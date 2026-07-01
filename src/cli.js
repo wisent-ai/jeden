@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
 
 function usage() {
@@ -55,6 +56,7 @@ async function main() {
     process.stdout.write(usage())
     return
   }
+  loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
   const result = await runJeden(args)
   process.stdout.write(`${result.text}\n`)
 }

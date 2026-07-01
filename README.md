@@ -36,6 +36,8 @@ MODEL_ROUTER_URL=https://model-router-1080673333190.us-central1.run.app
 WISENT_APP_AGENT_ID=wisent-app
 ```
 
+The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from the launch directory and from `--cwd` before calling the router. Existing shell variables win.
+
 ## JSON action protocol
 
 The model must answer with one JSON object:
