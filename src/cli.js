@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 
+import { createInterface } from 'node:readline/promises'
+import { stdin as input, stdout as output } from 'node:process'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
+import { SessionRecorder } from './session.js'
 
 function usage() {
   return `Usage:
-  jeden run "task" [--cwd path] [--allow-write] [--max-steps n]
+  jeden [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
+  jeden run "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -15,15 +19,12 @@ Environment:
 `
 }
 
-function parseArgs(argv) {
-  const [command, ...rest] = argv
-  if (!command || command === '-h' || command === '--help') return { help: true }
-  if (command !== 'run') throw new Error(`unknown command: ${command}`)
-
-  let task = ''
+function parseSharedOptions(rest) {
   let cwd = process.cwd()
   let allowWrite = false
+  let allowCommand = false
   let maxSteps = 8
+  const positionals = []
 
   for (let i = 0; i < rest.length; i += 1) {
     const arg = rest[i]
@@ -36,18 +37,73 @@ function parseArgs(argv) {
       allowWrite = true
       continue
     }
+    if (arg === '--allow-command') {
+      allowCommand = true
+      continue
+    }
     if (arg === '--max-steps') {
       const raw = rest[++i]
       maxSteps = Number(raw)
       if (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 32) throw new Error('--max-steps must be an integer between 1 and 32')
       continue
     }
-    if (arg.startsWith('--')) throw new Error(`unknown option: ${arg}`)
-    task = task ? `${task} ${arg}` : arg
+    if (arg.slice(0, 2) === '--') throw new Error(`unknown option: ${arg}`)
+    positionals.push(arg)
   }
 
-  if (!task.trim()) throw new Error('run requires a task')
-  return { command, task, cwd, allowWrite, maxSteps }
+  return { cwd, allowWrite, allowCommand, maxSteps, positionals }
+}
+
+function parseArgs(argv) {
+  const [first, ...rest] = argv
+  if (first === '-h' || first === '--help') return { help: true }
+  if (!first) return { command: 'interactive', ...parseSharedOptions([]) }
+  if (first === 'run') {
+    const parsed = parseSharedOptions(rest)
+    const task = parsed.positionals.join(' ').trim()
+    if (!task) throw new Error('run requires a task')
+    return { command: 'run', task, ...parsed }
+  }
+  if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
+  throw new Error(`unknown command: ${first}`)
+}
+
+function loadRuntimeEnv(args) {
+  loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
+}
+
+async function runOnce(args) {
+  const recorder = new SessionRecorder({ cwd: args.cwd })
+  const result = await runJeden({ ...args, recorder })
+  process.stdout.write(`${result.text}\n`)
+  process.stderr.write(`[session] ${result.sessionPath}\n`)
+}
+
+async function runInteractive(args) {
+  const recorder = new SessionRecorder({ cwd: args.cwd })
+  await recorder.ensure()
+  process.stdout.write(`Jeden session: ${recorder.path()}\n`)
+  process.stdout.write(`cwd: ${args.cwd}\n`)
+  process.stdout.write(`write: ${args.allowWrite ? 'enabled' : 'disabled'}, command: ${args.allowCommand ? 'enabled' : 'disabled'}\n`)
+  process.stdout.write('Type /exit to quit.\n\n')
+
+  const rl = createInterface({ input, output })
+  try {
+    for (;;) {
+      const task = (await rl.question('jeden> ')).trim()
+      if (!task) continue
+      if (task === '/exit' || task === '/quit') break
+      try {
+        const result = await runJeden({ ...args, task, recorder })
+        process.stdout.write(`${result.text}\n`)
+      } catch (error) {
+        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+        await recorder.record('error', { message: error instanceof Error ? error.message : String(error) })
+      }
+    }
+  } finally {
+    rl.close()
+  }
 }
 
 async function main() {
@@ -56,9 +112,12 @@ async function main() {
     process.stdout.write(usage())
     return
   }
-  loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
-  const result = await runJeden(args)
-  process.stdout.write(`${result.text}\n`)
+  loadRuntimeEnv(args)
+  if (args.command === 'run') {
+    await runOnce(args)
+    return
+  }
+  await runInteractive(args)
 }
 
 main().catch((error) => {

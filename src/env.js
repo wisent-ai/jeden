@@ -7,7 +7,7 @@ function parseValue(raw) {
   let value = raw.trim()
   const commentIndex = value.search(/\s+#/)
   if (commentIndex !== -1) value = value.slice(0, commentIndex).trim()
-  if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+  if ((value.slice(0, 1) === '"' && value.slice(-1) === '"') || (value.slice(0, 1) === "'" && value.slice(-1) === "'")) {
     value = value.slice(1, -1)
   }
   return value.replace(/\\n/g, '\n')
@@ -29,7 +29,7 @@ export function loadEnvFiles({ dirs = [process.cwd()] } = {}) {
       }
       for (const line of text.split(/\r?\n/)) {
         const trimmed = line.trim()
-        if (!trimmed || trimmed.startsWith('#')) continue
+        if (!trimmed || trimmed.slice(0, 1) === '#') continue
         const index = trimmed.indexOf('=')
         if (index === -1) continue
         const key = trimmed.slice(0, index).trim()

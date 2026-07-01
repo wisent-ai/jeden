@@ -1,7 +1,7 @@
 export function extractJsonObject(text) {
   const raw = String(text || '').trim()
   if (!raw) throw new Error('model returned empty content')
-  if (raw.startsWith('{') && raw.endsWith('}')) return raw
+  if (raw.slice(0, 1) === '{' && raw.slice(-1) === '}') return raw
   const start = raw.indexOf('{')
   const end = raw.lastIndexOf('}')
   if (start === -1 || end === -1 || end <= start) {

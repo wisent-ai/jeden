@@ -1,29 +1,35 @@
 # Jeden
 
-Jeden is Wisent's private agent harness. It keeps Wisent's model routing, policy, and domain tools under our control instead of inheriting a generic coding-agent policy stack.
+Jeden is Wisent's private agent harness. It keeps Wisent's model routing, policy, terminal loop, and local tools under our control instead of inheriting a generic coding-agent policy stack.
 
 ## Design contract
 
 Jeden separates four planes:
 
 1. **Inference** — every model call goes through the Wisent model router using HMAC-signed OpenAI-compatible chat completions.
-2. **Policy** — the harness prompt is short, local, and explicit: no unrequested tests, no docs unless requested, no silent substitution, no shell by default.
-3. **Tools** — tools are a small allowlisted registry with path-jail enforcement. Initial tools are filesystem-only: list, read, search, and opt-in write.
+2. **Policy** — the harness prompt is short, local, and explicit: no unrequested tests, no unrequested docs, no silent substitution, no command execution unless enabled.
+3. **Tools** — tools are a small allowlisted registry with path-jail enforcement. Writes and commands are gated by CLI flags.
 4. **Run loop** — the model must emit strict JSON actions. Invalid JSON is a hard failure.
 
 ## Current scope
 
-The initial private version is intentionally small:
+The private M1 version includes:
 
-- `jeden run "task"` starts a bounded JSON tool loop.
-- Model calls use `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
-- The default model is `claude-code-subscription`.
-- Writes require `--allow-write`; shell execution is not present.
+- `jeden` interactive terminal mode.
+- `jeden run "task"` one-shot mode.
+- Session logs under `~/.jeden/sessions/<id>/`.
+- Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
+- Default model `claude-code-subscription`.
+- Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`.
+- Command tool: `run_command`, disabled unless `--allow-command` is passed.
+- Existing file writes require the `sha256` returned by `read_file`.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
 
 ## CLI
 
 ```sh
+jeden --cwd ../content-platform
+jeden --cwd ../content-platform --allow-command
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
 ```
@@ -40,13 +46,21 @@ The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from th
 
 ## JSON action protocol
 
-The model must answer with one JSON object:
+The model must answer with one JSON object.
+
+Tool call:
 
 ```json
 {"action":"tool","tool":"read_file","input":{"path":"package.json"}}
 ```
 
-or:
+Command call, only when enabled:
+
+```json
+{"action":"tool","tool":"run_command","input":{"command":"npm run check","timeoutMs":30000}}
+```
+
+Final:
 
 ```json
 {"action":"final","text":"Done."}
