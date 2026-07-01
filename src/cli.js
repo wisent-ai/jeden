@@ -5,6 +5,8 @@ import { stdin as input, stdout as output } from 'node:process'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
 import { SessionRecorder } from './session.js'
+import { createSharedHookRunner } from './hooks.js'
+
 
 function usage() {
   return `Usage:
@@ -72,9 +74,22 @@ function loadRuntimeEnv(args) {
   loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
 }
 
+async function runUserPromptHook({ hookRunner, task, cwd, recorder }) {
+  const result = await hookRunner.run('user_prompt_submit', {
+    runtime: 'jeden',
+    project_dir: cwd,
+    user_message: task,
+  })
+  await recorder?.record('hook', { event: 'user_prompt_submit', result })
+  if (result.decision === 'block') throw new Error(`user prompt hook blocked: ${result.reason}`)
+}
+
+
 async function runOnce(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
-  const result = await runJeden({ ...args, recorder })
+  const hookRunner = createSharedHookRunner()
+  await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
+  const result = await runJeden({ ...args, recorder, hookRunner })
   process.stdout.write(`${result.text}\n`)
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }
@@ -94,6 +109,7 @@ async function runInteractive(args) {
   process.stdout.write(`write: ${args.allowWrite ? 'enabled' : 'disabled'}, command: ${args.allowCommand ? 'enabled' : 'disabled'}\n`)
   process.stdout.write('Type /exit to quit.\n\n')
 
+  const hookRunner = createSharedHookRunner()
   const rl = createInterface({ input, output })
   const approveTool = async (request) => {
     const answer = (await rl.question(approvalPrompt(request))).trim().toLowerCase()
@@ -106,7 +122,8 @@ async function runInteractive(args) {
       if (!task) continue
       if (task === '/exit' || task === '/quit') break
       try {
-        const result = await runJeden({ ...args, task, recorder, approveTool })
+        await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
+        const result = await runJeden({ ...args, task, recorder, approveTool, hookRunner })
         process.stdout.write(`${result.text}\n`)
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

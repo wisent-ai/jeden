@@ -2,6 +2,8 @@ import { chatCompletion, modelRouterConfig } from './model-router.js'
 import { parseAction, formatToolResult } from './protocol.js'
 import { systemPrompt } from './policy.js'
 import { createToolRegistry } from './tools.js'
+import { toolHookEvent, postToolHookEvent } from './hooks.js'
+
 
 function approvalKind(tool) {
   if (tool === 'write_file' || tool === 'apply_patch') return 'write'
@@ -20,6 +22,26 @@ async function maybeApprove({ action, allowWrite, allowCommand, approveTool, rec
   if (!approved) return { approved: false, result: { ok: false, error: `${action.tool} denied by user approval` } }
   return { approved: true }
 }
+async function runHook({ hookRunner, event, payload, recorder }) {
+  if (!hookRunner) return { decision: 'pass' }
+  const result = await hookRunner.run(event, payload)
+  await recorder?.record('hook', { event, result })
+  return result
+}
+
+function hookPayload({ task, cwd, action = null, result = null, finalText = null }) {
+  return {
+    runtime: 'jeden',
+    project_dir: cwd,
+    user_message: task,
+    last_assistant_message: finalText || null,
+    tool_name: action?.tool || null,
+    tool_input: action?.input || null,
+    tool: action ? { name: action.tool, input: action.input } : null,
+    tool_result: result,
+  }
+}
+
 
 
 export async function runJeden({
@@ -32,6 +54,7 @@ export async function runJeden({
   chat = chatCompletion,
   recorder = null,
   approveTool = null,
+  hookRunner = null,
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
@@ -50,13 +73,38 @@ export async function runJeden({
     messages.push({ role: 'assistant', content })
 
     if (action.action === 'final') {
+      const stop = await runHook({
+        hookRunner,
+        event: 'stop',
+        payload: hookPayload({ task, cwd, finalText: action.text }),
+        recorder,
+      })
+      if (stop.decision === 'block') {
+        messages.push({
+          role: 'user',
+          content: `Stop hook blocked the final answer: ${stop.reason}. Continue executing available work in this same turn, or finish only if there is a concrete external blocker.`,
+        })
+        continue
+      }
       await recorder?.record('final', { step, text: action.text })
       return { text: action.text, steps: step, sessionPath: recorder?.path?.() || null }
     }
 
-    const approval = await maybeApprove({ action, allowWrite, allowCommand, approveTool, recorder })
+    const preHook = await runHook({
+      hookRunner,
+      event: toolHookEvent(action.tool),
+      payload: hookPayload({ task, cwd, action }),
+      recorder,
+    })
+    const approval = preHook.decision === 'block'
+      ? { approved: false, result: { ok: false, error: `hook blocked ${action.tool}: ${preHook.reason}` } }
+      : await maybeApprove({ action, allowWrite, allowCommand, approveTool, recorder })
     const result = approval.approved ? await tools.execute(action.tool, action.input) : approval.result
     await recorder?.record('tool_result', { step, tool: action.tool, result })
+    const postEvent = postToolHookEvent(action.tool)
+    if (postEvent) {
+      await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action, result }), recorder })
+    }
     messages.push({ role: 'user', content: formatToolResult(result) })
   }
 
