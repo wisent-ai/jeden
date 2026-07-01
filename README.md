@@ -17,12 +17,13 @@ The private M1 version includes:
 
 - `jeden` interactive terminal mode.
 - `jeden run "task"` one-shot mode.
-- Session logs under `~/.jeden/sessions/<id>/`.
+- Session logs and artifacts under `~/.jeden/sessions/<id>/`.
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`.
 - Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
 - Command tools: `run_command`, `list_package_scripts`, `run_package_script`. One-shot execution requires `--allow-command`; interactive mode asks for approval when the flag is absent.
 - Git read tools: `git_status`, `git_diff`.
+- Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
@@ -75,6 +76,12 @@ Git diff call:
 {"action":"tool","tool":"git_diff","input":{"path":"src/tools.js"}}
 ```
 
+
+Artifact call:
+
+```json
+{"action":"tool","tool":"save_artifact","input":{"name":"notes.txt","content":"research notes"}}
+```
 Patch call, only when writes are enabled:
 
 ```json

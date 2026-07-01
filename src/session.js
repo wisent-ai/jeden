@@ -29,6 +29,20 @@ export class SessionRecorder {
     await appendFile(join(this.dir, 'transcript.jsonl'), `${JSON.stringify(event)}\n`, 'utf8')
   }
 
+  artifactDir() {
+    return join(this.dir, 'artifacts')
+  }
+
+  async writeArtifact(name, content) {
+    await this.ensure()
+    const safeName = String(name || 'artifact.txt').replace(/[^a-zA-Z0-9._-]/g, '_')
+    const file = join(this.artifactDir(), safeName)
+    await writeFile(file, String(content ?? ''), 'utf8')
+    await this.record('artifact', { name: safeName, path: file })
+    return file
+  }
+
+
   path() {
     return this.dir
   }

@@ -132,7 +132,7 @@ async function packageScripts(cwd) {
 }
 
 
-export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false } = {}) {
+export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null } = {}) {
   const tools = new Map()
 
   function add(definition) {
@@ -317,6 +317,22 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const args = ['diff', '--']
       if (input.path) args.push(publicPath(cwd, jailPath(cwd, input.path)))
       return runProcess({ cwd: resolve(cwd), command: 'git', args, timeoutMs: 30_000 })
+    },
+  })
+
+  add({
+    name: 'save_artifact',
+    description: 'Save UTF-8 content into the current session artifacts directory',
+    input: { name: 'string required', content: 'string required' },
+    async execute(input) {
+      if (!artifactDir) throw new Error('save_artifact requires an active session')
+      if (!input.name) throw new Error('name is required')
+      if (typeof input.content !== 'string') throw new Error('content is required')
+      const safeName = String(input.name).replace(/[^a-zA-Z0-9._-]/g, '_')
+      const file = resolve(artifactDir, safeName)
+      await mkdir(dirname(file), { recursive: true })
+      await writeFile(file, input.content, 'utf8')
+      return { path: file, bytes: Buffer.byteLength(input.content, 'utf8') }
     },
   })
 

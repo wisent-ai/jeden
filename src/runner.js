@@ -34,7 +34,8 @@ export async function runJeden({
   approveTool = null,
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
-  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool) })
+  await recorder?.ensure?.()
+  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null })
   const messages = [
     { role: 'system', content: systemPrompt(tools.list()) },
     { role: 'user', content: task },
