@@ -300,6 +300,26 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
     },
   })
 
+  add({
+    name: 'git_status',
+    description: 'Read git status --short for cwd',
+    input: {},
+    async execute() {
+      return runProcess({ cwd: resolve(cwd), command: 'git', args: ['status', '--short'], timeoutMs: 30_000 })
+    },
+  })
+
+  add({
+    name: 'git_diff',
+    description: 'Read git diff for cwd or one path under cwd',
+    input: { path: 'string optional' },
+    async execute(input) {
+      const args = ['diff', '--']
+      if (input.path) args.push(publicPath(cwd, jailPath(cwd, input.path)))
+      return runProcess({ cwd: resolve(cwd), command: 'git', args, timeoutMs: 30_000 })
+    },
+  })
+
   return {
     list() {
       return Array.from(tools.values()).map(({ name, description, input }) => ({ name, description, input }))

@@ -22,6 +22,7 @@ The private M1 version includes:
 - Default model `claude-code-subscription`.
 - Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
 - Command tools: `run_command`, `list_package_scripts`, `run_package_script`. One-shot execution requires `--allow-command`; interactive mode asks for approval when the flag is absent.
+- Git read tools: `git_status`, `git_diff`.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
@@ -67,6 +68,12 @@ Package script call:
 {"action":"tool","tool":"run_package_script","input":{"script":"check","timeoutMs":60000}}
 ```
 
+
+Git diff call:
+
+```json
+{"action":"tool","tool":"git_diff","input":{"path":"src/tools.js"}}
+```
 
 Patch call, only when writes are enabled:
 
