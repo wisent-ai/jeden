@@ -99,6 +99,39 @@ function runShellCommand({ cwd, command, timeoutMs }) {
   })
 }
 
+function runProcess({ cwd, command, args, timeoutMs }) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, { cwd, env: process.env })
+    let stdout = ''
+    let stderr = ''
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      child.kill('SIGTERM')
+    }, timeoutMs)
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString('utf8')
+      if (stdout.length > 100_000) stdout = stdout.slice(0, 100_000)
+    })
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString('utf8')
+      if (stderr.length > 100_000) stderr = stderr.slice(0, 100_000)
+    })
+    child.on('close', (code, signal) => {
+      clearTimeout(timer)
+      resolvePromise({ code, signal, timedOut, stdout, stderr })
+    })
+  })
+}
+
+async function packageScripts(cwd) {
+  const file = jailPath(cwd, 'package.json')
+  const pkg = JSON.parse(await readFile(file, 'utf8'))
+  const scripts = pkg?.scripts && typeof pkg.scripts === 'object' && !Array.isArray(pkg.scripts) ? pkg.scripts : {}
+  return Object.fromEntries(Object.entries(scripts).filter((entry) => typeof entry[1] === 'string'))
+}
+
+
 export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false } = {}) {
   const tools = new Map()
 
@@ -241,6 +274,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
       return runShellCommand({ cwd: resolve(cwd), command: input.command, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'list_package_scripts',
+    description: 'List package.json scripts in cwd',
+    input: {},
+    async execute() {
+      return packageScripts(cwd)
+    },
+  })
+
+  add({
+    name: 'run_package_script',
+    description: 'Run one existing package.json script with npm; requires --allow-command or interactive approval',
+    input: { script: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!allowCommand) throw new Error('run_package_script requires --allow-command')
+      if (!input.script || typeof input.script !== 'string') throw new Error('script is required')
+      const scripts = await packageScripts(cwd)
+      if (typeof scripts[input.script] !== 'string') throw new Error(`unknown package script: ${input.script}`)
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 60_000, 1_000), 180_000)
+      return runProcess({ cwd: resolve(cwd), command: 'npm', args: ['run', input.script], timeoutMs })
     },
   })
 

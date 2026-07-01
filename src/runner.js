@@ -5,7 +5,7 @@ import { createToolRegistry } from './tools.js'
 
 function approvalKind(tool) {
   if (tool === 'write_file' || tool === 'apply_patch') return 'write'
-  if (tool === 'run_command') return 'command'
+  if (tool === 'run_command' || tool === 'run_package_script') return 'command'
   return null
 }
 
