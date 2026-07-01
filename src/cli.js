@@ -79,6 +79,13 @@ async function runOnce(args) {
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }
 
+function approvalPrompt({ tool, kind, input }) {
+  const payload = JSON.stringify(input, null, 2)
+  const preview = payload.length > 1200 ? `${payload.slice(0, 1200)}…` : payload
+  return `\nApproval required for ${kind} tool ${tool}:\n${preview}\nApprove? [y/N] `
+}
+
+
 async function runInteractive(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   await recorder.ensure()
@@ -88,13 +95,18 @@ async function runInteractive(args) {
   process.stdout.write('Type /exit to quit.\n\n')
 
   const rl = createInterface({ input, output })
+  const approveTool = async (request) => {
+    const answer = (await rl.question(approvalPrompt(request))).trim().toLowerCase()
+    return answer === 'y' || answer === 'yes'
+  }
+
   try {
     for (;;) {
       const task = (await rl.question('jeden> ')).trim()
       if (!task) continue
       if (task === '/exit' || task === '/quit') break
       try {
-        const result = await runJeden({ ...args, task, recorder })
+        const result = await runJeden({ ...args, task, recorder, approveTool })
         process.stdout.write(`${result.text}\n`)
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

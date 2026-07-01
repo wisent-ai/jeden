@@ -21,8 +21,9 @@ The private M1 version includes:
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`.
 - Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
-- Command tool: `run_command`, disabled unless `--allow-command` is passed.
+- Command tool: `run_command`. One-shot mode requires `--allow-command`; interactive mode asks for approval when the flag is absent.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
+- Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
 
 ## CLI
