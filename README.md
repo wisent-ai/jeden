@@ -20,9 +20,9 @@ The private M1 version includes:
 - Session logs under `~/.jeden/sessions/<id>/`.
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`.
-- Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`.
+- Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
 - Command tool: `run_command`, disabled unless `--allow-command` is passed.
-- Existing file writes require the `sha256` returned by `read_file`.
+- Existing file writes and patches require the `sha256` returned by `read_file`.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
 
 ## CLI
@@ -60,6 +60,12 @@ Command call, only when enabled:
 {"action":"tool","tool":"run_command","input":{"command":"npm run check","timeoutMs":30000}}
 ```
 
+
+Patch call, only when writes are enabled:
+
+```json
+{"action":"tool","tool":"apply_patch","input":{"path":"package.json","expectedSha256":"...","replacements":[{"old":"\"version\": \"0.1.0\"","new":"\"version\": \"0.1.1\""}]}}
+```
 Final:
 
 ```json

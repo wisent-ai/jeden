@@ -37,6 +37,27 @@ async function fileExists(path) {
   }
 }
 
+function replaceExactlyOnce(content, oldText, newText) {
+  if (typeof oldText !== 'string' || oldText.length === 0) throw new Error('old text is required')
+  if (typeof newText !== 'string') throw new Error('new text is required')
+  const first = content.indexOf(oldText)
+  if (first === -1) throw new Error('old text not found')
+  const second = content.indexOf(oldText, first + oldText.length)
+  if (second !== -1) throw new Error('old text occurs more than once')
+  return `${content.slice(0, first)}${newText}${content.slice(first + oldText.length)}`
+}
+
+function applyReplacementList(content, replacements) {
+  if (!Array.isArray(replacements) || replacements.length === 0) throw new Error('replacements are required')
+  let next = content
+  for (const replacement of replacements) {
+    if (!replacement || typeof replacement !== 'object' || Array.isArray(replacement)) throw new Error('replacement must be an object')
+    next = replaceExactlyOnce(next, replacement.old, replacement.new)
+  }
+  return next
+}
+
+
 async function walkFiles(root, start, out) {
   if (out.length >= MAX_SEARCH_FILES) return
   const entries = await readdir(start, { withFileTypes: true })
@@ -185,6 +206,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       await mkdir(dirname(file), { recursive: true })
       await writeFile(file, input.content, 'utf8')
       return { path: publicPath(cwd, file), sha256: sha256(input.content), bytes: Buffer.byteLength(input.content, 'utf8') }
+    },
+  })
+
+  add({
+    name: 'apply_patch',
+    description: 'Apply exact one-occurrence string replacements to an existing UTF-8 file; requires expectedSha256 and --allow-write',
+    input: { path: 'string required', expectedSha256: 'string required', replacements: 'array of { old, new } required' },
+    async execute(input) {
+      if (!allowWrite) throw new Error('apply_patch requires --allow-write')
+      if (!input.path) throw new Error('path is required')
+      if (!input.expectedSha256) throw new Error('expectedSha256 is required')
+      const file = jailPath(cwd, input.path)
+      const current = await readFile(file, 'utf8')
+      const currentHash = sha256(current)
+      if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${publicPath(cwd, file)}`)
+      const next = applyReplacementList(current, input.replacements)
+      await writeFile(file, next, 'utf8')
+      return {
+        path: publicPath(cwd, file),
+        sha256: sha256(next),
+        replacements: input.replacements.length,
+        bytes: Buffer.byteLength(next, 'utf8'),
+      }
     },
   })
 
