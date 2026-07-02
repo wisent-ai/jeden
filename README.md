@@ -23,6 +23,7 @@ The private M1 version includes:
 - Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
 - Command tools: `run_command`, `list_package_scripts`, `run_package_script`. One-shot execution requires `--allow-command`; interactive mode asks for approval when the flag is absent.
 - Git read tools: `git_status`, `git_diff`.
+- Web read tool: `fetch_url`.
 - Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
@@ -90,6 +91,12 @@ Artifact call:
 
 ```json
 {"action":"tool","tool":"save_artifact","input":{"name":"notes.txt","content":"research notes"}}
+```
+
+URL fetch call:
+
+```json
+{"action":"tool","tool":"fetch_url","input":{"url":"https://example.com","maxBytes":200000}}
 ```
 Patch call, only when writes are enabled:
 

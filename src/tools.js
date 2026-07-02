@@ -321,6 +321,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
   })
 
   add({
+    name: 'fetch_url',
+    description: 'Fetch one HTTP(S) URL and return text capped at maxBytes',
+    input: { url: 'string required', maxBytes: 'number optional' },
+    async execute(input) {
+      if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
+      const url = new URL(input.url)
+      if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('only http and https URLs are allowed')
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 200_000, 1_000), 1_000_000)
+      const response = await fetch(url)
+      const buffer = Buffer.from(await response.arrayBuffer())
+      const sliced = buffer.subarray(0, maxBytes)
+      return {
+        url: url.toString(),
+        status: response.status,
+        ok: response.ok,
+        contentType: response.headers.get('content-type') || null,
+        truncated: buffer.length > sliced.length,
+        text: sliced.toString('utf8'),
+      }
+    },
+  })
+
+  add({
     name: 'save_artifact',
     description: 'Save UTF-8 content into the current session artifacts directory',
     input: { name: 'string required', content: 'string required' },
