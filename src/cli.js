@@ -2,6 +2,7 @@
 
 import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
+import { writeFile } from 'node:fs/promises'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
 import { SessionRecorder, listSessions, readSession } from './session.js'
@@ -17,6 +18,7 @@ function usage() {
   jeden resume <session-id-or-path> "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden show <session-id-or-path>
+  jeden export <session-id-or-path> [output.json]
   jeden tools [--cwd path]
 
 Environment:
@@ -89,6 +91,11 @@ function parseArgs(argv) {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('show requires a session id or path')
     return { command: 'show', idOrPath }
+  }
+  if (first === 'export') {
+    const idOrPath = rest[0]
+    if (!idOrPath) throw new Error('export requires a session id or path')
+    return { command: 'export', idOrPath, outputPath: rest[1] || null }
   }
   if (first === 'tools') {
     return { command: 'tools', ...parseSharedOptions(rest) }
@@ -204,6 +211,17 @@ async function showSession(idOrPath) {
   }
 }
 
+async function exportSession(idOrPath, outputPath) {
+  const session = await readSession({ idOrPath })
+  const payload = JSON.stringify(session, null, 2)
+  if (outputPath) {
+    await writeFile(outputPath, `${payload}\n`, 'utf8')
+    process.stdout.write(`${outputPath}\n`)
+  } else {
+    process.stdout.write(`${payload}\n`)
+  }
+}
+
 async function showTools(args) {
   const builtIn = createToolRegistry({ cwd: args.cwd }).list()
   const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
@@ -230,6 +248,10 @@ async function main() {
   }
   if (args.command === 'show') {
     await showSession(args.idOrPath)
+    return
+  }
+  if (args.command === 'export') {
+    await exportSession(args.idOrPath, args.outputPath)
     return
   }
   if (args.command === 'tools') {
