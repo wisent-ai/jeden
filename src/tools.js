@@ -85,10 +85,76 @@ function readableTextFromFeed(raw) {
   return lines.length > 0 ? lines.join('\n') : readableTextFromHtml(raw)
 }
 
+function parseDelimitedRows(raw, delimiter) {
+  const rows = []
+  let row = []
+  let field = ''
+  let quoted = false
+  const text = String(raw || '')
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          field += '"'
+          i += 1
+        } else {
+          quoted = false
+        }
+      } else {
+        field += char
+      }
+      continue
+    }
+    if (char === '"') {
+      quoted = true
+      continue
+    }
+    if (char === delimiter) {
+      row.push(field)
+      field = ''
+      continue
+    }
+    if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i += 1
+      row.push(field)
+      rows.push(row)
+      row = []
+      field = ''
+      continue
+    }
+    field += char
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field)
+    rows.push(row)
+  }
+  return rows
+}
+
+function markdownCell(value) {
+  return String(value ?? '').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim()
+}
+
+function readableTextFromDelimited(raw, delimiter) {
+  const rows = parseDelimitedRows(raw, delimiter).filter((row) => row.some((cell) => String(cell).trim() !== ''))
+  if (rows.length === 0) return ''
+  const columnCount = Math.max(...rows.map((row) => row.length))
+  const normalized = rows.slice(0, 51).map((row) => Array.from({ length: columnCount }, (_, index) => markdownCell(row[index] || '')))
+  const header = normalized[0]
+  const separator = Array.from({ length: columnCount }, () => '---')
+  const body = normalized.slice(1)
+  const table = [header, separator, ...body].map((row) => `| ${row.join(' | ')} |`)
+  if (rows.length > 51) table.push(`\n[truncated after 50 data rows; total rows: ${rows.length}]`)
+  return table.join('\n')
+}
+
 function readableTextForContent(raw, contentType) {
   const type = String(contentType || '').toLowerCase()
   if (type.indexOf('json') !== -1) return readableTextFromJson(raw)
   if (type.indexOf('rss') !== -1 || type.indexOf('atom') !== -1 || type.indexOf('xml') !== -1) return readableTextFromFeed(raw)
+  if (type.indexOf('csv') !== -1) return readableTextFromDelimited(raw, ',')
+  if (type.indexOf('tab-separated-values') !== -1 || type.indexOf('tsv') !== -1) return readableTextFromDelimited(raw, '\t')
   return readableTextFromHtml(raw)
 }
 
@@ -164,6 +230,8 @@ function readableTextForDocument({ content, file }) {
   const raw = Buffer.from(content).toString('utf8')
   if (ext === '.ipynb') return readableTextFromNotebook(raw)
   if (ext === '.json') return readableTextFromJson(raw)
+  if (ext === '.csv') return readableTextFromDelimited(raw, ',')
+  if (ext === '.tsv' || ext === '.tab') return readableTextFromDelimited(raw, '\t')
   if (ext === '.html' || ext === '.htm') return readableTextFromHtml(raw)
   return raw
 }
@@ -172,7 +240,7 @@ function readableTextForUrlContent({ buffer, contentType, urlPath }) {
   const type = String(contentType || '').toLowerCase()
   const ext = extname(urlPath || '').toLowerCase()
   if (type.indexOf('pdf') !== -1 || ext === '.pdf') return readableTextFromPdf(buffer)
-  if (ext === '.ipynb' || ext === '.json' || ext === '.html' || ext === '.htm') return readableTextForDocument({ content: buffer, file: urlPath })
+  if (ext === '.ipynb' || ext === '.json' || ext === '.html' || ext === '.htm' || ext === '.csv' || ext === '.tsv' || ext === '.tab') return readableTextForDocument({ content: buffer, file: urlPath })
   return readableTextForContent(Buffer.from(buffer).toString('utf8'), contentType)
 }
 

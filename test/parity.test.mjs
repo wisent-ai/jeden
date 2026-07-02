@@ -188,6 +188,7 @@ test('read_image returns dimensions and capped base64', async () => {
 test('read_document extracts JSON notebooks and basic PDF text', async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, 'data.json'), '{"z":1,"a":{"ok":true}}', 'utf8')
+    await writeFile(join(dir, 'data.csv'), 'name,count\nalpha,1\n"beta, quoted",2\n', 'utf8')
     await writeFile(join(dir, 'analysis.ipynb'), JSON.stringify({ cells: [{ cell_type: 'markdown', source: ['# Title\n', 'Body'] }, { cell_type: 'code', source: ['print("ok")\n'] }] }), 'utf8')
     await writeFile(join(dir, 'paper.pdf'), `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
@@ -202,6 +203,8 @@ trailer << /Root 1 0 R >>
 
     const json = await registry.execute('read_document', { path: 'data.json' })
     assert.equal(json.output.text, '{\n  "z": 1,\n  "a": {\n    "ok": true\n  }\n}')
+    const csv = await registry.execute('read_document', { path: 'data.csv' })
+    assert.equal(csv.output.text, '| name | count |\n| --- | --- |\n| alpha | 1 |\n| beta, quoted | 2 |')
     const notebook = await registry.execute('read_document', { path: 'analysis.ipynb' })
     assert.match(notebook.output.text, /# %% \[markdown\] cell:1\n# Title\nBody/)
     assert.match(notebook.output.text, /# %% \[code\] cell:2\nprint\("ok"\)/)
@@ -404,6 +407,11 @@ test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities',
         response.end('<rss><channel><title>News</title><item><title>First</title><link>https://example.com/first</link></item><item><title>Second</title></item></channel></rss>')
         return
       }
+      if (request.url === '/table.tsv') {
+        response.writeHead(200, { 'content-type': 'text/tab-separated-values' })
+        response.end('name\tcount\nalpha\t1\nbeta\t2\n')
+        return
+      }
       if (request.url === '/paper.pdf') {
         response.writeHead(200, { 'content-type': 'application/pdf' })
         response.end(`%PDF-1.4
@@ -446,6 +454,9 @@ trailer << /Root 1 0 R >>
 
       const feed = await registry.execute('fetch_readable_url', { url: `${origin}/feed.xml` })
       assert.equal(feed.output.text, '# News\n- First — https://example.com/first\n- Second')
+
+      const table = await registry.execute('fetch_readable_url', { url: `${origin}/table.tsv` })
+      assert.equal(table.output.text, '| name | count |\n| --- | --- |\n| alpha | 1 |\n| beta | 2 |')
 
       const pdf = await registry.execute('fetch_readable_url', { url: `${origin}/paper.pdf` })
       assert.equal(pdf.output.text, 'Remote PDF text')
