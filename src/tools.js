@@ -339,6 +339,28 @@ function publicPath(cwd, target) {
   return rel || '.'
 }
 
+function sqliteIdentifier(name) {
+  const text = String(name || '')
+  if (!text.match(/^[A-Za-z_][A-Za-z0-9_]*$/)) throw new Error(`invalid sqlite identifier: ${name}`)
+  return `"${text}"`
+}
+
+function parseSqliteJson(stdout) {
+  const text = String(stdout || '').trim()
+  return text ? JSON.parse(text) : []
+}
+
+async function runSqliteJson({ cwd, file, sql }) {
+  const result = await runProcess({
+    cwd,
+    command: 'sqlite3',
+    args: ['-readonly', '-json', file, sql],
+    timeoutMs: 30_000,
+  })
+  if (result.code !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || `sqlite3 exited with ${result.code}`)
+  return parseSqliteJson(result.stdout)
+}
+
 async function listDirectoryEntries({ cwd, dir, depth, limit }) {
   const out = []
   async function visit(current, level) {
@@ -1134,6 +1156,53 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         text: sliced.toString('utf8'),
         sha256: sha256(content),
       }
+    },
+  })
+
+  add({
+    name: 'read_sqlite',
+    description: 'Read a SQLite database under cwd: list tables, inspect a table, fetch one row by primary key, or run a read-only SELECT/WITH query',
+    input: { path: 'string required', table: 'string optional', key: 'string optional', query: 'string optional', limit: 'number optional', offset: 'number optional', where: 'string optional', order: 'string optional' },
+    async execute(input) {
+      if (!input.path) throw new Error('path is required')
+      const file = jailPath(cwd, input.path)
+      const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 100)
+      const offset = Math.max(Number(input.offset) || 0, 0)
+      if (input.query) {
+        const query = String(input.query).trim()
+        if (query.search(/^(select|with)\b/i) !== 0) throw new Error('read_sqlite query must be SELECT or WITH')
+        const rows = await runSqliteJson({ cwd, file, sql: query })
+        return { path: publicPath(cwd, file), query, rows }
+      }
+      if (!input.table) {
+        const tables = await runSqliteJson({
+          cwd,
+          file,
+          sql: "SELECT name, type FROM sqlite_schema WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name",
+        })
+        for (const table of tables) {
+          if (table.type !== 'table') continue
+          const countRows = await runSqliteJson({ cwd, file, sql: `SELECT count(*) AS count FROM ${sqliteIdentifier(table.name)}` })
+          table.rows = countRows[0]?.count ?? 0
+        }
+        return { path: publicPath(cwd, file), tables }
+      }
+      const table = sqliteIdentifier(input.table)
+      const schema = await runSqliteJson({ cwd, file, sql: `PRAGMA table_info(${table})` })
+      if (input.key != null) {
+        const primaryKey = schema.find((column) => Number(column.pk) === 1)
+        if (!primaryKey) throw new Error(`table has no single-column primary key: ${input.table}`)
+        const keySql = JSON.stringify(String(input.key))
+        const rows = await runSqliteJson({ cwd, file, sql: `SELECT * FROM ${table} WHERE ${sqliteIdentifier(primaryKey.name)} = ${keySql} LIMIT 1` })
+        return { path: publicPath(cwd, file), table: input.table, schema, row: rows[0] || null }
+      }
+      const clauses = []
+      if (input.where) clauses.push(`WHERE ${String(input.where)}`)
+      if (input.order) clauses.push(`ORDER BY ${String(input.order)}`)
+      clauses.push(`LIMIT ${limit}`)
+      if (offset > 0) clauses.push(`OFFSET ${offset}`)
+      const rows = await runSqliteJson({ cwd, file, sql: `SELECT * FROM ${table} ${clauses.join(' ')}` })
+      return { path: publicPath(cwd, file), table: input.table, schema, rows, limit, offset }
     },
   })
 

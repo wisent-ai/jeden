@@ -4,6 +4,7 @@ import { chmod, mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
+import { execFile } from 'node:child_process'
 
 import { parseAction } from '../src/protocol.js'
 import { createToolRegistry } from '../src/tools.js'
@@ -22,6 +23,20 @@ async function withTempDir(fn) {
   } finally {
     await rm(dir, { recursive: true, force: true })
   }
+}
+
+async function execFileOk(command, args, options = {}) {
+  return await new Promise((resolve, reject) => {
+    execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) {
+        error.stdout = stdout
+        error.stderr = stderr
+        reject(error)
+        return
+      }
+      resolve({ stdout, stderr })
+    })
+  })
 }
 
 async function withIsolatedHome(dir, fn) {
@@ -225,6 +240,37 @@ trailer << /Root 1 0 R >>
     assert.match(notebook.output.text, /# %% \[code\] cell:2\nprint\("ok"\)/)
     const pdf = await registry.execute('read_document', { path: 'paper.pdf' })
     assert.equal(pdf.output.text, 'Hello PDF text')
+  })
+})
+
+test('read_sqlite lists tables and reads rows', async () => {
+  await withTempDir(async (dir) => {
+    await execFileOk('sqlite3', [
+      join(dir, 'app.db'),
+      "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL); INSERT INTO users (name, active) VALUES ('Ada', 1), ('Grace', 0);",
+    ])
+    const registry = createToolRegistry({ cwd: dir })
+
+    const tables = await registry.execute('read_sqlite', { path: 'app.db' })
+    assert.equal(tables.ok, true)
+    assert.deepEqual(tables.output.tables, [{ name: 'users', type: 'table', rows: 2 }])
+
+    const sample = await registry.execute('read_sqlite', { path: 'app.db', table: 'users', where: 'active = 1', order: 'id DESC' })
+    assert.equal(sample.ok, true)
+    assert.deepEqual(sample.output.schema.map((column) => column.name), ['id', 'name', 'active'])
+    assert.deepEqual(sample.output.rows, [{ id: 1, name: 'Ada', active: 1 }])
+
+    const row = await registry.execute('read_sqlite', { path: 'app.db', table: 'users', key: '2' })
+    assert.equal(row.ok, true)
+    assert.deepEqual(row.output.row, { id: 2, name: 'Grace', active: 0 })
+
+    const query = await registry.execute('read_sqlite', { path: 'app.db', query: 'SELECT count(*) AS total FROM users' })
+    assert.equal(query.ok, true)
+    assert.deepEqual(query.output.rows, [{ total: 2 }])
+
+    const denied = await registry.execute('read_sqlite', { path: 'app.db', query: 'DELETE FROM users' })
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /SELECT or WITH/)
   })
 })
 
