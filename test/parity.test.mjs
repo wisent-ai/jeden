@@ -276,6 +276,8 @@ test('search_files and grep_regex accept multiple paths', async () => {
     await writeFile(join(dir, 'right', 'b.txt'), 'beta needle\n', 'utf8')
     await writeFile(join(dir, 'skip', 'c.txt'), 'skip needle\n', 'utf8')
     await writeFile(join(dir, 'right', 'multi.txt'), 'one\nalpha\nbeta\nthree\n', 'utf8')
+    await mkdir(join(dir, 'empty-dir'), { recursive: true })
+    await writeFile(join(dir, 'right', 'image.bin'), Buffer.from([0, 1, 2, 3]))
     await writeFile(join(dir, '.secret.txt'), 'hidden needle\n', 'utf8')
     const registry = createToolRegistry({ cwd: dir })
 
@@ -297,6 +299,12 @@ test('search_files and grep_regex accept multiple paths', async () => {
     assert.deepEqual(hiddenDefault.output.matches, [])
     const hiddenSearch = await registry.execute('search_files', { query: 'hidden', hidden: true, limit: 10 })
     assert.deepEqual(hiddenSearch.output.matches.map((match) => match.path), ['.secret.txt'])
+
+    const globbed = await registry.execute('glob_paths', { patterns: ['**/*.bin', 'empty-dir'], gitignore: false, limit: 10 })
+    assert.deepEqual(globbed.output.matches, [
+      { path: 'empty-dir', type: 'dir' },
+      { path: 'right/image.bin', type: 'file' },
+    ])
   })
 })
 

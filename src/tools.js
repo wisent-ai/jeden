@@ -808,6 +808,11 @@ function hasHiddenSegment(path) {
 
 async function discoverPathEntries(cwd, root, options = {}) {
   const repoRoot = resolve(cwd)
+  if (options.gitignore === false) {
+    const entries = []
+    await walkPaths(repoRoot, root, entries, { hidden: Boolean(options.hidden), ignored: true, limit: options.limit || MAX_SEARCH_FILES })
+    return entries.sort((a, b) => a.path.localeCompare(b.path)).slice(0, options.limit || MAX_SEARCH_FILES)
+  }
   const files = await discoverTextFiles(repoRoot, root, { gitignore: options.gitignore, hidden: Boolean(options.hidden) })
   const byPath = new Map()
   for (const file of files) {
