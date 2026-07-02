@@ -893,14 +893,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'grep_regex',
-    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, hidden, gitignore, limit, and skip',
-    input: { expr: 'string required', path: 'string optional', paths: 'array optional', hidden: 'boolean optional', gitignore: 'boolean optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
+    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, hidden, gitignore, multiline, limit, and skip',
+    input: { expr: 'string required', path: 'string optional', paths: 'array optional', hidden: 'boolean optional', gitignore: 'boolean optional', multiline: 'boolean optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.expr || typeof input.expr !== 'string') throw new Error('expr is required')
       const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
       const skip = Math.max(Number(input.skip) || 0, 0)
       let seen = 0
-      const matcher = new globalThis.RegExp(input.expr, input.caseSensitive ? '' : 'i')
+      const multiline = Boolean(input.multiline) || input.expr.indexOf('\n') !== -1
+      const matcher = new globalThis.RegExp(input.expr, `${input.caseSensitive ? '' : 'i'}${multiline ? 'gs' : ''}`)
       const files = await textFilesForInputs(cwd, input)
       const matches = []
       for (const file of files) {
@@ -912,14 +913,28 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
           continue
         }
         if (content.indexOf('\u0000') !== -1) continue
-        const lines = content.split(/\r?\n/)
-        for (let i = 0; i < lines.length; i += 1) {
+        if (multiline) {
           matcher.lastIndex = 0
-          if (matcher.exec(lines[i])) {
+          let match
+          while ((match = matcher.exec(content))) {
             seen += 1
-            if (seen <= skip) continue
-            matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
-            if (matches.length >= limit) break
+            if (seen > skip) {
+              const line = content.slice(0, match.index).split(/\r?\n/).length
+              matches.push({ path: publicPath(cwd, file), line, text: match[0].replace(/\s+/g, ' ').slice(0, 500) })
+              if (matches.length >= limit) break
+            }
+            if (match[0].length === 0) matcher.lastIndex += 1
+          }
+        } else {
+          const lines = content.split(/\r?\n/)
+          for (let i = 0; i < lines.length; i += 1) {
+            matcher.lastIndex = 0
+            if (matcher.exec(lines[i])) {
+              seen += 1
+              if (seen <= skip) continue
+              matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
+              if (matches.length >= limit) break
+            }
           }
         }
       }
