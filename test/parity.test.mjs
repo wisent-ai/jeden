@@ -706,6 +706,66 @@ test('run_command timeout kills shell grandchildren', async () => {
     await assert.rejects(() => readFile(join(dir, 'marker'), 'utf8'), /ENOENT/)
   })
 })
+
+test('eval and package script tools execute with command permission', async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, 'package.json'), JSON.stringify({ scripts: { echoenv: 'node -e "process.stdout.write(process.env.JEDEN_SCRIPT_VALUE)"' } }), 'utf8')
+    const locked = createToolRegistry({ cwd: dir })
+    const denied = await locked.execute('node_eval', { code: 'console.log("nope")' })
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /requires --allow-command/)
+
+    const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+    const node = await registry.execute('node_eval', { code: 'console.log(JSON.stringify({ ok: 2 + 3 }))', timeoutMs: 1000 })
+    assert.equal(node.output.code, 0)
+    assert.equal(node.output.stdout.trim(), '{"ok":5}')
+
+    let hasPython3 = true
+    try {
+      await execFileOk('python3', ['--version'])
+    } catch {
+      hasPython3 = false
+    }
+    if (hasPython3) {
+      const python = await registry.execute('python_eval', { code: 'print("py-ok")', timeoutMs: 1000 })
+      assert.equal(python.output.code, 0)
+      assert.equal(python.output.stdout.trim(), 'py-ok')
+    }
+
+    const scripts = await registry.execute('list_package_scripts', {})
+    assert.deepEqual(scripts.output, { echoenv: 'node -e "process.stdout.write(process.env.JEDEN_SCRIPT_VALUE)"' })
+    const script = await registry.execute('run_package_script', { script: 'echoenv', env: { JEDEN_SCRIPT_VALUE: 'script-ok' }, timeoutMs: 5000 })
+    assert.equal(script.output.code, 0)
+    assert.equal(script.output.stdout.trim().split('\n').at(-1), 'script-ok')
+  })
+})
+
+test('git read tools expose status, diff, log, and show', async () => {
+  await withTempDir(async (dir) => {
+    await execFileOk('git', ['init'], { cwd: dir })
+    await writeFile(join(dir, 'tracked.txt'), 'alpha\n', 'utf8')
+    await execFileOk('git', ['add', 'tracked.txt'], { cwd: dir })
+    await execFileOk('git', ['-c', 'user.name=Jeden Test', '-c', 'user.email=jeden@example.com', 'commit', '-m', 'initial'], { cwd: dir })
+    await writeFile(join(dir, 'tracked.txt'), 'alpha\nbeta\n', 'utf8')
+    await writeFile(join(dir, 'new.txt'), 'new\n', 'utf8')
+    const registry = createToolRegistry({ cwd: dir })
+
+    const status = await registry.execute('git_status', {})
+    assert.match(status.output.stdout, / M tracked\.txt/)
+    assert.match(status.output.stdout, /\?\? new\.txt/)
+
+    const diff = await registry.execute('git_diff', { path: 'tracked.txt' })
+    assert.match(diff.output.stdout, /\+beta/)
+
+    const log = await registry.execute('git_log', { limit: 1 })
+    assert.match(log.output.stdout, /initial/)
+
+    const show = await registry.execute('git_show', { ref: 'HEAD' })
+    assert.match(show.output.stdout, /initial/)
+    assert.match(show.output.stdout, /tracked\.txt/)
+  })
+})
+
 test('custom tools preserve capability metadata and jail readText', async () => {
   await withTempDir(async (dir) => {
     await withIsolatedHome(dir, async () => {
