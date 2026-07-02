@@ -5,7 +5,7 @@ import { stdin as input, stdout as output } from 'node:process'
 import { writeFile } from 'node:fs/promises'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
-import { SessionRecorder, listSessions, readSession, listSessionArtifacts, readSessionArtifact } from './session.js'
+import { SessionRecorder, listSessions, readSession, listSessionArtifacts, readSessionArtifact, sessionReplayMessages } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
 import { applyConfigEnv, loadJedenConfig } from './config.js'
@@ -190,15 +190,6 @@ async function runOnce(args) {
   }
 }
 
-function sessionContext(session) {
-  const parts = []
-  for (const event of session.events) {
-    if (event.type === 'user') parts.push(`User: ${event.data?.task || ''}`)
-    else if (event.type === 'final') parts.push(`Assistant: ${event.data?.text || ''}`)
-    else if (event.type === 'tool_result') parts.push(`Tool ${event.data?.tool || ''}: ${JSON.stringify(event.data?.result || {})}`)
-  }
-  return parts.slice(-40).join('\n\n')
-}
 
 async function runResume(args) {
   const previous = await readSession({ idOrPath: args.idOrPath })
@@ -206,7 +197,7 @@ async function runResume(args) {
   const hookRunner = createSharedHookRunner()
   const task = await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
   await recorder.record('resumed_from', { id: previous.id, path: previous.path })
-  const result = await runJeden({ ...args, task, recorder, hookRunner, priorContext: sessionContext(previous) })
+  const result = await runJeden({ ...args, task, recorder, hookRunner, priorMessages: sessionReplayMessages(previous) })
   process.stdout.write(`${result.text}\n`)
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }

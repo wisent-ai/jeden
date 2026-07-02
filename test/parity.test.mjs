@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os'
 import { parseAction } from '../src/protocol.js'
 import { createToolRegistry } from '../src/tools.js'
 import { loadProjectContext } from '../src/context.js'
-import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions } from '../src/session.js'
+import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions, sessionReplayMessages } from '../src/session.js'
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { runJeden } from '../src/index.js'
@@ -446,6 +446,33 @@ export default () => [
       assert.equal(result.text, 'parallel ok')
       assert.ok(elapsed < 380, `expected parallel execution, got ${elapsed}ms`)
     })
+  })
+})
+
+test('resume replay preserves structured prior messages', async () => {
+  await withTempDir(async (dir) => {
+    const previous = {
+      events: [
+        { type: 'user', data: { task: 'old task' } },
+        { type: 'assistant_raw', data: { content: JSON.stringify({ action: 'tool', tool: 'read_file', input: { path: 'a.txt' } }) } },
+        { type: 'tool_result', data: { result: { ok: true, output: { content: 'old file' } } } },
+        { type: 'assistant_raw', data: { content: JSON.stringify({ action: 'final', text: 'old final' }) } },
+        { type: 'final', data: { text: 'old final' } },
+      ],
+    }
+    const replay = sessionReplayMessages(previous)
+    assert.deepEqual(replay.map((message) => message.role), ['user', 'assistant', 'user', 'assistant'])
+
+    let captured = null
+    const chat = async ({ messages }) => {
+      captured = messages.map((message) => ({ ...message }))
+      return JSON.stringify({ action: 'final', text: 'resume ok' })
+    }
+    const result = await runJeden({ task: 'new task', cwd: dir, chat, priorMessages: replay, maxSteps: 1 })
+    assert.equal(result.text, 'resume ok')
+    assert.deepEqual(captured.slice(1).map((message) => message.role), ['user', 'assistant', 'user', 'assistant', 'user'])
+    assert.equal(captured.at(-1).content, 'new task')
+    assert.match(captured[3].content, /old file/)
   })
 })
 

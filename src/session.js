@@ -1,6 +1,7 @@
 import { mkdir, appendFile, writeFile, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, join, resolve } from 'node:path'
+import { formatToolResult } from './protocol.js'
 
 export function defaultSessionRoot() {
   return join(homedir(), '.jeden', 'sessions')
@@ -96,6 +97,30 @@ export async function readSession({ idOrPath, root = defaultSessionRoot() }) {
   const text = await readFile(join(dir, 'transcript.jsonl'), 'utf8')
   const events = text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
   return { id: basename(dir), path: dir, events }
+}
+
+function clippedToolResult(result) {
+  const text = formatToolResult(result)
+  if (Buffer.byteLength(text, 'utf8') <= 20_000) return text
+  return JSON.stringify({
+    type: 'tool_result',
+    result: {
+      truncated: true,
+      bytes: Buffer.byteLength(text, 'utf8'),
+      preview: text.slice(0, 4_000),
+    },
+  })
+}
+
+export function sessionReplayMessages(session, { limit = 80 } = {}) {
+  const messages = []
+  for (const event of session.events || []) {
+    if (event.type === 'user') messages.push({ role: 'user', content: String(event.data?.task || '') })
+    else if (event.type === 'assistant_raw') messages.push({ role: 'assistant', content: String(event.data?.content || '') })
+    else if (event.type === 'tool_result') messages.push({ role: 'user', content: clippedToolResult(event.data?.result || {}) })
+    else if (event.type === 'final' && messages[messages.length - 1]?.role !== 'assistant') messages.push({ role: 'assistant', content: JSON.stringify({ action: 'final', text: event.data?.text || '' }) })
+  }
+  return messages.filter((message) => message.content).slice(-limit)
 }
 
 export async function listSessionArtifacts({ idOrPath, root = defaultSessionRoot() } = {}) {

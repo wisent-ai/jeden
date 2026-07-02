@@ -141,6 +141,7 @@ export async function runJeden({
   hookRunner = null,
   askUser = null,
   priorContext = '',
+  priorMessages = [],
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
@@ -156,7 +157,8 @@ export async function runJeden({
   const messages = [
     { role: 'system', content: contextText ? `${systemPrompt(tools.list())}\n\n${contextText}` : systemPrompt(tools.list()) },
   ]
-  if (priorContext) messages.push({ role: 'user', content: `Previous session context:\n\n${priorContext}` })
+  if (Array.isArray(priorMessages) && priorMessages.length > 0) messages.push(...priorMessages)
+  else if (priorContext) messages.push({ role: 'user', content: `Previous session context:\n\n${priorContext}` })
   messages.push({ role: 'user', content: task })
   await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps, maxTokens })
 

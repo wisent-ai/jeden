@@ -92,7 +92,7 @@ Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON s
 Use `jeden search-sessions <query> [limit]` to find matching recent session transcripts.
 Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-path> <name> [output]` to inspect or extract session artifacts.
 
-Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
+Use `jeden resume <session-id-or-path> "task"` to seed a new run with structured replay of the prior session's user, assistant, and tool-result messages while recording a fresh session.
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in/custom/native MCP tool counts, and tool load errors.
