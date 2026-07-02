@@ -3,6 +3,6 @@ export { chatCompletion, hmacHeaders, modelRouterConfig } from './model-router.j
 export { parseAction, extractJsonObject, formatToolResult } from './protocol.js'
 export { createToolRegistry } from './tools.js'
 export { systemPrompt } from './policy.js'
-export { SessionRecorder } from './session.js'
+export { SessionRecorder, listSessions, readSession, defaultSessionRoot } from './session.js'
 export { loadEnvFiles } from './env.js'
 export { createSharedHookRunner, toolHookEvent, postToolHookEvent } from './hooks.js'

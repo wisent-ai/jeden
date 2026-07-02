@@ -4,7 +4,7 @@ import { createInterface } from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
-import { SessionRecorder } from './session.js'
+import { SessionRecorder, listSessions, readSession } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
 
 
@@ -12,6 +12,8 @@ function usage() {
   return `Usage:
   jeden [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
   jeden run "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
+  jeden sessions [limit]
+  jeden show <session-id-or-path>
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -65,6 +67,16 @@ function parseArgs(argv) {
     const task = parsed.positionals.join(' ').trim()
     if (!task) throw new Error('run requires a task')
     return { command: 'run', task, ...parsed }
+  }
+  if (first === 'sessions') {
+    const limit = rest[0] ? Number(rest[0]) : 20
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('sessions limit must be 1..200')
+    return { command: 'sessions', limit }
+  }
+  if (first === 'show') {
+    const idOrPath = rest[0]
+    if (!idOrPath) throw new Error('show requires a session id or path')
+    return { command: 'show', idOrPath }
   }
   if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
   throw new Error(`unknown command: ${first}`)
@@ -135,6 +147,28 @@ async function runInteractive(args) {
   }
 }
 
+async function showSessions(limit) {
+  const sessions = await listSessions({ limit })
+  for (const session of sessions) {
+    process.stdout.write(`${session.id}\t${session.updatedAt || '-'}\t${session.cwd || '-'}\n`)
+  }
+}
+
+async function showSession(idOrPath) {
+  const session = await readSession({ idOrPath })
+  for (const event of session.events) {
+    const label = `${event.ts || ''} ${event.type || ''}`.trim()
+    let body = ''
+    if (event.type === 'user') body = event.data?.task || ''
+    else if (event.type === 'final') body = event.data?.text || ''
+    else if (event.type === 'tool_result') body = `${event.data?.tool || ''} ${JSON.stringify(event.data?.result || {})}`
+    else if (event.type === 'hook') body = `${event.data?.event || ''} ${JSON.stringify(event.data?.result || {})}`
+    else body = JSON.stringify(event.data || {})
+    process.stdout.write(`${label}\n${body}\n\n`)
+  }
+}
+
+
 async function main() {
   const args = parseArgs(process.argv.slice(2))
   if (args.help) {
@@ -142,6 +176,14 @@ async function main() {
     return
   }
   loadRuntimeEnv(args)
+  if (args.command === 'sessions') {
+    await showSessions(args.limit)
+    return
+  }
+  if (args.command === 'show') {
+    await showSession(args.idOrPath)
+    return
+  }
   if (args.command === 'run') {
     await runOnce(args)
     return

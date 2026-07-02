@@ -34,6 +34,8 @@ The private M1 version includes:
 ```sh
 jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
+jeden sessions 20
+jeden show <session-id-or-path>
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
 ```
