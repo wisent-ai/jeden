@@ -3,7 +3,7 @@ import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
-import { resolve, relative, dirname } from 'node:path'
+import { resolve, relative, dirname, extname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
@@ -48,6 +48,25 @@ async function fileExists(path) {
     throw error
   }
 }
+
+function mimeTypeForPath(path) {
+  switch (extname(String(path)).toLowerCase()) {
+    case '.png':
+      return 'image/png'
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg'
+    case '.gif':
+      return 'image/gif'
+    case '.webp':
+      return 'image/webp'
+    case '.pdf':
+      return 'application/pdf'
+    default:
+      return 'application/octet-stream'
+  }
+}
+
 
 function replaceExactlyOnce(content, oldText, newText) {
   if (typeof oldText !== 'string' || oldText.length === 0) throw new Error('old text is required')
@@ -466,6 +485,27 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (Buffer.byteLength(content, 'utf8') > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap')
       const selected = lineWindow(content, selectedPath.range)
       return { path: publicPath(cwd, file), sha256: sha256(content), range: selectedPath.range || null, startLine: selected.startLine, endLine: selected.endLine, content: selected.content }
+    },
+  })
+
+  add({
+    name: 'read_binary_file',
+    description: 'Read one binary file under cwd as base64, capped at 512KB',
+    input: { path: 'string required', maxBytes: 'number optional' },
+    async execute(input) {
+      if (!input.path) throw new Error('path is required')
+      const file = jailPath(cwd, input.path)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1), MAX_READ_BYTES)
+      const content = await readFile(file)
+      const sliced = content.subarray(0, maxBytes)
+      return {
+        path: publicPath(cwd, file),
+        bytes: content.length,
+        truncated: content.length > sliced.length,
+        mimeType: mimeTypeForPath(file),
+        base64: sliced.toString('base64'),
+        sha256: sha256(content),
+      }
     },
   })
 
