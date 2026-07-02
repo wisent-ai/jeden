@@ -1190,8 +1190,9 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const table = sqliteIdentifier(input.table)
       const schema = await runSqliteJson({ cwd, file, sql: `PRAGMA table_info(${table})` })
       if (input.key != null) {
-        const primaryKey = schema.find((column) => Number(column.pk) === 1)
-        if (!primaryKey) throw new Error(`table has no single-column primary key: ${input.table}`)
+        const primaryKeys = schema.filter((column) => Number(column.pk) > 0)
+        if (primaryKeys.length !== 1) throw new Error(`table has no single-column primary key: ${input.table}`)
+        const primaryKey = primaryKeys[0]
         const keySql = JSON.stringify(String(input.key))
         const rows = await runSqliteJson({ cwd, file, sql: `SELECT * FROM ${table} WHERE ${sqliteIdentifier(primaryKey.name)} = ${keySql} LIMIT 1` })
         return { path: publicPath(cwd, file), table: input.table, schema, row: rows[0] || null }

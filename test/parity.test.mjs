@@ -247,13 +247,13 @@ test('read_sqlite lists tables and reads rows', async () => {
   await withTempDir(async (dir) => {
     await execFileOk('sqlite3', [
       join(dir, 'app.db'),
-      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL); INSERT INTO users (name, active) VALUES (\'Ada\', 1), (\'Grace\', 0); CREATE TABLE "user data" ("account id" TEXT PRIMARY KEY, "display name" TEXT NOT NULL); INSERT INTO "user data" VALUES (\'acct-1\', \'Quoted Name\');',
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL); INSERT INTO users (name, active) VALUES (\'Ada\', 1), (\'Grace\', 0); CREATE TABLE "user data" ("account id" TEXT PRIMARY KEY, "display name" TEXT NOT NULL); INSERT INTO "user data" VALUES (\'acct-1\', \'Quoted Name\'); CREATE TABLE composite (tenant TEXT, slug TEXT, value TEXT, PRIMARY KEY (tenant, slug)); INSERT INTO composite VALUES (\'t1\', \'s1\', \'v1\');',
     ])
     const registry = createToolRegistry({ cwd: dir })
 
     const tables = await registry.execute('read_sqlite', { path: 'app.db' })
     assert.equal(tables.ok, true)
-    assert.deepEqual(tables.output.tables, [{ name: 'user data', type: 'table', rows: 1 }, { name: 'users', type: 'table', rows: 2 }])
+    assert.deepEqual(tables.output.tables, [{ name: 'composite', type: 'table', rows: 1 }, { name: 'user data', type: 'table', rows: 1 }, { name: 'users', type: 'table', rows: 2 }])
 
     const sample = await registry.execute('read_sqlite', { path: 'app.db', table: 'users', where: 'active = 1', order: 'id DESC' })
     assert.equal(sample.ok, true)
@@ -267,6 +267,10 @@ test('read_sqlite lists tables and reads rows', async () => {
     const quotedRow = await registry.execute('read_sqlite', { path: 'app.db', table: 'user data', key: 'acct-1' })
     assert.equal(quotedRow.ok, true)
     assert.deepEqual(quotedRow.output.row, { 'account id': 'acct-1', 'display name': 'Quoted Name' })
+
+    const compositeKey = await registry.execute('read_sqlite', { path: 'app.db', table: 'composite', key: 't1' })
+    assert.equal(compositeKey.ok, false)
+    assert.match(compositeKey.error, /single-column primary key/)
 
     const query = await registry.execute('read_sqlite', { path: 'app.db', query: 'SELECT count(*) AS total FROM users' })
     assert.equal(query.ok, true)
