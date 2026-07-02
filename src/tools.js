@@ -229,16 +229,21 @@ function applyLineEditOps(content, ops) {
 }
 
 
-async function walkFiles(root, start, out) {
+async function walkFiles(root, start, out, options = {}) {
   if (out.length >= MAX_SEARCH_FILES) return
+  const info = await stat(start)
+  if (info.isFile()) {
+    out.push(start)
+    return
+  }
   const entries = await readdir(start, { withFileTypes: true })
   for (const entry of entries) {
     if (out.length >= MAX_SEARCH_FILES) return
-    if (entry.name.slice(0, 1) === '.' && entry.name !== '.env.local') continue
+    if (entry.name.slice(0, 1) === '.' && !options.hidden) continue
     const full = resolve(start, entry.name)
     if (entry.isDirectory()) {
       if (SKIP_DIRS.has(entry.name)) continue
-      await walkFiles(root, full, out)
+      await walkFiles(root, full, out, options)
       continue
     }
     if (entry.isFile()) out.push(full)
@@ -454,32 +459,34 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null }) {
   })
 }
 
-async function discoverTextFiles(cwd, root) {
+async function discoverTextFiles(cwd, root, options = {}) {
   const repoRoot = resolve(cwd)
-  const relRoot = publicPath(repoRoot, root)
-  const listed = await runProcess({
-    cwd: repoRoot,
-    command: 'git',
-    args: ['ls-files', '-co', '--exclude-standard', '-z', '--', relRoot],
-    timeoutMs: 30_000,
-  })
-  if (listed.code === 0) {
-    const files = []
-    for (const rel of listed.stdout.split('\u0000')) {
-      if (!rel) continue
-      const file = jailPath(repoRoot, rel)
-      if (file === root || file.slice(0, root.length + 1) === `${root}/`) {
-        try {
-          const info = await stat(file)
-          if (info.isFile()) files.push(file)
-        } catch {}
+  if (options.gitignore !== false) {
+    const relRoot = publicPath(repoRoot, root)
+    const listed = await runProcess({
+      cwd: repoRoot,
+      command: 'git',
+      args: ['ls-files', '-co', '--exclude-standard', '-z', '--', relRoot],
+      timeoutMs: 30_000,
+    })
+    if (listed.code === 0) {
+      const files = []
+      for (const rel of listed.stdout.split('\u0000')) {
+        if (!rel) continue
+        const file = jailPath(repoRoot, rel)
+        if (file === root || file.slice(0, root.length + 1) === `${root}/`) {
+          try {
+            const info = await stat(file)
+            if (info.isFile()) files.push(file)
+          } catch {}
+        }
+        if (files.length >= MAX_SEARCH_FILES) break
       }
-      if (files.length >= MAX_SEARCH_FILES) break
+      return files
     }
-    return files
   }
   const files = []
-  await walkFiles(repoRoot, root, files)
+  await walkFiles(repoRoot, root, files, options)
   return files
 }
 
@@ -489,7 +496,7 @@ async function textFilesForInputs(cwd, input) {
   const files = []
   for (const item of raw) {
     const root = jailPath(cwd, item || '.')
-    for (const file of await discoverTextFiles(cwd, root)) {
+    for (const file of await discoverTextFiles(cwd, root, { gitignore: input.gitignore, hidden: Boolean(input.hidden) })) {
       const key = publicPath(cwd, file)
       if (seen.has(key)) continue
       seen.add(key)
@@ -506,7 +513,7 @@ function hasHiddenSegment(path) {
 
 async function discoverPathEntries(cwd, root, options = {}) {
   const repoRoot = resolve(cwd)
-  const files = await discoverTextFiles(repoRoot, root)
+  const files = await discoverTextFiles(repoRoot, root, { gitignore: options.gitignore, hidden: Boolean(options.hidden) })
   const byPath = new Map()
   for (const file of files) {
     const relFile = publicPath(repoRoot, file)
@@ -731,8 +738,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'search_files',
-    description: 'Recursively search text files under cwd for a literal string, capped at 500 matches; supports path/paths, limit, and skip',
-    input: { path: 'string optional', paths: 'array optional', query: 'string required', limit: 'number optional', skip: 'number optional' },
+    description: 'Recursively search text files under cwd for a literal string, capped at 500 matches; supports path/paths, hidden, gitignore, limit, and skip',
+    input: { path: 'string optional', paths: 'array optional', query: 'string required', hidden: 'boolean optional', gitignore: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.query) throw new Error('query is required')
       const files = await textFilesForInputs(cwd, input)
@@ -765,14 +772,14 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'glob_paths',
-    description: 'Find files and directories under cwd with simple glob patterns; supports * and **; skips gitignored files when possible',
-    input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', limit: 'number optional', skip: 'number optional' },
+    description: 'Find files and directories under cwd with simple glob patterns; supports * and ** plus hidden, gitignore, limit, and skip',
+    input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', gitignore: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       const root = jailPath(cwd, input.path || '.')
       const limit = Math.min(Math.max(Number(input.limit) || 200, 1), 2_000)
       const skip = Math.max(Number(input.skip) || 0, 0)
       const rawPatterns = Array.isArray(input.patterns) ? input.patterns : [input.patterns || '**']
-      const paths = await discoverPathEntries(cwd, root, { hidden: Boolean(input.hidden), limit: MAX_SEARCH_FILES })
+      const paths = await discoverPathEntries(cwd, root, { hidden: Boolean(input.hidden), gitignore: input.gitignore, limit: MAX_SEARCH_FILES })
       const matches = paths
         .filter((entry) => matchesPattern(entry.path, rawPatterns))
         .slice(skip, skip + limit)
@@ -783,8 +790,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'grep_regex',
-    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, limit, and skip',
-    input: { expr: 'string required', path: 'string optional', paths: 'array optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
+    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, hidden, gitignore, limit, and skip',
+    input: { expr: 'string required', path: 'string optional', paths: 'array optional', hidden: 'boolean optional', gitignore: 'boolean optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.expr || typeof input.expr !== 'string') throw new Error('expr is required')
       const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)

@@ -131,6 +131,7 @@ test('search_files and grep_regex accept multiple paths', async () => {
     await writeFile(join(dir, 'left', 'a.txt'), 'alpha needle\n', 'utf8')
     await writeFile(join(dir, 'right', 'b.txt'), 'beta needle\n', 'utf8')
     await writeFile(join(dir, 'skip', 'c.txt'), 'skip needle\n', 'utf8')
+    await writeFile(join(dir, '.secret.txt'), 'hidden needle\n', 'utf8')
     const registry = createToolRegistry({ cwd: dir })
 
     const literal = await registry.execute('search_files', { paths: ['left', 'right'], query: 'needle', limit: 10 })
@@ -138,6 +139,11 @@ test('search_files and grep_regex accept multiple paths', async () => {
 
     const regex = await registry.execute('grep_regex', { paths: ['right'], expr: 'beta\\s+needle', limit: 10 })
     assert.deepEqual(regex.output.matches.map((match) => match.path), ['right/b.txt'])
+
+    const hiddenDefault = await registry.execute('search_files', { query: 'hidden', limit: 10 })
+    assert.deepEqual(hiddenDefault.output.matches, [])
+    const hiddenSearch = await registry.execute('search_files', { query: 'hidden', hidden: true, limit: 10 })
+    assert.deepEqual(hiddenSearch.output.matches.map((match) => match.path), ['.secret.txt'])
   })
 })
 
