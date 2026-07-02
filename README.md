@@ -28,6 +28,7 @@ The private M1 version includes:
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
+- Project context auto-loads from `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `.jeden/instructions.md`, and `.jeden/context.md` under `--cwd`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
@@ -53,6 +54,8 @@ WISENT_APP_AGENT_ID=wisent-app
 ```
 
 The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from the launch directory and from `--cwd` before calling the router. Existing shell variables win.
+
+Before each run, Jeden appends project context files from `--cwd` to the system prompt when present. Oversized context files are skipped.
 
 
 Hooks can be disabled for debugging with:

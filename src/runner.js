@@ -3,6 +3,7 @@ import { parseAction, formatToolResult } from './protocol.js'
 import { systemPrompt } from './policy.js'
 import { createToolRegistry } from './tools.js'
 import { loadCustomTools } from './custom-tools.js'
+import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 
 
@@ -63,8 +64,11 @@ export async function runJeden({
   const custom = await loadCustomTools({ cwd, builtInToolNames })
   const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null, customTools: custom.tools })
   if (custom.errors.length > 0) await recorder?.record('custom_tool_errors', { errors: custom.errors })
+  const contextFiles = await loadProjectContext({ cwd })
+  const contextText = formatProjectContext(contextFiles)
+  if (contextFiles.length > 0) await recorder?.record('project_context', { files: contextFiles.map((file) => file.path) })
   const messages = [
-    { role: 'system', content: systemPrompt(tools.list()) },
+    { role: 'system', content: contextText ? `${systemPrompt(tools.list())}\n\n${contextText}` : systemPrompt(tools.list()) },
     { role: 'user', content: task },
   ]
   await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps })
