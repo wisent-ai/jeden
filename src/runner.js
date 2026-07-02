@@ -5,6 +5,7 @@ import { createToolRegistry, toolCapability } from './tools.js'
 import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
+import { loadMcpToolAdapters } from './mcp.js'
 
 const MAX_TOOL_RESULT_BYTES = 64_000
 
@@ -44,6 +45,12 @@ function inputFieldSchema(spec) {
 }
 
 function inputObjectSchema(input = {}) {
+  if (input?.type === 'object' && input.properties && typeof input.properties === 'object') {
+    return {
+      ...input,
+      additionalProperties: input.additionalProperties ?? false,
+    }
+  }
   const properties = {}
   const required = []
   for (const [name, spec] of Object.entries(input || {})) {
@@ -139,8 +146,10 @@ export async function runJeden({
   await recorder?.ensure?.()
   const builtInToolNames = createToolRegistry({ cwd, allowWrite, allowCommand, artifactDir: recorder?.artifactDir?.() || null }).list().map((tool) => tool.name)
   const custom = await loadCustomTools({ cwd, builtInToolNames, allowCommand: allowCommand || Boolean(approveTool) })
-  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null, customTools: custom.tools, askUser })
-  if (custom.errors.length > 0) await recorder?.record('custom_tool_errors', { errors: custom.errors })
+  const mcp = await loadMcpToolAdapters({ cwd })
+  const allCustomTools = [...custom.tools, ...mcp.tools]
+  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null, customTools: allCustomTools, askUser })
+  if (custom.errors.length > 0 || mcp.errors.length > 0) await recorder?.record('custom_tool_errors', { errors: [...custom.errors, ...mcp.errors] })
   const contextFiles = await loadProjectContext({ cwd })
   const contextText = formatProjectContext(contextFiles)
   if (contextFiles.length > 0) await recorder?.record('project_context', { files: contextFiles.map((file) => file.path) })

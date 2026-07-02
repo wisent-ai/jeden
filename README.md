@@ -33,7 +33,7 @@ The private M1 version includes:
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session and is gated as command execution.
 - Interactive ask tool: `ask_user` lets the model ask the human a question during `jeden` terminal mode.
 - Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`; `recall` can filter by query over note text and tags.
-- MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers.
+- MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers. Configured MCP server tools are also surfaced natively as `mcp__<server>__<tool>` with the server-provided input schema.
 - Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
@@ -95,9 +95,9 @@ Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-pa
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
-Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in tool count, and custom tool load errors.
+Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in/custom/native MCP tool counts, and tool load errors.
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
-MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit.
+MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit. During `jeden run`, configured MCP tools are listed beside built-ins under native names like `mcp__filesystem__read_file`, so models can call them directly without first using `mcp_list_tools`.
 
 Hook stdout may be empty, plain text, or JSON. JSON supports `decision: "block"` with `reason`, `userMessage` to replace the submitted prompt, and `toolInput` to replace the current pre-tool input. Jeden records hook results plus requested/effective tool payloads in the session transcript.
 

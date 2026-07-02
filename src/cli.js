@@ -10,6 +10,7 @@ import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
 import { applyConfigEnv, loadJedenConfig } from './config.js'
 import { loadCustomTools } from './custom-tools.js'
+import { loadMcpToolAdapters } from './mcp.js'
 
 
 function usage() {
@@ -375,15 +376,24 @@ async function showArtifact(idOrPath, name, outputPath) {
   }
 }
 
-async function showTools(args) {
+async function loadCliTools(args) {
   const builtIn = createToolRegistry({ cwd: args.cwd }).list()
   const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
-  const tools = createToolRegistry({ cwd: args.cwd, customTools: custom.tools }).list()
+  const mcp = await loadMcpToolAdapters({ cwd: args.cwd })
+  const tools = createToolRegistry({ cwd: args.cwd, customTools: [...custom.tools, ...mcp.tools] }).list()
+  return { tools, custom, mcp, builtIn }
+}
+
+async function showTools(args) {
+  const { tools, custom, mcp } = await loadCliTools(args)
   for (const tool of tools) {
     process.stdout.write(`${tool.name}\t${tool.description}\n`)
   }
   for (const error of custom.errors) {
     process.stderr.write(`custom tool skipped: ${error.path}: ${error.error}\n`)
+  }
+  for (const error of mcp.errors) {
+    process.stderr.write(`mcp tool skipped: ${error.server}${error.tool ? `/${error.tool}` : ''}: ${error.error}\n`)
   }
 }
 
@@ -394,10 +404,9 @@ async function showConfig(args) {
 
 async function showDoctor(args) {
   const config = await loadJedenConfig({ cwd: args.cwd })
-  const builtIn = createToolRegistry({ cwd: args.cwd }).list()
-  const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
+  const { builtIn, custom, mcp } = await loadCliTools(args)
   const report = {
-    ok: custom.errors.length === 0,
+    ok: custom.errors.length === 0 && mcp.errors.length === 0,
     cwd: args.cwd,
     node: process.version,
     model: process.env.JEDEN_MODEL || config.model,
@@ -411,8 +420,11 @@ async function showDoctor(args) {
     tools: {
       builtIn: builtIn.length,
       custom: custom.tools.length,
-      errors: custom.errors,
+      mcp: mcp.tools.length,
+      total: builtIn.length + custom.tools.length + mcp.tools.length,
     },
+    customToolErrors: custom.errors,
+    mcpToolErrors: mcp.errors,
   }
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 }

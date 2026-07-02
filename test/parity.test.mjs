@@ -13,6 +13,7 @@ import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { runJeden } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
+import { loadMcpToolAdapters } from '../src/mcp.js'
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'jeden-test-'))
@@ -444,6 +445,74 @@ export default () => [
       const elapsed = Date.now() - started
       assert.equal(result.text, 'parallel ok')
       assert.ok(elapsed < 380, `expected parallel execution, got ${elapsed}ms`)
+    })
+  })
+})
+
+test('native MCP tools are listed and callable by runJeden', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      const serverFile = join(dir, 'mcp-server.mjs')
+      await writeFile(serverFile, `
+let buffer = Buffer.alloc(0)
+function send(message) {
+  const body = Buffer.from(JSON.stringify(message), 'utf8')
+  process.stdout.write('Content-Length: ' + body.length + '\\r\\n\\r\\n')
+  process.stdout.write(body)
+}
+function handle(message) {
+  if (message.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'fake', version: '1' } } })
+    return
+  }
+  if (message.method === 'tools/list') {
+    send({ jsonrpc: '2.0', id: message.id, result: { tools: [{ name: 'echo', description: 'Echo text through MCP', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } }] } })
+    return
+  }
+  if (message.method === 'tools/call') {
+    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: message.params.arguments.text }] } })
+  }
+}
+process.stdin.on('data', (chunk) => {
+  buffer = Buffer.concat([buffer, chunk])
+  for (;;) {
+    const headerEnd = buffer.indexOf('\\r\\n\\r\\n')
+    if (headerEnd === -1) break
+    const header = buffer.subarray(0, headerEnd).toString('utf8')
+    const line = header.split('\\r\\n')[0]
+    const length = Number(line.slice('Content-Length:'.length).trim())
+    const bodyStart = headerEnd + 4
+    const bodyEnd = bodyStart + length
+    if (buffer.length < bodyEnd) break
+    const message = JSON.parse(buffer.subarray(bodyStart, bodyEnd).toString('utf8'))
+    buffer = buffer.subarray(bodyEnd)
+    handle(message)
+  }
+})
+`, 'utf8')
+      await mkdir(join(dir, '.jeden'), { recursive: true })
+      await writeFile(join(dir, '.jeden', 'mcp.json'), JSON.stringify({ mcpServers: { local: { command: process.execPath, args: [serverFile] } } }), 'utf8')
+
+      const adapters = await loadMcpToolAdapters({ cwd: dir })
+      assert.deepEqual(adapters.errors, [])
+      assert.deepEqual(adapters.tools.map((tool) => tool.name), ['mcp__local__echo'])
+
+      let calls = 0
+      const chat = async ({ messages, tools }) => {
+        calls += 1
+        if (calls === 1) {
+          const nativeTool = tools.find((tool) => tool.function.name === 'mcp__local__echo')
+          assert.ok(nativeTool)
+          assert.deepEqual(nativeTool.function.parameters.required, ['text'])
+          return JSON.stringify({ action: 'tool', tool: 'mcp__local__echo', input: { text: 'mcp ok' } })
+        }
+        const toolMessage = JSON.parse(messages.at(-1).content)
+        assert.equal(toolMessage.result.output.content[0].text, 'mcp ok')
+        return JSON.stringify({ action: 'final', text: 'native mcp ok' })
+      }
+
+      const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 2 })
+      assert.equal(result.text, 'native mcp ok')
     })
   })
 })

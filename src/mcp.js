@@ -26,6 +26,52 @@ export async function loadMcpConfig({ cwd = process.cwd() } = {}) {
   }
 }
 
+function nativeMcpToolName(serverName, toolName) {
+  const server = String(serverName).replace(/[^a-zA-Z0-9_]/g, '_')
+  const tool = String(toolName).replace(/[^a-zA-Z0-9_]/g, '_')
+  return `mcp__${server}__${tool}`
+}
+
+function normalizeInputSchema(schema) {
+  if (!schema || typeof schema !== 'object') return {}
+  if (schema.type === 'object' && schema.properties && typeof schema.properties === 'object') return schema
+  return { type: 'object', properties: {}, additionalProperties: true }
+}
+
+export async function loadMcpToolAdapters({ cwd = process.cwd(), timeoutMs = 30_000 } = {}) {
+  const config = await loadMcpConfig({ cwd })
+  const disabled = new Set(config.disabledServers || [])
+  const tools = []
+  const errors = []
+  const used = new Set()
+  for (const [serverName, server] of Object.entries(config.mcpServers || {})) {
+    if (disabled.has(serverName)) continue
+    try {
+      const listed = await withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/list'))
+      for (const tool of listed.tools || []) {
+        if (!tool?.name) continue
+        const nativeName = nativeMcpToolName(serverName, tool.name)
+        if (used.has(nativeName)) {
+          errors.push({ server: serverName, tool: tool.name, error: `duplicate native MCP tool name: ${nativeName}` })
+          continue
+        }
+        used.add(nativeName)
+        tools.push({
+          name: nativeName,
+          description: tool.description || `MCP tool ${tool.name} from ${serverName}`,
+          input: normalizeInputSchema(tool.inputSchema),
+          async execute(input) {
+            return callMcpTool({ cwd, serverName, toolName: tool.name, args: input || {}, timeoutMs })
+          },
+        })
+      }
+    } catch (error) {
+      errors.push({ server: serverName, error: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return { tools, errors }
+}
+
 function encodeMessage(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8')
   return Buffer.concat([Buffer.from(`Content-Length: ${body.length}\r\n\r\n`, 'utf8'), body])
