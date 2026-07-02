@@ -227,6 +227,8 @@ Delegate call:
 {"action":"tool","tool":"delegate_task","input":{"task":"summarize src/tools.js","maxSteps":6}}
 ```
 
+`delegate_task` returns child process status plus `delegated` parsed from the child `--json` run output: `{ ok, text, sessionPath }` when the child completed normally.
+
 
 MCP list call:
 

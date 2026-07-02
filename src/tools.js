@@ -1190,12 +1190,17 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!allowCommand) throw new Error('delegate_task requires --allow-command')
       if (!input.task || typeof input.task !== 'string') throw new Error('task is required')
       const maxSteps = Math.min(Math.max(Number(input.maxSteps) || 6, 1), 16)
-      return runProcess({
+      const result = await runProcess({
         cwd: resolve(cwd),
         command: process.env.JEDEN_NODE || 'node',
-        args: [cliPath(), 'run', input.task, '--cwd', resolve(cwd), '--max-steps', String(maxSteps)],
+        args: [cliPath(), 'run', input.task, '--cwd', resolve(cwd), '--max-steps', String(maxSteps), '--json'],
         timeoutMs: Math.min(maxSteps * 45_000, 300_000),
       })
+      let parsed = null
+      try {
+        parsed = JSON.parse(result.stdout)
+      } catch {}
+      return { ...result, delegated: parsed }
     },
   })
 

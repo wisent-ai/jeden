@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -372,5 +372,25 @@ test('pre-tool hook can replace tool input before execution', async () => {
 
     const result = await runJeden({ task: 'Read a file', cwd: dir, chat, hookRunner, maxSteps: 2 })
     assert.equal(result.text, 'hook changed input')
+  })
+})
+
+test('delegate_task parses child JSON run output', async () => {
+  await withTempDir(async (dir) => {
+    const fakeNode = join(dir, 'fake-node.mjs')
+    await writeFile(fakeNode, '#!/usr/bin/env node\nprocess.stdout.write(JSON.stringify({ ok: true, text: "delegated ok", sessionPath: "/tmp/session" }))\n', 'utf8')
+    await chmod(fakeNode, 0o755)
+    const previous = process.env.JEDEN_NODE
+    process.env.JEDEN_NODE = fakeNode
+    try {
+      const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+      const result = await registry.execute('delegate_task', { task: 'child task', maxSteps: 1 })
+      assert.equal(result.ok, true)
+      assert.equal(result.output.code, 0)
+      assert.deepEqual(result.output.delegated, { ok: true, text: 'delegated ok', sessionPath: '/tmp/session' })
+    } finally {
+      if (previous === undefined) delete process.env.JEDEN_NODE
+      else process.env.JEDEN_NODE = previous
+    }
   })
 })
