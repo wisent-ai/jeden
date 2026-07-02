@@ -6,6 +6,30 @@ import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 
+const MAX_TOOL_RESULT_BYTES = 64_000
+
+function safeArtifactName(step, tool) {
+  const safeTool = String(tool || 'tool').replace(/[^a-zA-Z0-9._-]/g, '_')
+  return `tool-result-${step}-${safeTool}.json`
+}
+
+async function compactToolResult({ result, recorder, step, tool }) {
+  const payload = JSON.stringify(result)
+  if (Buffer.byteLength(payload, 'utf8') <= MAX_TOOL_RESULT_BYTES) return result
+  const preview = payload.slice(0, 4_000)
+  const compacted = {
+    ok: result?.ok ?? true,
+    truncated: true,
+    bytes: Buffer.byteLength(payload, 'utf8'),
+    preview,
+  }
+  if (recorder?.writeArtifact) {
+    const path = await recorder.writeArtifact(safeArtifactName(step, tool), JSON.stringify(result, null, 2))
+    return { ...compacted, artifact: path }
+  }
+  return compacted
+}
+
 function toOpenAIToolSpecs(list) {
   return list.map((tool) => ({
     type: 'function',
@@ -128,8 +152,10 @@ export async function runJeden({
         ? { approved: false, result: { ok: false, error: `hook blocked ${toolAction.tool}: ${preHook.reason}` } }
         : await maybeApprove({ action: toolAction, allowWrite, allowCommand, approveTool, recorder })
       const result = approval.approved ? await tools.execute(toolAction.tool, toolAction.input) : approval.result
-      results.push({ tool: toolAction.tool, result })
+      const compactedResult = await compactToolResult({ result, recorder, step, tool: toolAction.tool })
+      results.push({ tool: toolAction.tool, result: compactedResult })
       await recorder?.record('tool_result', { step, tool: toolAction.tool, result })
+      if (compactedResult !== result) await recorder?.record('tool_result_compacted', { step, tool: toolAction.tool, result: compactedResult })
       const postEvent = postToolHookEvent(toolAction.tool)
       if (postEvent) {
         await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action: toolAction, result }), recorder })
