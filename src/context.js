@@ -1,11 +1,20 @@
 import { readFile, stat } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { dirname, relative, resolve } from 'node:path'
 
 const MAX_CONTEXT_BYTES = 64_000
-const CONTEXT_FILES = [
+const PROJECT_CONTEXT_FILES = [
   'JEDEN.md',
   'AGENTS.md',
   'CLAUDE.md',
+  'RULES.md',
+  '.omp/AGENTS.md',
+  '.omp/RULES.md',
+  '.jeden/instructions.md',
+  '.jeden/context.md',
+]
+
+const USER_CONTEXT_FILES = [
   '.jeden/instructions.md',
   '.jeden/context.md',
 ]
@@ -14,13 +23,34 @@ function under(root, target) {
   return target === root || target.slice(0, root.length + 1) === `${root}/`
 }
 
-async function readContextFile(root, relativePath) {
+
+function ancestorDirs(root) {
+  const start = resolve(root)
+  const home = resolve(homedir())
+  const floor = under(home, start) ? home : dirname(start)
+  const dirs = []
+  let current = start
+  for (;;) {
+    dirs.push(current)
+    if (current === floor) break
+    const parent = dirname(current)
+    if (parent === current) break
+    current = parent
+  }
+  return dirs.reverse()
+}
+
+function labelPath(base, dir, file) {
+  const relDir = relative(base, dir)
+  return relDir ? `${relDir}/${file}` : file
+}
+async function readContextFile(root, relativePath, label = relativePath) {
   const file = resolve(root, relativePath)
   if (!under(root, file)) return null
   try {
     const info = await stat(file)
     if (!info.isFile() || info.size > MAX_CONTEXT_BYTES) return null
-    return { path: relativePath, content: await readFile(file, 'utf8') }
+    return { path: label, content: await readFile(file, 'utf8') }
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
     throw error
@@ -30,9 +60,24 @@ async function readContextFile(root, relativePath) {
 export async function loadProjectContext({ cwd = process.cwd() } = {}) {
   const root = resolve(cwd)
   const loaded = []
-  for (const file of CONTEXT_FILES) {
-    const context = await readContextFile(root, file)
-    if (context) loaded.push(context)
+  const seen = new Set()
+  for (const file of USER_CONTEXT_FILES) {
+    const context = await readContextFile(homedir(), file, `~/${file}`)
+    if (context) {
+      loaded.push(context)
+      seen.add(context.path)
+    }
+  }
+  for (const dir of ancestorDirs(root)) {
+    for (const file of PROJECT_CONTEXT_FILES) {
+      const label = labelPath(root, dir, file)
+      if (seen.has(label)) continue
+      const context = await readContextFile(dir, file, label)
+      if (context) {
+        loaded.push(context)
+        seen.add(context.path)
+      }
+    }
   }
   return loaded
 }

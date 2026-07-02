@@ -33,7 +33,7 @@ The private M1 version includes:
 - MCP tools: `mcp_list_tools`, `mcp_call_tool` support configured stdio MCP servers.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
-- Project context auto-loads from `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `.jeden/instructions.md`, and `.jeden/context.md` under `--cwd`.
+- Project context auto-loads user context, ancestor context, and cwd context files before each run.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
 - No tests are included; repository hooks and `npm run check` are the quality gate.
@@ -62,7 +62,7 @@ WISENT_APP_AGENT_ID=wisent-app
 
 The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from the launch directory and from `--cwd` before calling the router. Existing shell variables win.
 
-Before each run, Jeden appends project context files from `--cwd` to the system prompt when present. Oversized context files are skipped.
+Before each run, Jeden appends context files to the system prompt when present. User context loads from `~/.jeden/instructions.md` and `~/.jeden/context.md`; project context walks from the home/project ancestor down to `--cwd` and reads `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `RULES.md`, `.omp/AGENTS.md`, `.omp/RULES.md`, `.jeden/instructions.md`, and `.jeden/context.md`. Oversized context files are skipped.
 
 
 Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript.
