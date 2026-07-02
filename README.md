@@ -79,6 +79,7 @@ Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior 
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
+MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit.
 
 Hooks can be disabled for debugging with:
 

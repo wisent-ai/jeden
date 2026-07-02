@@ -65,9 +65,22 @@ function startServer(server, cwd) {
 export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 30_000 }, callback) {
   const child = startServer(server, cwd)
   const state = { buffer: Buffer.alloc(0), nextId: 1, pending: new Map(), stderr: '' }
+  function rejectPending(error) {
+    for (const pending of state.pending.values()) pending.reject(error)
+    state.pending.clear()
+  }
+
   let closed = false
+  let timedOut = false
+  let exited = false
   const timer = setTimeout(() => {
+    timedOut = true
+    const error = new Error(`MCP server timed out after ${timeoutMs}ms`)
+    rejectPending(error)
     child.kill('SIGTERM')
+    setTimeout(() => {
+      if (!exited) child.kill('SIGKILL')
+    }, 1_000)
   }, timeoutMs)
 
   child.stderr.on('data', (chunk) => {
@@ -84,16 +97,21 @@ export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 3
     }
   })
   child.on('close', () => {
+    exited = true
     closed = true
-    for (const pending of state.pending.values()) pending.reject(new Error('MCP server closed'))
-    state.pending.clear()
+    rejectPending(new Error(timedOut ? `MCP server timed out after ${timeoutMs}ms` : 'MCP server closed'))
+  })
+  child.on('error', (error) => {
+    exited = true
+    closed = true
+    rejectPending(error)
   })
 
   function sendRaw(message) {
     child.stdin.write(encodeMessage(message))
   }
   function request(method, params = {}) {
-    if (closed) throw new Error('MCP server is closed')
+    if (closed || timedOut) throw new Error(timedOut ? `MCP server timed out after ${timeoutMs}ms` : 'MCP server is closed')
     const id = state.nextId
     state.nextId += 1
     const message = { jsonrpc: '2.0', id, method, params }
