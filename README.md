@@ -25,7 +25,7 @@ The private M1 version includes:
 - Git read tools: `git_status`, `git_diff`.
 - Eval tools: `node_eval`, `python_eval`. Both require command permission.
 - Web read tool: `fetch_url`.
-- Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
+- Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
@@ -126,6 +126,18 @@ Regex grep call:
 
 ```json
 {"action":"tool","tool":"grep_regex","input":{"expr":"createToolRegistry","path":"src","caseSensitive":true}}
+```
+
+List artifacts:
+
+```json
+{"action":"tool","tool":"list_artifacts","input":{}}
+```
+
+Read artifact:
+
+```json
+{"action":"tool","tool":"read_artifact","input":{"name":"notes.txt"}}
 ```
 
 Command call, only when enabled:

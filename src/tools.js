@@ -30,6 +30,15 @@ function publicPath(cwd, target) {
   return rel || '.'
 }
 
+function jailedArtifactPath(artifactDir, name) {
+  if (!artifactDir) throw new Error('artifact tools require an active session')
+  if (!name || typeof name !== 'string') throw new Error('name is required')
+  const root = resolve(artifactDir)
+  const target = resolve(root, name)
+  if (target === root || target.slice(0, root.length + 1) === `${root}/`) return target
+  throw new Error(`artifact path escapes session: ${name}`)
+}
+
 async function fileExists(path) {
   try {
     const info = await stat(path)
@@ -563,6 +572,50 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       await mkdir(dirname(file), { recursive: true })
       await writeFile(file, input.content, 'utf8')
       return { path: file, bytes: Buffer.byteLength(input.content, 'utf8') }
+    },
+  })
+
+  add({
+    name: 'list_artifacts',
+    description: 'List files in the current session artifact directory',
+    input: {},
+    async execute() {
+      if (!artifactDir) throw new Error('list_artifacts requires an active session')
+      let entries = []
+      try {
+        entries = await readdir(resolve(artifactDir), { withFileTypes: true })
+      } catch (error) {
+        if (error?.code === 'ENOENT') return { artifacts: [] }
+        throw error
+      }
+      const artifacts = []
+      for (const entry of entries) {
+        if (!entry.isFile()) continue
+        const file = resolve(artifactDir, entry.name)
+        const info = await stat(file)
+        artifacts.push({ name: entry.name, bytes: info.size, updatedAt: info.mtime.toISOString() })
+      }
+      return { artifacts: artifacts.sort((a, b) => a.name.localeCompare(b.name)) }
+    },
+  })
+
+  add({
+    name: 'read_artifact',
+    description: 'Read one UTF-8 artifact from the current session artifact directory',
+    input: { name: 'string required', maxBytes: 'number optional' },
+    async execute(input) {
+      const file = jailedArtifactPath(artifactDir, input.name)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
+      const content = await readFile(file, 'utf8')
+      const buffer = Buffer.from(content, 'utf8')
+      const sliced = buffer.subarray(0, maxBytes)
+      return {
+        name: publicPath(resolve(artifactDir), file),
+        bytes: buffer.length,
+        truncated: buffer.length > sliced.length,
+        content: sliced.toString('utf8'),
+        sha256: sha256(content),
+      }
     },
   })
 
