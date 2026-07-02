@@ -12,7 +12,7 @@ import { loadProjectContext } from '../src/context.js'
 import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions, sessionReplayMessages } from '../src/session.js'
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
-import { runJeden } from '../src/index.js'
+import { buildCapabilityManifest, buildDoctorReport, modelRouterConfig, runJeden } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
 import { closeMcpClients, loadMcpToolAdapters } from '../src/mcp.js'
 
@@ -646,6 +646,83 @@ test('system prompt enforces dedicated tool policy', () => {
   assert.match(prompt, /Use grep_regex\/search_files for content search/)
   assert.match(prompt, /do not use run_command\/run_process for grep, find, ls, or globbing/)
   assert.match(prompt, /Use read_file ranges\/selectors for targeted reads/)
+})
+
+test('capability manifest lists built-in tools and runtime defaults', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      const previous = {
+        JEDEN_MODEL: process.env.JEDEN_MODEL,
+        MODEL_ROUTER_URL: process.env.MODEL_ROUTER_URL,
+        WISENT_APP_AGENT_ID: process.env.WISENT_APP_AGENT_ID,
+      }
+      delete process.env.JEDEN_MODEL
+      delete process.env.MODEL_ROUTER_URL
+      delete process.env.WISENT_APP_AGENT_ID
+      try {
+        const expectedRoute = modelRouterConfig({})
+        const manifest = await buildCapabilityManifest({ cwd: dir })
+        assert.equal(manifest.cwd, dir)
+        assert.equal(manifest.model, expectedRoute.model)
+        assert.equal(manifest.agentId, expectedRoute.agentId)
+        assert.equal(manifest.modelRouterUrl, expectedRoute.url)
+        assert.ok(manifest.tools.total >= manifest.tools.builtIn.length)
+        assert.ok(manifest.tools.builtIn.some((tool) => tool.name === 'read_file'))
+      } finally {
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+      }
+    })
+  })
+})
+
+test('doctor reports missing model router auth as fatal', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      const previous = {
+        WISENT_APP_AGENT_AUTH_SECRET: process.env.WISENT_APP_AGENT_AUTH_SECRET,
+        JEDEN_MEMORY_FILE: process.env.JEDEN_MEMORY_FILE,
+        JEDEN_MODEL: process.env.JEDEN_MODEL,
+        MODEL_ROUTER_URL: process.env.MODEL_ROUTER_URL,
+        WISENT_APP_AGENT_ID: process.env.WISENT_APP_AGENT_ID,
+      }
+      delete process.env.WISENT_APP_AGENT_AUTH_SECRET
+      delete process.env.JEDEN_MODEL
+      delete process.env.MODEL_ROUTER_URL
+      delete process.env.WISENT_APP_AGENT_ID
+      process.env.JEDEN_MEMORY_FILE = join(dir, 'memory.jsonl')
+      try {
+        const expectedRoute = modelRouterConfig({})
+        const report = await buildDoctorReport({ cwd: dir })
+        const auth = report.checks.find((item) => item.id === 'secret.modelRouterAuth.present')
+        assert.equal(report.ok, false)
+        assert.equal(auth.ok, false)
+        assert.equal(auth.fatal, true)
+        assert.equal(report.modelRouterUrl, expectedRoute.url)
+      } finally {
+        for (const [key, value] of Object.entries(previous)) {
+          if (value === undefined) delete process.env[key]
+          else process.env[key] = value
+        }
+      }
+    })
+  })
+})
+
+test('CLI emits capability and doctor JSON', async () => {
+  await withTempDir(async (dir) => {
+    const env = { ...process.env, HOME: join(dir, 'home'), USERPROFILE: join(dir, 'home'), JEDEN_MEMORY_FILE: join(dir, 'memory.jsonl'), WISENT_APP_AGENT_AUTH_SECRET: 'test-secret' }
+    const capabilities = await execFileOk(process.execPath, ['src/cli.js', 'capabilities', '--cwd', dir], { cwd: join(process.cwd()), env })
+    const manifest = JSON.parse(capabilities.stdout)
+    assert.ok(manifest.tools.all.some((tool) => tool.name === 'read_file'))
+
+    const doctor = await execFileOk(process.execPath, ['src/cli.js', 'doctor', '--cwd', dir], { cwd: join(process.cwd()), env })
+    const report = JSON.parse(doctor.stdout)
+    assert.equal(report.checks.find((item) => item.id === 'secret.modelRouterAuth.present').ok, true)
+    assert.equal(report.tools.total, manifest.tools.total)
+  })
 })
 
 test('hook helpers classify tools from capability metadata', () => {

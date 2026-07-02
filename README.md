@@ -68,6 +68,7 @@ jeden sessions 20
 jeden search-sessions "needle" 50
 jeden show <session-id-or-path>
 jeden tools --cwd ../content-platform
+jeden capabilities --cwd ../content-platform
 jeden doctor --cwd ../content-platform
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform --model claude-code-subscription
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
@@ -96,6 +97,7 @@ Use `jeden resume <session-id-or-path> "task"` to seed a new run with structured
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in/custom/native MCP tool counts, and tool load errors.
+Use `jeden capabilities --cwd .` to print the resolved capability manifest, including runtime defaults and the full built-in/custom/MCP tool surface.
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
 MCP clients stay open for the duration of a `jeden run`, so native MCP calls can reuse server state across steps; pending requests time out and close the client, with `SIGTERM` then `SIGKILL` cleanup. During `jeden run`, configured MCP tools are listed beside built-ins under native names like `mcp__filesystem__read_file`, so models can call them directly without first using `mcp_list_tools`.
 

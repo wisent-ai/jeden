@@ -11,6 +11,7 @@ import { createToolRegistry } from './tools.js'
 import { applyConfigEnv, loadJedenConfig } from './config.js'
 import { loadCustomTools } from './custom-tools.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
+import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 
 
 function usage() {
@@ -29,6 +30,7 @@ function usage() {
   jeden tools [--cwd path]
   jeden config [--cwd path]
   jeden doctor [--cwd path]
+  jeden capabilities [--cwd path]
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -153,6 +155,9 @@ function parseArgs(argv) {
   }
   if (first === 'doctor') {
     return { command: 'doctor', ...parseSharedOptions(rest) }
+  }
+  if (first === 'capabilities') {
+    return { command: 'capabilities', ...parseSharedOptions(rest) }
   }
   if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
   throw new Error(`unknown command: ${first}`)
@@ -398,34 +403,13 @@ async function showConfig(args) {
 }
 
 async function showDoctor(args) {
-  try {
-    const config = await loadJedenConfig({ cwd: args.cwd })
-    const { builtIn, custom, mcp } = await loadCliTools(args)
-    const report = {
-      ok: custom.errors.length === 0 && mcp.errors.length === 0,
-      cwd: args.cwd,
-      node: process.version,
-      model: process.env.JEDEN_MODEL || config.model,
-      modelRouterUrl: config.modelRouterUrl,
-      agentId: config.agentId,
-      env: {
-        hasAuthSecret: Boolean(process.env.WISENT_APP_AGENT_AUTH_SECRET),
-        hasModelRouterUrl: Boolean(process.env.MODEL_ROUTER_URL),
-        hasAgentId: Boolean(process.env.WISENT_APP_AGENT_ID),
-      },
-      tools: {
-        builtIn: builtIn.length,
-        custom: custom.tools.length,
-        mcp: mcp.tools.length,
-        total: builtIn.length + custom.tools.length + mcp.tools.length,
-      },
-      customToolErrors: custom.errors,
-      mcpToolErrors: mcp.errors,
-    }
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
-  } finally {
-    await closeMcpClients({ cwd: args.cwd })
-  }
+  const report = await buildDoctorReport({ cwd: args.cwd })
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+}
+
+async function showCapabilities(args) {
+  const manifest = await buildCapabilityManifest({ cwd: args.cwd })
+  process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`)
 }
 
 
@@ -467,6 +451,10 @@ async function main() {
   }
   if (args.command === 'doctor') {
     await showDoctor(args)
+    return
+  }
+  if (args.command === 'capabilities') {
+    await showCapabilities(args)
     return
   }
   if (args.command === 'tools') {
