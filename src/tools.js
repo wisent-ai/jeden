@@ -831,6 +831,7 @@ async function discoverTextFiles(cwd, root, options = {}) {
         if (!rel) continue
         const file = jailPath(repoRoot, rel)
         if (file === root || file.slice(0, root.length + 1) === `${root}/`) {
+          if (!options.hidden && file !== root && hasHiddenSegment(publicPath(root, file))) continue
           try {
             const info = await stat(file)
             if (info.isFile()) files.push(file)
@@ -878,12 +879,12 @@ async function discoverPathEntries(cwd, root, options = {}) {
   const byPath = new Map()
   for (const file of files) {
     const relFile = publicPath(repoRoot, file)
-    if (!options.hidden && hasHiddenSegment(relFile)) continue
+    if (!options.hidden && file !== root && hasHiddenSegment(publicPath(root, file))) continue
     byPath.set(relFile, { path: relFile, absolute: file, type: 'file' })
     let dir = dirname(file)
     while (dir !== root && dir.slice(0, root.length + 1) === `${root}/`) {
       const relDir = publicPath(repoRoot, dir)
-      if (options.hidden || !hasHiddenSegment(relDir)) byPath.set(relDir, { path: relDir, absolute: dir, type: 'dir' })
+      if (options.hidden || !hasHiddenSegment(publicPath(root, dir))) byPath.set(relDir, { path: relDir, absolute: dir, type: 'dir' })
       dir = dirname(dir)
     }
     if (byPath.size >= (options.limit || MAX_SEARCH_FILES)) break

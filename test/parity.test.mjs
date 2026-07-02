@@ -382,8 +382,35 @@ test('search_files and grep_regex accept multiple paths', async () => {
       { path: 'empty-dir', type: 'dir' },
       { path: 'right/image.bin', type: 'file' },
     ])
+
     const fileRoot = await registry.execute('glob_paths', { path: 'left/a.txt', patterns: '**', gitignore: false })
     assert.deepEqual(fileRoot.output.matches, [{ path: 'left/a.txt', type: 'file' }])
+  })
+})
+
+test('search_files hides git dot paths unless requested', async () => {
+  await withTempDir(async (dir) => {
+    await execFileOk('git', ['init'], { cwd: dir })
+    await writeFile(join(dir, 'visible.txt'), 'git needle\n', 'utf8')
+    await writeFile(join(dir, '.hidden.txt'), 'git needle\n', 'utf8')
+    await mkdir(join(dir, '.secret'), { recursive: true })
+    await writeFile(join(dir, '.secret', 'note.txt'), 'git needle\n', 'utf8')
+    const registry = createToolRegistry({ cwd: dir })
+
+    const hiddenDefault = await registry.execute('search_files', { query: 'git needle', limit: 10 })
+    assert.deepEqual(hiddenDefault.output.matches.map((match) => match.path), ['visible.txt'])
+
+    const hiddenIncluded = await registry.execute('search_files', { query: 'git needle', hidden: true, limit: 10 })
+    assert.deepEqual(hiddenIncluded.output.matches.map((match) => match.path), ['.hidden.txt', '.secret/note.txt', 'visible.txt'])
+
+    const explicitHiddenFile = await registry.execute('search_files', { path: '.hidden.txt', query: 'git needle', limit: 10 })
+    assert.deepEqual(explicitHiddenFile.output.matches.map((match) => match.path), ['.hidden.txt'])
+
+    const explicitHiddenDir = await registry.execute('search_files', { path: '.secret', query: 'git needle', limit: 10 })
+    assert.deepEqual(explicitHiddenDir.output.matches.map((match) => match.path), ['.secret/note.txt'])
+
+    const explicitHiddenGlob = await registry.execute('glob_paths', { path: '.secret', patterns: '**', limit: 10 })
+    assert.deepEqual(explicitHiddenGlob.output.matches, [{ path: '.secret/note.txt', type: 'file' }])
   })
 })
 
