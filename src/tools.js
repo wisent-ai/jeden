@@ -485,8 +485,8 @@ function applyLineEditOps(content, ops) {
   const normalized = ops.map((op, index) => {
     if (!op || typeof op !== 'object' || Array.isArray(op)) throw new Error('op must be an object')
     const kind = String(op.op || '')
-    const start = Number(op.start)
-    const end = op.end == null ? start : Number(op.end)
+    const start = Number(op.start ?? op.startLine ?? op.line)
+    const end = op.end == null && op.endLine == null ? start : Number(op.end ?? op.endLine)
     if (!validOps.has(kind)) throw new Error(`unknown edit op: ${kind}`)
     if (!Number.isInteger(start) || start < 1) throw new Error('start must be a 1-based line number')
     if (!Number.isInteger(end) || end < start) throw new Error('end must be >= start')

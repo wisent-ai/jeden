@@ -299,7 +299,7 @@ Patch call, only when writes are enabled:
 {"action":"tool","tool":"apply_patch","input":{"path":"package.json","expectedSha256":"...","replacements":[{"old":"\"version\": \"0.1.0\"","new":"\"version\": \"0.1.1\""}]}}
 ```
 
-Line edit call:
+Line edit call (`start`/`end`, `startLine`/`endLine`, or `line` are accepted for 1-based line anchors):
 
 ```json
 {"action":"tool","tool":"edit_file","input":{"path":"src/file.js","expectedSha256":"...","ops":[{"op":"replace","start":10,"end":12,"content":"const ok = true"}]}}

@@ -158,6 +158,18 @@ test('read_file selectors return a line window while edit_file rejects stale sha
     assert.match(staleEdit.error, /sha256 mismatch for notes\.txt/)
     assert.equal(await readFile(file, 'utf8'), 'alpha\nbravo\nCHANGED\ndelta\n')
 
+    const current = await registry.execute('read_file', { path: 'notes.txt' })
+    const applied = await registry.execute('edit_file', {
+      path: 'notes.txt',
+      expectedSha256: current.output.sha256,
+      ops: [
+        { op: 'replace', startLine: 2, endLine: 3, content: 'BRAVO\nCHARLIE' },
+        { op: 'insert_after', line: 4, content: 'echo' },
+      ],
+    })
+    assert.equal(applied.ok, true)
+    assert.equal(await readFile(file, 'utf8'), 'alpha\nBRAVO\nCHARLIE\ndelta\necho\n')
+
     const bigLines = ['head', ...new Array(560).fill('x'.repeat(1024)), 'tail']
     await writeFile(join(dir, 'big.txt'), `${bigLines.join('\n')}\n`, 'utf8')
     const bigWhole = await registry.execute('read_file', { path: 'big.txt' })
