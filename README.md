@@ -68,6 +68,8 @@ Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON s
 
 
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
+
+Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Hooks can be disabled for debugging with:
 
 ```sh

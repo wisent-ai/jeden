@@ -8,6 +8,7 @@ import { runJeden } from './runner.js'
 import { SessionRecorder, listSessions, readSession } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
+import { applyConfigEnv, loadJedenConfig } from './config.js'
 import { loadCustomTools } from './custom-tools.js'
 
 
@@ -20,6 +21,7 @@ function usage() {
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
   jeden tools [--cwd path]
+  jeden config [--cwd path]
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -100,14 +102,19 @@ function parseArgs(argv) {
   if (first === 'tools') {
     return { command: 'tools', ...parseSharedOptions(rest) }
   }
+  if (first === 'config') {
+    return { command: 'config', ...parseSharedOptions(rest) }
+  }
   if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
   throw new Error(`unknown command: ${first}`)
 }
 
-function loadRuntimeEnv(args) {
+async function loadRuntimeEnv(args) {
   loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
+  const config = await loadJedenConfig({ cwd: args.cwd || process.cwd() })
+  applyConfigEnv(config)
+  return config
 }
-
 async function runUserPromptHook({ hookRunner, task, cwd, recorder }) {
   const result = await hookRunner.run('user_prompt_submit', {
     runtime: 'jeden',
@@ -234,6 +241,11 @@ async function showTools(args) {
   }
 }
 
+async function showConfig(args) {
+  const config = await loadJedenConfig({ cwd: args.cwd })
+  process.stdout.write(`${JSON.stringify(config, null, 2)}\n`)
+}
+
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
@@ -241,7 +253,7 @@ async function main() {
     process.stdout.write(usage())
     return
   }
-  loadRuntimeEnv(args)
+  await loadRuntimeEnv(args)
   if (args.command === 'sessions') {
     await showSessions(args.limit)
     return
@@ -252,6 +264,10 @@ async function main() {
   }
   if (args.command === 'export') {
     await exportSession(args.idOrPath, args.outputPath)
+    return
+  }
+  if (args.command === 'config') {
+    await showConfig(args)
     return
   }
   if (args.command === 'tools') {
