@@ -28,9 +28,11 @@ export const TOOL_CAPABILITIES = {
   python_eval: { permission: 'command', hook: 'bash', postHook: 'bash' },
   delegate_task: { permission: 'command', hook: 'bash', postHook: 'bash' },
 }
+const CUSTOM_TOOL_CAPABILITIES = new Map()
+
 
 export function toolCapability(tool) {
-  return TOOL_CAPABILITIES[tool] || { hook: 'read' }
+  return CUSTOM_TOOL_CAPABILITIES.get(tool) || TOOL_CAPABILITIES[tool] || { hook: 'read' }
 }
 
 function sha256(content) {
@@ -601,6 +603,14 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   function add(definition) {
     tools.set(definition.name, definition)
+    const capability = {}
+    if (definition.permission) capability.permission = definition.permission
+    if (definition.hook) capability.hook = definition.hook
+    if (!definition.hook && definition.permission === 'write') capability.hook = 'edit'
+    if (!definition.hook && definition.permission === 'command') capability.hook = 'bash'
+    if (definition.postHook) capability.postHook = definition.postHook
+    if (!definition.postHook && definition.permission === 'command') capability.postHook = 'bash'
+    if (Object.keys(capability).length > 0) CUSTOM_TOOL_CAPABILITIES.set(definition.name, capability)
   }
 
   add({

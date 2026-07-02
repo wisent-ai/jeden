@@ -1,7 +1,7 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 const MAX_OUTPUT_BYTES = 100_000
@@ -37,6 +37,21 @@ async function listToolFiles(dir) {
 function cap(value) {
   if (value.length <= MAX_OUTPUT_BYTES) return value
   return value.slice(0, MAX_OUTPUT_BYTES)
+}
+
+function jailPath(cwd, inputPath) {
+  const root = resolve(cwd)
+  const target = resolve(root, String(inputPath || '.'))
+  const rel = relative(root, target)
+  if (rel === '' || (rel.slice(0, 2) !== '..' && rel.slice(0, 1) !== '/')) return target
+  throw new Error(`path escapes cwd: ${inputPath}`)
+}
+
+function optionalEnum(value, allowed, label) {
+  if (value == null) return null
+  const text = String(value)
+  if (!allowed.has(text)) throw new Error(`invalid ${label}: ${text}`)
+  return text
 }
 
 function exec(command, args = [], options = {}) {
@@ -87,10 +102,16 @@ function normalizeTool(raw, source) {
   if (!isToolName(raw.name)) throw new Error(`invalid tool name: ${raw.name}`)
   if (!raw.description || typeof raw.description !== 'string') throw new Error(`tool.description is required for ${raw.name}`)
   if (typeof raw.execute !== 'function') throw new Error(`tool.execute is required for ${raw.name}`)
+  const permission = optionalEnum(raw.permission, new Set(['write', 'command']), 'permission')
+  const hook = optionalEnum(raw.hook, new Set(['read', 'edit', 'bash']), 'hook')
+  const postHook = optionalEnum(raw.postHook, new Set(['read', 'edit', 'bash']), 'postHook')
   return {
     name: raw.name,
     description: raw.description,
     input: raw.input && typeof raw.input === 'object' && !Array.isArray(raw.input) ? raw.input : {},
+    permission,
+    hook,
+    postHook,
     source,
     execute: raw.execute,
   }
@@ -122,7 +143,7 @@ export async function loadCustomTools({ cwd = process.cwd(), builtInToolNames = 
       if (!allowCommand) throw new Error('custom tool exec requires --allow-command')
       return exec(command, args, { cwd: resolve(cwd), ...options })
     },
-    readText: (path) => readFile(resolve(cwd, path), 'utf8'),
+    readText: (path) => readFile(jailPath(cwd, path), 'utf8'),
     dirname,
   }
 

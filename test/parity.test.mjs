@@ -243,6 +243,40 @@ export default (api) => ({
   })
 })
 
+test('custom tools preserve capability metadata and jail readText', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      await mkdir(join(dir, '.jeden', 'tools'), { recursive: true })
+      await writeFile(join(dir, 'inside.txt'), 'inside', 'utf8')
+      await writeFile(join(dir, '..', 'outside.txt'), 'outside', 'utf8')
+      await writeFile(join(dir, '.jeden', 'tools', 'metadata-probe.mjs'), `
+export default (api) => ({
+  name: 'custom_metadata_probe',
+  description: 'Checks custom capability metadata and readText jail',
+  permission: 'write',
+  input: { target: 'string optional' },
+  async execute(input) {
+    return api.readText(input.target || 'inside.txt')
+  },
+})
+`, 'utf8')
+
+      const builtInToolNames = createToolRegistry({ cwd: dir }).list().map((tool) => tool.name)
+      const loaded = await loadCustomTools({ cwd: dir, builtInToolNames })
+      assert.deepEqual(loaded.errors, [])
+      const registry = createToolRegistry({ cwd: dir, customTools: loaded.tools })
+      assert.equal(toolHookEvent('custom_metadata_probe'), 'pre_tool_use:edit')
+
+      const inside = await registry.execute('custom_metadata_probe', {})
+      assert.equal(inside.output, 'inside')
+      const outside = await registry.execute('custom_metadata_probe', { target: '../outside.txt' })
+      assert.equal(outside.ok, false)
+      assert.match(outside.error, /path escapes cwd/)
+    })
+  })
+})
+
+
 test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities', async () => {
   await withTempDir(async (dir) => {
     await withHttpServer((request, response) => {

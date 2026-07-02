@@ -120,6 +120,8 @@ export default (jeden) => ({
 })
 ```
 
+Custom tools may declare `permission: "write"` or `permission: "command"` plus optional `hook`/`postHook` metadata. Write permission defaults to edit hooks; command permission defaults to bash pre/post hooks. The `readText` helper is jailed to `cwd`; `exec` still requires command permission.
+
 Discovery order is user tools first, then project tools. Tool names must be unique and cannot collide with built-ins. List active tools with:
 
 ```sh
