@@ -24,7 +24,7 @@ The private M1 version includes:
 - Default model `claude-code-subscription`; override per run with `--model <name>`, `JEDEN_MODEL`, or config.
 - Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. Recursive search and glob discovery use `git ls-files --exclude-standard` when available, so ignored files are skipped. `search_files`, `glob_paths`, and `grep_regex` accept `limit` and `skip` for pagination.
 - File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
-- Git read tools: `git_status`, `git_diff`.
+- Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
 - Eval tools: `node_eval`, `python_eval`. Both require command permission.
 - Web read tool: `fetch_url`.
 - Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.

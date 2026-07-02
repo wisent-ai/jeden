@@ -809,6 +809,30 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
   })
 
   add({
+    name: 'git_log',
+    description: 'Read recent git commits for cwd or one path under cwd',
+    input: { limit: 'number optional', path: 'string optional' },
+    async execute(input) {
+      const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 100)
+      const args = ['log', `-${limit}`, '--oneline', '--decorate', '--']
+      if (input.path) args.push(publicPath(cwd, jailPath(cwd, input.path)))
+      return runProcess({ cwd: resolve(cwd), command: 'git', args, timeoutMs: 30_000 })
+    },
+  })
+
+  add({
+    name: 'git_show',
+    description: 'Read one git object or commit summary; optional path scopes the output',
+    input: { ref: 'string optional', path: 'string optional' },
+    async execute(input) {
+      const ref = input.ref ? String(input.ref) : 'HEAD'
+      const args = ['show', '--stat', '--oneline', '--decorate', ref, '--']
+      if (input.path) args.push(publicPath(cwd, jailPath(cwd, input.path)))
+      return runProcess({ cwd: resolve(cwd), command: 'git', args, timeoutMs: 30_000 })
+    },
+  })
+
+  add({
     name: 'fetch_url',
     description: 'Fetch one HTTP(S) URL and return text capped at maxBytes',
     input: { url: 'string required', maxBytes: 'number optional' },
