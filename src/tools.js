@@ -74,6 +74,73 @@ async function walkFiles(root, start, out) {
   }
 }
 
+async function walkPaths(root, start, out, options = {}) {
+  if (out.length >= (options.limit || MAX_SEARCH_FILES)) return
+  const entries = await readdir(start, { withFileTypes: true })
+  for (const entry of entries) {
+    if (out.length >= (options.limit || MAX_SEARCH_FILES)) return
+    const hidden = entry.name.slice(0, 1) === '.'
+    if (hidden && !options.hidden) continue
+    const full = resolve(start, entry.name)
+    const rel = publicPath(root, full)
+    if (entry.isDirectory()) {
+      if (SKIP_DIRS.has(entry.name) && !options.ignored) continue
+      out.push({ path: rel, type: 'dir', absolute: full })
+      await walkPaths(root, full, out, options)
+      continue
+    }
+    if (entry.isFile()) out.push({ path: rel, type: 'file', absolute: full })
+  }
+}
+
+function globExpression(pattern) {
+  let source = '^'
+  const text = String(pattern || '*')
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i]
+    const next = text[i + 1]
+    const afterNext = text[i + 2]
+    if (char === '*') {
+      if (next === '*') {
+        if (afterNext === '/') {
+          source += '(?:.*/)?'
+          i += 2
+        } else {
+          source += '.*'
+          i += 1
+        }
+      } else {
+        source += '[^/]*'
+      }
+      continue
+    }
+    if (char === '?') {
+      source += '[^/]'
+      continue
+    }
+    if ('\\.^$+{}()|[]'.indexOf(char) !== -1) source += `\\${char}`
+    else source += char
+  }
+  return new RegExp(`${source}$`)
+}
+
+function matchesPattern(path, patterns) {
+  for (const pattern of patterns) {
+    if (globExpression(pattern).exec(path)) return true
+  }
+  return false
+}
+
+function lineWindow(content, range) {
+  if (!range) return { content, startLine: 1, endLine: content.split(/\r?\n/).length }
+  const parts = String(range).split('-')
+  const start = Math.max(Number(parts[0]) || 1, 1)
+  const lines = content.split(/\r?\n/)
+  const end = Math.min(parts[1] ? Number(parts[1]) || start : start, lines.length)
+  const selected = lines.slice(start - 1, end)
+  return { content: selected.join('\n'), startLine: start, endLine: end }
+}
+
 function runShellCommand({ cwd, command, timeoutMs }) {
   return new Promise((resolvePromise) => {
     const child = spawn('/bin/sh', ['-lc', command], { cwd, env: process.env })
@@ -154,14 +221,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_file',
-    description: 'Read a UTF-8 text file under cwd, capped at 512KB; returns sha256 for guarded writes',
-    input: { path: 'string required' },
+    description: 'Read a UTF-8 text file under cwd, capped at 512KB; optional range uses 1-based lines like 10-30',
+    input: { path: 'string required', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const file = jailPath(cwd, input.path)
       const content = await readFile(file, 'utf8')
       if (Buffer.byteLength(content, 'utf8') > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap')
-      return { path: publicPath(cwd, file), sha256: sha256(content), content }
+      const selected = lineWindow(content, input.range)
+      return { path: publicPath(cwd, file), sha256: sha256(content), range: input.range || null, startLine: selected.startLine, endLine: selected.endLine, content: selected.content }
     },
   })
 
@@ -213,6 +281,59 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
           if (lines[i].indexOf(String(input.query)) !== -1) {
             matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
             if (matches.length >= MAX_SEARCH_RESULTS) break
+          }
+        }
+      }
+      return { searchedFiles: files.length, matches }
+    },
+  })
+
+  add({
+    name: 'glob_paths',
+    description: 'Find files and directories under cwd with simple glob patterns; supports * and **',
+    input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', limit: 'number optional' },
+    async execute(input) {
+      const root = jailPath(cwd, input.path || '.')
+      const limit = Math.min(Math.max(Number(input.limit) || 200, 1), 2_000)
+      const rawPatterns = Array.isArray(input.patterns) ? input.patterns : [input.patterns || '**']
+      const paths = []
+      await walkPaths(resolve(cwd), root, paths, { hidden: Boolean(input.hidden), limit })
+      const matches = paths
+        .filter((entry) => matchesPattern(entry.path, rawPatterns))
+        .slice(0, limit)
+        .map((entry) => ({ path: entry.path, type: entry.type }))
+      return { matches }
+    },
+  })
+
+  add({
+    name: 'grep_regex',
+    description: 'Search text files under cwd with a JavaScript regular expression, capped at 100 matches',
+    input: { expr: 'string required', path: 'string optional', caseSensitive: 'boolean optional', limit: 'number optional' },
+    async execute(input) {
+      if (!input.expr || typeof input.expr !== 'string') throw new Error('expr is required')
+      const root = jailPath(cwd, input.path || '.')
+      const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
+      const matcher = new globalThis.RegExp(input.expr, input.caseSensitive ? '' : 'i')
+      const entries = []
+      await walkPaths(resolve(cwd), root, entries, { hidden: false, limit: MAX_SEARCH_FILES })
+      const files = entries.filter((entry) => entry.type === 'file').map((entry) => entry.absolute)
+      const matches = []
+      for (const file of files) {
+        if (matches.length >= limit) break
+        let content = ''
+        try {
+          content = await readFile(file, 'utf8')
+        } catch {
+          continue
+        }
+        if (content.indexOf('\u0000') !== -1) continue
+        const lines = content.split(/\r?\n/)
+        for (let i = 0; i < lines.length; i += 1) {
+          matcher.lastIndex = 0
+          if (matcher.exec(lines[i])) {
+            matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
+            if (matches.length >= limit) break
           }
         }
       }

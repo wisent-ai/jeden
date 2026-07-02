@@ -20,7 +20,7 @@ The private M1 version includes:
 - Session logs and artifacts under `~/.jeden/sessions/<id>/`.
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`.
-- Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `write_file`, `apply_patch`.
+- Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`, `write_file`, `apply_patch`.
 - Command tools: `run_command`, `list_package_scripts`, `run_package_script`. One-shot execution requires `--allow-command`; interactive mode asks for approval when the flag is absent.
 - Git read tools: `git_status`, `git_diff`.
 - Web read tool: `fetch_url`.
@@ -89,6 +89,24 @@ Tool call:
 
 ```json
 {"action":"tool","tool":"read_file","input":{"path":"package.json"}}
+```
+
+Range read:
+
+```json
+{"action":"tool","tool":"read_file","input":{"path":"src/tools.js","range":"10-40"}}
+```
+
+Glob call:
+
+```json
+{"action":"tool","tool":"glob_paths","input":{"patterns":["src/**/*.js","scripts/*.mjs"],"limit":200}}
+```
+
+Regex grep call:
+
+```json
+{"action":"tool","tool":"grep_regex","input":{"expr":"createToolRegistry","path":"src","caseSensitive":true}}
 ```
 
 Command call, only when enabled:
