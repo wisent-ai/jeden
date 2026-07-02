@@ -14,9 +14,9 @@ import { loadCustomTools } from './custom-tools.js'
 
 function usage() {
   return `Usage:
-  jeden [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
-  jeden run "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
-  jeden resume <session-id-or-path> "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
+  jeden [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
+  jeden run "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
+  jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
@@ -40,6 +40,7 @@ function parseSharedOptions(rest) {
   let allowWrite = false
   let allowCommand = false
   let maxSteps = 8
+  let model = null
   const positionals = []
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -57,6 +58,11 @@ function parseSharedOptions(rest) {
       allowCommand = true
       continue
     }
+    if (arg === '--model') {
+      model = rest[++i]
+      if (!model) throw new Error('--model requires a value')
+      continue
+    }
     if (arg === '--max-steps') {
       const raw = rest[++i]
       maxSteps = Number(raw)
@@ -67,7 +73,7 @@ function parseSharedOptions(rest) {
     positionals.push(arg)
   }
 
-  return { cwd, allowWrite, allowCommand, maxSteps, positionals }
+  return { cwd, allowWrite, allowCommand, maxSteps, model, positionals }
 }
 
 function parseArgs(argv) {
@@ -133,6 +139,7 @@ async function loadRuntimeEnv(args) {
   loadEnvFiles({ dirs: [process.cwd(), args.cwd] })
   const config = await loadJedenConfig({ cwd: args.cwd || process.cwd() })
   applyConfigEnv(config)
+  if (args.model) process.env.JEDEN_MODEL = String(args.model)
   return config
 }
 async function runUserPromptHook({ hookRunner, task, cwd, recorder }) {
@@ -328,7 +335,7 @@ async function showDoctor(args) {
     ok: custom.errors.length === 0,
     cwd: args.cwd,
     node: process.version,
-    model: config.model,
+    model: process.env.JEDEN_MODEL || config.model,
     modelRouterUrl: config.modelRouterUrl,
     agentId: config.agentId,
     env: {
