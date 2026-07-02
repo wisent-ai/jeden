@@ -21,11 +21,12 @@ export function hmacHeaders({ body, agentId, secret }) {
   }
 }
 
-export async function chatCompletion({ messages, maxTokens = 2048, config = modelRouterConfig(), fetchImpl = fetch }) {
+export async function chatCompletion({ messages, maxTokens = 2048, config = modelRouterConfig(), fetchImpl = fetch, tools = [] }) {
   const body = JSON.stringify({
     model: config.model,
     max_tokens: maxTokens,
     messages,
+    ...(tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
   })
   const endpoint = `${config.url.replace(/\/$/, '')}/v1/chat/completions`
   const response = await fetchImpl(endpoint, {
@@ -36,7 +37,15 @@ export async function chatCompletion({ messages, maxTokens = 2048, config = mode
   const text = await response.text()
   if (!response.ok) throw new Error(`model router ${response.status}: ${text.slice(0, 800)}`)
   const data = JSON.parse(text)
-  const content = data?.choices?.[0]?.message?.content
+  const message = data?.choices?.[0]?.message
+  const toolCall = Array.isArray(message?.tool_calls) ? message.tool_calls[0] : null
+  const name = toolCall?.function?.name
+  if (name) {
+    const rawArgs = toolCall?.function?.arguments || '{}'
+    const input = rawArgs ? JSON.parse(rawArgs) : {}
+    return JSON.stringify({ action: 'tool', tool: name, input })
+  }
+  const content = message?.content
   if (typeof content !== 'string' || !content.trim()) throw new Error('model router returned no message content')
   return content
 }

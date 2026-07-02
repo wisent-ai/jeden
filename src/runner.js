@@ -6,10 +6,24 @@ import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 
+function toOpenAIToolSpecs(list) {
+  return list.map((tool) => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: {
+        type: 'object',
+        additionalProperties: true,
+      },
+    },
+  }))
+}
+
 
 function approvalKind(tool) {
-  if (tool === 'write_file' || tool === 'apply_patch') return 'write'
-  if (tool === 'run_command' || tool === 'run_package_script') return 'command'
+  if (tool === 'write_file' || tool === 'apply_patch' || tool === 'edit_file' || tool === 'delete_file' || tool === 'move_file') return 'write'
+  if (tool === 'run_command' || tool === 'run_package_script' || tool === 'node_eval' || tool === 'python_eval') return 'command'
   return null
 }
 
@@ -75,8 +89,9 @@ export async function runJeden({
   messages.push({ role: 'user', content: task })
   await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps })
 
+  const toolSpecs = toOpenAIToolSpecs(tools.list())
   for (let step = 1; step <= maxSteps; step += 1) {
-    const content = await chat({ messages, config })
+    const content = await chat({ messages, config, tools: toolSpecs })
     await recorder?.record('assistant_raw', { step, content })
     const action = parseAction(content)
     await recorder?.record('action', { step, action })

@@ -9,7 +9,9 @@ Jeden separates four planes:
 1. **Inference** — every model call goes through the Wisent model router using HMAC-signed OpenAI-compatible chat completions.
 2. **Policy** — the harness prompt is short, local, and explicit: no unrequested tests, no unrequested docs, no silent substitution, no command execution unless enabled.
 3. **Tools** — tools are a small allowlisted registry with path-jail enforcement. Writes and commands are gated by CLI flags.
-4. **Run loop** — the model must emit strict JSON actions. Invalid JSON is a hard failure.
+4. **Run loop** — the model can emit strict JSON actions or a native OpenAI `tool_calls` response. Invalid JSON is a hard failure when text actions are used.
+
+The router call sends OpenAI-compatible tool definitions; if the model returns native tool calls, Jeden maps the first call back into the same local action loop.
 
 ## Current scope
 
