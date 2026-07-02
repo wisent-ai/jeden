@@ -344,27 +344,66 @@ async function loadTodoState(file) {
   try {
     const raw = await readFile(file, 'utf8')
     const parsed = JSON.parse(raw)
-    return Array.isArray(parsed.items) ? parsed : { items: [] }
+    return normalizeTodoState(parsed)
   } catch (error) {
-    if (error?.code === 'ENOENT') return { items: [] }
+    if (error?.code === 'ENOENT') return { phases: [] }
     throw error
   }
 }
 
 async function saveTodoState(file, state) {
   await mkdir(dirname(file), { recursive: true })
-  await writeFile(file, JSON.stringify(state, null, 2), 'utf8')
+  await writeFile(file, JSON.stringify(normalizeTodoState(state), null, 2), 'utf8')
 }
 
-function todoItem(text, status = 'pending') {
-  return { text: String(text), status }
+function todoItem(item, status = 'pending') {
+  if (item && typeof item === 'object' && !Array.isArray(item)) {
+    return { text: String(item.text ?? item.task ?? item.name ?? ''), status: String(item.status || status) }
+  }
+  return { text: String(item), status }
+}
+
+function normalizeTodoState(state) {
+  if (Array.isArray(state?.phases)) {
+    return {
+      phases: state.phases.map((phase) => ({
+        phase: String(phase.phase || phase.name || 'Tasks'),
+        items: Array.isArray(phase.items) ? phase.items.map((item) => todoItem(item)) : [],
+      })),
+    }
+  }
+  if (Array.isArray(state?.items)) return { phases: [{ phase: 'Tasks', items: state.items.map((item) => todoItem(item)) }] }
+  return { phases: [] }
+}
+
+function flattenTodoItems(state) {
+  const out = []
+  for (const phase of state.phases) {
+    for (const item of phase.items) out.push(Object.assign(item, { phase: phase.phase }))
+  }
+  return out
+}
+
+function promoteTodo(state) {
+  if (flattenTodoItems(state).some((item) => item.status === 'in_progress')) return
+  const next = flattenTodoItems(state).find((item) => item.status === 'pending')
+  if (next) next.status = 'in_progress'
+}
+
+function findTodo(state, task) {
+  for (const phase of state.phases) {
+    const item = phase.items.find((candidate) => candidate.text === task)
+    if (item) return { phase, item }
+  }
+  return null
 }
 
 function summarizeTodos(state) {
-  const total = state.items.length
-  const completed = state.items.filter((item) => item.status === 'done').length
-  const active = state.items.find((item) => item.status !== 'done') || null
-  return { total, completed, active: active?.text || null, items: state.items }
+  promoteTodo(state)
+  const items = flattenTodoItems(state)
+  const completed = items.filter((item) => item.status === 'done').length
+  const active = items.find((item) => item.status === 'in_progress') || items.find((item) => item.status !== 'done' && item.status !== 'dropped') || null
+  return { total: items.length, completed, active: active?.text || null, phases: state.phases, items }
 }
 
 function memoryPath() {
@@ -814,28 +853,60 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'todo',
-    description: 'Manage the current session todo list with init, append, done, drop, and view operations',
-    input: { op: 'string required', items: 'array optional', task: 'string optional' },
+    description: 'Manage the current session todo list with init, append, start, done, drop, rm, and view operations; supports phased lists',
+    input: { op: 'string required', list: 'array optional', phase: 'string optional', items: 'array optional', task: 'string optional' },
     async execute(input) {
       if (!artifactDir) throw new Error('todo requires an active session')
       const file = resolve(artifactDir, 'todo.json')
       const state = await loadTodoState(file)
       const op = input.op || 'view'
       if (op === 'init') {
-        state.items = Array.isArray(input.items) ? input.items.map((item) => todoItem(item)) : []
+        if (Array.isArray(input.list)) {
+          state.phases = input.list.map((phase) => ({
+            phase: String(phase.phase || phase.name || 'Tasks'),
+            items: Array.isArray(phase.items) ? phase.items.map((item) => todoItem(item)) : [],
+          }))
+        } else {
+          state.phases = [{ phase: input.phase ? String(input.phase) : 'Tasks', items: Array.isArray(input.items) ? input.items.map((item) => todoItem(item)) : [] }]
+        }
       } else if (op === 'append') {
         if (!Array.isArray(input.items) || input.items.length === 0) throw new Error('items are required')
-        state.items.push(...input.items.map((item) => todoItem(item)))
-      } else if (op === 'done' || op === 'drop') {
+        const name = input.phase ? String(input.phase) : 'Tasks'
+        let phase = state.phases.find((candidate) => candidate.phase === name)
+        if (!phase) {
+          phase = { phase: name, items: [] }
+          state.phases.push(phase)
+        }
+        phase.items.push(...input.items.map((item) => todoItem(item)))
+      } else if (op === 'start') {
         if (!input.task) throw new Error('task is required')
-        const item = state.items.find((candidate) => candidate.text === input.task)
-        if (!item) throw new Error(`unknown task: ${input.task}`)
-        item.status = op === 'done' ? 'done' : 'dropped'
+        const match = findTodo(state, input.task)
+        if (!match) throw new Error(`unknown task: ${input.task}`)
+        for (const item of flattenTodoItems(state)) if (item.status === 'in_progress') item.status = 'pending'
+        match.item.status = 'in_progress'
+      } else if (op === 'done' || op === 'drop') {
+        const nextStatus = op === 'done' ? 'done' : 'dropped'
+        if (input.phase && !input.task) {
+          const phase = state.phases.find((candidate) => candidate.phase === String(input.phase))
+          if (!phase) throw new Error(`unknown phase: ${input.phase}`)
+          for (const item of phase.items) item.status = nextStatus
+        } else {
+          if (!input.task) throw new Error('task is required')
+          const match = findTodo(state, input.task)
+          if (!match) throw new Error(`unknown task: ${input.task}`)
+          match.item.status = nextStatus
+        }
+      } else if (op === 'rm') {
+        if (input.phase) state.phases = state.phases.filter((phase) => phase.phase !== String(input.phase))
+        else if (input.task) {
+          for (const phase of state.phases) phase.items = phase.items.filter((item) => item.text !== input.task)
+        } else state.phases = []
       } else if (op !== 'view') {
         throw new Error(`unknown todo op: ${op}`)
       }
+      const summary = summarizeTodos(state)
       await saveTodoState(file, state)
-      return summarizeTodos(state)
+      return summary
     },
   })
 

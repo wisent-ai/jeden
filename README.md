@@ -33,6 +33,7 @@ The private M1 version includes:
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
 - Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
 - MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers.
+- Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads user context, ancestor context, and cwd context files before each run.
