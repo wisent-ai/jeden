@@ -50,6 +50,8 @@ The private M1 version includes:
 jeden artifacts <session-id-or-path>
 jeden artifact <session-id-or-path> notes.txt
 jeden export <session-id-or-path> session.json
+jeden export <session-id-or-path> --html session.html
+jeden export <session-id-or-path> --markdown session.md
 jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
 jeden resume <session-id-or-path> "continue with the previous context" --cwd ../content-platform

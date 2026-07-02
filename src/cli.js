@@ -22,6 +22,7 @@ function usage() {
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
   jeden export <session-id-or-path> --html [output.html]
+  jeden export <session-id-or-path> --markdown [output.md]
   jeden artifacts <session-id-or-path>
   jeden artifact <session-id-or-path> <name> [output]
   jeden tools [--cwd path]
@@ -122,8 +123,9 @@ function parseArgs(argv) {
   if (first === 'export') {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('export requires a session id or path')
-    const outputPath = rest[1] === '--html' ? rest[2] || null : rest[1] || null
-    const format = rest[1] === '--html' ? 'html' : 'json'
+    const flag = rest[1] && rest[1].slice(0, 2) === '--' ? rest[1] : null
+    const outputPath = flag ? rest[2] || null : rest[1] || null
+    const format = flag === '--html' ? 'html' : flag === '--markdown' ? 'markdown' : 'json'
     return { command: 'export', idOrPath, outputPath, format }
   }
   if (first === 'artifacts') {
@@ -326,9 +328,17 @@ function renderSessionHtml(session) {
 `
 }
 
+function renderSessionMarkdown(session) {
+  const parts = [`# Jeden session ${session.id}`, '', session.path, '']
+  for (const event of session.events) {
+    parts.push(`## ${`${event.ts || ''} ${event.type || ''}`.trim()}`, '', '```json', JSON.stringify(event.data || {}, null, 2), '```', '')
+  }
+  return `${parts.join('\n')}\n`
+}
+
 async function exportSession(idOrPath, outputPath, format = 'json') {
   const session = await readSession({ idOrPath })
-  const payload = format === 'html' ? renderSessionHtml(session) : `${JSON.stringify(session, null, 2)}\n`
+  const payload = format === 'html' ? renderSessionHtml(session) : format === 'markdown' ? renderSessionMarkdown(session) : `${JSON.stringify(session, null, 2)}\n`
   if (outputPath) {
     await writeFile(outputPath, payload, 'utf8')
     process.stdout.write(`${outputPath}\n`)
