@@ -28,7 +28,7 @@ The private M1 version includes:
 - Eval tools: `node_eval`, `python_eval`. Both require command permission.
 - Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text.
 - Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.
-- Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
+- Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`; their `exec` helper is gated by command permission.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session and is gated as command execution.
 - Interactive ask tool: `ask_user` lets the model ask the human a question during `jeden` terminal mode.

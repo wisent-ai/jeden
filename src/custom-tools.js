@@ -111,14 +111,17 @@ export async function discoverCustomToolFiles({ cwd = process.cwd() } = {}) {
   return nested.flat()
 }
 
-export async function loadCustomTools({ cwd = process.cwd(), builtInToolNames = [] } = {}) {
+export async function loadCustomTools({ cwd = process.cwd(), builtInToolNames = [], allowCommand = false } = {}) {
   const files = await discoverCustomToolFiles({ cwd })
   const errors = []
   const tools = []
   const seen = new Set(builtInToolNames)
   const api = {
     cwd: resolve(cwd),
-    exec: (command, args, options = {}) => exec(command, args, { cwd: resolve(cwd), ...options }),
+    exec: (command, args, options = {}) => {
+      if (!allowCommand) throw new Error('custom tool exec requires --allow-command')
+      return exec(command, args, { cwd: resolve(cwd), ...options })
+    },
     readText: (path) => readFile(resolve(cwd, path), 'utf8'),
     dirname,
   }

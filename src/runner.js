@@ -125,7 +125,7 @@ export async function runJeden({
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
   const builtInToolNames = createToolRegistry({ cwd, allowWrite, allowCommand, artifactDir: recorder?.artifactDir?.() || null }).list().map((tool) => tool.name)
-  const custom = await loadCustomTools({ cwd, builtInToolNames })
+  const custom = await loadCustomTools({ cwd, builtInToolNames, allowCommand: allowCommand || Boolean(approveTool) })
   const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null, customTools: custom.tools, askUser })
   if (custom.errors.length > 0) await recorder?.record('custom_tool_errors', { errors: custom.errors })
   const contextFiles = await loadProjectContext({ cwd })
