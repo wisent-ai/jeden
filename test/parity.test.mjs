@@ -1,22 +1,64 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { createServer } from 'node:http'
+import { tmpdir } from 'node:os'
 
 import { parseAction } from '../src/protocol.js'
 import { createToolRegistry } from '../src/tools.js'
 import { loadProjectContext } from '../src/context.js'
 import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions } from '../src/session.js'
-
-const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
+import { loadCustomTools } from '../src/custom-tools.js'
+import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
+import { runJeden } from '../src/index.js'
 
 async function withTempDir(fn) {
-  const dir = await mkdtemp(join(repoRoot, '.tmp-test-'))
+  const dir = await mkdtemp(join(tmpdir(), 'jeden-test-'))
   try {
     return await fn(dir)
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+}
+
+async function withIsolatedHome(dir, fn) {
+  const previousHome = process.env.HOME
+  const previousUserProfile = process.env.USERPROFILE
+  const home = join(dir, 'home')
+  await mkdir(home, { recursive: true })
+  process.env.HOME = home
+  process.env.USERPROFILE = home
+  try {
+    return await fn(home)
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME
+    else process.env.HOME = previousHome
+    if (previousUserProfile === undefined) delete process.env.USERPROFILE
+    else process.env.USERPROFILE = previousUserProfile
+  }
+}
+
+async function withHttpServer(handler, fn) {
+  const server = createServer(handler)
+  await new Promise((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', reject)
+      resolve()
+    })
+  })
+  try {
+    const address = server.address()
+    assert.ok(address && typeof address === 'object', 'expected the HTTP server to have a TCP address')
+    return await fn(`http://127.0.0.1:${address.port}`)
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error)
+        else resolve()
+      })
+    })
   }
 }
 
@@ -108,5 +150,129 @@ test('session artifact readers list sanitized artifact names and read their cont
     assert.equal(artifact.id, 'session-a')
     assert.equal(artifact.name, 'analysis_report.txt')
     assert.equal(artifact.content, 'ranked output')
+  })
+})
+
+test('hook helpers classify tools from capability metadata', () => {
+  assert.equal(toolHookEvent('list_dir'), 'pre_tool_use:read')
+  assert.equal(postToolHookEvent('list_dir'), null)
+
+  assert.equal(toolHookEvent('write_file'), 'pre_tool_use:edit')
+  assert.equal(postToolHookEvent('write_file'), null)
+
+  assert.equal(toolHookEvent('save_artifact'), 'pre_tool_use:edit')
+  assert.equal(postToolHookEvent('save_artifact'), null)
+
+  assert.equal(toolHookEvent('run_command'), 'pre_tool_use:bash')
+  assert.equal(postToolHookEvent('run_command'), 'post_tool_use:bash')
+})
+
+test('custom tool api.exec is denied unless command execution is allowed', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      await mkdir(join(dir, '.jeden', 'tools'), { recursive: true })
+      await writeFile(join(dir, '.jeden', 'tools', 'exec-probe.mjs'), `
+export default (api) => ({
+  name: 'custom_exec_probe',
+  description: 'Runs a deterministic child process through custom-tool api.exec',
+  input: {},
+  async execute() {
+    return api.exec(process.execPath, ['-e', 'process.stdout.write("custom-ok")'], { timeoutMs: 1000 })
+  },
+})
+`, 'utf8')
+
+      const builtInToolNames = createToolRegistry({ cwd: dir }).list().map((tool) => tool.name)
+
+      const denied = await loadCustomTools({ cwd: dir, builtInToolNames, allowCommand: false })
+      assert.deepEqual(denied.errors, [])
+      const deniedRegistry = createToolRegistry({ cwd: dir, customTools: denied.tools })
+      const deniedResult = await deniedRegistry.execute('custom_exec_probe', {})
+      assert.equal(deniedResult.ok, false)
+      assert.match(deniedResult.error, /custom tool exec requires --allow-command/)
+
+      const allowed = await loadCustomTools({ cwd: dir, builtInToolNames, allowCommand: true })
+      assert.deepEqual(allowed.errors, [])
+      const allowedRegistry = createToolRegistry({ cwd: dir, customTools: allowed.tools })
+      const allowedResult = await allowedRegistry.execute('custom_exec_probe', {})
+      assert.equal(allowedResult.ok, true)
+      assert.equal(allowedResult.output.code, 0)
+      assert.equal(allowedResult.output.timedOut, false)
+      assert.equal(allowedResult.output.stdout, 'custom-ok')
+      assert.equal(allowedResult.output.stderr, '')
+    })
+  })
+})
+
+test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities', async () => {
+  await withTempDir(async (dir) => {
+    await withHttpServer((request, response) => {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+      response.end(`<!doctype html>
+<html>
+  <head>
+    <style>body { color: red; }</style>
+    <script>globalThis.leaked = "script text";</script>
+  </head>
+  <body>
+    <h1>Tom &amp; Jerry</h1>
+    <p>5 &lt; 7 &gt; 3 &quot;yes&quot; &#39;ok&#39;&nbsp;done</p>
+    <div>Visible <strong>text</strong></div>
+  </body>
+</html>`)
+    }, async (origin) => {
+      const registry = createToolRegistry({ cwd: dir })
+      const result = await registry.execute('fetch_readable_url', { url: `${origin}/page` })
+
+      assert.equal(result.ok, true)
+      assert.equal(result.output.status, 200)
+      assert.equal(result.output.ok, true)
+      assert.equal(result.output.contentType, 'text/html; charset=utf-8')
+      assert.equal(result.output.truncated, false)
+      assert.equal(result.output.text, 'Tom & Jerry 5 < 7 > 3 "yes" \'ok\' done Visible text')
+    })
+  })
+})
+
+test('runJeden round-trips ask_user through the provided callback', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      const asked = []
+      let calls = 0
+      const chat = async ({ messages, tools }) => {
+        calls += 1
+        if (calls === 1) {
+          assert.ok(tools.some((tool) => tool.function.name === 'ask_user'), 'expected ask_user to be advertised to the model')
+          return JSON.stringify({
+            action: 'tool',
+            tool: 'ask_user',
+            input: { question: 'Pick a color', options: ['red', 42] },
+          })
+        }
+
+        const toolMessage = JSON.parse(messages.at(-1).content)
+        assert.deepEqual(toolMessage, {
+          type: 'tool_result',
+          result: { ok: true, output: { answer: 'blue' } },
+        })
+        return JSON.stringify({ action: 'final', text: `model saw ${toolMessage.result.output.answer}` })
+      }
+
+      const result = await runJeden({
+        task: 'Ask the user for a color.',
+        cwd: dir,
+        chat,
+        askUser: async (request) => {
+          asked.push(request)
+          return 'blue'
+        },
+        maxSteps: 2,
+      })
+
+      assert.equal(result.text, 'model saw blue')
+      assert.equal(result.steps, 2)
+      assert.equal(calls, 2)
+      assert.deepEqual(asked, [{ question: 'Pick a color', options: ['red', '42'] }])
+    })
   })
 })

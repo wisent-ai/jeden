@@ -483,6 +483,13 @@ function memoryId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+function memoryMatchesQuery(entry, query) {
+  const needle = String(query || '').trim().toLowerCase()
+  if (!needle) return true
+  const text = `${entry.text || ''} ${(entry.tags || []).join(' ')}`.toLowerCase()
+  return text.indexOf(needle) !== -1
+}
+
 
 
 
@@ -1088,7 +1095,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       }
       if (op === 'recall') {
         const limit = Math.min(Math.max(Number(input.limit) || 10, 1), 100)
-        return { entries: entries.slice(-limit).reverse(), query: input.query || null }
+        const matched = entries.filter((entry) => memoryMatchesQuery(entry, input.query))
+        return { entries: matched.slice(-limit).reverse(), query: input.query || null }
       }
       throw new Error(`unknown memory op: ${op}`)
     },

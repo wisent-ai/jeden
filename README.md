@@ -32,7 +32,7 @@ The private M1 version includes:
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session and is gated as command execution.
 - Interactive ask tool: `ask_user` lets the model ask the human a question during `jeden` terminal mode.
-- Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
+- Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`; `recall` can filter by query over note text and tags.
 - MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers.
 - Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
