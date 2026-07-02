@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { chmod, mkdtemp, readFile, rm, writeFile, mkdir } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile, mkdir, utimes } from 'node:fs/promises'
 import { join } from 'node:path'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
@@ -15,6 +15,7 @@ import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { buildCapabilityManifest, buildDoctorReport, createLocalMemoryBackend, loadMemoryRecords, modelRouterConfig, runJeden } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
 import { closeMcpClients, loadMcpToolAdapters } from '../src/mcp.js'
+import { claudeProjectPath, formatConversationList, listConversationJsonls, recallConversationFromJsonl, resolveConversationJsonl } from '../src/conversation-recall.js'
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'jeden-test-'))
@@ -55,6 +56,17 @@ async function withIsolatedHome(dir, fn) {
     else process.env.USERPROFILE = previousUserProfile
   }
 }
+
+function conversationJsonl(events) {
+  return `${events.map((event) => JSON.stringify(event)).join('\n')}\n`
+}
+
+async function makeClaudeProject(home, cwd) {
+  const projectDir = claudeProjectPath({ cwd, home })
+  await mkdir(projectDir, { recursive: true })
+  return projectDir
+}
+
 
 async function withIsolatedMemory(dir, fn, memoryFile = join(dir, 'memory.jsonl')) {
   const previousMemoryFile = process.env.JEDEN_MEMORY_FILE
@@ -143,6 +155,161 @@ function makeZip(name, data) {
   eocd.writeUInt32LE(local.length + content.length, 16)
   return Buffer.concat([local, content, central, eocd])
 }
+
+test('recall claudeProjectPath encodes provided cwd verbatim under isolated HOME', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async (home) => {
+      const providedCwd = `${dir}/workspaces/../literal project`
+
+      assert.equal(
+        claudeProjectPath({ cwd: providedCwd }),
+        join(home, '.claude', 'projects', providedCwd.replaceAll('/', '-')),
+      )
+    })
+  })
+})
+
+test('recallConversationFromJsonl emits text-only transcript blocks and filters Claude noise', () => {
+  const jsonlPath = '/tmp/claude-project/session-123.jsonl'
+  const raw = conversationJsonl([
+    { type: 'system', message: { content: 'system event hidden' } },
+    {
+      type: 'user',
+      message: {
+        content: [
+          { type: 'text', text: '\nHello from user\n<system-reminder>system hidden</system-reminder>\nStop hook feedback: hook hidden\n[python3 $HOME/.shared-hooks/hook.py]\nBLOCKED by hook\nBypass: hook hidden\n<task-notification>task hidden</task-notification>\nVisible user text' },
+          { type: 'tool_result', content: 'tool result hidden' },
+          { type: 'image', source: { data: 'image hidden' } },
+        ],
+      },
+    },
+    {
+      type: 'assistant',
+      message: {
+        content: [
+          { type: 'text', text: 'Assistant answer' },
+          { type: 'tool_use', id: 'toolu_hidden', name: 'Read', input: { file_path: 'secret.txt' } },
+          { type: 'text', text: 'Second assistant line\n<tool-use-id>task tool id hidden</tool-use-id>\n<summary>task summary hidden</summary>\nDone' },
+          { type: 'tool_result', content: 'assistant tool result hidden' },
+          { type: 'image', source: { data: 'assistant image hidden' } },
+        ],
+      },
+    },
+    { type: 'user', message: { content: [{ type: 'tool_result', content: 'tool-only user hidden' }] } },
+  ])
+
+  assert.equal(recallConversationFromJsonl(raw, { jsonlPath }), `# Conversation transcript: ${jsonlPath}
+# (text-only, no tool_use / tool_result / images / hooks)
+
+[USER]
+Hello from user
+Visible user text
+
+[ASSISTANT]
+Assistant answer
+Second assistant line
+Done
+`)
+})
+
+test('recall resolveConversationJsonl supports uuid and direct filename fallback', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async (home) => {
+      const cwd = join(dir, 'fixture-project')
+      await mkdir(cwd, { recursive: true })
+      const projectDir = await makeClaudeProject(home, cwd)
+      const uuid = '11111111-2222-4333-8444-555555555555'
+      const uuidPath = join(projectDir, `${uuid}.jsonl`)
+      const directName = 'manual-session.jsonl'
+      const directPath = join(projectDir, directName)
+      await writeFile(uuidPath, conversationJsonl([{ type: 'user', message: { content: 'uuid transcript' } }]), 'utf8')
+      await writeFile(directPath, conversationJsonl([{ type: 'user', message: { content: 'direct transcript' } }]), 'utf8')
+
+      assert.equal(await resolveConversationJsonl({ cwd, home, session: uuid }), uuidPath)
+      assert.equal(await resolveConversationJsonl({ cwd, home, session: directName }), directPath)
+    })
+  })
+})
+
+test('recall listConversationJsonls returns latest ten and formatConversationList emits long-list rows', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async (home) => {
+      const cwd = join(dir, 'fixture-project')
+      await mkdir(cwd, { recursive: true })
+      const projectDir = await makeClaudeProject(home, cwd)
+      const baseTime = Date.now() - 60_000
+      for (let index = 0; index < 12; index += 1) {
+        const file = join(projectDir, `session-${String(index).padStart(2, '0')}.jsonl`)
+        await writeFile(file, `payload-${index}\n`, 'utf8')
+        await chmod(file, 0o644)
+        const mtime = new Date(baseTime + index * 1000)
+        await utimes(file, mtime, mtime)
+      }
+      await writeFile(join(projectDir, 'ignored.txt'), 'not a transcript\n', 'utf8')
+
+      const entries = await listConversationJsonls({ cwd, home })
+      assert.deepEqual(
+        entries.map((entry) => entry.name),
+        ['session-11.jsonl', 'session-10.jsonl', 'session-09.jsonl', 'session-08.jsonl', 'session-07.jsonl', 'session-06.jsonl', 'session-05.jsonl', 'session-04.jsonl', 'session-03.jsonl', 'session-02.jsonl'],
+      )
+
+      const rows = formatConversationList(entries).trimEnd().split('\n')
+      assert.equal(rows.length, 10)
+      for (const [index, entry] of entries.entries()) {
+        const columns = rows[index].trim().split(/\s+/)
+        assert.equal(columns[0], '-rw-r--r--')
+        assert.match(columns[1], /^\d+$/)
+        assert.match(columns[4], /^\d+$/)
+        assert.match(columns[5], /^[A-Z][a-z]{2}$/)
+        assert.match(columns[6], /^\d{1,2}$/)
+        assert.ok(/^\d{2}:\d{2}$/.test(columns[7]) || /^\d{4}$/.test(columns[7]))
+        assert.match(rows[index], new RegExp(`\\s${entry.size}\\s+`))
+        assert.ok(rows[index].endsWith(entry.path), `expected row to end with ${entry.path}: ${rows[index]}`)
+      }
+    })
+  })
+})
+
+test('recall_conversation CLI reads and lists fixture project without touching real HOME', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async (home) => {
+      const cwd = join(dir, 'fixture-project')
+      await mkdir(cwd, { recursive: true })
+      const projectDir = await makeClaudeProject(home, cwd)
+      const olderPath = join(projectDir, 'older.jsonl')
+      const latestPath = join(projectDir, 'latest.jsonl')
+      const olderRaw = conversationJsonl([{ type: 'user', message: { content: 'older transcript' } }])
+      const latestRaw = conversationJsonl([{ type: 'assistant', message: { content: [{ type: 'text', text: 'latest transcript' }, { type: 'tool_use', name: 'Hidden', input: {} }] } }])
+      await writeFile(olderPath, olderRaw, 'utf8')
+      await writeFile(latestPath, latestRaw, 'utf8')
+      await chmod(olderPath, 0o644)
+      await chmod(latestPath, 0o644)
+      const now = Date.now()
+      await utimes(olderPath, new Date(now - 10_000), new Date(now - 10_000))
+      await utimes(latestPath, new Date(now), new Date(now))
+      const env = { ...process.env, HOME: home, USERPROFILE: home }
+      delete env.RECALL_CWD
+
+      const recalled = await execFileOk(process.execPath, ['src/cli.js', 'recall_conversation', '--cwd', cwd], { cwd: process.cwd(), env })
+      assert.equal(recalled.stderr, '')
+      assert.equal(recalled.stdout, recallConversationFromJsonl(latestRaw, { jsonlPath: latestPath }))
+
+      const listed = await execFileOk(process.execPath, ['src/cli.js', 'recall_conversation', '--list', '--cwd', cwd], { cwd: process.cwd(), env })
+      assert.equal(listed.stderr, '')
+      const rows = listed.stdout.trimEnd().split('\n')
+      assert.equal(rows.length, 2)
+      assert.ok(rows[0].endsWith(latestPath), `expected newest transcript first: ${listed.stdout}`)
+      assert.ok(rows[1].endsWith(olderPath), `expected older transcript second: ${listed.stdout}`)
+      const columns = rows[0].trim().split(/\s+/)
+      assert.equal(columns[0], '-rw-r--r--')
+      assert.match(columns[1], /^\d+$/)
+      assert.match(columns[4], /^\d+$/)
+      assert.match(columns[5], /^[A-Z][a-z]{2}$/)
+      assert.match(columns[6], /^\d{1,2}$/)
+      assert.ok(/^\d{2}:\d{2}$/.test(columns[7]) || /^\d{4}$/.test(columns[7]))
+    })
+  })
+})
 
 test('parseAction preserves ordered multi-tool requests and default inputs', () => {
   const action = parseAction(`model preface

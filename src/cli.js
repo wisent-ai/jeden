@@ -12,6 +12,7 @@ import { applyConfigEnv, loadJedenConfig } from './config.js'
 import { loadCustomTools } from './custom-tools.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
+import { formatConversationList, listConversationJsonls, recallConversation } from './conversation-recall.js'
 
 
 function usage() {
@@ -19,6 +20,8 @@ function usage() {
   jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
   jeden run "task" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
   jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
+  jeden recall_conversation [session-uuid-or-filename] [--list] [--cwd path]
+  jeden recall-conversation [session-uuid-or-filename] [--list] [--cwd path]
   jeden sessions [limit]
   jeden search-sessions <query> [limit]
   jeden show <session-id-or-path>
@@ -93,6 +96,28 @@ function parseSharedOptions(rest) {
   return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, json, positionals }
 }
 
+function parseRecallConversationOptions(rest) {
+  let cwd = process.env.RECALL_CWD || process.cwd()
+  let list = false
+  let session = null
+  for (let i = 0; i < rest.length; i += 1) {
+    const arg = rest[i]
+    if (arg === '--cwd') {
+      cwd = rest[++i]
+      if (!cwd) throw new Error('--cwd requires a value')
+      continue
+    }
+    if (arg === '--list') {
+      list = true
+      continue
+    }
+    if (arg.slice(0, 2) === '--') throw new Error(`unknown option: ${arg}`)
+    if (session) throw new Error('recall_conversation accepts at most one session uuid or filename')
+    session = arg
+  }
+  return { command: 'recall_conversation', cwd, list, session }
+}
+
 function parseArgs(argv) {
   const [first, ...rest] = argv
   if (first === '-h' || first === '--help') return { help: true }
@@ -103,6 +128,7 @@ function parseArgs(argv) {
     if (!task) throw new Error('run requires a task')
     return { command: 'run', task, ...parsed }
   }
+  if (first === 'recall_conversation' || first === 'recall-conversation') return parseRecallConversationOptions(rest)
   if (first === 'resume') {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('resume requires a session id or path')
@@ -411,6 +437,15 @@ async function showCapabilities(args) {
   const manifest = await buildCapabilityManifest({ cwd: args.cwd })
   process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`)
 }
+async function showRecallConversation(args) {
+  if (args.list) {
+    const entries = await listConversationJsonls({ cwd: args.cwd })
+    process.stdout.write(formatConversationList(entries))
+    return
+  }
+  process.stdout.write(await recallConversation({ cwd: args.cwd, session: args.session }))
+}
+
 
 
 
@@ -422,6 +457,10 @@ async function main() {
   }
   if (args.help) {
     process.stdout.write(usage())
+    return
+  }
+  if (args.command === 'recall_conversation') {
+    await showRecallConversation(args)
     return
   }
   await loadRuntimeEnv(args)

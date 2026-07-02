@@ -66,6 +66,8 @@ jeden --cwd ../content-platform --allow-command
 jeden resume <session-id-or-path> "continue with the previous context" --cwd ../content-platform
 jeden sessions 20
 jeden search-sessions "needle" 50
+jeden recall_conversation --list --cwd ../content-platform
+jeden recall_conversation <session-uuid> --cwd ../content-platform
 jeden show <session-id-or-path>
 jeden tools --cwd ../content-platform
 jeden capabilities --cwd ../content-platform
@@ -94,6 +96,8 @@ Use `jeden search-sessions <query> [limit]` to find matching recent session tran
 Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-path> <name> [output]` to inspect or extract session artifacts.
 
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with structured replay of the prior session's user, assistant, and tool-result messages while recording a fresh session.
+Use `jeden recall_conversation [session-uuid-or-filename] [--list] [--cwd path]` to reproduce `~/.claude/scratch/recall_conversation.sh` inside Jeden: it reads Claude session JSONLs from `~/.claude/projects/<encoded-cwd>/`, emits text-only `[USER]`/`[ASSISTANT]` blocks, and strips tool_use/tool_result/images/hooks/noise. `RECALL_CWD` still overrides the default project cwd; `--cwd` is available for explicit selection.
+
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in/custom/native MCP tool counts, and tool load errors.
