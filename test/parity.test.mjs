@@ -74,9 +74,9 @@ function makeTar(name, text) {
   return Buffer.concat([header, content, padding, Buffer.alloc(1024)])
 }
 
-function makeZip(name, text) {
+function makeZip(name, data) {
   const nameBytes = Buffer.from(name, 'utf8')
-  const content = Buffer.from(text, 'utf8')
+  const content = Buffer.isBuffer(data) ? data : Buffer.from(data, 'utf8')
   const local = Buffer.alloc(30 + nameBytes.length)
   local.writeUInt32LE(0x04034b50, 0)
   local.writeUInt16LE(20, 4)
@@ -220,6 +220,17 @@ test('read_archive lists and reads tar and zip entries', async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, 'bundle.tar'), makeTar('docs/readme.txt', 'tar text'), 'utf8')
     await writeFile(join(dir, 'bundle.zip'), makeZip('src/index.js', 'zip text'))
+    await writeFile(join(dir, 'paper.zip'), makeZip('paper.pdf', `%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj
+4 0 obj << /Length 44 >> stream
+BT /F1 12 Tf 72 720 Td (Archive PDF text) Tj ET
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF`))
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAQAAADoP0S7AAAADElEQVR42mP8z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')
+    await writeFile(join(dir, 'image.zip'), makeZip('tiny.png', png))
     const registry = createToolRegistry({ cwd: dir })
 
     const tarList = await registry.execute('read_archive', { path: 'bundle.tar' })
@@ -231,6 +242,16 @@ test('read_archive lists and reads tar and zip entries', async () => {
     assert.deepEqual(zipList.output.entries, [{ name: 'src/index.js', type: 'file', bytes: 8 }])
     const zipEntry = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js' })
     assert.equal(zipEntry.output.content, 'zip text')
+    const zipBinary = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js', mode: 'binary', maxBytes: 4 })
+    assert.equal(zipBinary.output.base64, Buffer.from('zip ').toString('base64'))
+    assert.equal(zipBinary.output.truncated, true)
+    const zipDocument = await registry.execute('read_archive', { path: 'paper.zip', entry: 'paper.pdf', mode: 'document' })
+    assert.equal(zipDocument.output.text, 'Archive PDF text')
+    const zipImage = await registry.execute('read_archive', { path: 'image.zip', entry: 'tiny.png', mode: 'image', maxBytes: 12 })
+    assert.equal(zipImage.output.mimeType, 'image/png')
+    assert.equal(zipImage.output.width, 2)
+    assert.equal(zipImage.output.height, 3)
+    assert.equal(zipImage.output.base64, png.subarray(0, 12).toString('base64'))
   })
 })
 

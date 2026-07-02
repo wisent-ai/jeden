@@ -1024,8 +1024,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_archive',
-    description: 'List archive entries or read one UTF-8 entry from .zip, .tar, .tar.gz, or .tgz under cwd',
-    input: { path: 'string required', entry: 'string optional', maxBytes: 'number optional' },
+    description: 'List archive entries or read one entry from .zip, .tar, .tar.gz, or .tgz under cwd as text, binary base64, document text, or image metadata',
+    input: { path: 'string required', entry: 'string optional', mode: 'text|binary|document|image optional', maxBytes: 'number optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const file = jailPath(cwd, input.path)
@@ -1037,11 +1037,57 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const match = entries.find((entry) => entry.name === input.entry)
       if (!match) throw new Error(`archive entry not found: ${input.entry}`)
       if (match.type !== 'file') throw new Error(`archive entry is not a file: ${input.entry}`)
-      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1), MAX_READ_BYTES)
+      const mode = String(input.mode || 'text')
       const sliced = match.content.subarray(0, maxBytes)
+      if (mode === 'binary') {
+        return {
+          path: publicPath(cwd, file),
+          entry: match.name,
+          mode,
+          bytes: match.content.length,
+          truncated: match.content.length > sliced.length,
+          mimeType: mimeTypeForPath(match.name),
+          base64: sliced.toString('base64'),
+          sha256: sha256(match.content),
+        }
+      }
+      if (mode === 'document') {
+        const text = readableTextForDocument({ content: match.content, file: match.name })
+        const buffer = Buffer.from(text, 'utf8')
+        const docSlice = buffer.subarray(0, maxBytes)
+        return {
+          path: publicPath(cwd, file),
+          entry: match.name,
+          mode,
+          bytes: buffer.length,
+          truncated: buffer.length > docSlice.length,
+          mimeType: mimeTypeForPath(match.name),
+          text: docSlice.toString('utf8'),
+          sha256: sha256(match.content),
+        }
+      }
+      if (mode === 'image') {
+        const metadata = imageMetadata(match.content, match.name)
+        if (metadata.mimeType.indexOf('image/') !== 0) throw new Error(`unsupported image type: ${metadata.mimeType}`)
+        return {
+          path: publicPath(cwd, file),
+          entry: match.name,
+          mode,
+          bytes: match.content.length,
+          truncated: match.content.length > sliced.length,
+          mimeType: metadata.mimeType,
+          width: metadata.width,
+          height: metadata.height,
+          base64: sliced.toString('base64'),
+          sha256: sha256(match.content),
+        }
+      }
+      if (mode !== 'text') throw new Error(`unsupported archive read mode: ${mode}`)
       return {
         path: publicPath(cwd, file),
         entry: match.name,
+        mode,
         bytes: match.content.length,
         truncated: match.content.length > sliced.length,
         content: sliced.toString('utf8'),
