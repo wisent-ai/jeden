@@ -2,7 +2,7 @@ import { readdir, readFile, rename, unlink, writeFile, stat } from 'node:fs/prom
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
-import { inflateSync } from 'node:zlib'
+import { gunzipSync, inflateRawSync, inflateSync } from 'node:zlib'
 import { createInterface } from 'node:readline'
 import { resolve, relative, dirname, extname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
@@ -166,6 +166,72 @@ function readableTextForDocument({ content, file }) {
   if (ext === '.json') return readableTextFromJson(raw)
   if (ext === '.html' || ext === '.htm') return readableTextFromHtml(raw)
   return raw
+}
+
+function tarEntries(buffer) {
+  const entries = []
+  let offset = 0
+  while (offset + 512 <= buffer.length) {
+    const header = buffer.subarray(offset, offset + 512)
+    if (header.every((byte) => byte === 0)) break
+    const name = header.subarray(0, 100).toString('utf8').replace(/\u0000.*$/, '')
+    const prefix = header.subarray(345, 500).toString('utf8').replace(/\u0000.*$/, '')
+    const sizeText = header.subarray(124, 136).toString('utf8').replace(/\u0000.*$/, '').trim()
+    const size = parseInt(sizeText || '0', 8) || 0
+    const typeFlag = header.subarray(156, 157).toString('utf8')
+    const fullName = prefix ? `${prefix}/${name}` : name
+    const dataStart = offset + 512
+    const dataEnd = dataStart + size
+    if (fullName) entries.push({ name: fullName, size, type: typeFlag === '5' ? 'dir' : 'file', content: buffer.subarray(dataStart, dataEnd) })
+    offset = dataStart + Math.ceil(size / 512) * 512
+  }
+  return entries
+}
+
+function zipEntries(buffer) {
+  let eocd = -1
+  for (let i = buffer.length - 22; i >= 0; i -= 1) {
+    if (buffer.readUInt32LE(i) === 0x06054b50) {
+      eocd = i
+      break
+    }
+  }
+  if (eocd === -1) throw new Error('zip central directory not found')
+  const total = buffer.readUInt16LE(eocd + 10)
+  let offset = buffer.readUInt32LE(eocd + 16)
+  const entries = []
+  for (let i = 0; i < total; i += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) throw new Error('invalid zip central directory')
+    const method = buffer.readUInt16LE(offset + 10)
+    const compressedSize = buffer.readUInt32LE(offset + 20)
+    const size = buffer.readUInt32LE(offset + 24)
+    const nameLength = buffer.readUInt16LE(offset + 28)
+    const extraLength = buffer.readUInt16LE(offset + 30)
+    const commentLength = buffer.readUInt16LE(offset + 32)
+    const localOffset = buffer.readUInt32LE(offset + 42)
+    const name = buffer.subarray(offset + 46, offset + 46 + nameLength).toString('utf8')
+    const localNameLength = buffer.readUInt16LE(localOffset + 26)
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28)
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength
+    const compressed = buffer.subarray(dataStart, dataStart + compressedSize)
+    let content = Buffer.alloc(0)
+    if (name.slice(-1) !== '/') {
+      if (method === 0) content = compressed
+      else if (method === 8) content = inflateRawSync(compressed)
+      else throw new Error(`unsupported zip compression method: ${method}`)
+    }
+    entries.push({ name, size, type: name.slice(-1) === '/' ? 'dir' : 'file', content })
+    offset += 46 + nameLength + extraLength + commentLength
+  }
+  return entries
+}
+
+function archiveEntries(file, buffer) {
+  const lower = file.toLowerCase()
+  if (lower.slice(-4) === '.zip') return zipEntries(buffer)
+  if (lower.slice(-4) === '.tgz' || lower.slice(-7) === '.tar.gz') return tarEntries(gunzipSync(buffer))
+  if (lower.slice(-4) === '.tar') return tarEntries(buffer)
+  throw new Error('supported archives: .zip, .tar, .tar.gz, .tgz')
 }
 
 
@@ -788,6 +854,34 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         mimeType: mimeTypeForPath(file),
         base64: sliced.toString('base64'),
         sha256: sha256(content),
+      }
+    },
+  })
+
+  add({
+    name: 'read_archive',
+    description: 'List archive entries or read one UTF-8 entry from .zip, .tar, .tar.gz, or .tgz under cwd',
+    input: { path: 'string required', entry: 'string optional', maxBytes: 'number optional' },
+    async execute(input) {
+      if (!input.path) throw new Error('path is required')
+      const file = jailPath(cwd, input.path)
+      const content = await readFile(file)
+      const entries = archiveEntries(file, content)
+      if (!input.entry) {
+        return { path: publicPath(cwd, file), entries: entries.map((entry) => ({ name: entry.name, type: entry.type, bytes: entry.size })) }
+      }
+      const match = entries.find((entry) => entry.name === input.entry)
+      if (!match) throw new Error(`archive entry not found: ${input.entry}`)
+      if (match.type !== 'file') throw new Error(`archive entry is not a file: ${input.entry}`)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
+      const sliced = match.content.subarray(0, maxBytes)
+      return {
+        path: publicPath(cwd, file),
+        entry: match.name,
+        bytes: match.content.length,
+        truncated: match.content.length > sliced.length,
+        content: sliced.toString('utf8'),
+        sha256: sha256(match.content),
       }
     },
   })

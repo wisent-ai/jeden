@@ -64,6 +64,42 @@ async function withHttpServer(handler, fn) {
   }
 }
 
+function makeTar(name, text) {
+  const content = Buffer.from(text, 'utf8')
+  const header = Buffer.alloc(512)
+  header.write(name, 0, 'utf8')
+  header.write(content.length.toString(8).padStart(11, '0'), 124, 'utf8')
+  header.write('0', 156, 'utf8')
+  const padding = Buffer.alloc(Math.ceil(content.length / 512) * 512 - content.length)
+  return Buffer.concat([header, content, padding, Buffer.alloc(1024)])
+}
+
+function makeZip(name, text) {
+  const nameBytes = Buffer.from(name, 'utf8')
+  const content = Buffer.from(text, 'utf8')
+  const local = Buffer.alloc(30 + nameBytes.length)
+  local.writeUInt32LE(0x04034b50, 0)
+  local.writeUInt16LE(20, 4)
+  local.writeUInt32LE(content.length, 18)
+  local.writeUInt32LE(content.length, 22)
+  local.writeUInt16LE(nameBytes.length, 26)
+  nameBytes.copy(local, 30)
+  const central = Buffer.alloc(46 + nameBytes.length)
+  central.writeUInt32LE(0x02014b50, 0)
+  central.writeUInt16LE(20, 6)
+  central.writeUInt32LE(content.length, 20)
+  central.writeUInt32LE(content.length, 24)
+  central.writeUInt16LE(nameBytes.length, 28)
+  nameBytes.copy(central, 46)
+  const eocd = Buffer.alloc(22)
+  eocd.writeUInt32LE(0x06054b50, 0)
+  eocd.writeUInt16LE(1, 8)
+  eocd.writeUInt16LE(1, 10)
+  eocd.writeUInt32LE(central.length, 12)
+  eocd.writeUInt32LE(local.length + content.length, 16)
+  return Buffer.concat([local, content, central, eocd])
+}
+
 test('parseAction preserves ordered multi-tool requests and default inputs', () => {
   const action = parseAction(`model preface
 {"action":"tools","tools":[{"tool":"read_file","input":{"path":"src/protocol.js"}},{"tool":"list_dir"}]}
@@ -155,6 +191,24 @@ trailer << /Root 1 0 R >>
     assert.match(notebook.output.text, /# %% \[code\] cell:2\nprint\("ok"\)/)
     const pdf = await registry.execute('read_document', { path: 'paper.pdf' })
     assert.equal(pdf.output.text, 'Hello PDF text')
+  })
+})
+
+test('read_archive lists and reads tar and zip entries', async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, 'bundle.tar'), makeTar('docs/readme.txt', 'tar text'), 'utf8')
+    await writeFile(join(dir, 'bundle.zip'), makeZip('src/index.js', 'zip text'))
+    const registry = createToolRegistry({ cwd: dir })
+
+    const tarList = await registry.execute('read_archive', { path: 'bundle.tar' })
+    assert.deepEqual(tarList.output.entries, [{ name: 'docs/readme.txt', type: 'file', bytes: 8 }])
+    const tarEntry = await registry.execute('read_archive', { path: 'bundle.tar', entry: 'docs/readme.txt' })
+    assert.equal(tarEntry.output.content, 'tar text')
+
+    const zipList = await registry.execute('read_archive', { path: 'bundle.zip' })
+    assert.deepEqual(zipList.output.entries, [{ name: 'src/index.js', type: 'file', bytes: 8 }])
+    const zipEntry = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js' })
+    assert.equal(zipEntry.output.content, 'zip text')
   })
 })
 
