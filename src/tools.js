@@ -728,17 +728,31 @@ function processEnv(inputEnv) {
   return next
 }
 
+function killChildTree(child, signal) {
+  try {
+    if (child.pid) {
+      process.kill(-child.pid, signal)
+      return
+    }
+  } catch {}
+  try {
+    child.kill(signal)
+  } catch {}
+}
+
 function runShellCommand({ cwd, command, timeoutMs, env = null }) {
   return new Promise((resolvePromise) => {
-    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: processEnv(env) })
+    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: processEnv(env), detached: true })
     let stdout = ''
     let stderr = ''
     let stdoutTruncated = false
     let stderrTruncated = false
     let timedOut = false
+    let killTimer = null
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGTERM')
+      killChildTree(child, 'SIGTERM')
+      killTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), 1_000)
     }, timeoutMs)
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8')
@@ -756,6 +770,7 @@ function runShellCommand({ cwd, command, timeoutMs, env = null }) {
     })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       resolvePromise({ code, signal, timedOut, stdout, stderr, stdoutTruncated, stderrTruncated })
     })
   })
@@ -763,15 +778,17 @@ function runShellCommand({ cwd, command, timeoutMs, env = null }) {
 
 function runProcess({ cwd, command, args, timeoutMs, stdin = null, env = null }) {
   return new Promise((resolvePromise) => {
-    const child = spawn(command, args, { cwd, env: processEnv(env) })
+    const child = spawn(command, args, { cwd, env: processEnv(env), detached: true })
     let stdout = ''
     let stderr = ''
     let stdoutTruncated = false
     let stderrTruncated = false
     let timedOut = false
+    let killTimer = null
     const timer = setTimeout(() => {
       timedOut = true
-      child.kill('SIGTERM')
+      killChildTree(child, 'SIGTERM')
+      killTimer = setTimeout(() => killChildTree(child, 'SIGKILL'), 1_000)
     }, timeoutMs)
     if (stdin !== null) child.stdin.end(String(stdin))
     child.stdout.on('data', (chunk) => {
@@ -790,6 +807,7 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null, env = null })
     })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
+      if (killTimer) clearTimeout(killTimer)
       resolvePromise({ code, signal, timedOut, stdout, stderr, stdoutTruncated, stderrTruncated })
     })
   })

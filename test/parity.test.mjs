@@ -512,6 +512,32 @@ test('run_process reports capped stdout and stderr', async () => {
     assert.equal(result.output.stderrTruncated, true)
   })
 })
+
+test('run_process escalates timed-out children to SIGKILL', async () => {
+  await withTempDir(async (dir) => {
+    const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+    const result = await registry.execute('run_process', {
+      command: process.execPath,
+      args: ['-e', 'process.on("SIGTERM", () => {}); setInterval(() => {}, 1000)'],
+      timeoutMs: 50,
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.output.timedOut, true)
+    assert.equal(result.output.signal, 'SIGKILL')
+  })
+})
+
+test('run_command timeout kills shell grandchildren', async () => {
+  await withTempDir(async (dir) => {
+    const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+    const command = `${JSON.stringify(process.execPath)} -e 'setTimeout(() => require("fs").writeFileSync("marker", "late"), 3000)' & wait`
+    const result = await registry.execute('run_command', { command, timeoutMs: 1000 })
+    assert.equal(result.ok, true)
+    assert.equal(result.output.timedOut, true)
+    await new Promise((resolve) => setTimeout(resolve, 2300))
+    await assert.rejects(() => readFile(join(dir, 'marker'), 'utf8'), /ENOENT/)
+  })
+})
 test('custom tools preserve capability metadata and jail readText', async () => {
   await withTempDir(async (dir) => {
     await withIsolatedHome(dir, async () => {
