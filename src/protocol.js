@@ -10,6 +10,12 @@ export function extractJsonObject(text) {
   return raw.slice(start, end + 1)
 }
 
+
+function parseToolAction(json) {
+  if (typeof json.tool !== 'string') throw new Error('tool action requires tool')
+  const input = json.input && typeof json.input === 'object' && !Array.isArray(json.input) ? json.input : {}
+  return { action: 'tool', tool: json.tool, input }
+}
 export function parseAction(text) {
   const json = JSON.parse(extractJsonObject(text))
   if (!json || typeof json !== 'object' || Array.isArray(json)) {
@@ -20,9 +26,11 @@ export function parseAction(text) {
     return { action: 'final', text: json.text }
   }
   if (json.action === 'tool') {
-    if (typeof json.tool !== 'string') throw new Error('tool action requires tool')
-    const input = json.input && typeof json.input === 'object' && !Array.isArray(json.input) ? json.input : {}
-    return { action: 'tool', tool: json.tool, input }
+    return parseToolAction(json)
+  }
+  if (json.action === 'tools') {
+    if (!Array.isArray(json.tools) || json.tools.length === 0) throw new Error('tools action requires tools')
+    return { action: 'tools', tools: json.tools.map(parseToolAction) }
   }
   throw new Error(`unknown action: ${String(json.action)}`)
 }

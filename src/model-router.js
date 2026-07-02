@@ -38,12 +38,14 @@ export async function chatCompletion({ messages, maxTokens = 2048, config = mode
   if (!response.ok) throw new Error(`model router ${response.status}: ${text.slice(0, 800)}`)
   const data = JSON.parse(text)
   const message = data?.choices?.[0]?.message
-  const toolCall = Array.isArray(message?.tool_calls) ? message.tool_calls[0] : null
-  const name = toolCall?.function?.name
-  if (name) {
-    const rawArgs = toolCall?.function?.arguments || '{}'
-    const input = rawArgs ? JSON.parse(rawArgs) : {}
-    return JSON.stringify({ action: 'tool', tool: name, input })
+  const toolCalls = Array.isArray(message?.tool_calls) ? message.tool_calls : []
+  if (toolCalls.length > 0) {
+    const tools = toolCalls.map((call) => {
+      const rawArgs = call?.function?.arguments || '{}'
+      return { tool: call?.function?.name, input: rawArgs ? JSON.parse(rawArgs) : {} }
+    })
+    if (tools.length === 1) return JSON.stringify({ action: 'tool', tool: tools[0].tool, input: tools[0].input })
+    return JSON.stringify({ action: 'tools', tools })
   }
   const content = message?.content
   if (typeof content !== 'string' || !content.trim()) throw new Error('model router returned no message content')

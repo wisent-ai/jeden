@@ -115,22 +115,27 @@ export async function runJeden({
       return { text: action.text, steps: step, sessionPath: recorder?.path?.() || null }
     }
 
-    const preHook = await runHook({
-      hookRunner,
-      event: toolHookEvent(action.tool),
-      payload: hookPayload({ task, cwd, action }),
-      recorder,
-    })
-    const approval = preHook.decision === 'block'
-      ? { approved: false, result: { ok: false, error: `hook blocked ${action.tool}: ${preHook.reason}` } }
-      : await maybeApprove({ action, allowWrite, allowCommand, approveTool, recorder })
-    const result = approval.approved ? await tools.execute(action.tool, action.input) : approval.result
-    await recorder?.record('tool_result', { step, tool: action.tool, result })
-    const postEvent = postToolHookEvent(action.tool)
-    if (postEvent) {
-      await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action, result }), recorder })
+    const toolActions = action.action === 'tools' ? action.tools : [action]
+    const results = []
+    for (const toolAction of toolActions) {
+      const preHook = await runHook({
+        hookRunner,
+        event: toolHookEvent(toolAction.tool),
+        payload: hookPayload({ task, cwd, action: toolAction }),
+        recorder,
+      })
+      const approval = preHook.decision === 'block'
+        ? { approved: false, result: { ok: false, error: `hook blocked ${toolAction.tool}: ${preHook.reason}` } }
+        : await maybeApprove({ action: toolAction, allowWrite, allowCommand, approveTool, recorder })
+      const result = approval.approved ? await tools.execute(toolAction.tool, toolAction.input) : approval.result
+      results.push({ tool: toolAction.tool, result })
+      await recorder?.record('tool_result', { step, tool: toolAction.tool, result })
+      const postEvent = postToolHookEvent(toolAction.tool)
+      if (postEvent) {
+        await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action: toolAction, result }), recorder })
+      }
     }
-    messages.push({ role: 'user', content: formatToolResult(result) })
+    messages.push({ role: 'user', content: formatToolResult(action.action === 'tools' ? results : results[0].result) })
   }
 
   throw new Error(`max steps exceeded: ${maxSteps}`)

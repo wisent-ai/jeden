@@ -112,6 +112,12 @@ Tool call:
 {"action":"tool","tool":"read_file","input":{"path":"package.json"}}
 ```
 
+Multiple tool calls:
+
+```json
+{"action":"tools","tools":[{"tool":"read_file","input":{"path":"package.json"}},{"tool":"git_status","input":{}}]}
+```
+
 Range read:
 
 ```json
