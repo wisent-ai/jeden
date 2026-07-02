@@ -168,6 +168,14 @@ function readableTextForDocument({ content, file }) {
   return raw
 }
 
+function readableTextForUrlContent({ buffer, contentType, urlPath }) {
+  const type = String(contentType || '').toLowerCase()
+  const ext = extname(urlPath || '').toLowerCase()
+  if (type.indexOf('pdf') !== -1 || ext === '.pdf') return readableTextFromPdf(buffer)
+  if (ext === '.ipynb' || ext === '.json' || ext === '.html' || ext === '.htm') return readableTextForDocument({ content: buffer, file: urlPath })
+  return readableTextForContent(Buffer.from(buffer).toString('utf8'), contentType)
+}
+
 function tarEntries(buffer) {
   const entries = []
   let offset = 0
@@ -1283,7 +1291,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'fetch_readable_url',
-    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes',
+    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes; supports HTML, JSON, RSS/Atom/XML, notebooks, and basic PDF text streams',
     input: { url: 'string required', maxBytes: 'number optional' },
     async execute(input) {
       if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
@@ -1291,9 +1299,9 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('only http and https URLs are allowed')
       const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 200_000, 1_000), 1_000_000)
       const response = await fetch(url)
-      const raw = Buffer.from(await response.arrayBuffer()).toString('utf8')
+      const raw = Buffer.from(await response.arrayBuffer())
       const contentType = response.headers.get('content-type') || null
-      const readable = readableTextForContent(raw, contentType)
+      const readable = readableTextForUrlContent({ buffer: raw, contentType, urlPath: url.pathname })
       const buffer = Buffer.from(readable, 'utf8')
       const sliced = buffer.subarray(0, maxBytes)
       return {

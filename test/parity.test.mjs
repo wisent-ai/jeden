@@ -388,6 +388,19 @@ test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities',
         response.end('<rss><channel><title>News</title><item><title>First</title><link>https://example.com/first</link></item><item><title>Second</title></item></channel></rss>')
         return
       }
+      if (request.url === '/paper.pdf') {
+        response.writeHead(200, { 'content-type': 'application/pdf' })
+        response.end(`%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj
+4 0 obj << /Length 42 >> stream
+BT /F1 12 Tf 72 720 Td (Remote PDF text) Tj ET
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF`)
+        return
+      }
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       response.end(`<!doctype html>
 <html>
@@ -417,6 +430,9 @@ test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities',
 
       const feed = await registry.execute('fetch_readable_url', { url: `${origin}/feed.xml` })
       assert.equal(feed.output.text, '# News\n- First — https://example.com/first\n- Second')
+
+      const pdf = await registry.execute('fetch_readable_url', { url: `${origin}/paper.pdf` })
+      assert.equal(pdf.output.text, 'Remote PDF text')
     })
   })
 })

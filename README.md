@@ -26,7 +26,7 @@ The private M1 version includes:
 - File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
 - Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
 - Eval/process tools: `node_eval`, `python_eval`, `run_process`. They require command permission; `run_process` accepts argv without a shell.
-- Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text. `fetch_readable_url` normalizes HTML, pretty-prints JSON, and extracts RSS/Atom item titles and links.
+- Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text. `fetch_readable_url` normalizes HTML, pretty-prints JSON, extracts RSS/Atom item titles and links, and extracts basic PDF/notebook document text from URL responses.
 - Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`; their `exec` helper is gated by command permission.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
