@@ -6,6 +6,7 @@ import { createInterface } from 'node:readline'
 import { resolve, relative, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
+import { homedir } from 'node:os'
 
 const MAX_READ_BYTES = 512_000
 const MAX_SEARCH_RESULTS = 100
@@ -229,6 +230,32 @@ function summarizeTodos(state) {
   const active = state.items.find((item) => item.status !== 'done') || null
   return { total, completed, active: active?.text || null, items: state.items }
 }
+
+function memoryPath() {
+  return process.env.JEDEN_MEMORY_FILE ? resolve(process.env.JEDEN_MEMORY_FILE) : resolve(homedir(), '.jeden', 'memory.jsonl')
+}
+
+async function loadMemoryEntries(file = memoryPath()) {
+  try {
+    const raw = await readFile(file, 'utf8')
+    return raw.split(/\r?\n/).filter((line) => line.trim()).map((line) => JSON.parse(line))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return []
+    throw error
+  }
+}
+
+async function saveMemoryEntries(entries, file = memoryPath()) {
+  await mkdir(dirname(file), { recursive: true })
+  const body = entries.map((entry) => JSON.stringify(entry)).join('\n')
+  await writeFile(file, body ? `${body}\n` : '', 'utf8')
+}
+
+function memoryId() {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+
 
 
 
@@ -553,6 +580,37 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         args: [cliPath(), 'run', input.task, '--cwd', resolve(cwd), '--max-steps', String(maxSteps)],
         timeoutMs: Math.min(maxSteps * 45_000, 300_000),
       })
+    },
+  })
+
+  add({
+    name: 'memory',
+    description: 'Remember and recall durable notes across Jeden sessions',
+    input: { op: 'string required', text: 'string optional', query: 'string optional', tags: 'array optional', limit: 'number optional' },
+    async execute(input) {
+      const entries = await loadMemoryEntries()
+      const op = input.op || 'recall'
+      if (op === 'remember') {
+        if (!input.text || typeof input.text !== 'string') throw new Error('text is required')
+        const entry = {
+          id: memoryId(),
+          text: input.text,
+          tags: Array.isArray(input.tags) ? input.tags.map((tag) => String(tag)) : [],
+          createdAt: new Date().toISOString(),
+        }
+        entries.push(entry)
+        await saveMemoryEntries(entries)
+        return { entry }
+      }
+      if (op === 'list') {
+        const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 200)
+        return { entries: entries.slice(-limit).reverse() }
+      }
+      if (op === 'recall') {
+        const limit = Math.min(Math.max(Number(input.limit) || 10, 1), 100)
+        return { entries: entries.slice(-limit).reverse(), query: input.query || null }
+      }
+      throw new Error(`unknown memory op: ${op}`)
     },
   })
 

@@ -28,6 +28,8 @@ The private M1 version includes:
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
+- Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
+- Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads from `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `.jeden/instructions.md`, and `.jeden/context.md` under `--cwd`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
@@ -142,6 +144,12 @@ Delegate call:
 {"action":"tool","tool":"delegate_task","input":{"task":"summarize src/tools.js","maxSteps":6}}
 ```
 
+
+Memory call:
+
+```json
+{"action":"tool","tool":"memory","input":{"op":"remember","text":"Repo uses npm run check for syntax validation","tags":["jeden"]}}
+```
 Git diff call:
 
 ```json
