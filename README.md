@@ -97,7 +97,7 @@ Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in/custom/native MCP tool counts, and tool load errors.
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
-MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit. During `jeden run`, configured MCP tools are listed beside built-ins under native names like `mcp__filesystem__read_file`, so models can call them directly without first using `mcp_list_tools`.
+MCP clients stay open for the duration of a `jeden run`, so native MCP calls can reuse server state across steps; pending requests time out and close the client, with `SIGTERM` then `SIGKILL` cleanup. During `jeden run`, configured MCP tools are listed beside built-ins under native names like `mcp__filesystem__read_file`, so models can call them directly without first using `mcp_list_tools`.
 
 Hook stdout may be empty, plain text, or JSON. JSON supports `decision: "block"` with `reason`, `userMessage` to replace the submitted prompt, and `toolInput` to replace the current pre-tool input. Jeden records hook results plus requested/effective tool payloads in the session transcript.
 

@@ -5,7 +5,7 @@ import { createToolRegistry, toolCapability } from './tools.js'
 import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
-import { loadMcpToolAdapters } from './mcp.js'
+import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 
 const MAX_TOOL_RESULT_BYTES = 64_000
 
@@ -160,7 +160,8 @@ export async function runJeden({
   messages.push({ role: 'user', content: task })
   await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps, maxTokens })
 
-  const toolSpecs = toOpenAIToolSpecs(tools.list())
+  try {
+    const toolSpecs = toOpenAIToolSpecs(tools.list())
   for (let step = 1; step <= maxSteps; step += 1) {
     const content = await chat({ messages, config, tools: toolSpecs, maxTokens })
     await recorder?.record('assistant_raw', { step, content })
@@ -224,5 +225,8 @@ export async function runJeden({
     messages.push({ role: 'user', content: formatToolResult(action.action === 'tools' ? results : results[0].result) })
   }
 
-  throw new Error(`max steps exceeded: ${maxSteps}`)
+    throw new Error(`max steps exceeded: ${maxSteps}`)
+  } finally {
+    await closeMcpClients({ cwd })
+  }
 }

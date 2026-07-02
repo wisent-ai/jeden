@@ -455,6 +455,7 @@ test('native MCP tools are listed and callable by runJeden', async () => {
       const serverFile = join(dir, 'mcp-server.mjs')
       await writeFile(serverFile, `
 let buffer = Buffer.alloc(0)
+let toolCalls = 0
 function send(message) {
   const body = Buffer.from(JSON.stringify(message), 'utf8')
   process.stdout.write('Content-Length: ' + body.length + '\\r\\n\\r\\n')
@@ -470,7 +471,8 @@ function handle(message) {
     return
   }
   if (message.method === 'tools/call') {
-    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: message.params.arguments.text }] } })
+    toolCalls += 1
+    send({ jsonrpc: '2.0', id: message.id, result: { content: [{ type: 'text', text: message.params.arguments.text + ':' + toolCalls }] } })
   }
 }
 process.stdin.on('data', (chunk) => {
@@ -504,14 +506,18 @@ process.stdin.on('data', (chunk) => {
           const nativeTool = tools.find((tool) => tool.function.name === 'mcp__local__echo')
           assert.ok(nativeTool)
           assert.deepEqual(nativeTool.function.parameters.required, ['text'])
-          return JSON.stringify({ action: 'tool', tool: 'mcp__local__echo', input: { text: 'mcp ok' } })
+          return JSON.stringify({ action: 'tool', tool: 'mcp__local__echo', input: { text: 'first' } })
         }
         const toolMessage = JSON.parse(messages.at(-1).content)
-        assert.equal(toolMessage.result.output.content[0].text, 'mcp ok')
+        if (calls === 2) {
+          assert.equal(toolMessage.result.output.content[0].text, 'first:1')
+          return JSON.stringify({ action: 'tool', tool: 'mcp__local__echo', input: { text: 'second' } })
+        }
+        assert.equal(toolMessage.result.output.content[0].text, 'second:2')
         return JSON.stringify({ action: 'final', text: 'native mcp ok' })
       }
 
-      const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 2 })
+      const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 3 })
       assert.equal(result.text, 'native mcp ok')
     })
   })

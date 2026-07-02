@@ -44,10 +44,10 @@ export async function loadMcpToolAdapters({ cwd = process.cwd(), timeoutMs = 30_
   const tools = []
   const errors = []
   const used = new Set()
-  for (const [serverName, server] of Object.entries(config.mcpServers || {})) {
+  for (const serverName of Object.keys(config.mcpServers || {})) {
     if (disabled.has(serverName)) continue
     try {
-      const listed = await withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/list'))
+      const listed = await listMcpTools({ cwd, serverName, timeoutMs })
       for (const tool of listed.tools || []) {
         if (!tool?.name) continue
         const nativeName = nativeMcpToolName(serverName, tool.name)
@@ -108,26 +108,28 @@ function startServer(server, cwd) {
   return spawn(server.command, args, { cwd: serverCwd, env: { ...process.env, ...(server.env || {}) }, stdio: ['pipe', 'pipe', 'pipe'] })
 }
 
-export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 30_000 }, callback) {
+function createMcpClient({ server, cwd = process.cwd(), timeoutMs = 30_000, onClose = null }) {
   const child = startServer(server, cwd)
   const state = { buffer: Buffer.alloc(0), nextId: 1, pending: new Map(), stderr: '' }
+  let closed = false
+  let exited = false
   function rejectPending(error) {
-    for (const pending of state.pending.values()) pending.reject(error)
+    for (const pending of state.pending.values()) {
+      clearTimeout(pending.timer)
+      pending.reject(error)
+    }
     state.pending.clear()
   }
-
-  let closed = false
-  let timedOut = false
-  let exited = false
-  const timer = setTimeout(() => {
-    timedOut = true
-    const error = new Error(`MCP server timed out after ${timeoutMs}ms`)
+  function close(error = new Error('MCP server closed')) {
+    if (closed) return
+    closed = true
     rejectPending(error)
     child.kill('SIGTERM')
     setTimeout(() => {
       if (!exited) child.kill('SIGKILL')
     }, 1_000)
-  }, timeoutMs)
+    onClose?.()
+  }
 
   child.stderr.on('data', (chunk) => {
     state.stderr += chunk.toString('utf8')
@@ -138,31 +140,36 @@ export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 3
       if (Object.prototype.hasOwnProperty.call(message, 'id') && state.pending.has(message.id)) {
         const pending = state.pending.get(message.id)
         state.pending.delete(message.id)
+        clearTimeout(pending.timer)
         pending.resolve(message)
       }
     }
   })
   child.on('close', () => {
     exited = true
-    closed = true
-    rejectPending(new Error(timedOut ? `MCP server timed out after ${timeoutMs}ms` : 'MCP server closed'))
+    close(new Error('MCP server closed'))
   })
   child.on('error', (error) => {
     exited = true
-    closed = true
-    rejectPending(error)
+    close(error)
   })
 
   function sendRaw(message) {
     child.stdin.write(encodeMessage(message))
   }
-  function request(method, params = {}) {
-    if (closed || timedOut) throw new Error(timedOut ? `MCP server timed out after ${timeoutMs}ms` : 'MCP server is closed')
+  function request(method, params = {}, requestTimeoutMs = timeoutMs) {
+    if (closed) throw new Error('MCP server is closed')
     const id = state.nextId
     state.nextId += 1
     const message = { jsonrpc: '2.0', id, method, params }
     return new Promise((resolvePromise, rejectPromise) => {
-      state.pending.set(id, { resolve: resolvePromise, reject: rejectPromise })
+      const timer = setTimeout(() => {
+        state.pending.delete(id)
+        const error = new Error(`MCP request timed out after ${requestTimeoutMs}ms`)
+        rejectPromise(error)
+        close(error)
+      }, requestTimeoutMs)
+      state.pending.set(id, { resolve: resolvePromise, reject: rejectPromise, timer })
       sendRaw(message)
     }).then((response) => {
       if (response.error) throw new Error(response.error.message || JSON.stringify(response.error))
@@ -172,18 +179,63 @@ export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 3
   function notify(method, params = {}) {
     sendRaw({ jsonrpc: '2.0', method, params })
   }
-
-  try {
+  async function initialize() {
     await request('initialize', {
       protocolVersion: MCP_PROTOCOL_VERSION,
       capabilities: {},
       clientInfo: { name: 'jeden', version: '0.1.0' },
     })
     notify('notifications/initialized')
-    return await callback({ request, notify, stderr: () => state.stderr })
+    return api
+  }
+  const api = { request, notify, stderr: () => state.stderr, close, initialize }
+  return api
+}
+
+export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 30_000 }, callback) {
+  const client = createMcpClient({ server, cwd, timeoutMs })
+  try {
+    await client.initialize()
+    return await callback(client)
   } finally {
-    clearTimeout(timer)
-    child.kill('SIGTERM')
+    client.close()
+  }
+}
+
+const MCP_CLIENTS = new Map()
+
+function mcpClientKey(cwd, serverName) {
+  return `${resolve(cwd)}\u0000${serverName}`
+}
+
+async function getMcpClient({ cwd = process.cwd(), serverName, timeoutMs = 30_000 } = {}) {
+  const key = mcpClientKey(cwd, serverName)
+  const cached = MCP_CLIENTS.get(key)
+  if (cached) return cached
+  const server = await configuredServer({ cwd, serverName })
+  const client = createMcpClient({
+    server,
+    cwd,
+    timeoutMs,
+    onClose: () => MCP_CLIENTS.delete(key),
+  })
+  MCP_CLIENTS.set(key, client)
+  try {
+    await client.initialize()
+    return client
+  } catch (error) {
+    MCP_CLIENTS.delete(key)
+    client.close()
+    throw error
+  }
+}
+
+export async function closeMcpClients({ cwd = null } = {}) {
+  const prefix = cwd ? `${resolve(cwd)}\u0000` : null
+  for (const [key, client] of Array.from(MCP_CLIENTS.entries())) {
+    if (prefix && key.slice(0, prefix.length) !== prefix) continue
+    MCP_CLIENTS.delete(key)
+    client.close()
   }
 }
 
@@ -197,34 +249,34 @@ async function configuredServer({ cwd, serverName }) {
 }
 
 export async function listMcpTools({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/list'))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('tools/list', {}, timeoutMs)
 }
 
 export async function callMcpTool({ cwd = process.cwd(), serverName, toolName, args = {}, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
   if (!toolName) throw new Error('toolName is required')
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/call', { name: toolName, arguments: args }))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('tools/call', { name: toolName, arguments: args }, timeoutMs)
 }
 
 export async function listMcpResources({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('resources/list'))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('resources/list', {}, timeoutMs)
 }
 
 export async function readMcpResource({ cwd = process.cwd(), serverName, uri, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
   if (!uri) throw new Error('uri is required')
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('resources/read', { uri }))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('resources/read', { uri }, timeoutMs)
 }
 
 export async function listMcpPrompts({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('prompts/list'))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('prompts/list', {}, timeoutMs)
 }
 
 export async function getMcpPrompt({ cwd = process.cwd(), serverName, name, args = {}, timeoutMs } = {}) {
-  const server = await configuredServer({ cwd, serverName })
   if (!name) throw new Error('name is required')
-  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('prompts/get', { name, arguments: args }))
+  const client = await getMcpClient({ cwd, serverName, timeoutMs })
+  return client.request('prompts/get', { name, arguments: args }, timeoutMs)
 }

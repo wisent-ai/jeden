@@ -10,7 +10,7 @@ import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
 import { applyConfigEnv, loadJedenConfig } from './config.js'
 import { loadCustomTools } from './custom-tools.js'
-import { loadMcpToolAdapters } from './mcp.js'
+import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 
 
 function usage() {
@@ -385,15 +385,19 @@ async function loadCliTools(args) {
 }
 
 async function showTools(args) {
-  const { tools, custom, mcp } = await loadCliTools(args)
-  for (const tool of tools) {
-    process.stdout.write(`${tool.name}\t${tool.description}\n`)
-  }
-  for (const error of custom.errors) {
-    process.stderr.write(`custom tool skipped: ${error.path}: ${error.error}\n`)
-  }
-  for (const error of mcp.errors) {
-    process.stderr.write(`mcp tool skipped: ${error.server}${error.tool ? `/${error.tool}` : ''}: ${error.error}\n`)
+  try {
+    const { tools, custom, mcp } = await loadCliTools(args)
+    for (const tool of tools) {
+      process.stdout.write(`${tool.name}\t${tool.description}\n`)
+    }
+    for (const error of custom.errors) {
+      process.stderr.write(`custom tool skipped: ${error.path}: ${error.error}\n`)
+    }
+    for (const error of mcp.errors) {
+      process.stderr.write(`mcp tool skipped: ${error.server}${error.tool ? `/${error.tool}` : ''}: ${error.error}\n`)
+    }
+  } finally {
+    await closeMcpClients({ cwd: args.cwd })
   }
 }
 
@@ -403,30 +407,34 @@ async function showConfig(args) {
 }
 
 async function showDoctor(args) {
-  const config = await loadJedenConfig({ cwd: args.cwd })
-  const { builtIn, custom, mcp } = await loadCliTools(args)
-  const report = {
-    ok: custom.errors.length === 0 && mcp.errors.length === 0,
-    cwd: args.cwd,
-    node: process.version,
-    model: process.env.JEDEN_MODEL || config.model,
-    modelRouterUrl: config.modelRouterUrl,
-    agentId: config.agentId,
-    env: {
-      hasAuthSecret: Boolean(process.env.WISENT_APP_AGENT_AUTH_SECRET),
-      hasModelRouterUrl: Boolean(process.env.MODEL_ROUTER_URL),
-      hasAgentId: Boolean(process.env.WISENT_APP_AGENT_ID),
-    },
-    tools: {
-      builtIn: builtIn.length,
-      custom: custom.tools.length,
-      mcp: mcp.tools.length,
-      total: builtIn.length + custom.tools.length + mcp.tools.length,
-    },
-    customToolErrors: custom.errors,
-    mcpToolErrors: mcp.errors,
+  try {
+    const config = await loadJedenConfig({ cwd: args.cwd })
+    const { builtIn, custom, mcp } = await loadCliTools(args)
+    const report = {
+      ok: custom.errors.length === 0 && mcp.errors.length === 0,
+      cwd: args.cwd,
+      node: process.version,
+      model: process.env.JEDEN_MODEL || config.model,
+      modelRouterUrl: config.modelRouterUrl,
+      agentId: config.agentId,
+      env: {
+        hasAuthSecret: Boolean(process.env.WISENT_APP_AGENT_AUTH_SECRET),
+        hasModelRouterUrl: Boolean(process.env.MODEL_ROUTER_URL),
+        hasAgentId: Boolean(process.env.WISENT_APP_AGENT_ID),
+      },
+      tools: {
+        builtIn: builtIn.length,
+        custom: custom.tools.length,
+        mcp: mcp.tools.length,
+        total: builtIn.length + custom.tools.length + mcp.tools.length,
+      },
+      customToolErrors: custom.errors,
+      mcpToolErrors: mcp.errors,
+    }
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+  } finally {
+    await closeMcpClients({ cwd: args.cwd })
   }
-  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
 }
 
 
