@@ -169,6 +169,22 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
+test('read_image returns dimensions and capped base64', async () => {
+  await withTempDir(async (dir) => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAQAAADoP0S7AAAADElEQVR42mP8z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')
+    await writeFile(join(dir, 'tiny.png'), png)
+    const registry = createToolRegistry({ cwd: dir })
+    const image = await registry.execute('read_image', { path: 'tiny.png', maxBytes: 12 })
+    assert.equal(image.ok, true)
+    assert.equal(image.output.mimeType, 'image/png')
+    assert.equal(image.output.width, 2)
+    assert.equal(image.output.height, 3)
+    assert.equal(image.output.bytes, png.length)
+    assert.equal(image.output.truncated, true)
+    assert.equal(image.output.base64, png.subarray(0, 12).toString('base64'))
+  })
+})
+
 test('read_document extracts JSON notebooks and basic PDF text', async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, 'data.json'), '{"z":1,"a":{"ok":true}}', 'utf8')

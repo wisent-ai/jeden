@@ -312,6 +312,53 @@ function mimeTypeForPath(path) {
   }
 }
 
+function readUint24LE(buffer, offset) {
+  return buffer[offset] | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16)
+}
+
+function imageMetadata(buffer, path = '') {
+  const bytes = Buffer.from(buffer)
+  const mimeType = mimeTypeForPath(path)
+  if (bytes.length >= 24 && bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
+    return { mimeType: 'image/png', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+  }
+  if (bytes.length >= 10 && bytes.subarray(0, 3).toString('ascii') === 'GIF') {
+    return { mimeType: 'image/gif', width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) }
+  }
+  if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+    let offset = 2
+    while (offset + 9 < bytes.length) {
+      while (bytes[offset] === 0xff) offset += 1
+      const marker = bytes[offset++]
+      if (marker === 0xd9 || marker === 0xda) break
+      if (offset + 2 > bytes.length) break
+      const length = bytes.readUInt16BE(offset)
+      if (length < 2 || offset + length > bytes.length) break
+      if ((marker >= 0xc0 && marker <= 0xc3) || (marker >= 0xc5 && marker <= 0xc7) || (marker >= 0xc9 && marker <= 0xcb) || (marker >= 0xcd && marker <= 0xcf)) {
+        return { mimeType: 'image/jpeg', width: bytes.readUInt16BE(offset + 5), height: bytes.readUInt16BE(offset + 3) }
+      }
+      offset += length
+    }
+  }
+  if (bytes.length >= 30 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP') {
+    let offset = 12
+    while (offset + 8 <= bytes.length) {
+      const chunk = bytes.subarray(offset, offset + 4).toString('ascii')
+      const size = bytes.readUInt32LE(offset + 4)
+      const data = offset + 8
+      if (data + size > bytes.length) break
+      if (chunk === 'VP8X' && size >= 10) return { mimeType: 'image/webp', width: readUint24LE(bytes, data + 4) + 1, height: readUint24LE(bytes, data + 7) + 1 }
+      if (chunk === 'VP8 ' && size >= 10 && bytes[data + 3] === 0x9d && bytes[data + 4] === 0x01 && bytes[data + 5] === 0x2a) return { mimeType: 'image/webp', width: bytes.readUInt16LE(data + 6) & 0x3fff, height: bytes.readUInt16LE(data + 8) & 0x3fff }
+      if (chunk === 'VP8L' && size >= 5 && bytes[data] === 0x2f) {
+        const bits = bytes.readUInt32LE(data + 1)
+        return { mimeType: 'image/webp', width: (bits & 0x3fff) + 1, height: ((bits >> 14) & 0x3fff) + 1 }
+      }
+      offset = data + size + (size % 2)
+    }
+  }
+  return { mimeType, width: null, height: null }
+}
+
 
 function replaceExactlyOnce(content, oldText, newText) {
   if (typeof oldText !== 'string' || oldText.length === 0) throw new Error('old text is required')
@@ -860,6 +907,31 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         bytes: content.length,
         truncated: content.length > sliced.length,
         mimeType: mimeTypeForPath(file),
+        base64: sliced.toString('base64'),
+        sha256: sha256(content),
+      }
+    },
+  })
+
+  add({
+    name: 'read_image',
+    description: 'Read one PNG, JPEG, GIF, or WebP image under cwd as base64 with mime type and dimensions, capped at 512KB',
+    input: { path: 'string required', maxBytes: 'number optional' },
+    async execute(input) {
+      if (!input.path) throw new Error('path is required')
+      const file = jailPath(cwd, input.path)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1), MAX_READ_BYTES)
+      const content = await readFile(file)
+      const sliced = content.subarray(0, maxBytes)
+      const metadata = imageMetadata(content, file)
+      if (metadata.mimeType.indexOf('image/') !== 0) throw new Error(`unsupported image type: ${metadata.mimeType}`)
+      return {
+        path: publicPath(cwd, file),
+        bytes: content.length,
+        truncated: content.length > sliced.length,
+        mimeType: metadata.mimeType,
+        width: metadata.width,
+        height: metadata.height,
         base64: sliced.toString('base64'),
         sha256: sha256(content),
       }
