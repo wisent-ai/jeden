@@ -233,6 +233,7 @@ function readableTextForDocument({ content, file }) {
   if (ext === '.csv') return readableTextFromDelimited(raw, ',')
   if (ext === '.tsv' || ext === '.tab') return readableTextFromDelimited(raw, '\t')
   if (ext === '.html' || ext === '.htm') return readableTextFromHtml(raw)
+  if (ext === '.xml' || ext === '.rss' || ext === '.atom') return readableTextFromFeed(raw)
   return raw
 }
 
@@ -240,7 +241,7 @@ function readableTextForUrlContent({ buffer, contentType, urlPath }) {
   const type = String(contentType || '').toLowerCase()
   const ext = extname(urlPath || '').toLowerCase()
   if (type.indexOf('pdf') !== -1 || ext === '.pdf') return readableTextFromPdf(buffer)
-  if (ext === '.ipynb' || ext === '.json' || ext === '.html' || ext === '.htm' || ext === '.csv' || ext === '.tsv' || ext === '.tab') return readableTextForDocument({ content: buffer, file: urlPath })
+  if (ext === '.ipynb' || ext === '.json' || ext === '.html' || ext === '.htm' || ext === '.csv' || ext === '.tsv' || ext === '.tab' || ext === '.xml' || ext === '.rss' || ext === '.atom') return readableTextForDocument({ content: buffer, file: urlPath })
   return readableTextForContent(Buffer.from(buffer).toString('utf8'), contentType)
 }
 
@@ -1051,7 +1052,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_document',
-    description: 'Extract readable text from one document under cwd; supports text, HTML, JSON, notebooks, and basic PDF text streams; capped at 512KB output',
+    description: 'Extract readable text from one document under cwd; supports text, HTML, JSON, CSV/TSV, XML/RSS/Atom, notebooks, and basic PDF text streams; capped at 512KB output',
     input: { path: 'string required', maxBytes: 'number optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')

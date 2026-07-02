@@ -189,6 +189,7 @@ test('read_document extracts JSON notebooks and basic PDF text', async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, 'data.json'), '{"z":1,"a":{"ok":true}}', 'utf8')
     await writeFile(join(dir, 'data.csv'), 'name,count\nalpha,1\n"beta, quoted",2\n', 'utf8')
+    await writeFile(join(dir, 'feed.xml'), '<rss><channel><title>Local News</title><item><title>One</title><link>https://example.com/one</link></item><item><title>Two</title></item></channel></rss>', 'utf8')
     await writeFile(join(dir, 'analysis.ipynb'), JSON.stringify({ cells: [{ cell_type: 'markdown', source: ['# Title\n', 'Body'] }, { cell_type: 'code', source: ['print("ok")\n'] }] }), 'utf8')
     await writeFile(join(dir, 'paper.pdf'), `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
@@ -205,6 +206,8 @@ trailer << /Root 1 0 R >>
     assert.equal(json.output.text, '{\n  "z": 1,\n  "a": {\n    "ok": true\n  }\n}')
     const csv = await registry.execute('read_document', { path: 'data.csv' })
     assert.equal(csv.output.text, '| name | count |\n| --- | --- |\n| alpha | 1 |\n| beta, quoted | 2 |')
+    const xml = await registry.execute('read_document', { path: 'feed.xml' })
+    assert.equal(xml.output.text, '# Local News\n- One — https://example.com/one\n- Two')
     const notebook = await registry.execute('read_document', { path: 'analysis.ipynb' })
     assert.match(notebook.output.text, /# %% \[markdown\] cell:1\n# Title\nBody/)
     assert.match(notebook.output.text, /# %% \[code\] cell:2\nprint\("ok"\)/)
