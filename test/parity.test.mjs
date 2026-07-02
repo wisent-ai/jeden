@@ -196,6 +196,75 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
+test('filesystem mutation tools require hashes and mutate safely', async () => {
+  await withTempDir(async (dir) => {
+    const locked = createToolRegistry({ cwd: dir })
+    const denied = await locked.execute('write_file', { path: 'notes.txt', content: 'draft\n' })
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /requires --allow-write/)
+
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const created = await registry.execute('write_file', { path: 'notes.txt', content: 'alpha\nbravo\n' })
+    assert.equal(created.ok, true)
+    assert.equal(created.output.path, 'notes.txt')
+
+    const missingHash = await registry.execute('write_file', { path: 'notes.txt', content: 'bad\n' })
+    assert.equal(missingHash.ok, false)
+    assert.match(missingHash.error, /expectedSha256 is required/)
+    assert.equal(await readFile(join(dir, 'notes.txt'), 'utf8'), 'alpha\nbravo\n')
+
+    const current = await registry.execute('read_file', { path: 'notes.txt' })
+    const patched = await registry.execute('apply_patch', {
+      path: 'notes.txt',
+      expectedSha256: current.output.sha256,
+      replacements: [{ old: 'bravo', new: 'charlie' }],
+    })
+    assert.equal(patched.ok, true)
+    assert.equal(await readFile(join(dir, 'notes.txt'), 'utf8'), 'alpha\ncharlie\n')
+
+    const patchedCurrent = await registry.execute('read_file', { path: 'notes.txt' })
+    const moved = await registry.execute('move_file', { from: 'notes.txt', to: 'archive/notes.txt', expectedSha256: patchedCurrent.output.sha256 })
+    assert.deepEqual(moved.output, { from: 'notes.txt', to: 'archive/notes.txt', moved: true })
+    assert.equal(await readFile(join(dir, 'archive', 'notes.txt'), 'utf8'), 'alpha\ncharlie\n')
+    await assert.rejects(() => readFile(join(dir, 'notes.txt'), 'utf8'), /ENOENT/)
+
+    const movedCurrent = await registry.execute('read_file', { path: 'archive/notes.txt' })
+    const deleted = await registry.execute('delete_file', { path: 'archive/notes.txt', expectedSha256: movedCurrent.output.sha256 })
+    assert.deepEqual(deleted.output, { path: 'archive/notes.txt', deleted: true })
+    await assert.rejects(() => readFile(join(dir, 'archive', 'notes.txt'), 'utf8'), /ENOENT/)
+  })
+})
+
+test('list_dir and read_binary_file expose bounded metadata', async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(join(dir, 'nested'), { recursive: true })
+    await writeFile(join(dir, 'nested', 'child.txt'), 'child\n', 'utf8')
+    const binary = Buffer.from([0, 1, 2, 3, 4])
+    await writeFile(join(dir, 'data.bin'), binary)
+    const registry = createToolRegistry({ cwd: dir })
+
+    const shallow = await registry.execute('list_dir', {})
+    assert.deepEqual(shallow.output, [
+      { name: 'data.bin', type: 'file' },
+      { name: 'nested', type: 'dir' },
+    ])
+
+    const recursive = await registry.execute('list_dir', { depth: 2, limit: 10 })
+    assert.deepEqual(recursive.output.entries.map((entry) => [entry.path, entry.type]), [
+      ['data.bin', 'file'],
+      ['nested', 'dir'],
+      ['nested/child.txt', 'file'],
+    ])
+    assert.equal(recursive.output.truncated, false)
+
+    const readBinary = await registry.execute('read_binary_file', { path: 'data.bin', maxBytes: 3 })
+    assert.equal(readBinary.output.path, 'data.bin')
+    assert.equal(readBinary.output.bytes, 5)
+    assert.equal(readBinary.output.truncated, true)
+    assert.equal(readBinary.output.base64, binary.subarray(0, 3).toString('base64'))
+  })
+})
+
 test('read_image returns metadata for PNG, GIF, JPEG, and WebP', async () => {
   await withTempDir(async (dir) => {
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAQAAADoP0S7AAAADElEQVR42mP8z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')
