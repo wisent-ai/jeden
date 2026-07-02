@@ -38,7 +38,7 @@ The private M1 version includes:
 - Project context auto-loads user context, ancestor context, and cwd context files before each run.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
-- No tests are included; repository hooks and `npm run check` are the quality gate.
+- `npm test` runs zero-dependency parity tests for protocol, file tools, context imports, and session artifacts; `npm run check` remains the syntax gate.
 
 ## CLI
 

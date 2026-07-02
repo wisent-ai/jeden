@@ -10,7 +10,8 @@
     ".": "./src/index.js"
   },
   "scripts": {
-    "check": "node scripts/check-syntax.mjs"
+    "check": "node scripts/check-syntax.mjs",
+    "test": "node --test"
   },
   "engines": {
     "node": ">=20"
