@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { toolCapability } from './tools.js'
 
 function runHookProcess({ runnerPath, event, payload, timeoutMs }) {
   return new Promise((resolve) => {
@@ -54,12 +55,10 @@ export function createSharedHookRunner({
 }
 
 export function toolHookEvent(tool) {
-  if (tool === 'run_command' || tool === 'run_package_script') return 'pre_tool_use:bash'
-  if (tool === 'write_file' || tool === 'apply_patch' || tool === 'save_artifact') return 'pre_tool_use:edit'
-  return 'pre_tool_use:read'
+  return `pre_tool_use:${toolCapability(tool).hook || 'read'}`
 }
 
 export function postToolHookEvent(tool) {
-  if (tool === 'run_command' || tool === 'run_package_script') return 'post_tool_use:bash'
-  return null
+  const hook = toolCapability(tool).postHook
+  return hook ? `post_tool_use:${hook}` : null
 }

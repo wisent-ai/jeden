@@ -14,6 +14,24 @@ const MAX_SEARCH_RESULTS = 100
 const MAX_SEARCH_FILES = 2_000
 const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'coverage', '.vercel'])
 
+export const TOOL_CAPABILITIES = {
+  write_file: { permission: 'write', hook: 'edit' },
+  apply_patch: { permission: 'write', hook: 'edit' },
+  edit_file: { permission: 'write', hook: 'edit' },
+  delete_file: { permission: 'write', hook: 'edit' },
+  move_file: { permission: 'write', hook: 'edit' },
+  save_artifact: { hook: 'edit' },
+  run_command: { permission: 'command', hook: 'bash', postHook: 'bash' },
+  run_package_script: { permission: 'command', hook: 'bash', postHook: 'bash' },
+  node_eval: { permission: 'command', hook: 'bash', postHook: 'bash' },
+  python_eval: { permission: 'command', hook: 'bash', postHook: 'bash' },
+  delegate_task: { permission: 'command', hook: 'bash', postHook: 'bash' },
+}
+
+export function toolCapability(tool) {
+  return TOOL_CAPABILITIES[tool] || { hook: 'read' }
+}
+
 function sha256(content) {
   return createHash('sha256').update(content).digest('hex')
 }

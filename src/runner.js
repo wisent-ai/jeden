@@ -1,7 +1,7 @@
 import { chatCompletion, modelRouterConfig } from './model-router.js'
 import { parseAction, formatToolResult } from './protocol.js'
 import { systemPrompt } from './policy.js'
-import { createToolRegistry } from './tools.js'
+import { createToolRegistry, toolCapability } from './tools.js'
 import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
@@ -71,9 +71,7 @@ function toOpenAIToolSpecs(list) {
 
 
 function approvalKind(tool) {
-  if (tool === 'write_file' || tool === 'apply_patch' || tool === 'edit_file' || tool === 'delete_file' || tool === 'move_file') return 'write'
-  if (tool === 'run_command' || tool === 'run_package_script' || tool === 'node_eval' || tool === 'python_eval' || tool === 'delegate_task') return 'command'
-  return null
+  return toolCapability(tool).permission || null
 }
 
 async function maybeApprove({ action, allowWrite, allowCommand, approveTool, recorder }) {
