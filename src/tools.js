@@ -456,15 +456,18 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'search_files',
-    description: 'Recursively search text files under cwd for a literal string, capped at 100 matches',
-    input: { path: 'string optional', query: 'string required' },
+    description: 'Recursively search text files under cwd for a literal string, capped at 500 matches; supports limit and skip',
+    input: { path: 'string optional', query: 'string required', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.query) throw new Error('query is required')
       const root = jailPath(cwd, input.path || '.')
       const files = await discoverTextFiles(cwd, root)
+      const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
+      const skip = Math.max(Number(input.skip) || 0, 0)
+      let seen = 0
       const matches = []
       for (const file of files) {
-        if (matches.length >= MAX_SEARCH_RESULTS) break
+        if (matches.length >= limit) break
         let content = ''
         try {
           content = await readFile(file, 'utf8')
@@ -475,40 +478,45 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         const lines = content.split(/\r?\n/)
         for (let i = 0; i < lines.length; i += 1) {
           if (lines[i].indexOf(String(input.query)) !== -1) {
+            seen += 1
+            if (seen <= skip) continue
             matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
-            if (matches.length >= MAX_SEARCH_RESULTS) break
+            if (matches.length >= limit) break
           }
         }
       }
-      return { searchedFiles: files.length, matches }
+      return { searchedFiles: files.length, skip, limit, matches }
     },
   })
 
   add({
     name: 'glob_paths',
     description: 'Find files and directories under cwd with simple glob patterns; supports * and **; skips gitignored files when possible',
-    input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', limit: 'number optional' },
+    input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       const root = jailPath(cwd, input.path || '.')
       const limit = Math.min(Math.max(Number(input.limit) || 200, 1), 2_000)
+      const skip = Math.max(Number(input.skip) || 0, 0)
       const rawPatterns = Array.isArray(input.patterns) ? input.patterns : [input.patterns || '**']
       const paths = await discoverPathEntries(cwd, root, { hidden: Boolean(input.hidden), limit: MAX_SEARCH_FILES })
       const matches = paths
         .filter((entry) => matchesPattern(entry.path, rawPatterns))
-        .slice(0, limit)
+        .slice(skip, skip + limit)
         .map((entry) => ({ path: entry.path, type: entry.type }))
-      return { matches }
+      return { skip, limit, matches }
     },
   })
 
   add({
     name: 'grep_regex',
-    description: 'Search text files under cwd with a JavaScript regular expression, capped at 100 matches',
-    input: { expr: 'string required', path: 'string optional', caseSensitive: 'boolean optional', limit: 'number optional' },
+    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports limit and skip',
+    input: { expr: 'string required', path: 'string optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.expr || typeof input.expr !== 'string') throw new Error('expr is required')
       const root = jailPath(cwd, input.path || '.')
       const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
+      const skip = Math.max(Number(input.skip) || 0, 0)
+      let seen = 0
       const matcher = new globalThis.RegExp(input.expr, input.caseSensitive ? '' : 'i')
       const files = await discoverTextFiles(cwd, root)
       const matches = []
@@ -525,12 +533,14 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         for (let i = 0; i < lines.length; i += 1) {
           matcher.lastIndex = 0
           if (matcher.exec(lines[i])) {
+            seen += 1
+            if (seen <= skip) continue
             matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })
             if (matches.length >= limit) break
           }
         }
       }
-      return { searchedFiles: files.length, matches }
+      return { searchedFiles: files.length, skip, limit, matches }
     },
   })
 
