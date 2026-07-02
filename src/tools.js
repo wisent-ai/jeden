@@ -132,7 +132,7 @@ async function packageScripts(cwd) {
 }
 
 
-export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null } = {}) {
+export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null, customTools = [] } = {}) {
   const tools = new Map()
 
   function add(definition) {
@@ -358,6 +358,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       return { path: file, bytes: Buffer.byteLength(input.content, 'utf8') }
     },
   })
+
+  for (const tool of customTools) {
+    if (tools.has(tool.name)) throw new Error(`tool name conflict: ${tool.name}`)
+    add(tool)
+  }
 
   return {
     list() {

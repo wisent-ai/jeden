@@ -25,6 +25,7 @@ The private M1 version includes:
 - Git read tools: `git_status`, `git_diff`.
 - Web read tool: `fetch_url`.
 - Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
+- Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
@@ -37,6 +38,7 @@ jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
 jeden sessions 20
 jeden show <session-id-or-path>
+jeden tools --cwd ../content-platform
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
 ```
@@ -56,6 +58,28 @@ Hooks can be disabled for debugging with:
 
 ```sh
 JEDEN_HOOKS=0 jeden run "..." 
+```
+
+## Custom tools
+
+Custom tool modules export a default factory. The factory receives `{ cwd, exec, readText }` and returns one tool or an array of tools:
+
+```js
+export default (jeden) => ({
+  name: 'repo_name',
+  description: 'Return package name from package.json',
+  input: {},
+  async execute() {
+    const pkg = JSON.parse(await jeden.readText('package.json'))
+    return { name: pkg.name }
+  },
+})
+```
+
+Discovery order is user tools first, then project tools. Tool names must be unique and cannot collide with built-ins. List active tools with:
+
+```sh
+jeden tools --cwd .
 ```
 ## JSON action protocol
 

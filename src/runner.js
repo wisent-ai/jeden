@@ -2,6 +2,7 @@ import { chatCompletion, modelRouterConfig } from './model-router.js'
 import { parseAction, formatToolResult } from './protocol.js'
 import { systemPrompt } from './policy.js'
 import { createToolRegistry } from './tools.js'
+import { loadCustomTools } from './custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 
 
@@ -58,7 +59,10 @@ export async function runJeden({
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
-  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null })
+  const builtInToolNames = createToolRegistry({ cwd, allowWrite, allowCommand, artifactDir: recorder?.artifactDir?.() || null }).list().map((tool) => tool.name)
+  const custom = await loadCustomTools({ cwd, builtInToolNames })
+  const tools = createToolRegistry({ cwd, allowWrite: allowWrite || Boolean(approveTool), allowCommand: allowCommand || Boolean(approveTool), artifactDir: recorder?.artifactDir?.() || null, customTools: custom.tools })
+  if (custom.errors.length > 0) await recorder?.record('custom_tool_errors', { errors: custom.errors })
   const messages = [
     { role: 'system', content: systemPrompt(tools.list()) },
     { role: 'user', content: task },

@@ -6,6 +6,8 @@ import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
 import { SessionRecorder, listSessions, readSession } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
+import { createToolRegistry } from './tools.js'
+import { loadCustomTools } from './custom-tools.js'
 
 
 function usage() {
@@ -14,6 +16,7 @@ function usage() {
   jeden run "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden show <session-id-or-path>
+  jeden tools [--cwd path]
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -77,6 +80,9 @@ function parseArgs(argv) {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('show requires a session id or path')
     return { command: 'show', idOrPath }
+  }
+  if (first === 'tools') {
+    return { command: 'tools', ...parseSharedOptions(rest) }
   }
   if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
   throw new Error(`unknown command: ${first}`)
@@ -168,6 +174,18 @@ async function showSession(idOrPath) {
   }
 }
 
+async function showTools(args) {
+  const builtIn = createToolRegistry({ cwd: args.cwd }).list()
+  const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
+  const tools = createToolRegistry({ cwd: args.cwd, customTools: custom.tools }).list()
+  for (const tool of tools) {
+    process.stdout.write(`${tool.name}\t${tool.description}\n`)
+  }
+  for (const error of custom.errors) {
+    process.stderr.write(`custom tool skipped: ${error.path}: ${error.error}\n`)
+  }
+}
+
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
@@ -182,6 +200,10 @@ async function main() {
   }
   if (args.command === 'show') {
     await showSession(args.idOrPath)
+    return
+  }
+  if (args.command === 'tools') {
+    await showTools(args)
     return
   }
   if (args.command === 'run') {
