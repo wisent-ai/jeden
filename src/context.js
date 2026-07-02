@@ -44,13 +44,42 @@ function labelPath(base, dir, file) {
   const relDir = relative(base, dir)
   return relDir ? `${relDir}/${file}` : file
 }
+
+async function readContextImport(root, sourceDir, specifier) {
+  if (!specifier || specifier.slice(0, 1) === '/') return null
+  const file = resolve(sourceDir, specifier)
+  if (!under(root, file)) return null
+  try {
+    const info = await stat(file)
+    if (!info.isFile() || info.size > MAX_CONTEXT_BYTES) return null
+    return { path: relative(root, file), content: await readFile(file, 'utf8') }
+  } catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
+    throw error
+  }
+}
+
+async function expandContextImports(root, relativePath, content) {
+  const sourceDir = dirname(resolve(root, relativePath))
+  const imports = []
+  for (const line of content.split(/\r?\n/)) {
+    const match = /^@([^\s]+)\s*$/.exec(line.trim())
+    if (!match) continue
+    const imported = await readContextImport(root, sourceDir, match[1])
+    if (imported) imports.push(imported)
+  }
+  if (imports.length === 0) return content
+  const sections = imports.map((item) => `# Imported ${item.path}\n${item.content.trim()}`)
+  return `${content.trim()}\n\n${sections.join('\n\n')}\n`
+}
 async function readContextFile(root, relativePath, label = relativePath) {
   const file = resolve(root, relativePath)
   if (!under(root, file)) return null
   try {
     const info = await stat(file)
     if (!info.isFile() || info.size > MAX_CONTEXT_BYTES) return null
-    return { path: label, content: await readFile(file, 'utf8') }
+    const content = await expandContextImports(root, relativePath, await readFile(file, 'utf8'))
+    return { path: label, content }
   } catch (error) {
     if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return null
     throw error

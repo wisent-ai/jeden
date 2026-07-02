@@ -62,9 +62,8 @@ MODEL_ROUTER_URL=https://model-router-1080673333190.us-central1.run.app
 WISENT_APP_AGENT_ID=wisent-app
 ```
 
-The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from the launch directory and from `--cwd` before calling the router. Existing shell variables win.
+Before each run, Jeden appends context files to the system prompt when present. User context loads from `~/.jeden/instructions.md` and `~/.jeden/context.md`; project context walks from the home/project ancestor down to `--cwd` and reads `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `RULES.md`, `.omp/AGENTS.md`, `.omp/RULES.md`, `.jeden/instructions.md`, and `.jeden/context.md`. A context line like `@./extra.md` imports another file under the same context root. Oversized context files are skipped.
 
-Before each run, Jeden appends context files to the system prompt when present. User context loads from `~/.jeden/instructions.md` and `~/.jeden/context.md`; project context walks from the home/project ancestor down to `--cwd` and reads `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `RULES.md`, `.omp/AGENTS.md`, `.omp/RULES.md`, `.jeden/instructions.md`, and `.jeden/context.md`. Oversized context files are skipped.
 
 
 Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript.
