@@ -12,6 +12,7 @@ import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { runJeden } from '../src/index.js'
+import { systemPrompt } from '../src/policy.js'
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'jeden-test-'))
@@ -151,6 +152,14 @@ test('session artifact readers list sanitized artifact names and read their cont
     assert.equal(artifact.name, 'analysis_report.txt')
     assert.equal(artifact.content, 'ranked output')
   })
+})
+
+test('system prompt enforces dedicated tool policy', () => {
+  const prompt = systemPrompt(createToolRegistry().list())
+  assert.match(prompt, /Use glob_paths\/list_dir for file discovery/)
+  assert.match(prompt, /Use grep_regex\/search_files for content search/)
+  assert.match(prompt, /do not use run_command\/run_process for grep, find, ls, or globbing/)
+  assert.match(prompt, /Use read_file ranges\/selectors for targeted reads/)
 })
 
 test('hook helpers classify tools from capability metadata', () => {

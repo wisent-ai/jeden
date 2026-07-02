@@ -44,6 +44,15 @@ The private M1 version includes:
 - `npm test` runs zero-dependency parity tests for protocol, file tools, context imports, and session artifacts; `npm run check` remains the syntax gate.
 - Tool results larger than the context cap are written to the active session artifacts directory and replaced in the model loop with a compact preview plus artifact path.
 
+## Tool policy
+
+- Use `glob_paths` or `list_dir` for file discovery before reading unknown paths.
+- Use `grep_regex` or `search_files` for content search; do not use `run_command` or `run_process` for grep/find/ls/glob tasks covered by built-in tools.
+- Use `read_file` selectors/ranges for targeted reads instead of dumping large files.
+- Retry one alternate search pattern or narrower path before concluding a file or symbol is absent.
+- Use `run_package_script` for package scripts after `list_package_scripts`; reserve `run_command` and `run_process` for commands without a safer built-in tool.
+- Verify behavior changes with the narrowest relevant tool or package script before final output.
+
 ## CLI
 
 ```sh
