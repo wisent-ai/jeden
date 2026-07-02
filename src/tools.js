@@ -1134,19 +1134,22 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'search_text',
-    description: 'Search one file for a literal string, capped at 50 line matches',
-    input: { path: 'string required', query: 'string required' },
+    description: 'Search one file for a literal string, capped at 50 line matches; case-insensitive by default',
+    input: { path: 'string required', query: 'string required', caseSensitive: 'boolean optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       if (!input.query) throw new Error('query is required')
       const file = jailPath(cwd, input.path)
+      const query = String(input.query)
+      const needle = input.caseSensitive === true ? query : query.toLowerCase()
       const matches = []
       const stream = createReadStream(file, { encoding: 'utf8' })
       const lines = createInterface({ input: stream, crlfDelay: Infinity })
       let lineNumber = 0
       for await (const line of lines) {
         lineNumber += 1
-        if (line.indexOf(String(input.query)) !== -1) {
+        const haystack = input.caseSensitive === true ? line : line.toLowerCase()
+        if (haystack.indexOf(needle) !== -1) {
           matches.push({ line: lineNumber, text: line })
           if (matches.length >= 50) break
         }
@@ -1158,13 +1161,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'search_files',
-    description: 'Recursively search text files under cwd for a literal string, capped at 500 matches; supports path/paths, hidden, gitignore, limit, and skip',
-    input: { path: 'string optional', paths: 'array optional', query: 'string required', hidden: 'boolean optional', gitignore: 'boolean optional', limit: 'number optional', skip: 'number optional' },
+    description: 'Recursively search text files under cwd for a literal string, capped at 500 matches; supports path/paths, hidden, gitignore, caseSensitive, limit, and skip; case-insensitive by default',
+    input: { path: 'string optional', paths: 'array optional', query: 'string required', hidden: 'boolean optional', gitignore: 'boolean optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.query) throw new Error('query is required')
       const files = await textFilesForInputs(cwd, input)
       const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
       const skip = Math.max(Number(input.skip) || 0, 0)
+      const query = String(input.query)
+      const needle = input.caseSensitive === true ? query : query.toLowerCase()
       let seen = 0
       const matches = []
       for (const file of files) {
@@ -1178,7 +1183,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         if (content.indexOf('\u0000') !== -1) continue
         const lines = content.split(/\r?\n/)
         for (let i = 0; i < lines.length; i += 1) {
-          if (lines[i].indexOf(String(input.query)) !== -1) {
+          const haystack = input.caseSensitive === true ? lines[i] : lines[i].toLowerCase()
+          if (haystack.indexOf(needle) !== -1) {
             seen += 1
             if (seen <= skip) continue
             matches.push({ path: publicPath(cwd, file), line: i + 1, text: lines[i] })

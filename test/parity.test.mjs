@@ -281,6 +281,12 @@ test('search_files and grep_regex accept multiple paths', async () => {
 
     const literal = await registry.execute('search_files', { paths: ['left', 'right'], query: 'needle', limit: 10 })
     assert.deepEqual(literal.output.matches.map((match) => match.path), ['left/a.txt', 'right/b.txt'])
+    const insensitiveFile = await registry.execute('search_text', { path: 'left/a.txt', query: 'NEEDLE' })
+    assert.deepEqual(insensitiveFile.output.matches.map((match) => match.line), [1])
+    const sensitiveFile = await registry.execute('search_text', { path: 'left/a.txt', query: 'NEEDLE', caseSensitive: true })
+    assert.deepEqual(sensitiveFile.output.matches, [])
+    const insensitiveTree = await registry.execute('search_files', { paths: ['left', 'right'], query: 'NEEDLE', limit: 10 })
+    assert.deepEqual(insensitiveTree.output.matches.map((match) => match.path), ['left/a.txt', 'right/b.txt'])
 
     const regex = await registry.execute('grep_regex', { paths: ['right'], expr: 'beta\\s+needle', limit: 10 })
     assert.deepEqual(regex.output.matches.map((match) => match.path), ['right/b.txt'])
