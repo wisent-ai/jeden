@@ -280,6 +280,16 @@ export default (api) => ({
 test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities', async () => {
   await withTempDir(async (dir) => {
     await withHttpServer((request, response) => {
+      if (request.url === '/data.json') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end('{"name":"Jeden","nested":{"ok":true}}')
+        return
+      }
+      if (request.url === '/feed.xml') {
+        response.writeHead(200, { 'content-type': 'application/rss+xml' })
+        response.end('<rss><channel><title>News</title><item><title>First</title><link>https://example.com/first</link></item><item><title>Second</title></item></channel></rss>')
+        return
+      }
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
       response.end(`<!doctype html>
 <html>
@@ -303,6 +313,12 @@ test('fetch_readable_url strips scripts, styles, tags, and basic HTML entities',
       assert.equal(result.output.contentType, 'text/html; charset=utf-8')
       assert.equal(result.output.truncated, false)
       assert.equal(result.output.text, 'Tom & Jerry 5 < 7 > 3 "yes" \'ok\' done Visible text')
+
+      const json = await registry.execute('fetch_readable_url', { url: `${origin}/data.json` })
+      assert.equal(json.output.text, '{\n  "name": "Jeden",\n  "nested": {\n    "ok": true\n  }\n}')
+
+      const feed = await registry.execute('fetch_readable_url', { url: `${origin}/feed.xml` })
+      assert.equal(feed.output.text, '# News\n- First — https://example.com/first\n- Second')
     })
   })
 })

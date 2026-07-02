@@ -54,6 +54,43 @@ function readableTextFromHtml(html) {
     .trim()
 }
 
+function xmlText(value) {
+  return readableTextFromHtml(value || '')
+}
+
+function tagText(xml, tag) {
+  const match = new globalThis.RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, 'i').exec(xml)
+  return match ? xmlText(match[1]) : ''
+}
+
+function readableTextFromJson(raw) {
+  return JSON.stringify(JSON.parse(raw), null, 2)
+}
+
+function readableTextFromFeed(raw) {
+  const xml = String(raw || '')
+  const lines = []
+  const feedTitle = tagText(xml, 'title')
+  if (feedTitle) lines.push(`# ${feedTitle}`)
+  const itemRegex = /<(item|entry)\b[^>]*>([\s\S]*?)<\/\1>/gi
+  let match
+  while ((match = itemRegex.exec(xml))) {
+    const body = match[2]
+    const title = tagText(body, 'title') || '(untitled)'
+    const hrefMatch = /<link[^>]*href=["']([^"']+)["'][^>]*>/i.exec(body)
+    const link = hrefMatch ? hrefMatch[1] : tagText(body, 'link')
+    lines.push(link ? `- ${title} — ${xmlText(link)}` : `- ${title}`)
+  }
+  return lines.length > 0 ? lines.join('\n') : readableTextFromHtml(raw)
+}
+
+function readableTextForContent(raw, contentType) {
+  const type = String(contentType || '').toLowerCase()
+  if (type.indexOf('json') !== -1) return readableTextFromJson(raw)
+  if (type.indexOf('rss') !== -1 || type.indexOf('atom') !== -1 || type.indexOf('xml') !== -1) return readableTextFromFeed(raw)
+  return readableTextFromHtml(raw)
+}
+
 
 function jailPath(cwd, inputPath) {
   const root = resolve(cwd)
@@ -1036,14 +1073,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 200_000, 1_000), 1_000_000)
       const response = await fetch(url)
       const raw = Buffer.from(await response.arrayBuffer()).toString('utf8')
-      const readable = readableTextFromHtml(raw)
+      const contentType = response.headers.get('content-type') || null
+      const readable = readableTextForContent(raw, contentType)
       const buffer = Buffer.from(readable, 'utf8')
       const sliced = buffer.subarray(0, maxBytes)
       return {
         url: url.toString(),
         status: response.status,
         ok: response.ok,
-        contentType: response.headers.get('content-type') || null,
+        contentType,
         truncated: buffer.length > sliced.length,
         text: sliced.toString('utf8'),
       }
