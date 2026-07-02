@@ -752,19 +752,22 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_file',
-    description: 'Read a UTF-8 text file under cwd, capped at 512KB; selectors support ranges, comma ranges, raw, and conflicts',
+    description: 'Read a UTF-8 text file under cwd, capped at 512KB unless a selector narrows output; selectors support ranges, comma ranges, raw, and conflicts',
     input: { path: 'string required; may end with selectors like :10-30, :5-8,20-22, :raw, or :conflicts', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const selectedPath = splitPathSelector(input.path, input.range)
       const file = jailPath(cwd, selectedPath.path)
-      const content = await readFile(file, 'utf8')
-      if (Buffer.byteLength(content, 'utf8') > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap')
+      const bytes = await readFile(file)
+      const content = bytes.toString('utf8')
+      const hasSelector = selectedPath.range || selectedPath.conflicts
+      if (!hasSelector && bytes.length > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap; use a line selector for large files')
       if (selectedPath.conflicts) {
-        return { path: publicPath(cwd, file), sha256: sha256(content), conflicts: conflictBlocks(content) }
+        return { path: publicPath(cwd, file), sha256: sha256(bytes), conflicts: conflictBlocks(content) }
       }
       const selected = lineWindow(content, selectedPath.range)
-      return { path: publicPath(cwd, file), sha256: sha256(content), range: selectedPath.range || null, raw: selectedPath.raw, startLine: selected.startLine, endLine: selected.endLine, ranges: selected.ranges, content: selected.content }
+      if (Buffer.byteLength(selected.content, 'utf8') > MAX_READ_BYTES) throw new Error('selected range exceeds 512KB read cap')
+      return { path: publicPath(cwd, file), sha256: sha256(bytes), range: selectedPath.range || null, raw: selectedPath.raw, startLine: selected.startLine, endLine: selected.endLine, ranges: selected.ranges, content: selected.content }
     },
   })
 
