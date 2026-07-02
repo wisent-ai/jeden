@@ -196,7 +196,7 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
-test('read_image returns dimensions and capped base64', async () => {
+test('read_image returns metadata for PNG, GIF, JPEG, and WebP', async () => {
   await withTempDir(async (dir) => {
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAADCAQAAADoP0S7AAAADElEQVR42mP8z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64')
     await writeFile(join(dir, 'tiny.png'), png)
@@ -209,6 +209,42 @@ test('read_image returns dimensions and capped base64', async () => {
     assert.equal(image.output.bytes, png.length)
     assert.equal(image.output.truncated, true)
     assert.equal(image.output.base64, png.subarray(0, 12).toString('base64'))
+
+    const gif = Buffer.from([
+      0x47, 0x49, 0x46, 0x38, 0x39, 0x61,
+      0x04, 0x00, 0x05, 0x00,
+    ])
+    await writeFile(join(dir, 'tiny.gif'), gif)
+    const gifImage = await registry.execute('read_image', { path: 'tiny.gif' })
+    assert.equal(gifImage.output.mimeType, 'image/gif')
+    assert.equal(gifImage.output.width, 4)
+    assert.equal(gifImage.output.height, 5)
+
+    const jpeg = Buffer.from([
+      0xff, 0xd8,
+      0xff, 0xc0, 0x00, 0x11, 0x08,
+      0x00, 0x07,
+      0x00, 0x06,
+      0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x00, 0x03, 0x11, 0x00,
+    ])
+    await writeFile(join(dir, 'tiny.jpg'), jpeg)
+    const jpegImage = await registry.execute('read_image', { path: 'tiny.jpg' })
+    assert.equal(jpegImage.output.mimeType, 'image/jpeg')
+    assert.equal(jpegImage.output.width, 6)
+    assert.equal(jpegImage.output.height, 7)
+
+    const webp = Buffer.concat([
+      Buffer.from('RIFF', 'ascii'),
+      Buffer.from([0x16, 0x00, 0x00, 0x00]),
+      Buffer.from('WEBPVP8X', 'ascii'),
+      Buffer.from([0x0a, 0x00, 0x00, 0x00]),
+      Buffer.from([0x00, 0x00, 0x00, 0x00, 0x08, 0x00, 0x00, 0x09, 0x00, 0x00]),
+    ])
+    await writeFile(join(dir, 'tiny.webp'), webp)
+    const webpImage = await registry.execute('read_image', { path: 'tiny.webp' })
+    assert.equal(webpImage.output.mimeType, 'image/webp')
+    assert.equal(webpImage.output.width, 9)
+    assert.equal(webpImage.output.height, 10)
   })
 })
 
