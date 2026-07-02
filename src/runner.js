@@ -57,6 +57,7 @@ export async function runJeden({
   recorder = null,
   approveTool = null,
   hookRunner = null,
+  priorContext = '',
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
@@ -69,8 +70,9 @@ export async function runJeden({
   if (contextFiles.length > 0) await recorder?.record('project_context', { files: contextFiles.map((file) => file.path) })
   const messages = [
     { role: 'system', content: contextText ? `${systemPrompt(tools.list())}\n\n${contextText}` : systemPrompt(tools.list()) },
-    { role: 'user', content: task },
   ]
+  if (priorContext) messages.push({ role: 'user', content: `Previous session context:\n\n${priorContext}` })
+  messages.push({ role: 'user', content: task })
   await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps })
 
   for (let step = 1; step <= maxSteps; step += 1) {

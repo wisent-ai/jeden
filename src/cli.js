@@ -14,6 +14,7 @@ function usage() {
   return `Usage:
   jeden [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
   jeden run "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
+  jeden resume <session-id-or-path> "task" [--cwd path] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden show <session-id-or-path>
   jeden tools [--cwd path]
@@ -71,6 +72,14 @@ function parseArgs(argv) {
     if (!task) throw new Error('run requires a task')
     return { command: 'run', task, ...parsed }
   }
+  if (first === 'resume') {
+    const idOrPath = rest[0]
+    if (!idOrPath) throw new Error('resume requires a session id or path')
+    const parsed = parseSharedOptions(rest.slice(1))
+    const task = parsed.positionals.join(' ').trim()
+    if (!task) throw new Error('resume requires a task')
+    return { command: 'resume', idOrPath, task, ...parsed }
+  }
   if (first === 'sessions') {
     const limit = rest[0] ? Number(rest[0]) : 20
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('sessions limit must be 1..200')
@@ -108,6 +117,27 @@ async function runOnce(args) {
   const hookRunner = createSharedHookRunner()
   await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
   const result = await runJeden({ ...args, recorder, hookRunner })
+  process.stdout.write(`${result.text}\n`)
+  process.stderr.write(`[session] ${result.sessionPath}\n`)
+}
+
+function sessionContext(session) {
+  const parts = []
+  for (const event of session.events) {
+    if (event.type === 'user') parts.push(`User: ${event.data?.task || ''}`)
+    else if (event.type === 'final') parts.push(`Assistant: ${event.data?.text || ''}`)
+    else if (event.type === 'tool_result') parts.push(`Tool ${event.data?.tool || ''}: ${JSON.stringify(event.data?.result || {})}`)
+  }
+  return parts.slice(-40).join('\n\n')
+}
+
+async function runResume(args) {
+  const previous = await readSession({ idOrPath: args.idOrPath })
+  const recorder = new SessionRecorder({ cwd: args.cwd })
+  const hookRunner = createSharedHookRunner()
+  await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
+  await recorder.record('resumed_from', { id: previous.id, path: previous.path })
+  const result = await runJeden({ ...args, recorder, hookRunner, priorContext: sessionContext(previous) })
   process.stdout.write(`${result.text}\n`)
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }
@@ -204,6 +234,10 @@ async function main() {
   }
   if (args.command === 'tools') {
     await showTools(args)
+    return
+  }
+  if (args.command === 'resume') {
+    await runResume(args)
     return
   }
   if (args.command === 'run') {

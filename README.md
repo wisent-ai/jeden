@@ -38,6 +38,7 @@ The private M1 version includes:
 ```sh
 jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
+jeden resume <session-id-or-path> "continue with the previous context" --cwd ../content-platform
 jeden sessions 20
 jeden show <session-id-or-path>
 jeden tools --cwd ../content-platform
@@ -58,6 +59,8 @@ The CLI loads `.env`, `.env.local`, `.env.production`, and `.env.vercel` from th
 Before each run, Jeden appends project context files from `--cwd` to the system prompt when present. Oversized context files are skipped.
 
 
+
+Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
 Hooks can be disabled for debugging with:
 
 ```sh
