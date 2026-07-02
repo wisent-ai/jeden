@@ -23,6 +23,7 @@ The private M1 version includes:
 - Filesystem tools: `list_dir`, `read_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`, `write_file`, `apply_patch`.
 - Command tools: `run_command`, `list_package_scripts`, `run_package_script`. One-shot execution requires `--allow-command`; interactive mode asks for approval when the flag is absent.
 - Git read tools: `git_status`, `git_diff`.
+- Eval tools: `node_eval`, `python_eval`. Both require command permission.
 - Web read tool: `fetch_url`.
 - Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
@@ -129,6 +130,18 @@ Package script call:
 
 ```json
 {"action":"tool","tool":"run_package_script","input":{"script":"check","timeoutMs":60000}}
+```
+
+Node eval call:
+
+```json
+{"action":"tool","tool":"node_eval","input":{"code":"console.log(2 + 2)"}}
+```
+
+Python eval call:
+
+```json
+{"action":"tool","tool":"python_eval","input":{"code":"print(2 + 2)"}}
 ```
 
 

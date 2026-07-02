@@ -168,7 +168,7 @@ function runShellCommand({ cwd, command, timeoutMs }) {
   })
 }
 
-function runProcess({ cwd, command, args, timeoutMs }) {
+function runProcess({ cwd, command, args, timeoutMs, stdin = null }) {
   return new Promise((resolvePromise) => {
     const child = spawn(command, args, { cwd, env: process.env })
     let stdout = ''
@@ -178,6 +178,7 @@ function runProcess({ cwd, command, args, timeoutMs }) {
       timedOut = true
       child.kill('SIGTERM')
     }, timeoutMs)
+    if (stdin !== null) child.stdin.end(String(stdin))
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8')
       if (stdout.length > 100_000) stdout = stdout.slice(0, 100_000)
@@ -455,6 +456,30 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
       return runShellCommand({ cwd: resolve(cwd), command: input.command, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'node_eval',
+    description: 'Run JavaScript with node --input-type=module in cwd; requires --allow-command',
+    input: { code: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!allowCommand) throw new Error('node_eval requires --allow-command')
+      if (!input.code || typeof input.code !== 'string') throw new Error('code is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return runProcess({ cwd: resolve(cwd), command: 'node', args: ['--input-type=module', '-'], timeoutMs, stdin: input.code })
+    },
+  })
+
+  add({
+    name: 'python_eval',
+    description: 'Run Python code with python3 in cwd; requires --allow-command',
+    input: { code: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!allowCommand) throw new Error('python_eval requires --allow-command')
+      if (!input.code || typeof input.code !== 'string') throw new Error('code is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return runProcess({ cwd: resolve(cwd), command: 'python3', args: ['-'], timeoutMs, stdin: input.code })
     },
   })
 
