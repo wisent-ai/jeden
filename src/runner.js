@@ -6,6 +6,7 @@ import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
+import { buildMemoryContext, learnFromCompletedRun } from './memory.js'
 
 const MAX_TOOL_RESULT_BYTES = 64_000
 
@@ -142,6 +143,7 @@ export async function runJeden({
   askUser = null,
   priorContext = '',
   priorMessages = [],
+  memory = true,
 } = {}) {
   if (!task || typeof task !== 'string') throw new Error('task is required')
   await recorder?.ensure?.()
@@ -154,8 +156,18 @@ export async function runJeden({
   const contextFiles = await loadProjectContext({ cwd })
   const contextText = formatProjectContext(contextFiles)
   if (contextFiles.length > 0) await recorder?.record('project_context', { files: contextFiles.map((file) => file.path) })
+  let memoryContext = { records: [], text: '' }
+  if (memory) {
+    try {
+      memoryContext = await buildMemoryContext({ cwd, task })
+      if (memoryContext.records.length > 0) await recorder?.record('memory_recall', { ids: memoryContext.records.map((record) => record.id), count: memoryContext.records.length })
+    } catch (error) {
+      await recorder?.record('memory_error', { stage: 'recall', error: error.message })
+    }
+  }
+  const systemParts = [systemPrompt(tools.list()), contextText, memoryContext.text].filter(Boolean)
   const messages = [
-    { role: 'system', content: contextText ? `${systemPrompt(tools.list())}\n\n${contextText}` : systemPrompt(tools.list()) },
+    { role: 'system', content: systemParts.join('\n\n') },
   ]
   if (Array.isArray(priorMessages) && priorMessages.length > 0) messages.push(...priorMessages)
   else if (priorContext) messages.push({ role: 'user', content: `Previous session context:\n\n${priorContext}` })
@@ -186,6 +198,14 @@ export async function runJeden({
         continue
       }
       await recorder?.record('final', { step, text: action.text })
+      if (memory) {
+        try {
+          const learnedMemory = await learnFromCompletedRun({ cwd, task, finalText: action.text, runId: recorder?.id || null, sessionPath: recorder?.path?.() || null })
+          if (learnedMemory) await recorder?.record('memory_learned', { id: learnedMemory.id, kind: learnedMemory.kind, confidence: learnedMemory.confidence })
+        } catch (error) {
+          await recorder?.record('memory_error', { stage: 'learn', error: error.message })
+        }
+      }
       return { text: action.text, steps: step, sessionPath: recorder?.path?.() || null }
     }
 

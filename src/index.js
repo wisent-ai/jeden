@@ -11,3 +11,4 @@ export { SessionRecorder, listSessions, readSession, listSessionArtifacts, readS
 export { loadEnvFiles } from './env.js'
 export { createSharedHookRunner, toolHookEvent, postToolHookEvent } from './hooks.js'
 export { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
+export { buildMemoryContext, createCogneeMemoryBackend, createLocalMemoryBackend, createMemoryRecord, learnFromCompletedRun, loadMemoryRecords, recallMemories, rememberMemory } from './memory.js'

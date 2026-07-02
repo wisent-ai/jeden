@@ -9,6 +9,7 @@ import { loadCustomTools } from './custom-tools.js'
 import { modelRouterConfig } from './model-router.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 import { defaultSessionRoot } from './session.js'
+import { loadMemoryRecords, memoryPath } from './memory.js'
 import { createToolRegistry } from './tools.js'
 
 async function packageVersion() {
@@ -90,6 +91,10 @@ export async function buildCapabilityManifest({ cwd = process.cwd() } = {}) {
         custom: custom.errors,
         mcp: mcp.errors,
       },
+      memory: {
+        backend: 'local-jsonl',
+        path: memoryPath(),
+      },
     }
   } finally {
     await closeMcpClients({ cwd: root })
@@ -112,6 +117,13 @@ export async function buildDoctorReport({ cwd = process.cwd() } = {}) {
       python3: await commandAvailable('python3'),
       sqlite3: await commandAvailable('sqlite3'),
     }
+    let memoryRecords = []
+    let memoryError = null
+    try {
+      memoryRecords = await loadMemoryRecords(memoryPath(), { cwd: root })
+    } catch (error) {
+      memoryError = error.message
+    }
     const checks = [
       nodeCheck,
       check('filesystem.cwd.readable', cwdProbe.ok, cwdProbe, true),
@@ -127,6 +139,7 @@ export async function buildDoctorReport({ cwd = process.cwd() } = {}) {
       check('dependency.npm.available', dependencies.npm.ok, dependencies.npm, false),
       check('dependency.python3.available', dependencies.python3.ok, dependencies.python3, false),
       check('dependency.sqlite3.available', dependencies.sqlite3.ok, dependencies.sqlite3, false),
+      check('memory.local.readable', memoryError === null, { path: memoryPath(), records: memoryRecords.length, error: memoryError }, false),
     ]
     return {
       ok: checks.every((item) => item.ok || !item.fatal),
@@ -142,6 +155,12 @@ export async function buildDoctorReport({ cwd = process.cwd() } = {}) {
         custom: custom.tools.length,
         mcp: mcp.tools.length,
         total: tools.length,
+      },
+      memory: {
+        backend: 'local-jsonl',
+        path: memoryPath(),
+        records: memoryRecords.length,
+        error: memoryError,
       },
     }
   } finally {

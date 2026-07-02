@@ -32,10 +32,10 @@ The private M1 version includes:
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session and is gated as command execution.
 - Interactive ask tool: `ask_user` lets the model ask the human a question during `jeden` terminal mode.
-- Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`; `recall` can filter by query over note text and tags.
+- Automated durable memory: `memory` stores structured scoped MemoryRecord entries in `~/.jeden/memory.jsonl`; `runJeden` recalls relevant repo/global memories into the system prompt and records completed run episodes automatically after final answers. Memory failures are recorded as `memory_error` events and do not fail otherwise successful runs.
 - MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers. Configured MCP server tools are also surfaced natively as `mcp__<server>__<tool>` with the server-provided input schema.
 - Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.
-- Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
+- Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs. The core memory backend is local JSONL; optional semantic/graph backends such as Cognee can be plugged in behind the exported backend adapter interface without changing the runtime contract.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads user context, ancestor context, and cwd context files before each run.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
@@ -263,7 +263,7 @@ MCP tool call:
 Memory call:
 
 ```json
-{"action":"tool","tool":"memory","input":{"op":"remember","text":"Repo uses npm run check for syntax validation","tags":["jeden"]}}
+{"action":"tool","tool":"memory","input":{"op":"remember","kind":"project_fact","text":"Repo uses npm run check for syntax validation","tags":["jeden"],"confidence":0.8}}
 ```
 
 MCP resource call:

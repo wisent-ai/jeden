@@ -12,7 +12,7 @@ import { loadProjectContext } from '../src/context.js'
 import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions, sessionReplayMessages } from '../src/session.js'
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
-import { buildCapabilityManifest, buildDoctorReport, modelRouterConfig, runJeden } from '../src/index.js'
+import { buildCapabilityManifest, buildDoctorReport, createLocalMemoryBackend, loadMemoryRecords, modelRouterConfig, runJeden } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
 import { closeMcpClients, loadMcpToolAdapters } from '../src/mcp.js'
 
@@ -53,6 +53,35 @@ async function withIsolatedHome(dir, fn) {
     else process.env.HOME = previousHome
     if (previousUserProfile === undefined) delete process.env.USERPROFILE
     else process.env.USERPROFILE = previousUserProfile
+  }
+}
+
+async function withIsolatedMemory(dir, fn, memoryFile = join(dir, 'memory.jsonl')) {
+  const previousMemoryFile = process.env.JEDEN_MEMORY_FILE
+  process.env.JEDEN_MEMORY_FILE = memoryFile
+  try {
+    return await withIsolatedHome(dir, () => fn(memoryFile))
+  } finally {
+    if (previousMemoryFile === undefined) delete process.env.JEDEN_MEMORY_FILE
+    else process.env.JEDEN_MEMORY_FILE = previousMemoryFile
+  }
+}
+
+function makeInMemoryRecorder(dir, id = 'test-session') {
+  const events = []
+  return {
+    id,
+    events,
+    async ensure() {},
+    async record(type, data) {
+      events.push({ type, data })
+    },
+    artifactDir() {
+      return join(dir, 'artifacts')
+    },
+    path() {
+      return join(dir, 'sessions', id)
+    },
   }
 }
 
@@ -612,31 +641,88 @@ test('artifact and todo tools use the session artifact directory', async () => {
   })
 })
 
-test('memory stores and recalls isolated notes', async () => {
+test('memory tool stores MemoryRecord metadata and recalls only visible provenance-backed records', async () => {
   await withTempDir(async (dir) => {
-    const previousMemoryFile = process.env.JEDEN_MEMORY_FILE
-    process.env.JEDEN_MEMORY_FILE = join(dir, 'memory.jsonl')
-    try {
+    await withIsolatedMemory(dir, async (memoryFile) => {
+      const otherRepo = join(dir, 'other-repo')
+      await mkdir(otherRepo, { recursive: true })
+
       const registry = createToolRegistry({ cwd: dir })
-      const first = await registry.execute('memory', { op: 'remember', text: 'Use npm run check before push', tags: ['jeden', 'checks'] })
-      assert.equal(first.ok, true)
-      assert.match(first.output.entry.id, /^[a-z0-9]+-[a-z0-9]+$/)
+      const saved = await registry.execute('memory', {
+        op: 'remember',
+        text: 'Prefer pnpm for release packaging in this repository',
+        kind: 'user_preference',
+        scope: { kind: 'repo', id: dir },
+        tags: ['release', 'packaging', 'release'],
+        confidence: 0.91,
+      })
+      assert.equal(saved.ok, true)
+      assert.match(saved.output.entry.id, /^[a-z0-9]+-[a-z0-9]+$/)
+      assert.equal(saved.output.entry.kind, 'user_preference')
+      assert.deepEqual(saved.output.entry.scope, { kind: 'repo', id: dir })
+      assert.deepEqual(saved.output.entry.tags, ['release', 'packaging'])
+      assert.deepEqual(saved.output.entry.source, { origin: 'memory_tool' })
+      assert.equal(saved.output.entry.confidence, 0.91)
+      assert.match(saved.output.entry.createdAt, /^\d{4}-\d{2}-\d{2}T/)
 
-      const second = await registry.execute('memory', { op: 'remember', text: 'SQLite reads use limit pagination', tags: ['sqlite'] })
-      assert.equal(second.ok, true)
+      const currentMemory = await readFile(memoryFile, 'utf8')
+      await writeFile(memoryFile, `${currentMemory}${JSON.stringify({
+        id: 'legacy-note',
+        text: 'Legacy deploy checklist requires a changelog review',
+        tags: ['legacy', 'deploy'],
+        createdAt: '2024-01-01T00:00:00.000Z',
+      })}\n`, 'utf8')
 
-      const recallByText = await registry.execute('memory', { op: 'recall', query: 'pagination' })
-      assert.deepEqual(recallByText.output.entries.map((entry) => entry.text), ['SQLite reads use limit pagination'])
+      const recallRepo = await registry.execute('memory', { op: 'recall', query: 'release packaging' })
+      assert.equal(recallRepo.ok, true)
+      assert.deepEqual(recallRepo.output.entries.map((entry) => entry.id), [saved.output.entry.id])
+      assert.deepEqual(recallRepo.output.entries[0].source, { origin: 'memory_tool' })
+      assert.deepEqual(recallRepo.output.entries[0].scope, { kind: 'repo', id: dir })
 
-      const recallByTag = await registry.execute('memory', { op: 'recall', query: 'checks' })
-      assert.deepEqual(recallByTag.output.entries.map((entry) => entry.text), ['Use npm run check before push'])
+      const otherRegistry = createToolRegistry({ cwd: otherRepo })
+      const recallOtherRepo = await otherRegistry.execute('memory', { op: 'recall', query: 'release packaging' })
+      assert.deepEqual(recallOtherRepo.output.entries, [])
 
-      const listed = await registry.execute('memory', { op: 'list', limit: 1 })
-      assert.deepEqual(listed.output.entries.map((entry) => entry.text), ['SQLite reads use limit pagination'])
-    } finally {
-      if (previousMemoryFile === undefined) delete process.env.JEDEN_MEMORY_FILE
-      else process.env.JEDEN_MEMORY_FILE = previousMemoryFile
-    }
+      const recallLegacy = await otherRegistry.execute('memory', { op: 'recall', query: 'legacy deploy' })
+      assert.deepEqual(recallLegacy.output.entries.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        scope: entry.scope,
+        text: entry.text,
+        source: entry.source,
+        confidence: entry.confidence,
+      })), [{
+        id: 'legacy-note',
+        kind: 'note',
+        scope: { kind: 'global', id: 'global' },
+        text: 'Legacy deploy checklist requires a changelog review',
+        source: { origin: 'legacy_memory_tool' },
+        confidence: 0.4,
+      }])
+    })
+  })
+})
+
+test('local memory backend forgets repo scope without deleting global memories', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedMemory(dir, async (memoryFile) => {
+      const otherRepo = join(dir, 'other-repo')
+      const backend = createLocalMemoryBackend({ file: memoryFile, cwd: dir })
+      await backend.remember([
+        { text: 'Global instruction survives repository cleanup', scope: { kind: 'global', id: 'global' }, tags: ['cleanup'] },
+        { text: 'Repo-specific instruction is removable', scope: { kind: 'repo', id: dir }, tags: ['cleanup'] },
+        { text: 'Other repository instruction survives', scope: { kind: 'repo', id: otherRepo }, tags: ['cleanup'] },
+      ])
+
+      const forgotten = await backend.forget({ kind: 'repo', id: dir })
+      assert.deepEqual(forgotten, { removed: 1 })
+
+      const remaining = await loadMemoryRecords(memoryFile, { cwd: dir })
+      assert.deepEqual(remaining.map((entry) => [entry.text, entry.scope]), [
+        ['Global instruction survives repository cleanup', { kind: 'global', id: 'global' }],
+        ['Other repository instruction survives', { kind: 'repo', id: otherRepo }],
+      ])
+    })
   })
 })
 
@@ -1011,6 +1097,148 @@ trailer << /Root 1 0 R >>
       const pdf = await registry.execute('fetch_readable_url', { url: `${origin}/paper.pdf` })
       assert.equal(pdf.output.text, 'Remote PDF text')
     })
+  })
+})
+
+test('runJeden injects scoped memory into the first model system prompt', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedMemory(dir, async (memoryFile) => {
+      const otherRepo = join(dir, 'other-repo')
+      const backend = createLocalMemoryBackend({ file: memoryFile, cwd: dir })
+      await backend.remember([
+        {
+          text: 'Repo release summaries must mention the risk register',
+          kind: 'project_fact',
+          scope: { kind: 'repo', id: dir },
+          tags: ['release'],
+          source: { origin: 'fixture' },
+          confidence: 0.8,
+        },
+        {
+          text: 'Global release notes should include customer impact',
+          kind: 'user_preference',
+          scope: { kind: 'global', id: 'global' },
+          tags: ['release'],
+          source: { origin: 'fixture' },
+          confidence: 0.7,
+        },
+        {
+          text: 'Other repository release summaries use the deprecated staging checklist',
+          kind: 'project_fact',
+          scope: { kind: 'repo', id: otherRepo },
+          tags: ['release'],
+          source: { origin: 'fixture' },
+          confidence: 0.9,
+        },
+      ])
+
+      const recorder = makeInMemoryRecorder(dir, 'recall-session')
+      let calls = 0
+      const chat = async ({ messages }) => {
+        calls += 1
+        assert.equal(calls, 1)
+        assert.match(messages[0].content, /Durable memory \(scoped, provenance-backed/)
+        assert.match(messages[0].content, /Repo release summaries must mention the risk register/)
+        assert.match(messages[0].content, /Global release notes should include customer impact/)
+        assert.doesNotMatch(messages[0].content, /deprecated staging checklist/)
+        assert.equal(messages.at(-1).content, 'Write a release summary for this repository.')
+        return JSON.stringify({ action: 'final', text: 'release summary complete' })
+      }
+
+      const result = await runJeden({
+        task: 'Write a release summary for this repository.',
+        cwd: dir,
+        chat,
+        recorder,
+        maxSteps: 1,
+      })
+
+      assert.equal(result.text, 'release summary complete')
+      assert.equal(calls, 1)
+      const recallEvent = recorder.events.find((event) => event.type === 'memory_recall')
+      assert.equal(recallEvent?.data.count, 2)
+    })
+  })
+})
+
+test('runJeden learns a run_episode memory after a successful final answer', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedMemory(dir, async (memoryFile) => {
+      const recorder = makeInMemoryRecorder(dir, 'learn-session')
+      const chat = async () => JSON.stringify({ action: 'final', text: 'Documented the release procedure.' })
+
+      const result = await runJeden({
+        task: 'Summarize the release procedure.',
+        cwd: dir,
+        chat,
+        recorder,
+        maxSteps: 1,
+      })
+
+      assert.equal(result.text, 'Documented the release procedure.')
+      const records = await loadMemoryRecords(memoryFile, { cwd: dir })
+      assert.equal(records.length, 1)
+      assert.equal(records[0].kind, 'run_episode')
+      assert.deepEqual(records[0].scope, { kind: 'repo', id: dir })
+      assert.equal(records[0].source.origin, 'runJeden')
+      assert.equal(records[0].source.runId, 'learn-session')
+      assert.equal(records[0].source.sessionPath, join(dir, 'sessions', 'learn-session'))
+      assert.equal(records[0].source.verified, false)
+      assert.deepEqual(records[0].tags, ['auto', 'run', 'unverified'])
+      assert.equal(records[0].confidence, 0.45)
+      assert.match(records[0].text, /Completed run for task: Summarize the release procedure\./)
+      assert.match(records[0].text, /Final result: Documented the release procedure\./)
+
+      const learnedEvent = recorder.events.find((event) => event.type === 'memory_learned')
+      assert.deepEqual(learnedEvent?.data, {
+        id: records[0].id,
+        kind: 'run_episode',
+        confidence: 0.45,
+      })
+    })
+  })
+})
+
+test('runJeden records memory errors without failing successful runs', async () => {
+  await withTempDir(async (dir) => {
+    const unreadableMemoryPath = join(dir, 'memory-path-is-directory')
+    await mkdir(unreadableMemoryPath, { recursive: true })
+    await withIsolatedMemory(dir, async () => {
+      const recorder = makeInMemoryRecorder(dir, 'read-error-session')
+      const chat = async () => JSON.stringify({ action: 'final', text: 'completed despite recall failure' })
+
+      const result = await runJeden({
+        task: 'Finish even if memory cannot be read.',
+        cwd: dir,
+        chat,
+        recorder,
+        maxSteps: 1,
+      })
+
+      assert.equal(result.text, 'completed despite recall failure')
+      assert.ok(recorder.events.some((event) => event.type === 'memory_error' && event.data.stage === 'recall'))
+    }, unreadableMemoryPath)
+  })
+
+  await withTempDir(async (dir) => {
+    const readOnlyMemoryFile = join(dir, 'memory.jsonl')
+    await writeFile(readOnlyMemoryFile, '', 'utf8')
+    await chmod(readOnlyMemoryFile, 0o444)
+    await withIsolatedMemory(dir, async () => {
+      const recorder = makeInMemoryRecorder(dir, 'write-error-session')
+      const chat = async () => JSON.stringify({ action: 'final', text: 'completed despite learn failure' })
+
+      const result = await runJeden({
+        task: 'Finish even if memory cannot be written.',
+        cwd: dir,
+        chat,
+        recorder,
+        maxSteps: 1,
+      })
+
+      assert.equal(result.text, 'completed despite learn failure')
+      assert.ok(recorder.events.some((event) => event.type === 'memory_error' && event.data.stage === 'learn'))
+    }, readOnlyMemoryFile)
   })
 })
 
