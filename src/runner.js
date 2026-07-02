@@ -72,7 +72,7 @@ function toOpenAIToolSpecs(list) {
 
 function approvalKind(tool) {
   if (tool === 'write_file' || tool === 'apply_patch' || tool === 'edit_file' || tool === 'delete_file' || tool === 'move_file') return 'write'
-  if (tool === 'run_command' || tool === 'run_package_script' || tool === 'node_eval' || tool === 'python_eval') return 'command'
+  if (tool === 'run_command' || tool === 'run_package_script' || tool === 'node_eval' || tool === 'python_eval' || tool === 'delegate_task') return 'command'
   return null
 }
 

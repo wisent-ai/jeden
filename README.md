@@ -30,7 +30,7 @@ The private M1 version includes:
 - Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
-- Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
+- Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session and is gated as command execution.
 - Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
 - MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers.
 - Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.

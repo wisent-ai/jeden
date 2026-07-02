@@ -955,6 +955,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
     description: 'Run a focused subtask in a fresh Jeden session and return its result',
     input: { task: 'string required', maxSteps: 'number optional' },
     async execute(input) {
+      if (!allowCommand) throw new Error('delegate_task requires --allow-command')
       if (!input.task || typeof input.task !== 'string') throw new Error('task is required')
       const maxSteps = Math.min(Math.max(Number(input.maxSteps) || 6, 1), 16)
       return runProcess({
