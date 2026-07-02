@@ -306,6 +306,29 @@ async function discoverTextFiles(cwd, root) {
   return files
 }
 
+function hasHiddenSegment(path) {
+  return path.split('/').some((segment) => segment.slice(0, 1) === '.')
+}
+
+async function discoverPathEntries(cwd, root, options = {}) {
+  const repoRoot = resolve(cwd)
+  const files = await discoverTextFiles(repoRoot, root)
+  const byPath = new Map()
+  for (const file of files) {
+    const relFile = publicPath(repoRoot, file)
+    if (!options.hidden && hasHiddenSegment(relFile)) continue
+    byPath.set(relFile, { path: relFile, absolute: file, type: 'file' })
+    let dir = dirname(file)
+    while (dir !== root && dir.slice(0, root.length + 1) === `${root}/`) {
+      const relDir = publicPath(repoRoot, dir)
+      if (options.hidden || !hasHiddenSegment(relDir)) byPath.set(relDir, { path: relDir, absolute: dir, type: 'dir' })
+      dir = dirname(dir)
+    }
+    if (byPath.size >= (options.limit || MAX_SEARCH_FILES)) break
+  }
+  return Array.from(byPath.values()).sort((a, b) => a.path.localeCompare(b.path)).slice(0, options.limit || MAX_SEARCH_FILES)
+}
+
 
 function cliPath() {
   return fileURLToPath(new URL('./cli.js', import.meta.url))
@@ -463,14 +486,13 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'glob_paths',
-    description: 'Find files and directories under cwd with simple glob patterns; supports * and **',
+    description: 'Find files and directories under cwd with simple glob patterns; supports * and **; skips gitignored files when possible',
     input: { patterns: 'string or array optional', path: 'string optional', hidden: 'boolean optional', limit: 'number optional' },
     async execute(input) {
       const root = jailPath(cwd, input.path || '.')
       const limit = Math.min(Math.max(Number(input.limit) || 200, 1), 2_000)
       const rawPatterns = Array.isArray(input.patterns) ? input.patterns : [input.patterns || '**']
-      const paths = []
-      await walkPaths(resolve(cwd), root, paths, { hidden: Boolean(input.hidden), limit })
+      const paths = await discoverPathEntries(cwd, root, { hidden: Boolean(input.hidden), limit: MAX_SEARCH_FILES })
       const matches = paths
         .filter((entry) => matchesPattern(entry.path, rawPatterns))
         .slice(0, limit)
