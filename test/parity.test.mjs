@@ -296,7 +296,7 @@ test('read_sqlite lists tables and reads rows', async () => {
 test('read_archive lists and reads tar and zip entries', async () => {
   await withTempDir(async (dir) => {
     await writeFile(join(dir, 'bundle.tar'), makeTar('docs/readme.txt', 'tar text'), 'utf8')
-    await writeFile(join(dir, 'bundle.zip'), makeZip('src/index.js', 'zip text'))
+    await writeFile(join(dir, 'bundle.zip'), makeZip('src/index.js', 'zip one\nzip two\nzip three'))
     await writeFile(join(dir, 'paper.zip'), makeZip('paper.pdf', `%PDF-1.4
 1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
 2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
@@ -316,9 +316,13 @@ trailer << /Root 1 0 R >>
     assert.equal(tarEntry.output.content, 'tar text')
 
     const zipList = await registry.execute('read_archive', { path: 'bundle.zip' })
-    assert.deepEqual(zipList.output.entries, [{ name: 'src/index.js', type: 'file', bytes: 8 }])
+    assert.deepEqual(zipList.output.entries, [{ name: 'src/index.js', type: 'file', bytes: 25 }])
     const zipEntry = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js' })
-    assert.equal(zipEntry.output.content, 'zip text')
+    assert.equal(zipEntry.output.content, 'zip one\nzip two\nzip three')
+    const zipRange = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js', range: '2-3' })
+    assert.equal(zipRange.output.content, 'zip two\nzip three')
+    assert.equal(zipRange.output.startLine, 2)
+    assert.equal(zipRange.output.endLine, 3)
     const zipBinary = await registry.execute('read_archive', { path: 'bundle.zip', entry: 'src/index.js', mode: 'binary', maxBytes: 4 })
     assert.equal(zipBinary.output.base64, Buffer.from('zip ').toString('base64'))
     assert.equal(zipBinary.output.truncated, true)

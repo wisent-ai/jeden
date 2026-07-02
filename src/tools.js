@@ -1103,8 +1103,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_archive',
-    description: 'List archive entries or read one entry from .zip, .tar, .tar.gz, or .tgz under cwd as text, binary base64, document text, or image metadata',
-    input: { path: 'string required', entry: 'string optional', mode: 'text|binary|document|image optional', maxBytes: 'number optional' },
+    description: 'List archive entries or read one entry from .zip, .tar, .tar.gz, or .tgz under cwd as text, binary base64, document text, or image metadata; text/document entries support line ranges',
+    input: { path: 'string required', entry: 'string optional', mode: 'text|binary|document|image optional', maxBytes: 'number optional', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const file = jailPath(cwd, input.path)
@@ -1133,16 +1133,22 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       }
       if (mode === 'document') {
         const text = readableTextForDocument({ content: match.content, file: match.name })
+        const selected = input.range ? lineWindow(text, input.range) : null
+        const outputText = selected ? selected.content : text
         const buffer = Buffer.from(text, 'utf8')
-        const docSlice = buffer.subarray(0, maxBytes)
+        const outputBuffer = Buffer.from(outputText, 'utf8')
+        const docSlice = outputBuffer.subarray(0, maxBytes)
         return {
           path: publicPath(cwd, file),
           entry: match.name,
           mode,
           bytes: buffer.length,
-          truncated: buffer.length > docSlice.length,
+          truncated: outputBuffer.length > docSlice.length,
           mimeType: mimeTypeForPath(match.name),
           text: docSlice.toString('utf8'),
+          startLine: selected?.startLine,
+          endLine: selected?.endLine,
+          ranges: selected?.ranges,
           sha256: sha256(match.content),
         }
       }
@@ -1163,13 +1169,21 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         }
       }
       if (mode !== 'text') throw new Error(`unsupported archive read mode: ${mode}`)
+      const text = match.content.toString('utf8')
+      const selected = input.range ? lineWindow(text, input.range) : null
+      const outputText = selected ? selected.content : text
+      const outputBuffer = Buffer.from(outputText, 'utf8')
+      const textSlice = outputBuffer.subarray(0, maxBytes)
       return {
         path: publicPath(cwd, file),
         entry: match.name,
         mode,
         bytes: match.content.length,
-        truncated: match.content.length > sliced.length,
-        content: sliced.toString('utf8'),
+        truncated: outputBuffer.length > textSlice.length,
+        content: textSlice.toString('utf8'),
+        startLine: selected?.startLine,
+        endLine: selected?.endLine,
+        ranges: selected?.ranges,
         sha256: sha256(match.content),
       }
     },
