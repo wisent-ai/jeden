@@ -21,7 +21,7 @@ The private M1 version includes:
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`.
 - Filesystem read tools: `list_dir`, `read_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`.
-- File write tools: `write_file`, `apply_patch`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
+- File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
 - Git read tools: `git_status`, `git_diff`.
 - Eval tools: `node_eval`, `python_eval`. Both require command permission.
 - Web read tool: `fetch_url`.
@@ -217,6 +217,12 @@ Patch call, only when writes are enabled:
 
 ```json
 {"action":"tool","tool":"apply_patch","input":{"path":"package.json","expectedSha256":"...","replacements":[{"old":"\"version\": \"0.1.0\"","new":"\"version\": \"0.1.1\""}]}}
+```
+
+Line edit call:
+
+```json
+{"action":"tool","tool":"edit_file","input":{"path":"src/file.js","expectedSha256":"...","ops":[{"op":"replace","start":10,"end":12,"content":"const ok = true"}]}}
 ```
 Final:
 

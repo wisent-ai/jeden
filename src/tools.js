@@ -69,6 +69,52 @@ function applyReplacementList(content, replacements) {
   return next
 }
 
+function splitTextLines(content) {
+  const hasTrailingNewline = content.endsWith('\n')
+  const body = hasTrailingNewline ? content.slice(0, -1) : content
+  return { lines: body ? body.split(/\r?\n/) : [], hasTrailingNewline }
+}
+
+function normalizeInsertedLines(content) {
+  if (content == null) return []
+  if (typeof content !== 'string') throw new Error('content must be a string')
+  if (content.length === 0) return []
+  const body = content.endsWith('\n') ? content.slice(0, -1) : content
+  return body ? body.split(/\r?\n/) : []
+}
+
+function applyLineEditOps(content, ops) {
+  if (!Array.isArray(ops) || ops.length === 0) throw new Error('ops are required')
+  const { lines, hasTrailingNewline } = splitTextLines(content)
+  const validOps = new Set(['replace', 'delete', 'insert_before', 'insert_after'])
+  const normalized = ops.map((op, index) => {
+    if (!op || typeof op !== 'object' || Array.isArray(op)) throw new Error('op must be an object')
+    const kind = String(op.op || '')
+    const start = Number(op.start)
+    const end = op.end == null ? start : Number(op.end)
+    if (!validOps.has(kind)) throw new Error(`unknown edit op: ${kind}`)
+    if (!Number.isInteger(start) || start < 1) throw new Error('start must be a 1-based line number')
+    if (!Number.isInteger(end) || end < start) throw new Error('end must be >= start')
+    if ((kind === 'replace' || kind === 'delete') && end > lines.length) throw new Error('edit range is past end of file')
+    if ((kind === 'insert_before' || kind === 'insert_after') && start > lines.length + 1) throw new Error('insert line is past end of file')
+    return { kind, start, end, content: normalizeInsertedLines(op.content), index }
+  })
+  const ranges = normalized
+    .filter((op) => op.kind === 'replace' || op.kind === 'delete')
+    .sort((a, b) => a.start - b.start)
+  for (let i = 1; i < ranges.length; i += 1) {
+    if (ranges[i].start <= ranges[i - 1].end) throw new Error('edit ranges overlap')
+  }
+  for (const op of normalized.sort((a, b) => b.start - a.start || b.index - a.index)) {
+    if (op.kind === 'replace') lines.splice(op.start - 1, op.end - op.start + 1, ...op.content)
+    if (op.kind === 'delete') lines.splice(op.start - 1, op.end - op.start + 1)
+    if (op.kind === 'insert_before') lines.splice(Math.max(op.start - 1, 0), 0, ...op.content)
+    if (op.kind === 'insert_after') lines.splice(Math.min(op.start, lines.length), 0, ...op.content)
+  }
+  const next = lines.join('\n')
+  return hasTrailingNewline ? `${next}\n` : next
+}
+
 
 async function walkFiles(root, start, out) {
   if (out.length >= MAX_SEARCH_FILES) return
@@ -452,6 +498,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         path: publicPath(cwd, file),
         sha256: sha256(next),
         replacements: input.replacements.length,
+        bytes: Buffer.byteLength(next, 'utf8'),
+      }
+    },
+  })
+
+  add({
+    name: 'edit_file',
+    description: 'Apply line-based edits to a UTF-8 file under cwd; requires expectedSha256 and --allow-write',
+    input: { path: 'string required', expectedSha256: 'string required', ops: 'array of line edit operations required' },
+    async execute(input) {
+      if (!allowWrite) throw new Error('edit_file requires --allow-write')
+      if (!input.path) throw new Error('path is required')
+      if (!input.expectedSha256) throw new Error('expectedSha256 is required')
+      const file = jailPath(cwd, input.path)
+      const current = await readFile(file, 'utf8')
+      const currentHash = sha256(current)
+      if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${publicPath(cwd, file)}`)
+      const next = applyLineEditOps(current, input.ops)
+      await writeFile(file, next, 'utf8')
+      return {
+        path: publicPath(cwd, file),
+        sha256: sha256(next),
+        ops: input.ops.length,
         bytes: Buffer.byteLength(next, 'utf8'),
       }
     },
