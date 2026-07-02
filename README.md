@@ -30,6 +30,7 @@ The private M1 version includes:
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
 - Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
+- MCP tools: `mcp_list_tools`, `mcp_call_tool` support configured stdio MCP servers.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads from `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `.jeden/instructions.md`, and `.jeden/context.md` under `--cwd`.
@@ -71,6 +72,8 @@ Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior 
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
 Hooks can be disabled for debugging with:
+
+MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers.
 
 ```sh
 JEDEN_HOOKS=0 jeden run "..." 
@@ -162,6 +165,18 @@ Delegate call:
 {"action":"tool","tool":"delegate_task","input":{"task":"summarize src/tools.js","maxSteps":6}}
 ```
 
+
+MCP list call:
+
+```json
+{"action":"tool","tool":"mcp_list_tools","input":{"server":"filesystem"}}
+```
+
+MCP tool call:
+
+```json
+{"action":"tool","tool":"mcp_call_tool","input":{"server":"filesystem","tool":"list_allowed_directories","args":{}}}
+```
 
 Memory call:
 

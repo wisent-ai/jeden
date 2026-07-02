@@ -7,6 +7,7 @@ import { resolve, relative, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
+import { callMcpTool, listMcpTools } from './mcp.js'
 
 const MAX_READ_BYTES = 512_000
 const MAX_SEARCH_RESULTS = 100
@@ -636,6 +637,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         return { entries: entries.slice(-limit).reverse(), query: input.query || null }
       }
       throw new Error(`unknown memory op: ${op}`)
+    },
+  })
+
+  add({
+    name: 'mcp_list_tools',
+    description: 'List tools from a configured stdio MCP server',
+    input: { server: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return listMcpTools({ cwd, serverName: input.server, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'mcp_call_tool',
+    description: 'Call one tool on a configured stdio MCP server',
+    input: { server: 'string required', tool: 'string required', args: 'object optional', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      if (!input.tool || typeof input.tool !== 'string') throw new Error('tool is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return callMcpTool({ cwd, serverName: input.server, toolName: input.tool, args: input.args || {}, timeoutMs })
     },
   })
 
