@@ -147,6 +147,14 @@ Range read:
 {"action":"tool","tool":"read_file","input":{"path":"src/tools.js:10+30"}}
 ```
 
+Additional read selectors:
+
+```json
+{"action":"tool","tool":"read_file","input":{"path":"src/tools.js:5-8,20-22"}}
+{"action":"tool","tool":"read_file","input":{"path":"src/tools.js:raw:10+5"}}
+{"action":"tool","tool":"read_file","input":{"path":"src/tools.js:conflicts"}}
+```
+
 Glob call:
 
 ```json

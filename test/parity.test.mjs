@@ -98,6 +98,18 @@ test('read_file selectors return a line window while edit_file rejects stale sha
     assert.equal(selected.output.endLine, 3)
     assert.equal(selected.output.content, 'bravo\ncharlie')
 
+    const multi = await registry.execute('read_file', { path: 'notes.txt:1-1,4' })
+    assert.equal(multi.output.content, 'alpha\ndelta')
+    assert.deepEqual(multi.output.ranges.map((range) => [range.startLine, range.endLine]), [[1, 1], [4, 4]])
+
+    const raw = await registry.execute('read_file', { path: 'notes.txt:raw:3+1' })
+    assert.equal(raw.output.raw, true)
+    assert.equal(raw.output.content, 'charlie')
+
+    await writeFile(join(dir, 'conflict.txt'), 'before\n<<<<<<< ours\nleft\n=======\nright\n>>>>>>> theirs\nafter\n', 'utf8')
+    const conflicts = await registry.execute('read_file', { path: 'conflict.txt:conflicts' })
+    assert.deepEqual(conflicts.output.conflicts.map((block) => [block.startLine, block.separatorLine, block.endLine]), [[2, 4, 6]])
+
     await writeFile(file, 'alpha\nbravo\nCHANGED\ndelta\n', 'utf8')
     const staleEdit = await registry.execute('edit_file', {
       path: 'notes.txt',

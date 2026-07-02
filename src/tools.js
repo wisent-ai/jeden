@@ -263,11 +263,45 @@ function matchesPattern(path, patterns) {
   return false
 }
 
+function isRangeSelector(text) {
+  return /^\d+(?:-\d*)?$/.exec(text) || /^\d+\+\d+$/.exec(text)
+}
+
+function isRangeListSelector(text) {
+  if (!text || typeof text !== 'string') return false
+  return String(text).split(',').every((part) => isRangeSelector(part.trim()))
+}
+
+function parseReadSelector(path, explicitRange) {
+  const selector = { path, range: null, raw: false, conflicts: false }
+  const applyToken = (token) => {
+    if (token === 'raw') {
+      selector.raw = true
+      return true
+    }
+    if (token === 'conflicts') {
+      selector.conflicts = true
+      return true
+    }
+    if (isRangeListSelector(token)) {
+      selector.range = token
+      return true
+    }
+    return false
+  }
+  if (explicitRange) {
+    if (!applyToken(String(explicitRange))) selector.range = String(explicitRange)
+    return selector
+  }
+  if (typeof path !== 'string') return selector
+  const parts = path.split(':')
+  while (parts.length > 1 && applyToken(parts[parts.length - 1])) parts.pop()
+  selector.path = parts.join(':')
+  return selector
+}
+
 function splitPathSelector(path, explicitRange) {
-  if (explicitRange || typeof path !== 'string') return { path, range: explicitRange || null }
-  const match = /^(.*):(\d+(?:-\d*)?|\d+\+\d+)$/.exec(path)
-  if (!match || !match[1]) return { path, range: null }
-  return { path: match[1], range: match[2] }
+  return parseReadSelector(path, explicitRange)
 }
 
 function parseLineRange(range, maxLine) {
@@ -290,14 +324,44 @@ function parseLineRange(range, maxLine) {
     const start = Math.max(Number(match[1]), 1)
     return { start, end: Math.min(start, maxLine) }
   }
-  throw new Error('range must look like 10, 10-20, 10-, or 10+5')
+  throw new Error('range must look like 10, 10-20, 10-, 10+5, or a comma-separated list')
+}
+
+function parseLineRanges(range, maxLine) {
+  if (!range) return [parseLineRange(null, maxLine)]
+  return String(range).split(',').map((part) => parseLineRange(part.trim(), maxLine))
 }
 
 function lineWindow(content, range) {
   const lines = content.split(/\r?\n/)
-  const { start, end } = parseLineRange(range, lines.length)
-  const selected = lines.slice(start - 1, end)
-  return { content: selected.join('\n'), startLine: start, endLine: end }
+  const ranges = parseLineRanges(range, lines.length)
+  const windows = ranges.map(({ start, end }) => ({ startLine: start, endLine: end, content: lines.slice(start - 1, end).join('\n') }))
+  return { content: windows.map((window) => window.content).join('\n'), startLine: windows[0]?.startLine || 1, endLine: windows[windows.length - 1]?.endLine || 1, ranges: windows }
+}
+
+function conflictBlocks(content) {
+  const lines = content.split(/\r?\n/)
+  const blocks = []
+  let start = null
+  let middle = null
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    if (line.slice(0, 7) === '<<<<<<<') {
+      start = i + 1
+      middle = null
+      continue
+    }
+    if (start && line.slice(0, 7) === '=======') {
+      middle = i + 1
+      continue
+    }
+    if (start && line.slice(0, 7) === '>>>>>>>') {
+      blocks.push({ startLine: start, separatorLine: middle, endLine: i + 1, content: lines.slice(start - 1, i + 1).join('\n') })
+      start = null
+      middle = null
+    }
+  }
+  return blocks
 }
 
 function runShellCommand({ cwd, command, timeoutMs }) {
@@ -540,16 +604,19 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_file',
-    description: 'Read a UTF-8 text file under cwd, capped at 512KB; optional range uses 1-based selectors like 10, 10-30, 10-, or 10+20',
-    input: { path: 'string required; may end with :10-30 selector', range: 'string optional' },
+    description: 'Read a UTF-8 text file under cwd, capped at 512KB; selectors support ranges, comma ranges, raw, and conflicts',
+    input: { path: 'string required; may end with selectors like :10-30, :5-8,20-22, :raw, or :conflicts', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const selectedPath = splitPathSelector(input.path, input.range)
       const file = jailPath(cwd, selectedPath.path)
       const content = await readFile(file, 'utf8')
       if (Buffer.byteLength(content, 'utf8') > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap')
+      if (selectedPath.conflicts) {
+        return { path: publicPath(cwd, file), sha256: sha256(content), conflicts: conflictBlocks(content) }
+      }
       const selected = lineWindow(content, selectedPath.range)
-      return { path: publicPath(cwd, file), sha256: sha256(content), range: selectedPath.range || null, startLine: selected.startLine, endLine: selected.endLine, content: selected.content }
+      return { path: publicPath(cwd, file), sha256: sha256(content), range: selectedPath.range || null, raw: selectedPath.raw, startLine: selected.startLine, endLine: selected.endLine, ranges: selected.ranges, content: selected.content }
     },
   })
 
