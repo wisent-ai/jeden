@@ -277,6 +277,35 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null }) {
   })
 }
 
+async function discoverTextFiles(cwd, root) {
+  const repoRoot = resolve(cwd)
+  const relRoot = publicPath(repoRoot, root)
+  const listed = await runProcess({
+    cwd: repoRoot,
+    command: 'git',
+    args: ['ls-files', '-co', '--exclude-standard', '-z', '--', relRoot],
+    timeoutMs: 30_000,
+  })
+  if (listed.code === 0) {
+    const files = []
+    for (const rel of listed.stdout.split('\u0000')) {
+      if (!rel) continue
+      const file = jailPath(repoRoot, rel)
+      if (file === root || file.slice(0, root.length + 1) === `${root}/`) {
+        try {
+          const info = await stat(file)
+          if (info.isFile()) files.push(file)
+        } catch {}
+      }
+      if (files.length >= MAX_SEARCH_FILES) break
+    }
+    return files
+  }
+  const files = []
+  await walkFiles(repoRoot, root, files)
+  return files
+}
+
 
 function cliPath() {
   return fileURLToPath(new URL('./cli.js', import.meta.url))
@@ -409,8 +438,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
     async execute(input) {
       if (!input.query) throw new Error('query is required')
       const root = jailPath(cwd, input.path || '.')
-      const files = []
-      await walkFiles(resolve(cwd), root, files)
+      const files = await discoverTextFiles(cwd, root)
       const matches = []
       for (const file of files) {
         if (matches.length >= MAX_SEARCH_RESULTS) break
@@ -460,9 +488,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const root = jailPath(cwd, input.path || '.')
       const limit = Math.min(Math.max(Number(input.limit) || MAX_SEARCH_RESULTS, 1), 500)
       const matcher = new globalThis.RegExp(input.expr, input.caseSensitive ? '' : 'i')
-      const entries = []
-      await walkPaths(resolve(cwd), root, entries, { hidden: false, limit: MAX_SEARCH_FILES })
-      const files = entries.filter((entry) => entry.type === 'file').map((entry) => entry.absolute)
+      const files = await discoverTextFiles(cwd, root)
       const matches = []
       for (const file of files) {
         if (matches.length >= limit) break
