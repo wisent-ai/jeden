@@ -212,6 +212,10 @@ async function runInteractive(args) {
     const answer = (await rl.question(approvalPrompt(request))).trim().toLowerCase()
     return answer === 'y' || answer === 'yes'
   }
+  const askUser = async ({ question, options }) => {
+    const suffix = options.length > 0 ? ` (${options.join('/')})` : ''
+    return (await rl.question(`${question}${suffix}\n> `)).trim()
+  }
 
   try {
     for (;;) {
@@ -220,7 +224,7 @@ async function runInteractive(args) {
       if (task === '/exit' || task === '/quit') break
       try {
         await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
-        const result = await runJeden({ ...args, task, recorder, approveTool, hookRunner })
+        const result = await runJeden({ ...args, task, recorder, approveTool, askUser, hookRunner })
         process.stdout.write(`${result.text}\n`)
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

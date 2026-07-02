@@ -453,7 +453,7 @@ function memoryId() {
 
 
 
-export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null, customTools = [] } = {}) {
+export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null, customTools = [], askUser = null } = {}) {
   const tools = new Map()
 
   function add(definition) {
@@ -912,6 +912,19 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         content: sliced.toString('utf8'),
         sha256: sha256(content),
       }
+    },
+  })
+
+  add({
+    name: 'ask_user',
+    description: 'Ask the human user a question during an interactive session',
+    input: { question: 'string required', options: 'array optional' },
+    async execute(input) {
+      if (!askUser) throw new Error('ask_user requires interactive mode')
+      if (!input.question || typeof input.question !== 'string') throw new Error('question is required')
+      const options = Array.isArray(input.options) ? input.options.map((option) => String(option)) : []
+      const answer = await askUser({ question: input.question, options })
+      return { answer }
     },
   })
 
