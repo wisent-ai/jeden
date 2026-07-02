@@ -394,3 +394,34 @@ test('delegate_task parses child JSON run output', async () => {
     }
   })
 })
+
+test('runJeden executes read-only multi-tool actions in parallel', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      await mkdir(join(dir, '.jeden', 'tools'), { recursive: true })
+      await writeFile(join(dir, '.jeden', 'tools', 'delay.mjs'), `
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+export default () => [
+  { name: 'slow_a', description: 'Slow read A', input: {}, async execute() { await wait(220); return 'A' } },
+  { name: 'slow_b', description: 'Slow read B', input: {}, async execute() { await wait(220); return 'B' } },
+]
+`, 'utf8')
+      let calls = 0
+      const chat = async ({ messages }) => {
+        calls += 1
+        if (calls === 1) {
+          return JSON.stringify({ action: 'tools', tools: [{ tool: 'slow_a', input: {} }, { tool: 'slow_b', input: {} }] })
+        }
+        const toolMessage = JSON.parse(messages.at(-1).content)
+        assert.deepEqual(toolMessage.result.map((entry) => entry.result.output), ['A', 'B'])
+        return JSON.stringify({ action: 'final', text: 'parallel ok' })
+      }
+
+      const started = Date.now()
+      const result = await runJeden({ task: 'Run slow reads', cwd: dir, chat, maxSteps: 2 })
+      const elapsed = Date.now() - started
+      assert.equal(result.text, 'parallel ok')
+      assert.ok(elapsed < 380, `expected parallel execution, got ${elapsed}ms`)
+    })
+  })
+})

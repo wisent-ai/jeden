@@ -146,6 +146,8 @@ Multiple tool calls:
 {"action":"tools","tools":[{"tool":"read_file","input":{"path":"package.json"}},{"tool":"git_status","input":{}}]}
 ```
 
+Read-only multi-tool calls run in parallel when hooks and approvals are not active; writes, commands, hooks, and approval-gated tools stay serialized.
+
 Range read:
 
 ```json
