@@ -65,6 +65,26 @@ function publicPath(cwd, target) {
   return rel || '.'
 }
 
+async function listDirectoryEntries({ cwd, dir, depth, limit }) {
+  const out = []
+  async function visit(current, level) {
+    const entries = await readdir(current, { withFileTypes: true })
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (out.length >= limit) return
+      const target = resolve(current, entry.name)
+      const item = {
+        name: entry.name,
+        path: publicPath(cwd, target),
+        type: entry.isDirectory() ? 'dir' : entry.isFile() ? 'file' : 'other',
+      }
+      out.push(item)
+      if (entry.isDirectory() && level < depth && !SKIP_DIRS.has(entry.name)) await visit(target, level + 1)
+    }
+  }
+  await visit(dir, 1)
+  return { entries: out, truncated: out.length >= limit }
+}
+
 function jailedArtifactPath(artifactDir, name) {
   if (!artifactDir) throw new Error('artifact tools require an active session')
   if (!name || typeof name !== 'string') throw new Error('name is required')
@@ -504,14 +524,17 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'list_dir',
-    description: 'List one directory under cwd',
-    input: { path: 'string optional' },
+    description: 'List a directory under cwd; optional depth recursively includes children',
+    input: { path: 'string optional', depth: 'number optional', limit: 'number optional' },
     async execute(input) {
       const dir = jailPath(cwd, input.path || '.')
-      const entries = await readdir(dir, { withFileTypes: true })
-      return entries
-        .map((entry) => ({ name: entry.name, type: entry.isDirectory() ? 'dir' : entry.isFile() ? 'file' : 'other' }))
-        .sort((a, b) => a.name.localeCompare(b.name))
+      const depth = Math.min(Math.max(Number(input.depth) || 1, 1), 5)
+      const limit = Math.min(Math.max(Number(input.limit) || 200, 1), 1000)
+      if (input.depth === undefined && input.limit === undefined) {
+        const listing = await listDirectoryEntries({ cwd, dir, depth: 1, limit: 200 })
+        return listing.entries.map((entry) => ({ name: entry.name, type: entry.type }))
+      }
+      return listDirectoryEntries({ cwd, dir, depth, limit })
     },
   })
 
