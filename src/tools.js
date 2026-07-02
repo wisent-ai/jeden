@@ -1701,7 +1701,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.name) throw new Error('name is required')
       if (typeof input.content !== 'string') throw new Error('content is required')
       const safeName = String(input.name).replace(/[^a-zA-Z0-9._-]/g, '_')
-      const file = resolve(artifactDir, safeName)
+      if (!safeName || safeName === '.' || safeName === '..') throw new Error('invalid artifact name')
+      const file = jailedArtifactPath(artifactDir, safeName)
       await mkdir(dirname(file), { recursive: true })
       await writeFile(file, input.content, 'utf8')
       return { path: file, bytes: Buffer.byteLength(input.content, 'utf8') }
@@ -1738,7 +1739,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
     input: { name: 'string required', maxBytes: 'number optional' },
     async execute(input) {
       const file = jailedArtifactPath(artifactDir, input.name)
-      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1), MAX_READ_BYTES)
       const content = await readFile(file, 'utf8')
       const buffer = Buffer.from(content, 'utf8')
       const sliced = buffer.subarray(0, maxBytes)

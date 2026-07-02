@@ -562,6 +562,56 @@ test('session artifact readers list sanitized artifact names and read their cont
   })
 })
 
+test('artifact and todo tools use the session artifact directory', async () => {
+  await withTempDir(async (dir) => {
+    const artifactDir = join(dir, 'artifacts')
+    const missingSession = createToolRegistry({ cwd: dir })
+    const denied = await missingSession.execute('save_artifact', { name: 'x.txt', content: 'x' })
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /requires an active session/)
+
+    const registry = createToolRegistry({ cwd: dir, artifactDir })
+    const saved = await registry.execute('save_artifact', { name: 'analysis report.txt', content: 'alpha\nbeta\n' })
+    assert.equal(saved.output.bytes, Buffer.byteLength('alpha\nbeta\n'))
+    assert.equal(saved.output.path, join(artifactDir, 'analysis_report.txt'))
+    const invalidDot = await registry.execute('save_artifact', { name: '.', content: 'bad' })
+    assert.equal(invalidDot.ok, false)
+    assert.match(invalidDot.error, /invalid artifact name/)
+    const invalidParent = await registry.execute('save_artifact', { name: '..', content: 'bad' })
+    assert.equal(invalidParent.ok, false)
+    assert.match(invalidParent.error, /invalid artifact name/)
+
+
+    const listed = await registry.execute('list_artifacts', {})
+    assert.deepEqual(listed.output.artifacts.map((artifact) => artifact.name), ['analysis_report.txt'])
+
+    const readArtifact = await registry.execute('read_artifact', { name: 'analysis_report.txt', maxBytes: 6 })
+    assert.equal(readArtifact.output.name, 'analysis_report.txt')
+    assert.equal(readArtifact.output.bytes, Buffer.byteLength('alpha\nbeta\n'))
+    assert.equal(readArtifact.output.truncated, true)
+    assert.equal(readArtifact.output.content, 'alpha\n')
+
+    const initialized = await registry.execute('todo', { op: 'init', list: [{ phase: 'Build', items: ['Patch code', 'Run tests'] }] })
+    assert.equal(initialized.output.total, 2)
+    assert.equal(initialized.output.active, 'Patch code')
+
+    const done = await registry.execute('todo', { op: 'done', task: 'Patch code' })
+    assert.equal(done.output.completed, 1)
+    assert.equal(done.output.active, 'Run tests')
+
+    const appended = await registry.execute('todo', { op: 'append', phase: 'Review', items: ['Push branch'] })
+    assert.equal(appended.output.total, 3)
+    assert.deepEqual(appended.output.phases.map((phase) => phase.phase), ['Build', 'Review'])
+
+    const view = await registry.execute('todo', { op: 'view' })
+    assert.deepEqual(view.output.items.map((item) => [item.text, item.status, item.phase]), [
+      ['Patch code', 'done', 'Build'],
+      ['Run tests', 'in_progress', 'Build'],
+      ['Push branch', 'pending', 'Review'],
+    ])
+  })
+})
+
 test('memory stores and recalls isolated notes', async () => {
   await withTempDir(async (dir) => {
     const previousMemoryFile = process.env.JEDEN_MEMORY_FILE
