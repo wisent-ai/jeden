@@ -7,7 +7,7 @@ import { resolve, relative, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { homedir } from 'node:os'
-import { callMcpTool, listMcpTools } from './mcp.js'
+import { callMcpTool, getMcpPrompt, listMcpPrompts, listMcpResources, listMcpTools, readMcpResource } from './mcp.js'
 
 const MAX_READ_BYTES = 512_000
 const MAX_SEARCH_RESULTS = 100
@@ -906,6 +906,52 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.tool || typeof input.tool !== 'string') throw new Error('tool is required')
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
       return callMcpTool({ cwd, serverName: input.server, toolName: input.tool, args: input.args || {}, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'mcp_list_resources',
+    description: 'List resources from a configured stdio MCP server',
+    input: { server: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return listMcpResources({ cwd, serverName: input.server, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'mcp_read_resource',
+    description: 'Read one resource from a configured stdio MCP server',
+    input: { server: 'string required', uri: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      if (!input.uri || typeof input.uri !== 'string') throw new Error('uri is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return readMcpResource({ cwd, serverName: input.server, uri: input.uri, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'mcp_list_prompts',
+    description: 'List prompts from a configured stdio MCP server',
+    input: { server: 'string required', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return listMcpPrompts({ cwd, serverName: input.server, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'mcp_get_prompt',
+    description: 'Get one prompt from a configured stdio MCP server',
+    input: { server: 'string required', name: 'string required', args: 'object optional', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!input.server || typeof input.server !== 'string') throw new Error('server is required')
+      if (!input.name || typeof input.name !== 'string') throw new Error('name is required')
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return getMcpPrompt({ cwd, serverName: input.server, name: input.name, args: input.args || {}, timeoutMs })
     },
   })
 

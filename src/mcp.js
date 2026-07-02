@@ -123,17 +123,42 @@ export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 3
   }
 }
 
-export async function listMcpTools({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
+async function configuredServer({ cwd, serverName }) {
   const config = await loadMcpConfig({ cwd })
   const server = config.mcpServers?.[serverName]
   if (!server) throw new Error(`unknown MCP server: ${serverName}`)
+  return server
+}
+
+export async function listMcpTools({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
+  const server = await configuredServer({ cwd, serverName })
   return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/list'))
 }
 
 export async function callMcpTool({ cwd = process.cwd(), serverName, toolName, args = {}, timeoutMs } = {}) {
-  const config = await loadMcpConfig({ cwd })
-  const server = config.mcpServers?.[serverName]
-  if (!server) throw new Error(`unknown MCP server: ${serverName}`)
+  const server = await configuredServer({ cwd, serverName })
   if (!toolName) throw new Error('toolName is required')
   return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('tools/call', { name: toolName, arguments: args }))
+}
+
+export async function listMcpResources({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
+  const server = await configuredServer({ cwd, serverName })
+  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('resources/list'))
+}
+
+export async function readMcpResource({ cwd = process.cwd(), serverName, uri, timeoutMs } = {}) {
+  const server = await configuredServer({ cwd, serverName })
+  if (!uri) throw new Error('uri is required')
+  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('resources/read', { uri }))
+}
+
+export async function listMcpPrompts({ cwd = process.cwd(), serverName, timeoutMs } = {}) {
+  const server = await configuredServer({ cwd, serverName })
+  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('prompts/list'))
+}
+
+export async function getMcpPrompt({ cwd = process.cwd(), serverName, name, args = {}, timeoutMs } = {}) {
+  const server = await configuredServer({ cwd, serverName })
+  if (!name) throw new Error('name is required')
+  return withMcpServer({ server, cwd, timeoutMs }, async (client) => client.request('prompts/get', { name, arguments: args }))
 }

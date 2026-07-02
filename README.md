@@ -32,7 +32,7 @@ The private M1 version includes:
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
 - Durable memory tool: `memory` stores and recalls notes across sessions from `~/.jeden/memory.jsonl`.
-- MCP tools: `mcp_list_tools`, `mcp_call_tool` support configured stdio MCP servers.
+- MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads user context, ancestor context, and cwd context files before each run.
@@ -205,6 +205,18 @@ Memory call:
 
 ```json
 {"action":"tool","tool":"memory","input":{"op":"remember","text":"Repo uses npm run check for syntax validation","tags":["jeden"]}}
+```
+
+MCP resource call:
+
+```json
+{"action":"tool","tool":"mcp_read_resource","input":{"server":"filesystem","uri":"file:///tmp/notes.txt"}}
+```
+
+MCP prompt call:
+
+```json
+{"action":"tool","tool":"mcp_get_prompt","input":{"server":"prompts","name":"review","args":{"topic":"diff"}}}
 ```
 Git diff call:
 
