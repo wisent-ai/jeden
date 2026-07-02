@@ -1624,8 +1624,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'fetch_url',
-    description: 'Fetch one HTTP(S) URL and return text capped at maxBytes with byte count, truncation state, SHA-256, and optional timeoutMs',
-    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional' },
+    description: 'Fetch one HTTP(S) URL and return text capped at maxBytes with byte count, truncation state, SHA-256, optional timeoutMs, and optional line range',
+    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional', range: 'string optional' },
     async execute(input) {
       if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
       const url = new URL(input.url)
@@ -1634,7 +1634,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
       const response = await fetchWithTimeout(url, timeoutMs)
       const buffer = Buffer.from(await response.arrayBuffer())
-      const sliced = buffer.subarray(0, maxBytes)
+      const text = buffer.toString('utf8')
+      const selected = input.range ? lineWindow(text, input.range) : null
+      const outputText = selected ? selected.content : text
+      const outputBuffer = Buffer.from(outputText, 'utf8')
+      const sliced = outputBuffer.subarray(0, maxBytes)
       return {
         url: url.toString(),
         status: response.status,
@@ -1642,8 +1646,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         contentType: response.headers.get('content-type') || null,
         bytes: buffer.length,
         sha256: sha256(buffer),
-        truncated: buffer.length > sliced.length,
+        truncated: outputBuffer.length > sliced.length,
         text: sliced.toString('utf8'),
+        startLine: selected?.startLine,
+        endLine: selected?.endLine,
+        ranges: selected?.ranges,
       }
     },
   })

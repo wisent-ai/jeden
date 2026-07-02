@@ -642,6 +642,11 @@ trailer << /Root 1 0 R >>
       assert.equal(raw.output.truncated, false)
       assert.ok(raw.output.bytes > result.output.bytes)
       assert.match(raw.output.sha256, /^[a-f0-9]{64}$/)
+      const rawRange = await registry.execute('fetch_url', { url: `${origin}/table.tsv`, range: '2-3', maxBytes: 1000, timeoutMs: 1000 })
+      assert.equal(rawRange.output.text, 'alpha\t1\nbeta\t2')
+      assert.equal(rawRange.output.startLine, 2)
+      assert.equal(rawRange.output.endLine, 3)
+
 
       const json = await registry.execute('fetch_readable_url', { url: `${origin}/data.json` })
       assert.equal(json.output.text, '{\n  "name": "Jeden",\n  "nested": {\n    "ok": true\n  }\n}')
