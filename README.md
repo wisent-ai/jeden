@@ -25,7 +25,7 @@ The private M1 version includes:
 - Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. Recursive search and glob discovery use `git ls-files --exclude-standard` when available, so ignored files are skipped. `search_files`, `glob_paths`, and `grep_regex` accept `limit` and `skip` for pagination.
 - File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
 - Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
-- Eval tools: `node_eval`, `python_eval`. Both require command permission.
+- Eval/process tools: `node_eval`, `python_eval`, `run_process`. They require command permission; `run_process` accepts argv without a shell.
 - Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text.
 - Artifact tools: `save_artifact`, `list_artifacts`, `read_artifact` persist large or reusable UTF-8 outputs under the active session artifact directory.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`; their `exec` helper is gated by command permission.
@@ -166,6 +166,12 @@ Command call, only when enabled:
 
 ```json
 {"action":"tool","tool":"run_command","input":{"command":"npm run check","timeoutMs":30000}}
+```
+
+Argv process call without a shell:
+
+```json
+{"action":"tool","tool":"run_process","input":{"command":"node","args":["-e","console.log(process.argv[1])","hello"],"timeoutMs":30000}}
 ```
 
 Package script call:

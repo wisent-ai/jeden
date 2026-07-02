@@ -22,6 +22,7 @@ export const TOOL_CAPABILITIES = {
   move_file: { permission: 'write', hook: 'edit' },
   save_artifact: { hook: 'edit' },
   run_command: { permission: 'command', hook: 'bash', postHook: 'bash' },
+  run_process: { permission: 'command', hook: 'bash', postHook: 'bash' },
   run_package_script: { permission: 'command', hook: 'bash', postHook: 'bash' },
   node_eval: { permission: 'command', hook: 'bash', postHook: 'bash' },
   python_eval: { permission: 'command', hook: 'bash', postHook: 'bash' },
@@ -779,6 +780,19 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
       return runShellCommand({ cwd: resolve(cwd), command: input.command, timeoutMs })
+    },
+  })
+
+  add({
+    name: 'run_process',
+    description: 'Run one process with argv array in cwd without a shell; requires --allow-command',
+    input: { command: 'string required', args: 'array optional', stdin: 'string optional', timeoutMs: 'number optional' },
+    async execute(input) {
+      if (!allowCommand) throw new Error('run_process requires --allow-command')
+      if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
+      const args = Array.isArray(input.args) ? input.args.map((arg) => String(arg)) : []
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      return runProcess({ cwd: resolve(cwd), command: input.command, args, timeoutMs, stdin: input.stdin ?? null })
     },
   })
 
