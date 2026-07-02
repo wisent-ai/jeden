@@ -54,6 +54,7 @@ jeden resume <session-id-or-path> "continue with the previous context" --cwd ../
 jeden sessions 20
 jeden show <session-id-or-path>
 jeden tools --cwd ../content-platform
+jeden doctor --cwd ../content-platform
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
 ```
@@ -78,6 +79,7 @@ Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-pa
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.
+Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged config, model-router env presence, built-in tool count, and custom tool load errors.
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
 MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit.
 

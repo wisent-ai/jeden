@@ -25,6 +25,7 @@ function usage() {
   jeden artifact <session-id-or-path> <name> [output]
   jeden tools [--cwd path]
   jeden config [--cwd path]
+  jeden doctor [--cwd path]
 
 Environment:
   WISENT_APP_AGENT_AUTH_SECRET  required for model-router calls
@@ -120,6 +121,9 @@ function parseArgs(argv) {
   }
   if (first === 'config') {
     return { command: 'config', ...parseSharedOptions(rest) }
+  }
+  if (first === 'doctor') {
+    return { command: 'doctor', ...parseSharedOptions(rest) }
   }
   if (first.slice(0, 2) === '--') return { command: 'interactive', ...parseSharedOptions(argv) }
   throw new Error(`unknown command: ${first}`)
@@ -316,6 +320,32 @@ async function showConfig(args) {
   process.stdout.write(`${JSON.stringify(config, null, 2)}\n`)
 }
 
+async function showDoctor(args) {
+  const config = await loadJedenConfig({ cwd: args.cwd })
+  const builtIn = createToolRegistry({ cwd: args.cwd }).list()
+  const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
+  const report = {
+    ok: custom.errors.length === 0,
+    cwd: args.cwd,
+    node: process.version,
+    model: config.model,
+    modelRouterUrl: config.modelRouterUrl,
+    agentId: config.agentId,
+    env: {
+      hasAuthSecret: Boolean(process.env.WISENT_APP_AGENT_AUTH_SECRET),
+      hasModelRouterUrl: Boolean(process.env.MODEL_ROUTER_URL),
+      hasAgentId: Boolean(process.env.WISENT_APP_AGENT_ID),
+    },
+    tools: {
+      builtIn: builtIn.length,
+      custom: custom.tools.length,
+      errors: custom.errors,
+    },
+  }
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
+}
+
+
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
@@ -346,6 +376,10 @@ async function main() {
   }
   if (args.command === 'config') {
     await showConfig(args)
+    return
+  }
+  if (args.command === 'doctor') {
+    await showDoctor(args)
     return
   }
   if (args.command === 'tools') {
