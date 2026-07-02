@@ -198,6 +198,34 @@ async function packageScripts(cwd) {
   return Object.fromEntries(Object.entries(scripts).filter((entry) => typeof entry[1] === 'string'))
 }
 
+async function loadTodoState(file) {
+  try {
+    const raw = await readFile(file, 'utf8')
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed.items) ? parsed : { items: [] }
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { items: [] }
+    throw error
+  }
+}
+
+async function saveTodoState(file, state) {
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, JSON.stringify(state, null, 2), 'utf8')
+}
+
+function todoItem(text, status = 'pending') {
+  return { text: String(text), status }
+}
+
+function summarizeTodos(state) {
+  const total = state.items.length
+  const completed = state.items.filter((item) => item.status === 'done').length
+  const active = state.items.find((item) => item.status !== 'done') || null
+  return { total, completed, active: active?.text || null, items: state.items }
+}
+
+
 
 export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, allowCommand = false, artifactDir = null, customTools = [] } = {}) {
   const tools = new Map()
@@ -477,6 +505,33 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       await mkdir(dirname(file), { recursive: true })
       await writeFile(file, input.content, 'utf8')
       return { path: file, bytes: Buffer.byteLength(input.content, 'utf8') }
+    },
+  })
+
+  add({
+    name: 'todo',
+    description: 'Manage the current session todo list with init, append, done, drop, and view operations',
+    input: { op: 'string required', items: 'array optional', task: 'string optional' },
+    async execute(input) {
+      if (!artifactDir) throw new Error('todo requires an active session')
+      const file = resolve(artifactDir, 'todo.json')
+      const state = await loadTodoState(file)
+      const op = input.op || 'view'
+      if (op === 'init') {
+        state.items = Array.isArray(input.items) ? input.items.map((item) => todoItem(item)) : []
+      } else if (op === 'append') {
+        if (!Array.isArray(input.items) || input.items.length === 0) throw new Error('items are required')
+        state.items.push(...input.items.map((item) => todoItem(item)))
+      } else if (op === 'done' || op === 'drop') {
+        if (!input.task) throw new Error('task is required')
+        const item = state.items.find((candidate) => candidate.text === input.task)
+        if (!item) throw new Error(`unknown task: ${input.task}`)
+        item.status = op === 'done' ? 'done' : 'dropped'
+      } else if (op !== 'view') {
+        throw new Error(`unknown todo op: ${op}`)
+      }
+      await saveTodoState(file, state)
+      return summarizeTodos(state)
     },
   })
 

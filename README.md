@@ -26,6 +26,7 @@ The private M1 version includes:
 - Web read tool: `fetch_url`.
 - Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
+- Session todo tool: `todo` stores task state under the active session artifacts directory.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
@@ -122,6 +123,12 @@ Package script call:
 ```
 
 
+
+Todo call:
+
+```json
+{"action":"tool","tool":"todo","input":{"op":"init","items":["Inspect files","Apply fix","Verify behavior"]}}
+```
 Git diff call:
 
 ```json
