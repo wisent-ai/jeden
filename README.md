@@ -69,7 +69,7 @@ Before each run, Jeden appends context files to the system prompt when present. 
 
 
 
-Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript.
+Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript. Use `jeden export <session-id-or-path> --html [output.html]` for a standalone HTML transcript.
 
 
 Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-path> <name> [output]` to inspect or extract session artifacts.

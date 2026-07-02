@@ -20,6 +20,7 @@ function usage() {
   jeden sessions [limit]
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
+  jeden export <session-id-or-path> --html [output.html]
   jeden artifacts <session-id-or-path>
   jeden artifact <session-id-or-path> <name> [output]
   jeden tools [--cwd path]
@@ -99,7 +100,9 @@ function parseArgs(argv) {
   if (first === 'export') {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('export requires a session id or path')
-    return { command: 'export', idOrPath, outputPath: rest[1] || null }
+    const outputPath = rest[1] === '--html' ? rest[2] || null : rest[1] || null
+    const format = rest[1] === '--html' ? 'html' : 'json'
+    return { command: 'export', idOrPath, outputPath, format }
   }
   if (first === 'artifacts') {
     const idOrPath = rest[0]
@@ -231,14 +234,50 @@ async function showSession(idOrPath) {
   }
 }
 
-async function exportSession(idOrPath, outputPath) {
+function htmlEscape(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+function renderSessionHtml(session) {
+  const events = session.events.map((event) => {
+    const label = htmlEscape(`${event.ts || ''} ${event.type || ''}`.trim())
+    const body = htmlEscape(JSON.stringify(event.data || {}, null, 2))
+    return `<section class="event"><h2>${label}</h2><pre>${body}</pre></section>`
+  }).join('\n')
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Jeden session ${htmlEscape(session.id)}</title>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 2rem; background: #fafafa; color: #111; }
+    .event { border: 1px solid #ddd; border-radius: 8px; background: white; margin: 1rem 0; padding: 1rem; }
+    h1 { margin-bottom: 0; }
+    h2 { font-size: 0.9rem; color: #555; margin-top: 0; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <h1>Jeden session ${htmlEscape(session.id)}</h1>
+  <p>${htmlEscape(session.path)}</p>
+  ${events}
+</body>
+</html>
+`
+}
+
+async function exportSession(idOrPath, outputPath, format = 'json') {
   const session = await readSession({ idOrPath })
-  const payload = JSON.stringify(session, null, 2)
+  const payload = format === 'html' ? renderSessionHtml(session) : `${JSON.stringify(session, null, 2)}\n`
   if (outputPath) {
-    await writeFile(outputPath, `${payload}\n`, 'utf8')
+    await writeFile(outputPath, payload, 'utf8')
     process.stdout.write(`${outputPath}\n`)
   } else {
-    process.stdout.write(`${payload}\n`)
+    process.stdout.write(payload)
   }
 }
 
@@ -294,7 +333,7 @@ async function main() {
     return
   }
   if (args.command === 'export') {
-    await exportSession(args.idOrPath, args.outputPath)
+    await exportSession(args.idOrPath, args.outputPath, args.format)
     return
   }
   if (args.command === 'artifacts') {
