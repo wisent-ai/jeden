@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, stat } from 'node:fs/promises'
+import { readdir, readFile, rename, unlink, writeFile, stat } from 'node:fs/promises'
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
@@ -454,6 +454,44 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         replacements: input.replacements.length,
         bytes: Buffer.byteLength(next, 'utf8'),
       }
+    },
+  })
+
+  add({
+    name: 'delete_file',
+    description: 'Delete one UTF-8 file under cwd; requires expectedSha256 and --allow-write',
+    input: { path: 'string required', expectedSha256: 'string required' },
+    async execute(input) {
+      if (!allowWrite) throw new Error('delete_file requires --allow-write')
+      if (!input.path) throw new Error('path is required')
+      if (!input.expectedSha256) throw new Error('expectedSha256 is required')
+      const file = jailPath(cwd, input.path)
+      const current = await readFile(file, 'utf8')
+      const currentHash = sha256(current)
+      if (currentHash !== input.expectedSha256) throw new Error(`expectedSha256 mismatch: ${currentHash}`)
+      await unlink(file)
+      return { path: publicPath(cwd, file), deleted: true }
+    },
+  })
+
+  add({
+    name: 'move_file',
+    description: 'Move or rename one file under cwd; requires expectedSha256 and --allow-write',
+    input: { from: 'string required', to: 'string required', expectedSha256: 'string required', overwrite: 'boolean optional' },
+    async execute(input) {
+      if (!allowWrite) throw new Error('move_file requires --allow-write')
+      if (!input.from) throw new Error('from is required')
+      if (!input.to) throw new Error('to is required')
+      if (!input.expectedSha256) throw new Error('expectedSha256 is required')
+      const from = jailPath(cwd, input.from)
+      const to = jailPath(cwd, input.to)
+      const current = await readFile(from, 'utf8')
+      const currentHash = sha256(current)
+      if (currentHash !== input.expectedSha256) throw new Error(`expectedSha256 mismatch: ${currentHash}`)
+      if (!input.overwrite && await fileExists(to)) throw new Error('destination exists')
+      await mkdir(dirname(to), { recursive: true })
+      await rename(from, to)
+      return { from: publicPath(cwd, from), to: publicPath(cwd, to), moved: true }
     },
   })
 
