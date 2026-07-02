@@ -125,6 +125,8 @@ export async function withMcpServer({ server, cwd = process.cwd(), timeoutMs = 3
 
 async function configuredServer({ cwd, serverName }) {
   const config = await loadMcpConfig({ cwd })
+  const disabled = new Set(config.disabledServers || [])
+  if (disabled.has(serverName)) throw new Error(`disabled MCP server: ${serverName}`)
   const server = config.mcpServers?.[serverName]
   if (!server) throw new Error(`unknown MCP server: ${serverName}`)
   return server
