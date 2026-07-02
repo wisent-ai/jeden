@@ -2,6 +2,7 @@ import { readdir, readFile, rename, unlink, writeFile, stat } from 'node:fs/prom
 import { createReadStream } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
+import { inflateSync } from 'node:zlib'
 import { createInterface } from 'node:readline'
 import { resolve, relative, dirname, extname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
@@ -89,6 +90,82 @@ function readableTextForContent(raw, contentType) {
   if (type.indexOf('json') !== -1) return readableTextFromJson(raw)
   if (type.indexOf('rss') !== -1 || type.indexOf('atom') !== -1 || type.indexOf('xml') !== -1) return readableTextFromFeed(raw)
   return readableTextFromHtml(raw)
+}
+
+function decodePdfString(value) {
+  return String(value || '')
+    .replace(/\\([nrtbf()\\])/g, (_, char) => {
+      if (char === 'n') return '\n'
+      if (char === 'r') return '\r'
+      if (char === 't') return '\t'
+      if (char === 'b') return '\b'
+      if (char === 'f') return '\f'
+      return char
+    })
+    .replace(/\\([0-7]{1,3})/g, (_, octal) => String.fromCharCode(parseInt(octal, 8)))
+}
+
+function pdfTextOperators(text) {
+  const out = []
+  const source = String(text || '')
+  const stringPattern = String.raw`\((?:\\.|[^\\)])*\)`
+  const single = new globalThis.RegExp(`(${stringPattern})\\s*Tj`, 'g')
+  let match
+  while ((match = single.exec(source))) out.push(decodePdfString(match[1].slice(1, -1)))
+  const arrays = new globalThis.RegExp(`\\[((?:\\s*${stringPattern}\\s*[-0-9.]*\\s*)+)\\]\\s*TJ`, 'g')
+  while ((match = arrays.exec(source))) {
+    const parts = []
+    const items = new globalThis.RegExp(stringPattern, 'g')
+    let item
+    while ((item = items.exec(match[1]))) parts.push(decodePdfString(item[0].slice(1, -1)))
+    if (parts.length > 0) out.push(parts.join(''))
+  }
+  return out
+}
+
+function readableTextFromPdf(buffer) {
+  const raw = Buffer.from(buffer).toString('latin1')
+  const chunks = []
+  const streamPattern = /<<(.*?)>>\s*stream\r?\n([\s\S]*?)\r?\nendstream/g
+  let match
+  while ((match = streamPattern.exec(raw))) {
+    const dict = match[1]
+    let data = Buffer.from(match[2], 'latin1')
+    if (dict.indexOf('FlateDecode') !== -1) {
+      try {
+        data = inflateSync(data)
+      } catch {}
+    }
+    chunks.push(data.toString('latin1'))
+  }
+  const seen = new Set()
+  const extracted = []
+  for (const text of pdfTextOperators(chunks.join('\n')).concat(pdfTextOperators(raw))) {
+    if (seen.has(text)) continue
+    seen.add(text)
+    extracted.push(text)
+  }
+  return extracted.join('\n').replace(/\s+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+function readableTextFromNotebook(raw) {
+  const notebook = JSON.parse(raw)
+  const cells = Array.isArray(notebook.cells) ? notebook.cells : []
+  return cells.map((cell, index) => {
+    const kind = cell.cell_type || 'cell'
+    const source = Array.isArray(cell.source) ? cell.source.join('') : String(cell.source || '')
+    return `# %% [${kind}] cell:${index + 1}\n${source}`.trim()
+  }).join('\n\n')
+}
+
+function readableTextForDocument({ content, file }) {
+  const ext = extname(file).toLowerCase()
+  if (ext === '.pdf') return readableTextFromPdf(content)
+  const raw = Buffer.from(content).toString('utf8')
+  if (ext === '.ipynb') return readableTextFromNotebook(raw)
+  if (ext === '.json') return readableTextFromJson(raw)
+  if (ext === '.html' || ext === '.htm') return readableTextFromHtml(raw)
+  return raw
 }
 
 
@@ -707,6 +784,29 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         truncated: content.length > sliced.length,
         mimeType: mimeTypeForPath(file),
         base64: sliced.toString('base64'),
+        sha256: sha256(content),
+      }
+    },
+  })
+
+  add({
+    name: 'read_document',
+    description: 'Extract readable text from one document under cwd; supports text, HTML, JSON, notebooks, and basic PDF text streams; capped at 512KB output',
+    input: { path: 'string required', maxBytes: 'number optional' },
+    async execute(input) {
+      if (!input.path) throw new Error('path is required')
+      const file = jailPath(cwd, input.path)
+      const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
+      const content = await readFile(file)
+      const text = readableTextForDocument({ content, file })
+      const buffer = Buffer.from(text, 'utf8')
+      const sliced = buffer.subarray(0, maxBytes)
+      return {
+        path: publicPath(cwd, file),
+        bytes: buffer.length,
+        truncated: buffer.length > sliced.length,
+        mimeType: mimeTypeForPath(file),
+        text: sliced.toString('utf8'),
         sha256: sha256(content),
       }
     },

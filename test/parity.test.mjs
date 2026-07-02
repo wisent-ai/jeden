@@ -124,6 +124,31 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
+test('read_document extracts JSON notebooks and basic PDF text', async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, 'data.json'), '{"z":1,"a":{"ok":true}}', 'utf8')
+    await writeFile(join(dir, 'analysis.ipynb'), JSON.stringify({ cells: [{ cell_type: 'markdown', source: ['# Title\n', 'Body'] }, { cell_type: 'code', source: ['print("ok")\n'] }] }), 'utf8')
+    await writeFile(join(dir, 'paper.pdf'), `%PDF-1.4
+1 0 obj << /Type /Catalog /Pages 2 0 R >> endobj
+2 0 obj << /Type /Pages /Kids [3 0 R] /Count 1 >> endobj
+3 0 obj << /Type /Page /Parent 2 0 R /Contents 4 0 R >> endobj
+4 0 obj << /Length 44 >> stream
+BT /F1 12 Tf 72 720 Td (Hello PDF text) Tj ET
+endstream endobj
+trailer << /Root 1 0 R >>
+%%EOF`, 'utf8')
+    const registry = createToolRegistry({ cwd: dir })
+
+    const json = await registry.execute('read_document', { path: 'data.json' })
+    assert.equal(json.output.text, '{\n  "z": 1,\n  "a": {\n    "ok": true\n  }\n}')
+    const notebook = await registry.execute('read_document', { path: 'analysis.ipynb' })
+    assert.match(notebook.output.text, /# %% \[markdown\] cell:1\n# Title\nBody/)
+    assert.match(notebook.output.text, /# %% \[code\] cell:2\nprint\("ok"\)/)
+    const pdf = await registry.execute('read_document', { path: 'paper.pdf' })
+    assert.equal(pdf.output.text, 'Hello PDF text')
+  })
+})
+
 test('search_files and grep_regex accept multiple paths', async () => {
   await withTempDir(async (dir) => {
     await mkdir(join(dir, 'left'), { recursive: true })
