@@ -651,6 +651,10 @@ trailer << /Root 1 0 R >>
 
       const table = await registry.execute('fetch_readable_url', { url: `${origin}/table.tsv` })
       assert.equal(table.output.text, '| name | count |\n| --- | --- |\n| alpha | 1 |\n| beta | 2 |')
+      const tableRange = await registry.execute('fetch_readable_url', { url: `${origin}/table.tsv`, range: '3-4' })
+      assert.equal(tableRange.output.text, '| alpha | 1 |\n| beta | 2 |')
+      assert.equal(tableRange.output.startLine, 3)
+      assert.equal(tableRange.output.endLine, 4)
 
       const pdf = await registry.execute('fetch_readable_url', { url: `${origin}/paper.pdf` })
       assert.equal(pdf.output.text, 'Remote PDF text')

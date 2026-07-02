@@ -1650,8 +1650,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'fetch_readable_url',
-    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes with byte count, truncation state, SHA-256, and optional timeoutMs; supports HTML, JSON, CSV/TSV, RSS/Atom/XML, notebooks, and basic PDF text streams',
-    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional' },
+    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes with byte count, truncation state, SHA-256, optional timeoutMs, and optional line range; supports HTML, JSON, CSV/TSV, RSS/Atom/XML, notebooks, and basic PDF text streams',
+    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional', range: 'string optional' },
     async execute(input) {
       if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
       const url = new URL(input.url)
@@ -1662,8 +1662,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const raw = Buffer.from(await response.arrayBuffer())
       const contentType = response.headers.get('content-type') || null
       const readable = readableTextForUrlContent({ buffer: raw, contentType, urlPath: url.pathname })
+      const selected = input.range ? lineWindow(readable, input.range) : null
+      const text = selected ? selected.content : readable
       const buffer = Buffer.from(readable, 'utf8')
-      const sliced = buffer.subarray(0, maxBytes)
+      const outputBuffer = Buffer.from(text, 'utf8')
+      const sliced = outputBuffer.subarray(0, maxBytes)
       return {
         url: url.toString(),
         status: response.status,
@@ -1672,8 +1675,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         sourceBytes: raw.length,
         bytes: buffer.length,
         sha256: sha256(buffer),
-        truncated: buffer.length > sliced.length,
+        truncated: outputBuffer.length > sliced.length,
         text: sliced.toString('utf8'),
+        startLine: selected?.startLine,
+        endLine: selected?.endLine,
+        ranges: selected?.ranges,
       }
     },
   })
