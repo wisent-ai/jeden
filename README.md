@@ -113,7 +113,7 @@ Tool call:
 Range read:
 
 ```json
-{"action":"tool","tool":"read_file","input":{"path":"src/tools.js","range":"10-40"}}
+{"action":"tool","tool":"read_file","input":{"path":"src/tools.js:10+30"}}
 ```
 
 Glob call:

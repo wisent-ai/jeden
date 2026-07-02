@@ -189,12 +189,39 @@ function matchesPattern(path, patterns) {
   return false
 }
 
+function splitPathSelector(path, explicitRange) {
+  if (explicitRange || typeof path !== 'string') return { path, range: explicitRange || null }
+  const match = /^(.*):(\d+(?:-\d*)?|\d+\+\d+)$/.exec(path)
+  if (!match || !match[1]) return { path, range: null }
+  return { path: match[1], range: match[2] }
+}
+
+function parseLineRange(range, maxLine) {
+  if (!range) return { start: 1, end: maxLine }
+  const text = String(range).trim()
+  let match = /^(\d+)\+(\d+)$/.exec(text)
+  if (match) {
+    const start = Math.max(Number(match[1]), 1)
+    const count = Math.max(Number(match[2]), 1)
+    return { start, end: Math.min(start + count - 1, maxLine) }
+  }
+  match = /^(\d+)-(\d*)$/.exec(text)
+  if (match) {
+    const start = Math.max(Number(match[1]), 1)
+    const end = match[2] ? Math.min(Number(match[2]) || start, maxLine) : maxLine
+    return { start, end: Math.max(start, end) }
+  }
+  match = /^(\d+)$/.exec(text)
+  if (match) {
+    const start = Math.max(Number(match[1]), 1)
+    return { start, end: Math.min(start, maxLine) }
+  }
+  throw new Error('range must look like 10, 10-20, 10-, or 10+5')
+}
+
 function lineWindow(content, range) {
-  if (!range) return { content, startLine: 1, endLine: content.split(/\r?\n/).length }
-  const parts = String(range).split('-')
-  const start = Math.max(Number(parts[0]) || 1, 1)
   const lines = content.split(/\r?\n/)
-  const end = Math.min(parts[1] ? Number(parts[1]) || start : start, lines.length)
+  const { start, end } = parseLineRange(range, lines.length)
   const selected = lines.slice(start - 1, end)
   return { content: selected.join('\n'), startLine: start, endLine: end }
 }
@@ -338,15 +365,16 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_file',
-    description: 'Read a UTF-8 text file under cwd, capped at 512KB; optional range uses 1-based lines like 10-30',
-    input: { path: 'string required', range: 'string optional' },
+    description: 'Read a UTF-8 text file under cwd, capped at 512KB; optional range uses 1-based selectors like 10, 10-30, 10-, or 10+20',
+    input: { path: 'string required; may end with :10-30 selector', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
-      const file = jailPath(cwd, input.path)
+      const selectedPath = splitPathSelector(input.path, input.range)
+      const file = jailPath(cwd, selectedPath.path)
       const content = await readFile(file, 'utf8')
       if (Buffer.byteLength(content, 'utf8') > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap')
-      const selected = lineWindow(content, input.range)
-      return { path: publicPath(cwd, file), sha256: sha256(content), range: input.range || null, startLine: selected.startLine, endLine: selected.endLine, content: selected.content }
+      const selected = lineWindow(content, selectedPath.range)
+      return { path: publicPath(cwd, file), sha256: sha256(content), range: selectedPath.range || null, startLine: selected.startLine, endLine: selected.endLine, content: selected.content }
     },
   })
 
