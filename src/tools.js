@@ -1174,10 +1174,11 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const limit = Math.min(Math.max(Number(input.limit) || 20, 1), 100)
       const offset = Math.max(Number(input.offset) || 0, 0)
       if (input.query) {
-        const query = String(input.query).trim()
+        const query = String(input.query).trim().replace(/;+\s*$/, '')
+        if (query.indexOf(';') !== -1 || query.indexOf('\u0000') !== -1) throw new Error('read_sqlite query must be a single SELECT or WITH statement')
         if (query.search(/^(select|with)\b/i) !== 0) throw new Error('read_sqlite query must be SELECT or WITH')
-        const rows = await runSqliteJson({ cwd, file, sql: query })
-        return { path: publicPath(cwd, file), query, rows }
+        const rows = await runSqliteJson({ cwd, file, sql: `SELECT * FROM (${query}) LIMIT ${limit} OFFSET ${offset}` })
+        return { path: publicPath(cwd, file), query, rows, limit, offset }
       }
       if (!input.table) {
         const tables = await runSqliteJson({

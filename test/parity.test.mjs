@@ -247,13 +247,13 @@ test('read_sqlite lists tables and reads rows', async () => {
   await withTempDir(async (dir) => {
     await execFileOk('sqlite3', [
       join(dir, 'app.db'),
-      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL); INSERT INTO users (name, active) VALUES (\'Ada\', 1), (\'Grace\', 0); CREATE TABLE "user data" ("account id" TEXT PRIMARY KEY, "display name" TEXT NOT NULL); INSERT INTO "user data" VALUES (\'acct-1\', \'Quoted Name\'); CREATE TABLE composite (tenant TEXT, slug TEXT, value TEXT, PRIMARY KEY (tenant, slug)); INSERT INTO composite VALUES (\'t1\', \'s1\', \'v1\');',
+      'CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT NOT NULL, active INTEGER NOT NULL); INSERT INTO users (name, active) VALUES (\'Ada\', 1), (\'Grace\', 0); CREATE TABLE nums (id INTEGER PRIMARY KEY); INSERT INTO nums (id) VALUES (1), (2), (3), (4), (5); CREATE TABLE "user data" ("account id" TEXT PRIMARY KEY, "display name" TEXT NOT NULL); INSERT INTO "user data" VALUES (\'acct-1\', \'Quoted Name\'); CREATE TABLE composite (tenant TEXT, slug TEXT, value TEXT, PRIMARY KEY (tenant, slug)); INSERT INTO composite VALUES (\'t1\', \'s1\', \'v1\');',
     ])
     const registry = createToolRegistry({ cwd: dir })
 
     const tables = await registry.execute('read_sqlite', { path: 'app.db' })
     assert.equal(tables.ok, true)
-    assert.deepEqual(tables.output.tables, [{ name: 'composite', type: 'table', rows: 1 }, { name: 'user data', type: 'table', rows: 1 }, { name: 'users', type: 'table', rows: 2 }])
+    assert.deepEqual(tables.output.tables, [{ name: 'composite', type: 'table', rows: 1 }, { name: 'nums', type: 'table', rows: 5 }, { name: 'user data', type: 'table', rows: 1 }, { name: 'users', type: 'table', rows: 2 }])
 
     const sample = await registry.execute('read_sqlite', { path: 'app.db', table: 'users', where: 'active = 1', order: 'id DESC' })
     assert.equal(sample.ok, true)
@@ -275,6 +275,17 @@ test('read_sqlite lists tables and reads rows', async () => {
     const query = await registry.execute('read_sqlite', { path: 'app.db', query: 'SELECT count(*) AS total FROM users' })
     assert.equal(query.ok, true)
     assert.deepEqual(query.output.rows, [{ total: 2 }])
+
+    const pagedQuery = await registry.execute('read_sqlite', { path: 'app.db', query: 'SELECT id FROM nums ORDER BY id', limit: 2, offset: 2 })
+    assert.equal(pagedQuery.ok, true)
+    assert.deepEqual(pagedQuery.output.rows, [{ id: 3 }, { id: 4 }])
+
+    const writeCte = await registry.execute('read_sqlite', { path: 'app.db', query: 'WITH picked AS (SELECT id FROM users) DELETE FROM users' })
+    assert.equal(writeCte.ok, false)
+    const escapedQuery = await registry.execute('read_sqlite', { path: 'app.db', query: 'SELECT 1); DELETE FROM users; --' })
+    assert.equal(escapedQuery.ok, false)
+    assert.match(escapedQuery.error, /single SELECT or WITH/)
+
 
     const denied = await registry.execute('read_sqlite', { path: 'app.db', query: 'DELETE FROM users' })
     assert.equal(denied.ok, false)
