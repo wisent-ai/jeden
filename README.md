@@ -27,6 +27,7 @@ The private M1 version includes:
 - Artifact tool: `save_artifact` writes into the active session artifact directory, not the workspace.
 - Custom JavaScript tools auto-load from `~/.jeden/tools/*.js|*.mjs` and `<cwd>/.jeden/tools/*.js|*.mjs`.
 - Session todo tool: `todo` stores task state under the active session artifacts directory.
+- Delegation tool: `delegate_task` runs a focused subtask in a fresh Jeden session.
 - Existing file writes and patches require the `sha256` returned by `read_file`.
 - Project context auto-loads from `JEDEN.md`, `AGENTS.md`, `CLAUDE.md`, `.jeden/instructions.md`, and `.jeden/context.md` under `--cwd`.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
@@ -129,12 +130,18 @@ Package script call:
 ```
 
 
-
 Todo call:
 
 ```json
 {"action":"tool","tool":"todo","input":{"op":"init","items":["Inspect files","Apply fix","Verify behavior"]}}
 ```
+
+Delegate call:
+
+```json
+{"action":"tool","tool":"delegate_task","input":{"task":"summarize src/tools.js","maxSteps":6}}
+```
+
 Git diff call:
 
 ```json

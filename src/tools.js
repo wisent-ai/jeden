@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { resolve, relative, dirname } from 'node:path'
 import { mkdir } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 
 const MAX_READ_BYTES = 512_000
 const MAX_SEARCH_RESULTS = 100
@@ -191,6 +192,10 @@ function runProcess({ cwd, command, args, timeoutMs }) {
   })
 }
 
+
+function cliPath() {
+  return fileURLToPath(new URL('./cli.js', import.meta.url))
+}
 async function packageScripts(cwd) {
   const file = jailPath(cwd, 'package.json')
   const pkg = JSON.parse(await readFile(file, 'utf8'))
@@ -532,6 +537,22 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       }
       await saveTodoState(file, state)
       return summarizeTodos(state)
+    },
+  })
+
+  add({
+    name: 'delegate_task',
+    description: 'Run a focused subtask in a fresh Jeden session and return its result',
+    input: { task: 'string required', maxSteps: 'number optional' },
+    async execute(input) {
+      if (!input.task || typeof input.task !== 'string') throw new Error('task is required')
+      const maxSteps = Math.min(Math.max(Number(input.maxSteps) || 6, 1), 16)
+      return runProcess({
+        cwd: resolve(cwd),
+        command: process.env.JEDEN_NODE || 'node',
+        args: [cliPath(), 'run', input.task, '--cwd', resolve(cwd), '--max-steps', String(maxSteps)],
+        timeoutMs: Math.min(maxSteps * 45_000, 300_000),
+      })
     },
   })
 
