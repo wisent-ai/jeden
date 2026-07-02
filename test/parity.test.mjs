@@ -123,6 +123,24 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
+test('search_files and grep_regex accept multiple paths', async () => {
+  await withTempDir(async (dir) => {
+    await mkdir(join(dir, 'left'), { recursive: true })
+    await mkdir(join(dir, 'right'), { recursive: true })
+    await mkdir(join(dir, 'skip'), { recursive: true })
+    await writeFile(join(dir, 'left', 'a.txt'), 'alpha needle\n', 'utf8')
+    await writeFile(join(dir, 'right', 'b.txt'), 'beta needle\n', 'utf8')
+    await writeFile(join(dir, 'skip', 'c.txt'), 'skip needle\n', 'utf8')
+    const registry = createToolRegistry({ cwd: dir })
+
+    const literal = await registry.execute('search_files', { paths: ['left', 'right'], query: 'needle', limit: 10 })
+    assert.deepEqual(literal.output.matches.map((match) => match.path), ['left/a.txt', 'right/b.txt'])
+
+    const regex = await registry.execute('grep_regex', { paths: ['right'], expr: 'beta\\s+needle', limit: 10 })
+    assert.deepEqual(regex.output.matches.map((match) => match.path), ['right/b.txt'])
+  })
+})
+
 test('loadProjectContext expands @ imports relative to the context file', async () => {
   await withTempDir(async (dir) => {
     await mkdir(join(dir, 'partials'), { recursive: true })
