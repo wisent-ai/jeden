@@ -30,16 +30,41 @@ async function compactToolResult({ result, recorder, step, tool }) {
   return compacted
 }
 
+function inputFieldSchema(spec) {
+  const text = String(spec || '').toLowerCase()
+  const schema = {}
+  if (text.indexOf('number') !== -1) schema.type = 'number'
+  else if (text.indexOf('boolean') !== -1) schema.type = 'boolean'
+  else if (text.indexOf('array') !== -1) schema.type = 'array'
+  else if (text.indexOf('object') !== -1) schema.type = 'object'
+  else schema.type = 'string'
+  if (text.indexOf('optional') !== -1) schema.description = String(spec)
+  else schema.description = String(spec)
+  return schema
+}
+
+function inputObjectSchema(input = {}) {
+  const properties = {}
+  const required = []
+  for (const [name, spec] of Object.entries(input || {})) {
+    properties[name] = inputFieldSchema(spec)
+    if (String(spec || '').toLowerCase().indexOf('required') !== -1) required.push(name)
+  }
+  return {
+    type: 'object',
+    properties,
+    required,
+    additionalProperties: false,
+  }
+}
+
 function toOpenAIToolSpecs(list) {
   return list.map((tool) => ({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: {
-        type: 'object',
-        additionalProperties: true,
-      },
+      parameters: inputObjectSchema(tool.input),
     },
   }))
 }

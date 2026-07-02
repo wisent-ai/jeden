@@ -11,7 +11,7 @@ Jeden separates four planes:
 3. **Tools** — tools are a small allowlisted registry with path-jail enforcement. Writes and commands are gated by CLI flags.
 4. **Run loop** — the model can emit strict JSON actions or a native OpenAI `tool_calls` response. Invalid JSON is a hard failure when text actions are used.
 
-The router call sends OpenAI-compatible tool definitions; if the model returns native tool calls, Jeden maps the first call back into the same local action loop.
+The router call sends OpenAI-compatible tool definitions with JSON schemas derived from each tool input contract; if the model returns native tool calls, Jeden maps them back into the same local action loop.
 
 ## Current scope
 
