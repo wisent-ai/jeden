@@ -492,9 +492,26 @@ test('run_process supports child env overrides', async () => {
     assert.equal(result.ok, true)
     assert.equal(result.output.code, 0)
     assert.equal(result.output.stdout, 'ok:removed')
+    assert.equal(result.output.stdoutTruncated, false)
+    assert.equal(result.output.stderrTruncated, false)
   })
 })
 
+test('run_process reports capped stdout and stderr', async () => {
+  await withTempDir(async (dir) => {
+    const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+    const result = await registry.execute('run_process', {
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write("x".repeat(100050)); process.stderr.write("e".repeat(100050))'],
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.output.code, 0)
+    assert.equal(result.output.stdout.length, 100000)
+    assert.equal(result.output.stderr.length, 100000)
+    assert.equal(result.output.stdoutTruncated, true)
+    assert.equal(result.output.stderrTruncated, true)
+  })
+})
 test('custom tools preserve capability metadata and jail readText', async () => {
   await withTempDir(async (dir) => {
     await withIsolatedHome(dir, async () => {

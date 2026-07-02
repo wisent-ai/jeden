@@ -733,6 +733,8 @@ function runShellCommand({ cwd, command, timeoutMs, env = null }) {
     const child = spawn('/bin/sh', ['-lc', command], { cwd, env: processEnv(env) })
     let stdout = ''
     let stderr = ''
+    let stdoutTruncated = false
+    let stderrTruncated = false
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
@@ -740,15 +742,21 @@ function runShellCommand({ cwd, command, timeoutMs, env = null }) {
     }, timeoutMs)
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8')
-      if (stdout.length > 100_000) stdout = stdout.slice(0, 100_000)
+      if (stdout.length > 100_000) {
+        stdoutTruncated = true
+        stdout = stdout.slice(0, 100_000)
+      }
     })
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString('utf8')
-      if (stderr.length > 100_000) stderr = stderr.slice(0, 100_000)
+      if (stderr.length > 100_000) {
+        stderrTruncated = true
+        stderr = stderr.slice(0, 100_000)
+      }
     })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
-      resolvePromise({ code, signal, timedOut, stdout, stderr })
+      resolvePromise({ code, signal, timedOut, stdout, stderr, stdoutTruncated, stderrTruncated })
     })
   })
 }
@@ -758,6 +766,8 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null, env = null })
     const child = spawn(command, args, { cwd, env: processEnv(env) })
     let stdout = ''
     let stderr = ''
+    let stdoutTruncated = false
+    let stderrTruncated = false
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
@@ -766,15 +776,21 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null, env = null })
     if (stdin !== null) child.stdin.end(String(stdin))
     child.stdout.on('data', (chunk) => {
       stdout += chunk.toString('utf8')
-      if (stdout.length > 100_000) stdout = stdout.slice(0, 100_000)
+      if (stdout.length > 100_000) {
+        stdoutTruncated = true
+        stdout = stdout.slice(0, 100_000)
+      }
     })
     child.stderr.on('data', (chunk) => {
       stderr += chunk.toString('utf8')
-      if (stderr.length > 100_000) stderr = stderr.slice(0, 100_000)
+      if (stderr.length > 100_000) {
+        stderrTruncated = true
+        stderr = stderr.slice(0, 100_000)
+      }
     })
     child.on('close', (code, signal) => {
       clearTimeout(timer)
-      resolvePromise({ code, signal, timedOut, stdout, stderr })
+      resolvePromise({ code, signal, timedOut, stdout, stderr, stdoutTruncated, stderrTruncated })
     })
   })
 }
