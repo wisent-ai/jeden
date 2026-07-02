@@ -15,7 +15,7 @@ import { loadCustomTools } from './custom-tools.js'
 function usage() {
   return `Usage:
   jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
-  jeden run "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
+  jeden run "task" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
   jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden search-sessions <query> [limit]
@@ -44,6 +44,7 @@ function parseSharedOptions(rest) {
   let maxSteps = 8
   let model = null
   let maxTokens = 2048
+  let json = false
   const positionals = []
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -59,6 +60,10 @@ function parseSharedOptions(rest) {
     }
     if (arg === '--allow-command') {
       allowCommand = true
+      continue
+    }
+    if (arg === '--json') {
+      json = true
       continue
     }
     if (arg === '--model') {
@@ -82,7 +87,7 @@ function parseSharedOptions(rest) {
     positionals.push(arg)
   }
 
-  return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, positionals }
+  return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, json, positionals }
 }
 
 function parseArgs(argv) {
@@ -175,8 +180,12 @@ async function runOnce(args) {
   const hookRunner = createSharedHookRunner()
   await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
   const result = await runJeden({ ...args, recorder, hookRunner })
-  process.stdout.write(`${result.text}\n`)
-  process.stderr.write(`[session] ${result.sessionPath}\n`)
+  if (args.json) {
+    process.stdout.write(`${JSON.stringify({ ok: true, text: result.text, sessionPath: result.sessionPath }, null, 2)}\n`)
+  } else {
+    process.stdout.write(`${result.text}\n`)
+    process.stderr.write(`[session] ${result.sessionPath}\n`)
+  }
 }
 
 function sessionContext(session) {

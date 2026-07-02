@@ -71,6 +71,7 @@ jeden tools --cwd ../content-platform
 jeden doctor --cwd ../content-platform
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform --model claude-code-subscription
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
+jeden run "summarize package.json" --json
 ```
 
 Required env for real model calls:
