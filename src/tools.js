@@ -340,9 +340,9 @@ function publicPath(cwd, target) {
 }
 
 function sqliteIdentifier(name) {
-  const text = String(name || '')
-  if (!text.match(/^[A-Za-z_][A-Za-z0-9_]*$/)) throw new Error(`invalid sqlite identifier: ${name}`)
-  return `"${text}"`
+  const text = String(name ?? '')
+  if (text.length === 0 || text.indexOf('\u0000') !== -1) throw new Error(`invalid sqlite identifier: ${name}`)
+  return `"${text.replace(/"/g, '""')}"`
 }
 
 function parseSqliteJson(stdout) {
