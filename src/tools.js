@@ -1291,7 +1291,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'grep_regex',
-    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, hidden, gitignore, multiline, limit, and skip',
+    description: 'Search text files under cwd with a JavaScript regular expression, capped at 500 matches; supports path/paths, hidden, gitignore, multiline, caseSensitive, limit, and skip; case-insensitive by default',
     input: { expr: 'string required', path: 'string optional', paths: 'array optional', hidden: 'boolean optional', gitignore: 'boolean optional', multiline: 'boolean optional', caseSensitive: 'boolean optional', limit: 'number optional', skip: 'number optional' },
     async execute(input) {
       if (!input.expr || typeof input.expr !== 'string') throw new Error('expr is required')

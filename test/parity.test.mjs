@@ -346,6 +346,10 @@ test('search_files and grep_regex accept multiple paths', async () => {
 
     const regex = await registry.execute('grep_regex', { paths: ['right'], expr: 'beta\\s+needle', limit: 10 })
     assert.deepEqual(regex.output.matches.map((match) => match.path), ['right/b.txt'])
+    const insensitiveRegex = await registry.execute('grep_regex', { paths: ['right'], expr: 'BETA\\s+NEEDLE', limit: 10 })
+    assert.deepEqual(insensitiveRegex.output.matches.map((match) => match.path), ['right/b.txt'])
+    const sensitiveRegex = await registry.execute('grep_regex', { paths: ['right'], expr: 'BETA\\s+NEEDLE', caseSensitive: true, limit: 10 })
+    assert.deepEqual(sensitiveRegex.output.matches, [])
     const multiline = await registry.execute('grep_regex', { paths: ['right'], expr: 'alpha\\nbeta', multiline: true, limit: 10 })
     assert.deepEqual(multiline.output.matches.map((match) => [match.path, match.line, match.text]), [['right/multi.txt', 2, 'alpha beta']])
 
