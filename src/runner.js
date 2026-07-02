@@ -92,6 +92,11 @@ async function runHook({ hookRunner, event, payload, recorder }) {
   return result
 }
 
+function actionWithHookInput(action, hookResult) {
+  if (!hookResult?.toolInput) return action
+  return { ...action, input: hookResult.toolInput }
+}
+
 function hookPayload({ task, cwd, action = null, result = null, finalText = null }) {
   return {
     runtime: 'jeden',
@@ -173,17 +178,18 @@ export async function runJeden({
         payload: hookPayload({ task, cwd, action: toolAction }),
         recorder,
       })
+      const effectiveAction = actionWithHookInput(toolAction, preHook)
       const approval = preHook.decision === 'block'
         ? { approved: false, result: { ok: false, error: `hook blocked ${toolAction.tool}: ${preHook.reason}` } }
-        : await maybeApprove({ action: toolAction, allowWrite, allowCommand, approveTool, recorder })
-      const result = approval.approved ? await tools.execute(toolAction.tool, toolAction.input) : approval.result
-      const compactedResult = await compactToolResult({ result, recorder, step, tool: toolAction.tool })
-      results.push({ tool: toolAction.tool, result: compactedResult })
-      await recorder?.record('tool_result', { step, tool: toolAction.tool, result })
-      if (compactedResult !== result) await recorder?.record('tool_result_compacted', { step, tool: toolAction.tool, result: compactedResult })
-      const postEvent = postToolHookEvent(toolAction.tool)
+        : await maybeApprove({ action: effectiveAction, allowWrite, allowCommand, approveTool, recorder })
+      const result = approval.approved ? await tools.execute(effectiveAction.tool, effectiveAction.input) : approval.result
+      const compactedResult = await compactToolResult({ result, recorder, step, tool: effectiveAction.tool })
+      results.push({ tool: effectiveAction.tool, result: compactedResult })
+      await recorder?.record('tool_result', { step, tool: effectiveAction.tool, requested: toolAction, effective: effectiveAction, result })
+      if (compactedResult !== result) await recorder?.record('tool_result_compacted', { step, tool: effectiveAction.tool, result: compactedResult })
+      const postEvent = postToolHookEvent(effectiveAction.tool)
       if (postEvent) {
-        await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action: toolAction, result }), recorder })
+        await runHook({ hookRunner, event: postEvent, payload: hookPayload({ task, cwd, action: effectiveAction, result }), recorder })
       }
     }
     messages.push({ role: 'user', content: formatToolResult(action.action === 'tools' ? results : results[0].result) })

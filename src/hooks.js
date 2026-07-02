@@ -23,6 +23,17 @@ function runHookProcess({ runnerPath, event, payload, timeoutMs }) {
   })
 }
 
+function normalizedDecision(parsed, fallback = 'pass') {
+  const decision = parsed?.decision === 'block' ? 'block' : fallback
+  const out = { decision, raw: parsed }
+  if (parsed?.reason) out.reason = String(parsed.reason)
+  if (parsed?.message) out.message = String(parsed.message)
+  if (parsed?.userMessage) out.userMessage = String(parsed.userMessage)
+  if (parsed?.additionalContext) out.additionalContext = String(parsed.additionalContext)
+  if (parsed?.toolInput && typeof parsed.toolInput === 'object' && !Array.isArray(parsed.toolInput)) out.toolInput = parsed.toolInput
+  return out
+}
+
 function parseDecision(result, event) {
   if (result.timedOut) return { decision: 'block', reason: `${event} hook runner timed out` }
   const raw = String(result.stdout || '').trim()
@@ -32,8 +43,9 @@ function parseDecision(result, event) {
   }
   try {
     const parsed = JSON.parse(raw)
-    if (parsed?.decision === 'block') return { decision: 'block', reason: parsed.reason || `${event} blocked`, raw: parsed }
-    return { decision: 'pass', raw: parsed }
+    const normalized = normalizedDecision(parsed)
+    if (normalized.decision === 'block') return { ...normalized, reason: normalized.reason || `${event} blocked` }
+    return normalized
   } catch {
     if (result.code) return { decision: 'block', reason: result.stderr || raw }
     return { decision: 'pass', raw }

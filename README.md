@@ -99,6 +99,8 @@ Use `jeden doctor --cwd .` to print a JSON diagnostics report covering merged co
 MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape for stdio servers. Add server names to `disabledServers` to block them after config merge.
 MCP calls reject pending requests when their timeout elapses and escalate from `SIGTERM` to `SIGKILL` if the child does not exit.
 
+Hook stdout may be empty, plain text, or JSON. JSON supports `decision: "block"` with `reason`, `userMessage` to replace the submitted prompt, and `toolInput` to replace the current pre-tool input. Jeden records hook results plus requested/effective tool payloads in the session transcript.
+
 Hooks can be disabled for debugging with:
 
 ```sh

@@ -172,14 +172,15 @@ async function runUserPromptHook({ hookRunner, task, cwd, recorder }) {
   })
   await recorder?.record('hook', { event: 'user_prompt_submit', result })
   if (result.decision === 'block') throw new Error(`user prompt hook blocked: ${result.reason}`)
+  return result.userMessage || task
 }
 
 
 async function runOnce(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   const hookRunner = createSharedHookRunner()
-  await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
-  const result = await runJeden({ ...args, recorder, hookRunner })
+  const task = await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
+  const result = await runJeden({ ...args, task, recorder, hookRunner })
   if (args.json) {
     process.stdout.write(`${JSON.stringify({ ok: true, text: result.text, sessionPath: result.sessionPath }, null, 2)}\n`)
   } else {
@@ -202,9 +203,9 @@ async function runResume(args) {
   const previous = await readSession({ idOrPath: args.idOrPath })
   const recorder = new SessionRecorder({ cwd: args.cwd })
   const hookRunner = createSharedHookRunner()
-  await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
+  const task = await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
   await recorder.record('resumed_from', { id: previous.id, path: previous.path })
-  const result = await runJeden({ ...args, recorder, hookRunner, priorContext: sessionContext(previous) })
+  const result = await runJeden({ ...args, task, recorder, hookRunner, priorContext: sessionContext(previous) })
   process.stdout.write(`${result.text}\n`)
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }
@@ -241,8 +242,8 @@ async function runInteractive(args) {
       if (!task) continue
       if (task === '/exit' || task === '/quit') break
       try {
-        await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
-        const result = await runJeden({ ...args, task, recorder, approveTool, askUser, hookRunner })
+        const taskForRun = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
+        const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner })
         process.stdout.write(`${result.text}\n`)
       } catch (error) {
         process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)

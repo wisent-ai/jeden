@@ -349,3 +349,28 @@ test('runJeden round-trips ask_user through the provided callback', async () => 
     })
   })
 })
+
+test('pre-tool hook can replace tool input before execution', async () => {
+  await withTempDir(async (dir) => {
+    await writeFile(join(dir, 'a.txt'), 'wrong', 'utf8')
+    await writeFile(join(dir, 'b.txt'), 'right', 'utf8')
+    let calls = 0
+    const chat = async ({ messages }) => {
+      calls += 1
+      if (calls === 1) return JSON.stringify({ action: 'tool', tool: 'read_file', input: { path: 'a.txt' } })
+      const toolMessage = JSON.parse(messages.at(-1).content)
+      assert.equal(toolMessage.result.output.path, 'b.txt')
+      assert.equal(toolMessage.result.output.content, 'right')
+      return JSON.stringify({ action: 'final', text: 'hook changed input' })
+    }
+    const hookRunner = {
+      async run(event) {
+        if (event === 'pre_tool_use:read') return { decision: 'pass', toolInput: { path: 'b.txt' } }
+        return { decision: 'pass' }
+      },
+    }
+
+    const result = await runJeden({ task: 'Read a file', cwd: dir, chat, hookRunner, maxSteps: 2 })
+    assert.equal(result.text, 'hook changed input')
+  })
+})
