@@ -363,6 +363,8 @@ test('search_files and grep_regex accept multiple paths', async () => {
       { path: 'empty-dir', type: 'dir' },
       { path: 'right/image.bin', type: 'file' },
     ])
+    const fileRoot = await registry.execute('glob_paths', { path: 'left/a.txt', patterns: '**', gitignore: false })
+    assert.deepEqual(fileRoot.output.matches, [{ path: 'left/a.txt', type: 'file' }])
   })
 })
 

@@ -555,6 +555,11 @@ async function walkFiles(root, start, out, options = {}) {
 }
 
 async function walkPaths(root, start, out, options = {}) {
+  const info = await stat(start)
+  if (info.isFile()) {
+    out.push({ path: publicPath(root, start), type: 'file', absolute: start })
+    return
+  }
   if (out.length >= (options.limit || MAX_SEARCH_FILES)) return
   const entries = await readdir(start, { withFileTypes: true })
   for (const entry of entries) {
