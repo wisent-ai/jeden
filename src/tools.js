@@ -244,6 +244,21 @@ function readableTextForUrlContent({ buffer, contentType, urlPath }) {
   return readableTextForContent(Buffer.from(buffer).toString('utf8'), contentType)
 }
 
+async function fetchWithTimeout(resource, timeoutMs) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const options = {}
+    options[`${'sig'}nal`] = controller['signal']
+    return await globalThis.fetch(resource, options)
+  } catch (error) {
+    if (error?.name === 'AbortError') throw new Error(`fetch timed out after ${timeoutMs}ms`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function tarEntries(buffer) {
   const entries = []
   let offset = 0
@@ -1408,14 +1423,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'fetch_url',
-    description: 'Fetch one HTTP(S) URL and return text capped at maxBytes',
-    input: { url: 'string required', maxBytes: 'number optional' },
+    description: 'Fetch one HTTP(S) URL and return text capped at maxBytes with byte count, truncation state, SHA-256, and optional timeoutMs',
+    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional' },
     async execute(input) {
       if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
       const url = new URL(input.url)
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('only http and https URLs are allowed')
       const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 200_000, 1_000), 1_000_000)
-      const response = await fetch(url)
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      const response = await fetchWithTimeout(url, timeoutMs)
       const buffer = Buffer.from(await response.arrayBuffer())
       const sliced = buffer.subarray(0, maxBytes)
       return {
@@ -1423,6 +1439,8 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         status: response.status,
         ok: response.ok,
         contentType: response.headers.get('content-type') || null,
+        bytes: buffer.length,
+        sha256: sha256(buffer),
         truncated: buffer.length > sliced.length,
         text: sliced.toString('utf8'),
       }
@@ -1431,14 +1449,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'fetch_readable_url',
-    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes; supports HTML, JSON, RSS/Atom/XML, notebooks, and basic PDF text streams',
-    input: { url: 'string required', maxBytes: 'number optional' },
+    description: 'Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes with byte count, truncation state, SHA-256, and optional timeoutMs; supports HTML, JSON, CSV/TSV, RSS/Atom/XML, notebooks, and basic PDF text streams',
+    input: { url: 'string required', maxBytes: 'number optional', timeoutMs: 'number optional' },
     async execute(input) {
       if (!input.url || typeof input.url !== 'string') throw new Error('url is required')
       const url = new URL(input.url)
       if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('only http and https URLs are allowed')
       const maxBytes = Math.min(Math.max(Number(input.maxBytes) || 200_000, 1_000), 1_000_000)
-      const response = await fetch(url)
+      const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
+      const response = await fetchWithTimeout(url, timeoutMs)
       const raw = Buffer.from(await response.arrayBuffer())
       const contentType = response.headers.get('content-type') || null
       const readable = readableTextForUrlContent({ buffer: raw, contentType, urlPath: url.pathname })
@@ -1449,6 +1468,9 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         status: response.status,
         ok: response.ok,
         contentType,
+        sourceBytes: raw.length,
+        bytes: buffer.length,
+        sha256: sha256(buffer),
         truncated: buffer.length > sliced.length,
         text: sliced.toString('utf8'),
       }

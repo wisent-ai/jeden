@@ -448,6 +448,14 @@ trailer << /Root 1 0 R >>
       assert.equal(result.output.contentType, 'text/html; charset=utf-8')
       assert.equal(result.output.truncated, false)
       assert.equal(result.output.text, 'Tom & Jerry 5 < 7 > 3 "yes" \'ok\' done Visible text')
+      assert.ok(result.output.sourceBytes > result.output.bytes)
+      assert.match(result.output.sha256, /^[a-f0-9]{64}$/)
+
+      const raw = await registry.execute('fetch_url', { url: `${origin}/page`, maxBytes: 1000, timeoutMs: 1000 })
+      assert.equal(raw.output.status, 200)
+      assert.equal(raw.output.truncated, false)
+      assert.ok(raw.output.bytes > result.output.bytes)
+      assert.match(raw.output.sha256, /^[a-f0-9]{64}$/)
 
       const json = await registry.execute('fetch_readable_url', { url: `${origin}/data.json` })
       assert.equal(json.output.text, '{\n  "name": "Jeden",\n  "nested": {\n    "ok": true\n  }\n}')
