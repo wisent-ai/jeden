@@ -1132,6 +1132,16 @@ process.stdin.on('data', (chunk) => {
       const adapters = await loadMcpToolAdapters({ cwd: dir })
       assert.deepEqual(adapters.errors, [])
       assert.deepEqual(adapters.tools.map((tool) => tool.name), ['mcp__local__echo'])
+      const registry = createToolRegistry({ cwd: dir })
+      try {
+        const directTools = await registry.execute('mcp_list_tools', { server: 'local', timeoutMs: 1000 })
+        assert.deepEqual(directTools.output.tools.map((tool) => tool.name), ['echo'])
+        const directCall = await registry.execute('mcp_call_tool', { server: 'local', tool: 'echo', args: { text: 'direct' }, timeoutMs: 1000 })
+        assert.equal(directCall.output.content[0].text, 'direct:1')
+      } finally {
+        await closeMcpClients({ cwd: dir })
+      }
+
 
       let calls = 0
       const chat = async ({ messages, tools }) => {
