@@ -1,6 +1,6 @@
 import { mkdir, appendFile, writeFile, readdir, readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { basename, join, resolve } from 'node:path'
 
 export function defaultSessionRoot() {
   return join(homedir(), '.jeden', 'sessions')
@@ -51,6 +51,19 @@ export class SessionRecorder {
   }
 }
 
+function sessionDir(idOrPath, root = defaultSessionRoot()) {
+  if (!idOrPath) throw new Error('session id or path is required')
+  return String(idOrPath).indexOf('/') === -1 ? join(root, String(idOrPath)) : resolve(String(idOrPath))
+}
+
+function artifactPath(dir, name) {
+  if (!name) throw new Error('artifact name is required')
+  const root = join(dir, 'artifacts')
+  const file = resolve(root, String(name))
+  if (file === root || file.slice(0, root.length + 1) === `${root}/`) return file
+  throw new Error(`artifact path escapes session: ${name}`)
+}
+
 export async function listSessions({ root = defaultSessionRoot(), limit = 20 } = {}) {
   let entries = []
   try {
@@ -79,9 +92,34 @@ export async function listSessions({ root = defaultSessionRoot(), limit = 20 } =
 }
 
 export async function readSession({ idOrPath, root = defaultSessionRoot() }) {
-  if (!idOrPath) throw new Error('session id or path is required')
-  const dir = String(idOrPath).indexOf('/') === -1 ? join(root, String(idOrPath)) : resolve(String(idOrPath))
+  const dir = sessionDir(idOrPath, root)
   const text = await readFile(join(dir, 'transcript.jsonl'), 'utf8')
   const events = text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line))
-  return { id: dir.split('/').pop(), path: dir, events }
+  return { id: basename(dir), path: dir, events }
+}
+
+export async function listSessionArtifacts({ idOrPath, root = defaultSessionRoot() } = {}) {
+  const dir = sessionDir(idOrPath, root)
+  const artifactDir = join(dir, 'artifacts')
+  let entries = []
+  try {
+    entries = await readdir(artifactDir, { withFileTypes: true })
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { id: basename(dir), path: dir, artifacts: [] }
+    throw error
+  }
+  const artifacts = []
+  for (const entry of entries) {
+    if (!entry.isFile()) continue
+    const file = join(artifactDir, entry.name)
+    const info = await stat(file)
+    artifacts.push({ name: entry.name, path: file, bytes: info.size, updatedAt: info.mtime.toISOString() })
+  }
+  return { id: basename(dir), path: dir, artifacts: artifacts.sort((a, b) => a.name.localeCompare(b.name)) }
+}
+
+export async function readSessionArtifact({ idOrPath, name, root = defaultSessionRoot() } = {}) {
+  const dir = sessionDir(idOrPath, root)
+  const file = artifactPath(dir, name)
+  return { id: basename(dir), name: basename(file), path: file, content: await readFile(file, 'utf8') }
 }

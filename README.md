@@ -43,6 +43,8 @@ The private M1 version includes:
 ## CLI
 
 ```sh
+jeden artifacts <session-id-or-path>
+jeden artifact <session-id-or-path> notes.txt
 jeden export <session-id-or-path> session.json
 jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
@@ -68,6 +70,8 @@ Before each run, Jeden appends context files to the system prompt when present. 
 
 Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript.
 
+
+Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-path> <name> [output]` to inspect or extract session artifacts.
 
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
 

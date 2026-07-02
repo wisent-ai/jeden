@@ -5,7 +5,7 @@ import { stdin as input, stdout as output } from 'node:process'
 import { writeFile } from 'node:fs/promises'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
-import { SessionRecorder, listSessions, readSession } from './session.js'
+import { SessionRecorder, listSessions, readSession, listSessionArtifacts, readSessionArtifact } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
 import { applyConfigEnv, loadJedenConfig } from './config.js'
@@ -20,6 +20,8 @@ function usage() {
   jeden sessions [limit]
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
+  jeden artifacts <session-id-or-path>
+  jeden artifact <session-id-or-path> <name> [output]
   jeden tools [--cwd path]
   jeden config [--cwd path]
 
@@ -98,6 +100,17 @@ function parseArgs(argv) {
     const idOrPath = rest[0]
     if (!idOrPath) throw new Error('export requires a session id or path')
     return { command: 'export', idOrPath, outputPath: rest[1] || null }
+  }
+  if (first === 'artifacts') {
+    const idOrPath = rest[0]
+    if (!idOrPath) throw new Error('artifacts requires a session id or path')
+    return { command: 'artifacts', idOrPath }
+  }
+  if (first === 'artifact') {
+    const idOrPath = rest[0]
+    const name = rest[1]
+    if (!idOrPath || !name) throw new Error('artifact requires a session id or path and artifact name')
+    return { command: 'artifact', idOrPath, name, outputPath: rest[2] || null }
   }
   if (first === 'tools') {
     return { command: 'tools', ...parseSharedOptions(rest) }
@@ -229,6 +242,24 @@ async function exportSession(idOrPath, outputPath) {
   }
 }
 
+async function showArtifacts(idOrPath) {
+  const listing = await listSessionArtifacts({ idOrPath })
+  for (const artifact of listing.artifacts) {
+    process.stdout.write(`${artifact.name}\t${artifact.bytes}\t${artifact.updatedAt}\n`)
+  }
+}
+
+async function showArtifact(idOrPath, name, outputPath) {
+  const artifact = await readSessionArtifact({ idOrPath, name })
+  if (outputPath) {
+    await writeFile(outputPath, artifact.content, 'utf8')
+    process.stdout.write(`${outputPath}\n`)
+  } else {
+    process.stdout.write(artifact.content)
+    if (!artifact.content.endsWith('\n')) process.stdout.write('\n')
+  }
+}
+
 async function showTools(args) {
   const builtIn = createToolRegistry({ cwd: args.cwd }).list()
   const custom = await loadCustomTools({ cwd: args.cwd, builtInToolNames: builtIn.map((tool) => tool.name) })
@@ -264,6 +295,14 @@ async function main() {
   }
   if (args.command === 'export') {
     await exportSession(args.idOrPath, args.outputPath)
+    return
+  }
+  if (args.command === 'artifacts') {
+    await showArtifacts(args.idOrPath)
+    return
+  }
+  if (args.command === 'artifact') {
+    await showArtifact(args.idOrPath, args.name, args.outputPath)
     return
   }
   if (args.command === 'config') {
