@@ -430,6 +430,34 @@ test('session artifact readers list sanitized artifact names and read their cont
   })
 })
 
+test('memory stores and recalls isolated notes', async () => {
+  await withTempDir(async (dir) => {
+    const previousMemoryFile = process.env.JEDEN_MEMORY_FILE
+    process.env.JEDEN_MEMORY_FILE = join(dir, 'memory.jsonl')
+    try {
+      const registry = createToolRegistry({ cwd: dir })
+      const first = await registry.execute('memory', { op: 'remember', text: 'Use npm run check before push', tags: ['jeden', 'checks'] })
+      assert.equal(first.ok, true)
+      assert.match(first.output.entry.id, /^[a-z0-9]+-[a-z0-9]+$/)
+
+      const second = await registry.execute('memory', { op: 'remember', text: 'SQLite reads use limit pagination', tags: ['sqlite'] })
+      assert.equal(second.ok, true)
+
+      const recallByText = await registry.execute('memory', { op: 'recall', query: 'pagination' })
+      assert.deepEqual(recallByText.output.entries.map((entry) => entry.text), ['SQLite reads use limit pagination'])
+
+      const recallByTag = await registry.execute('memory', { op: 'recall', query: 'checks' })
+      assert.deepEqual(recallByTag.output.entries.map((entry) => entry.text), ['Use npm run check before push'])
+
+      const listed = await registry.execute('memory', { op: 'list', limit: 1 })
+      assert.deepEqual(listed.output.entries.map((entry) => entry.text), ['SQLite reads use limit pagination'])
+    } finally {
+      if (previousMemoryFile === undefined) delete process.env.JEDEN_MEMORY_FILE
+      else process.env.JEDEN_MEMORY_FILE = previousMemoryFile
+    }
+  })
+})
+
 test('system prompt enforces dedicated tool policy', () => {
   const prompt = systemPrompt(createToolRegistry().list())
   assert.match(prompt, /Use glob_paths\/list_dir for file discovery/)
