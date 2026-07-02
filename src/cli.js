@@ -14,9 +14,9 @@ import { loadCustomTools } from './custom-tools.js'
 
 function usage() {
   return `Usage:
-  jeden [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
-  jeden run "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
-  jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
+  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
+  jeden run "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
+  jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
   jeden search-sessions <query> [limit]
   jeden show <session-id-or-path>
@@ -42,6 +42,7 @@ function parseSharedOptions(rest) {
   let allowCommand = false
   let maxSteps = 8
   let model = null
+  let maxTokens = 2048
   const positionals = []
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -64,6 +65,12 @@ function parseSharedOptions(rest) {
       if (!model) throw new Error('--model requires a value')
       continue
     }
+    if (arg === '--max-tokens') {
+      const raw = rest[++i]
+      maxTokens = Number(raw)
+      if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 200000) throw new Error('--max-tokens must be an integer between 1 and 200000')
+      continue
+    }
     if (arg === '--max-steps') {
       const raw = rest[++i]
       maxSteps = Number(raw)
@@ -74,7 +81,7 @@ function parseSharedOptions(rest) {
     positionals.push(arg)
   }
 
-  return { cwd, allowWrite, allowCommand, maxSteps, model, positionals }
+  return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, positionals }
 }
 
 function parseArgs(argv) {

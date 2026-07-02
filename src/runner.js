@@ -115,6 +115,7 @@ export async function runJeden({
   allowWrite = false,
   allowCommand = false,
   maxSteps = 8,
+  maxTokens = 2048,
   config = modelRouterConfig(),
   chat = chatCompletion,
   recorder = null,
@@ -137,11 +138,11 @@ export async function runJeden({
   ]
   if (priorContext) messages.push({ role: 'user', content: `Previous session context:\n\n${priorContext}` })
   messages.push({ role: 'user', content: task })
-  await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps })
+  await recorder?.record('user', { task, cwd, allowWrite, allowCommand, maxSteps, maxTokens })
 
   const toolSpecs = toOpenAIToolSpecs(tools.list())
   for (let step = 1; step <= maxSteps; step += 1) {
-    const content = await chat({ messages, config, tools: toolSpecs })
+    const content = await chat({ messages, config, tools: toolSpecs, maxTokens })
     await recorder?.record('assistant_raw', { step, content })
     const action = parseAction(content)
     await recorder?.record('action', { step, action })

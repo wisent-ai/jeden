@@ -21,7 +21,7 @@ The private M1 version includes:
 - `jeden run "task"` one-shot mode.
 - Session logs and artifacts under `~/.jeden/sessions/<id>/`.
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
-- Default model `claude-code-subscription`; override per run with `--model <name>`, `JEDEN_MODEL`, or config.
+- Default model `claude-code-subscription`; override per run with `--model <name>`, `JEDEN_MODEL`, or config. Use `--max-tokens <n>` to override the per-call output token cap.
 - Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. Recursive search and glob discovery use `git ls-files --exclude-standard` when available, so ignored files are skipped. `search_files`, `glob_paths`, and `grep_regex` accept `limit` and `skip` for pagination.
 - File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
 - Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
