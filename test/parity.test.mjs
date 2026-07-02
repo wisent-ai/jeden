@@ -384,6 +384,20 @@ export default (api) => ({
   })
 })
 
+test('run_process supports child env overrides', async () => {
+  await withTempDir(async (dir) => {
+    const registry = createToolRegistry({ cwd: dir, allowCommand: true })
+    const result = await registry.execute('run_process', {
+      command: process.execPath,
+      args: ['-e', 'process.stdout.write(`${process.env.JEDEN_ENV_TEST || "missing"}:${process.env.JEDEN_ENV_REMOVE || "removed"}`)'],
+      env: { JEDEN_ENV_TEST: 'ok', JEDEN_ENV_REMOVE: null },
+    })
+    assert.equal(result.ok, true)
+    assert.equal(result.output.code, 0)
+    assert.equal(result.output.stdout, 'ok:removed')
+  })
+})
+
 test('custom tools preserve capability metadata and jail readText', async () => {
   await withTempDir(async (dir) => {
     await withIsolatedHome(dir, async () => {

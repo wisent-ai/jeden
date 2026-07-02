@@ -690,9 +690,20 @@ function conflictBlocks(content) {
   return blocks
 }
 
-function runShellCommand({ cwd, command, timeoutMs }) {
+function processEnv(inputEnv) {
+  if (!inputEnv || typeof inputEnv !== 'object' || Array.isArray(inputEnv)) return process.env
+  const next = { ...process.env }
+  for (const [key, value] of Object.entries(inputEnv)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.exec(key)) throw new Error(`invalid env name: ${key}`)
+    if (value === null) delete next[key]
+    else next[key] = String(value)
+  }
+  return next
+}
+
+function runShellCommand({ cwd, command, timeoutMs, env = null }) {
   return new Promise((resolvePromise) => {
-    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: process.env })
+    const child = spawn('/bin/sh', ['-lc', command], { cwd, env: processEnv(env) })
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -715,9 +726,9 @@ function runShellCommand({ cwd, command, timeoutMs }) {
   })
 }
 
-function runProcess({ cwd, command, args, timeoutMs, stdin = null }) {
+function runProcess({ cwd, command, args, timeoutMs, stdin = null, env = null }) {
   return new Promise((resolvePromise) => {
-    const child = spawn(command, args, { cwd, env: process.env })
+    const child = spawn(command, args, { cwd, env: processEnv(env) })
     let stdout = ''
     let stderr = ''
     let timedOut = false
@@ -740,6 +751,8 @@ function runProcess({ cwd, command, args, timeoutMs, stdin = null }) {
     })
   })
 }
+
+
 
 async function discoverTextFiles(cwd, root, options = {}) {
   const repoRoot = resolve(cwd)
@@ -1354,26 +1367,26 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'run_command',
-    description: 'Run a shell command in cwd; requires --allow-command; timeout defaults to 30s and maxes at 120s',
-    input: { command: 'string required', timeoutMs: 'number optional' },
+    description: 'Run a shell command in cwd; requires --allow-command; supports env overrides; timeout defaults to 30s and maxes at 120s',
+    input: { command: 'string required', timeoutMs: 'number optional', env: 'object optional' },
     async execute(input) {
       if (!allowCommand) throw new Error('run_command requires --allow-command')
       if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
-      return runShellCommand({ cwd: resolve(cwd), command: input.command, timeoutMs })
+      return runShellCommand({ cwd: resolve(cwd), command: input.command, timeoutMs, env: input.env || null })
     },
   })
 
   add({
     name: 'run_process',
-    description: 'Run one process with argv array in cwd without a shell; requires --allow-command',
-    input: { command: 'string required', args: 'array optional', stdin: 'string optional', timeoutMs: 'number optional' },
+    description: 'Run one process with argv array in cwd without a shell; requires --allow-command; supports env overrides',
+    input: { command: 'string required', args: 'array optional', stdin: 'string optional', timeoutMs: 'number optional', env: 'object optional' },
     async execute(input) {
       if (!allowCommand) throw new Error('run_process requires --allow-command')
       if (!input.command || typeof input.command !== 'string') throw new Error('command is required')
       const args = Array.isArray(input.args) ? input.args.map((arg) => String(arg)) : []
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 30_000, 1_000), 120_000)
-      return runProcess({ cwd: resolve(cwd), command: input.command, args, timeoutMs, stdin: input.stdin ?? null })
+      return runProcess({ cwd: resolve(cwd), command: input.command, args, timeoutMs, stdin: input.stdin ?? null, env: input.env || null })
     },
   })
 
@@ -1412,15 +1425,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'run_package_script',
-    description: 'Run one existing package.json script with npm; requires --allow-command or interactive approval',
-    input: { script: 'string required', timeoutMs: 'number optional' },
+    description: 'Run one existing package.json script with npm; requires --allow-command or interactive approval; supports env overrides',
+    input: { script: 'string required', timeoutMs: 'number optional', env: 'object optional' },
     async execute(input) {
       if (!allowCommand) throw new Error('run_package_script requires --allow-command')
       if (!input.script || typeof input.script !== 'string') throw new Error('script is required')
       const scripts = await packageScripts(cwd)
       if (typeof scripts[input.script] !== 'string') throw new Error(`unknown package script: ${input.script}`)
       const timeoutMs = Math.min(Math.max(Number(input.timeoutMs) || 60_000, 1_000), 180_000)
-      return runProcess({ cwd: resolve(cwd), command: 'npm', args: ['run', input.script], timeoutMs })
+      return runProcess({ cwd: resolve(cwd), command: 'npm', args: ['run', input.script], timeoutMs, env: input.env || null })
     },
   })
 
