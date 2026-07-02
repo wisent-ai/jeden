@@ -1191,22 +1191,28 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_document',
-    description: 'Extract readable text from one document under cwd; supports text, HTML, JSON, CSV/TSV, XML/RSS/Atom, notebooks, and basic PDF text streams; capped at 512KB output',
-    input: { path: 'string required', maxBytes: 'number optional' },
+    description: 'Extract readable text from one document under cwd; supports text, HTML, JSON, CSV/TSV, XML/RSS/Atom, notebooks, and basic PDF text streams; supports line ranges; capped at 512KB output',
+    input: { path: 'string required', maxBytes: 'number optional', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
       const file = jailPath(cwd, input.path)
       const maxBytes = Math.min(Math.max(Number(input.maxBytes) || MAX_READ_BYTES, 1_000), MAX_READ_BYTES)
       const content = await readFile(file)
       const text = readableTextForDocument({ content, file })
+      const selected = input.range ? lineWindow(text, input.range) : null
+      const outputText = selected ? selected.content : text
       const buffer = Buffer.from(text, 'utf8')
-      const sliced = buffer.subarray(0, maxBytes)
+      const outputBuffer = Buffer.from(outputText, 'utf8')
+      const sliced = outputBuffer.subarray(0, maxBytes)
       return {
         path: publicPath(cwd, file),
         bytes: buffer.length,
-        truncated: buffer.length > sliced.length,
+        truncated: outputBuffer.length > sliced.length,
         mimeType: mimeTypeForPath(file),
         text: sliced.toString('utf8'),
+        startLine: selected?.startLine,
+        endLine: selected?.endLine,
+        ranges: selected?.ranges,
         sha256: sha256(content),
       }
     },
