@@ -14,7 +14,7 @@ import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { runJeden } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
-import { loadMcpToolAdapters } from '../src/mcp.js'
+import { closeMcpClients, loadMcpToolAdapters } from '../src/mcp.js'
 
 async function withTempDir(fn) {
   const dir = await mkdtemp(join(tmpdir(), 'jeden-test-'))
@@ -1043,6 +1043,74 @@ process.stdin.on('data', (chunk) => {
 
       const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 3 })
       assert.equal(result.text, 'native mcp ok')
+    })
+  })
+})
+
+test('configured MCP tools read resources and prompts directly', async () => {
+  await withTempDir(async (dir) => {
+    await withIsolatedHome(dir, async () => {
+      const serverFile = join(dir, 'mcp-resource-server.mjs')
+      await writeFile(serverFile, `
+let buffer = Buffer.alloc(0)
+function send(message) {
+  const body = Buffer.from(JSON.stringify(message), 'utf8')
+  process.stdout.write('Content-Length: ' + body.length + '\\r\\n\\r\\n')
+  process.stdout.write(body)
+}
+function handle(message) {
+  if (message.method === 'initialize') {
+    send({ jsonrpc: '2.0', id: message.id, result: { protocolVersion: '2024-11-05', capabilities: {}, serverInfo: { name: 'fake-resources', version: '1' } } })
+    return
+  }
+  if (message.method === 'resources/list') {
+    send({ jsonrpc: '2.0', id: message.id, result: { resources: [{ uri: 'wisent://alpha', name: 'Alpha', mimeType: 'text/plain' }] } })
+    return
+  }
+  if (message.method === 'resources/read') {
+    send({ jsonrpc: '2.0', id: message.id, result: { contents: [{ uri: message.params.uri, mimeType: 'text/plain', text: 'resource:' + message.params.uri }] } })
+    return
+  }
+  if (message.method === 'prompts/list') {
+    send({ jsonrpc: '2.0', id: message.id, result: { prompts: [{ name: 'brief', description: 'Make a brief', arguments: [{ name: 'topic', required: true }] }] } })
+    return
+  }
+  if (message.method === 'prompts/get') {
+    send({ jsonrpc: '2.0', id: message.id, result: { description: 'Brief prompt', messages: [{ role: 'user', content: { type: 'text', text: 'Brief ' + message.params.arguments.topic } }] } })
+  }
+}
+process.stdin.on('data', (chunk) => {
+  buffer = Buffer.concat([buffer, chunk])
+  for (;;) {
+    const headerEnd = buffer.indexOf('\\r\\n\\r\\n')
+    if (headerEnd === -1) break
+    const header = buffer.subarray(0, headerEnd).toString('utf8')
+    const length = Number(header.split('\\r\\n')[0].slice('Content-Length:'.length).trim())
+    const bodyStart = headerEnd + 4
+    const bodyEnd = bodyStart + length
+    if (buffer.length < bodyEnd) break
+    const message = JSON.parse(buffer.subarray(bodyStart, bodyEnd).toString('utf8'))
+    buffer = buffer.subarray(bodyEnd)
+    handle(message)
+  }
+})
+`, 'utf8')
+      await mkdir(join(dir, '.jeden'), { recursive: true })
+      await writeFile(join(dir, '.jeden', 'mcp.json'), JSON.stringify({ mcpServers: { local: { command: process.execPath, args: [serverFile] } } }), 'utf8')
+      const registry = createToolRegistry({ cwd: dir })
+      try {
+        const resources = await registry.execute('mcp_list_resources', { server: 'local', timeoutMs: 1000 })
+        assert.deepEqual(resources.output.resources, [{ uri: 'wisent://alpha', name: 'Alpha', mimeType: 'text/plain' }])
+        const resource = await registry.execute('mcp_read_resource', { server: 'local', uri: 'wisent://alpha', timeoutMs: 1000 })
+        assert.deepEqual(resource.output.contents, [{ uri: 'wisent://alpha', mimeType: 'text/plain', text: 'resource:wisent://alpha' }])
+
+        const prompts = await registry.execute('mcp_list_prompts', { server: 'local', timeoutMs: 1000 })
+        assert.deepEqual(prompts.output.prompts, [{ name: 'brief', description: 'Make a brief', arguments: [{ name: 'topic', required: true }] }])
+        const prompt = await registry.execute('mcp_get_prompt', { server: 'local', name: 'brief', args: { topic: 'parity' }, timeoutMs: 1000 })
+        assert.deepEqual(prompt.output.messages, [{ role: 'user', content: { type: 'text', text: 'Brief parity' } }])
+      } finally {
+        await closeMcpClients({ cwd: dir })
+      }
     })
   })
 })
