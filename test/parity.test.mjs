@@ -1275,6 +1275,7 @@ test('runJeden round-trips ask_user through the provided callback', async () => 
           return 'blue'
         },
         maxSteps: 2,
+        memory: false,
       })
 
       assert.equal(result.text, 'model saw blue')
@@ -1305,7 +1306,7 @@ test('pre-tool hook can replace tool input before execution', async () => {
       },
     }
 
-    const result = await runJeden({ task: 'Read a file', cwd: dir, chat, hookRunner, maxSteps: 2 })
+    const result = await runJeden({ task: 'Read a file', cwd: dir, chat, hookRunner, maxSteps: 2, memory: false })
     assert.equal(result.text, 'hook changed input')
   })
 })
@@ -1353,7 +1354,7 @@ export default () => [
       }
 
       const started = Date.now()
-      const result = await runJeden({ task: 'Run slow reads', cwd: dir, chat, maxSteps: 2 })
+      const result = await runJeden({ task: 'Run slow reads', cwd: dir, chat, maxSteps: 2, memory: false })
       const elapsed = Date.now() - started
       assert.equal(result.text, 'parallel ok')
       assert.ok(elapsed < 380, `expected parallel execution, got ${elapsed}ms`)
@@ -1380,7 +1381,7 @@ test('resume replay preserves structured prior messages', async () => {
       captured = messages.map((message) => ({ ...message }))
       return JSON.stringify({ action: 'final', text: 'resume ok' })
     }
-    const result = await runJeden({ task: 'new task', cwd: dir, chat, priorMessages: replay, maxSteps: 1 })
+    const result = await runJeden({ task: 'new task', cwd: dir, chat, priorMessages: replay, maxSteps: 1, memory: false })
     assert.equal(result.text, 'resume ok')
     assert.deepEqual(captured.slice(1).map((message) => message.role), ['user', 'assistant', 'user', 'assistant', 'user'])
     assert.equal(captured.at(-1).content, 'new task')
@@ -1466,7 +1467,7 @@ process.stdin.on('data', (chunk) => {
         return JSON.stringify({ action: 'final', text: 'native mcp ok' })
       }
 
-      const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 3 })
+      const result = await runJeden({ task: 'Call native MCP', cwd: dir, chat, maxSteps: 3, memory: false })
       assert.equal(result.text, 'native mcp ok')
     })
   })
