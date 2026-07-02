@@ -18,6 +18,7 @@ function usage() {
   jeden run "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
   jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--allow-write] [--allow-command] [--max-steps n]
   jeden sessions [limit]
+  jeden search-sessions <query> [limit]
   jeden show <session-id-or-path>
   jeden export <session-id-or-path> [output.json]
   jeden export <session-id-or-path> --html [output.html]
@@ -98,6 +99,13 @@ function parseArgs(argv) {
     const limit = rest[0] ? Number(rest[0]) : 20
     if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('sessions limit must be 1..200')
     return { command: 'sessions', limit }
+  }
+  if (first === 'search-sessions') {
+    const query = rest[0]
+    if (!query) throw new Error('search-sessions requires a query')
+    const limit = rest[1] ? Number(rest[1]) : 50
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200) throw new Error('search-sessions limit must be 1..200')
+    return { command: 'search-sessions', query, limit }
   }
   if (first === 'show') {
     const idOrPath = rest[0]
@@ -245,6 +253,32 @@ async function showSession(idOrPath) {
   }
 }
 
+function sessionEventText(event) {
+  return JSON.stringify(event.data || {})
+}
+
+async function searchSessions(query, limit) {
+  const needle = String(query).toLowerCase()
+  const sessions = await listSessions({ limit })
+  for (const row of sessions) {
+    let session
+    try {
+      session = await readSession({ idOrPath: row.path })
+    } catch {
+      continue
+    }
+    for (const event of session.events) {
+      const text = sessionEventText(event)
+      const at = text.toLowerCase().indexOf(needle)
+      if (at === -1) continue
+      const start = Math.max(at - 80, 0)
+      const snippet = text.slice(start, at + needle.length + 160).replace(/\s+/g, ' ')
+      process.stdout.write(`${session.id}\t${event.ts || ''}\t${event.type || ''}\t${snippet}\n`)
+      break
+    }
+  }
+}
+
 function htmlEscape(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -356,6 +390,10 @@ async function showDoctor(args) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
+  if (args.command === 'search-sessions') {
+    await searchSessions(args.query, args.limit)
+    return
+  }
   if (args.help) {
     process.stdout.write(usage())
     return

@@ -52,6 +52,7 @@ jeden --cwd ../content-platform
 jeden --cwd ../content-platform --allow-command
 jeden resume <session-id-or-path> "continue with the previous context" --cwd ../content-platform
 jeden sessions 20
+jeden search-sessions "needle" 50
 jeden show <session-id-or-path>
 jeden tools --cwd ../content-platform
 jeden doctor --cwd ../content-platform
@@ -74,6 +75,7 @@ Before each run, Jeden appends context files to the system prompt when present. 
 Use `jeden export <session-id-or-path> [output.json]` to write a portable JSON session transcript. Use `jeden export <session-id-or-path> --html [output.html]` for a standalone HTML transcript.
 
 
+Use `jeden search-sessions <query> [limit]` to find matching recent session transcripts.
 Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-path> <name> [output]` to inspect or extract session artifacts.
 
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with the prior session transcript summary while recording a fresh session.
