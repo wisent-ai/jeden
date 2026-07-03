@@ -174,10 +174,28 @@ fn rust_tool_specs() -> Vec<Value> {
     vec![
         tool_spec("list_dir", "List a directory under cwd", json!({"path": {"type": "string"}, "limit": {"type": "number"}}), vec![]),
         tool_spec("read_file", "Read a UTF-8 file under cwd", json!({"path": {"type": "string"}}), vec!["path"]),
+        tool_spec("read_binary_file", "Read one binary file under cwd as base64", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
         tool_spec("search_text", "Search one file for a literal string", json!({"path": {"type": "string"}, "query": {"type": "string"}, "caseSensitive": {"type": "boolean"}}), vec!["path", "query"]),
+        tool_spec("search_files", "Recursively search text files under cwd for a literal string", json!({"path": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}}, "query": {"type": "string"}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "caseSensitive": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec!["query"]),
+        tool_spec("glob_paths", "Find files under cwd with simple glob patterns", json!({"patterns": {"type": "string"}, "path": {"type": "string"}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec![]),
+        tool_spec("grep_regex", "Search text files under cwd with a regular expression", json!({"expr": {"type": "string"}, "path": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "multiline": {"type": "boolean"}, "caseSensitive": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec!["expr"]),
         tool_spec("write_file", "Create or overwrite a UTF-8 file under cwd; overwrites require expectedSha256 and --allow-write", json!({"path": {"type": "string"}, "content": {"type": "string"}, "expectedSha256": {"type": "string"}}), vec!["path", "content"]),
+        tool_spec("delete_file", "Delete one file under cwd; requires expectedSha256 and --allow-write", json!({"path": {"type": "string"}, "expectedSha256": {"type": "string"}}), vec!["path", "expectedSha256"]),
+        tool_spec("move_file", "Move or rename one file under cwd; requires expectedSha256 and --allow-write", json!({"from": {"type": "string"}, "to": {"type": "string"}, "expectedSha256": {"type": "string"}, "overwrite": {"type": "boolean"}}), vec!["from", "to", "expectedSha256"]),
         tool_spec("run_command", "Run a shell command in cwd; requires --allow-command", json!({"command": {"type": "string"}, "timeoutMs": {"type": "number"}}), vec!["command"]),
+        tool_spec("run_process", "Run one process with argv array in cwd; requires --allow-command", json!({"command": {"type": "string"}, "args": {"type": "array", "items": {"type": "string"}}, "stdin": {"type": "string"}, "timeoutMs": {"type": "number"}, "env": {"type": "object"}}), vec!["command"]),
+        tool_spec("node_eval", "Run JavaScript with node --input-type=module in cwd; requires --allow-command", json!({"code": {"type": "string"}, "timeoutMs": {"type": "number"}}), vec!["code"]),
+        tool_spec("python_eval", "Run Python code with python3 in cwd; requires --allow-command", json!({"code": {"type": "string"}, "timeoutMs": {"type": "number"}}), vec!["code"]),
+        tool_spec("list_package_scripts", "List package.json scripts in cwd", json!({}), vec![]),
+        tool_spec("run_package_script", "Run one existing package.json script with npm; requires --allow-command", json!({"script": {"type": "string"}, "timeoutMs": {"type": "number"}, "env": {"type": "object"}}), vec!["script"]),
+        tool_spec("git_status", "Read git status --short for cwd", json!({}), vec![]),
+        tool_spec("git_diff", "Read git diff for cwd or one path under cwd", json!({"path": {"type": "string"}}), vec![]),
+        tool_spec("git_log", "Read recent git commits for cwd or one path under cwd", json!({"limit": {"type": "number"}, "path": {"type": "string"}}), vec![]),
+        tool_spec("git_show", "Read one git object or commit summary", json!({"ref": {"type": "string"}, "path": {"type": "string"}}), vec![]),
+        tool_spec("fetch_url", "Fetch one HTTP(S) URL and return capped text; supports optional line range", json!({"url": {"type": "string"}, "maxBytes": {"type": "number"}, "timeoutMs": {"type": "number"}, "range": {"type": "string"}}), vec!["url"]),
         tool_spec("save_artifact", "Save UTF-8 content into the current session artifacts directory", json!({"name": {"type": "string"}, "content": {"type": "string"}}), vec!["content"]),
+        tool_spec("list_artifacts", "List files in the current session artifact directory", json!({}), vec![]),
+        tool_spec("read_artifact", "Read one UTF-8 artifact from the current session artifact directory", json!({"name": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["name"]),
     ]
 }
 
@@ -198,7 +216,7 @@ fn tool_spec(name: &str, description: &str, properties: Value, required: Vec<&st
 }
 
 fn system_prompt(cwd: &Path) -> String {
-    let executable = ["list_dir", "read_file", "search_text", "write_file", "run_command", "save_artifact"];
+    let executable = ["list_dir", "read_file", "read_binary_file", "search_text", "search_files", "glob_paths", "grep_regex", "write_file", "delete_file", "move_file", "run_command", "run_process", "node_eval", "python_eval", "list_package_scripts", "run_package_script", "git_status", "git_diff", "git_log", "git_show", "fetch_url", "save_artifact", "list_artifacts", "read_artifact"];
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
         .filter(|tool| executable.contains(&tool.name.as_str()))

@@ -1,12 +1,16 @@
+use base64::{engine::general_purpose, Engine as _};
+use glob::Pattern;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 const MAX_READ_BYTES: u64 = 512_000;
+const MAX_SEARCH_FILES: usize = 2_000;
 
 #[derive(Debug, Clone)]
 pub struct ToolRuntime<'a> {
@@ -50,6 +54,56 @@ fn u64_input(input: &Value, key: &str, default: u64) -> u64 {
     input.get(key).and_then(Value::as_u64).unwrap_or(default)
 }
 
+fn mime_type_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
+        "txt" | "md" | "rs" | "js" | "ts" | "tsx" | "json" | "toml" | "yaml" | "yml" | "html" | "css" | "csv" => "text/plain",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "pdf" => "application/pdf",
+        _ => "application/octet-stream",
+    }
+}
+
+fn parse_line_range_token(token: &str, line_count: usize, full_range: &str) -> Result<(usize, usize), String> {
+    let trimmed = token.trim();
+    let (start, end) = if let Some((a, b)) = trimmed.split_once('+') {
+        let start = a.parse::<usize>().map_err(|_| format!("invalid range: {full_range}"))?;
+        let count = b.parse::<usize>().map_err(|_| format!("invalid range: {full_range}"))?;
+        (start, start.saturating_add(count).saturating_sub(1))
+    } else if let Some((a, b)) = trimmed.split_once('-') {
+        let start = a.parse::<usize>().map_err(|_| format!("invalid range: {full_range}"))?;
+        let end = if b.is_empty() { line_count } else { b.parse::<usize>().map_err(|_| format!("invalid range: {full_range}"))? };
+        (start, end)
+    } else {
+        let line = trimmed.parse::<usize>().map_err(|_| format!("invalid range: {full_range}"))?;
+        (line, line)
+    };
+    if start == 0 || end < start { return Err(format!("invalid range: {full_range}")); }
+    Ok((start, end.min(line_count)))
+}
+
+fn line_window(text: &str, range: &str) -> Result<(String, usize, usize, Vec<Value>), String> {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() { return Ok((String::new(), 1, 0, vec![json!({"startLine": 1, "endLine": 0})])); }
+    let mut chunks = Vec::new();
+    let mut ranges = Vec::new();
+    let mut first_start = usize::MAX;
+    let mut last_end = 0usize;
+    for token in range.split(',') {
+        let (start, end) = parse_line_range_token(token, lines.len(), range)?;
+        first_start = first_start.min(start);
+        last_end = last_end.max(end);
+        let start_idx = start.saturating_sub(1).min(lines.len());
+        let end_idx = end.min(lines.len());
+        if start_idx < end_idx { chunks.push(lines[start_idx..end_idx].join("\n")); }
+        ranges.push(json!({"startLine": start, "endLine": end}));
+    }
+    Ok((chunks.join("\n"), first_start, last_end, ranges))
+}
+
+
 fn list_dir(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").unwrap_or_else(|| ".".into());
     let limit = u64_input(input, "limit", 200) as usize;
@@ -78,6 +132,19 @@ fn read_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> 
     Ok(json!({"ok": true, "path": path, "bytes": bytes.len(), "sha256": sha256_hex(&bytes), "content": content}))
 }
 
+fn read_binary_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let path = string_input(input, "path").ok_or("read_binary_file requires path")?;
+    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    let file = jail_path(runtime.cwd, &path)?;
+    let meta = fs::metadata(&file).map_err(|e| e.to_string())?;
+    if !meta.is_file() { return Err(format!("not a file: {path}")); }
+    let bytes = fs::read(&file).map_err(|e| e.to_string())?;
+    let truncated = bytes.len() > max_bytes;
+    let slice = &bytes[..bytes.len().min(max_bytes)];
+    Ok(json!({"ok": true, "path": path, "bytes": bytes.len(), "truncated": truncated, "mimeType": mime_type_for_path(&file), "sha256": sha256_hex(&bytes), "base64": general_purpose::STANDARD.encode(slice)}))
+}
+
+
 fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     if !runtime.allow_write { return Err("write_file requires --allow-write".into()); }
     let path = string_input(input, "path").ok_or("write_file requires path")?;
@@ -93,6 +160,41 @@ fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String>
     fs::write(&file, content.as_bytes()).map_err(|e| e.to_string())?;
     Ok(json!({"ok": true, "path": path, "bytes": content.len(), "sha256": sha256_hex(content.as_bytes())}))
 }
+
+fn verify_expected_sha(path_label: &str, file: &Path, expected: &str) -> Result<Vec<u8>, String> {
+    let bytes = fs::read(file).map_err(|e| e.to_string())?;
+    let actual = sha256_hex(&bytes);
+    if actual != expected {
+        return Err(format!("expectedSha256 mismatch for {path_label}: expected {expected}, actual {actual}"));
+    }
+    Ok(bytes)
+}
+
+fn delete_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_write { return Err("delete_file requires --allow-write".into()); }
+    let path = string_input(input, "path").ok_or("delete_file requires path")?;
+    let expected = string_input(input, "expectedSha256").ok_or("delete_file requires expectedSha256")?;
+    let file = jail_path(runtime.cwd, &path)?;
+    let bytes = verify_expected_sha(&path, &file, &expected)?;
+    fs::remove_file(&file).map_err(|e| e.to_string())?;
+    Ok(json!({"ok": true, "path": path, "deleted": true, "previousSha256": sha256_hex(&bytes), "previousBytes": bytes.len()}))
+}
+
+fn move_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_write { return Err("move_file requires --allow-write".into()); }
+    let from = string_input(input, "from").ok_or("move_file requires from")?;
+    let to = string_input(input, "to").ok_or("move_file requires to")?;
+    let expected = string_input(input, "expectedSha256").ok_or("move_file requires expectedSha256")?;
+    let overwrite = bool_input(input, "overwrite", false);
+    let from_file = jail_path(runtime.cwd, &from)?;
+    let to_file = jail_path(runtime.cwd, &to)?;
+    let bytes = verify_expected_sha(&from, &from_file, &expected)?;
+    if to_file.exists() && !overwrite { return Err(format!("destination exists: {to}")); }
+    if let Some(parent) = to_file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    fs::rename(&from_file, &to_file).map_err(|e| e.to_string())?;
+    Ok(json!({"ok": true, "from": from, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}))
+}
+
 
 fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_text requires query")?;
@@ -111,6 +213,159 @@ fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String
     }
     Ok(json!({"ok": true, "path": path, "query": query, "matches": matches}))
 }
+
+fn rel_path(cwd: &Path, file: &Path) -> String {
+    file.strip_prefix(cwd).unwrap_or(file).to_string_lossy().replace('\\', "/")
+}
+
+fn skip_discovery_dir(name: &str) -> bool {
+    matches!(name, ".git" | "node_modules" | "dist" | "build" | "coverage" | ".next" | "target" | ".turbo" | ".vercel")
+}
+
+fn collect_files(root: &Path, hidden: bool, out: &mut Vec<PathBuf>) -> Result<(), String> {
+    if out.len() >= MAX_SEARCH_FILES { return Ok(()); }
+    let entries = fs::read_dir(root).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        if out.len() >= MAX_SEARCH_FILES { break; }
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !hidden && name.starts_with('.') { continue; }
+        let meta = match entry.metadata() { Ok(meta) => meta, Err(_) => continue };
+        if meta.is_dir() {
+            if skip_discovery_dir(&name) { continue; }
+            collect_files(&path, hidden, out)?;
+        } else if meta.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn collect_entries(root: &Path, hidden: bool, out: &mut Vec<(PathBuf, &'static str)>) -> Result<(), String> {
+    if out.len() >= MAX_SEARCH_FILES { return Ok(()); }
+    let entries = fs::read_dir(root).map_err(|e| e.to_string())?;
+    for entry in entries.flatten() {
+        if out.len() >= MAX_SEARCH_FILES { break; }
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !hidden && name.starts_with('.') { continue; }
+        let meta = match entry.metadata() { Ok(meta) => meta, Err(_) => continue };
+        if meta.is_dir() {
+            if skip_discovery_dir(&name) { continue; }
+            out.push((path.clone(), "directory"));
+            collect_entries(&path, hidden, out)?;
+        } else if meta.is_file() {
+            out.push((path, "file"));
+        }
+    }
+    Ok(())
+}
+
+
+fn input_roots(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
+    if let Some(paths) = input.get("paths").and_then(Value::as_array) {
+        return paths.iter().filter_map(Value::as_str).map(|path| jail_path(runtime.cwd, path)).collect();
+    }
+    let path = string_input(input, "path").unwrap_or_else(|| ".".into());
+    Ok(vec![jail_path(runtime.cwd, &path)?])
+}
+
+fn text_files_for_input(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
+    let hidden = bool_input(input, "hidden", false);
+    let mut files = Vec::new();
+    for root in input_roots(runtime, input)? {
+        let meta = fs::metadata(&root).map_err(|e| e.to_string())?;
+        if meta.is_file() { files.push(root); }
+        else if meta.is_dir() { collect_files(&root, hidden, &mut files)?; }
+    }
+    files.sort();
+    Ok(files)
+}
+
+fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let query = string_input(input, "query").ok_or("search_files requires query")?;
+    let limit = u64_input(input, "limit", 500).clamp(1, 500) as usize;
+    let skip = u64_input(input, "skip", 0) as usize;
+    let case_sensitive = bool_input(input, "caseSensitive", false);
+    let needle = if case_sensitive { query.clone() } else { query.to_lowercase() };
+    let files = text_files_for_input(runtime, input)?;
+    let mut seen = 0usize;
+    let mut matches = Vec::new();
+    for file in &files {
+        if matches.len() >= limit { break; }
+        let Ok(content) = fs::read_to_string(file) else { continue };
+        if content.contains('\0') { continue; }
+        for (idx, line) in content.lines().enumerate() {
+            let hay = if case_sensitive { line.to_string() } else { line.to_lowercase() };
+            if hay.contains(&needle) {
+                seen += 1;
+                if seen <= skip { continue; }
+                matches.push(json!({"path": rel_path(runtime.cwd, file), "line": idx + 1, "text": line}));
+                if matches.len() >= limit { break; }
+            }
+        }
+    }
+    Ok(json!({"searchedFiles": files.len(), "skip": skip, "limit": limit, "matches": matches}))
+}
+
+fn glob_paths(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let root = jail_path(runtime.cwd, &string_input(input, "path").unwrap_or_else(|| ".".into()))?;
+    let limit = u64_input(input, "limit", 200).clamp(1, 2_000) as usize;
+    let skip = u64_input(input, "skip", 0) as usize;
+    let hidden = bool_input(input, "hidden", false);
+    let raw_patterns = if let Some(patterns) = input.get("patterns").and_then(Value::as_array) {
+        patterns.iter().filter_map(Value::as_str).map(ToString::to_string).collect::<Vec<_>>()
+    } else {
+        vec![string_input(input, "patterns").unwrap_or_else(|| "**".into())]
+    };
+    let patterns = raw_patterns.iter().filter_map(|pattern| Pattern::new(pattern).ok()).collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    collect_entries(&root, hidden, &mut paths)?;
+    let mut entries = paths.into_iter().filter_map(|(file, kind)| {
+        let path = rel_path(runtime.cwd, &file);
+        if patterns.iter().any(|pattern| pattern.matches(&path)) { Some(json!({"path": path, "type": kind})) } else { None }
+    }).collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.get("path").and_then(Value::as_str).unwrap_or("").to_string());
+    let matches = entries.into_iter().skip(skip).take(limit).collect::<Vec<_>>();
+    Ok(json!({"skip": skip, "limit": limit, "matches": matches}))
+}
+
+fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let expr = string_input(input, "expr").ok_or("grep_regex requires expr")?;
+    let limit = u64_input(input, "limit", 500).clamp(1, 500) as usize;
+    let skip = u64_input(input, "skip", 0) as usize;
+    let case_sensitive = bool_input(input, "caseSensitive", false);
+    let multiline = bool_input(input, "multiline", false) || expr.contains('\n');
+    let matcher = regex::RegexBuilder::new(&expr).case_insensitive(!case_sensitive).dot_matches_new_line(multiline).build().map_err(|e| e.to_string())?;
+    let files = text_files_for_input(runtime, input)?;
+    let mut seen = 0usize;
+    let mut matches = Vec::new();
+    for file in &files {
+        if matches.len() >= limit { break; }
+        let Ok(content) = fs::read_to_string(file) else { continue };
+        if content.contains('\0') { continue; }
+        if multiline {
+            for mat in matcher.find_iter(&content) {
+                seen += 1;
+                if seen <= skip { continue; }
+                let line = content[..mat.start()].lines().count() + 1;
+                matches.push(json!({"path": rel_path(runtime.cwd, file), "line": line, "text": mat.as_str().split_whitespace().collect::<Vec<_>>().join(" ").chars().take(500).collect::<String>()}));
+                if matches.len() >= limit { break; }
+            }
+        } else {
+            for (idx, line) in content.lines().enumerate() {
+                if matcher.is_match(line) {
+                    seen += 1;
+                    if seen <= skip { continue; }
+                    matches.push(json!({"path": rel_path(runtime.cwd, file), "line": idx + 1, "text": line}));
+                    if matches.len() >= limit { break; }
+                }
+            }
+        }
+    }
+    Ok(json!({"searchedFiles": files.len(), "skip": skip, "limit": limit, "matches": matches}))
+}
+
 
 fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     if !runtime.allow_command { return Err("run_command requires --allow-command".into()); }
@@ -144,6 +399,153 @@ fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String
     }
 }
 
+fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_command { return Err("run_process requires --allow-command".into()); }
+    let command = string_input(input, "command").ok_or("run_process requires command")?;
+    let args = input.get("args").and_then(Value::as_array).map(|values| values.iter().map(|value| value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string())).collect::<Vec<_>>()).unwrap_or_default();
+    let stdin = string_input(input, "stdin");
+    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
+    let deadline = Duration::from_millis(timeout_ms);
+    let mut command_builder = Command::new(&command);
+    command_builder
+        .args(&args)
+        .current_dir(runtime.cwd)
+        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(env) = input.get("env").and_then(Value::as_object) {
+        for (key, value) in env {
+            if value.is_null() {
+                command_builder.env_remove(key);
+            } else {
+                command_builder.env(key, value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string()));
+            }
+        }
+    }
+    let mut child = command_builder.spawn().map_err(|e| e.to_string())?;
+    if let Some(stdin) = stdin {
+        if let Some(mut pipe) = child.stdin.take() { pipe.write_all(stdin.as_bytes()).map_err(|e| e.to_string())?; }
+    }
+    let started = Instant::now();
+    loop {
+        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
+            let output = child.wait_with_output().map_err(|e| e.to_string())?;
+            return Ok(json!({"ok": output.status.success(), "command": command, "args": args, "timeoutMs": timeout_ms, "timedOut": false, "code": output.status.code(), "stdout": String::from_utf8_lossy(&output.stdout), "stderr": String::from_utf8_lossy(&output.stderr)}));
+        }
+        if started.elapsed() >= deadline {
+            let _ = child.kill();
+            let output = child.wait_with_output().map_err(|e| e.to_string())?;
+            return Ok(json!({"ok": false, "command": command, "args": args, "timeoutMs": timeout_ms, "timedOut": true, "code": output.status.code(), "stdout": String::from_utf8_lossy(&output.stdout), "stderr": String::from_utf8_lossy(&output.stderr)}));
+        }
+        sleep(Duration::from_millis(20));
+    }
+}
+
+fn node_eval(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let code = string_input(input, "code").ok_or("node_eval requires code")?;
+    run_process(runtime, &json!({"command": "node", "args": ["--input-type=module", "-"], "stdin": code, "timeoutMs": u64_input(input, "timeoutMs", 30_000)}))
+}
+
+fn python_eval(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let code = string_input(input, "code").ok_or("python_eval requires code")?;
+    run_process(runtime, &json!({"command": "python3", "args": ["-"], "stdin": code, "timeoutMs": u64_input(input, "timeoutMs", 30_000)}))
+}
+
+
+fn list_package_scripts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
+    let file = runtime.cwd.join("package.json");
+    let raw = fs::read_to_string(&file).map_err(|e| e.to_string())?;
+    let parsed: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let mut scripts = serde_json::Map::new();
+    if let Some(raw_scripts) = parsed.get("scripts").and_then(Value::as_object) {
+        for (name, value) in raw_scripts {
+            if let Some(script) = value.as_str() { scripts.insert(name.clone(), json!(script)); }
+        }
+    }
+    Ok(Value::Object(scripts))
+}
+
+fn run_package_script(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_command { return Err("run_package_script requires --allow-command".into()); }
+    let script = string_input(input, "script").ok_or("run_package_script requires script")?;
+    let scripts = list_package_scripts(runtime)?;
+    if scripts.get(&script).and_then(Value::as_str).is_none() {
+        return Err(format!("unknown package script: {script}"));
+    }
+    let mut payload = json!({"command": "npm", "args": ["run", script], "timeoutMs": u64_input(input, "timeoutMs", 60_000).clamp(1_000, 180_000)});
+    if let Some(env) = input.get("env") { payload["env"] = env.clone(); }
+    run_process(runtime, &payload)
+}
+
+fn run_read_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let elevated = ToolRuntime {
+        cwd: runtime.cwd,
+        artifact_dir: runtime.artifact_dir,
+        allow_write: runtime.allow_write,
+        allow_command: true,
+    };
+    run_process(&elevated, input)
+}
+
+
+fn git_status(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
+    run_read_process(runtime, &json!({"command": "git", "args": ["status", "--short"], "timeoutMs": 30_000}))
+}
+
+fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let mut args = vec!["diff".to_string(), "--".to_string()];
+    if let Some(path) = string_input(input, "path") {
+        let _ = jail_path(runtime.cwd, &path)?;
+        args.push(path);
+    }
+    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+}
+
+fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let limit = u64_input(input, "limit", 20).clamp(1, 100);
+    let mut args = vec!["log".to_string(), format!("-{limit}"), "--oneline".to_string(), "--decorate".to_string(), "--".to_string()];
+    if let Some(path) = string_input(input, "path") {
+        let _ = jail_path(runtime.cwd, &path)?;
+        args.push(path);
+    }
+    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+}
+
+fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let reference = string_input(input, "ref").unwrap_or_else(|| "HEAD".into());
+    let mut args = vec!["show".to_string(), "--stat".to_string(), "--oneline".to_string(), "--decorate".to_string(), reference, "--".to_string()];
+    if let Some(path) = string_input(input, "path") {
+        let _ = jail_path(runtime.cwd, &path)?;
+        args.push(path);
+    }
+    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+}
+
+
+fn fetch_url(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let url = string_input(input, "url").ok_or("fetch_url requires url")?;
+    if !url.starts_with("http://") && !url.starts_with("https://") { return Err("fetch_url requires http(s) URL".into()); }
+    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
+    let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
+    let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(timeout_ms)).build().map_err(|e| e.to_string())?;
+    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let status = response.status().as_u16();
+    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).map(ToString::to_string);
+    let bytes = response.bytes().map_err(|e| e.to_string())?;
+    let raw_text = String::from_utf8_lossy(&bytes).to_string();
+    let (selected_text, start_line, end_line, ranges) = if let Some(range) = string_input(input, "range") {
+        line_window(&raw_text, &range)?
+    } else {
+        (raw_text, 0, 0, Vec::new())
+    };
+    let output_bytes = selected_text.as_bytes();
+    let truncated = output_bytes.len() > max_bytes;
+    let slice = &output_bytes[..output_bytes.len().min(max_bytes)];
+    let text = String::from_utf8_lossy(slice).to_string();
+    Ok(json!({"ok": status >= 200 && status < 300, "url": url, "status": status, "contentType": content_type, "bytes": bytes.len(), "truncated": truncated, "sha256": sha256_hex(&bytes), "text": text, "startLine": if ranges.is_empty() { Value::Null } else { json!(start_line) }, "endLine": if ranges.is_empty() { Value::Null } else { json!(end_line) }, "ranges": if ranges.is_empty() { Value::Null } else { json!(ranges) }}))
+}
+
+
 fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let Some(dir) = runtime.artifact_dir else { return Err("save_artifact requires an active session artifact directory".into()); };
     let name = string_input(input, "name").unwrap_or_else(|| "artifact.txt".into());
@@ -155,14 +557,57 @@ fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Stri
     Ok(json!({"ok": true, "name": name, "path": path.display().to_string(), "bytes": content.len()}))
 }
 
+fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
+    let Some(dir) = runtime.artifact_dir else { return Err("list_artifacts requires an active session artifact directory".into()); };
+    let mut artifacts = Vec::new();
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let meta = entry.metadata().map_err(|e| e.to_string())?;
+            if meta.is_file() { artifacts.push(json!({"name": entry.file_name().to_string_lossy(), "bytes": meta.len()})); }
+        }
+    }
+    Ok(json!({"ok": true, "artifacts": artifacts}))
+}
+
+fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let Some(dir) = runtime.artifact_dir else { return Err("read_artifact requires an active session artifact directory".into()); };
+    let name = string_input(input, "name").ok_or("read_artifact requires name")?;
+    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    if name.contains('/') || name.contains("..") { return Err(format!("invalid artifact name: {name}")); }
+    let path = dir.join(&name);
+    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let truncated = bytes.len() > max_bytes;
+    let slice = &bytes[..bytes.len().min(max_bytes)];
+    Ok(json!({"ok": true, "name": name, "bytes": bytes.len(), "truncated": truncated, "content": String::from_utf8_lossy(slice), "sha256": sha256_hex(&bytes)}))
+}
+
+
 pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<Value, String> {
     match tool {
         "list_dir" => list_dir(runtime, input),
         "read_file" => read_file(runtime, input),
+        "read_binary_file" => read_binary_file(runtime, input),
         "search_text" => search_text(runtime, input),
+        "search_files" => search_files(runtime, input),
+        "glob_paths" => glob_paths(runtime, input),
+        "grep_regex" => grep_regex(runtime, input),
         "write_file" => write_file(runtime, input),
+        "delete_file" => delete_file(runtime, input),
+        "move_file" => move_file(runtime, input),
         "run_command" => run_command(runtime, input),
+        "run_process" => run_process(runtime, input),
+        "node_eval" => node_eval(runtime, input),
+        "python_eval" => python_eval(runtime, input),
+        "list_package_scripts" => list_package_scripts(runtime),
+        "run_package_script" => run_package_script(runtime, input),
+        "git_status" => git_status(runtime),
+        "git_diff" => git_diff(runtime, input),
+        "git_log" => git_log(runtime, input),
+        "git_show" => git_show(runtime, input),
+        "fetch_url" => fetch_url(runtime, input),
         "save_artifact" => save_artifact(runtime, input),
+        "list_artifacts" => list_artifacts(runtime),
+        "read_artifact" => read_artifact(runtime, input),
         other => Err(format!("Rust tool runtime has not ported tool: {other}")),
     }
 }
