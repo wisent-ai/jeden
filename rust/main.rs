@@ -94,6 +94,9 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let first = rest.next();
     let mut command = first.unwrap_or_else(|| "interactive".to_string());
     if command == "--help" || command == "-h" { return Ok(Args { raw, command: "help".into(), cwd: env::current_dir().unwrap(), model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] }); }
+    if matches!(command.as_str(), "resume" | "tools" | "recall_conversation" | "recall-conversation" | "search-sessions") {
+        return Ok(Args { raw, command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: rest.collect() });
+    }
     if command.starts_with("--") { rest = std::iter::once(command).chain(rest).collect::<Vec<_>>().into_iter(); command = "interactive".into(); }
     let mut args = Args { raw, command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] };
     while let Some(arg) = rest.next() {
