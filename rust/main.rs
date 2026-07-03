@@ -1,8 +1,6 @@
-use hmac::{Hmac, Mac};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -13,7 +11,14 @@ use std::process::Command;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
-type HmacSha256 = Hmac<Sha256>;
+mod tui;
+mod agent;
+mod model_router;
+mod protocol;
+mod slash;
+mod tools;
+mod tool_runtime;
+
 
 #[derive(Debug, Clone)]
 struct Args {
@@ -94,7 +99,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let first = rest.next();
     let mut command = first.unwrap_or_else(|| "interactive".to_string());
     if command == "--help" || command == "-h" { return Ok(Args { raw, command: "help".into(), cwd: env::current_dir().unwrap(), model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] }); }
-    if matches!(command.as_str(), "resume" | "tools" | "recall_conversation" | "recall-conversation" | "search-sessions") {
+    if matches!(command.as_str(), "resume" | "recall_conversation" | "recall-conversation" | "search-sessions") {
         return Ok(Args { raw, command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: rest.collect() });
     }
     if command.starts_with("--") { rest = std::iter::once(command).chain(rest).collect::<Vec<_>>().into_iter(); command = "interactive".into(); }
@@ -314,8 +319,13 @@ fn format_slash_help() -> String {
     out
 }
 
-fn slash(cwd: &Path, input: &str) -> Result<String, String> {
+pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
+    let session_root = session_root();
+    let slash_context = slash::SlashContext { cwd, model, session_root: &session_root };
+    if let Some(result) = slash::handle_local(&slash_context, trimmed) {
+        return result;
+    }
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or("");
     match command {
@@ -323,8 +333,6 @@ fn slash(cwd: &Path, input: &str) -> Result<String, String> {
         "/settings" | "/setup" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
-        "/fast" => Ok("Fast mode status is managed by the JavaScript runtime state; Rust parity for this mutable mode is not complete.".into()),
-        "/advisor" => Ok("Advisor status is managed by the JavaScript runtime state; Rust parity for this mutable mode is not complete.".into()),
         "/usage" => Ok("Usage accounting is available through the JavaScript runtime; Rust usage parity is not complete.".into()),
         _ => Err(format!("Unknown or unported Rust slash command: {}", command)),
     }
@@ -427,42 +435,35 @@ fn artifact_command(args: &Args) -> Result<String, String> {
     if let Some(output) = args.positionals.get(2) { fs::write(output, &content).map_err(|e| e.to_string())?; Ok(format!("{}\n", output)) } else { Ok(if content.ends_with('\n') { content } else { content + "\n" }) }
 }
 
-fn model_router_config(config: &Config, args: &Args) -> (String, String, String, String) {
-    let url = env::var("MODEL_ROUTER_URL").ok().or(config.model_router_url.clone()).unwrap_or_else(|| "https://model-router-1080673333190.us-central1.run.app".into());
-    let agent_id = env::var("WISENT_APP_AGENT_ID").ok().or(config.agent_id.clone()).unwrap_or_else(|| "wisent-app".into());
-    let secret = env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default();
-    let model = args.model.clone().or(config.model.clone()).or_else(|| env::var("JEDEN_MODEL").ok()).unwrap_or_else(|| "claude-code-subscription".into());
-    (url, agent_id, secret, model)
-}
-
-fn hmac_headers(body: &str, agent_id: &str, secret: &str) -> Result<(String, String, String), String> {
-    if secret.is_empty() { return Err("WISENT_APP_AGENT_AUTH_SECRET is required".into()); }
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs().to_string();
-    let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
-    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
-    mac.update(format!("{}:{}:{}", agent_id, ts, body_hash).as_bytes());
-    Ok((ts, body_hash, hex::encode(mac.finalize().into_bytes())))
-}
-
-fn run_prompt(args: &Args) -> Result<String, String> {
-    let task = args.positionals.join(" ");
-    if task.trim_start().starts_with('/') { return slash(&args.cwd, task.trim()); }
-    let config = load_config(&args.cwd);
-    let (url, agent_id, secret, model) = model_router_config(&config, args);
-    let body = json!({"model": model, "messages": [{"role":"user", "content": task}], "max_tokens": args.max_tokens}).to_string();
-    let (ts, body_hash, sig) = hmac_headers(&body, &agent_id, &secret)?;
-    let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(120)).build().map_err(|e| e.to_string())?;
-    let res = client.post(format!("{}/v1/chat/completions", url.trim_end_matches('/'))).header("content-type", "application/json").header("x-agent-id", agent_id).header("x-agent-timestamp", ts).header("x-agent-body-sha256", body_hash).header("x-agent-signature", sig).body(body).send().map_err(|e| e.to_string())?;
-    let text = res.text().map_err(|e| e.to_string())?;
-    Ok(text)
-}
 
 fn doctor(args: &Args) -> String {
     let config = load_config(&args.cwd);
-    let (url, agent_id, secret, model) = model_router_config(&config, args);
-    json!({"cwd": args.cwd, "modelRouterUrl": url, "agentId": agent_id, "model": model, "secretPresent": !secret.is_empty(), "authFile": auth_path(&args.cwd)}).to_string() + "\n"
+    let router = agent::model_router_config(&config, args);
+    json!({"cwd": args.cwd, "modelRouterUrl": router.url, "agentId": router.agent_id, "model": router.model, "secretPresent": !router.secret.is_empty(), "authFile": auth_path(&args.cwd)}).to_string() + "\n"
 }
 
+
+fn interactive(args: &Args) -> Result<String, String> {
+    let config = load_config(&args.cwd);
+    let model = args
+        .model
+        .clone()
+        .or(config.model)
+        .or_else(|| env::var("JEDEN_MODEL").ok())
+        .or_else(|| env::var("MODEL").ok())
+        .unwrap_or_else(|| "default".into());
+    tui::run_basic_loop(
+        tui::InteractiveConfig {
+            cwd: args.cwd.display().to_string(),
+            write_status: if args.allow_write { "allow".into() } else { "ask".into() },
+            command_status: if args.allow_command { "allow".into() } else { "ask".into() },
+            model,
+        },
+        |input| handle_slash(&args.cwd, input, args.model.as_deref()),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(String::new())
+}
 
 fn delegate_to_node(args: &[String]) -> ! {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -484,21 +485,15 @@ fn main() {
     let args = match parse_args(argv) { Ok(v) => v, Err(e) => { eprintln!("Error: {}\n{}", e, usage()); std::process::exit(2); } };
     let result = match args.command.as_str() {
         "help" => Ok(usage().to_string()),
-        "interactive" => delegate_to_node(&args.raw),
-        "run" => {
-            let task = args.positionals.join(" ");
-            if task.trim_start().starts_with('/') {
-                run_prompt(&args).map(|s| if args.json { json!({"text": s}).to_string() + "\n" } else { s + "\n" })
-            } else {
-                delegate_to_node(&args.raw)
-            }
-        },
+        "interactive" => interactive(&args),
+        "run" => agent::run_command(&args),
         "sessions" => Ok(list_sessions(args.positionals.get(0).and_then(|s| s.parse().ok()).unwrap_or(20))),
         "show" => args.positionals.get(0).map(|id| render_session_export(&read_session_value(id).unwrap_or_else(|e| json!({"error": e})), "json").unwrap_or_default()).ok_or("show requires a session id".into()),
         "export" => export_session_command(&args),
         "artifacts" => args.positionals.get(0).map(|id| list_artifacts_command(id)).unwrap_or_else(|| Err("artifacts requires a session id".into())),
         "artifact" => artifact_command(&args),
-        "resume" | "tools" | "recall_conversation" | "recall-conversation" | "search-sessions" => delegate_to_node(&args.raw),
+        "tools" => Ok(tools::tools_table(&args.cwd)),
+        "resume" | "recall_conversation" | "recall-conversation" | "search-sessions" => delegate_to_node(&args.raw),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),
