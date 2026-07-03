@@ -149,6 +149,38 @@ function formatAuthStatus(auth, { cwd, file, setup = false } = {}) {
   ])
 }
 
+function formatLoginGuide(auth, { cwd, file, provider = '' } = {}) {
+  const providers = auth?.providers || {}
+  const names = Object.keys(providers).sort()
+  const target = providerName(provider)
+  const providerHint = target || '<provider>'
+  return lines([
+    target ? `Login guide for ${target}` : 'Login guide',
+    `Workspace: ${resolve(cwd || process.cwd())}`,
+    `Auth file: ${file}`,
+    names.length ? `Already configured: ${names.join(', ')}` : 'Already configured: none',
+    '',
+    'Pick one path:',
+    '1) Manual token/API key profile:',
+    `   /login ${providerHint} credential.apiKey=<secret>`,
+    `   /login ${providerHint} profile.account=<label> credential.token=<secret>`,
+    '',
+    '2) OAuth authorization-code flow:',
+    `   /login ${providerHint} oauth authUrl=<authorize-url> tokenUrl=<token-url> clientId=<client-id> redirectUri=http://127.0.0.1:37371/oauth/${providerHint}`,
+    '   Jeden opens the authorization URL, waits on the local redirect URI, validates state, exchanges the code, and stores tokens.',
+    '',
+    '3) OAuth fallback if you already have the redirected callback URL:',
+    '   /login <redirect-url> provider=<provider> tokenUrl=<token-url> clientId=<client-id>',
+    '',
+    'Examples:',
+    `   /login github credential.token=ghp_xxx`,
+    `   /login github oauth authUrl=https://github.com/login/oauth/authorize tokenUrl=https://github.com/login/oauth/access_token clientId=<id> scope=repo`,
+    '',
+    'No credentials were written. Run one of the commands above to continue.',
+  ])
+}
+
+
 async function handleSettings({ cwd, setup = false }) {
   const auth = await loadProjectAuthConfig({ cwd })
   return ok(formatAuthStatus(auth, { cwd, file: projectJedenAuthPath({ cwd }), setup }))
@@ -410,8 +442,17 @@ async function captureOauthRedirect(redirectUrl, parts, { cwd }) {
 
 async function handleLogin(parsed, { cwd }) {
   const [provider, ...parts] = splitArgs(parsed.args)
-  if (!provider) return handleSettings({ cwd, setup: true })
+  if (!provider) {
+    const auth = await loadProjectAuthConfig({ cwd })
+    return ok(formatLoginGuide(auth, { cwd, file: projectJedenAuthPath({ cwd }) }))
+  }
   if (looksLikeOauthRedirect(provider)) return captureOauthRedirect(provider, parts, { cwd })
+  if (parts.length === 0) {
+    const name = providerName(provider)
+    if (!name) return err('Usage: /login <provider> [credential.<name>=<secret>|profile.<name>=<value>|oauth ...]')
+    const auth = await loadProjectAuthConfig({ cwd })
+    return ok(formatLoginGuide(auth, { cwd, file: projectJedenAuthPath({ cwd }), provider: name }))
+  }
   if (parts[0]?.toLowerCase() === 'oauth') return startOauthFlow(providerName(provider), parts.slice(1), { cwd })
   return upsertProvider(provider, parts, { cwd, source: 'login' })
 }
