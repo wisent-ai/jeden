@@ -320,7 +320,7 @@ OMP-style anchored visual patch call:
 {"action":"tool","tool":"edit","input":{"patch":"*** Begin Patch\n[src/file.js#A1B2]\nSWAP 10.=10:\n+const ok = true\nINS.POST 11:\n+export { ok }\n*** End Patch"}}
 ```
 
-Supported visual patch hunks are `SWAP N.=M:`, `DEL N` / `DEL N.=M`, `INS.PRE N:`, `INS.POST N:`, `INS.HEAD:`, and `INS.TAIL:`. `SWAP`/`INS` hunks require `+` body lines; use `DEL` for deletion. The `[path#TAG]` tag must match the current `read_file.snapshot` tag.
+Supported visual patch hunks are `SWAP N.=M:`, `SWAP.BLK N:`, `DEL N` / `DEL N.=M`, `DEL.BLK N`, `INS.PRE N:`, `INS.POST N:`, `INS.HEAD:`, `INS.TAIL:`, `INS.BLK.POST N:`, `REM`, and `MV path`. `SWAP`/`INS` hunks require `+` body lines; use `DEL`/`DEL.BLK`/`REM` for deletion. Block hunks use safe markdown-heading, brace-block, or indentation-block boundaries and reject unrecognized anchors. The `[path#TAG]` tag must match the current `read_file.snapshot` tag.
 
 `read_file` also returns an OMP-style `visual` snapshot alongside JSON metadata:
 

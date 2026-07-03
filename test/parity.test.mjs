@@ -500,6 +500,166 @@ DEL 5
   })
 })
 
+test('edit REM deletes a file and returns delete metadata with a visual diff', async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, 'obsolete.txt')
+    const original = 'alpha\nbravo\n'
+    await writeFile(file, original, 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const current = await registry.execute('read_file', { path: 'obsolete.txt' })
+
+    const patched = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('obsolete.txt', current.output.sha256)}
+REM
+*** End Patch`,
+    })
+
+    assert.equal(patched.ok, true)
+    assert.equal(patched.output.files.length, 1)
+    assert.equal(patched.output.files[0].path, 'obsolete.txt')
+    assert.equal(patched.output.files[0].deleted, true)
+    assert.equal(patched.output.files[0].sha256, null)
+    assert.equal(patched.output.files[0].snapshot, null)
+    assert.equal(patched.output.files[0].ops, 0)
+    assert.equal(patched.output.files[0].bytes, 0)
+    assert.equal(patched.output.files[0].diff, '--- obsolete.txt\n+++ obsolete.txt\n@@ -1,2 +1,0 @@\n-alpha\n-bravo')
+    await assert.rejects(() => readFile(file, 'utf8'), /ENOENT/)
+  })
+})
+
+test('edit MV moves a file and reports move metadata with the destination snapshot', async () => {
+  await withTempDir(async (dir) => {
+    const fromFile = join(dir, 'notes.txt')
+    const expected = 'alpha\nbravo\n'
+    await writeFile(fromFile, expected, 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const current = await registry.execute('read_file', { path: 'notes.txt' })
+
+    const patched = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('notes.txt', current.output.sha256)}
+MV archive/notes.txt
+*** End Patch`,
+    })
+
+    assert.equal(patched.ok, true)
+    assert.equal(patched.output.files.length, 1)
+    assert.equal(patched.output.files[0].path, 'archive/notes.txt')
+    assert.equal(patched.output.files[0].from, 'notes.txt')
+    assert.equal(patched.output.files[0].to, 'archive/notes.txt')
+    assert.equal(patched.output.files[0].moved, true)
+    assert.equal(patched.output.files[0].sha256, current.output.sha256)
+    assert.equal(patched.output.files[0].snapshot, expectedSnapshot('archive/notes.txt', current.output.sha256))
+    assert.equal(patched.output.files[0].diff, 'rename notes.txt -> archive/notes.txt')
+    assert.equal(patched.output.files[0].ops, 0)
+    assert.equal(patched.output.files[0].bytes, Buffer.byteLength(expected, 'utf8'))
+    assert.equal(await readFile(join(dir, 'archive', 'notes.txt'), 'utf8'), expected)
+    await assert.rejects(() => readFile(fromFile, 'utf8'), /ENOENT/)
+  })
+})
+
+test('edit rejects duplicate MV destinations before mutating either source', async () => {
+  await withTempDir(async (dir) => {
+    const firstOriginal = 'first\n'
+    const secondOriginal = 'second\n'
+    await writeFile(join(dir, 'first.txt'), firstOriginal, 'utf8')
+    await writeFile(join(dir, 'second.txt'), secondOriginal, 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const firstCurrent = await registry.execute('read_file', { path: 'first.txt' })
+    const secondCurrent = await registry.execute('read_file', { path: 'second.txt' })
+
+    const rejected = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('first.txt', firstCurrent.output.sha256)}
+MV archive/shared.txt
+${expectedSnapshotHeader('second.txt', secondCurrent.output.sha256)}
+MV archive/shared.txt
+*** End Patch`,
+    })
+
+    assert.equal(rejected.ok, false)
+    assert.match(rejected.error, /duplicate.*destination|destination.*duplicate/)
+    assert.equal(await readFile(join(dir, 'first.txt'), 'utf8'), firstOriginal)
+    assert.equal(await readFile(join(dir, 'second.txt'), 'utf8'), secondOriginal)
+    await assert.rejects(() => readFile(join(dir, 'archive', 'shared.txt'), 'utf8'), /ENOENT/)
+  })
+})
+
+test('edit block hunks replace markdown sections, delete brace blocks, and insert after heading blocks', async () => {
+  await withTempDir(async (dir) => {
+    const markdownSwap = '# Guide\n\n## API\nold detail\n### Nested\nnested detail\n## Keep\nkeep detail\n'
+    const braceDelete = 'function one() {\n  return 1\n}\n\nfunction two() {\n  return 2\n}\n'
+    const markdownInsert = '# Guide\n\n## First\nfirst\n## Second\nsecond\n'
+    await writeFile(join(dir, 'swap.md'), markdownSwap, 'utf8')
+    await writeFile(join(dir, 'delete.js'), braceDelete, 'utf8')
+    await writeFile(join(dir, 'insert.md'), markdownInsert, 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const swapCurrent = await registry.execute('read_file', { path: 'swap.md' })
+    const deleteCurrent = await registry.execute('read_file', { path: 'delete.js' })
+    const insertCurrent = await registry.execute('read_file', { path: 'insert.md' })
+
+    const patched = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('swap.md', swapCurrent.output.sha256)}
+SWAP.BLK 3:
++## API
++new detail
+${expectedSnapshotHeader('delete.js', deleteCurrent.output.sha256)}
+DEL.BLK 1
+${expectedSnapshotHeader('insert.md', insertCurrent.output.sha256)}
+INS.BLK.POST 3:
++## Inserted
++between
+*** End Patch`,
+    })
+
+    assert.equal(patched.ok, true)
+    assert.equal(await readFile(join(dir, 'swap.md'), 'utf8'), '# Guide\n\n## API\nnew detail\n## Keep\nkeep detail\n')
+    assert.equal(await readFile(join(dir, 'delete.js'), 'utf8'), '\nfunction two() {\n  return 2\n}\n')
+    assert.equal(await readFile(join(dir, 'insert.md'), 'utf8'), '# Guide\n\n## First\nfirst\n## Inserted\nbetween\n## Second\nsecond\n')
+    assert.equal(patched.output.files.length, 3)
+    assert.equal(patched.output.files[0].ops, 1)
+    assert.match(patched.output.files[0].diff, /^-old detail$/m)
+    assert.match(patched.output.files[0].diff, /^-### Nested$/m)
+    assert.match(patched.output.files[0].diff, /^\+new detail$/m)
+    assert.equal(patched.output.files[1].ops, 1)
+    assert.match(patched.output.files[1].diff, /^-function one\(\) \{$/m)
+    assert.doesNotMatch(await readFile(join(dir, 'delete.js'), 'utf8'), /return 1/)
+    assert.equal(patched.output.files[2].ops, 1)
+    assert.match(patched.output.files[2].diff, /^\+## Inserted$/m)
+    assert.match(patched.output.files[2].diff, /^\+between$/m)
+  })
+})
+
+test('edit rejects unsupported block anchors without mutating any prepared file', async () => {
+  await withTempDir(async (dir) => {
+    const validOriginal = 'alpha\nbravo\n'
+    const plainOriginal = 'plain\nsecond\n'
+    await writeFile(join(dir, 'valid.txt'), validOriginal, 'utf8')
+    await writeFile(join(dir, 'plain.txt'), plainOriginal, 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const validCurrent = await registry.execute('read_file', { path: 'valid.txt' })
+    const plainCurrent = await registry.execute('read_file', { path: 'plain.txt' })
+
+    const rejected = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('valid.txt', validCurrent.output.sha256)}
+SWAP 2.=2:
++BRAVO
+${expectedSnapshotHeader('plain.txt', plainCurrent.output.sha256)}
+SWAP.BLK 1:
++changed
+*** End Patch`,
+    })
+
+    assert.equal(rejected.ok, false)
+    assert.match(rejected.error, /unsupported block anchor at line 1/)
+    assert.equal(await readFile(join(dir, 'valid.txt'), 'utf8'), validOriginal)
+    assert.equal(await readFile(join(dir, 'plain.txt'), 'utf8'), plainOriginal)
+  })
+})
+
 test('edit is atomic across multiple file sections when a later hunk is invalid', async () => {
   await withTempDir(async (dir) => {
     const fileA = join(dir, 'a.txt')

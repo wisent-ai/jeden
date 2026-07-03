@@ -779,7 +779,41 @@ function parseVisualEditPatch(patch) {
       continue
     }
     if (!current) throw new Error('patch hunk appears before file header')
-    let match = /^SWAP ([1-9]\d*)\.=([1-9]\d*):$/.exec(line)
+    let match = /^SWAP\.BLK ([1-9]\d*):$/.exec(line)
+    if (match) {
+      const parsed = parseVisualPatchBody(lines, index + 1)
+      if (parsed.rows === 0) throw new Error('SWAP.BLK hunk requires at least one + body line; use DEL.BLK to delete')
+      current.ops.push({ op: 'replace_block', line: Number(match[1]), content: parsed.content })
+      index = parsed.index
+      continue
+    }
+    match = /^DEL\.BLK ([1-9]\d*)$/.exec(line)
+    if (match) {
+      current.ops.push({ op: 'delete_block', line: Number(match[1]) })
+      index += 1
+      continue
+    }
+    match = /^INS\.BLK\.POST ([1-9]\d*):$/.exec(line)
+    if (match) {
+      const parsed = parseVisualPatchBody(lines, index + 1)
+      if (parsed.rows === 0) throw new Error('INS.BLK.POST hunk requires at least one + body line')
+      current.ops.push({ op: 'insert_block_after', line: Number(match[1]), content: parsed.content })
+      index = parsed.index
+      continue
+    }
+    if (line === 'REM') {
+      current.remove = true
+      index += 1
+      continue
+    }
+    match = /^MV (.+)$/.exec(line)
+    if (match) {
+      current.moveTo = match[1]
+      index += 1
+      continue
+    }
+    
+    match = /^SWAP ([1-9]\d*)\.=([1-9]\d*):$/.exec(line)
     if (match) {
       const parsed = parseVisualPatchBody(lines, index + 1)
       if (parsed.rows === 0) throw new Error('SWAP hunk requires at least one + body line; use DEL to delete')
@@ -813,9 +847,54 @@ function parseVisualEditPatch(patch) {
   }
   if (files.length === 0) throw new Error('patch must include at least one file section')
   for (const file of files) {
-    if (file.ops.length === 0) throw new Error(`patch file section has no hunks: ${file.path}`)
+    if (file.remove && (file.ops.length > 0 || file.moveTo)) throw new Error(`REM cannot be combined with other hunks: ${file.path}`)
+    if (file.ops.length === 0 && !file.remove && !file.moveTo) throw new Error(`patch file section has no hunks: ${file.path}`)
   }
   return files
+}
+
+function visualBlockRange(content, startLine) {
+  const { lines } = splitTextLines(content)
+  if (!Number.isInteger(startLine) || startLine < 1 || startLine > lines.length) throw new Error('block start is past end of file')
+  const line = lines[startLine - 1]
+  const heading = /^(#{1,6})\s/.exec(line)
+  if (heading) {
+    const level = heading[1].length
+    for (let index = startLine; index < lines.length; index += 1) {
+      const next = /^(#{1,6})\s/.exec(lines[index])
+      if (next && next[1].length <= level) return { startLine, endLine: index }
+    }
+    return { startLine, endLine: lines.length }
+  }
+  if (line.includes('{')) {
+    let balance = 0
+    let opened = false
+    for (let index = startLine - 1; index < lines.length; index += 1) {
+      for (const char of lines[index]) {
+        if (char === '{') {
+          balance += 1
+          opened = true
+        }
+        if (char === '}') balance -= 1
+      }
+      if (opened && balance <= 0) return { startLine, endLine: index + 1 }
+    }
+  }
+  if (line.trimEnd().endsWith(':')) {
+    const baseIndent = line.match(/^\s*/)[0].length
+    let endLine = startLine
+    for (let index = startLine; index < lines.length; index += 1) {
+      if (lines[index].trim() === '') {
+        endLine = index + 1
+        continue
+      }
+      const indent = lines[index].match(/^\s*/)[0].length
+      if (indent <= baseIndent) break
+      endLine = index + 1
+    }
+    if (endLine > startLine) return { startLine, endLine }
+  }
+  throw new Error(`unsupported block anchor at line ${startLine}`)
 }
 
 function visualPatchOpsForContent(content, ops) {
@@ -823,6 +902,18 @@ function visualPatchOpsForContent(content, ops) {
   return ops.map((op) => {
     if (op.op === 'insert_head') return { op: 'insert_before', line: 1, content: op.content }
     if (op.op === 'insert_tail') return { op: lines.length === 0 ? 'insert_before' : 'insert_after', line: lines.length === 0 ? 1 : lines.length, content: op.content }
+    if (op.op === 'replace_block') {
+      const range = visualBlockRange(content, op.line)
+      return { op: 'replace', startLine: range.startLine, endLine: range.endLine, content: op.content }
+    }
+    if (op.op === 'delete_block') {
+      const range = visualBlockRange(content, op.line)
+      return { op: 'delete', startLine: range.startLine, endLine: range.endLine }
+    }
+    if (op.op === 'insert_block_after') {
+      const range = visualBlockRange(content, op.line)
+      return { op: 'insert_after', line: range.endLine, content: op.content }
+    }
     return op
   })
 }
@@ -1723,42 +1814,68 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'edit',
-    description: 'Apply an OMP-style anchored visual patch string with [path#TAG], SWAP/INS/DEL hunks, visual diffs, and tag freshness checks; requires --allow-write',
-    input: { patch: 'string required; *** Begin Patch ... [path#TAG] ... SWAP/INS/DEL ... *** End Patch' },
+    description: 'Apply an OMP-style anchored visual patch string with [path#TAG], SWAP/DEL/INS/REM/MV and safe block hunks, visual diffs, and tag freshness checks; requires --allow-write',
+    input: { patch: 'string required; *** Begin Patch ... [path#TAG] ... SWAP/INS/DEL/REM/MV ... *** End Patch' },
     async execute(input) {
       if (!allowWrite) throw new Error('edit requires --allow-write')
       const sections = parseVisualEditPatch(input.patch)
-      const seenPaths = new Set()
+      const sourceFiles = new Set()
+      for (const section of sections) {
+        const sourceFile = jailPath(cwd, section.path)
+        if (sourceFiles.has(sourceFile)) throw new Error(`duplicate patch file section: ${section.path}`)
+        sourceFiles.add(sourceFile)
+      }
+      const destinationFiles = new Set()
       const prepared = []
       for (const section of sections) {
-        if (seenPaths.has(section.path)) throw new Error(`duplicate patch file section: ${section.path}`)
-        seenPaths.add(section.path)
         const file = jailPath(cwd, section.path)
         const current = await readFile(file, 'utf8')
         const currentHash = sha256(current)
         const currentTag = snapshotTagForHash(currentHash)
         if (currentTag !== section.tag) throw new Error(`snapshot tag mismatch for ${section.path}: expected ${currentTag}, got ${section.tag}`)
-        const ops = visualPatchOpsForContent(current, section.ops)
-        const next = applyLineEditOps(current, ops)
+        const toFile = section.moveTo ? jailPath(cwd, section.moveTo) : null
+        if (toFile) {
+          if (destinationFiles.has(toFile)) throw new Error(`duplicate move destination: ${section.moveTo}`)
+          if (sourceFiles.has(toFile) && toFile !== file) throw new Error(`move destination is another patched source: ${section.moveTo}`)
+          destinationFiles.add(toFile)
+        }
+        if (toFile && toFile !== file && await fileExists(toFile)) throw new Error(`destination exists: ${section.moveTo}`)
+        const ops = section.remove ? [] : visualPatchOpsForContent(current, section.ops)
+        const next = section.remove ? '' : (ops.length > 0 ? applyLineEditOps(current, ops) : current)
         prepared.push({
           file,
+          toFile,
           path: publicPath(cwd, file),
+          toPath: toFile ? publicPath(cwd, toFile) : null,
           before: current,
           after: next,
           ops,
+          remove: Boolean(section.remove),
         })
       }
       for (const item of prepared) {
-        await writeFile(item.file, item.after, 'utf8')
+        if (item.remove) {
+          await unlink(item.file)
+        } else {
+          if (item.ops.length > 0) await writeFile(item.file, item.after, 'utf8')
+          if (item.toFile) {
+            await mkdir(dirname(item.toFile), { recursive: true })
+            await rename(item.file, item.toFile)
+          }
+        }
       }
       return {
         files: prepared.map((item) => {
-          const nextHash = sha256(item.after)
+          const nextHash = item.remove ? null : sha256(item.after)
           return {
-            path: item.path,
+            path: item.toPath || item.path,
+            from: item.toPath ? item.path : undefined,
+            to: item.toPath || undefined,
+            moved: item.toPath ? true : undefined,
+            deleted: item.remove ? true : undefined,
             sha256: nextHash,
-            snapshot: snapshotName(item.path, nextHash),
-            diff: visualLineEditDiff({ path: item.path, before: item.before, ops: item.ops }),
+            snapshot: nextHash ? snapshotName(item.toPath || item.path, nextHash) : null,
+            diff: item.remove ? visualLineDiff({ path: item.path, before: item.before, after: '' }) : (item.toPath && item.ops.length === 0 ? `rename ${item.path} -> ${item.toPath}` : visualLineEditDiff({ path: item.path, before: item.before, ops: item.ops })),
             ops: item.ops.length,
             bytes: Buffer.byteLength(item.after, 'utf8'),
           }
