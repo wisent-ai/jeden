@@ -495,7 +495,7 @@ fn main() {
         "export" => export_session_command(&args),
         "artifacts" => args.positionals.get(0).map(|id| list_artifacts_command(id)).unwrap_or_else(|| Err("artifacts requires a session id".into())),
         "artifact" => artifact_command(&args),
-        "resume" | "tools" => delegate_to_node(&args.raw),
+        "resume" | "tools" | "recall_conversation" | "recall-conversation" | "search-sessions" => delegate_to_node(&args.raw),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),
