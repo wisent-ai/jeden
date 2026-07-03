@@ -13,13 +13,14 @@ import { loadCustomTools } from './custom-tools.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 import { formatConversationList, listConversationJsonls, recallConversation } from './conversation-recall.js'
+import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self-repair.js'
 
 
 function usage() {
   return `Usage:
-  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
-  jeden run "task" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
-  jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]
+  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n] [--self-repair] [--self-repair-own-code]
+  jeden run "task" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n] [--self-repair] [--self-repair-own-code]
+  jeden resume <session-id-or-path> "task" [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n] [--self-repair] [--self-repair-own-code]
   jeden recall_conversation [session-uuid-or-filename] [--list] [--cwd path]
   jeden recall-conversation [session-uuid-or-filename] [--list] [--cwd path]
   jeden sessions [limit]
@@ -40,6 +41,10 @@ Environment:
   WISENT_APP_AGENT_ID           default: wisent-app
   MODEL_ROUTER_URL              default: production Wisent router
   JEDEN_MODEL                   default: claude-code-subscription
+
+Self repair:
+  --self-repair           on run failure, start one bounded repair turn in the same session
+  --self-repair-own-code  permit that repair turn to write inside the Jeden package itself
 `
 }
 
@@ -51,6 +56,8 @@ function parseSharedOptions(rest) {
   let model = null
   let maxTokens = 2048
   let json = false
+  let selfRepair = false
+  let selfRepairOwnCode = false
   const positionals = []
 
   for (let i = 0; i < rest.length; i += 1) {
@@ -70,6 +77,14 @@ function parseSharedOptions(rest) {
     }
     if (arg === '--json') {
       json = true
+      continue
+    }
+    if (arg === '--self-repair') {
+      selfRepair = true
+      continue
+    }
+    if (arg === '--self-repair-own-code') {
+      selfRepairOwnCode = true
       continue
     }
     if (arg === '--model') {
@@ -93,7 +108,7 @@ function parseSharedOptions(rest) {
     positionals.push(arg)
   }
 
-  return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, json, positionals }
+  return { cwd, allowWrite, allowCommand, maxSteps, maxTokens, model, json, selfRepair, selfRepairOwnCode, positionals }
 }
 
 function parseRecallConversationOptions(rest) {
@@ -207,15 +222,63 @@ async function runUserPromptHook({ hookRunner, task, cwd, recorder }) {
   return result.userMessage || task
 }
 
+async function runSelfRepairTurn({ args, task, recorder, hookRunner, error }) {
+  if (!args.selfRepair) throw error
+  const permissions = selfRepairPermissions({
+    cwd: args.cwd,
+    allowWrite: args.allowWrite,
+    allowCommand: args.allowCommand,
+    allowOwnCode: args.selfRepairOwnCode,
+  })
+  const repairTask = buildSelfRepairTask({
+    task,
+    cwd: args.cwd,
+    error,
+    sessionPath: recorder.path(),
+    apply: permissions.allowWrite,
+    ownCodeProtected: permissions.ownCodeProtected,
+  })
+  await recorder.record('self_repair_requested', {
+    originalError: errorMessage(error),
+    allowWrite: permissions.allowWrite,
+    allowCommand: permissions.allowCommand,
+    ownCodeProtected: permissions.ownCodeProtected,
+  })
+  const repairPriorMessages = sessionReplayMessages(await readSession({ idOrPath: recorder.path() }))
+  const result = await runJeden({
+    ...args,
+    selfRepair: false,
+    selfRepairOwnCode: false,
+    task: repairTask,
+    recorder,
+    hookRunner,
+    allowWrite: permissions.allowWrite,
+    allowCommand: permissions.allowCommand,
+    priorMessages: repairPriorMessages,
+    memory: false,
+  })
+  await recorder.record('self_repair_completed', { originalError: errorMessage(error), text: result.text })
+  return { ...result, repairedFromError: errorMessage(error), selfRepair: true }
+}
+
+async function runJedenWithSelfRepair({ args, task, recorder, hookRunner, priorMessages = [] }) {
+  try {
+    return await runJeden({ ...args, task, recorder, hookRunner, priorMessages })
+  } catch (error) {
+    return await runSelfRepairTurn({ args, task, recorder, hookRunner, error })
+  }
+}
+
 
 async function runOnce(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   const hookRunner = createSharedHookRunner()
   const task = await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
-  const result = await runJeden({ ...args, task, recorder, hookRunner })
+  const result = await runJedenWithSelfRepair({ args, task, recorder, hookRunner })
   if (args.json) {
-    process.stdout.write(`${JSON.stringify({ ok: true, text: result.text, sessionPath: result.sessionPath }, null, 2)}\n`)
+    process.stdout.write(`${JSON.stringify({ ok: true, repaired: Boolean(result.selfRepair), originalError: result.repairedFromError || null, text: result.text, sessionPath: result.sessionPath }, null, 2)}\n`)
   } else {
+    if (result.selfRepair) process.stderr.write(`[self-repair] original run failed: ${result.repairedFromError}\n`)
     process.stdout.write(`${result.text}\n`)
     process.stderr.write(`[session] ${result.sessionPath}\n`)
   }
@@ -228,7 +291,8 @@ async function runResume(args) {
   const hookRunner = createSharedHookRunner()
   const task = await runUserPromptHook({ hookRunner, task: args.task, cwd: args.cwd, recorder })
   await recorder.record('resumed_from', { id: previous.id, path: previous.path })
-  const result = await runJeden({ ...args, task, recorder, hookRunner, priorMessages: sessionReplayMessages(previous) })
+  const result = await runJedenWithSelfRepair({ args, task, recorder, hookRunner, priorMessages: sessionReplayMessages(previous) })
+  if (result.selfRepair) process.stderr.write(`[self-repair] original run failed: ${result.repairedFromError}\n`)
   process.stdout.write(`${result.text}\n`)
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }

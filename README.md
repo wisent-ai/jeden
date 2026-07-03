@@ -74,6 +74,7 @@ jeden capabilities --cwd ../content-platform
 jeden doctor --cwd ../content-platform
 jeden run "summarize src/lib/api/model-router-hmac.ts" --cwd ../content-platform --model claude-code-subscription
 jeden run "create notes.txt with hello" --cwd /tmp/sandbox --allow-write
+jeden run "fix the failing parser test" --cwd ../content-platform --self-repair --allow-write --allow-command
 jeden run "summarize package.json" --json
 ```
 
@@ -97,6 +98,8 @@ Use `jeden artifacts <session-id-or-path>` and `jeden artifact <session-id-or-pa
 
 Use `jeden resume <session-id-or-path> "task"` to seed a new run with structured replay of the prior session's user, assistant, and tool-result messages while recording a fresh session.
 Use `jeden recall_conversation [session-uuid-or-filename] [--list] [--cwd path]` to reproduce `~/.claude/scratch/recall_conversation.sh` inside Jeden: it reads Claude session JSONLs from `~/.claude/projects/<encoded-cwd>/`, emits text-only `[USER]`/`[ASSISTANT]` blocks, and strips tool_use/tool_result/images/hooks/noise. `RECALL_CWD` still overrides the default project cwd; `--cwd` is available for explicit selection.
+Use `--self-repair` on `jeden run` or `jeden resume` to start one bounded repair turn when the primary run fails. The failed session records a `run_error`, then the repair turn receives the original task, failure message, and transcript path. Without `--allow-write`, repair is diagnose/propose only; with `--allow-write`, it may apply a minimal project-scoped patch, and with `--allow-command` it may also run narrow verification. If `--cwd` is inside the Jeden package itself, writes/commands are stripped from the repair turn unless `--self-repair-own-code` is also passed.
+
 
 
 Config files load from `~/.jeden/config.json` and `<cwd>/.jeden/config.json`; project config overrides user config. Supported keys: `model`, `modelRouterUrl`, and `agentId`. Existing environment variables still win. Use `jeden config --cwd .` to print the merged config.

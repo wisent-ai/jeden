@@ -7,6 +7,7 @@ import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 import { buildMemoryContext, learnFromCompletedRun } from './memory.js'
+import { errorMessage } from './self-repair.js'
 
 const MAX_TOOL_RESULT_BYTES = 64_000
 
@@ -176,7 +177,7 @@ export async function runJeden({
 
   try {
     const toolSpecs = toOpenAIToolSpecs(tools.list())
-  for (let step = 1; step <= maxSteps; step += 1) {
+    for (let step = 1; step <= maxSteps; step += 1) {
     const content = await chat({ messages, config, tools: toolSpecs, maxTokens })
     await recorder?.record('assistant_raw', { step, content })
     const action = parseAction(content)
@@ -245,9 +246,12 @@ export async function runJeden({
       }
     }
     messages.push({ role: 'user', content: formatToolResult(action.action === 'tools' ? results : results[0].result) })
-  }
+    }
 
     throw new Error(`max steps exceeded: ${maxSteps}`)
+  } catch (error) {
+    await recorder?.record('run_error', { message: errorMessage(error) })
+    throw error
   } finally {
     await closeMcpClients({ cwd })
   }

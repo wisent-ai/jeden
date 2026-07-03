@@ -13,3 +13,4 @@ export { createSharedHookRunner, toolHookEvent, postToolHookEvent } from './hook
 export { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 export { buildMemoryContext, createCogneeMemoryBackend, createLocalMemoryBackend, createMemoryRecord, learnFromCompletedRun, loadMemoryRecords, recallMemories, rememberMemory } from './memory.js'
 export { claudeProjectPath, formatConversationList, listConversationJsonls, recallConversation, recallConversationFromJsonl, resolveConversationJsonl } from './conversation-recall.js'
+export { buildSelfRepairTask, defaultJedenPackageRoot, errorMessage, isInsidePath, selfRepairPermissions } from './self-repair.js'

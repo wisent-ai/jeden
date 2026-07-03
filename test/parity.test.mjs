@@ -12,7 +12,7 @@ import { loadProjectContext } from '../src/context.js'
 import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions, sessionReplayMessages } from '../src/session.js'
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
-import { buildCapabilityManifest, buildDoctorReport, createLocalMemoryBackend, loadMemoryRecords, modelRouterConfig, runJeden } from '../src/index.js'
+import { buildCapabilityManifest, buildDoctorReport, createLocalMemoryBackend, loadMemoryRecords, modelRouterConfig, runJeden, selfRepairPermissions } from '../src/index.js'
 import { systemPrompt } from '../src/policy.js'
 import { closeMcpClients, loadMcpToolAdapters } from '../src/mcp.js'
 import { claudeProjectPath, formatConversationList, listConversationJsonls, recallConversationFromJsonl, resolveConversationJsonl } from '../src/conversation-recall.js'
@@ -1408,6 +1408,129 @@ test('runJeden records memory errors without failing successful runs', async () 
     }, readOnlyMemoryFile)
   })
 })
+
+test('self-repair: runJeden records run_error with original max-steps failure', async () => {
+  await withTempDir(async (dir) => {
+    const recorder = makeInMemoryRecorder(dir, 'max-steps-session')
+    const chat = async () => JSON.stringify({ action: 'tool', tool: 'list_dir', input: {} })
+
+    await assert.rejects(
+      runJeden({
+        task: 'List files forever.',
+        cwd: dir,
+        chat,
+        recorder,
+        maxSteps: 1,
+        memory: false,
+      }),
+      /max steps exceeded: 1/,
+    )
+
+    const runError = recorder.events.find((event) => event.type === 'run_error')
+    assert.deepEqual(runError?.data, { message: 'max steps exceeded: 1' })
+  })
+})
+
+test('self-repair: permission gating protects own package unless explicitly allowed', async () => {
+  await withTempDir(async (dir) => {
+    const packageRoot = join(dir, 'jeden')
+    const packageChild = join(packageRoot, 'src')
+    const projectCwd = join(dir, 'consumer-project')
+    await mkdir(packageChild, { recursive: true })
+    await mkdir(projectCwd, { recursive: true })
+
+    assert.deepEqual(
+      selfRepairPermissions({ cwd: packageChild, packageRoot, allowWrite: true, allowCommand: true }),
+      { allowWrite: false, allowCommand: false, ownCodeProtected: true, packageRoot },
+    )
+    assert.deepEqual(
+      selfRepairPermissions({ cwd: packageChild, packageRoot, allowWrite: true, allowCommand: true, allowOwnCode: true }),
+      { allowWrite: true, allowCommand: true, ownCodeProtected: false, packageRoot },
+    )
+    assert.deepEqual(
+      selfRepairPermissions({ cwd: projectCwd, packageRoot, allowWrite: true, allowCommand: true }),
+      { allowWrite: true, allowCommand: true, ownCodeProtected: false, packageRoot },
+    )
+  })
+})
+
+test('self-repair: CLI repairs a max-steps run and records requested transcript', async () => {
+  await withTempDir(async (dir) => {
+    const cwd = join(dir, 'project')
+    const home = join(dir, 'home')
+    await mkdir(cwd, { recursive: true })
+    await mkdir(home, { recursive: true })
+
+    const requests = []
+    await withHttpServer((request, response) => {
+      let body = ''
+      request.setEncoding('utf8')
+      request.on('data', (chunk) => {
+        body += chunk
+      })
+      request.on('end', () => {
+        requests.push(JSON.parse(body))
+        response.writeHead(200, { 'content-type': 'application/json' })
+        const content = requests.length === 1
+          ? JSON.stringify({ action: 'tool', tool: 'list_dir', input: {} })
+          : JSON.stringify({ action: 'final', text: 'self-repair completed' })
+        response.end(JSON.stringify({ choices: [{ message: { content } }] }))
+      })
+    }, async (origin) => {
+      const task = 'Repair the generated release notes.'
+      const env = {
+        ...process.env,
+        HOME: home,
+        USERPROFILE: home,
+        JEDEN_MEMORY_FILE: join(dir, 'memory.jsonl'),
+        MODEL_ROUTER_URL: origin,
+        WISENT_APP_AGENT_AUTH_SECRET: 'test-secret',
+        JEDEN_HOOKS: '0',
+      }
+      const { stdout, stderr } = await execFileOk(
+        process.execPath,
+        ['src/cli.js', 'run', task, '--cwd', cwd, '--max-steps', '1', '--self-repair', '--json'],
+        { cwd: process.cwd(), env },
+      )
+
+      assert.equal(stderr, '')
+      assert.equal(requests.length, 2)
+      const output = JSON.parse(stdout)
+      assert.equal(output.ok, true)
+      assert.equal(output.repaired, true)
+      assert.equal(output.originalError, 'max steps exceeded: 1')
+      assert.equal(output.text, 'self-repair completed')
+
+      const repairMessages = requests[1].messages
+      const replayedMessages = repairMessages.slice(1, -1)
+      assert.deepEqual(replayedMessages.map((message) => message.role), ['user', 'assistant', 'user'])
+      assert.equal(replayedMessages[0].content, task)
+      assert.deepEqual(JSON.parse(replayedMessages[1].content), { action: 'tool', tool: 'list_dir', input: {} })
+      const replayedToolResult = JSON.parse(replayedMessages[2].content)
+      assert.equal(replayedToolResult.type, 'tool_result')
+      assert.deepEqual(replayedToolResult.result, { ok: true, output: [] })
+
+      const repairPrompt = repairMessages.at(-1).content
+      assert.match(repairPrompt, /A previous Jeden run failed\. Self-repair mode is enabled\./)
+      assert.match(repairPrompt, new RegExp(task.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+      assert.match(repairPrompt, /Failure:\nmax steps exceeded: 1/)
+      assert.match(repairPrompt, new RegExp(`${output.sessionPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/transcript\\.jsonl`))
+
+      const transcript = (await readFile(join(output.sessionPath, 'transcript.jsonl'), 'utf8'))
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line))
+      const repairRequested = transcript.find((event) => event.type === 'self_repair_requested')
+      assert.deepEqual(repairRequested?.data, {
+        originalError: 'max steps exceeded: 1',
+        allowWrite: false,
+        allowCommand: false,
+        ownCodeProtected: false,
+      })
+    })
+  })
+})
+
 
 test('runJeden round-trips ask_user through the provided callback', async () => {
   await withTempDir(async (dir) => {
