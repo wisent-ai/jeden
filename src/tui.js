@@ -1,5 +1,5 @@
 import { emitKeypressEvents } from 'node:readline'
-import { BRAND, WISENT_MARK } from './brand.js'
+import { BRAND, WISENT_HEADER_MARK, WISENT_MARK } from './brand.js'
 import { formatSlashCommand, slashCommandHints } from './slash-commands.js'
 
 const ANSI = {
@@ -95,16 +95,19 @@ function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask'
   const title = `${BRAND.product} ${BRAND.app} ${BRAND.version}`
   const markWidth = Math.max(...WISENT_MARK.map((line) => visibleLength(line)))
   const mark = (index) => padVisible(WISENT_MARK[index], markWidth)
+  const controls = [
+    'Controls',
+    '# prompt actions   / commands',
+    '! shell            $ node/python',
+    'Enter sends        Ctrl-J newline',
+    'arrows/Home/End edit',
+  ]
   const rows = [
     `${BRAND.product} private agent harness`,
     `Model route: ${model || 'default'}`,
     `Workspace: ${cwd}`,
     '',
-    `${mark(0)}   Controls`,
-    `${mark(1)}   # prompt actions   / commands`,
-    `${mark(2)}   ! shell            $ node/python`,
-    `${mark(3)}   Enter sends        Ctrl-J newline`,
-    `${mark(4)}   arrows/Home/End edit`,
+    ...WISENT_MARK.map((line, index) => `${mark(index)}   ${controls[index] || ''}`.trimEnd()),
     '',
     `Tool gates: write ${writeStatus} · command ${commandStatus}`,
     'Sessions: local history and artifacts',
@@ -116,7 +119,7 @@ function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask'
 function brandHeader({ width, model = 'default', cwd = '.', color }) {
   const inner = Math.max(width - 4, 8)
   const contentWidth = Math.max(inner - 2, 1)
-  const label = `${WISENT_MARK[0]}  ${BRAND.product} ${BRAND.app} ${BRAND.version} · ${model || 'default'} · ${cwd}`
+  const label = `${WISENT_HEADER_MARK} ${BRAND.product} ${BRAND.app} ${BRAND.version} · ${model || 'default'} · ${cwd}`
   const row = visibleLength(label) > contentWidth ? `${stripAnsi(label).slice(0, Math.max(contentWidth - 1, 0))}…` : label
   return `${paint('╭─', 'cyan', color)} ${padVisible(row, contentWidth)} ${paint('─╮', 'cyan', color)}`
 }
