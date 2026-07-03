@@ -3,6 +3,7 @@ import { basename, dirname, extname, join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 
 import { loadJedenConfig, loadProjectJedenConfig, saveProjectJedenConfig } from './config.js'
+import { handleAuthSlashCommand } from './auth-slash.js'
 import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 import { handleRuntimeSlashCommand } from './runtime-slash.js'
 import { dispatchModeSlashCommand } from './mode-state.js'
@@ -10,6 +11,8 @@ import { closeMcpClients, listMcpPrompts, listMcpResources, listMcpTools, loadMc
 import { deleteMentalModel, enqueueMemoryMaintenance, loadMemoryRecords, loadMentalModelBank, memoryPath, mentalModelPath, normalizeMentalModelId, rebuildMemoryFile, recallMemories, saveMemoryRecords, seedMentalModel } from './memory.js'
 import { listSessionArtifacts, listSessions, readSession } from './session.js'
 import { copyTextToClipboardOrArtifact, createEncryptedShareBundle, handleLocalCollab } from './local-sharing.js'
+import { handleExtensionsCommand, handleMarketplaceCommand, handlePluginsCommand, reloadPlugins } from './plugin-manager.js'
+import { resetUsage, usageSummary } from './usage.js'
 
 const OMP_COMMANDS = [
   ['settings', 'Open settings menu'],
@@ -29,7 +32,7 @@ const OMP_COMMANDS = [
   ['collab', 'Share this session live via a relay', { hint: '[start|view|stop|status] [relayUrl]', subcommands: ['view', 'status', 'stop'] }],
   ['join', 'Join a shared collab session', { hint: '<link>' }],
   ['leave', 'Leave the collab session'],
-  ['browser', 'Toggle browser headless vs visible mode', { hint: '[headless|visible]', subcommands: ['headless', 'visible'] }],
+  ['browser', 'Configure local browser runtime preference', { hint: '[status|headless|visible] [launch.<key>=value] [profile.<key>=value]', subcommands: ['status', 'headless', 'visible'] }],
   ['copy', 'Pick text or code from the conversation to copy'],
   ['todo', "View or modify the agent's todo list", { hint: '<subcommand>', subcommands: ['edit', 'copy', 'export [<path>]', 'import [<path>]', 'start <task>', 'done [<task|phase>]', 'drop [<task|phase>]', 'rm [<task|phase>]'] }],
   ['session', 'Session management commands', { hint: 'info|delete', subcommands: ['info', 'delete'] }],
@@ -65,7 +68,7 @@ const OMP_COMMANDS = [
   ['rename', 'Rename the current session', { hint: '<title>' }],
   ['move', 'Move the current session to a different directory', { hint: '[<path>]' }],
   ['exit', 'Exit the application'],
-  ['marketplace', 'Manage marketplace plugin sources and installed plugins', { hint: '<subcommand>', subcommands: ['add <source>', 'remove <name>', 'update [name]', 'list', 'discover [marketplace]', 'uninstall [name@marketplace]', 'installed', 'upgrade [name@marketplace]', 'help'] }],
+  ['marketplace', 'Manage marketplace plugin sources and installed plugins', { hint: '<subcommand>', subcommands: ['add <source>', 'remove <name>', 'update [name]', 'list', 'discover [marketplace]', 'install <name@marketplace>', 'uninstall [name@marketplace]', 'installed', 'upgrade [name@marketplace]', 'help'] }],
   ['plugins', 'View and manage installed plugins', { hint: '[list|enable|disable]', subcommands: ['list', 'enable <name@marketplace>', 'disable <name@marketplace>'] }],
   ['reload-plugins', 'Reload all plugins'],
   ['force', 'Force next turn to use a specific tool', { aliases: ['force:'], hint: '<tool-name> [prompt]' }],
@@ -160,7 +163,7 @@ export function formatSlashCommandList() {
     rows.push(`[local] ${formatSlashCommand(command)}`)
     if (command.subcommands.length) rows.push(`    subcommands: ${command.subcommands.join(', ')}`)
   }
-  rows.push('', 'Every listed slash command is dispatched locally before the model. Commands that need unavailable OMP-only infrastructure return a concrete blocker instead of pretending success.')
+  rows.push('', 'Every listed slash command is dispatched locally before the model. Cloud/UI-backed surfaces use durable local equivalents when a hosted backend is not configured.')
   return rows.join('\n')
 }
 
@@ -200,8 +203,13 @@ async function handleCopy(parsed, context) {
   return ok(await copyTextToClipboardOrArtifact({ payload, source, recorder: context.recorder }))
 }
 
-async function createEncryptedShare(context) {
-  return createEncryptedShareBundle({ session: await currentSession(context), artifactDir: context.recorder.artifactDir() })
+async function createEncryptedShare(context, args = '') {
+  const argv = splitArgs(args)
+  let copyLink = false
+  for (const arg of argv) {
+    if (arg === 'copy' || arg === '--copy' || arg === '--clipboard') copyLink = true
+  }
+  return createEncryptedShareBundle({ session: await currentSession(context), artifactDir: context.recorder.artifactDir(), copyLink })
 }
 
 async function exportCurrentSession(context, args) {
@@ -507,25 +515,11 @@ async function handleMemory(parsed, context) {
   return err('Usage: /memory view [query] | stats | diagnose | clear | reset | enqueue [note] | rebuild | mm list|show|history|seed|delete')
 }
 
-function formatConfigSummary(config) {
-  const entries = Object.entries(config || {})
-  if (entries.length === 0) return '(no config keys loaded)'
-  return entries.map(([key, value]) => {
-    const type = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value
-    const status = value === null || value === undefined || value === '' ? 'empty' : 'configured'
-    return `${key}: ${type} (${status})`
-  }).join('\n')
-}
 
-async function handleConfigStatus(name, context) {
-  if (name === 'settings' || name === 'setup') {
-    const config = await loadJedenConfig({ cwd: context.args.cwd })
-    return ok(`Jeden settings status:\nWorkspace: ${resolve(context.args.cwd)}\nEffective config:\n${formatConfigSummary(config)}\n\nProvider setup is environment/config driven in Jeden; edit .jeden/config.json, ~/.jeden/config.json, or env vars.`)
-  }
-  if (name === 'browser') return ok('Browser mode is configured through tools/MCP. Jeden has no persistent browser runtime toggle; use browser-capable tools exposed by /tools.')
-  if (name === 'login' || name === 'logout') return ok('OAuth login/logout is not embedded in Jeden. Configure provider credentials in env/config; use /settings to inspect current config inputs.')
-  if (name === 'extensions' || name === 'agents') return ok('Extension/Agent dashboards are OMP UI surfaces. Jeden loads custom tools and MCP adapters from local config; use /tools and /mcp list for the active registry.')
-  if (name === 'marketplace' || name === 'plugins' || name === 'reload-plugins') return ok('Jeden has no plugin marketplace runtime. Custom tools/MCP adapters are loaded from local config on process start; restart Jeden after changing them.')
+async function handleConfigStatus(name) {
+  if (name === 'settings' || name === 'setup') return null
+  if (name === 'login' || name === 'logout') return null
+  if (name === 'agents') return ok('Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.')
   return null
 }
 
@@ -570,7 +564,12 @@ async function handleUtility(canonical, parsed, context) {
   if (canonical === 'dump') return ok(formatSessionText(await currentSession(context)))
   if (canonical === 'copy') return handleCopy(parsed, context)
   if (canonical === 'jobs') return ok(state(context).jobs.length ? JSON.stringify(state(context).jobs, null, 2) : 'No background jobs are tracked inside this Jeden process.')
-  if (canonical === 'usage') return ok(JSON.stringify({ model: context.args.model || process.env.JEDEN_MODEL || process.env.MODEL || 'default', maxTokens: context.args.maxTokens, maxSteps: context.args.maxSteps }, null, 2))
+  if (canonical === 'usage') {
+    const [verb = 'show'] = splitArgs(parsed.args)
+    if (verb === 'reset') return ok(`Reset usage accounting: ${(await resetUsage({ cwd: context.args.cwd })).file}`)
+    if (verb !== 'show' && verb !== 'status') return err('Usage: /usage [show|reset]')
+    return ok(JSON.stringify(await usageSummary({ cwd: context.args.cwd }), null, 2))
+  }
   if (canonical === 'stats') return ok(JSON.stringify(await buildDoctorReport({ cwd: context.args.cwd }), null, 2))
   if (canonical === 'debug') return ok(JSON.stringify(await buildDoctorReport({ cwd: context.args.cwd }), null, 2))
   if (canonical === 'context') return ok(JSON.stringify(await buildCapabilityManifest({ cwd: context.args.cwd }), null, 2))
@@ -586,8 +585,9 @@ async function handleUtility(canonical, parsed, context) {
 
 async function handleCollab(canonical, parsed, context) {
   const st = state(context)
-  if (canonical === 'share') return ok(await createEncryptedShare(context))
+  if (canonical === 'share') return ok(await createEncryptedShare(context, parsed.args))
   const [verb = 'status', relay] = splitArgs(parsed.args)
+  const relayConfig = await loadJedenConfig({ cwd: context.args.cwd })
   const result = await handleLocalCollab({
     canonical,
     verb,
@@ -597,6 +597,7 @@ async function handleCollab(canonical, parsed, context) {
     sessionPath: context.recorder.path(),
     cwd: context.args.cwd,
     artifactDir: context.recorder.artifactDir(),
+    relayConfig,
   })
   if (!result) return null
   return result.error ? err(result.error) : ok(result.text)
@@ -634,7 +635,26 @@ export async function dispatchSlashCommand(input, context = {}) {
     return ok(`Current model route: ${context.args?.model || process.env.JEDEN_MODEL || process.env.MODEL || 'default'}.`)
   }
 
-  const config = await handleConfigStatus(canonical, context)
+  const auth = await handleAuthSlashCommand(canonical, parsed, context)
+  if (auth) return auth
+  if (canonical === 'marketplace') {
+    const result = await handleMarketplaceCommand(splitArgs(parsed.args), { cwd: context.args.cwd })
+    return result.error ? err(result.error) : ok(result.text)
+  }
+  if (canonical === 'plugins') {
+    const result = await handlePluginsCommand(splitArgs(parsed.args), { cwd: context.args.cwd })
+    return result.error ? err(result.error) : ok(result.text)
+  }
+  if (canonical === 'extensions') {
+    const result = await handleExtensionsCommand({ cwd: context.args.cwd })
+    return result.error ? err(result.error) : ok(result.text)
+  }
+  if (canonical === 'reload-plugins') {
+    const builtIn = context.createToolRegistry?.({ cwd: context.args?.cwd, allowWrite: false, allowCommand: false, artifactDir: context.recorder?.artifactDir?.() })?.list?.() || []
+    const result = await reloadPlugins({ cwd: context.args.cwd, builtInToolNames: builtIn.map((tool) => tool.name), allowCommand: context.args?.allowCommand })
+    return result.error ? err(result.error) : ok(result.text)
+  }
+  const config = await handleConfigStatus(canonical)
   if (config) return config
   if (canonical === 'session') return handleSession(parsed, context)
   if (canonical === 'todo') return handleTodo(parsed, context)
@@ -650,9 +670,6 @@ export async function dispatchSlashCommand(input, context = {}) {
   if (collab) return collab
   const branching = handleBranching(canonical, parsed, context)
   if (branching) return branching
-  if (canonical === 'btw') return ok(`Side question captured. Submit as a normal prompt for model execution:\n${parsed.args}`)
-  if (canonical === 'tan') return ok(`Tangential task captured. Jeden has no background-agent pool; submit as a normal prompt or open another terminal:\n${parsed.args}`)
-  if (canonical === 'omfg') return ok(`Rule complaint captured locally. Persistent rule authoring is not configured in Jeden:\n${parsed.args}`)
 
   return err(`No handler matched /${canonical}; this is a bug in the slash dispatcher.`)
 }

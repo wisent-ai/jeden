@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process'
 import { writeFile } from 'node:fs/promises'
 import { loadEnvFiles } from './env.js'
 import { runJeden } from './runner.js'
+import { chatCompletion, modelRouterConfig } from './model-router.js'
 import { SessionRecorder, listSessions, readSession, listSessionArtifacts, readSessionArtifact, sessionReplayMessages } from './session.js'
 import { createSharedHookRunner } from './hooks.js'
 import { createToolRegistry } from './tools.js'
@@ -16,7 +17,7 @@ import { formatConversationList, listConversationJsonls, recallConversation } fr
 import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self-repair.js'
 import { createTerminalTui } from './tui.js'
 import { dispatchSlashCommand } from './slash-commands.js'
-import { createModeState, consumeLoopPrompt, noteModeRunResult, prepareTaskForModes } from './mode-state.js'
+import { advisorReviewConfigForModes, advisorReviewPrompt, createModeState, consumeLoopPrompt, modelConfigForModes, noteModeRunResult, prepareTaskForModes, storeAdvisorModelReview } from './mode-state.js'
 
 
 function usage() {
@@ -448,11 +449,36 @@ async function runInteractive(args) {
         tui?.setBusy(true)
         const taskForHook = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
         const taskForRun = prepareTaskForModes(taskForHook, modeState)
-        const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner, priorMessages: replayInstalled ? priorMessages : [] })
+        const runConfig = modelConfigForModes(modeState, modelRouterConfig())
+        const result = await runJeden({ ...args, config: runConfig, task: taskForRun, recorder, approveTool, askUser, hookRunner, priorMessages: replayInstalled ? priorMessages : [] })
         noteModeRunResult(modeState, { task, text: result.text })
         if (replayInstalled) priorMessages = [...priorMessages, { role: 'user', content: taskForRun }, { role: 'assistant', content: JSON.stringify({ action: 'final', text: result.text }) }]
         if (tui) tui.push('assistant', result.text)
         else process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
+        const advisorConfig = advisorReviewConfigForModes(modeState, runConfig)
+        if (advisorConfig) {
+          try {
+            const reviewTask = advisorReviewPrompt({ task: taskForHook, result: result.text })
+            const reviewText = await chatCompletion({
+              config: advisorConfig,
+              maxTokens: Math.min(Number(args.maxTokens) || 2048, 1024),
+              messages: [
+                { role: 'system', content: 'You are the Jeden advisor reviewer. Review the completed agent answer only. Do not request tools.' },
+                { role: 'user', content: reviewTask },
+              ],
+              tools: [],
+            })
+            storeAdvisorModelReview(modeState, { task, text: reviewText, model: advisorConfig.model })
+            await recorder.record('advisor_review', { model: advisorConfig.model, text: reviewText })
+            if (tui) tui.push('system', `Advisor review:\n${reviewText}`)
+            else process.stdout.write(`\n${terminalBox('Advisor review', reviewText.split('\n'))}\n\n`)
+          } catch (advisorError) {
+            const message = advisorError instanceof Error ? advisorError.message : String(advisorError)
+            await recorder.record('advisor_error', { message })
+            if (tui) tui.push('error', `Advisor review failed: ${message}`)
+            else process.stderr.write(`\n${paint('╭─ advisor error', 'red')}\n${message}\n${paint('╰─', 'red')}\n\n`)
+          }
+        }
         pendingLoopTask = consumeLoopPrompt(modeState, task) || ''
         tui?.setBusy(false)
       } catch (error) {

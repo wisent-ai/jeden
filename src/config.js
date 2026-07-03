@@ -19,6 +19,21 @@ export function projectJedenConfigPath({ cwd = process.cwd() } = {}) {
   return resolve(cwd, '.jeden', 'config.json')
 }
 
+export function projectJedenAuthPath({ cwd = process.cwd() } = {}) {
+  return resolve(cwd, '.jeden', 'auth.json')
+}
+
+export async function loadProjectAuthConfig({ cwd = process.cwd() } = {}) {
+  return readJson(projectJedenAuthPath({ cwd }))
+}
+
+export async function saveProjectAuthConfig(config, { cwd = process.cwd() } = {}) {
+  const file = projectJedenAuthPath({ cwd })
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, `${JSON.stringify(config || {}, null, 2)}\n`, 'utf8')
+  return file
+}
+
 export async function loadProjectJedenConfig({ cwd = process.cwd() } = {}) {
   return readJson(projectJedenConfigPath({ cwd }))
 }

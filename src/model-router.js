@@ -5,7 +5,8 @@ export function modelRouterConfig(env = process.env) {
   const agentId = env.WISENT_APP_AGENT_ID || 'wisent-app'
   const secret = env.WISENT_APP_AGENT_AUTH_SECRET || ''
   const model = env.JEDEN_MODEL || 'claude-code-subscription'
-  return { url, agentId, secret, model }
+  const serviceTier = env.JEDEN_SERVICE_TIER || env.MODEL_SERVICE_TIER || ''
+  return { url, agentId, secret, model, serviceTier }
 }
 
 export function hmacHeaders({ body, agentId, secret }) {
@@ -26,6 +27,7 @@ export async function chatCompletion({ messages, maxTokens = 2048, config = mode
     model: config.model,
     max_tokens: maxTokens,
     messages,
+    ...(config.serviceTier ? { service_tier: config.serviceTier } : {}),
     ...(tools.length > 0 ? { tools, tool_choice: 'auto' } : {}),
   })
   const endpoint = `${config.url.replace(/\/$/, '')}/v1/chat/completions`

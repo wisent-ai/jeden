@@ -5,8 +5,10 @@ import {
   consumeLoopPrompt,
   createModeState,
   dispatchModeSlashCommand,
+  modelConfigForModes,
   noteModeRunResult,
   prepareTaskForModes,
+  storeAdvisorModelReview,
 } from '../src/mode-state.js'
 
 function fakeContext() {
@@ -100,10 +102,41 @@ test('force validates tools, consumes the next-turn instruction, and retry recor
   assert.equal(state.lastFailedTask, '')
 })
 
-test('unsupported external mode commands fail explicitly', () => {
+test('advisor mode stores model reviewer notes', () => {
   const state = createModeState()
 
-  assert.equal(dispatchModeSlashCommand(parsed('advisor', 'on'), state, fakeContext()).role, 'error')
-  assert.match(dispatchModeSlashCommand(parsed('tan', 'background work'), state, fakeContext()).text, /background-agent runtime/)
-  assert.match(dispatchModeSlashCommand(parsed('omfg', 'stop doing x'), state, fakeContext()).text, /TTSR rule store/)
+  const enabled = dispatchModeSlashCommand(parsed('advisor', 'on'), state, fakeContext())
+  assert.equal(enabled.handled, true)
+  assert.equal(state.advisor.enabled, true)
+
+  const configured = dispatchModeSlashCommand(parsed('advisor', 'configure model reviewer-local'), state, fakeContext())
+  assert.equal(configured.role, 'system')
+  assert.equal(state.advisor.model, 'reviewer-local')
+
+  const status = dispatchModeSlashCommand(parsed('advisor', 'status'), state, fakeContext())
+  assert.match(status.text, /enabled/)
+  assert.match(status.text, /reviewer-local/)
+  assert.match(status.text, /second model-router call/)
+  assert.match(prepareTaskForModes('ship change', state), /request a second model-router review/)
+
+  noteModeRunResult(state, { task: 'ship change', text: 'Implemented the change.' })
+  assert.equal(state.advisor.lastReview, null)
+  storeAdvisorModelReview(state, { task: 'ship change', text: 'Verdict: pass', model: 'reviewer-local' })
+  const dump = dispatchModeSlashCommand(parsed('advisor', 'dump'), state, fakeContext())
+  assert.equal(dump.role, 'system')
+  assert.match(dump.text, /Verdict: pass/)
+
+  const raw = dispatchModeSlashCommand(parsed('advisor', 'dump raw'), state, fakeContext())
+  assert.match(raw.text, /"backend": "model-router"/)
+})
+
+test('fast mode maps to model-router service tier', () => {
+  const state = createModeState()
+
+  const fast = dispatchModeSlashCommand(parsed('fast', 'tier flex'), state, fakeContext())
+  assert.equal(fast.role, 'system')
+  assert.equal(state.fast.enabled, true)
+  assert.equal(state.fast.serviceTier, 'flex')
+  assert.equal(modelConfigForModes(state, { model: 'm' }).serviceTier, 'flex')
+  assert.match(prepareTaskForModes('run', state), /service_tier=flex/)
 })

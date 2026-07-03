@@ -6,6 +6,7 @@ import { loadCustomTools } from './custom-tools.js'
 import { formatProjectContext, loadProjectContext } from './context.js'
 import { toolHookEvent, postToolHookEvent } from './hooks.js'
 import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
+import { recordUsageEvent } from './usage.js'
 import { buildMemoryContext, learnFromCompletedRun } from './memory.js'
 import { errorMessage } from './self-repair.js'
 
@@ -179,6 +180,11 @@ export async function runJeden({
     const toolSpecs = toOpenAIToolSpecs(tools.list())
     for (let step = 1; step <= maxSteps; step += 1) {
     const content = await chat({ messages, config, tools: toolSpecs, maxTokens })
+    try {
+      await recordUsageEvent({ cwd, model: config.model, serviceTier: config.serviceTier, messages, output: content, step })
+    } catch (usageError) {
+      await recorder?.record('usage_error', { message: usageError instanceof Error ? usageError.message : String(usageError) })
+    }
     await recorder?.record('assistant_raw', { step, content })
     const action = parseAction(content)
     await recorder?.record('action', { step, action })
