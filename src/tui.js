@@ -93,16 +93,18 @@ function divider(width) {
 
 function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask', commandStatus = 'ask', color }) {
   const title = `${BRAND.product} ${BRAND.app} ${BRAND.version}`
+  const markWidth = Math.max(...WISENT_MARK.map((line) => visibleLength(line)))
+  const mark = (index) => padVisible(WISENT_MARK[index], markWidth)
   const rows = [
     `${BRAND.product} private agent harness`,
     `Model route: ${model || 'default'}`,
     `Workspace: ${cwd}`,
     '',
-    `${WISENT_MARK[0]}   Controls`,
-    `${WISENT_MARK[1]}   # prompt actions   / commands`,
-    `${WISENT_MARK[2]}   ! shell            $ node/python`,
-    `${WISENT_MARK[3]}   Enter sends        Ctrl-J newline`,
-    `${WISENT_MARK[4]}   arrows/Home/End edit`,
+    `${mark(0)}   Controls`,
+    `${mark(1)}   # prompt actions   / commands`,
+    `${mark(2)}   ! shell            $ node/python`,
+    `${mark(3)}   Enter sends        Ctrl-J newline`,
+    `${mark(4)}   arrows/Home/End edit`,
     '',
     `Tool gates: write ${writeStatus} · command ${commandStatus}`,
     'Sessions: local history and artifacts',
