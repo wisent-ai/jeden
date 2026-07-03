@@ -9,7 +9,7 @@ import { execFile } from 'node:child_process'
 import { parseAction } from '../src/protocol.js'
 import { createToolRegistry } from '../src/tools.js'
 import { loadProjectContext } from '../src/context.js'
-import { SessionRecorder, listSessionArtifacts, readSessionArtifact, readSession, listSessions, sessionReplayMessages } from '../src/session.js'
+import { SessionRecorder, compactSession, createHandoffSession, createNewSession, deleteSession, dropSessionAndCreateNew, dumpSession, exportSession, formatSessionInfo, freshSessionUnsupported, getSessionInfo, listSessionArtifacts, readSessionArtifact, readSession, listSessions, moveSessionWorkspace, renameSession, resumeSessionIntoNew, sessionReplayMessages, shakeSession } from '../src/session.js'
 import { loadCustomTools } from '../src/custom-tools.js'
 import { toolHookEvent, postToolHookEvent } from '../src/hooks.js'
 import { buildCapabilityManifest, buildDoctorReport, createLocalMemoryBackend, loadMemoryRecords, modelRouterConfig, runJeden, selfRepairPermissions } from '../src/index.js'
@@ -1149,6 +1149,64 @@ test('session artifact readers list sanitized artifact names and read their cont
     assert.equal(artifact.id, 'session-a')
     assert.equal(artifact.name, 'analysis_report.txt')
     assert.equal(artifact.content, 'ranked output')
+  })
+})
+
+test('session lifecycle helpers mutate metadata and produce reusable context artifacts', async () => {
+  await withTempDir(async (root) => {
+    const recorder = new SessionRecorder({ root, cwd: root, id: 'session-a' })
+    await recorder.record('user', { task: 'alpha task' })
+    await recorder.record('assistant_raw', { content: JSON.stringify({ action: 'final', text: 'beta answer' }) })
+    await recorder.record('final', { text: 'beta answer' })
+
+    const renamed = await renameSession({ idOrPath: 'session-a', root, title: 'Research session' })
+    assert.equal(renamed.title, 'Research session')
+    assert.equal((await listSessions({ root }))[0].title, 'Research session')
+
+    const info = await getSessionInfo({ idOrPath: 'session-a', root })
+    assert.equal(info.title, 'Research session')
+    assert.equal(info.eventCount, 4)
+    assert.match(formatSessionInfo(info), /Title: Research session/)
+
+    const moved = await moveSessionWorkspace({ idOrPath: 'session-a', root, cwd: root })
+    assert.equal(moved.cwd, root)
+
+    const markdown = await exportSession({ idOrPath: 'session-a', root, format: 'markdown' })
+    assert.match(markdown.content, /# Jeden session Research session/)
+    const jsonPath = join(root, 'exports', 'session.json')
+    await exportSession({ idOrPath: 'session-a', root, outputPath: jsonPath, format: 'json' })
+    assert.match(await readFile(jsonPath, 'utf8'), /session_renamed/)
+
+    const dumped = await dumpSession({ idOrPath: 'session-a', root, outputDir: join(root, 'dump') })
+    assert.match(await readFile(dumped.replayPath, 'utf8'), /alpha task/)
+    assert.match(dumped.note, /does not persist exact provider request JSON/)
+
+    const handoff = await createHandoffSession({ idOrPath: 'session-a', root, cwd: root, focus: 'continue beta' })
+    assert.match(await readFile(handoff.artifactPath, 'utf8'), /Focus: continue beta/)
+    assert.equal(handoff.priorMessages[0].role, 'user')
+
+    const compacted = await compactSession({ idOrPath: 'session-a', root, focus: 'compress' })
+    assert.match(await readFile(compacted.artifactPath, 'utf8'), /Compacted previous session context/)
+    assert.ok(compacted.messages.length > 1)
+
+    const shaken = await shakeSession({ idOrPath: 'session-a', root, mode: 'elide' })
+    assert.match(shaken.text, /Dispatcher must install/)
+    assert.ok(shaken.messages.length > 0)
+
+    const resumed = await resumeSessionIntoNew({ idOrPath: 'session-a', root, cwd: root })
+    assert.equal(resumed.previous.id, 'session-a')
+    assert.ok(resumed.priorMessages.length > 0)
+
+    assert.throws(() => freshSessionUnsupported(), /no persistent provider stream state/)
+
+    const deleted = await deleteSession({ idOrPath: 'session-a', root })
+    assert.equal(deleted.deleted, true)
+    await assert.rejects(() => readSession({ idOrPath: 'session-a', root }), /ENOENT/)
+
+    const created = await createNewSession({ root, cwd: root })
+    const dropped = await dropSessionAndCreateNew({ idOrPath: created.path, root, cwd: root })
+    assert.equal(dropped.deleted.path, created.path)
+    assert.notEqual(dropped.path, created.path)
   })
 })
 

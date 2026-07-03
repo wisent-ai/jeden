@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 
 import { dispatchSlashCommand, formatSlashCommandList, slashCommandHints, SLASH_COMMANDS } from '../src/slash-commands.js'
+import { createModeState } from '../src/mode-state.js'
 
 function fakeContext() {
   const tools = [
@@ -10,6 +11,7 @@ function fakeContext() {
   ]
   return {
     args: { cwd: '/tmp/work', model: 'default', allowWrite: false, allowCommand: false },
+    modeState: createModeState(),
     recorder: {
       path() { return '/tmp/session' },
       artifactDir() { return '/tmp/session/artifacts' },
@@ -27,7 +29,7 @@ test('slash registry mirrors known OMP command surface', () => {
   }
   assert.equal(names.length, 58)
   assert.match(formatSlashCommandList(), /\[local\] \/model/)
-  assert.match(formatSlashCommandList(), /\[OMP-only\] \/settings/)
+  assert.match(formatSlashCommandList(), /Jeden slash commands/)
 })
 
 test('slash hints match the typed prefix and aliases', () => {
@@ -41,7 +43,7 @@ test('slash dispatcher handles local commands before model execution', async () 
 
   const help = await dispatchSlashCommand('/help', context)
   assert.equal(help.handled, true)
-  assert.match(help.text, /OMP slash commands known to Jeden/)
+  assert.match(help.text, /Jeden slash commands/)
 
   const model = await dispatchSlashCommand('/model gpt-5.5', context)
   assert.equal(model.handled, true)
@@ -52,10 +54,10 @@ test('slash dispatcher handles local commands before model execution', async () 
   assert.equal(tools.handled, true)
   assert.match(tools.text, /read_file/)
 
-  const unsupported = await dispatchSlashCommand('/settings', context)
-  assert.equal(unsupported.handled, true)
-  assert.match(unsupported.text, /exists in OMP/)
-  assert.match(unsupported.text, /not sent to the model/)
+  const settings = await dispatchSlashCommand('/settings', context)
+  assert.equal(settings.handled, true)
+  assert.match(settings.text, /Jeden settings status/)
+  assert.match(settings.text, /Workspace:/)
 
   const exit = await dispatchSlashCommand('/exit', context)
   assert.equal(exit.handled, true)

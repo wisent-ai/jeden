@@ -5,6 +5,11 @@ import { join, resolve } from 'node:path'
 
 const MCP_PROTOCOL_VERSION = '2024-11-05'
 
+function localHomeDir() {
+  return process.env.HOME || homedir()
+}
+
+
 async function readJson(file) {
   try {
     return JSON.parse(await readFile(file, 'utf8'))
@@ -15,7 +20,7 @@ async function readJson(file) {
 }
 
 export async function loadMcpConfig({ cwd = process.cwd() } = {}) {
-  const user = await readJson(join(homedir(), '.jeden', 'mcp.json'))
+  const user = await readJson(join(localHomeDir(), '.jeden', 'mcp.json'))
   const project = await readJson(resolve(cwd, '.jeden', 'mcp.json'))
   return {
     mcpServers: {

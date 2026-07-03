@@ -16,6 +16,7 @@ import { formatConversationList, listConversationJsonls, recallConversation } fr
 import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self-repair.js'
 import { createTerminalTui } from './tui.js'
 import { dispatchSlashCommand } from './slash-commands.js'
+import { createModeState, consumeLoopPrompt, noteModeRunResult, prepareTaskForModes } from './mode-state.js'
 
 
 function usage() {
@@ -390,17 +391,24 @@ async function runInteractive(args) {
     const suffix = options.length > 0 ? ` (${options.join('/')})` : ''
     return (await rl.question(`${paint(question, 'cyan')}${paint(suffix, 'dim')}\n${paint('╰─ answer ›', 'cyan')} `)).trim()
   }
+  const modeState = createModeState()
+  let pendingLoopTask = ''
 
   try {
     for (;;) {
-      const task = (await (tui ? tui.prompt() : rl.question(interactivePrompt()))).trim()
+      let task = pendingLoopTask
+      pendingLoopTask = ''
+      if (!task) task = (await (tui ? tui.prompt() : rl.question(interactivePrompt()))).trim()
+      else if (!tui) process.stdout.write(`\n${terminalBox('Loop resubmission', [task])}\n\n`)
       if (!task) continue
-      const slash = await dispatchSlashCommand(task, {
+      const slashContext = {
         args,
         recorder,
         createToolRegistry,
         setModel: (model) => tui?.setModel(model),
-      })
+        modeState,
+      }
+      const slash = await dispatchSlashCommand(task, slashContext)
       if (slash.handled) {
         if (slash.exit) break
         if (slash.text) {
@@ -408,16 +416,21 @@ async function runInteractive(args) {
           if (tui) tui.push(slash.role || 'system', slash.text)
           else process.stdout.write(`\n${terminalBox('Jeden command', slash.text.split('\n'))}\n\n`)
         }
-        continue
+        if (!slash.runTask) continue
+        task = slash.runTask
       }
       try {
         tui?.setBusy(true)
-        const taskForRun = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
+        const taskForHook = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
+        const taskForRun = prepareTaskForModes(taskForHook, modeState)
         const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner })
+        noteModeRunResult(modeState, { task, text: result.text })
         if (tui) tui.push('assistant', result.text)
         else process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
+        pendingLoopTask = consumeLoopPrompt(modeState, task) || ''
         tui?.setBusy(false)
       } catch (error) {
+        noteModeRunResult(modeState, { task, error })
         if (tui) tui.push('error', error instanceof Error ? error.message : String(error))
         else process.stderr.write(`\n${paint('╭─ error', 'red')}\n${error instanceof Error ? error.message : String(error)}\n${paint('╰─', 'red')}\n\n`)
         await recorder.record('error', { message: error instanceof Error ? error.message : String(error) })
@@ -597,6 +610,7 @@ async function showRecallConversation(args) {
   }
   process.stdout.write(await recallConversation({ cwd: args.cwd, session: args.session }))
 }
+
 
 
 
