@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 
 import { loadProjectAuthConfig, projectJedenAuthPath, saveProjectAuthConfig } from './config.js'
@@ -186,6 +188,74 @@ function oauthFieldsFromParts(parts) {
 function oauthProviderFromUrl(url, fields) {
   return providerName(fields.provider || url.searchParams.get('provider') || url.searchParams.get('state') || url.hostname.split('.')[0] || 'oauth') || 'oauth'
 }
+function boolField(value, fallback = false) {
+  if (value === undefined || value === null || value === '') return fallback
+  if (value === false || String(value).toLowerCase() === 'false' || String(value) === '0') return false
+  return true
+}
+
+function openAuthorizationUrl(url) {
+  const command = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'cmd.exe' : 'xdg-open'
+  const args = process.platform === 'win32' ? ['/c', 'start', '', url] : [url]
+  const child = spawn(command, args, { stdio: 'ignore', detached: true })
+  child.on('error', () => {})
+  child.unref()
+}
+
+function waitForOauthCallback({ redirectUri, state, timeoutMs }) {
+  const target = new URL(redirectUri)
+  if (target.protocol !== 'http:') throw new Error('Automated OAuth callback requires an http://127.0.0.1 or http://localhost redirectUri.')
+  const hostname = target.hostname || '127.0.0.1'
+  if (hostname !== '127.0.0.1' && hostname !== 'localhost') throw new Error('Automated OAuth callback listener only binds localhost redirectUri hosts.')
+  const port = Number(target.port || 80)
+  if (!Number.isInteger(port) || port <= 0) throw new Error('Automated OAuth callback requires an explicit localhost port in redirectUri.')
+  return new Promise((resolveCallback, rejectCallback) => {
+    let settled = false
+    const server = createServer((req, res) => {
+      try {
+        const requestUrl = new URL(req.url || '/', redirectUri)
+        if (requestUrl.pathname !== target.pathname) {
+          res.writeHead(404).end('Not found')
+          return
+        }
+        const callbackState = requestUrl.searchParams.get('state') || ''
+        if (state && callbackState !== state) {
+          res.writeHead(400).end('OAuth state mismatch')
+          settle(new Error('OAuth callback state mismatch.'))
+          return
+        }
+        const code = requestUrl.searchParams.get('code')
+        const callbackError = requestUrl.searchParams.get('error')
+        if (callbackError) {
+          res.writeHead(400).end('OAuth error received')
+          settle(new Error(`OAuth provider returned error: ${callbackError}`))
+          return
+        }
+        if (!code) {
+          res.writeHead(400).end('Missing OAuth code')
+          settle(new Error('OAuth callback did not include an authorization code.'))
+          return
+        }
+        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }).end('<!doctype html><title>Jeden OAuth</title><p>Jeden login completed. You can close this window.</p>')
+        settle(null, { code, callbackUrl: requestUrl.href })
+      } catch (error) {
+        settle(error)
+      }
+    })
+    const timer = setTimeout(() => settle(new Error('OAuth callback timed out.')), timeoutMs)
+    function settle(error, value = null) {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      server.close(() => {})
+      if (error) rejectCallback(error)
+      else resolveCallback(value)
+    }
+    server.on('error', settle)
+    server.listen(port, hostname)
+  })
+}
+
 
 async function startOauthFlow(provider, parts, { cwd }) {
   if (!provider) return err('Usage: /login <provider> oauth authUrl=<url> tokenUrl=<url> clientId=<id>')
@@ -196,6 +266,7 @@ async function startOauthFlow(provider, parts, { cwd }) {
   const clientId = String(fields.clientId || '')
   const redirectUri = String(fields.redirectUri || `http://127.0.0.1:37371/oauth/${provider}`)
   if (!authUrl || !tokenUrl || !clientId) return err('Usage: /login <provider> oauth authUrl=<url> tokenUrl=<url> clientId=<id> [redirectUri=<url>] [scope=<scope>]')
+  const timeoutMs = Math.max(1_000, Math.min(Number(fields.timeoutMs) || 120_000, 600_000))
   const state = randomState()
   const url = new URL(authUrl)
   url.searchParams.set('response_type', 'code')
@@ -205,23 +276,51 @@ async function startOauthFlow(provider, parts, { cwd }) {
   url.searchParams.set('state', state)
   const auth = await loadProjectAuthConfig({ cwd })
   const existing = auth.providers?.[provider] || {}
-  auth.providers = {
-    ...(auth.providers || {}),
+  const pending = {
+    ...existing,
+    active: false,
+    method: 'oauth-authorization-code',
+    updatedAt: nowIso(),
+    oauth: { authUrl, tokenUrl, clientId, redirectUri, state, scope: fields.scope || null },
+    profile: mergePlainObject(existing.profile, profile),
+    credentials: mergePlainObject(existing.credentials, credentials),
+  }
+  auth.providers = { ...(auth.providers || {}), [provider]: pending }
+  auth.activeProvider = provider
+  await saveProjectAuthConfig(auth, { cwd })
+  const callback = waitForOauthCallback({ redirectUri, state, timeoutMs })
+  if (boolField(fields.open, true)) openAuthorizationUrl(url.href)
+  let received
+  try {
+    received = await callback
+  } catch (error) {
+    return err(error instanceof Error ? error.message : String(error))
+  }
+  let tokens
+  try {
+    tokens = await exchangeOauthCode({ code: received.code, provider, fields, existing: pending })
+  } catch (error) {
+    return err(error instanceof Error ? error.message : String(error))
+  }
+  const latest = await loadProjectAuthConfig({ cwd })
+  latest.providers = {
+    ...(latest.providers || {}),
     [provider]: {
-      ...existing,
-      active: false,
-      method: 'oauth-authorization-code',
+      ...pending,
+      active: true,
+      method: 'oauth-token',
       updatedAt: nowIso(),
-      oauth: { authUrl, tokenUrl, clientId, redirectUri, state, scope: fields.scope || null },
-      profile: mergePlainObject(existing.profile, profile),
-      credentials: mergePlainObject(existing.credentials, credentials),
+      oauth: { ...pending.oauth, scope: tokens.scope },
+      credentials: mergePlainObject(pending.credentials, tokens),
+      profile: mergePlainObject(pending.profile, { callbackUrl: received.callbackUrl, exchangedAt: nowIso() }),
     },
   }
-  const file = await saveProjectAuthConfig(auth, { cwd })
+  latest.activeProvider = provider
+  const file = await saveProjectAuthConfig(latest, { cwd })
   return ok(lines([
-    `OAuth authorization prepared for ${provider} in ${file}.`,
-    `Open authorization URL: ${url.href}`,
-    `After redirect, run: /login <redirect-url> provider=${provider}`,
+    `OAuth login completed for ${provider} in ${file}.`,
+    `Access token stored: ${tokens.accessToken ? 'yes' : 'no'}`,
+    tokens.expiresAt ? `Expires at: ${tokens.expiresAt}` : null,
   ]))
 }
 
