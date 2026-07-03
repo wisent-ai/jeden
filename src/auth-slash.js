@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { resolve } from 'node:path'
 
-import { loadProjectAuthConfig, projectJedenAuthPath, saveProjectAuthConfig } from './config.js'
+import { loadJedenConfig, loadProjectAuthConfig, projectJedenAuthPath, saveProjectAuthConfig } from './config.js'
 
 function ok(text) { return { handled: true, role: 'system', text } }
 function err(text) { return { handled: true, role: 'error', text } }
@@ -140,45 +140,89 @@ function formatAuthStatus(auth, { cwd, file, setup = false } = {}) {
     ...names.map((name) => formatProviderRecord(name, providers[name])),
     '',
     'Actions:',
-    '  /login <provider> [key=value ...]             add or update a local provider credential profile',
-    '  /login <provider> profile.<name>=<value>      store non-secret profile metadata',
-    '  /login <provider> credential.<name>=<value>   store secret credential material',
-    '  /setup <provider> [key=value ...]             same local credential setup path',
-    '  /logout <provider>                            remove the local provider profile',
-    'OAuth: /login <provider> oauth authUrl=<url> tokenUrl=<url> clientId=<id> redirectUri=<url> starts a local authorization flow; /login <redirect-url> tokenUrl=<url> clientId=<id> exchanges the callback code.',
+    '  /login                                      start configured Wisent OAuth login',
+    '  /login <provider>                           start configured OAuth login for a provider',
+    '  /login <redirect-url> provider=<provider>    exchange an OAuth callback URL fallback',
+    '  /setup <provider> [key=value ...]            legacy local credential/profile setup',
+    '  /logout <provider>                           remove the local provider profile',
   ])
 }
 
-function formatLoginGuide(auth, { cwd, file, provider = '' } = {}) {
-  const providers = auth?.providers || {}
-  const names = Object.keys(providers).sort()
-  const target = providerName(provider)
-  const providerHint = target || '<provider>'
+function envKey(provider, suffix) {
+  return `JEDEN_${provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')}_${suffix}`
+}
+
+function pickString(...values) {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function providerConfig(config, provider) {
+  return config?.authProviders?.[provider]?.oauth
+    || config?.authProviders?.[provider]
+    || config?.oauthProviders?.[provider]
+    || config?.login?.providers?.[provider]
+    || (config?.login?.provider === provider ? config?.login?.oauth : null)
+    || {}
+}
+
+function oauthPresetFromConfig(provider, config, env = process.env) {
+  const source = providerConfig(config, provider)
+  const upper = provider.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+  const authUrl = pickString(source.authUrl, source.authorizeUrl, env[envKey(provider, 'AUTH_URL')], env[envKey(provider, 'AUTHORIZE_URL')], provider === 'wisent' ? env.WISENT_AUTH_URL : '', provider === 'wisent' ? env.WISENT_AUTHORIZE_URL : '')
+  const tokenUrl = pickString(source.tokenUrl, env[envKey(provider, 'TOKEN_URL')], provider === 'wisent' ? env.WISENT_TOKEN_URL : '')
+  const clientId = pickString(source.clientId, env[envKey(provider, 'CLIENT_ID')], provider === 'wisent' ? env.WISENT_CLIENT_ID : '')
+  const redirectUri = pickString(source.redirectUri, env[envKey(provider, 'REDIRECT_URI')], provider === 'wisent' ? env.WISENT_REDIRECT_URI : '', `http://127.0.0.1:37371/oauth/${provider}`)
+  const scope = pickString(source.scope, env[envKey(provider, 'SCOPE')], provider === 'wisent' ? env.WISENT_SCOPE : '')
+  const open = pickString(String(source.open ?? ''), env[envKey(provider, 'OPEN')], provider === 'wisent' ? env.WISENT_OPEN : '')
+  return { provider, authUrl, tokenUrl, clientId, redirectUri, scope, open, complete: Boolean(authUrl && tokenUrl && clientId), upper }
+}
+
+function oauthPresetParts(preset) {
+  return [
+    `authUrl=${preset.authUrl}`,
+    `tokenUrl=${preset.tokenUrl}`,
+    `clientId=${preset.clientId}`,
+    `redirectUri=${preset.redirectUri}`,
+    preset.scope ? `scope=${preset.scope}` : null,
+    preset.open ? `open=${preset.open}` : null,
+  ].filter(Boolean)
+}
+
+function formatAutomatedLoginNotConfigured(auth, preset, { cwd, file } = {}) {
+  const names = Object.keys(auth?.providers || {}).sort()
   return lines([
-    target ? `Login guide for ${target}` : 'Login guide',
+    `Automated login is not configured for ${preset.provider}.`,
     `Workspace: ${resolve(cwd || process.cwd())}`,
     `Auth file: ${file}`,
     names.length ? `Already configured: ${names.join(', ')}` : 'Already configured: none',
     '',
-    'Pick one path:',
-    '1) Manual token/API key profile:',
-    `   /login ${providerHint} credential.apiKey=<secret>`,
-    `   /login ${providerHint} profile.account=<label> credential.token=<secret>`,
+    '/login is automated only: it starts the configured OAuth flow and stores the exchanged token.',
+    `Missing required provider config: ${[
+      preset.authUrl ? null : `${envKey(preset.provider, 'AUTH_URL')} or ${envKey(preset.provider, 'AUTHORIZE_URL')}`,
+      preset.tokenUrl ? null : `${envKey(preset.provider, 'TOKEN_URL')}`,
+      preset.clientId ? null : `${envKey(preset.provider, 'CLIENT_ID')}`,
+    ].filter(Boolean).join(', ')}`,
     '',
-    '2) OAuth authorization-code flow:',
-    `   /login ${providerHint} oauth authUrl=<authorize-url> tokenUrl=<token-url> clientId=<client-id> redirectUri=http://127.0.0.1:37371/oauth/${providerHint}`,
-    '   Jeden opens the authorization URL, waits on the local redirect URI, validates state, exchanges the code, and stores tokens.',
-    '',
-    '3) OAuth fallback if you already have the redirected callback URL:',
-    '   /login <redirect-url> provider=<provider> tokenUrl=<token-url> clientId=<client-id>',
-    '',
-    'Examples:',
-    `   /login github credential.token=ghp_xxx`,
-    `   /login github oauth authUrl=https://github.com/login/oauth/authorize tokenUrl=https://github.com/login/oauth/access_token clientId=<id> scope=repo`,
-    '',
-    'No credentials were written. Run one of the commands above to continue.',
+    'Supported config shape in .jeden/config.json:',
+    `  {"authProviders":{"${preset.provider}":{"authUrl":"...","tokenUrl":"...","clientId":"...","scope":"..."}}}`,
   ])
 }
+
+async function startConfiguredLogin(provider, { cwd }) {
+  const name = providerName(provider || 'wisent')
+  if (!name) return err('Usage: /login [provider]')
+  const config = await loadJedenConfig({ cwd })
+  const preset = oauthPresetFromConfig(name, config)
+  if (!preset.complete) {
+    const auth = await loadProjectAuthConfig({ cwd })
+    return err(formatAutomatedLoginNotConfigured(auth, preset, { cwd, file: projectJedenAuthPath({ cwd }) }))
+  }
+  return startOauthFlow(name, oauthPresetParts(preset), { cwd })
+}
+
 
 
 async function handleSettings({ cwd, setup = false }) {
@@ -442,19 +486,10 @@ async function captureOauthRedirect(redirectUrl, parts, { cwd }) {
 
 async function handleLogin(parsed, { cwd }) {
   const [provider, ...parts] = splitArgs(parsed.args)
-  if (!provider) {
-    const auth = await loadProjectAuthConfig({ cwd })
-    return ok(formatLoginGuide(auth, { cwd, file: projectJedenAuthPath({ cwd }) }))
-  }
+  if (!provider) return startConfiguredLogin('wisent', { cwd })
   if (looksLikeOauthRedirect(provider)) return captureOauthRedirect(provider, parts, { cwd })
-  if (parts.length === 0) {
-    const name = providerName(provider)
-    if (!name) return err('Usage: /login <provider> [credential.<name>=<secret>|profile.<name>=<value>|oauth ...]')
-    const auth = await loadProjectAuthConfig({ cwd })
-    return ok(formatLoginGuide(auth, { cwd, file: projectJedenAuthPath({ cwd }), provider: name }))
-  }
-  if (parts[0]?.toLowerCase() === 'oauth') return startOauthFlow(providerName(provider), parts.slice(1), { cwd })
-  return upsertProvider(provider, parts, { cwd, source: 'login' })
+  if (parts.length === 0) return startConfiguredLogin(provider, { cwd })
+  return err('/login is automated-only. Configure authProviders.<provider> in .jeden/config.json and run /login <provider>, or use /setup <provider> for legacy local credentials.')
 }
 
 async function handleSetup(parsed, { cwd }) {
