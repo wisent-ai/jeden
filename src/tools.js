@@ -486,6 +486,154 @@ function applyReplacementList(content, replacements) {
   return next
 }
 
+function snapshotTagForHash(hash) {
+  return String(hash || '').slice(0, 4).toUpperCase()
+}
+
+function snapshotName(path, hash) {
+  return `${path}#${snapshotTagForHash(hash)}`
+}
+
+function snapshotHeader(path, hash) {
+  return `[${snapshotName(path, hash)}]`
+}
+
+function numberedWindow(window) {
+  const lines = splitTextLines(window.content).lines
+  return lines.map((line, index) => `${window.startLine + index}:${line}`).join('\n')
+}
+
+function anchoredReadText({ path, hash, selected }) {
+  return [snapshotHeader(path, hash), ...selected.ranges.map((range) => numberedWindow(range)).filter(Boolean)].join('\n')
+}
+
+function countLinesForHeader(count) {
+  return count === 0 ? '0' : String(count)
+}
+
+function lineDiffOperations(oldLines, newLines) {
+  const cellCount = oldLines.length * newLines.length
+  if (cellCount > 250_000) return null
+  const width = newLines.length + 1
+  const table = Array.from({ length: oldLines.length + 1 }, () => new Uint32Array(width))
+  for (let oldIndex = oldLines.length - 1; oldIndex >= 0; oldIndex -= 1) {
+    for (let newIndex = newLines.length - 1; newIndex >= 0; newIndex -= 1) {
+      table[oldIndex][newIndex] = oldLines[oldIndex] === newLines[newIndex]
+        ? table[oldIndex + 1][newIndex + 1] + 1
+        : Math.max(table[oldIndex + 1][newIndex], table[oldIndex][newIndex + 1])
+    }
+  }
+  const ops = []
+  let oldIndex = 0
+  let newIndex = 0
+  while (oldIndex < oldLines.length || newIndex < newLines.length) {
+    if (oldIndex < oldLines.length && newIndex < newLines.length && oldLines[oldIndex] === newLines[newIndex]) {
+      ops.push({ type: 'equal', oldLine: oldIndex + 1, newLine: newIndex + 1, text: oldLines[oldIndex] })
+      oldIndex += 1
+      newIndex += 1
+    } else if (newIndex < newLines.length && (oldIndex === oldLines.length || table[oldIndex][newIndex + 1] > table[oldIndex + 1][newIndex])) {
+      ops.push({ type: 'insert', oldLine: oldIndex + 1, newLine: newIndex + 1, text: newLines[newIndex] })
+      newIndex += 1
+    } else {
+      ops.push({ type: 'delete', oldLine: oldIndex + 1, newLine: newIndex + 1, text: oldLines[oldIndex] })
+      oldIndex += 1
+    }
+  }
+  return ops
+}
+
+function fallbackLinePreview({ path, before, after, context = 3, maxLines = 300 }) {
+  const oldLines = splitTextLines(before).lines
+  const newLines = splitTextLines(after).lines
+  let prefix = 0
+  while (prefix < oldLines.length && prefix < newLines.length && oldLines[prefix] === newLines[prefix]) prefix += 1
+  let suffix = 0
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] === newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix += 1
+  }
+  const oldChangeEnd = oldLines.length - suffix
+  const newChangeEnd = newLines.length - suffix
+  const oldStart = Math.max(prefix - context, 0)
+  const newStart = Math.max(prefix - context, 0)
+  const oldEnd = Math.min(oldChangeEnd + context, oldLines.length)
+  const newEnd = Math.min(newChangeEnd + context, newLines.length)
+  const lines = [
+    `--- ${path}`,
+    `+++ ${path}`,
+    `@@ coarse preview: exact diff skipped for ${oldLines.length}x${newLines.length} lines @@`,
+    `@@ -${oldStart + 1},${countLinesForHeader(oldEnd - oldStart)} +${newStart + 1},${countLinesForHeader(newEnd - newStart)} @@`,
+  ]
+  for (let index = oldStart; index < prefix; index += 1) lines.push(` ${oldLines[index]}`)
+  for (let index = prefix; index < oldChangeEnd; index += 1) {
+    lines.push(`-${oldLines[index]}`)
+    if (lines.length >= maxLines) {
+      lines.push(`[preview truncated at ${maxLines} lines]`)
+      return lines.join('\n')
+    }
+  }
+  for (let index = prefix; index < newChangeEnd; index += 1) {
+    lines.push(`+${newLines[index]}`)
+    if (lines.length >= maxLines) {
+      lines.push(`[preview truncated at ${maxLines} lines]`)
+      return lines.join('\n')
+    }
+  }
+  for (let index = oldChangeEnd; index < oldEnd; index += 1) lines.push(` ${oldLines[index]}`)
+  return lines.join('\n')
+}
+
+function unifiedDiffFromOperations(path, ops, context = 3, maxLines = 500) {
+  const changed = ops.map((op, index) => op.type === 'equal' ? null : index).filter((index) => index != null)
+  if (changed.length === 0) return ''
+  const hunks = []
+  let hunkStart = Math.max(changed[0] - context, 0)
+  let hunkEnd = Math.min(changed[0] + context + 1, ops.length)
+  for (const index of changed.slice(1)) {
+    const nextStart = Math.max(index - context, 0)
+    const nextEnd = Math.min(index + context + 1, ops.length)
+    if (nextStart <= hunkEnd) {
+      hunkEnd = Math.max(hunkEnd, nextEnd)
+    } else {
+      hunks.push([hunkStart, hunkEnd])
+      hunkStart = nextStart
+      hunkEnd = nextEnd
+    }
+  }
+  hunks.push([hunkStart, hunkEnd])
+  const lines = [`--- ${path}`, `+++ ${path}`]
+  for (const [start, end] of hunks) {
+    const chunk = ops.slice(start, end)
+    const firstOld = chunk.find((op) => op.type !== 'insert')?.oldLine || chunk[0]?.oldLine || 1
+    const firstNew = chunk.find((op) => op.type !== 'delete')?.newLine || chunk[0]?.newLine || 1
+    const oldCount = chunk.filter((op) => op.type !== 'insert').length
+    const newCount = chunk.filter((op) => op.type !== 'delete').length
+    lines.push(`@@ -${firstOld},${countLinesForHeader(oldCount)} +${firstNew},${countLinesForHeader(newCount)} @@`)
+    for (const op of chunk) {
+      if (op.type === 'equal') lines.push(` ${op.text}`)
+      if (op.type === 'delete') lines.push(`-${op.text}`)
+      if (op.type === 'insert') lines.push(`+${op.text}`)
+      if (lines.length >= maxLines) {
+        lines.push(`[diff truncated at ${maxLines} lines]`)
+        return lines.join('\n')
+      }
+    }
+  }
+  return lines.join('\n')
+}
+
+function visualLineDiff({ path, before, after, context = 3 }) {
+  if (before === after) return ''
+  const oldLines = splitTextLines(before).lines
+  const newLines = splitTextLines(after).lines
+  const ops = lineDiffOperations(oldLines, newLines)
+  if (!ops) return fallbackLinePreview({ path, before, after, context })
+  return unifiedDiffFromOperations(path, ops, context)
+}
+
 function splitTextLines(content) {
   const hasTrailingNewline = content.endsWith('\n')
   const body = hasTrailingNewline ? content.slice(0, -1) : content
@@ -500,9 +648,9 @@ function normalizeInsertedLines(content) {
   return body ? body.split(/\r?\n/) : []
 }
 
-function applyLineEditOps(content, ops) {
+function normalizeLineEditOpsForContent(content, ops) {
   if (!Array.isArray(ops) || ops.length === 0) throw new Error('ops are required')
-  const { lines, hasTrailingNewline } = splitTextLines(content)
+  const { lines } = splitTextLines(content)
   const validOps = new Set(['replace', 'delete', 'insert_before', 'insert_after'])
   const normalized = ops.map((op, index) => {
     if (!op || typeof op !== 'object' || Array.isArray(op)) throw new Error('op must be an object')
@@ -522,14 +670,73 @@ function applyLineEditOps(content, ops) {
   for (let i = 1; i < ranges.length; i += 1) {
     if (ranges[i].start <= ranges[i - 1].end) throw new Error('edit ranges overlap')
   }
-  for (const op of normalized.sort((a, b) => b.start - a.start || b.index - a.index)) {
+  return normalized
+}
+
+function applyNormalizedLineEditOps(lines, normalized) {
+  for (const op of normalized.slice().sort((a, b) => b.start - a.start || b.index - a.index)) {
     if (op.kind === 'replace') lines.splice(op.start - 1, op.end - op.start + 1, ...op.content)
     if (op.kind === 'delete') lines.splice(op.start - 1, op.end - op.start + 1)
     if (op.kind === 'insert_before') lines.splice(Math.max(op.start - 1, 0), 0, ...op.content)
     if (op.kind === 'insert_after') lines.splice(Math.min(op.start, lines.length), 0, ...op.content)
   }
+}
+
+function applyLineEditOps(content, ops) {
+  const { lines, hasTrailingNewline } = splitTextLines(content)
+  const normalized = normalizeLineEditOpsForContent(content, ops)
+  applyNormalizedLineEditOps(lines, normalized)
   const next = lines.join('\n')
   return hasTrailingNewline ? `${next}\n` : next
+}
+
+function lineEditDelta(op) {
+  const oldCount = op.kind === 'replace' || op.kind === 'delete' ? op.end - op.start + 1 : 0
+  return op.content.length - oldCount
+}
+
+function visualLineEditDiff({ path, before, ops, context = 3 }) {
+  const { lines } = splitTextLines(before)
+  const normalized = normalizeLineEditOpsForContent(before, ops)
+  const ranges = normalized.map((op) => {
+    const affectedStart = op.kind === 'insert_after' ? Math.min(op.start + 1, lines.length + 1) : op.start
+    const affectedEnd = op.kind === 'insert_before' ? Math.max(op.start - 1, 0) : op.end
+    return {
+      start: Math.max(affectedStart - context, 1),
+      end: Math.min(Math.max(affectedEnd, affectedStart) + context, lines.length),
+    }
+  }).sort((a, b) => a.start - b.start)
+  const hunks = []
+  for (const range of ranges) {
+    const last = hunks[hunks.length - 1]
+    if (last && range.start <= last.end + 1) {
+      last.end = Math.max(last.end, range.end)
+    } else {
+      hunks.push({ ...range })
+    }
+  }
+  const newLineCount = lines.length + normalized.reduce((sum, op) => sum + lineEditDelta(op), 0)
+  const output = [`--- ${path}`, `+++ ${path}`]
+  if (lines.length * newLineCount > 250_000) output.push(`@@ coarse preview: exact diff skipped for ${lines.length}x${newLineCount} lines @@`)
+  for (const hunk of hunks) {
+    const hunkOps = normalized.filter((op) => op.start >= hunk.start && op.start <= hunk.end + 1)
+    const oldSlice = lines.slice(hunk.start - 1, hunk.end)
+    const newSlice = oldSlice.slice()
+    const shiftedOps = hunkOps.map((op) => ({ ...op, start: op.start - hunk.start + 1, end: op.end - hunk.start + 1 }))
+    applyNormalizedLineEditOps(newSlice, shiftedOps)
+    const diffOps = lineDiffOperations(oldSlice, newSlice)
+    if (!diffOps) return visualLineDiff({ path, before, after: applyLineEditOps(before, ops), context })
+    const deltaBefore = normalized
+      .filter((op) => op.start < hunk.start)
+      .reduce((sum, op) => sum + lineEditDelta(op), 0)
+    const adjusted = diffOps.map((op) => ({
+      ...op,
+      oldLine: op.oldLine + hunk.start - 1,
+      newLine: op.newLine + hunk.start - 1 + deltaBefore,
+    }))
+    output.push(unifiedDiffFromOperations(path, adjusted, context).split('\n').slice(2).join('\n'))
+  }
+  return output.filter(Boolean).join('\n')
 }
 
 
@@ -1007,7 +1214,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'read_file',
-    description: 'Read a UTF-8 text file under cwd, capped at 512KB unless a selector narrows output; selectors support ranges, comma ranges, raw, and conflicts',
+    description: 'Read a UTF-8 text file under cwd, capped at 512KB unless a selector narrows output; returns sha256, snapshot path#TAG, visual numbered lines, content; selectors support ranges, comma ranges, raw, and conflicts',
     input: { path: 'string required; may end with selectors like :10-30, :5-8,20-22, :raw, or :conflicts', range: 'string optional' },
     async execute(input) {
       if (!input.path) throw new Error('path is required')
@@ -1017,12 +1224,15 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const content = bytes.toString('utf8')
       const hasSelector = selectedPath.range || selectedPath.conflicts
       if (!hasSelector && bytes.length > MAX_READ_BYTES) throw new Error('file exceeds 512KB read cap; use a line selector for large files')
+      const filePath = publicPath(cwd, file)
+      const fileHash = sha256(bytes)
       if (selectedPath.conflicts) {
-        return { path: publicPath(cwd, file), sha256: sha256(bytes), conflicts: conflictBlocks(content) }
+        const conflicts = conflictBlocks(content)
+        return { path: filePath, sha256: fileHash, snapshot: snapshotName(filePath, fileHash), visual: `${snapshotHeader(filePath, fileHash)}\n${conflicts.map((block) => numberedWindow(block)).join('\n')}`, conflicts }
       }
       const selected = lineWindow(content, selectedPath.range)
       if (Buffer.byteLength(selected.content, 'utf8') > MAX_READ_BYTES) throw new Error('selected range exceeds 512KB read cap')
-      return { path: publicPath(cwd, file), sha256: sha256(bytes), range: selectedPath.range || null, raw: selectedPath.raw, startLine: selected.startLine, endLine: selected.endLine, ranges: selected.ranges, content: selected.content }
+      return { path: filePath, sha256: fileHash, snapshot: snapshotName(filePath, fileHash), visual: anchoredReadText({ path: filePath, hash: fileHash, selected }), range: selectedPath.range || null, raw: selectedPath.raw, startLine: selected.startLine, endLine: selected.endLine, ranges: selected.ranges, content: selected.content }
     },
   })
 
@@ -1373,29 +1583,32 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'write_file',
-    description: 'Create or overwrite a UTF-8 text file under cwd; overwrites require expectedSha256 from read_file; requires --allow-write',
+    description: 'Create or overwrite a UTF-8 text file under cwd; overwrites require expectedSha256 from read_file; returns sha256 and visual diff; requires --allow-write',
     input: { path: 'string required', content: 'string required', expectedSha256: 'string required for overwrite' },
     async execute(input) {
       if (!allowWrite) throw new Error('write_file requires --allow-write')
       if (!input.path) throw new Error('path is required')
       if (typeof input.content !== 'string') throw new Error('content is required')
       const file = jailPath(cwd, input.path)
+      const filePath = publicPath(cwd, file)
       const exists = await fileExists(file)
+      let current = ''
       if (exists) {
-        const current = await readFile(file, 'utf8')
+        current = await readFile(file, 'utf8')
         const currentHash = sha256(current)
         if (!input.expectedSha256) throw new Error('expectedSha256 is required when overwriting an existing file')
-        if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${publicPath(cwd, file)}`)
+        if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${filePath}`)
       }
       await mkdir(dirname(file), { recursive: true })
       await writeFile(file, input.content, 'utf8')
-      return { path: publicPath(cwd, file), sha256: sha256(input.content), bytes: Buffer.byteLength(input.content, 'utf8') }
+      const nextHash = sha256(input.content)
+      return { path: filePath, sha256: nextHash, snapshot: snapshotName(filePath, nextHash), diff: visualLineDiff({ path: filePath, before: current, after: input.content }), bytes: Buffer.byteLength(input.content, 'utf8') }
     },
   })
 
   add({
     name: 'apply_patch',
-    description: 'Apply exact one-occurrence string replacements to an existing UTF-8 file; requires expectedSha256 and --allow-write',
+    description: 'Apply exact one-occurrence string replacements to an existing UTF-8 file; returns sha256 and visual diff; requires expectedSha256 and --allow-write',
     input: { path: 'string required', expectedSha256: 'string required', replacements: 'array of { old, new } required' },
     async execute(input) {
       if (!allowWrite) throw new Error('apply_patch requires --allow-write')
@@ -1407,9 +1620,13 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${publicPath(cwd, file)}`)
       const next = applyReplacementList(current, input.replacements)
       await writeFile(file, next, 'utf8')
+      const filePath = publicPath(cwd, file)
+      const nextHash = sha256(next)
       return {
-        path: publicPath(cwd, file),
-        sha256: sha256(next),
+        path: filePath,
+        sha256: nextHash,
+        snapshot: snapshotName(filePath, nextHash),
+        diff: visualLineDiff({ path: filePath, before: current, after: next }),
         replacements: input.replacements.length,
         bytes: Buffer.byteLength(next, 'utf8'),
       }
@@ -1418,7 +1635,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'edit_file',
-    description: 'Apply line-based edits to a UTF-8 file under cwd; requires expectedSha256 and --allow-write',
+    description: 'Apply line-based edits to a UTF-8 file under cwd; returns sha256 and visual diff; requires expectedSha256 and --allow-write',
     input: { path: 'string required', expectedSha256: 'string required', ops: 'array of line edit operations required' },
     async execute(input) {
       if (!allowWrite) throw new Error('edit_file requires --allow-write')
@@ -1430,9 +1647,13 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (input.expectedSha256 !== currentHash) throw new Error(`sha256 mismatch for ${publicPath(cwd, file)}`)
       const next = applyLineEditOps(current, input.ops)
       await writeFile(file, next, 'utf8')
+      const filePath = publicPath(cwd, file)
+      const nextHash = sha256(next)
       return {
-        path: publicPath(cwd, file),
-        sha256: sha256(next),
+        path: filePath,
+        sha256: nextHash,
+        snapshot: snapshotName(filePath, nextHash),
+        diff: visualLineEditDiff({ path: filePath, before: current, ops: input.ops }),
         ops: input.ops.length,
         bytes: Buffer.byteLength(next, 'utf8'),
       }
@@ -1441,7 +1662,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
 
   add({
     name: 'delete_file',
-    description: 'Delete one UTF-8 file under cwd; requires expectedSha256 and --allow-write',
+    description: 'Delete one UTF-8 file under cwd; returns visual diff; requires expectedSha256 and --allow-write',
     input: { path: 'string required', expectedSha256: 'string required' },
     async execute(input) {
       if (!allowWrite) throw new Error('delete_file requires --allow-write')
@@ -1452,13 +1673,14 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       const currentHash = sha256(current)
       if (currentHash !== input.expectedSha256) throw new Error(`expectedSha256 mismatch: ${currentHash}`)
       await unlink(file)
-      return { path: publicPath(cwd, file), deleted: true }
+      const filePath = publicPath(cwd, file)
+      return { path: filePath, deleted: true, diff: visualLineDiff({ path: filePath, before: current, after: '' }) }
     },
   })
 
   add({
     name: 'move_file',
-    description: 'Move or rename one file under cwd; requires expectedSha256 and --allow-write',
+    description: 'Move or rename one file under cwd; returns rename preview; requires expectedSha256 and --allow-write',
     input: { from: 'string required', to: 'string required', expectedSha256: 'string required', overwrite: 'boolean optional' },
     async execute(input) {
       if (!allowWrite) throw new Error('move_file requires --allow-write')
@@ -1473,7 +1695,7 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
       if (!input.overwrite && await fileExists(to)) throw new Error('destination exists')
       await mkdir(dirname(to), { recursive: true })
       await rename(from, to)
-      return { from: publicPath(cwd, from), to: publicPath(cwd, to), moved: true }
+      return { from: publicPath(cwd, from), to: publicPath(cwd, to), moved: true, snapshot: snapshotName(publicPath(cwd, to), currentHash), diff: `rename ${publicPath(cwd, from)} -> ${publicPath(cwd, to)}` }
     },
   })
 

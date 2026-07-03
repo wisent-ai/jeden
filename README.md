@@ -22,8 +22,8 @@ The private M1 version includes:
 - Session logs and artifacts under `~/.jeden/sessions/<id>/`.
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`; override per run with `--model <name>`, `JEDEN_MODEL`, or config. Use `--max-tokens <n>` to override the per-call output token cap.
-- Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `read_image`, `read_archive`, `read_document`, `read_sqlite`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. `read_file` supports selectors like `:10-30`, `:raw:10+5`, and `:conflicts`; large files require selectors so returned content stays under the cap. `read_image` returns base64 plus mime type, byte count, dimensions, truncation state, and SHA-256 for PNG, JPEG, GIF, and WebP images. `read_archive` lists entries from `.zip`, `.tar`, `.tar.gz`, and `.tgz`, and reads entries as UTF-8 text, binary base64, document text, or image metadata; text/document entry reads accept line ranges. `read_document` extracts readable text from text, HTML, JSON, CSV/TSV tables, XML/RSS/Atom feeds, notebooks, and basic PDF text streams, then can apply line ranges before the byte cap. `read_sqlite` lists SQLite tables with row counts, returns table schema plus sample rows, fetches rows by single-column primary key, supports quoted table/column names, and runs single-statement read-only SELECT/WITH queries through limit/offset pagination. `list_dir` accepts `depth`/`limit` for bounded recursive listings. Recursive search and glob discovery use `git ls-files --exclude-standard` by default, so ignored files are skipped; pass `gitignore:false` and `hidden:true` to include ignored files, binary files, empty directories, dot paths, and direct file roots. Explicit dot path roots are still searched without `hidden:true`. `search_text` and `search_files` are case-insensitive by default and accept `caseSensitive:true`; `search_files` and `grep_regex` accept `limit` and `skip` for pagination.
-- File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file` and require `--allow-write`.
+- Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `read_image`, `read_archive`, `read_document`, `read_sqlite`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. `read_file` supports selectors like `:10-30`, `:raw:10+5`, and `:conflicts`; returns `sha256`, `snapshot` (`path#TAG`), `visual` (`[path#TAG]` plus numbered lines), and selected text so edits can be anchored to the visible snapshot. Large files require selectors so returned content stays under the cap. `read_image` returns base64 plus mime type, byte count, dimensions, truncation state, and SHA-256 for PNG, JPEG, GIF, and WebP images. `read_archive` lists entries from `.zip`, `.tar`, `.tar.gz`, and `.tgz`, and reads entries as UTF-8 text, binary base64, document text, or image metadata; text/document entry reads accept line ranges. `read_document` extracts readable text from text, HTML, JSON, CSV/TSV tables, XML/RSS/Atom feeds, basic PDFs, and notebooks, and can apply line ranges before the byte cap.
+- File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file`, require `--allow-write`, and return OMP-style visual diffs/previews for inspection.
 - Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
 - Eval/process tools: `node_eval`, `python_eval`, `run_process`. They require command permission; `run_process` accepts argv without a shell. `run_command`, `run_process`, and `run_package_script` accept `env` overrides; `null` env values remove inherited variables for that child process. Process outputs are capped and report `stdoutTruncated`/`stderrTruncated` metadata. Timeouts send SIGTERM to the spawned process group, then SIGKILL after a short grace period.
 - Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text. Both accept `maxBytes`, `timeoutMs`, and line ranges, and return status, content type, byte counts, truncation state, and SHA-256. `fetch_readable_url` normalizes HTML, pretty-prints JSON, converts CSV/TSV responses to compact Markdown tables, extracts RSS/Atom item titles and links, extracts basic PDF/notebook document text from URL responses, and can apply line ranges before the byte cap.
@@ -312,6 +312,25 @@ Line edit call (`start`/`end`, `startLine`/`endLine`, or `line` are accepted for
 
 ```json
 {"action":"tool","tool":"edit_file","input":{"path":"src/file.js","expectedSha256":"...","ops":[{"op":"replace","start":10,"end":12,"content":"const ok = true"}]}}
+```
+
+`read_file` also returns an OMP-style `visual` snapshot alongside JSON metadata:
+
+```txt
+[src/file.js#A1B2]
+10:const oldValue = false
+11:export { oldValue }
+```
+
+Mutation tools keep the JSON API but now return a `diff` field with a visual hunk preview:
+
+```txt
+--- src/file.js
++++ src/file.js
+@@ -10,2 +10,2 @@
+-const oldValue = false
++const oldValue = true
+ export { oldValue }
 ```
 Final:
 

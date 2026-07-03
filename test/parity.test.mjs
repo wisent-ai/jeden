@@ -120,6 +120,15 @@ async function withHttpServer(handler, fn) {
   }
 }
 
+function expectedSnapshot(path, sha256) {
+  return `${path}#${sha256.slice(0, 4).toUpperCase()}`
+}
+
+function expectedSnapshotHeader(path, sha256) {
+  return `[${expectedSnapshot(path, sha256)}]`
+}
+
+
 function makeTar(name, text) {
   const content = Buffer.from(text, 'utf8')
   const header = Buffer.alloc(512)
@@ -332,7 +341,7 @@ test('parseAction rejects a multi-tool action with no executable requests', () =
   )
 })
 
-test('read_file selectors return a line window while edit_file rejects stale sha without mutating', async () => {
+test('read_file selectors return OMP-style snapshots while edit_file rejects stale sha without mutating', async () => {
   await withTempDir(async (dir) => {
     const file = join(dir, 'notes.txt')
     await writeFile(file, 'alpha\nbravo\ncharlie\ndelta\n', 'utf8')
@@ -345,10 +354,15 @@ test('read_file selectors return a line window while edit_file rejects stale sha
     assert.equal(selected.output.startLine, 2)
     assert.equal(selected.output.endLine, 3)
     assert.equal(selected.output.content, 'bravo\ncharlie')
+    assert.match(selected.output.sha256, /^[a-f0-9]{64}$/)
+    assert.equal(selected.output.snapshot, expectedSnapshot('notes.txt', selected.output.sha256))
+    assert.equal(selected.output.visual, `${expectedSnapshotHeader('notes.txt', selected.output.sha256)}\n2:bravo\n3:charlie`)
 
     const multi = await registry.execute('read_file', { path: 'notes.txt:1-1,4' })
     assert.equal(multi.output.content, 'alpha\ndelta')
     assert.deepEqual(multi.output.ranges.map((range) => [range.startLine, range.endLine]), [[1, 1], [4, 4]])
+    assert.equal(multi.output.snapshot, expectedSnapshot('notes.txt', multi.output.sha256))
+    assert.equal(multi.output.visual, `${expectedSnapshotHeader('notes.txt', multi.output.sha256)}\n1:alpha\n4:delta`)
 
     const raw = await registry.execute('read_file', { path: 'notes.txt:raw:3+1' })
     assert.equal(raw.output.raw, true)
@@ -380,6 +394,33 @@ test('read_file selectors return a line window while edit_file rejects stale sha
     })
     assert.equal(applied.ok, true)
     assert.equal(await readFile(file, 'utf8'), 'alpha\nBRAVO\nCHARLIE\ndelta\necho\n')
+    assert.equal(applied.output.path, 'notes.txt')
+    assert.match(applied.output.sha256, /^[a-f0-9]{64}$/)
+    assert.equal(applied.output.snapshot, expectedSnapshot('notes.txt', applied.output.sha256))
+    assert.equal(applied.output.ops, 2)
+    assert.equal(applied.output.bytes, Buffer.byteLength('alpha\nBRAVO\nCHARLIE\ndelta\necho\n', 'utf8'))
+    assert.match(applied.output.diff, /^--- notes\.txt\n\+\+\+ notes\.txt\n@@ -1,4 \+1,5 @@/m)
+    assert.match(applied.output.diff, /^-bravo$/m)
+    assert.match(applied.output.diff, /^\+BRAVO$/m)
+    assert.match(applied.output.diff, /^-CHANGED$/m)
+    assert.match(applied.output.diff, /^\+CHARLIE$/m)
+    assert.match(applied.output.diff, /^\+echo$/m)
+
+    const distantPath = join(dir, 'distant.txt')
+    await writeFile(distantPath, `${Array.from({ length: 11 }, (_, index) => `line ${index + 1}`).join('\n')}\n`, 'utf8')
+    const distantCurrent = await registry.execute('read_file', { path: 'distant.txt' })
+    const distantEdit = await registry.execute('edit_file', {
+      path: 'distant.txt',
+      expectedSha256: distantCurrent.output.sha256,
+      ops: [
+        { op: 'replace', startLine: 1, endLine: 1, content: 'LINE 1' },
+        { op: 'replace', startLine: 11, endLine: 11, content: 'LINE 11' },
+      ],
+    })
+    assert.equal(distantEdit.ok, true)
+    assert.match(distantEdit.output.diff, /^@@ -1,4 \+1,4 @@$/m)
+    assert.match(distantEdit.output.diff, /^@@ -8,4 \+8,4 @@$/m)
+    assert.doesNotMatch(distantEdit.output.diff, /^[-+]line 6$/m)
 
     const bigLines = ['head', ...new Array(560).fill('x'.repeat(1024)), 'tail']
     await writeFile(join(dir, 'big.txt'), `${bigLines.join('\n')}\n`, 'utf8')
@@ -392,7 +433,38 @@ test('read_file selectors return a line window while edit_file rejects stale sha
   })
 })
 
-test('filesystem mutation tools require hashes and mutate safely', async () => {
+test('edit_file returns a coarse visual diff preview for large files', async () => {
+  await withTempDir(async (dir) => {
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const prefix = Array.from({ length: 260 }, (_, index) => `prefix context ${index + 1}`)
+    const suffix = Array.from({ length: 260 }, (_, index) => `suffix context ${index + 1}`)
+    const content = [...prefix, 'old head line', 'old tail line', ...suffix].join('\n') + '\n'
+    await writeFile(join(dir, 'large-diff.txt'), content, 'utf8')
+
+    const current = await registry.execute('read_file', { path: 'large-diff.txt' })
+    const edited = await registry.execute('edit_file', {
+      path: 'large-diff.txt',
+      expectedSha256: current.output.sha256,
+      ops: [
+        { op: 'replace', startLine: 261, endLine: 261, content: 'new head line' },
+        { op: 'replace', startLine: 262, endLine: 262, content: 'new tail line' },
+      ],
+    })
+
+    assert.equal(edited.ok, true)
+    assert.equal(await readFile(join(dir, 'large-diff.txt'), 'utf8'), [...prefix, 'new head line', 'new tail line', ...suffix].join('\n') + '\n')
+    assert.match(edited.output.diff, /^@@ coarse preview: exact diff skipped/m)
+    assert.match(edited.output.diff, /^-old head line$/m)
+    assert.match(edited.output.diff, /^\+new head line$/m)
+    assert.match(edited.output.diff, /^-old tail line$/m)
+    assert.match(edited.output.diff, /^\+new tail line$/m)
+    assert.match(edited.output.diff, /^ prefix context 260$/m)
+    assert.match(edited.output.diff, /^ suffix context 1$/m)
+  })
+})
+
+
+test('filesystem mutation tools require hashes and expose visual diffs', async () => {
   await withTempDir(async (dir) => {
     const locked = createToolRegistry({ cwd: dir })
     const denied = await locked.execute('write_file', { path: 'notes.txt', content: 'draft\n' })
@@ -402,7 +474,14 @@ test('filesystem mutation tools require hashes and mutate safely', async () => {
     const registry = createToolRegistry({ cwd: dir, allowWrite: true })
     const created = await registry.execute('write_file', { path: 'notes.txt', content: 'alpha\nbravo\n' })
     assert.equal(created.ok, true)
-    assert.equal(created.output.path, 'notes.txt')
+    assert.match(created.output.sha256, /^[a-f0-9]{64}$/)
+    assert.deepEqual(created.output, {
+      path: 'notes.txt',
+      sha256: created.output.sha256,
+      snapshot: expectedSnapshot('notes.txt', created.output.sha256),
+      diff: '--- notes.txt\n+++ notes.txt\n@@ -1,0 +1,2 @@\n+alpha\n+bravo',
+      bytes: Buffer.byteLength('alpha\nbravo\n', 'utf8'),
+    })
 
     const missingHash = await registry.execute('write_file', { path: 'notes.txt', content: 'bad\n' })
     assert.equal(missingHash.ok, false)
@@ -417,16 +496,34 @@ test('filesystem mutation tools require hashes and mutate safely', async () => {
     })
     assert.equal(patched.ok, true)
     assert.equal(await readFile(join(dir, 'notes.txt'), 'utf8'), 'alpha\ncharlie\n')
+    assert.equal(patched.output.path, 'notes.txt')
+    assert.match(patched.output.sha256, /^[a-f0-9]{64}$/)
+    assert.equal(patched.output.snapshot, expectedSnapshot('notes.txt', patched.output.sha256))
+    assert.equal(patched.output.replacements, 1)
+    assert.equal(patched.output.bytes, Buffer.byteLength('alpha\ncharlie\n', 'utf8'))
+    assert.match(patched.output.diff, /^--- notes\.txt\n\+\+\+ notes\.txt\n@@ -1,2 \+1,2 @@/m)
+    assert.match(patched.output.diff, /^-bravo$/m)
+    assert.match(patched.output.diff, /^\+charlie$/m)
 
     const patchedCurrent = await registry.execute('read_file', { path: 'notes.txt' })
     const moved = await registry.execute('move_file', { from: 'notes.txt', to: 'archive/notes.txt', expectedSha256: patchedCurrent.output.sha256 })
-    assert.deepEqual(moved.output, { from: 'notes.txt', to: 'archive/notes.txt', moved: true })
+    assert.deepEqual(moved.output, {
+      from: 'notes.txt',
+      to: 'archive/notes.txt',
+      moved: true,
+      snapshot: expectedSnapshot('archive/notes.txt', patchedCurrent.output.sha256),
+      diff: 'rename notes.txt -> archive/notes.txt',
+    })
     assert.equal(await readFile(join(dir, 'archive', 'notes.txt'), 'utf8'), 'alpha\ncharlie\n')
     await assert.rejects(() => readFile(join(dir, 'notes.txt'), 'utf8'), /ENOENT/)
 
     const movedCurrent = await registry.execute('read_file', { path: 'archive/notes.txt' })
     const deleted = await registry.execute('delete_file', { path: 'archive/notes.txt', expectedSha256: movedCurrent.output.sha256 })
-    assert.deepEqual(deleted.output, { path: 'archive/notes.txt', deleted: true })
+    assert.deepEqual(deleted.output, {
+      path: 'archive/notes.txt',
+      deleted: true,
+      diff: '--- archive/notes.txt\n+++ archive/notes.txt\n@@ -1,2 +1,0 @@\n-alpha\n-charlie',
+    })
     await assert.rejects(() => readFile(join(dir, 'archive', 'notes.txt'), 'utf8'), /ENOENT/)
   })
 })
