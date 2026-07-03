@@ -489,7 +489,7 @@ async function handleLogin(parsed, { cwd }) {
   if (!provider) return startConfiguredLogin('wisent', { cwd })
   if (looksLikeOauthRedirect(provider)) return captureOauthRedirect(provider, parts, { cwd })
   if (parts.length === 0) return startConfiguredLogin(provider, { cwd })
-  return err('/login is automated-only. Configure authProviders.<provider> in .jeden/config.json and run /login <provider>, or use /setup <provider> for legacy local credentials.')
+  return err('/login is automated-only. Product OAuth is not configured for inline credential arguments; configure authProviders.<provider> and run /login <provider>.')
 }
 
 async function handleSetup(parsed, { cwd }) {
