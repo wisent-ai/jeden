@@ -304,12 +304,18 @@ function approvalPrompt({ tool, kind, input }) {
 }
 
 
+function interactivePermissionStatus(enabled) {
+  return enabled ? 'enabled' : 'ask'
+}
+
+
 async function runInteractive(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   await recorder.ensure()
   process.stdout.write(`Jeden session: ${recorder.path()}\n`)
   process.stdout.write(`cwd: ${args.cwd}\n`)
-  process.stdout.write(`write: ${args.allowWrite ? 'enabled' : 'disabled'}, command: ${args.allowCommand ? 'enabled' : 'disabled'}\n`)
+  process.stdout.write(`write: ${interactivePermissionStatus(args.allowWrite)}, command: ${interactivePermissionStatus(args.allowCommand)}\n`)
+  process.stdout.write('visual edit: enabled (approval-gated)\n')
   process.stdout.write('Type /exit to quit.\n\n')
 
   const hookRunner = createSharedHookRunner()
