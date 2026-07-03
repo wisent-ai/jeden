@@ -131,6 +131,22 @@ test('TerminalTui stores submitted prompts and navigates command history', () =>
   assert.equal(tui.cursorIndex, 'draft'.length)
 })
 
+test('TerminalTui treats PTY newline input as submit while Ctrl-J remains multiline insert', () => {
+  const { tui } = createTui()
+  let submitted = null
+
+  tui.inputText = 'from pty'
+  tui.cursorIndex = tui.inputText.length
+  tui.pending = { type: 'input', resolve(value) { submitted = value } }
+  tui.onKeypress('\n', {})
+  assert.equal(submitted, 'from pty')
+
+  tui.onKeypress('a', {})
+  tui.onKeypress('\n', { ctrl: true, name: 'j' })
+  tui.onKeypress('b', {})
+  assert.equal(tui.inputText, 'a\nb')
+})
+
 test('TerminalTui confirm mode accepts y and rejects n, escape, and ctrl-c without leaving payload text', () => {
   for (const [str, key, expected] of [
     ['y', {}, true],

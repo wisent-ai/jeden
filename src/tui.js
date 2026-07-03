@@ -302,13 +302,12 @@ export class TerminalTui {
       this.moveHistory(1)
       return
     }
-    if (key.name === 'return') {
+    if (key.name === 'return' || str === '\r' || (str === '\n' && !(key.ctrl && key.name === 'j'))) {
       this.submitInput()
       return
     }
     if (key.ctrl && key.name === 'j') {
       this.insertText('\n')
-      this.render()
       return
     }
     if (key.name === 'backspace') {
