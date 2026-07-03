@@ -105,6 +105,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--allow-write" => args.allow_write = true,
             "--allow-command" => args.allow_command = true,
             "--json" => args.json = true,
+            other if other.starts_with("--") && matches!(args.command.as_str(), "export") => args.positionals.push(other.to_string()),
             other if other.starts_with("--") => return Err(format!("unknown option: {}", other)),
             other => args.positionals.push(other.to_string()),
         }
@@ -300,6 +301,95 @@ fn list_sessions(limit: usize) -> String {
     if rows.is_empty() { "No sessions found.\n".into() } else { rows.join("\n") + "\n" }
 }
 
+
+fn session_dir_for(id_or_path: &str) -> PathBuf {
+    if id_or_path.contains('/') { PathBuf::from(id_or_path) } else { session_root().join(id_or_path) }
+}
+
+fn read_transcript_events(dir: &Path) -> Vec<Value> {
+    let file = dir.join("transcript.jsonl");
+    fs::read_to_string(file).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()
+}
+
+fn read_session_value(id_or_path: &str) -> Result<Value, String> {
+    let dir = session_dir_for(id_or_path);
+    if !dir.exists() { return Err(format!("session not found: {}", dir.display())); }
+    let state: Value = read_json(&dir.join("state.json"));
+    let id = dir.file_name().map(|v| v.to_string_lossy().to_string()).unwrap_or_else(|| id_or_path.to_string());
+    Ok(json!({"id": id, "path": dir, "state": state, "events": read_transcript_events(&dir)}))
+}
+
+fn html_escape(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn render_session_export(session: &Value, format: &str) -> Result<String, String> {
+    if format == "json" {
+        return Ok(serde_json::to_string_pretty(session).map_err(|e| e.to_string())? + "\n");
+    }
+    let id = session.get("id").and_then(Value::as_str).unwrap_or("session");
+    let path = session.get("path").and_then(Value::as_str).unwrap_or("");
+    let events = session.get("events").and_then(Value::as_array).cloned().unwrap_or_default();
+    if format == "markdown" || format == "md" {
+        let mut out = format!("# Jeden session {}\n\n{}\n\n", id, path);
+        for event in events {
+            let label = format!("{} {}", event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or("")).trim().to_string();
+            let data = serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null)).unwrap_or_else(|_| "{}".into());
+            out.push_str(&format!("## {}\n\n```json\n{}\n```\n\n", label, data));
+        }
+        return Ok(out);
+    }
+    if format == "html" {
+        let mut sections = String::new();
+        for event in events {
+            let label = html_escape(format!("{} {}", event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or("")).trim());
+            let body = html_escape(&serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null)).unwrap_or_else(|_| "{}".into()));
+            sections.push_str(&format!("<section class=\"event\"><h2>{}</h2><pre>{}</pre></section>\n", label, body));
+        }
+        return Ok(format!("<!doctype html>\n<html><head><meta charset=\"utf-8\"><title>Jeden session {}</title><style>body{{font-family:ui-sans-serif,system-ui,sans-serif;margin:2rem;background:#fafafa;color:#111}}.event{{border:1px solid #ddd;border-radius:8px;background:white;margin:1rem 0;padding:1rem}}pre{{white-space:pre-wrap;overflow-wrap:anywhere}}</style></head><body><h1>Jeden session {}</h1><p>{}</p>{}</body></html>\n", html_escape(id), html_escape(id), html_escape(path), sections));
+    }
+    Err(format!("unsupported session export format: {}", format))
+}
+
+fn export_session_command(args: &Args) -> Result<String, String> {
+    let id = args.positionals.get(0).ok_or("export requires a session id or path")?;
+    let mut format = "json".to_string();
+    let mut output = None;
+    for arg in args.positionals.iter().skip(1) {
+        if arg == "--html" { format = "html".into(); }
+        else if arg == "--markdown" { format = "markdown".into(); }
+        else { output = Some(arg.clone()); }
+    }
+    let payload = render_session_export(&read_session_value(id)?, &format)?;
+    if let Some(path) = output { fs::write(&path, &payload).map_err(|e| e.to_string())?; Ok(format!("{}\n", path)) } else { Ok(payload) }
+}
+
+fn list_artifacts_command(id_or_path: &str) -> Result<String, String> {
+    let dir = session_dir_for(id_or_path).join("artifacts");
+    let mut rows = vec![];
+    if let Ok(entries) = fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_file() { rows.push(format!("{}\t{}", entry.file_name().to_string_lossy(), meta.len())); }
+            }
+        }
+    }
+    rows.sort();
+    Ok(if rows.is_empty() { String::new() } else { rows.join("\n") + "\n" })
+}
+
+fn artifact_command(args: &Args) -> Result<String, String> {
+    let id = args.positionals.get(0).ok_or("artifact requires a session id or path")?;
+    let name = args.positionals.get(1).ok_or("artifact requires an artifact name")?;
+    let root = session_dir_for(id).join("artifacts");
+    let file = root.join(name);
+    let canonical_root = fs::canonicalize(&root).map_err(|e| e.to_string())?;
+    let canonical_file = fs::canonicalize(&file).map_err(|e| e.to_string())?;
+    if !canonical_file.starts_with(&canonical_root) { return Err(format!("artifact path escapes session: {}", name)); }
+    let content = fs::read_to_string(&canonical_file).map_err(|e| e.to_string())?;
+    if let Some(output) = args.positionals.get(2) { fs::write(output, &content).map_err(|e| e.to_string())?; Ok(format!("{}\n", output)) } else { Ok(if content.ends_with('\n') { content } else { content + "\n" }) }
+}
+
 fn model_router_config(config: &Config, args: &Args) -> (String, String, String, String) {
     let url = env::var("MODEL_ROUTER_URL").ok().or(config.model_router_url.clone()).unwrap_or_else(|| "https://model-router-1080673333190.us-central1.run.app".into());
     let agent_id = env::var("WISENT_APP_AGENT_ID").ok().or(config.agent_id.clone()).unwrap_or_else(|| "wisent-app".into());
@@ -367,7 +457,11 @@ fn main() {
             }
         },
         "sessions" => Ok(list_sessions(args.positionals.get(0).and_then(|s| s.parse().ok()).unwrap_or(20))),
-        "show" | "export" | "artifacts" | "artifact" | "resume" | "tools" => delegate_to_node(&args.raw),
+        "show" => args.positionals.get(0).map(|id| render_session_export(&read_session_value(id).unwrap_or_else(|e| json!({"error": e})), "json").unwrap_or_default()).ok_or("show requires a session id".into()),
+        "export" => export_session_command(&args),
+        "artifacts" => args.positionals.get(0).map(|id| list_artifacts_command(id)).unwrap_or_else(|| Err("artifacts requires a session id".into())),
+        "artifact" => artifact_command(&args),
+        "resume" | "tools" => delegate_to_node(&args.raw),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),
