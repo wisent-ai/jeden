@@ -199,15 +199,13 @@ function formatAutomatedLoginNotConfigured(auth, preset, { cwd, file } = {}) {
     `Auth file: ${file}`,
     names.length ? `Already configured: ${names.join(', ')}` : 'Already configured: none',
     '',
-    '/login is automated only: it starts the configured OAuth flow and stores the exchanged token.',
-    `Missing required provider config: ${[
-      preset.authUrl ? null : `${envKey(preset.provider, 'AUTH_URL')} or ${envKey(preset.provider, 'AUTHORIZE_URL')}`,
-      preset.tokenUrl ? null : `${envKey(preset.provider, 'TOKEN_URL')}`,
-      preset.clientId ? null : `${envKey(preset.provider, 'CLIENT_ID')}`,
+    '/login is automated only: it starts the product OAuth flow and stores the exchanged token.',
+    `Product OAuth preset is incomplete: ${[
+      preset.authUrl ? null : 'authorize URL',
+      preset.tokenUrl ? null : 'token URL',
+      preset.clientId ? null : 'client id',
     ].filter(Boolean).join(', ')}`,
-    '',
-    'Supported config shape in .jeden/config.json:',
-    `  {"authProviders":{"${preset.provider}":{"authUrl":"...","tokenUrl":"...","clientId":"...","scope":"..."}}}`,
+    'This is a product configuration error; /login will not fall back to manual credentials.',
   ])
 }
 
@@ -489,7 +487,7 @@ async function handleLogin(parsed, { cwd }) {
   if (!provider) return startConfiguredLogin('wisent', { cwd })
   if (looksLikeOauthRedirect(provider)) return captureOauthRedirect(provider, parts, { cwd })
   if (parts.length === 0) return startConfiguredLogin(provider, { cwd })
-  return err('/login is automated-only. Product OAuth is not configured for inline credential arguments; configure authProviders.<provider> and run /login <provider>.')
+  return err('/login is automated-only. Inline credential arguments are not accepted; product OAuth must provide the login flow.')
 }
 
 async function handleSetup(parsed, { cwd }) {
