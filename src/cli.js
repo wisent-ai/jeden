@@ -340,12 +340,24 @@ function statusChip(label, value, color) {
   return `${paint(label, 'dim')} ${paint(value, color)}`
 }
 
+
+const WISENT_MARK = [
+  '╭╮      ╭╮',
+  '│╰╮╭╮╭╮╭╯│',
+  '╰╮╰╯╰╯╰╯╭╯',
+  ' ╰─╮██╭─╯ ',
+  '   ╰──╯   ',
+]
+
 function interactivePrompt() {
   return `${paint('╭─', 'cyan')} ${paint('you', 'bold')}\n${paint('╰─ jeden ›', 'cyan')} `
 }
 
 function formatInteractiveBanner(args, sessionPath) {
-  return `${terminalBox('Jeden', [
+  return `${terminalBox('Wisent Jeden', [
+    'Wisent private agent harness',
+    ...WISENT_MARK,
+    '',
     `${paint('cwd', 'dim')} ${args.cwd}`,
     `${paint('session', 'dim')} ${sessionPath}`,
     `${statusChip('write', interactivePermissionStatus(args.allowWrite), args.allowWrite ? 'green' : 'yellow')}   ${statusChip('command', interactivePermissionStatus(args.allowCommand), args.allowCommand ? 'green' : 'yellow')}`,
