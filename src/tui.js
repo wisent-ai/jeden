@@ -76,44 +76,101 @@ function withCursorMarker(value, cursorIndex, colorEnabled) {
   return `${text.slice(0, index)}${paint('▌', 'yellow', colorEnabled)}${text.slice(index)}`
 }
 
-export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStatus, messages = [], inputText = '', cursorIndex = 0, mode = 'input', busy = false, columns = 100, rows = 30, color = false }) {
-  const width = Math.max(Math.min(columns, 120), 50)
-  const header = box('Jeden', [
-    `${paint('cwd', 'dim', color)} ${cwd}`,
-    `${paint('session', 'dim', color)} ${sessionPath}`,
-    `${paint('write', 'dim', color)} ${paint(writeStatus, writeStatus === 'enabled' ? 'green' : 'yellow', color)}   ${paint('command', 'dim', color)} ${paint(commandStatus, commandStatus === 'enabled' ? 'green' : 'yellow', color)}`,
-    `${paint('visual edit', 'dim', color)} ${paint('enabled', 'green', color)} ${paint('(approval-gated)', 'dim', color)}`,
-    `${paint('state', 'dim', color)} ${busy ? paint('thinking', 'yellow', color) : paint('ready', 'green', color)}`,
-  ], width, color)
+function center(value, width) {
+  const text = String(value)
+  const extra = Math.max(width - visibleLength(text), 0)
+  const left = Math.floor(extra / 2)
+  return `${' '.repeat(left)}${text}${' '.repeat(extra - left)}`
+}
 
-  const inputTitle = mode === 'confirm' ? 'approve y/N' : 'you'
+function divider(width) {
+  return '─'.repeat(Math.max(width, 0))
+}
+
+function welcomePanel({ width, model = 'default', color }) {
+  const inner = Math.max(width - 2, 48)
+  const left = Math.min(26, Math.floor(inner * 0.36))
+  const right = inner - left - 1
+  const title = ' Jeden v0.1.0 '
+  const rows = [
+    [center('', left), 'Tips'],
+    [center('Welcome back!', left), '# for prompt actions'],
+    [center('', left), '/ for commands'],
+    [center('▀██████████▀', left), '! to run bash'],
+    [center('╘██    ██', left), '$ to run node/python'],
+    [center('██    ██', left), divider(Math.min(right, 47))],
+    [center('██    ██', left), 'LSP Servers'],
+    [center('▄██▄  ▄██▄', left), 'No LSP servers'],
+    [center('', left), ''],
+    [center(model, left), ''],
+    [center('jeden', left), ''],
+    [center('', left), divider(Math.min(right, 47))],
+    [center('', left), 'Recent sessions'],
+    [center('', left), 'No recent sessions'],
+    [center('', left), ''],
+    [center('', left), ''],
+    [center('', left), ''],
+    [center('', left), ''],
+  ]
+  const top = `${paint('╭', 'cyan', color)}${paint(title, 'bold', color)}${paint(divider(Math.max(inner - visibleLength(title), 0)), 'cyan', color)}${paint('╮', 'cyan', color)}`
+  const body = rows.map(([l, r]) => `${paint('│', 'cyan', color)}${padVisible(l, left)}${paint('│', 'cyan', color)} ${padVisible(r, right - 1)}${paint('│', 'cyan', color)}`)
+  const bottom = `${paint('╰', 'cyan', color)}${paint(divider(left), 'cyan', color)}${paint('┴', 'cyan', color)}${paint(divider(right), 'cyan', color)}${paint('╯', 'cyan', color)}`
+  return [
+    top,
+    ...body,
+    bottom,
+    paint(' Tip: Use Ctrl-J for multiline input. Use arrow keys/Home/End to edit before sending.', 'dim', color),
+    paint(' Connected: local tools. MCP adapters load through Jeden tool registry.', 'dim', color),
+  ]
+}
+
+function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color }) {
+  const inner = Math.max(width - 2, 48)
+  const state = busy ? paint('thinking', 'yellow', color) : paint('ready', 'green', color)
+  const label = mode === 'confirm'
+    ? ` approve ${state} `
+    : ` jeden > ⬢ ${model || 'default'} · ${state} > ${cwd} > write ${writeStatus} > command ${commandStatus} ▶ `
+  const safeLabel = visibleLength(label) > inner - 4 ? `${stripAnsi(label).slice(0, inner - 7)}… ▶ ` : label
+  const top = `${paint('╭──', 'cyan', color)}${safeLabel}${paint(divider(Math.max(inner - visibleLength(safeLabel) - 2, 0)), 'cyan', color)}${paint('╮', 'cyan', color)}`
   const visibleInput = mode === 'input' ? withCursorMarker(inputText, cursorIndex, color) : inputText
-  const inputRows = visibleInput.length > 0 ? visibleInput.split('\n') : [paint('▌', 'yellow', color)]
-  const inputBox = box(inputTitle, inputRows, width, color)
-  const reserved = header.length + inputBox.length + 2
-  const availableMessageRows = Math.max(rows - reserved, 3)
+  const inputRows = (visibleInput.length > 0 ? visibleInput : paint('▌', 'yellow', color)).split('\n').flatMap((row) => wrapLine(row, inner - 4))
+  const rows = inputRows.slice(0, 4)
+  const body = rows.slice(0, -1).map((row) => `${paint('│', 'cyan', color)} ${padVisible(row, inner - 2)} ${paint('│', 'cyan', color)}`)
+  const last = rows[rows.length - 1] || paint('▌', 'yellow', color)
+  const bottom = `${paint('╰─', 'cyan', color)} ${padVisible(last, inner - 4)} ${paint('─╯', 'cyan', color)}`
+  const hint = mode === 'confirm'
+    ? 'Press y to approve, n/esc/ctrl-c to deny.'
+    : 'Enter sends · Ctrl-J newline · arrows/Home/End edit · ↑/↓ history · Ctrl-C exits'
+  return [top, ...body, bottom, paint(` ${hint}`, 'dim', color)]
+}
+
+export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStatus, model = 'default', messages = [], inputText = '', cursorIndex = 0, mode = 'input', busy = false, columns = 100, rows = 30, color = false }) {
+  const width = Math.max(Math.min(columns, 120), 50)
+  const prompt = compactPrompt({ width, model, cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color })
+  const reserved = prompt.length + 1
+  const availableRows = Math.max(rows - reserved, 4)
   const messageLines = messages.flatMap((message) => formatMessage(message, width, color))
-  const visibleMessages = messageLines.slice(-availableMessageRows)
+  const mainLines = messageLines.length > 0
+    ? messageLines.slice(-availableRows)
+    : welcomePanel({ width, model, color }).slice(0, availableRows)
   return [
     '\x1b[2J\x1b[H\x1b[?25l',
-    ...header,
-    '',
-    ...visibleMessages,
-    ...Array.from({ length: Math.max(availableMessageRows - visibleMessages.length, 0) }, () => ''),
-    ...inputBox,
-    paint(mode === 'confirm' ? 'Press y to approve, n/esc/ctrl-c to deny.' : 'Enter sends. Ctrl-J inserts newline. ←/→/Home/End edit. ↑/↓ history. Ctrl-C exits.', 'dim', color),
+    ...mainLines,
+    ...Array.from({ length: Math.max(availableRows - mainLines.length, 0) }, () => ''),
+    ...prompt,
     '\x1b[?25h',
   ].join('\n')
 }
 
 export class TerminalTui {
-  constructor({ input, output, cwd, sessionPath, writeStatus, commandStatus }) {
+  constructor({ input, output, cwd, sessionPath, writeStatus, commandStatus, model }) {
     this.input = input
     this.output = output
     this.cwd = cwd
     this.sessionPath = sessionPath
     this.writeStatus = writeStatus
     this.commandStatus = commandStatus
+    this.model = model || process.env.JEDEN_MODEL || process.env.MODEL || 'default'
     this.color = useColor(output)
     this.messages = []
     this.inputText = ''
@@ -150,6 +207,7 @@ export class TerminalTui {
       sessionPath: this.sessionPath,
       writeStatus: this.writeStatus,
       commandStatus: this.commandStatus,
+      model: this.model,
       messages: this.messages,
       inputText: this.inputText,
       cursorIndex: this.cursorIndex,

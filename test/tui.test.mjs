@@ -48,7 +48,30 @@ function createTui() {
   return { input, output, tui }
 }
 
-test('renderTerminalFrame draws header, transcript, cursor, and editor hints', () => {
+test('renderTerminalFrame draws OMP-style welcome chrome when transcript is empty', () => {
+  const frame = renderTerminalFrame({
+    cwd: '.',
+    sessionPath: '/session/current',
+    writeStatus: 'ask',
+    commandStatus: 'ask',
+    inputText: '',
+    cursorIndex: 0,
+    columns: 100,
+    rows: 32,
+    color: false,
+  })
+
+  assert.match(frame, /Jeden v0\.1\.0/)
+  assert.match(frame, /Welcome back!/)
+  assert.match(frame, /Tips/)
+  assert.match(frame, /LSP Servers/)
+  assert.match(frame, /No LSP servers/)
+  assert.match(frame, /Recent sessions/)
+  assert.match(frame, /No recent sessions/)
+  assert.match(frame, /jeden > ⬢ default/)
+})
+
+test('renderTerminalFrame draws transcript, cursor, and editor hints', () => {
   const frame = renderTerminalFrame({
     cwd: '.',
     sessionPath: '/session/current',
@@ -62,11 +85,11 @@ test('renderTerminalFrame draws header, transcript, cursor, and editor hints', (
     color: false,
   })
 
-  assert.match(frame, /╭ Jeden /)
-  assert.match(frame, /visual edit enabled/)
   assert.match(frame, /╭ jeden /)
+  assert.match(frame, /hello/)
+  assert.match(frame, /jeden > ⬢ default/)
   assert.match(frame, /dr▌aft/)
-  assert.match(frame, /←\/→\/Home\/End edit/)
+  assert.match(frame, /arrows\/Home\/End edit/)
 })
 
 test('TerminalTui installs raw key handling and restores raw mode on close', () => {

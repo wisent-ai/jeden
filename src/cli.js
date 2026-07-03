@@ -370,7 +370,7 @@ async function runInteractive(args) {
     writeStatus: interactivePermissionStatus(args.allowWrite),
     commandStatus: interactivePermissionStatus(args.allowCommand),
   }
-  const tui = createTerminalTui({ input, output, cwd: args.cwd, sessionPath: recorder.path(), ...permission })
+  const tui = createTerminalTui({ input, output, cwd: args.cwd, sessionPath: recorder.path(), model: args.model, ...permission })
   if (tui) {
     tui.start()
   } else {
