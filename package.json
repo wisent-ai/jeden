@@ -4,13 +4,13 @@
   "private": true,
   "type": "module",
   "bin": {
-    "jeden": "./src/cli.js"
-  },
-  "exports": {
-    ".": "./src/index.js"
+    "jeden": "./src/cli.js",
+    "jeden-rust": "./bin/jeden-rust"
   },
   "scripts": {
     "check": "node scripts/check-syntax.mjs",
+    "check:rust": "cargo check",
+    "build:rust": "cargo build --release",
     "test": "node --test"
   },
   "engines": {
