@@ -297,10 +297,63 @@ async function runResume(args) {
   process.stderr.write(`[session] ${result.sessionPath}\n`)
 }
 
+const TTY_COLORS = Boolean(output.isTTY) && !process.env.NO_COLOR
+const ANSI = {
+  reset: '\x1b[0m',
+  dim: '\x1b[2m',
+  bold: '\x1b[1m',
+  cyan: '\x1b[36m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  magenta: '\x1b[35m',
+  red: '\x1b[31m',
+}
+
+function paint(value, color) {
+  if (!TTY_COLORS) return value
+  return `${ANSI[color] || ''}${value}${ANSI.reset}`
+}
+
+function visibleLength(value) {
+  return String(value).replace(/\x1b\[[0-9;]*m/g, '').length
+}
+
+function padVisible(value, width) {
+  const extra = Math.max(width - visibleLength(value), 0)
+  return `${value}${' '.repeat(extra)}`
+}
+
+function terminalBox(title, rows) {
+  const cleanTitle = ` ${title} `
+  const normalizedRows = rows.flatMap((row) => String(row).split('\n'))
+  const width = Math.max(cleanTitle.length + 2, ...normalizedRows.map((row) => visibleLength(row))) + 2
+  const top = `${paint('╭', 'cyan')}${paint(cleanTitle, 'bold')}${paint('─'.repeat(Math.max(width + 2 - cleanTitle.length, 0)), 'cyan')}${paint('╮', 'cyan')}`
+  const body = normalizedRows.map((row) => `${paint('│', 'cyan')} ${padVisible(row, width)} ${paint('│', 'cyan')}`)
+  const bottom = `${paint('╰', 'cyan')}${paint('─'.repeat(width + 2), 'cyan')}${paint('╯', 'cyan')}`
+  return [top, ...body, bottom].join('\n')
+}
+
+function statusChip(label, value, color) {
+  return `${paint(label, 'dim')} ${paint(value, color)}`
+}
+
+function interactivePrompt() {
+  return `${paint('╭─', 'cyan')} ${paint('you', 'bold')}\n${paint('╰─ jeden ›', 'cyan')} `
+}
+
+function formatInteractiveBanner(args, sessionPath) {
+  return `${terminalBox('Jeden', [
+    `${paint('cwd', 'dim')} ${args.cwd}`,
+    `${paint('session', 'dim')} ${sessionPath}`,
+    `${statusChip('write', interactivePermissionStatus(args.allowWrite), args.allowWrite ? 'green' : 'yellow')}   ${statusChip('command', interactivePermissionStatus(args.allowCommand), args.allowCommand ? 'green' : 'yellow')}`,
+    `${paint('visual edit', 'dim')} ${paint('enabled', 'green')} ${paint('(approval-gated)', 'dim')}`,
+  ])}\n${paint('Type /exit to quit.', 'dim')}\n\n`
+}
+
 function approvalPrompt({ tool, kind, input }) {
   const payload = JSON.stringify(input, null, 2)
   const preview = payload.length > 1200 ? `${payload.slice(0, 1200)}…` : payload
-  return `\nApproval required for ${kind} tool ${tool}:\n${preview}\nApprove? [y/N] `
+  return `\n${terminalBox(`Approve ${kind}`, [paint(tool, 'bold'), preview])}\n${paint('Approve?', 'yellow')} ${paint('[y/N]', 'dim')} `
 }
 
 
@@ -312,11 +365,7 @@ function interactivePermissionStatus(enabled) {
 async function runInteractive(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   await recorder.ensure()
-  process.stdout.write(`Jeden session: ${recorder.path()}\n`)
-  process.stdout.write(`cwd: ${args.cwd}\n`)
-  process.stdout.write(`write: ${interactivePermissionStatus(args.allowWrite)}, command: ${interactivePermissionStatus(args.allowCommand)}\n`)
-  process.stdout.write('visual edit: enabled (approval-gated)\n')
-  process.stdout.write('Type /exit to quit.\n\n')
+  process.stdout.write(formatInteractiveBanner(args, recorder.path()))
 
   const hookRunner = createSharedHookRunner()
   const rl = createInterface({ input, output })
@@ -326,20 +375,20 @@ async function runInteractive(args) {
   }
   const askUser = async ({ question, options }) => {
     const suffix = options.length > 0 ? ` (${options.join('/')})` : ''
-    return (await rl.question(`${question}${suffix}\n> `)).trim()
+    return (await rl.question(`${paint(question, 'cyan')}${paint(suffix, 'dim')}\n${paint('╰─ answer ›', 'cyan')} `)).trim()
   }
 
   try {
     for (;;) {
-      const task = (await rl.question('jeden> ')).trim()
+      const task = (await rl.question(interactivePrompt())).trim()
       if (!task) continue
       if (task === '/exit' || task === '/quit') break
       try {
         const taskForRun = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
         const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner })
-        process.stdout.write(`${result.text}\n`)
+        process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
       } catch (error) {
-        process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`)
+        process.stderr.write(`\n${paint('╭─ error', 'red')}\n${error instanceof Error ? error.message : String(error)}\n${paint('╰─', 'red')}\n\n`)
         await recorder.record('error', { message: error instanceof Error ? error.message : String(error) })
       }
     }
