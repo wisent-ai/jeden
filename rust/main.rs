@@ -320,7 +320,10 @@ fn slash(cwd: &Path, input: &str) -> Result<String, String> {
         "/settings" | "/setup" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
-        _ => Err(format!("Unknown slash command: {}", command)),
+        "/fast" => Ok("Fast mode status is managed by the JavaScript runtime state; Rust parity for this mutable mode is not complete.".into()),
+        "/advisor" => Ok("Advisor status is managed by the JavaScript runtime state; Rust parity for this mutable mode is not complete.".into()),
+        "/usage" => Ok("Usage accounting is available through the JavaScript runtime; Rust usage parity is not complete.".into()),
+        _ => Err(format!("Unknown or unported Rust slash command: {}", command)),
     }
 }
 
@@ -481,7 +484,7 @@ fn main() {
         "interactive" => delegate_to_node(&args.raw),
         "run" => {
             let task = args.positionals.join(" ");
-            if task.trim_start().starts_with("/login") || task.trim_start().starts_with("/logout") || task.trim_start() == "/settings" || task.trim_start() == "/setup" || task.trim_start() == "/help" {
+            if task.trim_start().starts_with('/') {
                 run_prompt(&args).map(|s| if args.json { json!({"text": s}).to_string() + "\n" } else { s + "\n" })
             } else {
                 delegate_to_node(&args.raw)
