@@ -12,6 +12,22 @@ const ANSI = {
   blue: '\x1b[34m',
 }
 
+const BRAND = {
+  product: 'Wisent',
+  app: 'Agent',
+  version: 'v0.1.0',
+  assistantTitle: 'wisent',
+}
+
+const WISENT_MARK = [
+  '╭╮      ╭╮',
+  '│╰╮╭╮╭╮╭╯│',
+  '╰╮╰╯╰╯╰╯╭╯',
+  ' ╰─╮██╭─╯ ',
+  '   ╰──╯   ',
+]
+
+
 function useColor(output) {
   return Boolean(output?.isTTY) && !process.env.NO_COLOR
 }
@@ -66,7 +82,7 @@ function roleColor(role) {
 
 function formatMessage(message, width, colorEnabled) {
   const color = roleColor(message.role)
-  const title = message.role === 'assistant' ? 'jeden' : message.role
+  const title = message.role === 'assistant' ? BRAND.assistantTitle : message.role
   return box(title, String(message.text || '').split('\n'), width, colorEnabled).map((line) => paint(line, color, colorEnabled))
 }
 
@@ -87,41 +103,24 @@ function divider(width) {
   return '─'.repeat(Math.max(width, 0))
 }
 
-function welcomePanel({ width, model = 'default', color }) {
-  const inner = Math.max(width - 2, 48)
-  const left = Math.min(26, Math.floor(inner * 0.36))
-  const right = inner - left - 1
-  const title = ' Jeden v0.1.0 '
+function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask', commandStatus = 'ask', color }) {
+  const title = `${BRAND.product} ${BRAND.app} ${BRAND.version}`
   const rows = [
-    [center('', left), 'Tips'],
-    [center('Welcome back!', left), '# for prompt actions'],
-    [center('', left), '/ for commands'],
-    [center('▀██████████▀', left), '! to run bash'],
-    [center('╘██    ██', left), '$ to run node/python'],
-    [center('██    ██', left), divider(right - 2)],
-    [center('██    ██', left), 'LSP Servers'],
-    [center('▄██▄  ▄██▄', left), 'No LSP servers'],
-    [center('', left), ''],
-    [center(model, left), ''],
-    [center('jeden', left), ''],
-    [center('', left), divider(right - 2)],
-    [center('', left), 'Recent sessions'],
-    [center('', left), 'No recent sessions'],
-    [center('', left), ''],
-    [center('', left), ''],
-    [center('', left), ''],
-    [center('', left), ''],
+    `${BRAND.product} private agent harness`,
+    `Model route: ${model || 'default'}`,
+    `Workspace: ${cwd}`,
+    '',
+    `${WISENT_MARK[0]}   Controls`,
+    `${WISENT_MARK[1]}   # prompt actions   / commands`,
+    `${WISENT_MARK[2]}   ! shell            $ node/python`,
+    `${WISENT_MARK[3]}   Enter sends        Ctrl-J newline`,
+    `${WISENT_MARK[4]}   arrows/Home/End edit`,
+    '',
+    `Tool gates: write ${writeStatus} · command ${commandStatus}`,
+    'Sessions: local history and artifacts',
+    'MCP: adapters loaded through Wisent registry',
   ]
-  const top = `${paint('╭', 'cyan', color)}${paint(title, 'bold', color)}${paint(divider(Math.max(inner - visibleLength(title), 0)), 'cyan', color)}${paint('╮', 'cyan', color)}`
-  const body = rows.map(([l, r]) => `${paint('│', 'cyan', color)}${padVisible(l, left)}${paint('│', 'cyan', color)} ${padVisible(r, right - 1)}${paint('│', 'cyan', color)}`)
-  const bottom = `${paint('╰', 'cyan', color)}${paint(divider(left), 'cyan', color)}${paint('┴', 'cyan', color)}${paint(divider(right), 'cyan', color)}${paint('╯', 'cyan', color)}`
-  return [
-    top,
-    ...body,
-    bottom,
-    paint(' Tip: Use Ctrl-J for multiline input. Use arrow keys/Home/End to edit before sending.', 'dim', color),
-    paint(' Connected: local tools. MCP adapters load through Jeden tool registry.', 'dim', color),
-  ]
+  return box(title, rows, width, color)
 }
 
 function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color }) {
@@ -129,7 +128,7 @@ function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStat
   const state = busy ? paint('thinking', 'yellow', color) : paint('ready', 'green', color)
   const label = mode === 'confirm'
     ? ` approve ${state} `
-    : ` jeden > ⬢ ${model || 'default'} · ${state} > ${cwd} > write ${writeStatus} > command ${commandStatus} ▶ `
+    : ` wisent > ${model || 'default'} · ${state} > ${cwd} > write ${writeStatus} > command ${commandStatus} › `
   const safeLabel = visibleLength(label) > inner - 4 ? `${stripAnsi(label).slice(0, inner - 7)}… ▶ ` : label
   const top = `${paint('╭──', 'cyan', color)}${safeLabel}${paint(divider(Math.max(inner - visibleLength(safeLabel) - 2, 0)), 'cyan', color)}${paint('╮', 'cyan', color)}`
   const visibleInput = mode === 'input' ? withCursorMarker(inputText, cursorIndex, color) : inputText
@@ -152,7 +151,7 @@ export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStat
   const messageLines = messages.flatMap((message) => formatMessage(message, width, color))
   const mainLines = messageLines.length > 0
     ? messageLines.slice(-availableRows)
-    : welcomePanel({ width, model, color }).slice(0, availableRows)
+    : welcomePanel({ width, model, cwd, writeStatus, commandStatus, color }).slice(0, availableRows)
   return [
     '\x1b[2J\x1b[H\x1b[?25l',
     ...mainLines,

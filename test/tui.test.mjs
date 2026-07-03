@@ -48,7 +48,7 @@ function createTui() {
   return { input, output, tui }
 }
 
-test('renderTerminalFrame draws OMP-style welcome chrome when transcript is empty', () => {
+test('renderTerminalFrame draws Wisent welcome chrome when transcript is empty', () => {
   const frame = renderTerminalFrame({
     cwd: '.',
     sessionPath: '/session/current',
@@ -61,14 +61,15 @@ test('renderTerminalFrame draws OMP-style welcome chrome when transcript is empt
     color: false,
   })
 
-  assert.match(frame, /Jeden v0\.1\.0/)
-  assert.match(frame, /Welcome back!/)
-  assert.match(frame, /Tips/)
-  assert.match(frame, /LSP Servers/)
-  assert.match(frame, /No LSP servers/)
-  assert.match(frame, /Recent sessions/)
-  assert.match(frame, /No recent sessions/)
-  assert.match(frame, /jeden > ⬢ default/)
+  assert.match(frame, /Wisent Agent v0\.1\.0/)
+  assert.match(frame, /Wisent private agent harness/)
+  assert.match(frame, /Model route: default/)
+  assert.match(frame, /Controls/)
+  assert.match(frame, /Tool gates: write ask · command ask/)
+  assert.match(frame, /Sessions: local history and artifacts/)
+  assert.match(frame, /wisent > default/)
+  assert.doesNotMatch(frame, /Welcome back!/)
+  assert.doesNotMatch(frame, /OMP-style/)
 })
 
 test('renderTerminalFrame draws transcript, cursor, and editor hints', () => {
@@ -85,9 +86,9 @@ test('renderTerminalFrame draws transcript, cursor, and editor hints', () => {
     color: false,
   })
 
-  assert.match(frame, /╭ jeden /)
+  assert.match(frame, /╭ wisent /)
   assert.match(frame, /hello/)
-  assert.match(frame, /jeden > ⬢ default/)
+  assert.match(frame, /wisent > default/)
   assert.match(frame, /dr▌aft/)
   assert.match(frame, /arrows\/Home\/End edit/)
 })
