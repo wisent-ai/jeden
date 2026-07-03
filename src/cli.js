@@ -14,6 +14,7 @@ import { closeMcpClients, loadMcpToolAdapters } from './mcp.js'
 import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 import { formatConversationList, listConversationJsonls, recallConversation } from './conversation-recall.js'
 import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self-repair.js'
+import { createTerminalTui } from './tui.js'
 
 
 function usage() {
@@ -365,35 +366,52 @@ function interactivePermissionStatus(enabled) {
 async function runInteractive(args) {
   const recorder = new SessionRecorder({ cwd: args.cwd })
   await recorder.ensure()
-  process.stdout.write(formatInteractiveBanner(args, recorder.path()))
+  const permission = {
+    writeStatus: interactivePermissionStatus(args.allowWrite),
+    commandStatus: interactivePermissionStatus(args.allowCommand),
+  }
+  const tui = createTerminalTui({ input, output, cwd: args.cwd, sessionPath: recorder.path(), ...permission })
+  if (tui) {
+    tui.start()
+  } else {
+    process.stdout.write(formatInteractiveBanner(args, recorder.path()))
+  }
 
   const hookRunner = createSharedHookRunner()
-  const rl = createInterface({ input, output })
+  const rl = tui ? null : createInterface({ input, output })
   const approveTool = async (request) => {
+    if (tui) return tui.confirm(request)
     const answer = (await rl.question(approvalPrompt(request))).trim().toLowerCase()
     return answer === 'y' || answer === 'yes'
   }
   const askUser = async ({ question, options }) => {
+    if (tui) return tui.ask({ question, options })
     const suffix = options.length > 0 ? ` (${options.join('/')})` : ''
     return (await rl.question(`${paint(question, 'cyan')}${paint(suffix, 'dim')}\n${paint('╰─ answer ›', 'cyan')} `)).trim()
   }
 
   try {
     for (;;) {
-      const task = (await rl.question(interactivePrompt())).trim()
+      const task = (await (tui ? tui.prompt() : rl.question(interactivePrompt()))).trim()
       if (!task) continue
       if (task === '/exit' || task === '/quit') break
       try {
+        tui?.setBusy(true)
         const taskForRun = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
         const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner })
-        process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
+        if (tui) tui.push('assistant', result.text)
+        else process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
+        tui?.setBusy(false)
       } catch (error) {
-        process.stderr.write(`\n${paint('╭─ error', 'red')}\n${error instanceof Error ? error.message : String(error)}\n${paint('╰─', 'red')}\n\n`)
+        if (tui) tui.push('error', error instanceof Error ? error.message : String(error))
+        else process.stderr.write(`\n${paint('╭─ error', 'red')}\n${error instanceof Error ? error.message : String(error)}\n${paint('╰─', 'red')}\n\n`)
         await recorder.record('error', { message: error instanceof Error ? error.message : String(error) })
+        tui?.setBusy(false)
       }
     }
   } finally {
-    rl.close()
+    if (tui) tui.close()
+    else rl.close()
   }
 }
 
