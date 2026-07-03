@@ -12,6 +12,7 @@ const PROJECT_CONTEXT_FILES = [
   '.omp/RULES.md',
   '.jeden/instructions.md',
   '.jeden/context.md',
+  '.jeden/rules.jsonl',
 ]
 
 const USER_CONTEXT_FILES = [

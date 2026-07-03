@@ -1,12 +1,15 @@
 import { mkdir, readFile, rename as renameFile, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
 
-import { loadJedenConfig } from './config.js'
+import { loadJedenConfig, loadProjectJedenConfig, saveProjectJedenConfig } from './config.js'
 import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
+import { handleRuntimeSlashCommand } from './runtime-slash.js'
 import { dispatchModeSlashCommand } from './mode-state.js'
-import { closeMcpClients, listMcpPrompts, listMcpResources, listMcpTools, loadMcpConfig } from './mcp.js'
-import { loadMemoryRecords, memoryPath, recallMemories, saveMemoryRecords } from './memory.js'
+import { closeMcpClients, listMcpPrompts, listMcpResources, listMcpTools, loadMcpConfig, loadProjectMcpConfig, saveProjectMcpConfig } from './mcp.js'
+import { deleteMentalModel, enqueueMemoryMaintenance, loadMemoryRecords, loadMentalModelBank, memoryPath, mentalModelPath, normalizeMentalModelId, rebuildMemoryFile, recallMemories, saveMemoryRecords, seedMentalModel } from './memory.js'
 import { listSessionArtifacts, listSessions, readSession } from './session.js'
+import { copyTextToClipboardOrArtifact, createEncryptedShareBundle, handleLocalCollab } from './local-sharing.js'
 
 const OMP_COMMANDS = [
   ['settings', 'Open settings menu'],
@@ -176,6 +179,7 @@ function formatSessionMarkdown(session) {
   return `${out.join('\n')}\n`
 }
 
+
 function htmlEscape(value) {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
@@ -187,6 +191,17 @@ function formatSessionHtml(session) {
 
 async function currentSession(context) {
   return readSession({ idOrPath: context.recorder.path() })
+}
+
+async function handleCopy(parsed, context) {
+  const directText = parsed.args.trim()
+  const payload = directText || formatSessionText(await currentSession(context))
+  const source = directText ? 'provided text' : 'current session transcript'
+  return ok(await copyTextToClipboardOrArtifact({ payload, source, recorder: context.recorder }))
+}
+
+async function createEncryptedShare(context) {
+  return createEncryptedShareBundle({ session: await currentSession(context), artifactDir: context.recorder.artifactDir() })
 }
 
 async function exportCurrentSession(context, args) {
@@ -264,14 +279,106 @@ async function handleTodo(parsed, context) {
   return err('Usage: /todo [list|add|start|done|drop|rm|copy|export|import]')
 }
 
+function parseMcpServerSpec(parts) {
+  if (parts.length === 1) {
+    try {
+      const parsed = JSON.parse(parts[0])
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return parsed
+    } catch {}
+  }
+  const [command, ...args] = parts
+  return { command, args }
+}
+
+function projectDisabledServers(config) {
+  return Array.isArray(config.disabledServers) ? config.disabledServers.filter(Boolean).map(String) : []
+}
+
+function withoutValue(values, value) {
+  return values.filter((item) => item !== value)
+}
+
+function mcpHookSpec(server, verb) {
+  const value = server?.[`${verb}Command`] || server?.[verb]
+  if (!value) return null
+  if (typeof value === 'string') return parseMcpServerSpec(splitArgs(value))
+  if (Array.isArray(value)) return parseMcpServerSpec(value.map(String))
+  if (typeof value === 'object' && value.command) return { command: String(value.command), args: (value.args || []).map(String), env: value.env || {} }
+  return null
+}
+
+function runLocalCommand(spec, { cwd }) {
+  return new Promise((resolveResult, reject) => {
+    const child = spawn(spec.command, spec.args || [], { cwd, env: { ...process.env, ...(spec.env || {}) }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let stdout = ''
+    let stderr = ''
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8') })
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString('utf8') })
+    child.on('error', reject)
+    child.on('close', (code) => {
+      if (code === 0) resolveResult({ stdout: stdout.trim(), stderr: stderr.trim() })
+      else reject(new Error((stderr || stdout).trim() || `${spec.command} exited with ${code}`))
+    })
+  })
+}
+
 async function handleMcp(parsed, context) {
-  const [verb = 'list', serverName] = splitArgs(parsed.args)
+  const [verb = 'list', serverName, ...rest] = splitArgs(parsed.args)
   const cwd = context.args.cwd
   if (verb === 'list') {
     const config = await loadMcpConfig({ cwd })
     const names = Object.keys(config.mcpServers || {})
     const disabled = new Set(config.disabledServers || [])
     return ok(names.length ? names.map((name) => `${name}${disabled.has(name) ? ' (disabled)' : ''}`).join('\n') : 'No MCP servers configured.')
+  }
+  if (verb === 'add') {
+    if (!serverName || rest.length === 0) return err('Usage: /mcp add <name> <command> [args...]')
+    const project = await loadProjectMcpConfig({ cwd })
+    project.mcpServers = { ...(project.mcpServers || {}), [serverName]: parseMcpServerSpec(rest) }
+    project.disabledServers = withoutValue(projectDisabledServers(project), serverName)
+    const file = await saveProjectMcpConfig(project, { cwd })
+    await closeMcpClients({ cwd })
+    return ok(`Added MCP server ${serverName} to ${file}.`)
+  }
+  if (verb === 'remove') {
+    if (!serverName) return err('Usage: /mcp remove <name>')
+    const project = await loadProjectMcpConfig({ cwd })
+    if (!project.mcpServers?.[serverName]) {
+      const effective = await loadMcpConfig({ cwd })
+      if (effective.mcpServers?.[serverName]) return err(`MCP server ${serverName} is not in <cwd>/.jeden/mcp.json. Remove it from ~/.jeden/mcp.json or use /mcp disable ${serverName} for this workspace.`)
+      return err(`MCP server not found: ${serverName}`)
+    }
+    delete project.mcpServers[serverName]
+    project.disabledServers = withoutValue(projectDisabledServers(project), serverName)
+    const file = await saveProjectMcpConfig(project, { cwd })
+    await closeMcpClients({ cwd })
+    return ok(`Removed MCP server ${serverName} from ${file}.`)
+  }
+  if (verb === 'disable' || verb === 'enable') {
+    if (!serverName) return err(`Usage: /mcp ${verb} <name>`)
+    const effective = await loadMcpConfig({ cwd })
+    if (!effective.mcpServers?.[serverName]) return err(`MCP server not found: ${serverName}`)
+    const project = await loadProjectMcpConfig({ cwd })
+    const disabled = projectDisabledServers(project)
+    project.disabledServers = verb === 'disable' ? [...new Set([...disabled, serverName])] : withoutValue(disabled, serverName)
+    const file = await saveProjectMcpConfig(project, { cwd })
+    await closeMcpClients({ cwd })
+    return ok(`${verb === 'disable' ? 'Disabled' : 'Enabled'} MCP server ${serverName} in ${file}.`)
+  }
+  if (verb === 'reauth' || verb === 'unauth') {
+    if (!serverName) return err(`Usage: /mcp ${verb} <name>`)
+    const effective = await loadMcpConfig({ cwd })
+    const server = effective.mcpServers?.[serverName]
+    if (!server) return err(`MCP server not found: ${serverName}`)
+    const spec = mcpHookSpec(server, verb)
+    if (!spec?.command) return err(`MCP server ${serverName} has no ${verb} command configured. Add ${verb}Command to its MCP server config.`)
+    try {
+      const result = await runLocalCommand(spec, { cwd })
+      await closeMcpClients({ cwd })
+      return ok(lines([`MCP ${verb} completed for ${serverName}.`, result.stdout, result.stderr]))
+    } catch (error) {
+      return err(`MCP ${verb} failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
   const mcpReadCommands = new Set(['tools', 'resources', 'prompts', 'test'])
   if (!serverName && mcpReadCommands.has(verb)) return err(`Usage: /mcp ${verb} <server>`)
@@ -283,7 +390,18 @@ async function handleMcp(parsed, context) {
   } catch (error) {
     return err(`MCP ${verb} failed: ${error instanceof Error ? error.message : String(error)}`)
   }
-  return err('Jeden supports /mcp list|tools <server>|resources <server>|prompts <server>|test <server>|reload|reconnect. Editing MCP config is done by changing .jeden/mcp.json or ~/.jeden/mcp.json.')
+  return err('Usage: /mcp list | add <name> <command> [args...] | remove <name> | enable <name> | disable <name> | reauth <name> | unauth <name> | tools <server> | resources <server> | prompts <server> | test <server> | reload | reconnect')
+}
+
+function sshHostValue(target, options) {
+  if (options.length === 0) return target
+  const host = { host: target }
+  for (const option of options) {
+    const index = option.indexOf('=')
+    if (index <= 0) return null
+    host[option.slice(0, index)] = option.slice(index + 1)
+  }
+  return host
 }
 
 function configuredSshHosts(config) {
@@ -291,34 +409,102 @@ function configuredSshHosts(config) {
 }
 
 async function handleSsh(parsed, context) {
-  const [verb = 'list'] = splitArgs(parsed.args)
-  const config = await loadJedenConfig({ cwd: context.args.cwd })
+  const [verb = 'list', name, target, ...options] = splitArgs(parsed.args)
+  const cwd = context.args.cwd
+  const config = await loadJedenConfig({ cwd })
   const hosts = configuredSshHosts(config)
   if (verb === 'list') {
     const names = Object.keys(hosts || {})
     return ok(names.length ? names.map((host) => `${host}\t${typeof hosts[host] === 'string' ? hosts[host] : JSON.stringify(hosts[host])}`).join('\n') : 'No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).')
   }
-  if (verb === 'help') return ok('Usage: /ssh list. Configure hosts with sshHosts in ~/.jeden/config.json or <cwd>/.jeden/config.json.')
-  if (verb === 'add' || verb === 'remove') return err('/ssh add/remove are not implemented in this Jeden runtime. Edit sshHosts in the existing Jeden config files instead of creating a separate SSH store.')
-  return err('Usage: /ssh list | /ssh help')
+  if (verb === 'help') return ok('Usage: /ssh list | add <name> <target> [key=value ...] | remove <name>. Hosts are stored in <cwd>/.jeden/config.json under sshHosts.')
+  if (verb === 'add') {
+    if (!name || !target) return err('Usage: /ssh add <name> <target> [key=value ...]')
+    const value = sshHostValue(target, options)
+    if (!value) return err('Usage: /ssh add <name> <target> [key=value ...]')
+    const project = await loadProjectJedenConfig({ cwd })
+    project.sshHosts = { ...(project.sshHosts || {}), [name]: value }
+    const file = await saveProjectJedenConfig(project, { cwd })
+    return ok(`Added SSH host ${name} to ${file}.`)
+  }
+  if (verb === 'remove') {
+    if (!name) return err('Usage: /ssh remove <name>')
+    const project = await loadProjectJedenConfig({ cwd })
+    if (!project.sshHosts?.[name]) {
+      if (hosts?.[name]) return err(`SSH host ${name} is not in <cwd>/.jeden/config.json. Remove it from ~/.jeden/config.json or the config file that defines it.`)
+      return err(`SSH host not found: ${name}`)
+    }
+    delete project.sshHosts[name]
+    const file = await saveProjectJedenConfig(project, { cwd })
+    return ok(`Removed SSH host ${name} from ${file}.`)
+  }
+  return err('Usage: /ssh list | add <name> <target> [key=value ...] | remove <name> | help')
+}
+
+function formatMentalModelList(bank) {
+  const models = Object.values(bank.models || {}).sort((a, b) => String(b.updatedAt || '').localeCompare(String(a.updatedAt || '')))
+  if (models.length === 0) return 'No mental models seeded.'
+  return models.map((model) => `${model.id}\t${model.updatedAt || '-'}\t${String(model.text || '').slice(0, 100)}`).join('\n')
+}
+
+function formatMentalModelHistory(bank, modelId = '') {
+  const id = normalizeMentalModelId(modelId)
+  const history = (bank.history || []).filter((event) => !id || event.modelId === id)
+  if (history.length === 0) return id ? `No history for mental model: ${id}` : 'No mental-model history.'
+  return history.map((event) => `${event.at || '-'}\t${event.action || '-'}\t${event.modelId || '-'}\t${String(event.text || '').slice(0, 120)}`).join('\n')
+}
+
+async function handleMentalModels(rest, context, memoryFile) {
+  const [verb = 'list', id, ...textParts] = rest
+  const file = mentalModelPath(memoryFile)
+  const cwd = context.args.cwd
+  if (verb === 'list') return ok(lines([`Mental-model file: ${file}`, formatMentalModelList(await loadMentalModelBank(file))]))
+  if (verb === 'show') {
+    const modelId = normalizeMentalModelId(id)
+    if (!modelId) return err('Usage: /memory mm show <id>')
+    const bank = await loadMentalModelBank(file)
+    const model = bank.models[modelId]
+    if (!model) return err(`Mental model not found: ${modelId}`)
+    return ok(lines([`Mental model: ${model.id}`, `Updated: ${model.updatedAt || '-'}`, '', model.text || '']))
+  }
+  if (verb === 'history') return ok(lines([`Mental-model file: ${file}`, formatMentalModelHistory(await loadMentalModelBank(file), id)]))
+  if (verb === 'seed') {
+    if (!id || textParts.length === 0) return err('Usage: /memory mm seed <id> <text>')
+    const { model } = await seedMentalModel({ id, text: textParts.join(' '), cwd, file })
+    return ok(`Seeded mental model ${model.id} in ${file}`)
+  }
+  if (verb === 'delete') {
+    if (!id) return err('Usage: /memory mm delete <id>')
+    const result = await deleteMentalModel({ id, cwd, file })
+    return ok(result.deleted ? `Deleted mental model ${result.modelId} from ${file}` : `Mental model not found: ${result.modelId}`)
+  }
+  return err('Usage: /memory mm list | show <id> | history [id] | seed <id> <text> | delete <id>')
 }
 
 async function handleMemory(parsed, context) {
   const [verb = 'view', ...rest] = splitArgs(parsed.args)
+  const cwd = context.args.cwd
   const file = memoryPath()
   if (verb === 'stats' || verb === 'diagnose') {
-    const records = await loadMemoryRecords(file, { cwd: context.args.cwd })
-    return ok(lines([`Memory file: ${file}`, `Records: ${records.length}`, `Scope: ${context.args.cwd}`]))
+    const records = await loadMemoryRecords(file, { cwd })
+    return ok(lines([`Memory file: ${file}`, `Records: ${records.length}`, `Scope: ${cwd}`]))
   }
   if (verb === 'view') {
     const query = rest.join(' ')
-    const records = query ? await recallMemories({ cwd: context.args.cwd, query, limit: 20, file }) : await loadMemoryRecords(file, { cwd: context.args.cwd })
+    const records = query ? await recallMemories({ cwd, query, limit: 20, file }) : await loadMemoryRecords(file, { cwd })
     return ok(records.length ? records.slice(-20).map((record) => `${record.id || '-'}\t${record.kind || '-'}\t${record.text || record.content || ''}`).join('\n') : 'No memory records.')
   }
   if (verb === 'clear' || verb === 'reset') { await saveMemoryRecords([], file); return ok(`Cleared memory file: ${file}`) }
-  if (verb === 'enqueue' || verb === 'rebuild') return ok('Memory maintenance queued locally: no external memory worker is configured in Jeden; current local memory file remains authoritative.')
-  if (verb === 'mm') return ok('Mental-model bank commands are not backed by a Jeden mental-model store. Local durable memory is available via /memory view|stats|clear.')
-  return err('Usage: /memory view [query] | stats | diagnose | clear | reset | enqueue | rebuild')
+  if (verb === 'enqueue') {
+    const queued = await enqueueMemoryMaintenance({ operation: 'enqueue', cwd, file, note: rest.join(' ') })
+    return ok(lines([`Queued local memory maintenance: ${queued.record.id}`, `Queue: ${queued.queueFile}`, `Memory file: ${file}`]))
+  }
+  if (verb === 'rebuild') {
+    const result = await rebuildMemoryFile({ cwd, file })
+    return ok(lines([`Rebuilt local memory file: ${result.file}`, `Records: ${result.before} -> ${result.after}`, `Duplicates removed: ${result.duplicates}`, `Expired removed: ${result.expired}`, `Maintenance queue: ${result.queueFile}`]))
+  }
+  if (verb === 'mm') return handleMentalModels(rest, context, file)
+  return err('Usage: /memory view [query] | stats | diagnose | clear | reset | enqueue [note] | rebuild | mm list|show|history|seed|delete')
 }
 
 function formatConfigSummary(config) {
@@ -382,7 +568,7 @@ async function handleSessionLifecycle(canonical, parsed, context) {
 async function handleUtility(canonical, parsed, context) {
   if (canonical === 'export') return ok(await exportCurrentSession(context, parsed.args))
   if (canonical === 'dump') return ok(formatSessionText(await currentSession(context)))
-  if (canonical === 'copy') return ok('Copy selector UI is not available in a plain terminal. Use /dump or /export to retrieve transcript text.')
+  if (canonical === 'copy') return handleCopy(parsed, context)
   if (canonical === 'jobs') return ok(state(context).jobs.length ? JSON.stringify(state(context).jobs, null, 2) : 'No background jobs are tracked inside this Jeden process.')
   if (canonical === 'usage') return ok(JSON.stringify({ model: context.args.model || process.env.JEDEN_MODEL || process.env.MODEL || 'default', maxTokens: context.args.maxTokens, maxSteps: context.args.maxSteps }, null, 2))
   if (canonical === 'stats') return ok(JSON.stringify(await buildDoctorReport({ cwd: context.args.cwd }), null, 2))
@@ -400,18 +586,20 @@ async function handleUtility(canonical, parsed, context) {
 
 async function handleCollab(canonical, parsed, context) {
   const st = state(context)
-  if (canonical === 'share') return ok(`Local share artifact: ${join(context.recorder.artifactDir(), 'handoff.md')}\nUse /handoff to write a portable transcript. Encrypted relay sharing is not configured in Jeden.`)
-  if (canonical === 'collab') {
-    const [verb = 'status', relay] = splitArgs(parsed.args)
-    if (verb === 'stop') { st.collab.host = null; return ok('Collab stopped.') }
-    if (verb === 'status') return ok(st.collab.host ? `Collab hosting: ${st.collab.host}` : st.collab.guest ? `Collab guest: ${st.collab.guest}` : 'Collab off.')
-    if (verb === 'start' || verb === 'view') { st.collab.host = relay || 'local'; return ok(`Collab ${verb} recorded locally. Relay networking is not implemented in Jeden.`) }
-    st.collab.host = verb
-    return ok(`Collab relay recorded locally: ${verb}. Relay networking is not implemented in Jeden.`)
-  }
-  if (canonical === 'join') { st.collab.guest = parsed.args.trim(); return ok(`Join target recorded locally: ${st.collab.guest}. Relay networking is not implemented in Jeden.`) }
-  if (canonical === 'leave') { st.collab.guest = null; st.collab.host = null; return ok('Left collab state.') }
-  return null
+  if (canonical === 'share') return ok(await createEncryptedShare(context))
+  const [verb = 'status', relay] = splitArgs(parsed.args)
+  const result = await handleLocalCollab({
+    canonical,
+    verb,
+    relay,
+    target: parsed.args.trim(),
+    collabState: st.collab,
+    sessionPath: context.recorder.path(),
+    cwd: context.args.cwd,
+    artifactDir: context.recorder.artifactDir(),
+  })
+  if (!result) return null
+  return result.error ? err(result.error) : ok(result.text)
 }
 
 function handleBranching(canonical, parsed, context) {
@@ -433,6 +621,9 @@ export async function dispatchSlashCommand(input, context = {}) {
   if (canonical === 'exit' || canonical === 'quit') return { handled: true, exit: true }
   if (canonical === 'help' || canonical === 'commands') return ok(formatSlashCommandList())
   if (!command) return err(`Unknown slash command /${parsed.rawName}. Use /help to list commands.`)
+
+  const runtime = await handleRuntimeSlashCommand(canonical, parsed, context)
+  if (runtime) return runtime
 
   const mode = dispatchModeSlashCommand({ ...parsed, canonical }, context.modeState, context)
   if (mode) return mode

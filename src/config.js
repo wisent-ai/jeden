@@ -1,6 +1,6 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 async function readJson(file) {
   try {
@@ -13,6 +13,21 @@ async function readJson(file) {
 
 function mergeConfig(base, override) {
   return { ...base, ...override }
+}
+
+export function projectJedenConfigPath({ cwd = process.cwd() } = {}) {
+  return resolve(cwd, '.jeden', 'config.json')
+}
+
+export async function loadProjectJedenConfig({ cwd = process.cwd() } = {}) {
+  return readJson(projectJedenConfigPath({ cwd }))
+}
+
+export async function saveProjectJedenConfig(config, { cwd = process.cwd() } = {}) {
+  const file = projectJedenConfigPath({ cwd })
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, `${JSON.stringify(config || {}, null, 2)}\n`, 'utf8')
+  return file
 }
 
 export async function loadJedenConfig({ cwd = process.cwd() } = {}) {

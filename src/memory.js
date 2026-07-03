@@ -1,6 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const DEFAULT_MEMORY_LIMIT = 10
 const MAX_MEMORY_TEXT = 2_000
@@ -8,7 +8,6 @@ const SECRET_PATTERNS = [
   /\b(?:sk|pk|rk)_[A-Za-z0-9_\-]{16,}\b/g,
   /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/g,
   /\b[A-Za-z0-9+/]{32,}={0,2}\b/g,
-  /((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)[^\s,;]+/gi,
 ]
 
 export function memoryPath() {
@@ -104,10 +103,197 @@ export async function loadMemoryRecords(file = memoryPath(), { cwd = process.cwd
   }
 }
 
-export async function saveMemoryRecords(records, file = memoryPath()) {
+async function writeJsonFileAtomic(file, payload) {
   await mkdir(dirname(file), { recursive: true })
-  const body = records.map((entry) => JSON.stringify(entry)).join('\n')
-  await writeFile(file, body ? `${body}\n` : '', 'utf8')
+  const temp = join(dirname(file), `.${Date.now().toString(36)}-${memoryId()}.tmp`)
+  await writeFile(temp, payload, 'utf8')
+  await rename(temp, file)
+}
+
+async function writeJsonlFileAtomic(file, entries) {
+  const body = entries.map((entry) => JSON.stringify(entry)).join('\n')
+  await writeJsonFileAtomic(file, body ? `${body}\n` : '')
+}
+
+export async function saveMemoryRecords(records, file = memoryPath()) {
+  await writeJsonlFileAtomic(file, records)
+}
+
+export function memoryMaintenanceQueuePath(file = memoryPath()) {
+  return join(dirname(resolve(file)), 'memory-maintenance.jsonl')
+}
+
+export async function enqueueMemoryMaintenance({ operation = 'enqueue', cwd = process.cwd(), file = memoryPath(), note = '' } = {}) {
+  const queueFile = memoryMaintenanceQueuePath(file)
+  await mkdir(dirname(queueFile), { recursive: true })
+  const record = {
+    id: memoryId(),
+    type: 'memory_maintenance',
+    operation: String(operation || 'enqueue'),
+    status: 'queued',
+    memoryFile: resolve(file),
+    cwd: resolve(cwd),
+    note: clipText(note, 1_000),
+    createdAt: new Date().toISOString(),
+  }
+  await appendFile(queueFile, `${JSON.stringify(record)}\n`, 'utf8')
+  return { record, queueFile }
+}
+
+function normalizedRecordText(record) {
+  return String(record?.text || record?.content || '').toLowerCase().replace(/\s+/g, ' ').trim()
+}
+
+function memoryRecordKey(record) {
+  const scope = record?.scope || {}
+  return JSON.stringify([record?.kind || 'note', scope.kind || '', scope.id || '', normalizedRecordText(record)])
+}
+
+function memoryRecordTimestamp(record) {
+  return Date.parse(record?.lastVerifiedAt || record?.createdAt || '') || 0
+}
+
+function strongerMemoryRecord(left, right) {
+  const leftActive = left?.status === 'active' || !left?.status
+  const rightActive = right?.status === 'active' || !right?.status
+  if (leftActive !== rightActive) return leftActive ? left : right
+  const leftConfidence = Number(left?.confidence || 0)
+  const rightConfidence = Number(right?.confidence || 0)
+  if (leftConfidence !== rightConfidence) return leftConfidence > rightConfidence ? left : right
+  return memoryRecordTimestamp(left) >= memoryRecordTimestamp(right) ? left : right
+}
+
+function mergeMemoryTags(left, right) {
+  return memoryTags([...(left?.tags || []), ...(right?.tags || [])])
+}
+
+export async function rebuildMemoryFile({ file = memoryPath(), cwd = process.cwd() } = {}) {
+  const records = await loadMemoryRecords(file, { cwd })
+  const now = Date.now()
+  const byKey = new Map()
+  let expired = 0
+  let duplicates = 0
+  for (const record of records) {
+    if (isExpired(record, now)) {
+      expired += 1
+      continue
+    }
+    const key = memoryRecordKey(record)
+    const prior = byKey.get(key)
+    if (!prior) {
+      byKey.set(key, record)
+      continue
+    }
+    duplicates += 1
+    const winner = strongerMemoryRecord(prior, record)
+    const loser = winner === prior ? record : prior
+    winner.tags = mergeMemoryTags(winner, loser)
+    byKey.set(key, winner)
+  }
+  const compacted = [...byKey.values()].sort((a, b) => String(a.createdAt || '').localeCompare(String(b.createdAt || '')))
+  await saveMemoryRecords(compacted, file)
+  const queued = await enqueueMemoryMaintenance({ operation: 'rebuild', cwd, file, note: `Compacted ${records.length} records to ${compacted.length}` })
+  return {
+    file: resolve(file),
+    queueFile: queued.queueFile,
+    queueRecord: queued.record,
+    before: records.length,
+    after: compacted.length,
+    duplicates,
+    expired,
+  }
+}
+
+export function mentalModelPath(file = memoryPath()) {
+  return process.env.JEDEN_MENTAL_MODEL_FILE ? resolve(process.env.JEDEN_MENTAL_MODEL_FILE) : join(dirname(resolve(file)), 'mental-models.json')
+}
+
+function emptyMentalModelBank() {
+  return { version: 1, models: {}, history: [] }
+}
+
+export function normalizeMentalModelId(value) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+}
+
+function normalizeMentalModelBank(value) {
+  const bank = emptyMentalModelBank()
+  const models = value?.models && typeof value.models === 'object' && !Array.isArray(value.models) ? value.models : {}
+  for (const [rawId, model] of Object.entries(models)) {
+    const id = normalizeMentalModelId(model?.id || rawId)
+    if (!id) continue
+    bank.models[id] = {
+      id,
+      text: clipText(model?.text || model?.body || '', 8_000),
+      createdAt: model?.createdAt || new Date().toISOString(),
+      updatedAt: model?.updatedAt || model?.createdAt || new Date().toISOString(),
+      source: model?.source && typeof model.source === 'object' && !Array.isArray(model.source) ? model.source : {},
+      history: Array.isArray(model?.history) ? model.history : [],
+    }
+  }
+  bank.history = Array.isArray(value?.history) ? value.history : []
+  return bank
+}
+
+export async function loadMentalModelBank(file = mentalModelPath()) {
+  try {
+    return normalizeMentalModelBank(JSON.parse(await readFile(file, 'utf8')))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return emptyMentalModelBank()
+    throw error
+  }
+}
+
+export async function saveMentalModelBank(bank, file = mentalModelPath()) {
+  await writeJsonFileAtomic(file, `${JSON.stringify(normalizeMentalModelBank(bank), null, 2)}\n`)
+}
+
+export async function seedMentalModel({ id, text, cwd = process.cwd(), file = mentalModelPath() } = {}) {
+  const modelId = normalizeMentalModelId(id)
+  if (!modelId) throw new Error('mental model id is required')
+  if (!String(text || '').trim()) throw new Error('mental model text is required')
+  const bank = await loadMentalModelBank(file)
+  const existing = bank.models[modelId]
+  const now = new Date().toISOString()
+  const event = {
+    id: memoryId(),
+    at: now,
+    action: existing ? 'update' : 'seed',
+    modelId,
+    cwd: resolve(cwd),
+    text: clipText(text, 8_000),
+  }
+  bank.models[modelId] = {
+    id: modelId,
+    text: event.text,
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
+    source: { origin: '/memory mm seed', cwd: resolve(cwd) },
+    history: [...(existing?.history || []), event],
+  }
+  bank.history.push(event)
+  await saveMentalModelBank(bank, file)
+  return { model: bank.models[modelId], event, file }
+}
+
+export async function deleteMentalModel({ id, cwd = process.cwd(), file = mentalModelPath() } = {}) {
+  const modelId = normalizeMentalModelId(id)
+  if (!modelId) throw new Error('mental model id is required')
+  const bank = await loadMentalModelBank(file)
+  const existing = bank.models[modelId]
+  if (!existing) return { deleted: false, modelId, file }
+  const event = {
+    id: memoryId(),
+    at: new Date().toISOString(),
+    action: 'delete',
+    modelId,
+    cwd: resolve(cwd),
+    text: existing.text,
+  }
+  delete bank.models[modelId]
+  bank.history.push(event)
+  await saveMentalModelBank(bank, file)
+  return { deleted: true, modelId, event, file }
 }
 
 export async function rememberMemory(input, { file = memoryPath(), cwd = process.cwd() } = {}) {

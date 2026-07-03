@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 
 const MCP_PROTOCOL_VERSION = '2024-11-05'
 
@@ -18,6 +18,21 @@ async function readJson(file) {
     throw error
   }
 }
+export function projectMcpConfigPath({ cwd = process.cwd() } = {}) {
+  return resolve(cwd, '.jeden', 'mcp.json')
+}
+
+export async function loadProjectMcpConfig({ cwd = process.cwd() } = {}) {
+  return readJson(projectMcpConfigPath({ cwd }))
+}
+
+export async function saveProjectMcpConfig(config, { cwd = process.cwd() } = {}) {
+  const file = projectMcpConfigPath({ cwd })
+  await mkdir(dirname(file), { recursive: true })
+  await writeFile(file, `${JSON.stringify(config || {}, null, 2)}\n`, 'utf8')
+  return file
+}
+
 
 export async function loadMcpConfig({ cwd = process.cwd() } = {}) {
   const user = await readJson(join(localHomeDir(), '.jeden', 'mcp.json'))

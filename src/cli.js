@@ -366,7 +366,7 @@ function interactivePermissionStatus(enabled) {
 
 
 async function runInteractive(args) {
-  const recorder = new SessionRecorder({ cwd: args.cwd })
+  let recorder = new SessionRecorder({ cwd: args.cwd })
   await recorder.ensure()
   const permission = {
     writeStatus: interactivePermissionStatus(args.allowWrite),
@@ -393,6 +393,8 @@ async function runInteractive(args) {
   }
   const modeState = createModeState()
   let pendingLoopTask = ''
+  let priorMessages = []
+  let replayInstalled = false
 
   try {
     for (;;) {
@@ -406,6 +408,17 @@ async function runInteractive(args) {
         recorder,
         createToolRegistry,
         setModel: (model) => tui?.setModel(model),
+        setRecorder: (nextRecorder) => {
+          recorder = nextRecorder
+          if (tui) {
+            tui.sessionPath = nextRecorder.path()
+            tui.render()
+          }
+        },
+        installPriorMessages: (messages) => {
+          priorMessages = Array.isArray(messages) ? messages : []
+          replayInstalled = priorMessages.length > 0
+        },
         modeState,
       }
       const slash = await dispatchSlashCommand(task, slashContext)
@@ -423,8 +436,9 @@ async function runInteractive(args) {
         tui?.setBusy(true)
         const taskForHook = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })
         const taskForRun = prepareTaskForModes(taskForHook, modeState)
-        const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner })
+        const result = await runJeden({ ...args, task: taskForRun, recorder, approveTool, askUser, hookRunner, priorMessages: replayInstalled ? priorMessages : [] })
         noteModeRunResult(modeState, { task, text: result.text })
+        if (replayInstalled) priorMessages = [...priorMessages, { role: 'user', content: taskForRun }, { role: 'assistant', content: JSON.stringify({ action: 'final', text: result.text }) }]
         if (tui) tui.push('assistant', result.text)
         else process.stdout.write(`\n${paint('╭─ jeden', 'magenta')}\n${result.text}\n${paint('╰─', 'magenta')}\n\n`)
         pendingLoopTask = consumeLoopPrompt(modeState, task) || ''

@@ -400,8 +400,8 @@ export async function createNewSession({ root = defaultSessionRoot(), cwd = proc
 export async function dropSessionAndCreateNew({ recorder = null, idOrPath = null, root = defaultSessionRoot(), cwd = process.cwd() } = {}) {
   const current = idOrPath || recorder?.path?.()
   if (!current) throw new Error('current session is required')
-  const deleted = await deleteSession({ idOrPath: current, root })
   const next = await createNewSession({ root, cwd })
+  const deleted = await deleteSession({ idOrPath: current, root })
   return { deleted, ...next }
 }
 
