@@ -438,6 +438,8 @@ test('edit_file returns a coarse visual diff preview for large files', async () 
     const registry = createToolRegistry({ cwd: dir, allowWrite: true })
     const prefix = Array.from({ length: 260 }, (_, index) => `prefix context ${index + 1}`)
     const suffix = Array.from({ length: 260 }, (_, index) => `suffix context ${index + 1}`)
+    const lineCount = prefix.length + 2 + suffix.length
+    assert.ok(lineCount * lineCount > 250_000)
     const content = [...prefix, 'old head line', 'old tail line', ...suffix].join('\n') + '\n'
     await writeFile(join(dir, 'large-diff.txt'), content, 'utf8')
 
@@ -463,6 +465,141 @@ test('edit_file returns a coarse visual diff preview for large files', async () 
   })
 })
 
+test('edit applies OMP-style visual patches with anchored tags and metadata', async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, 'notes.txt')
+    await writeFile(file, 'alpha\nbravo\ncharlie\ndelta\necho\n', 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const current = await registry.execute('read_file', { path: 'notes.txt' })
+
+    const patched = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('notes.txt', current.output.sha256)}
+SWAP 2.=2:
++BRAVO
+INS.POST 3:
++between
+DEL 5
+*** End Patch`,
+    })
+
+    const expected = 'alpha\nBRAVO\ncharlie\nbetween\ndelta\n'
+    assert.equal(patched.ok, true)
+    assert.equal(await readFile(file, 'utf8'), expected)
+    assert.equal(patched.output.files.length, 1)
+    assert.equal(patched.output.files[0].path, 'notes.txt')
+    assert.match(patched.output.files[0].sha256, /^[a-f0-9]{64}$/)
+    assert.equal(patched.output.files[0].snapshot, expectedSnapshot('notes.txt', patched.output.files[0].sha256))
+    assert.equal(patched.output.files[0].ops, 3)
+    assert.equal(patched.output.files[0].bytes, Buffer.byteLength(expected, 'utf8'))
+    assert.match(patched.output.files[0].diff, /^--- notes\.txt\n\+\+\+ notes\.txt\n@@ -1,5 \+1,5 @@/m)
+    assert.match(patched.output.files[0].diff, /^-bravo$/m)
+    assert.match(patched.output.files[0].diff, /^\+BRAVO$/m)
+    assert.match(patched.output.files[0].diff, /^\+between$/m)
+    assert.match(patched.output.files[0].diff, /^-echo$/m)
+  })
+})
+
+test('edit is atomic across multiple file sections when a later hunk is invalid', async () => {
+  await withTempDir(async (dir) => {
+    const fileA = join(dir, 'a.txt')
+    const fileB = join(dir, 'b.txt')
+    const originalA = 'alpha\nbravo\ncharlie\n'
+    const originalB = 'one\ntwo\n'
+    await writeFile(fileA, originalA, 'utf8')
+    await writeFile(fileB, originalB, 'utf8')
+
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const currentA = await registry.execute('read_file', { path: 'a.txt' })
+    const currentB = await registry.execute('read_file', { path: 'b.txt' })
+
+    const rejected = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('a.txt', currentA.output.sha256)}
+SWAP 2.=2:
++BRAVO
+${expectedSnapshotHeader('b.txt', currentB.output.sha256)}
+SWAP 99.=99:
++broken
+*** End Patch`,
+    })
+
+    assert.equal(rejected.ok, false)
+    assert.match(rejected.error, /edit range is past end of file/)
+    assert.equal(await readFile(fileA, 'utf8'), originalA)
+    assert.equal(await readFile(fileB, 'utf8'), originalB)
+  })
+})
+
+test('edit rejects stale tags and empty visual patch bodies without mutating files', async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, 'notes.txt')
+    await writeFile(file, 'alpha\nbravo\ncharlie\n', 'utf8')
+
+    const locked = createToolRegistry({ cwd: dir })
+    const denied = await locked.execute('edit', { patch: '*** Begin Patch\n*** End Patch' })
+    assert.equal(denied.ok, false)
+    assert.match(denied.error, /requires --allow-write/)
+
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const staleBase = await registry.execute('read_file', { path: 'notes.txt' })
+    await writeFile(file, 'alpha\nBRAVO\ncharlie\n', 'utf8')
+    const stale = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('notes.txt', staleBase.output.sha256)}
+SWAP 2.=2:
++broken
+*** End Patch`,
+    })
+    assert.equal(stale.ok, false)
+    assert.match(stale.error, /snapshot tag mismatch for notes\.txt/)
+    assert.equal(await readFile(file, 'utf8'), 'alpha\nBRAVO\ncharlie\n')
+
+    const current = await registry.execute('read_file', { path: 'notes.txt' })
+    const emptySwap = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('notes.txt', current.output.sha256)}
+SWAP 1.=1:
+*** End Patch`,
+    })
+    assert.equal(emptySwap.ok, false)
+    assert.match(emptySwap.error, /SWAP hunk requires at least one \+ body line/)
+    assert.equal(await readFile(file, 'utf8'), 'alpha\nBRAVO\ncharlie\n')
+
+    const emptyInsert = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('notes.txt', current.output.sha256)}
+INS.POST 1:
+*** End Patch`,
+    })
+    assert.equal(emptyInsert.ok, false)
+    assert.match(emptyInsert.error, /INS hunk requires at least one \+ body line/)
+    assert.equal(await readFile(file, 'utf8'), 'alpha\nBRAVO\ncharlie\n')
+  })
+})
+
+test('edit treats a bare + body row as an inserted blank line', async () => {
+  await withTempDir(async (dir) => {
+    const file = join(dir, 'blank.txt')
+    await writeFile(file, 'top\nbottom\n', 'utf8')
+    const registry = createToolRegistry({ cwd: dir, allowWrite: true })
+    const current = await registry.execute('read_file', { path: 'blank.txt' })
+
+    const patched = await registry.execute('edit', {
+      patch: `*** Begin Patch
+${expectedSnapshotHeader('blank.txt', current.output.sha256)}
+INS.POST 1:
++
+*** End Patch`,
+    })
+
+    const expected = 'top\n\nbottom\n'
+    assert.equal(patched.ok, true)
+    assert.equal(await readFile(file, 'utf8'), expected)
+    assert.equal(patched.output.files[0].bytes, Buffer.byteLength(expected, 'utf8'))
+    assert.match(patched.output.files[0].diff, /^\+$/m)
+  })
+})
 
 test('filesystem mutation tools require hashes and expose visual diffs', async () => {
   await withTempDir(async (dir) => {

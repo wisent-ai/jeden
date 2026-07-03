@@ -18,6 +18,7 @@ const SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'co
 export const TOOL_CAPABILITIES = {
   write_file: { permission: 'write', hook: 'edit' },
   apply_patch: { permission: 'write', hook: 'edit' },
+  edit: { permission: 'write', hook: 'edit' },
   edit_file: { permission: 'write', hook: 'edit' },
   delete_file: { permission: 'write', hook: 'edit' },
   move_file: { permission: 'write', hook: 'edit' },
@@ -641,6 +642,10 @@ function splitTextLines(content) {
 }
 
 function normalizeInsertedLines(content) {
+  if (Array.isArray(content)) {
+    if (!content.every((line) => typeof line === 'string')) throw new Error('content lines must be strings')
+    return content.slice()
+  }
   if (content == null) return []
   if (typeof content !== 'string') throw new Error('content must be a string')
   if (content.length === 0) return []
@@ -737,6 +742,89 @@ function visualLineEditDiff({ path, before, ops, context = 3 }) {
     output.push(unifiedDiffFromOperations(path, adjusted, context).split('\n').slice(2).join('\n'))
   }
   return output.filter(Boolean).join('\n')
+}
+
+function parseVisualPatchBody(lines, index) {
+  const body = []
+  while (index < lines.length) {
+    const line = lines[index]
+    if (line === '*** End Patch' || /^\[[^#\]\r\n]+#[0-9A-Fa-f]{4}\]$/.test(line) || /^SWAP /.test(line) || /^DEL /.test(line) || /^INS\./.test(line)) break
+    if (!line.startsWith('+')) throw new Error(`patch body line must start with +: ${line}`)
+    body.push(line.slice(1))
+    index += 1
+  }
+  return { content: body, rows: body.length, index }
+}
+
+function parseVisualEditPatch(patch) {
+  if (typeof patch !== 'string' || patch.trim() === '') throw new Error('patch is required')
+  const lines = patch.replace(/\r\n/g, '\n').split('\n')
+  while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
+  if (lines[0] !== '*** Begin Patch') throw new Error('patch must start with *** Begin Patch')
+  if (lines[lines.length - 1] !== '*** End Patch') throw new Error('patch must end with *** End Patch')
+  const files = []
+  let current = null
+  let index = 1
+  while (index < lines.length - 1) {
+    const line = lines[index]
+    if (line.trim() === '') {
+      index += 1
+      continue
+    }
+    const header = /^\[([^#\]\r\n]+)#([0-9A-Fa-f]{4})\]$/.exec(line)
+    if (header) {
+      current = { path: header[1], tag: header[2].toUpperCase(), ops: [] }
+      files.push(current)
+      index += 1
+      continue
+    }
+    if (!current) throw new Error('patch hunk appears before file header')
+    let match = /^SWAP ([1-9]\d*)\.=([1-9]\d*):$/.exec(line)
+    if (match) {
+      const parsed = parseVisualPatchBody(lines, index + 1)
+      if (parsed.rows === 0) throw new Error('SWAP hunk requires at least one + body line; use DEL to delete')
+      current.ops.push({ op: 'replace', startLine: Number(match[1]), endLine: Number(match[2]), content: parsed.content })
+      index = parsed.index
+      continue
+    }
+    match = /^DEL ([1-9]\d*)(?:\.=([1-9]\d*))?$/.exec(line)
+    if (match) {
+      current.ops.push({ op: 'delete', startLine: Number(match[1]), endLine: Number(match[2] || match[1]) })
+      index += 1
+      continue
+    }
+    match = /^INS\.(PRE|POST) ([1-9]\d*):$/.exec(line)
+    if (match) {
+      const parsed = parseVisualPatchBody(lines, index + 1)
+      if (parsed.rows === 0) throw new Error('INS hunk requires at least one + body line')
+      current.ops.push({ op: match[1] === 'PRE' ? 'insert_before' : 'insert_after', line: Number(match[2]), content: parsed.content })
+      index = parsed.index
+      continue
+    }
+    match = /^INS\.(HEAD|TAIL):$/.exec(line)
+    if (match) {
+      const parsed = parseVisualPatchBody(lines, index + 1)
+      if (parsed.rows === 0) throw new Error('INS hunk requires at least one + body line')
+      current.ops.push({ op: match[1] === 'HEAD' ? 'insert_head' : 'insert_tail', content: parsed.content })
+      index = parsed.index
+      continue
+    }
+    throw new Error(`unsupported patch line: ${line}`)
+  }
+  if (files.length === 0) throw new Error('patch must include at least one file section')
+  for (const file of files) {
+    if (file.ops.length === 0) throw new Error(`patch file section has no hunks: ${file.path}`)
+  }
+  return files
+}
+
+function visualPatchOpsForContent(content, ops) {
+  const { lines } = splitTextLines(content)
+  return ops.map((op) => {
+    if (op.op === 'insert_head') return { op: 'insert_before', line: 1, content: op.content }
+    if (op.op === 'insert_tail') return { op: lines.length === 0 ? 'insert_before' : 'insert_after', line: lines.length === 0 ? 1 : lines.length, content: op.content }
+    return op
+  })
 }
 
 
@@ -1629,6 +1717,52 @@ export function createToolRegistry({ cwd = process.cwd(), allowWrite = false, al
         diff: visualLineDiff({ path: filePath, before: current, after: next }),
         replacements: input.replacements.length,
         bytes: Buffer.byteLength(next, 'utf8'),
+      }
+    },
+  })
+
+  add({
+    name: 'edit',
+    description: 'Apply an OMP-style anchored visual patch string with [path#TAG], SWAP/INS/DEL hunks, visual diffs, and tag freshness checks; requires --allow-write',
+    input: { patch: 'string required; *** Begin Patch ... [path#TAG] ... SWAP/INS/DEL ... *** End Patch' },
+    async execute(input) {
+      if (!allowWrite) throw new Error('edit requires --allow-write')
+      const sections = parseVisualEditPatch(input.patch)
+      const seenPaths = new Set()
+      const prepared = []
+      for (const section of sections) {
+        if (seenPaths.has(section.path)) throw new Error(`duplicate patch file section: ${section.path}`)
+        seenPaths.add(section.path)
+        const file = jailPath(cwd, section.path)
+        const current = await readFile(file, 'utf8')
+        const currentHash = sha256(current)
+        const currentTag = snapshotTagForHash(currentHash)
+        if (currentTag !== section.tag) throw new Error(`snapshot tag mismatch for ${section.path}: expected ${currentTag}, got ${section.tag}`)
+        const ops = visualPatchOpsForContent(current, section.ops)
+        const next = applyLineEditOps(current, ops)
+        prepared.push({
+          file,
+          path: publicPath(cwd, file),
+          before: current,
+          after: next,
+          ops,
+        })
+      }
+      for (const item of prepared) {
+        await writeFile(item.file, item.after, 'utf8')
+      }
+      return {
+        files: prepared.map((item) => {
+          const nextHash = sha256(item.after)
+          return {
+            path: item.path,
+            sha256: nextHash,
+            snapshot: snapshotName(item.path, nextHash),
+            diff: visualLineEditDiff({ path: item.path, before: item.before, ops: item.ops }),
+            ops: item.ops.length,
+            bytes: Buffer.byteLength(item.after, 'utf8'),
+          }
+        }),
       }
     },
   })

@@ -23,7 +23,7 @@ The private M1 version includes:
 - Model calls through `MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`.
 - Default model `claude-code-subscription`; override per run with `--model <name>`, `JEDEN_MODEL`, or config. Use `--max-tokens <n>` to override the per-call output token cap.
 - Filesystem read tools: `list_dir`, `read_file`, `read_binary_file`, `read_image`, `read_archive`, `read_document`, `read_sqlite`, `search_text`, `search_files`, `glob_paths`, `grep_regex`. `read_file` supports selectors like `:10-30`, `:raw:10+5`, and `:conflicts`; returns `sha256`, `snapshot` (`path#TAG`), `visual` (`[path#TAG]` plus numbered lines), and selected text so edits can be anchored to the visible snapshot. Large files require selectors so returned content stays under the cap. `read_image` returns base64 plus mime type, byte count, dimensions, truncation state, and SHA-256 for PNG, JPEG, GIF, and WebP images. `read_archive` lists entries from `.zip`, `.tar`, `.tar.gz`, and `.tgz`, and reads entries as UTF-8 text, binary base64, document text, or image metadata; text/document entry reads accept line ranges. `read_document` extracts readable text from text, HTML, JSON, CSV/TSV tables, XML/RSS/Atom feeds, basic PDFs, and notebooks, and can apply line ranges before the byte cap.
-- File write tools: `write_file`, `apply_patch`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` returned by `read_file`, require `--allow-write`, and return OMP-style visual diffs/previews for inspection.
+- File write tools: `write_file`, `apply_patch`, `edit`, `edit_file`, `delete_file`, `move_file`. Existing file mutations require the `sha256` or snapshot tag guard returned by `read_file`, require `--allow-write`, and return OMP-style visual diffs/previews for inspection.
 - Git read tools: `git_status`, `git_diff`, `git_log`, `git_show`.
 - Eval/process tools: `node_eval`, `python_eval`, `run_process`. They require command permission; `run_process` accepts argv without a shell. `run_command`, `run_process`, and `run_package_script` accept `env` overrides; `null` env values remove inherited variables for that child process. Process outputs are capped and report `stdoutTruncated`/`stderrTruncated` metadata. Timeouts send SIGTERM to the spawned process group, then SIGKILL after a short grace period.
 - Web read tools: `fetch_url` for raw text and `fetch_readable_url` for simplified readable text. Both accept `maxBytes`, `timeoutMs`, and line ranges, and return status, content type, byte counts, truncation state, and SHA-256. `fetch_readable_url` normalizes HTML, pretty-prints JSON, converts CSV/TSV responses to compact Markdown tables, extracts RSS/Atom item titles and links, extracts basic PDF/notebook document text from URL responses, and can apply line ranges before the byte cap.
@@ -36,7 +36,7 @@ The private M1 version includes:
 - MCP tools: `mcp_list_tools`, `mcp_call_tool`, `mcp_list_resources`, `mcp_read_resource`, `mcp_list_prompts`, and `mcp_get_prompt` support configured stdio MCP servers. Configured MCP server tools are also surfaced natively as `mcp__<server>__<tool>` with the server-provided input schema.
 - Session todo tool supports phased `list`, `phase`, and task operations `init`, `append`, `start`, `done`, `drop`, `rm`, and `view`; state is stored as a session artifact.
 - Set `JEDEN_MEMORY_FILE` to override the memory file path for tests or isolated runs. The core memory backend is local JSONL; optional semantic/graph backends such as Cognee can be plugged in behind the exported backend adapter interface without changing the runtime contract.
-- Existing file writes and patches require the `sha256` returned by `read_file`.
+- Existing file writes and patches require the `sha256` or snapshot tag guard returned by `read_file`.
 - Project context auto-loads user context, ancestor context, and cwd context files before each run.
 - Interactive mode asks before executing writes or commands unless the matching `--allow-*` flag is passed.
 - Shared hooks are loaded from `~/.shared-hooks/run-hook.mjs` for `user_prompt_submit`, `pre_tool_use:*`, `post_tool_use:*`, and `stop`.
@@ -313,6 +313,14 @@ Line edit call (`start`/`end`, `startLine`/`endLine`, or `line` are accepted for
 ```json
 {"action":"tool","tool":"edit_file","input":{"path":"src/file.js","expectedSha256":"...","ops":[{"op":"replace","start":10,"end":12,"content":"const ok = true"}]}}
 ```
+
+OMP-style anchored visual patch call:
+
+```json
+{"action":"tool","tool":"edit","input":{"patch":"*** Begin Patch\n[src/file.js#A1B2]\nSWAP 10.=10:\n+const ok = true\nINS.POST 11:\n+export { ok }\n*** End Patch"}}
+```
+
+Supported visual patch hunks are `SWAP N.=M:`, `DEL N` / `DEL N.=M`, `INS.PRE N:`, `INS.POST N:`, `INS.HEAD:`, and `INS.TAIL:`. `SWAP`/`INS` hunks require `+` body lines; use `DEL` for deletion. The `[path#TAG]` tag must match the current `read_file.snapshot` tag.
 
 `read_file` also returns an OMP-style `visual` snapshot alongside JSON metadata:
 
