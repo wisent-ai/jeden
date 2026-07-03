@@ -72,6 +72,24 @@ test('renderTerminalFrame draws Wisent welcome chrome when transcript is empty',
   assert.doesNotMatch(frame, /OMP-style/)
 })
 
+test('renderTerminalFrame shows slash command hints before dispatch', () => {
+  const frame = renderTerminalFrame({
+    cwd: '.',
+    sessionPath: '/session/current',
+    writeStatus: 'ask',
+    commandStatus: 'ask',
+    inputText: '/mo',
+    cursorIndex: 3,
+    columns: 100,
+    rows: 32,
+    color: false,
+  })
+
+  assert.match(frame, /slash commands/)
+  assert.match(frame, /\\/model/)
+  assert.match(frame, /Switch model for this session/)
+})
+
 test('renderTerminalFrame draws transcript, cursor, and editor hints', () => {
   const frame = renderTerminalFrame({
     cwd: '.',
@@ -108,6 +126,7 @@ test('TerminalTui installs raw key handling and restores raw mode on close', () 
 
 test('TerminalTui edits inside the input buffer with cursor keys', () => {
   const { tui } = createTui()
+  tui.pending = { type: 'input', resolve() {} }
 
   tui.onKeypress('a', {})
   tui.onKeypress('c', {})
@@ -144,6 +163,7 @@ test('TerminalTui stores submitted prompts and navigates command history', () =>
   assert.deepEqual(tui.history, ['first command'])
   assert.equal(tui.inputText, '')
 
+  tui.pending = { type: 'input', resolve() {} }
   tui.inputText = 'draft'
   tui.cursorIndex = tui.inputText.length
   tui.onKeypress('', { name: 'up' })
@@ -165,10 +185,23 @@ test('TerminalTui treats PTY newline input as submit while Ctrl-J remains multil
   tui.onKeypress('\n', {})
   assert.equal(submitted, 'from pty')
 
+  tui.pending = { type: 'input', resolve() {} }
   tui.onKeypress('a', {})
   tui.onKeypress('\n', { ctrl: true, name: 'j' })
   tui.onKeypress('b', {})
   assert.equal(tui.inputText, 'a\nb')
+})
+
+test('TerminalTui ignores keypresses while no prompt is pending', () => {
+  const { tui } = createTui()
+
+  tui.onKeypress('/', {})
+  tui.onKeypress('settings', {})
+  tui.onKeypress('\r', { name: 'return' })
+
+  assert.equal(tui.inputText, '')
+  assert.deepEqual(tui.messages, [])
+  assert.deepEqual(tui.history, [])
 })
 
 test('TerminalTui confirm mode accepts y and rejects n, escape, and ctrl-c without leaving payload text', () => {

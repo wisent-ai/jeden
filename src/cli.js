@@ -15,6 +15,7 @@ import { buildCapabilityManifest, buildDoctorReport } from './diagnostics.js'
 import { formatConversationList, listConversationJsonls, recallConversation } from './conversation-recall.js'
 import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self-repair.js'
 import { createTerminalTui } from './tui.js'
+import { dispatchSlashCommand } from './slash-commands.js'
 
 
 function usage() {
@@ -348,7 +349,7 @@ function formatInteractiveBanner(args, sessionPath) {
     `${paint('session', 'dim')} ${sessionPath}`,
     `${statusChip('write', interactivePermissionStatus(args.allowWrite), args.allowWrite ? 'green' : 'yellow')}   ${statusChip('command', interactivePermissionStatus(args.allowCommand), args.allowCommand ? 'green' : 'yellow')}`,
     `${paint('visual edit', 'dim')} ${paint('enabled', 'green')} ${paint('(approval-gated)', 'dim')}`,
-  ])}\n${paint('Type /exit to quit.', 'dim')}\n\n`
+  ])}\n${paint('Type /help for slash commands. Type /exit to quit.', 'dim')}\n\n`
 }
 
 function approvalPrompt({ tool, kind, input }) {
@@ -394,7 +395,21 @@ async function runInteractive(args) {
     for (;;) {
       const task = (await (tui ? tui.prompt() : rl.question(interactivePrompt()))).trim()
       if (!task) continue
-      if (task === '/exit' || task === '/quit') break
+      const slash = await dispatchSlashCommand(task, {
+        args,
+        recorder,
+        createToolRegistry,
+        setModel: (model) => tui?.setModel(model),
+      })
+      if (slash.handled) {
+        if (slash.exit) break
+        if (slash.text) {
+          await recorder.record('slash_command', { task, text: slash.text })
+          if (tui) tui.push(slash.role || 'system', slash.text)
+          else process.stdout.write(`\n${terminalBox('Jeden command', slash.text.split('\n'))}\n\n`)
+        }
+        continue
+      }
       try {
         tui?.setBusy(true)
         const taskForRun = await runUserPromptHook({ hookRunner, task, cwd: args.cwd, recorder })

@@ -1,4 +1,5 @@
 import { emitKeypressEvents } from 'node:readline'
+import { formatSlashCommand, slashCommandHints } from './slash-commands.js'
 
 const ANSI = {
   reset: '\x1b[0m',
@@ -123,6 +124,14 @@ function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask'
   return box(title, rows, width, color)
 }
 
+function slashHintPanel({ inputText, width, color }) {
+  const text = String(inputText || '')
+  if (!text.startsWith('/') || text.includes('\n')) return []
+  const hints = slashCommandHints(text, { limit: 6 })
+  if (hints.length === 0) return []
+  return box('slash commands', hints.map((command) => formatSlashCommand(command)), width, color)
+}
+
 function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color }) {
   const inner = Math.max(width - 2, 48)
   const state = busy ? paint('thinking', 'yellow', color) : paint('ready', 'green', color)
@@ -146,7 +155,8 @@ function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStat
 export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStatus, model = 'default', messages = [], inputText = '', cursorIndex = 0, mode = 'input', busy = false, columns = 100, rows = 30, color = false }) {
   const width = Math.max(Math.min(columns, 120), 50)
   const prompt = compactPrompt({ width, model, cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color })
-  const reserved = prompt.length + 1
+  const slashHints = mode === 'input' ? slashHintPanel({ inputText, width, color }) : []
+  const reserved = prompt.length + slashHints.length + 1
   const availableRows = Math.max(rows - reserved, 4)
   const messageLines = messages.flatMap((message) => formatMessage(message, width, color))
   const mainLines = messageLines.length > 0
@@ -156,6 +166,7 @@ export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStat
     '\x1b[2J\x1b[H\x1b[?25l',
     ...mainLines,
     ...Array.from({ length: Math.max(availableRows - mainLines.length, 0) }, () => ''),
+    ...slashHints,
     ...prompt,
     '\x1b[?25h',
   ].join('\n')
@@ -228,6 +239,11 @@ export class TerminalTui {
     this.render()
   }
 
+  setModel(value) {
+    this.model = value || 'default'
+    this.render()
+  }
+
   clearInput() {
     this.inputText = ''
     this.cursorIndex = 0
@@ -264,14 +280,19 @@ export class TerminalTui {
   }
 
   submitInput() {
+    const pending = this.pending
+    if (!pending) {
+      this.clearInput()
+      this.render()
+      return
+    }
     const value = this.inputText.trim()
     if (value) this.history.push(value)
     this.clearInput()
-    const pending = this.pending
     this.pending = null
     if (value) this.messages.push({ role: 'user', text: value })
     this.render()
-    pending?.resolve(value)
+    pending.resolve(value)
   }
 
   insertText(value) {
@@ -311,6 +332,7 @@ export class TerminalTui {
       pending?.resolve(pending?.type === 'confirm' ? false : '/exit')
       return
     }
+    if (!this.pending) return
     if (this.mode === 'confirm') {
       if (key.name === 'escape' || str === 'n' || str === 'N') {
         const pending = this.pending
