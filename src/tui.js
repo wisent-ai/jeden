@@ -124,6 +124,15 @@ function welcomePanel({ width, model = 'default', cwd = '.', writeStatus = 'ask'
   return box(title, rows, width, color)
 }
 
+function brandHeader({ width, model = 'default', cwd = '.', color }) {
+  const inner = Math.max(width - 4, 8)
+  const contentWidth = Math.max(inner - 2, 1)
+  const label = `${WISENT_MARK[0]}  ${BRAND.product} ${BRAND.app} ${BRAND.version} · ${model || 'default'} · ${cwd}`
+  const row = visibleLength(label) > contentWidth ? `${stripAnsi(label).slice(0, Math.max(contentWidth - 1, 0))}…` : label
+  return `${paint('╭─', 'cyan', color)} ${padVisible(row, contentWidth)} ${paint('─╮', 'cyan', color)}`
+}
+
+
 function slashHintPanel({ inputText, width, color }) {
   const text = String(inputText || '')
   if (!text.startsWith('/') || text.includes('\n')) return []
@@ -154,9 +163,10 @@ function compactPrompt({ width, model = 'default', cwd, writeStatus, commandStat
 
 export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStatus, model = 'default', messages = [], inputText = '', cursorIndex = 0, mode = 'input', busy = false, columns = 100, rows = 30, color = false }) {
   const width = Math.max(Math.min(columns, 120), 50)
+  const header = brandHeader({ width, model, cwd, color })
   const prompt = compactPrompt({ width, model, cwd, writeStatus, commandStatus, inputText, cursorIndex, mode, busy, color })
   const slashHints = mode === 'input' ? slashHintPanel({ inputText, width, color }) : []
-  const reserved = prompt.length + slashHints.length + 1
+  const reserved = 1 + prompt.length + slashHints.length + 1
   const availableRows = Math.max(rows - reserved, 4)
   const messageLines = messages.flatMap((message) => formatMessage(message, width, color))
   const mainLines = messageLines.length > 0
@@ -164,6 +174,7 @@ export function renderTerminalFrame({ cwd, sessionPath, writeStatus, commandStat
     : welcomePanel({ width, model, cwd, writeStatus, commandStatus, color }).slice(0, availableRows)
   return [
     '\x1b[2J\x1b[H\x1b[?25l',
+    header,
     ...mainLines,
     ...Array.from({ length: Math.max(availableRows - mainLines.length, 0) }, () => ''),
     ...slashHints,
