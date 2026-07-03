@@ -18,6 +18,7 @@ import { buildSelfRepairTask, errorMessage, selfRepairPermissions } from './self
 import { createTerminalTui } from './tui.js'
 import { dispatchSlashCommand } from './slash-commands.js'
 import { advisorReviewConfigForModes, advisorReviewPrompt, createModeState, consumeLoopPrompt, modelConfigForModes, noteModeRunResult, prepareTaskForModes, storeAdvisorModelReview } from './mode-state.js'
+import { WISENT_MARK } from './brand.js'
 
 
 function usage() {
@@ -342,13 +343,6 @@ function statusChip(label, value, color) {
 }
 
 
-const WISENT_MARK = [
-  '╭╮      ╭╮',
-  '│╰╮╭╮╭╮╭╯│',
-  '╰╮╰╯╰╯╰╯╭╯',
-  ' ╰─╮██╭─╯ ',
-  '   ╰──╯   ',
-]
 
 function interactivePrompt() {
   return `${paint('╭─', 'cyan')} ${paint('you', 'bold')}\n${paint('╰─ jeden ›', 'cyan')} `

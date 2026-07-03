@@ -1,4 +1,5 @@
 import { emitKeypressEvents } from 'node:readline'
+import { BRAND, WISENT_MARK } from './brand.js'
 import { formatSlashCommand, slashCommandHints } from './slash-commands.js'
 
 const ANSI = {
@@ -13,20 +14,6 @@ const ANSI = {
   blue: '\x1b[34m',
 }
 
-const BRAND = {
-  product: 'Wisent',
-  app: 'Agent',
-  version: 'v0.1.0',
-  assistantTitle: 'wisent',
-}
-
-const WISENT_MARK = [
-  '╭╮      ╭╮',
-  '│╰╮╭╮╭╮╭╯│',
-  '╰╮╰╯╰╯╰╯╭╯',
-  ' ╰─╮██╭─╯ ',
-  '   ╰──╯   ',
-]
 
 
 function useColor(output) {
