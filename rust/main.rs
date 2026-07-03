@@ -280,12 +280,43 @@ fn logout(cwd: &Path, provider: &str) -> Result<String, String> {
     Ok(format!("Removed provider profile {} from {}.", name, auth_path(cwd).display()))
 }
 
+
+const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("settings", "Open settings menu"), ("setup", "Open provider setup"), ("plan", "Toggle plan mode"),
+    ("goal", "Toggle goal mode"), ("loop", "Toggle loop mode"), ("model", "Switch model"),
+    ("fast", "Toggle priority service tier"), ("advisor", "Toggle advisor reviewer"),
+    ("export", "Export session"), ("dump", "Dump session"), ("share", "Share session"),
+    ("collab", "Collaborate via relay"), ("join", "Join shared session"), ("leave", "Leave collab"),
+    ("browser", "Configure browser runtime"), ("copy", "Copy conversation text"), ("todo", "Manage todos"),
+    ("session", "Session management"), ("jobs", "Show jobs"), ("usage", "Show provider usage"),
+    ("stats", "Launch stats dashboard"), ("changelog", "Show changelog"), ("hotkeys", "Show hotkeys"),
+    ("tools", "Show tools"), ("context", "Show context usage"), ("extensions", "Manage extensions"),
+    ("agents", "Agent controls"), ("branch", "Create branch"), ("fork", "Create fork"), ("tree", "Navigate tree"),
+    ("login", "Automated OAuth login"), ("logout", "Logout provider"), ("mcp", "Manage MCP servers"),
+    ("ssh", "Manage SSH hosts"), ("new", "Start new session"), ("fresh", "Reset provider stream state"),
+    ("drop", "Drop current session"), ("compact", "Compact session"), ("shake", "Shake session context"),
+    ("handoff", "Hand off session"), ("resume", "Resume session"), ("btw", "Side question"),
+    ("tan", "Background agent"), ("omfg", "Forge local rule"), ("retry", "Retry last failed turn"),
+    ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
+    ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
+    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
+    ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
+];
+
+fn format_slash_help() -> String {
+    let mut out = String::from("Jeden slash commands:
+");
+    for (name, description) in SLASH_COMMANDS { out.push_str(&format!("/{:<15} {}
+", name, description)); }
+    out
+}
+
 fn slash(cwd: &Path, input: &str) -> Result<String, String> {
     let trimmed = input.trim();
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or("");
     match command {
-        "/help" => Ok("Jeden slash commands:\n/login [provider]\n/logout <provider>\n/settings\n/help".into()),
+        "/help" => Ok(format_slash_help()),
         "/settings" | "/setup" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
@@ -450,7 +481,7 @@ fn main() {
         "interactive" => delegate_to_node(&args.raw),
         "run" => {
             let task = args.positionals.join(" ");
-            if task.trim_start().starts_with("/login") || task.trim_start().starts_with("/logout") || task.trim_start() == "/settings" {
+            if task.trim_start().starts_with("/login") || task.trim_start().starts_with("/logout") || task.trim_start() == "/settings" || task.trim_start() == "/setup" || task.trim_start() == "/help" {
                 run_prompt(&args).map(|s| if args.json { json!({"text": s}).to_string() + "\n" } else { s + "\n" })
             } else {
                 delegate_to_node(&args.raw)
