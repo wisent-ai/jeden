@@ -332,6 +332,53 @@ fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     Ok(lines.join("\n"))
 }
 
+fn discover_custom_tool_files(cwd: &Path) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut dirs = Vec::new();
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        dirs.push(home.join(".jeden/tools"));
+    }
+    dirs.push(cwd.join(".jeden/tools"));
+    dirs.sort();
+    dirs.dedup();
+    for dir in dirs {
+        if let Ok(entries) = fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    let ext = path.extension().and_then(|value| value.to_str()).unwrap_or("");
+                    if matches!(ext, "js" | "mjs") {
+                        out.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+    }
+    out.sort();
+    out
+}
+fn handle_reload_plugins(context: &SlashContext<'_>) -> Result<String, String> {
+    let mut registry = plugin_registry(context.cwd);
+    let files = discover_custom_tool_files(context.cwd);
+    let loaded_tools = tools::list_tools(context.cwd)
+        .into_iter()
+        .map(|tool| json!({ "name": tool.name, "description": tool.description }))
+        .collect::<Vec<_>>();
+    registry["reload"] = json!({
+        "requestedAt": now_text(),
+        "customToolFiles": files,
+        "loadedTools": loaded_tools,
+        "checkedBy": "rust"
+    });
+    let file = save_plugin_registry(context.cwd, &registry)?;
+    Ok([
+        format!("Plugin reload scanned {} custom tool file(s).", registry["reload"]["customToolFiles"].as_array().map(Vec::len).unwrap_or(0)),
+        format!("Visible Rust tool definitions: {}.", registry["reload"]["loadedTools"].as_array().map(Vec::len).unwrap_or(0)),
+        format!("Reload marker: {}", file.display()),
+        "The active tool registry is rebuilt on the next Jeden run; this Rust command records the reload request durably.".into(),
+    ].join("\n"))
+}
+
 fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
     let verb = argv.first().map(String::as_str).unwrap_or("list");
@@ -1066,6 +1113,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/browser" => Some(handle_browser(args, context)),
         "/extensions" | "/status" => Some(handle_extensions(context)),
         "/plugins" => Some(handle_plugins(args, context)),
+        "/reload-plugins" => Some(handle_reload_plugins(context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1078,7 +1126,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/marketplace" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/marketplace" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
