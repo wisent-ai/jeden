@@ -4,7 +4,7 @@ use rusqlite::{types::ValueRef as SqlValueRef, Connection};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread::sleep;
@@ -1497,6 +1497,26 @@ fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String
     Err(format!("unknown memory op: {op}"))
 }
 
+fn ask_user(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let question = string_input(input, "question").ok_or("ask_user requires question")?;
+    let options = input.get("options").and_then(Value::as_array).map(|items| {
+        items.iter().filter_map(Value::as_str).map(ToString::to_string).collect::<Vec<_>>()
+    }).unwrap_or_default();
+    eprintln!("\n[ask_user] {question}");
+    if !options.is_empty() {
+        for (index, option) in options.iter().enumerate() {
+            eprintln!("  {}. {}", index + 1, option);
+        }
+    }
+    eprint!("Answer: ");
+    io::stderr().flush().map_err(|e| e.to_string())?;
+    let mut answer = String::new();
+    let bytes = io::stdin().read_line(&mut answer).map_err(|e| e.to_string())?;
+    if bytes == 0 { return Err("ask_user requires interactive input".into()); }
+    Ok(json!({"answer": answer.trim_end_matches(['\r', '\n']).to_string()}))
+}
+
+
 
 
 fn mcp_timeout_ms(input: &Value) -> u64 {
@@ -1577,6 +1597,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "list_artifacts" => list_artifacts(runtime),
         "read_artifact" => read_artifact(runtime, input),
         "memory" => memory_tool(runtime, input),
+        "ask_user" => ask_user(runtime, input),
         "mcp_list_tools" => mcp_list_tools(runtime, input),
         "mcp_call_tool" => mcp_call_tool(runtime, input),
         "mcp_list_resources" => mcp_list_resources(runtime, input),

@@ -203,6 +203,7 @@ fn rust_tool_specs() -> Vec<Value> {
         tool_spec("save_artifact", "Save UTF-8 content into the current session artifacts directory", json!({"name": {"type": "string"}, "content": {"type": "string"}}), vec!["content"]),
         tool_spec("list_artifacts", "List files in the current session artifact directory", json!({}), vec![]),
         tool_spec("read_artifact", "Read one UTF-8 artifact from the current session artifact directory", json!({"name": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["name"]),
+        tool_spec("ask_user", "Ask the human user a question during an interactive session", json!({"question": {"type": "string"}, "options": {"type": "array"}}), vec!["question"]),
         tool_spec("todo", "Manage the current session todo list with init, append, start, done, drop, rm, and view operations", json!({"op": {"type": "string"}, "list": {"type": "array"}, "phase": {"type": "string"}, "items": {"type": "array"}, "task": {"type": "string"}}), vec!["op"]),
         tool_spec("delegate_task", "Run a focused subtask in a fresh Jeden session and return its result; requires --allow-command", json!({"task": {"type": "string"}, "maxSteps": {"type": "number"}}), vec!["task"]),
         tool_spec("memory", "Remember and recall durable scoped notes across Jeden sessions", json!({"op": {"type": "string"}, "text": {"type": "string"}, "query": {"type": "string"}, "tags": {"type": "array"}, "limit": {"type": "number"}, "kind": {"type": "string"}, "scope": {"type": "object"}, "confidence": {"type": "number"}}), vec!["op"]),
@@ -232,7 +233,7 @@ fn tool_spec(name: &str, description: &str, properties: Value, required: Vec<&st
 }
 
 fn system_prompt(cwd: &Path) -> String {
-    let executable = ["list_dir", "read_file", "read_binary_file", "read_document", "read_archive", "read_image", "read_sqlite", "search_text", "search_files", "glob_paths", "grep_regex", "write_file", "apply_patch", "edit_file", "delete_file", "move_file", "run_command", "run_process", "node_eval", "python_eval", "list_package_scripts", "run_package_script", "git_status", "git_diff", "git_log", "git_show", "fetch_url", "fetch_readable_url", "save_artifact", "list_artifacts", "read_artifact", "todo", "delegate_task", "memory", "mcp_list_tools", "mcp_call_tool", "mcp_list_resources", "mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"];
+    let executable = ["list_dir", "read_file", "read_binary_file", "read_document", "read_archive", "read_image", "read_sqlite", "search_text", "search_files", "glob_paths", "grep_regex", "write_file", "apply_patch", "edit_file", "delete_file", "move_file", "run_command", "run_process", "node_eval", "python_eval", "list_package_scripts", "run_package_script", "git_status", "git_diff", "git_log", "git_show", "fetch_url", "fetch_readable_url", "save_artifact", "list_artifacts", "read_artifact", "todo", "delegate_task", "memory", "ask_user", "mcp_list_tools", "mcp_call_tool", "mcp_list_resources", "mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"];
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
         .filter(|tool| executable.contains(&tool.name.as_str()))
