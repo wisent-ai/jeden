@@ -128,6 +128,43 @@ fn read_json<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
     fs::read_to_string(path).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
 }
 
+fn parse_env_value(raw: &str) -> String {
+    let mut value = raw.trim().to_string();
+    if let Some(index) = value.find(" #") {
+        value.truncate(index);
+        value = value.trim().to_string();
+    }
+    let quoted = (value.starts_with('"') && value.ends_with('"')) || (value.starts_with('\'') && value.ends_with('\''));
+    if quoted && value.len() >= 2 {
+        value = value[1..value.len() - 1].to_string();
+    }
+    value.replace("\\n", "\n")
+}
+
+fn load_env_files(cwd: &Path) -> Result<Vec<String>, String> {
+    let mut loaded = Vec::new();
+    for name in [".env", ".env.local", ".env.production", ".env.vercel"] {
+        let path = cwd.join(name);
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        for line in text.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') { continue; }
+            let Some((key, raw_value)) = trimmed.split_once('=') else { continue; };
+            let key = key.trim();
+            if key.is_empty() || env::var_os(key).is_some() { continue; }
+            env::set_var(key, parse_env_value(raw_value));
+            loaded.push(key.to_string());
+        }
+    }
+    loaded.sort();
+    loaded.dedup();
+    Ok(loaded)
+}
+
 fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
     let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())? + "\n";
@@ -522,6 +559,10 @@ fn delegate_to_node(args: &[String]) -> ! {
 fn main() {
     let argv = env::args().skip(1).collect::<Vec<_>>();
     let args = match parse_args(argv) { Ok(v) => v, Err(e) => { eprintln!("Error: {}\n{}", e, usage()); std::process::exit(2); } };
+    if let Err(error) = load_env_files(&args.cwd) {
+        eprintln!("Error: failed to load environment files: {}", error);
+        std::process::exit(1);
+    }
     let result = match args.command.as_str() {
         "help" => Ok(usage().to_string()),
         "interactive" => interactive(&args),
