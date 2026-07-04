@@ -1700,7 +1700,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
         "/jobs" => Some(handle_jobs(context)),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
-        "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `wisent ›` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
+        "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `jeden >` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
         "/update" => Some(handle_update()),
         "/tan" => Some(handle_tan(args, context)),
         _ => None,

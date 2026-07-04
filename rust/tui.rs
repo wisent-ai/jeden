@@ -1,9 +1,9 @@
 use std::io::{self, IsTerminal, Write};
 
-const PRODUCT: &str = "Wisent";
+const PRODUCT: &str = "Jeden";
 const APP: &str = "Agent";
 const VERSION: &str = "v0.1.0";
-const ASSISTANT_TITLE: &str = "wisent";
+const ASSISTANT_TITLE: &str = "jeden";
 
 
 const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
@@ -187,11 +187,10 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
         String::new(),
         "Welcome back!".to_string(),
         String::new(),
-        "▀██████████▀".to_string(),
-        " ╘██    ██".to_string(),
-        "  ██    ██".to_string(),
-        "  ██    ██".to_string(),
-        " ▄██▄  ▄██▄".to_string(),
+        "JEDEN".to_string(),
+        "Agent".to_string(),
+        "Rust TUI".to_string(),
+        String::new(),
         String::new(),
         if model.is_empty() { "default".to_string() } else { model.to_string() },
         "rust".to_string(),
@@ -241,7 +240,7 @@ fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> 
 fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, _input_text: &str, _cursor_index: usize, busy: bool, color: bool) -> Vec<String> {
     let inner = width.saturating_sub(2).max(48);
     let state = if busy { paint("thinking", "yellow", color) } else { paint("ready", "green", color) };
-    let label = format!(" wisent > {} · {} > {} > write {} > command {} ▶ ", if model.is_empty() { "default" } else { model }, state, compact_path(cwd), write_status, command_status);
+    let label = format!(" jeden > {} · {} > {} > write {} > command {} ▶ ", if model.is_empty() { "default" } else { model }, state, compact_path(cwd), write_status, command_status);
     let safe_label = if visible_len(&label) > inner.saturating_sub(4) {
         format!("{}… ▶ ", take_visible(&label, inner.saturating_sub(7)))
     } else {
@@ -370,9 +369,9 @@ mod tests {
             rows: 24,
             color: false,
         });
-        assert!(frame.contains("Wisent Agent v0.1.0"));
+        assert!(frame.contains("Jeden Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
-        assert!(frame.contains("wisent > test-model"));
+        assert!(frame.contains("jeden > test-model"));
         assert!(frame.contains("Welcome back!"));
         assert!(frame.contains("/update for upgrade steps"));
         assert!(frame.ends_with("╰─ "));
