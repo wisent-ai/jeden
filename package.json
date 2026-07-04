@@ -2,7 +2,6 @@
   "name": "@wisent-ai/jeden",
   "version": "0.1.0",
   "private": true,
-  "type": "module",
   "bin": {
     "jeden": "./bin/jeden-rust",
     "jeden-rust": "./bin/jeden-rust"
