@@ -348,7 +348,7 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
     ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
     ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
-    ("update", "Show update steps"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
+    ("update", "Run automated update"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
 ];
 
 fn format_slash_help() -> String {
@@ -357,26 +357,43 @@ fn format_slash_help() -> String {
         if *name == "update" { continue; }
         out.push_str(&format!("/{:<15} {}\n", name, description));
     }
-    out.push_str("\nJeden-only conveniences:\n/help            show this command list\n/commands        show this command list\n/update          show manual update steps\n");
+    out.push_str("\nJeden-only conveniences:\n/help            show this command list\n/commands        show this command list\n/update          run automated git pull/build update\n");
     out
 }
 
-fn update_text() -> String {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let head = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(&root)
+fn update_tool(env_key: &str, default: &str) -> String {
+    env::var(env_key).ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| default.into())
+}
+
+fn run_update_step(label: &str, program: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .current_dir(cwd)
         .output()
-        .ok()
-        .and_then(|output| if output.status.success() { Some(String::from_utf8_lossy(&output.stdout).trim().to_string()) } else { None })
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown".into());
-    format!(
-        "Jeden update\nCurrent source: {}\nCurrent git HEAD: {}\n\nTo update this source install:\n  cd {}\n  git pull --ff-only\n  cargo build --release\n\nIf your shell cannot find the linked bin after updating, run:\n  npm link\n  rehash\n",
-        root.display(),
-        head,
-        root.display()
-    )
+        .map_err(|error| format!("{} failed to start {}: {}", label, program, error))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = [stdout, stderr].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+    if output.status.success() {
+        Ok(if detail.is_empty() { format!("{}: ok", label) } else { format!("{}:\n{}", label, detail) })
+    } else {
+        Err(if detail.is_empty() {
+            format!("{} failed with {}", label, output.status)
+        } else {
+            format!("{} failed with {}\n{}", label, output.status, detail)
+        })
+    }
+}
+
+fn update_command() -> Result<String, String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let git = update_tool("JEDEN_UPDATE_GIT_BIN", "git");
+    let cargo = update_tool("JEDEN_UPDATE_CARGO_BIN", "cargo");
+    let before = run_update_step("git head before", &git, &["rev-parse", "--short", "HEAD"], &root)?;
+    let pull = run_update_step("git pull --ff-only", &git, &["pull", "--ff-only"], &root)?;
+    let build = run_update_step("cargo build --release", &cargo, &["build", "--release"], &root)?;
+    let after = run_update_step("git head after", &git, &["rev-parse", "--short", "HEAD"], &root)?;
+    Ok(format!("Jeden update completed\nSource: {}\n\n{}\n\n{}\n\n{}\n\n{}", root.display(), before, pull, build, after))
 }
 
 fn handle_model_slash(cwd: &Path, current_model: Option<&str>, args: &str) -> Result<String, String> {
@@ -401,13 +418,16 @@ fn handle_model_slash(cwd: &Path, current_model: Option<&str>, args: &str) -> Re
 
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
+    let mut parts = trimmed.split_whitespace();
+    let command = parts.next().unwrap_or("");
+    if command.eq_ignore_ascii_case("/update") {
+        return update_command();
+    }
     let session_root = session_root();
     let slash_context = slash::SlashContext { cwd, model, session_root: &session_root };
     if let Some(result) = slash::handle_local(&slash_context, trimmed) {
         return result;
     }
-    let mut parts = trimmed.split_whitespace();
-    let command = parts.next().unwrap_or("");
     match command {
         "/help" | "/commands" => Ok(format_slash_help()),
         "/settings" | "/setup" | "/providers" => Ok(format_auth_status(cwd)),
@@ -415,7 +435,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/model" | "/models" | "/switch" => handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/usage" => Ok(crate::slash::handle_local(&slash_context, trimmed).transpose()?.unwrap_or_else(|| "Usage accounting is available in Rust mode-state.".into())),
-        "/update" => Ok(update_text()),
+        "/update" => update_command(),
         "/exit" | "/quit" => Ok("Exit is handled by the interactive input loop.".into()),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
@@ -689,7 +709,7 @@ fn main() {
         "tools" => Ok(tools::tools_table(&args.cwd)),
         "search-sessions" => search_sessions_command(&args),
         "resume" | "recall_conversation" | "recall-conversation" => Err(format!("{} is not available in the Rust CLI yet; use sessions/show/export/search-sessions for recorded session inspection.", args.command)),
-        "update" => Ok(update_text()),
+        "update" => update_command(),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),
@@ -770,6 +790,37 @@ printf '%s\n' "unexpected broker command: $*" >&2
 exit 64
 "#,
         )
+    }
+
+    #[cfg(unix)]
+    fn fake_update_tool_bin(cwd: &Path, name: &str, script: &str) -> PathBuf {
+        let bin = cwd.join(name);
+        fs::write(&bin, script).unwrap();
+        let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bin, permissions).unwrap();
+        bin
+    }
+
+    #[cfg(unix)]
+    struct UpdateToolFixture {
+        log: PathBuf,
+        _git_env: EnvVarGuard,
+        _cargo_env: EnvVarGuard,
+        _log_env: EnvVarGuard,
+    }
+
+    #[cfg(unix)]
+    fn install_fake_update_tools(cwd: &Path, git_script: &str, cargo_script: &str) -> UpdateToolFixture {
+        let git = fake_update_tool_bin(cwd, "fake-git", git_script);
+        let cargo = fake_update_tool_bin(cwd, "fake-cargo", cargo_script);
+        let log = cwd.join("update.log");
+        UpdateToolFixture {
+            log: log.clone(),
+            _git_env: EnvVarGuard::set("JEDEN_UPDATE_GIT_BIN", &git),
+            _cargo_env: EnvVarGuard::set("JEDEN_UPDATE_CARGO_BIN", &cargo),
+            _log_env: EnvVarGuard::set("JEDEN_TEST_UPDATE_LOG", &log),
+        }
     }
 
     #[test]
@@ -892,6 +943,133 @@ exit 64
         assert!(result.contains("Legacy configured providers: none"));
         assert!(result.contains("/login                                      open OMP auth-broker provider selection"));
         assert_eq!(fs::read_to_string(&log).unwrap(), "auth-broker list --json\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn update_command_runs_git_pull_and_release_build_without_manual_instructions() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("update-command");
+        let fixture = install_fake_update_tools(
+            &cwd,
+            r#"#!/bin/sh
+printf 'git %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+if [ "$1" = "rev-parse" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
+  printf '%s\n' 'abc123'
+  exit 0
+fi
+if [ "$1" = "pull" ] && [ "$2" = "--ff-only" ]; then
+  printf '%s\n' 'pulled fast-forward changes'
+  exit 0
+fi
+printf '%s\n' "unexpected git command: $*" >&2
+exit 64
+"#,
+            r#"#!/bin/sh
+printf 'cargo %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+if [ "$1" = "build" ] && [ "$2" = "--release" ]; then
+  printf '%s\n' 'compiled release binary'
+  exit 0
+fi
+printf '%s\n' "unexpected cargo command: $*" >&2
+exit 64
+"#,
+        );
+
+        let result = update_command().unwrap();
+
+        assert!(result.contains("Jeden update completed"), "{result}");
+        assert!(result.contains("git pull --ff-only:\npulled fast-forward changes"), "{result}");
+        assert!(result.contains("cargo build --release:\ncompiled release binary"), "{result}");
+        for manual_instruction in ["To update this source install", "npm link", "rehash"] {
+            assert!(!result.contains(manual_instruction), "{manual_instruction} leaked into update output:\n{result}");
+        }
+        assert_eq!(
+            fs::read_to_string(&fixture.log).unwrap(),
+            "git rev-parse --short HEAD\ngit pull --ff-only\ncargo build --release\ngit rev-parse --short HEAD\n"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn slash_update_routes_to_automated_update_flow_without_manual_instructions() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("slash-update");
+        let fixture = install_fake_update_tools(
+            &cwd,
+            r#"#!/bin/sh
+printf 'git %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+if [ "$1" = "rev-parse" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
+  printf '%s\n' 'slash-head'
+  exit 0
+fi
+if [ "$1" = "pull" ] && [ "$2" = "--ff-only" ]; then
+  printf '%s\n' 'slash pull completed'
+  exit 0
+fi
+printf '%s\n' "unexpected git command: $*" >&2
+exit 64
+"#,
+            r#"#!/bin/sh
+printf 'cargo %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+if [ "$1" = "build" ] && [ "$2" = "--release" ]; then
+  printf '%s\n' 'slash release build completed'
+  exit 0
+fi
+printf '%s\n' "unexpected cargo command: $*" >&2
+exit 64
+"#,
+        );
+
+        let result = handle_slash(&cwd, "/update", None).unwrap();
+
+        assert!(result.contains("Jeden update completed"), "{result}");
+        assert!(result.contains("slash pull completed"), "{result}");
+        assert!(result.contains("slash release build completed"), "{result}");
+        for manual_instruction in ["To update this source install", "npm link", "rehash"] {
+            assert!(!result.contains(manual_instruction), "{manual_instruction} leaked into /update output:\n{result}");
+        }
+        assert_eq!(
+            fs::read_to_string(&fixture.log).unwrap(),
+            "git rev-parse --short HEAD\ngit pull --ff-only\ncargo build --release\ngit rev-parse --short HEAD\n"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn update_command_reports_git_pull_failure_and_stops_before_build() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("update-pull-failure");
+        let fixture = install_fake_update_tools(
+            &cwd,
+            r#"#!/bin/sh
+printf 'git %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+if [ "$1" = "rev-parse" ] && [ "$2" = "--short" ] && [ "$3" = "HEAD" ]; then
+  printf '%s\n' 'before-failure'
+  exit 0
+fi
+if [ "$1" = "pull" ] && [ "$2" = "--ff-only" ]; then
+  printf '%s\n' 'network rejected fast-forward' >&2
+  exit 42
+fi
+printf '%s\n' "unexpected git command: $*" >&2
+exit 64
+"#,
+            r#"#!/bin/sh
+printf 'cargo %s\n' "$*" >> "$JEDEN_TEST_UPDATE_LOG"
+printf '%s\n' "cargo should not run after pull failure" >&2
+exit 64
+"#,
+        );
+
+        let error = update_command().unwrap_err();
+
+        assert!(error.contains("git pull --ff-only failed with exit status: 42"), "{error}");
+        assert!(error.contains("network rejected fast-forward"), "{error}");
+        assert_eq!(
+            fs::read_to_string(&fixture.log).unwrap(),
+            "git rev-parse --short HEAD\ngit pull --ff-only\n"
+        );
     }
 
     #[test]
