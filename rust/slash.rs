@@ -360,7 +360,7 @@ fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, 
     let first = argv.get(1).map(String::as_str).unwrap_or("");
     let mut registry = plugin_registry(context.cwd);
     if verb == "help" {
-        return Ok("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace>. discover/update/install/upgrade require the JS marketplace scanner.".into());
+        return Ok("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace>. discover/update/install/upgrade require Rust plugin manifest discovery, which is not ported yet.".into());
     }
     if verb == "add" {
         let source = argv.iter().skip(1).cloned().collect::<Vec<_>>().join(" ").trim().to_string();
@@ -404,7 +404,7 @@ fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, 
         return Ok(format!("Uninstalled plugin {} from {}.", first, file.display()));
     }
     if matches!(verb, "discover" | "update" | "install" | "upgrade") {
-        return Err(format!("/marketplace {verb} requires plugin manifest discovery; use the JS entrypoint until the Rust-native scanner is ported."));
+        return Err(format!("/marketplace {verb} requires plugin manifest discovery, which is not ported yet."));
     }
     Err("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace> | help".into())
 }
@@ -866,6 +866,25 @@ fn handle_jobs(context: &SlashContext<'_>) -> Result<String, String> {
         serde_json::to_string_pretty(&jobs).map_err(|e| e.to_string())
     }
 }
+
+fn handle_update() -> Result<String, String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let head = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(&root)
+        .output()
+        .ok()
+        .and_then(|output| if output.status.success() { Some(String::from_utf8_lossy(&output.stdout).trim().to_string()) } else { None })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".into());
+    Ok(format!(
+        "Jeden update\nCurrent source: {}\nCurrent git HEAD: {}\n\nTo update this source install:\n  cd {}\n  git pull --ff-only\n  cargo build --release\n\nIf your shell cannot find the linked bin after updating, run:\n  npm link\n  rehash",
+        root.display(),
+        head,
+        root.display()
+    ))
+}
+
 
 
 
@@ -1681,7 +1700,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
         "/jobs" => Some(handle_jobs(context)),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
-        "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
+        "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `wisent ›` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
+        "/update" => Some(handle_update()),
         "/tan" => Some(handle_tan(args, context)),
         _ => None,
     };

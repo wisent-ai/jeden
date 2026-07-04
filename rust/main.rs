@@ -344,7 +344,7 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
     ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
     ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
-    ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
+    ("update", "Show update steps"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
 ];
 
 fn format_slash_help() -> String {
@@ -353,6 +353,24 @@ fn format_slash_help() -> String {
     for (name, description) in SLASH_COMMANDS { out.push_str(&format!("/{:<15} {}
 ", name, description)); }
     out
+}
+
+fn update_text() -> String {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let head = Command::new("git")
+        .args(["rev-parse", "--short", "HEAD"])
+        .current_dir(&root)
+        .output()
+        .ok()
+        .and_then(|output| if output.status.success() { Some(String::from_utf8_lossy(&output.stdout).trim().to_string()) } else { None })
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "unknown".into());
+    format!(
+        "Jeden update\nCurrent source: {}\nCurrent git HEAD: {}\n\nTo update this source install:\n  cd {}\n  git pull --ff-only\n  cargo build --release\n\nIf your shell cannot find the linked bin after updating, run:\n  npm link\n  rehash\n",
+        root.display(),
+        head,
+        root.display()
+    )
 }
 
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
@@ -370,6 +388,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
         "/usage" => Ok(crate::slash::handle_local(&slash_context, trimmed).transpose()?.unwrap_or_else(|| "Usage accounting is available in Rust mode-state.".into())),
+        "/update" => Ok(update_text()),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
 }
@@ -597,6 +616,7 @@ fn main() {
         "tools" => Ok(tools::tools_table(&args.cwd)),
         "search-sessions" => search_sessions_command(&args),
         "resume" | "recall_conversation" | "recall-conversation" => Err(format!("{} is not available in the Rust CLI yet; use sessions/show/export/search-sessions for recorded session inspection.", args.command)),
+        "update" => Ok(update_text()),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),

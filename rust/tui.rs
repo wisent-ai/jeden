@@ -5,7 +5,6 @@ const APP: &str = "Agent";
 const VERSION: &str = "v0.1.0";
 const ASSISTANT_TITLE: &str = "wisent";
 const HEADER_MARK: &str = "◒";
-const CURSOR: &str = "▌";
 
 const WISENT_MARK: &[&str] = &[
     "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",
@@ -35,6 +34,7 @@ const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
     ("login", "Automated OAuth login"),
     ("logout", "Logout provider"),
     ("usage", "Show provider usage"),
+    ("update", "Show update command"),
     ("exit", "Exit"),
     ("quit", "Quit"),
 ];
@@ -180,10 +180,10 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
     let mark_width = WISENT_MARK.iter().map(|line| visible_len(line)).max().unwrap_or(0);
     let controls = [
         "Controls",
-        "# prompt actions   / commands",
-        "! shell            $ node/python",
-        "Enter sends        Ctrl-J newline",
-        "arrows/Home/End edit",
+        "Type a prompt and press Enter",
+        "/help lists commands",
+        "/update shows upgrade steps",
+        "Ctrl-C exits",
     ];
     let mut rows = vec![
         format!("{} private agent harness", PRODUCT),
@@ -195,6 +195,9 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
         rows.push(format!("{}   {}", pad_visible(line, mark_width), controls.get(index).copied().unwrap_or("")).trim_end().to_string());
     }
     rows.extend([
+        String::new(),
+        "Get started: type a task, /help for commands, /model to switch routes, /update for upgrade steps.".to_string(),
+        "Example: make a short plan for this repo".to_string(),
         String::new(),
         format!("Tool gates: write {} · command {}", write_status, command_status),
         "Sessions: local history and artifacts".to_string(),
@@ -230,15 +233,8 @@ fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> 
     if rows.is_empty() { Vec::new() } else { boxed("slash commands", &rows, width, color) }
 }
 
-fn with_cursor_marker(value: &str, cursor_index: usize, color: bool) -> String {
-    let chars: Vec<char> = value.chars().collect();
-    let index = cursor_index.min(chars.len());
-    let before: String = chars[..index].iter().collect();
-    let after: String = chars[index..].iter().collect();
-    format!("{}{}{}", before, paint(CURSOR, "yellow", color), after)
-}
 
-fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, input_text: &str, cursor_index: usize, busy: bool, color: bool) -> Vec<String> {
+fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, _input_text: &str, _cursor_index: usize, busy: bool, color: bool) -> Vec<String> {
     let inner = width.saturating_sub(2).max(48);
     let state = if busy { paint("thinking", "yellow", color) } else { paint("ready", "green", color) };
     let label = format!(" wisent > {} · {} > {} > write {} > command {} › ", if model.is_empty() { "default" } else { model }, state, cwd, write_status, command_status);
@@ -254,19 +250,10 @@ fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, comm
         paint(&"─".repeat(inner.saturating_sub(visible_len(&safe_label) + 2)), "cyan", color),
         paint("╮", "cyan", color)
     );
-    let visible_input = if input_text.is_empty() { paint(CURSOR, "yellow", color) } else { with_cursor_marker(input_text, cursor_index, color) };
-    let mut input_rows = Vec::new();
-    for row in visible_input.split('\n') {
-        input_rows.extend(wrap_line(row, inner.saturating_sub(4)));
-    }
-    let rows: Vec<String> = input_rows.into_iter().take(4).collect();
     let mut out = vec![top];
-    for row in rows.iter().take(rows.len().saturating_sub(1)) {
-        out.push(format!("{} {} {}", paint("│", "cyan", color), pad_visible(row, inner.saturating_sub(2)), paint("│", "cyan", color)));
-    }
-    let last = rows.last().cloned().unwrap_or_else(|| paint(CURSOR, "yellow", color));
-    out.push(format!("{} {} {}", paint("╰─", "cyan", color), pad_visible(&last, inner.saturating_sub(4)), paint("─╯", "cyan", color)));
-    out.push(paint(" Enter sends · Ctrl-J newline · arrows/Home/End edit · ↑/↓ history · Ctrl-C exits", "dim", color));
+    out.push(format!("{} {} {}", paint("│", "cyan", color), pad_visible(&format!("Enter sends · /help commands · /update upgrades · Ctrl-C exits"), inner.saturating_sub(2)), paint("│", "cyan", color)));
+    let prompt = format!("{} wisent › ", paint("╰─", "cyan", color));
+    out.push(prompt);
     out
 }
 
@@ -296,19 +283,18 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
     if main_lines.len() > available_rows {
         main_lines = main_lines.split_off(main_lines.len() - available_rows);
     }
-    let mut lines = vec!["\x1b[2J\x1b[H\x1b[?25l".to_string(), header];
+    let mut lines = vec!["\x1b[2J\x1b[H".to_string(), header];
     lines.extend(main_lines.iter().cloned());
     lines.extend(std::iter::repeat(String::new()).take(available_rows.saturating_sub(main_lines.len())));
     lines.extend(slash_hints);
     lines.extend(prompt);
-    lines.push("\x1b[?25h".to_string());
     lines.join("\n")
 }
 
 pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     let mut stdout = io::stdout();
     stdout.write_all(render_terminal_frame(options).as_bytes())?;
-    stdout.write_all(b"\n")?;
+    stdout.write_all(b"\x1b[?25h")?;
     stdout.flush()
 }
 
@@ -388,5 +374,8 @@ mod tests {
         assert!(frame.contains("Wisent Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
         assert!(frame.contains("wisent > test-model"));
+        assert!(frame.contains("Get started: type a task"));
+        assert!(frame.contains("/update upgrades"));
+        assert!(frame.ends_with("wisent › "));
     }
 }
