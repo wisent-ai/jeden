@@ -253,6 +253,95 @@ fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value), String> {
     Ok((launch, profile))
 }
 
+fn plugin_registry_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/plugins.json") }
+
+fn plugin_registry(cwd: &Path) -> Value {
+    let raw = read_json_value(&plugin_registry_path(cwd));
+    json!({
+        "version": 1,
+        "sources": raw.get("sources").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
+        "installed": raw.get("installed").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
+        "reload": raw.get("reload").filter(|value| value.is_object()).cloned().unwrap_or(Value::Null),
+    })
+}
+
+fn save_plugin_registry(cwd: &Path, registry: &Value) -> Result<PathBuf, String> {
+    let file = plugin_registry_path(cwd);
+    let mut normalized = plugin_registry(cwd);
+    if let Some(map) = registry.as_object() {
+        if let Some(sources) = map.get("sources").filter(|value| value.is_object()) { normalized["sources"] = sources.clone(); }
+        if let Some(installed) = map.get("installed").filter(|value| value.is_object()) { normalized["installed"] = installed.clone(); }
+        if let Some(reload) = map.get("reload") { normalized["reload"] = reload.clone(); }
+    }
+    normalized["updatedAt"] = json!(now_text());
+    write_json_value(&file, &normalized)?;
+    Ok(file)
+}
+
+
+fn format_plugin_source(value: &Value) -> String {
+    format!(
+        "{}\t{}\t{}\t{}",
+        value.get("name").and_then(Value::as_str).unwrap_or("-"),
+        value.get("type").and_then(Value::as_str).unwrap_or("-"),
+        value.get("source").and_then(Value::as_str).unwrap_or("-"),
+        if value.get("enabled").and_then(Value::as_bool) == Some(false) { "disabled" } else { "enabled" }
+    )
+}
+
+fn format_plugin(value: &Value) -> String {
+    format!(
+        "{}\t{}\t{}\t{}",
+        value.get("id").and_then(Value::as_str).unwrap_or("-"),
+        value.get("version").and_then(Value::as_str).unwrap_or("-"),
+        if value.get("enabled").and_then(Value::as_bool) == Some(false) { "disabled" } else { "enabled" },
+        value.get("source").and_then(Value::as_str).unwrap_or("-")
+    )
+}
+
+fn sorted_object_values(value: &Value) -> Vec<Value> {
+    let mut values = value.as_object().map(|map| map.values().cloned().collect::<Vec<_>>()).unwrap_or_default();
+    values.sort_by(|a, b| format_plugin(a).cmp(&format_plugin(b)));
+    values
+}
+
+fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
+    let registry = plugin_registry(context.cwd);
+    let mut sources = sorted_object_values(&registry["sources"]);
+    sources.sort_by(|a, b| a.get("name").and_then(Value::as_str).unwrap_or("").cmp(b.get("name").and_then(Value::as_str).unwrap_or("")));
+    let mut installed = sorted_object_values(&registry["installed"]);
+    installed.sort_by(|a, b| a.get("id").and_then(Value::as_str).unwrap_or("").cmp(b.get("id").and_then(Value::as_str).unwrap_or("")));
+    let mut lines = vec![format!("Extension registry: {}", plugin_registry_path(context.cwd).display()), format!("Sources: {}", sources.len())];
+    if sources.is_empty() { lines.push("- none".into()); } else { lines.extend(sources.iter().map(format_plugin_source)); }
+    lines.push(format!("Installed plugins: {}", installed.len()));
+    if installed.is_empty() { lines.push("- none".into()); } else { lines.extend(installed.iter().map(format_plugin)); }
+    Ok(lines.join("\n"))
+}
+
+fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let verb = argv.first().map(String::as_str).unwrap_or("list");
+    let target = argv.get(1).map(String::as_str).unwrap_or("");
+    let mut registry = plugin_registry(context.cwd);
+    if verb == "list" {
+        let installed = sorted_object_values(&registry["installed"]);
+        return Ok(if installed.is_empty() { "No plugins installed. Use /marketplace discover and /marketplace install <name@marketplace>.".into() } else { ["Installed plugins:".into()].into_iter().chain(installed.iter().map(format_plugin)).collect::<Vec<_>>().join("\n") });
+    }
+    if verb == "enable" || verb == "disable" {
+        if target.is_empty() { return Err(format!("Usage: /plugins {verb} <name@marketplace>")); }
+        let installed = registry.get_mut("installed").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?;
+        let plugin = installed.get_mut(target).ok_or_else(|| format!("Installed plugin not found: {target}"))?;
+        if !plugin.is_object() { *plugin = json!({}); }
+        let plugin_obj = plugin.as_object_mut().expect("plugin object");
+        plugin_obj.insert("enabled".into(), json!(verb == "enable"));
+        plugin_obj.insert("updatedAt".into(), json!(now_text()));
+        let file = save_plugin_registry(context.cwd, &registry)?;
+        return Ok(format!("{} plugin {} in {}.", if verb == "enable" { "Enabled" } else { "Disabled" }, target, file.display()));
+    }
+    Err("Usage: /plugins list | enable <name@marketplace> | disable <name@marketplace>".into())
+}
+
+
 fn split_head(args: &str) -> (&str, &str) {
     let text = args.trim();
     if text.is_empty() { return ("", ""); }
@@ -947,6 +1036,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/mcp" => Some(handle_mcp(args, context)),
         "/ssh" => Some(handle_ssh(args, context)),
         "/browser" => Some(handle_browser(args, context)),
+        "/extensions" | "/status" => Some(handle_extensions(context)),
+        "/plugins" => Some(handle_plugins(args, context)),
         "/memory" => Some(handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
         "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
@@ -957,7 +1048,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/extensions" | "/status" | "/marketplace" | "/plugins" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/retry" | "/force" | "/force:" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/marketplace" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/retry" | "/force" | "/force:" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
