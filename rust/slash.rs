@@ -7,6 +7,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Map;
+use url::Url;
 
 use crate::tools;
 
@@ -455,6 +456,147 @@ fn handle_copy(args: &str, context: &SlashContext<'_>) -> Result<String, String>
     }
 }
 
+
+
+fn collab_state_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/collab.json") }
+
+fn collab_default_relay(cwd: &Path) -> PathBuf { cwd.join(".jeden/collab-relay.jsonl") }
+
+fn file_url(path: &Path) -> String {
+    Url::from_file_path(path).map(|url| url.to_string()).unwrap_or_else(|_| format!("file://{}", path.display()))
+}
+
+fn collab_path(cwd: &Path, target: &str) -> Result<PathBuf, String> {
+    let text = target.trim();
+    if text.starts_with("http://") || text.starts_with("https://") {
+        return Err("Rust collab currently supports durable file relays only; HTTP relay support remains JS-only.".into());
+    }
+    if text.starts_with("file://") {
+        let url = Url::parse(text).map_err(|e| e.to_string())?;
+        return url.to_file_path().map_err(|_| "Invalid file relay URL".to_string());
+    }
+    if text.is_empty() { return Ok(collab_default_relay(cwd)); }
+    let path = PathBuf::from(text);
+    Ok(if path.is_absolute() { path } else { cwd.join(path) })
+}
+
+fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> Result<(), String> {
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let line = serde_json::to_string(&json!({ "ts": now_text(), "type": event_type, "cwd": cwd })).map_err(|e| e.to_string())?;
+    let mut file = fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
+    writeln!(file, "{}", line).map_err(|e| e.to_string())
+}
+
+fn read_collab_events(path: &Path) -> Vec<Value> {
+    fs::read_to_string(path).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()
+}
+
+fn collab_descriptor(entry: &Value) -> String {
+    if let Some(file) = entry.get("relayFile").and_then(Value::as_str) {
+        format!("durable file relay: {}", file)
+    } else {
+        "off".into()
+    }
+}
+
+fn collab_role_status(role: &str, entry: &Value, view: bool) -> String {
+    if entry.is_null() { return format!("Collab {role}: off."); }
+    let relay_file = entry.get("relayFile").and_then(Value::as_str).unwrap_or("");
+    let events = read_collab_events(Path::new(relay_file));
+    let latest = events.last().and_then(|event| event.get("type")).and_then(Value::as_str).unwrap_or("none");
+    let mut lines = vec![
+        format!("Collab {role}: {}", collab_descriptor(entry)),
+        format!("Relay URL: {}", entry.get("relayUrl").and_then(Value::as_str).unwrap_or("")),
+        format!("Events: {}", events.len()),
+        format!("Latest event: {}", latest),
+    ];
+    if view {
+        if events.is_empty() {
+            lines.push("Event log is empty.".into());
+        } else {
+            lines.push("Event log:".into());
+            for (index, event) in events.iter().enumerate() {
+                lines.push(format!("{}. {}", index + 1, serde_json::to_string(event).unwrap_or_else(|_| "{}".into())));
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+fn save_collab_state(cwd: &Path, state: &Value) -> Result<PathBuf, String> {
+    let file = collab_state_path(cwd);
+    let host = state.get("host").cloned().unwrap_or(Value::Null);
+    let guest = state.get("guest").cloned().unwrap_or(Value::Null);
+    write_json_value(&file, &json!({ "version": 1, "updatedAt": now_text(), "host": host, "guest": guest }))?;
+    Ok(file)
+}
+
+fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let (verb, rest) = split_head(args);
+    let verb = if verb.is_empty() { "status" } else { verb };
+    let mut state = read_json_value(&collab_state_path(context.cwd));
+    if !state.is_object() { state = json!({}); }
+    if verb == "status" || verb == "view" {
+        let host = state.get("host").unwrap_or(&Value::Null);
+        let guest = state.get("guest").unwrap_or(&Value::Null);
+        let file = collab_state_path(context.cwd);
+        if host.is_null() && guest.is_null() {
+            return Ok(format!("Collab off.\nRust backend: durable local file relay in .jeden/collab-relay.jsonl.\nState: {}", file.display()));
+        }
+        let mut sections = Vec::new();
+        if !host.is_null() { sections.push(collab_role_status("host", host, verb == "view")); }
+        if !guest.is_null() { sections.push(collab_role_status("guest", guest, verb == "view")); }
+        sections.push(format!("State: {}", file.display()));
+        return Ok(sections.join("\n\n"));
+    }
+    if verb == "start" {
+        let relay = collab_path(context.cwd, rest)?;
+        append_collab_event(&relay, "host-start", context.cwd)?;
+        let entry = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "startedAt": now_text(), "cwd": context.cwd });
+        state["host"] = entry;
+        let file = save_collab_state(context.cwd, &state)?;
+        return Ok(format!("Collab started with durable file relay: {}.\nJoin with: /join {}\nBackend: durable local file relay.\nState: {}", relay.display(), file_url(&relay), file.display()));
+    }
+    if verb == "stop" {
+        let host = state.get("host").cloned().unwrap_or(Value::Null);
+        if host.is_null() { return Ok("Collab hosting is already stopped.".into()); }
+        if let Some(relay_file) = host.get("relayFile").and_then(Value::as_str) {
+            append_collab_event(Path::new(relay_file), "host-stop", context.cwd)?;
+        }
+        state["host"] = Value::Null;
+        let file = save_collab_state(context.cwd, &state)?;
+        return Ok(format!("Collab hosting stopped.\nState: {}", file.display()));
+    }
+    Err("Usage: /collab [start|status|view|stop] [relay-file]".into())
+}
+
+fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let target = args.trim();
+    if target.is_empty() { return Err("Usage: /join <relay-file-or-file-url>".into()); }
+    let relay = collab_path(context.cwd, target)?;
+    append_collab_event(&relay, "guest-join", context.cwd)?;
+    let mut state = read_json_value(&collab_state_path(context.cwd));
+    if !state.is_object() { state = json!({}); }
+    state["guest"] = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "joinedAt": now_text(), "cwd": context.cwd });
+    let file = save_collab_state(context.cwd, &state)?;
+    Ok(format!("Joined collab via durable file relay: {}.\nRelay URL: {}\nState: {}", relay.display(), file_url(&relay), file.display()))
+}
+
+fn handle_leave(context: &SlashContext<'_>) -> Result<String, String> {
+    let mut state = read_json_value(&collab_state_path(context.cwd));
+    if !state.is_object() { state = json!({}); }
+    let guest = state.get("guest").cloned().unwrap_or(Value::Null);
+    if guest.is_null() {
+        let host_note = if !state.get("host").unwrap_or(&Value::Null).is_null() { " Hosting is still active; use /collab stop to stop the host relay." } else { "" };
+        return Ok(format!("No guest collab attachment is active.{}", host_note));
+    }
+    if let Some(relay_file) = guest.get("relayFile").and_then(Value::as_str) {
+        append_collab_event(Path::new(relay_file), "guest-leave", context.cwd)?;
+    }
+    state["guest"] = Value::Null;
+    let file = save_collab_state(context.cwd, &state)?;
+    Ok(format!("Left collab relay.\nState: {}", file.display()))
+}
 
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
@@ -1253,6 +1395,9 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/reload-plugins" => Some(handle_reload_plugins(context)),
         "/marketplace" => Some(handle_marketplace(args, context)),
         "/copy" => Some(handle_copy(args, context)),
+        "/collab" => Some(handle_collab(args, context)),
+        "/join" => Some(handle_join(args, context)),
+        "/leave" => Some(handle_leave(context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1265,7 +1410,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/export" | "/dump" | "/share" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/export" | "/dump" | "/share" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
