@@ -53,6 +53,10 @@ fn bool_input(input: &Value, key: &str, default: bool) -> bool {
 fn u64_input(input: &Value, key: &str, default: u64) -> u64 {
     input.get(key).and_then(Value::as_u64).unwrap_or(default)
 }
+fn object_input(input: &Value, key: &str) -> Value {
+    input.get(key).filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({}))
+}
+
 
 fn mime_type_for_path(path: &Path) -> &'static str {
     match path.extension().and_then(|ext| ext.to_str()).unwrap_or("").to_ascii_lowercase().as_str() {
@@ -581,6 +585,47 @@ fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Stri
     Ok(json!({"ok": true, "name": name, "bytes": bytes.len(), "truncated": truncated, "content": String::from_utf8_lossy(slice), "sha256": sha256_hex(&bytes)}))
 }
 
+fn mcp_timeout_ms(input: &Value) -> u64 {
+    u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000)
+}
+
+fn mcp_server(input: &Value) -> Result<String, String> {
+    string_input(input, "server").filter(|server| !server.is_empty()).ok_or_else(|| "server is required".into())
+}
+
+fn mcp_list_tools(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    crate::mcp::list_tools(runtime.cwd, &server, mcp_timeout_ms(input))
+}
+
+fn mcp_call_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    let tool = string_input(input, "tool").filter(|tool| !tool.is_empty()).ok_or_else(|| "tool is required".to_string())?;
+    crate::mcp::call_tool(runtime.cwd, &server, &tool, object_input(input, "args"), mcp_timeout_ms(input))
+}
+
+fn mcp_list_resources(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    crate::mcp::list_resources(runtime.cwd, &server, mcp_timeout_ms(input))
+}
+
+fn mcp_read_resource(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    let uri = string_input(input, "uri").filter(|uri| !uri.is_empty()).ok_or_else(|| "uri is required".to_string())?;
+    crate::mcp::read_resource(runtime.cwd, &server, &uri, mcp_timeout_ms(input))
+}
+
+fn mcp_list_prompts(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    crate::mcp::list_prompts(runtime.cwd, &server, mcp_timeout_ms(input))
+}
+
+fn mcp_get_prompt(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let server = mcp_server(input)?;
+    let name = string_input(input, "name").filter(|name| !name.is_empty()).ok_or_else(|| "name is required".to_string())?;
+    crate::mcp::get_prompt(runtime.cwd, &server, &name, object_input(input, "args"), mcp_timeout_ms(input))
+}
+
 
 pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<Value, String> {
     match tool {
@@ -608,6 +653,12 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "save_artifact" => save_artifact(runtime, input),
         "list_artifacts" => list_artifacts(runtime),
         "read_artifact" => read_artifact(runtime, input),
+        "mcp_list_tools" => mcp_list_tools(runtime, input),
+        "mcp_call_tool" => mcp_call_tool(runtime, input),
+        "mcp_list_resources" => mcp_list_resources(runtime, input),
+        "mcp_read_resource" => mcp_read_resource(runtime, input),
+        "mcp_list_prompts" => mcp_list_prompts(runtime, input),
+        "mcp_get_prompt" => mcp_get_prompt(runtime, input),
         other => Err(format!("Rust tool runtime has not ported tool: {other}")),
     }
 }

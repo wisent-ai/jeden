@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use serde_json::Map;
 
 use crate::tools;
 
@@ -20,6 +21,8 @@ struct ModeState {
     plan: PlanState,
     #[serde(default)]
     goal: GoalState,
+    #[serde(rename = "guidedGoal", default)]
+    guided_goal: GuidedGoalState,
     #[serde(default)]
     loop_mode: LoopState,
     #[serde(default)]
@@ -30,6 +33,10 @@ struct ModeState {
     compact: bool,
     #[serde(default)]
     shake: String,
+    #[serde(default)]
+    todos: Vec<TodoState>,
+    #[serde(default)]
+    branches: Vec<BranchState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -38,6 +45,14 @@ struct PlanState {
     enabled: bool,
     #[serde(rename = "latestPlan", default)]
     latest_plan: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct GuidedGoalState {
+    #[serde(default)]
+    active: bool,
+    #[serde(rename = "roughObjective", default)]
+    rough_objective: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -88,6 +103,26 @@ struct AdvisorState {
     last_review: Option<Value>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct TodoState {
+    #[serde(default)]
+    text: String,
+    #[serde(default)]
+    status: String,
+    #[serde(rename = "createdAt", default)]
+    created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct BranchState {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    title: String,
+    #[serde(rename = "createdAt", default)]
+    created_at: String,
+}
+
 fn mode_state_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/mode-state.json") }
 
 fn read_mode_state(cwd: &Path) -> ModeState {
@@ -104,6 +139,34 @@ fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), String> {
     fs::write(path, text).map_err(|e| e.to_string())
 }
 
+fn dirs_home() -> PathBuf { env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(".")) }
+
+fn project_config_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/config.json") }
+
+fn read_json_value(path: &Path) -> Value {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+fn write_json_value(path: &Path, value: &Value) -> Result<(), String> {
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())? + "\n";
+    fs::write(path, text).map_err(|e| e.to_string())
+}
+
+fn merged_config(cwd: &Path) -> Value {
+    let mut merged = match read_json_value(&dirs_home().join(".jeden/config.json")) {
+        Value::Object(map) => map,
+        _ => Map::new(),
+    };
+    if let Value::Object(project) = read_json_value(&project_config_path(cwd)) {
+        for (key, value) in project { merged.insert(key, value); }
+    }
+    Value::Object(merged)
+}
+
 fn split_head(args: &str) -> (&str, &str) {
     let text = args.trim();
     if text.is_empty() { return ("", ""); }
@@ -115,6 +178,43 @@ fn split_head(args: &str) -> (&str, &str) {
 
 fn now_millis() -> u64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
+
+fn now_text() -> String { now_millis().to_string() }
+
+fn split_args(value: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    let mut escaped = false;
+    for ch in value.trim().chars() {
+        if escaped {
+            current.push(ch);
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' {
+            escaped = true;
+            continue;
+        }
+        if let Some(active) = quote {
+            if ch == active { quote = None; } else { current.push(ch); }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            quote = Some(ch);
+            continue;
+        }
+        if ch.is_whitespace() {
+            if !current.is_empty() {
+                args.push(std::mem::take(&mut current));
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() { args.push(current); }
+    args
 }
 
 fn parse_duration_ms(value: &str) -> Option<u64> {
@@ -372,11 +472,265 @@ fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<String, String> 
         "tools" | "resources" | "prompts" | "test" => {
             let (server, _) = split_head(rest);
             if server.is_empty() { return Err(format!("Usage: /mcp {} <server>", verb)); }
-            Err(format!("MCP {} for {} requires a live stdio MCP client. Rust currently lists configured servers and static tool metadata without starting external MCP processes.", verb, server))
+            let result = match verb {
+                "tools" | "test" => crate::mcp::list_tools(context.cwd, server, 10_000),
+                "resources" => crate::mcp::list_resources(context.cwd, server, 10_000),
+                "prompts" => crate::mcp::list_prompts(context.cwd, server, 10_000),
+                _ => unreachable!(),
+            }?;
+            serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
         },
         "reload" | "reconnect" => Ok("MCP clients closed; Rust has no persistent MCP clients in this one-shot command.".into()),
         _ => Err("Usage: /mcp list | tools <server> | resources <server> | prompts <server> | test <server> | reload | reconnect".into()),
     }
+}
+
+fn usage_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/usage.json") }
+
+fn handle_usage(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let (verb, _) = split_head(args);
+    let verb = if verb.is_empty() { "show" } else { verb };
+    let path = usage_path(context.cwd);
+    if verb == "reset" {
+        write_json_value(&path, &json!({"version": 1, "updatedAt": now_text(), "events": []}))?;
+        return Ok(format!("Reset usage accounting: {}", path.display()));
+    }
+    if verb != "show" && verb != "status" {
+        return Err("Usage: /usage [show|reset]".into());
+    }
+    let usage = read_json_value(&path);
+    let events = usage.get("events").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut by_model = Map::new();
+    let mut input_tokens = 0.0;
+    let mut output_tokens = 0.0;
+    let mut total_tokens = 0.0;
+    for event in &events {
+        let input = event.get("inputTokens").and_then(Value::as_f64).unwrap_or(0.0);
+        let output = event.get("outputTokens").and_then(Value::as_f64).unwrap_or(0.0);
+        let total = event.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0);
+        input_tokens += input;
+        output_tokens += output;
+        total_tokens += total;
+        let model = event.get("model").and_then(Value::as_str).unwrap_or("default").to_string();
+        let entry = by_model.entry(model).or_insert_with(|| json!({"calls": 0, "inputTokens": 0.0, "outputTokens": 0.0, "totalTokens": 0.0}));
+        if let Value::Object(map) = entry {
+            let calls = map.get("calls").and_then(Value::as_u64).unwrap_or(0) + 1;
+            let model_input = map.get("inputTokens").and_then(Value::as_f64).unwrap_or(0.0) + input;
+            let model_output = map.get("outputTokens").and_then(Value::as_f64).unwrap_or(0.0) + output;
+            let model_total = map.get("totalTokens").and_then(Value::as_f64).unwrap_or(0.0) + total;
+            map.insert("calls".into(), json!(calls));
+            map.insert("inputTokens".into(), json!(model_input));
+            map.insert("outputTokens".into(), json!(model_output));
+            map.insert("totalTokens".into(), json!(model_total));
+        }
+    }
+    let recent = events.iter().rev().take(10).cloned().collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>();
+    let summary = json!({
+        "file": path,
+        "updatedAt": usage.get("updatedAt").cloned().unwrap_or(Value::Null),
+        "totals": {
+            "calls": events.len(),
+            "inputTokens": input_tokens,
+            "outputTokens": output_tokens,
+            "totalTokens": total_tokens,
+            "byModel": by_model,
+        },
+        "recent": recent,
+    });
+    serde_json::to_string_pretty(&summary).map_err(|e| e.to_string())
+}
+
+fn memory_file_path() -> PathBuf {
+    env::var_os("JEDEN_MEMORY_FILE").map(PathBuf::from).unwrap_or_else(|| dirs_home().join(".jeden/memory.jsonl"))
+}
+
+fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
+    tools::list_tools(context.cwd)
+        .into_iter()
+        .map(|tool| json!({"name": tool.name, "description": tool.description, "input": {}}))
+        .collect()
+}
+
+fn handle_context(context: &SlashContext<'_>) -> Result<String, String> {
+    let all = tool_values(context);
+    let manifest = json!({
+        "cwd": context.cwd,
+        "model": current_model_route(context),
+        "tools": {
+            "total": all.len(),
+            "all": all,
+        },
+        "memory": {
+            "backend": "local-jsonl",
+            "path": memory_file_path(),
+        },
+    });
+    serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())
+}
+
+fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String> {
+    let all = tool_values(context);
+    let report = json!({
+        "ok": true,
+        "cwd": context.cwd,
+        "model": current_model_route(context),
+        "checks": [
+            {"id": "filesystem.cwd.readable", "ok": context.cwd.is_dir(), "fatal": true, "path": context.cwd},
+            {"id": "tools.static.load", "ok": true, "fatal": false},
+        ],
+        "tools": {
+            "total": all.len(),
+        },
+        "memory": {
+            "backend": "local-jsonl",
+            "path": memory_file_path(),
+        },
+    });
+    serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
+}
+
+fn ssh_hosts_from(config: &Value) -> Option<&Map<String, Value>> {
+    config.get("sshHosts").and_then(Value::as_object)
+        .or_else(|| config.get("ssh").and_then(|ssh| ssh.get("hosts")).and_then(Value::as_object))
+        .or_else(|| config.get("ssh").and_then(Value::as_object))
+}
+
+fn ssh_host_value(target: &str, options: &[String]) -> Option<Value> {
+    if options.is_empty() { return Some(Value::String(target.to_string())); }
+    let mut host = Map::new();
+    host.insert("host".into(), Value::String(target.to_string()));
+    for option in options {
+        let (key, value) = option.split_once('=')?;
+        if key.is_empty() { return None; }
+        host.insert(key.to_string(), Value::String(value.to_string()));
+    }
+    Some(Value::Object(host))
+}
+
+fn handle_ssh(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let verb = argv.first().map(String::as_str).unwrap_or("list");
+    let name = argv.get(1).map(String::as_str).unwrap_or("");
+    let target = argv.get(2).map(String::as_str).unwrap_or("");
+    let options = if argv.len() > 3 { &argv[3..] } else { &[] };
+    let project_file = project_config_path(context.cwd);
+    if verb == "list" {
+        let config = merged_config(context.cwd);
+        let Some(hosts) = ssh_hosts_from(&config) else {
+            return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into());
+        };
+        let mut names = hosts.keys().cloned().collect::<Vec<_>>();
+        names.sort();
+        if names.is_empty() {
+            return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into());
+        }
+        return Ok(names.into_iter().map(|host| {
+            let value = hosts.get(&host).cloned().unwrap_or(Value::Null);
+            let rendered = value.as_str().map(ToString::to_string).unwrap_or_else(|| serde_json::to_string(&value).unwrap_or_else(|_| "null".into()));
+            format!("{}\t{}", host, rendered)
+        }).collect::<Vec<_>>().join("\n"));
+    }
+    if verb == "help" {
+        return Ok("Usage: /ssh list | add <name> <target> [key=value ...] | remove <name>. Hosts are stored in <cwd>/.jeden/config.json under sshHosts.".into());
+    }
+    if verb == "add" {
+        if name.is_empty() || target.is_empty() { return Err("Usage: /ssh add <name> <target> [key=value ...]".into()); }
+        let value = ssh_host_value(target, options).ok_or_else(|| "Usage: /ssh add <name> <target> [key=value ...]".to_string())?;
+        let mut project = read_json_value(&project_file);
+        if !project.is_object() { project = json!({}); }
+        let object = project.as_object_mut().expect("project config object");
+        let hosts = object.entry("sshHosts").or_insert_with(|| Value::Object(Map::new()));
+        if !hosts.is_object() { *hosts = Value::Object(Map::new()); }
+        hosts.as_object_mut().expect("sshHosts object").insert(name.to_string(), value);
+        write_json_value(&project_file, &project)?;
+        return Ok(format!("Added SSH host {} to {}.", name, project_file.display()));
+    }
+    if verb == "remove" {
+        if name.is_empty() { return Err("Usage: /ssh remove <name>".into()); }
+        let effective = merged_config(context.cwd);
+        let mut project = read_json_value(&project_file);
+        let in_project = project.get("sshHosts").and_then(Value::as_object).and_then(|hosts| hosts.get(name)).is_some();
+        if !in_project {
+            if ssh_hosts_from(&effective).and_then(|hosts| hosts.get(name)).is_some() {
+                return Err(format!("SSH host {} is not in <cwd>/.jeden/config.json. Remove it from ~/.jeden/config.json or the config file that defines it.", name));
+            }
+            return Err(format!("SSH host not found: {}", name));
+        }
+        if let Some(hosts) = project.get_mut("sshHosts").and_then(Value::as_object_mut) { hosts.remove(name); }
+        write_json_value(&project_file, &project)?;
+        return Ok(format!("Removed SSH host {} from {}.", name, project_file.display()));
+    }
+    Err("Usage: /ssh list | add <name> <target> [key=value ...] | remove <name> | help".into())
+}
+
+fn resolve_cwd_path(cwd: &Path, target: &str) -> PathBuf {
+    let path = PathBuf::from(target);
+    if path.is_absolute() { path } else { cwd.join(path) }
+}
+
+fn handle_todo(args: &str, state: &mut ModeState, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let verb = argv.first().map(String::as_str).unwrap_or("list");
+    let text = argv.iter().skip(1).cloned().collect::<Vec<_>>().join(" ");
+    if verb.is_empty() || verb == "list" {
+        if state.todos.is_empty() { return Ok("Todo list is empty.".into()); }
+        return Ok(state.todos.iter().enumerate().map(|(index, todo)| format!("{}. [{}] {}", index + 1, todo.status, todo.text)).collect::<Vec<_>>().join("\n"));
+    }
+    if verb == "add" || verb == "start" {
+        if text.is_empty() { return Err(format!("Usage: /todo {} <task>", verb)); }
+        state.todos.push(TodoState { text: text.clone(), status: if verb == "start" { "in_progress".into() } else { "pending".into() }, created_at: now_text() });
+        return Ok(format!("Todo added: {}", text));
+    }
+    if verb == "done" || verb == "drop" || verb == "rm" {
+        let needle = text.to_ascii_lowercase();
+        let Some(index) = state.todos.iter().position(|todo| todo.text.to_ascii_lowercase().contains(&needle)).or_else(|| text.parse::<usize>().ok().and_then(|n| n.checked_sub(1)).filter(|&n| n < state.todos.len())) else {
+            return Err(format!("Todo not found: {}", if text.is_empty() { "(missing)" } else { &text }));
+        };
+        let todo_text = state.todos[index].text.clone();
+        if verb == "rm" { state.todos.remove(index); }
+        else { state.todos[index].status = if verb == "done" { "done".into() } else { "dropped".into() }; }
+        return Ok(format!("{} todo: {}", if verb == "rm" { "Removed" } else { "Updated" }, todo_text));
+    }
+    if verb == "copy" || verb == "export" {
+        let md = if state.todos.is_empty() { "- [ ]".into() } else { state.todos.iter().map(|todo| format!("- [{}] {}", if todo.status == "done" { "x" } else { " " }, todo.text)).collect::<Vec<_>>().join("\n") };
+        if verb == "copy" { return Ok(md); }
+        let target = resolve_cwd_path(context.cwd, if text.is_empty() { "TODO.md" } else { &text });
+        if let Some(parent) = target.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        fs::write(&target, format!("{}\n", md)).map_err(|e| e.to_string())?;
+        return Ok(format!("Todos exported to {}", target.display()));
+    }
+    if verb == "import" {
+        let target = resolve_cwd_path(context.cwd, if text.is_empty() { "TODO.md" } else { &text });
+        let raw = fs::read_to_string(&target).map_err(|e| e.to_string())?;
+        state.todos = raw.lines().filter_map(|line| {
+            let trimmed = line.trim_start();
+            if !trimmed.starts_with("- [") { return None; }
+            let status_mark = trimmed.chars().nth(3)?;
+            let text = trimmed.get(6..)?.trim().to_string();
+            if text.is_empty() { return None; }
+            Some(TodoState { text, status: if status_mark == 'x' || status_mark == 'X' { "done".into() } else { "pending".into() }, created_at: now_text() })
+        }).collect();
+        return Ok(format!("Imported {} todos from {}", state.todos.len(), target.display()));
+    }
+    Err("Usage: /todo [list|add|start|done|drop|rm|copy|export|import]".into())
+}
+
+fn handle_guided_goal(args: &str, state: &mut ModeState) -> Result<String, String> {
+    let objective = args.trim();
+    if objective.is_empty() { return Err("Usage: /guided-goal <rough objective>".into()); }
+    state.guided_goal.active = true;
+    state.guided_goal.rough_objective = objective.to_string();
+    Ok("Guided goal drafting started. Jeden will use the next turn to refine the objective instead of pretending to open an overlay.".into())
+}
+
+fn handle_branching(command: &str, args: &str, state: &mut ModeState) -> Result<String, String> {
+    if command == "/tree" {
+        if state.branches.is_empty() { return Ok(String::new()); }
+        return Ok(state.branches.iter().map(|branch| format!("{}\t{}\t{}", branch.id, branch.title, branch.created_at)).collect::<Vec<_>>().join("\n"));
+    }
+    let id = format!("{}-{}", command.trim_start_matches('/'), state.branches.len() + 1);
+    state.branches.push(BranchState { id: id.clone(), title: if args.trim().is_empty() { id.clone() } else { args.trim().into() }, created_at: now_text() });
+    Ok(format!("{} created locally: {}", command.trim_start_matches('/'), id))
 }
 
 pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<String, String>> {
@@ -388,13 +742,20 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
     let result = match command.as_str() {
         "/plan" => { changed = args.trim() != "status"; Some(handle_plan(args, &mut state)) },
         "/goal" => { changed = !matches!(split_head(args).0, "" | "show" | "status"); Some(handle_goal(args, &mut state)) },
+        "/guided-goal" => { changed = true; Some(handle_guided_goal(args, &mut state)) },
         "/loop" => { changed = split_head(args).0 != "status"; Some(handle_loop(args, &mut state)) },
         "/fast" => { changed = split_head(args).0 != "status"; Some(handle_fast(args, &mut state)) },
         "/advisor" => { changed = !matches!(split_head(args).0, "" | "status" | "dump"); Some(handle_advisor(args, &mut state, context)) },
         "/plan-review" => Some(if state.plan.latest_plan.is_empty() { Err("No plan is available to review yet. Run a prompt while /plan is enabled, then use /plan-review.".into()) } else { Ok("Reopening the latest plan for review.".into()) }),
         "/tools" => Some(Ok(tools::tools_slash_text(context.cwd))),
+        "/context" => Some(handle_context(context)),
+        "/stats" | "/debug" => Some(handle_doctor(context)),
+        "/usage" => Some(handle_usage(args, context)),
         "/session" => Some(handle_session(args, context)),
+        "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(handle_todo(args, &mut state, context)) },
         "/mcp" => Some(handle_mcp(args, context)),
+        "/ssh" => Some(handle_ssh(args, context)),
+        "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
         "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
             changed = matches!(command.as_str(), "/compact" | "/shake");
             handle_lifecycle(command.as_str(), args, &mut state, context)
@@ -411,4 +772,59 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_workspace(name: &str) -> PathBuf {
+        let path = env::temp_dir().join(format!("jeden-slash-{}-{}", name, now_millis()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn test_context<'a>(cwd: &'a Path, session_root: &'a Path) -> SlashContext<'a> {
+        SlashContext { cwd, model: Some("test-model"), session_root }
+    }
+
+    #[test]
+    fn ssh_add_list_remove_roundtrip_updates_project_config() {
+        let cwd = temp_workspace("ssh");
+        let sessions = cwd.join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let context = test_context(&cwd, &sessions);
+
+        let added = handle_local(&context, "/ssh add lab example.test user=me").unwrap().unwrap();
+        assert!(added.contains("Added SSH host lab"));
+        let listed = handle_local(&context, "/ssh list").unwrap().unwrap();
+        assert!(listed.contains("lab"));
+        assert!(listed.contains("example.test"));
+        assert!(listed.contains("\"user\":\"me\""));
+        let removed = handle_local(&context, "/ssh remove lab").unwrap().unwrap();
+        assert!(removed.contains("Removed SSH host lab"));
+        let listed = handle_local(&context, "/ssh list").unwrap().unwrap();
+        assert!(listed.contains("No SSH hosts configured"));
+    }
+
+    #[test]
+    fn usage_summary_and_reset_match_js_shape() {
+        let cwd = temp_workspace("usage");
+        let sessions = cwd.join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        fs::create_dir_all(cwd.join(".jeden")).unwrap();
+        fs::write(cwd.join(".jeden/usage.json"), r#"{"updatedAt":"then","events":[{"model":"a","inputTokens":2,"outputTokens":3,"totalTokens":5},{"model":"a","inputTokens":4,"outputTokens":1,"totalTokens":5}]}"#).unwrap();
+        let context = test_context(&cwd, &sessions);
+
+        let summary = handle_local(&context, "/usage show").unwrap().unwrap();
+        let value: Value = serde_json::from_str(&summary).unwrap();
+        assert_eq!(value["totals"]["calls"], 2);
+        assert_eq!(value["totals"]["totalTokens"], 10.0);
+        assert_eq!(value["totals"]["byModel"]["a"]["calls"], 2);
+
+        let reset = handle_local(&context, "/usage reset").unwrap().unwrap();
+        assert!(reset.contains("Reset usage accounting"));
+        let reset_file = read_json_value(&cwd.join(".jeden/usage.json"));
+        assert_eq!(reset_file["events"].as_array().unwrap().len(), 0);
+    }
 }

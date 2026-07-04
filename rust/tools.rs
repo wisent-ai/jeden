@@ -156,14 +156,7 @@ fn merge_mcp_config(cwd: &Path) -> Value {
 }
 
 pub fn configured_mcp_server_names(cwd: &Path) -> Vec<String> {
-    let config = merge_mcp_config(cwd);
-    let disabled = config.get("disabledServers").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<BTreeSet<_>>();
-    let mut names = config.get("mcpServers")
-        .and_then(Value::as_object)
-        .map(|servers| servers.keys().map(|name| if disabled.contains(name.as_str()) { format!("{} (disabled)", name) } else { name.clone() }).collect::<Vec<_>>())
-        .unwrap_or_default();
-    names.sort();
-    names
+    crate::mcp::configured_server_names(cwd)
 }
 
 fn static_mcp_tools(cwd: &Path, seen: &mut BTreeSet<String>) -> Vec<ToolInfo> {

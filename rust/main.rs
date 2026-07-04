@@ -13,6 +13,7 @@ use url::Url;
 
 mod tui;
 mod agent;
+mod mcp;
 mod model_router;
 mod protocol;
 mod slash;
