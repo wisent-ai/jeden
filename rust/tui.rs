@@ -1,9 +1,25 @@
 use std::io::{self, IsTerminal, Write};
 
-const PRODUCT: &str = "Jeden";
+const PRODUCT: &str = "Wisent";
 const APP: &str = "Agent";
 const VERSION: &str = "v0.1.0";
-const ASSISTANT_TITLE: &str = "jeden";
+const ASSISTANT_TITLE: &str = "wisent";
+
+const WISENT_MARK: &[&str] = &[
+    "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",
+    "     ▄█▀▀             ▀▀▀█▄",
+    "  ▄██▀                    ▀██",
+    " ▄█▀▀▀█▄▄                   ▀█▄",
+    "▄█▀     ▀▀▀█▄▄▄              ▀█▄",
+    "██▄▄          ▀▀▀██▄▄▄        ██",
+    "██▀▀██               ▀▀▀▀██▄▄▄██",
+    "▀█▄ ██                       ▄█▀",
+    " ▀█▄ ██              ▄▄▄    ▄█▀",
+    "   ▀█▄██▄          ▄█▀▀▀▀▀███▀",
+    "     ▀████▄    ▄▄██▀  ▄▄▄█▀",
+    "        ▀▀▀██████▄▄██▀▀▀",
+];
+
 
 
 const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
@@ -194,17 +210,17 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
     let left_width = (inner / 3).clamp(24, 34);
     let right_width = inner.saturating_sub(left_width + 3).max(24);
     let cwd_label = compact_path(cwd);
-    let left = [
+    let mut left = vec![
         String::new(),
         "Welcome back!".to_string(),
         String::new(),
-        "JEDEN".to_string(),
-        "Agent CLI".to_string(),
-        String::new(),
+    ];
+    left.extend(WISENT_MARK.iter().map(|line| line.to_string()));
+    left.extend([
         String::new(),
         if model.is_empty() { "default".to_string() } else { model.to_string() },
-        String::new(),
-    ];
+        "Jeden CLI".to_string(),
+    ]);
     let right = [
         "Tips".to_string(),
         "Type a task and press Enter".to_string(),
@@ -385,7 +401,7 @@ mod tests {
             rows: 24,
             color: false,
         });
-        assert!(frame.contains("Jeden Agent v0.1.0"));
+        assert!(frame.contains("Wisent Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
         assert!(frame.contains("jeden > ⬢ test-model"));
         assert!(frame.contains("Welcome back!"));
