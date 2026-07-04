@@ -37,14 +37,25 @@ impl Message {
 }
 
 #[derive(Debug, Clone)]
-pub struct FrameOptions {
+pub struct PromptStatus {
     pub cwd: String,
     pub write_status: String,
     pub command_status: String,
     pub model: String,
+    pub service_tier: String,
+    pub branch: Option<String>,
+    pub dirty_count: usize,
+    pub context_percent: Option<f64>,
+    pub context_limit: Option<String>,
+    pub cost: Option<String>,
+}
+
+
+#[derive(Debug, Clone)]
+pub struct FrameOptions {
+    pub status: PromptStatus,
     pub messages: Vec<Message>,
     pub input_text: String,
-    pub cursor_index: usize,
     pub busy: bool,
     pub columns: usize,
     pub rows: usize,
@@ -188,12 +199,11 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
         "Welcome back!".to_string(),
         String::new(),
         "JEDEN".to_string(),
-        "Agent".to_string(),
-        "Rust TUI".to_string(),
+        "Agent CLI".to_string(),
         String::new(),
         String::new(),
         if model.is_empty() { "default".to_string() } else { model.to_string() },
-        "rust".to_string(),
+        String::new(),
     ];
     let right = [
         "Tips".to_string(),
@@ -237,10 +247,30 @@ fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> 
     if rows.is_empty() { Vec::new() } else { boxed("slash commands", &rows, width, color) }
 }
 
-fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, _input_text: &str, _cursor_index: usize, busy: bool, color: bool) -> Vec<String> {
+fn compact_prompt(width: usize, status: &PromptStatus, _busy: bool, color: bool) -> Vec<String> {
     let inner = width.saturating_sub(2).max(48);
-    let state = if busy { paint("thinking", "yellow", color) } else { paint("ready", "green", color) };
-    let label = format!(" jeden > {} · {} > {} > write {} > command {} ▶ ", if model.is_empty() { "default" } else { model }, state, compact_path(cwd), write_status, command_status);
+    let model = if status.model.is_empty() { "default" } else { status.model.as_str() };
+    let tier = if status.service_tier.is_empty() { "default" } else { status.service_tier.as_str() };
+    let branch = status
+        .branch
+        .as_ref()
+        .map(|branch| format!(" > ⑂ {}{}", branch, if status.dirty_count > 0 { format!(" ?{}", status.dirty_count) } else { String::new() }))
+        .unwrap_or_default();
+    let context = match (status.context_percent, status.context_limit.as_deref()) {
+        (Some(percent), Some(limit)) => format!(" > ◫ {:.1}%/{}", percent, limit),
+        (_, Some(limit)) => format!(" > ◫ n/a/{}", limit),
+        _ => String::new(),
+    };
+    let cost = status.cost.as_ref().map(|cost| format!(" > {}", cost)).unwrap_or_default();
+    let label = format!(
+        " jeden > ⬢ {} > ↯ {} > 📁 {}{}{}{} ▶ ",
+        model,
+        tier,
+        compact_path(&status.cwd),
+        branch,
+        context,
+        cost
+    );
     let safe_label = if visible_len(&label) > inner.saturating_sub(4) {
         format!("{}… ▶ ", take_visible(&label, inner.saturating_sub(7)))
     } else {
@@ -258,23 +288,13 @@ fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, comm
 
 pub fn render_terminal_frame(options: &FrameOptions) -> String {
     let width = options.columns.min(120).max(50);
-    let prompt = compact_prompt(
-        width,
-        &options.model,
-        &options.cwd,
-        &options.write_status,
-        &options.command_status,
-        &options.input_text,
-        options.cursor_index,
-        options.busy,
-        options.color,
-    );
+    let prompt = compact_prompt(width, &options.status, options.busy, options.color);
     let slash_hints = slash_hint_panel(&options.input_text, width, options.color);
     let reserved = prompt.len() + slash_hints.len() + 1;
     let available_rows = options.rows.saturating_sub(reserved).max(4);
     let message_lines: Vec<String> = options.messages.iter().flat_map(|message| format_message(message, width, options.color)).collect();
     let mut main_lines = if message_lines.is_empty() {
-        welcome_panel(width, &options.model, &options.cwd, &options.write_status, &options.command_status, options.color)
+        welcome_panel(width, &options.status.model, &options.status.cwd, &options.status.write_status, &options.status.command_status, options.color)
     } else {
         message_lines
     };
@@ -296,28 +316,17 @@ pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     stdout.flush()
 }
 
-#[derive(Debug, Clone)]
-pub struct InteractiveConfig {
-    pub cwd: String,
-    pub write_status: String,
-    pub command_status: String,
-    pub model: String,
-}
-
-pub fn run_basic_loop<F>(config: InteractiveConfig, mut handle_prompt: F) -> io::Result<()>
+pub fn run_basic_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
 where
+    S: FnMut() -> PromptStatus,
     F: FnMut(&str) -> Result<String, String>,
 {
     let mut messages = Vec::new();
     loop {
         let options = FrameOptions {
-            cwd: config.cwd.clone(),
-            write_status: config.write_status.clone(),
-            command_status: config.command_status.clone(),
-            model: config.model.clone(),
+            status: status_provider(),
             messages: messages.clone(),
             input_text: String::new(),
-            cursor_index: 0,
             busy: false,
             columns: default_columns(),
             rows: default_rows(),
@@ -357,13 +366,20 @@ mod tests {
     #[test]
     fn renders_welcome_and_prompt() {
         let frame = render_terminal_frame(&FrameOptions {
-            cwd: "/tmp/work".to_string(),
-            write_status: "ask".to_string(),
-            command_status: "ask".to_string(),
-            model: "test-model".to_string(),
+            status: PromptStatus {
+                cwd: "/tmp/work".to_string(),
+                write_status: "ask".to_string(),
+                command_status: "ask".to_string(),
+                model: "test-model".to_string(),
+                service_tier: "priority".to_string(),
+                branch: Some("main".to_string()),
+                dirty_count: 1,
+                context_percent: None,
+                context_limit: Some("2048".to_string()),
+                cost: None,
+            },
             messages: Vec::new(),
             input_text: String::new(),
-            cursor_index: 0,
             busy: false,
             columns: 80,
             rows: 24,
@@ -371,7 +387,7 @@ mod tests {
         });
         assert!(frame.contains("Jeden Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
-        assert!(frame.contains("jeden > test-model"));
+        assert!(frame.contains("jeden > ⬢ test-model"));
         assert!(frame.contains("Welcome back!"));
         assert!(frame.contains("/update for upgrade steps"));
         assert!(frame.ends_with("╰─ "));

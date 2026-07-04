@@ -447,7 +447,7 @@ fn write_clipboard(payload: &str) -> Result<String, String> {
 fn handle_copy(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let payload = args.trim();
     if payload.is_empty() {
-        return Err("/copy without text requires a live session recorder; pass text explicitly with /copy <text> in the Rust TUI.".into());
+        return Err("/copy without text requires a live session recorder; pass text explicitly with /copy <text> in interactive Jeden.".into());
     }
     match write_clipboard(payload) {
         Ok(command) => Ok(format!("Copied provided text to the OS clipboard with {}.", command)),

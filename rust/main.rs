@@ -1,6 +1,7 @@
 use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
@@ -536,6 +537,42 @@ fn doctor(args: &Args) -> String {
 }
 
 
+
+fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
+    let branch = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["branch", "--show-current"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|value| !value.is_empty());
+    let dirty_count = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).lines().count())
+        .unwrap_or(0);
+    (branch, dirty_count)
+}
+
+fn service_tier_prompt(cwd: &Path) -> String {
+    let mode: Value = read_json(&cwd.join(".jeden/mode-state.json"));
+    if mode.pointer("/fast/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        if let Some(tier) = mode.pointer("/fast/serviceTier").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+            return tier.to_string();
+        }
+    }
+    env::var("JEDEN_SERVICE_TIER")
+        .ok()
+        .or_else(|| env::var("MODEL_SERVICE_TIER").ok())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "default".into())
+}
 fn interactive(args: &Args) -> Result<String, String> {
     let config = load_config(&args.cwd);
     let model = args
@@ -545,13 +582,22 @@ fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("JEDEN_MODEL").ok())
         .or_else(|| env::var("MODEL").ok())
         .unwrap_or_else(|| "default".into());
-    let mut session_model = Some(model.clone());
+    let session_model = RefCell::new(Some(model));
     tui::run_basic_loop(
-        tui::InteractiveConfig {
-            cwd: args.cwd.display().to_string(),
-            write_status: if args.allow_write { "allow".into() } else { "ask".into() },
-            command_status: if args.allow_command { "allow".into() } else { "ask".into() },
-            model,
+        || {
+            let (branch, dirty_count) = git_prompt_status(&args.cwd);
+            tui::PromptStatus {
+                cwd: args.cwd.display().to_string(),
+                write_status: if args.allow_write { "allow".into() } else { "ask".into() },
+                command_status: if args.allow_command { "allow".into() } else { "ask".into() },
+                model: session_model.borrow().clone().unwrap_or_else(|| "default".into()),
+                service_tier: service_tier_prompt(&args.cwd),
+                branch,
+                dirty_count,
+                context_percent: None,
+                context_limit: None,
+                cost: None,
+            }
         },
         |input| {
             if input.trim_start().starts_with('/') {
@@ -560,15 +606,15 @@ fn interactive(args: &Args) -> Result<String, String> {
                 if matches!(command, "/model" | "/models" | "/switch") {
                     let next = rest.trim();
                     if next.is_empty() {
-                        return Ok(format!("Current model route: {}.", session_model.as_deref().unwrap_or("default")));
+                        return Ok(format!("Current model route: {}.", session_model.borrow().as_deref().unwrap_or("default")));
                     }
-                    session_model = Some(next.to_string());
+                    *session_model.borrow_mut() = Some(next.to_string());
                     return Ok(format!("Model route set to {}.", next));
                 }
                 if command == "/retry" {
                     let mut run_args = args.clone();
                     run_args.command = "run".into();
-                    run_args.model = session_model.clone();
+                    run_args.model = session_model.borrow().clone();
                     run_args.positionals = vec![trimmed.to_string()];
                     run_args.json = false;
                     return agent::retry_command(&run_args).map(|text| text.trim().to_string());
@@ -576,16 +622,16 @@ fn interactive(args: &Args) -> Result<String, String> {
                 if command == "/btw" {
                     let mut run_args = args.clone();
                     run_args.command = "run".into();
-                    run_args.model = session_model.clone();
+                    run_args.model = session_model.borrow().clone();
                     run_args.positionals = vec![trimmed.to_string()];
                     run_args.json = false;
                     return agent::btw_command(&run_args, rest).map(|text| text.trim().to_string());
                 }
-                handle_slash(&args.cwd, input, session_model.as_deref())
+                handle_slash(&args.cwd, input, session_model.borrow().as_deref())
             } else {
                 let mut run_args = args.clone();
                 run_args.command = "run".into();
-                run_args.model = session_model.clone();
+                run_args.model = session_model.borrow().clone();
                 run_args.positionals = vec![input.to_string()];
                 run_args.json = false;
                 agent::run_command(&run_args).map(|text| text.trim().to_string())
