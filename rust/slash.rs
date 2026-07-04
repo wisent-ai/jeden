@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde_json::Map;
 
@@ -401,6 +403,58 @@ fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, 
     }
     Err("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace> | help".into())
 }
+
+fn clipboard_candidates() -> Vec<(&'static str, Vec<&'static str>)> {
+    match env::consts::OS {
+        "macos" => vec![("pbcopy", vec![])],
+        "windows" => vec![("powershell.exe", vec!["-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"]), ("clip.exe", vec![])],
+        _ => vec![("wl-copy", vec![]), ("xclip", vec!["-selection", "clipboard"]), ("xsel", vec!["--clipboard", "--input"])],
+    }
+}
+
+fn write_clipboard(payload: &str) -> Result<String, String> {
+    let mut last_error = "no clipboard command was attempted".to_string();
+    for (command, args) in clipboard_candidates() {
+        match Command::new(command).args(args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn() {
+            Ok(mut child) => {
+                if let Some(stdin) = child.stdin.as_mut() {
+                    if let Err(error) = stdin.write_all(payload.as_bytes()) {
+                        last_error = error.to_string();
+                        let _ = child.kill();
+                        continue;
+                    }
+                }
+                match child.wait_with_output() {
+                    Ok(output) if output.status.success() => return Ok(command.to_string()),
+                    Ok(output) => {
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        last_error = if stderr.is_empty() { format!("{command} exited with {}", output.status) } else { stderr };
+                    }
+                    Err(error) => last_error = error.to_string(),
+                }
+            }
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(last_error)
+}
+
+fn handle_copy(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let payload = args.trim();
+    if payload.is_empty() {
+        return Err("/copy without text requires a live session recorder; pass text explicitly with /copy <text> in the Rust TUI.".into());
+    }
+    match write_clipboard(payload) {
+        Ok(command) => Ok(format!("Copied provided text to the OS clipboard with {}.", command)),
+        Err(error) => {
+            let file = context.cwd.join(".jeden/copy.txt");
+            if let Some(parent) = file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+            fs::write(&file, payload).map_err(|e| e.to_string())?;
+            Ok(format!("OS clipboard is unavailable ({}). Wrote provided text to fallback file: {}", error, file.display()))
+        }
+    }
+}
+
 
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
@@ -1198,6 +1252,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/plugins" => Some(handle_plugins(args, context)),
         "/reload-plugins" => Some(handle_reload_plugins(context)),
         "/marketplace" => Some(handle_marketplace(args, context)),
+        "/copy" => Some(handle_copy(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1210,7 +1265,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/export" | "/dump" | "/share" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
