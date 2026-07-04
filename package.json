@@ -5,17 +5,13 @@
   "type": "module",
   "bin": {
     "jeden": "./bin/jeden-rust",
-    "jeden-rust": "./bin/jeden-rust",
-    "jeden-js": "./src/cli.js"
+    "jeden-rust": "./bin/jeden-rust"
   },
   "scripts": {
-    "check": "node scripts/check-syntax.mjs",
+    "check": "cargo check",
     "check:rust": "cargo check",
     "build:rust": "cargo build --release",
-    "test": "node --test"
-  },
-  "engines": {
-    "node": ">=20"
+    "test": "cargo test"
   },
   "license": "UNLICENSED"
 }
