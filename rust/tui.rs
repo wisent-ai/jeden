@@ -320,7 +320,7 @@ pub struct InteractiveConfig {
     pub model: String,
 }
 
-pub fn run_basic_loop<F>(config: InteractiveConfig, mut handle_slash: F) -> io::Result<()>
+pub fn run_basic_loop<F>(config: InteractiveConfig, mut handle_prompt: F) -> io::Result<()>
 where
     F: FnMut(&str) -> Result<String, String>,
 {
@@ -354,19 +354,11 @@ where
         if matches!(prompt, "/exit" | "/quit") {
             break;
         }
-        if prompt.starts_with('/') {
-            match handle_slash(prompt) {
-                Ok(text) => messages.push(Message::new("system", text)),
-                Err(error) => messages.push(Message::new("error", error)),
-            }
-            continue;
-        }
-
         messages.push(Message::new("user", prompt));
-        messages.push(Message::new(
-            "system",
-            "Rust interactive prompt accepted. Model execution is not yet ported for this TUI path; use `jeden run \"prompt\"` when model-backed execution is required.",
-        ));
+        match handle_prompt(prompt) {
+            Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
+            Err(error) => messages.push(Message::new("error", error)),
+        }
     }
 
     let mut stdout = io::stdout();

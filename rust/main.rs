@@ -459,7 +459,17 @@ fn interactive(args: &Args) -> Result<String, String> {
             command_status: if args.allow_command { "allow".into() } else { "ask".into() },
             model,
         },
-        |input| handle_slash(&args.cwd, input, args.model.as_deref()),
+        |input| {
+            if input.trim_start().starts_with('/') {
+                handle_slash(&args.cwd, input, args.model.as_deref())
+            } else {
+                let mut run_args = args.clone();
+                run_args.command = "run".into();
+                run_args.positionals = vec![input.to_string()];
+                run_args.json = false;
+                agent::run_command(&run_args).map(|text| text.trim().to_string())
+            }
+        },
     )
     .map_err(|e| e.to_string())?;
     Ok(String::new())
