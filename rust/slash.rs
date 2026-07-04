@@ -751,6 +751,39 @@ fn handle_share(args: &str, context: &SlashContext<'_>) -> Result<String, String
     ))
 }
 
+fn handle_handoff(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let session = slash_session_value(context, "")?;
+    let focus = args.trim();
+    let text = format!("{}{}", if focus.is_empty() { String::new() } else { format!("Focus: {}\n\n", focus) }, slash_session_export(&session, "markdown")?);
+    let session_dir = slash_session_dir(context, "")?;
+    let artifact_dir = session_dir.join("artifacts");
+    fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
+    let file = artifact_dir.join("handoff.md");
+    fs::write(&file, text).map_err(|e| e.to_string())?;
+    Ok(format!("Handoff written to {}", file.display()))
+}
+
+fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let complaint = args.trim();
+    if complaint.is_empty() { return Err("Usage: /omfg <complaint>".into()); }
+    let file = context.cwd.join(".jeden/rules.jsonl");
+    if let Some(parent) = file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let id = format!("rule-{}", now_text());
+    let record = json!({
+        "id": id,
+        "kind": "omfg-rule",
+        "createdAt": now_text(),
+        "cwd": context.cwd,
+        "complaint": complaint,
+        "rule": format!("When this situation recurs, avoid the behavior described here: {}", complaint),
+        "source": "/omfg"
+    });
+    let mut out = fs::OpenOptions::new().create(true).append(true).open(&file).map_err(|e| e.to_string())?;
+    writeln!(out, "{}", serde_json::to_string(&record).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(format!("Forged local rule {}.\nRules file: {}\nRule: {}", id, file.display(), record.get("rule").and_then(Value::as_str).unwrap_or("")))
+}
+
+
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
     let mut sources = sorted_object_values(&registry["sources"]);
@@ -1533,7 +1566,6 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/loop" => { changed = split_head(args).0 != "status"; Some(handle_loop(args, &mut state)) },
         "/fast" => { changed = split_head(args).0 != "status"; Some(handle_fast(args, &mut state)) },
         "/advisor" => { changed = !matches!(split_head(args).0, "" | "status" | "dump"); Some(handle_advisor(args, &mut state, context)) },
-        "/plan-review" => Some(if state.plan.latest_plan.is_empty() { Err("No plan is available to review yet. Run a prompt while /plan is enabled, then use /plan-review.".into()) } else { Ok("Reopening the latest plan for review.".into()) }),
         "/tools" => Some(Ok(tools::tools_slash_text(context.cwd))),
         "/context" => Some(handle_context(context)),
         "/stats" | "/debug" => Some(handle_doctor(context)),
@@ -1554,6 +1586,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/dump" => Some(handle_dump(args, context)),
         "/export" => Some(handle_export(args, context)),
         "/share" => Some(handle_share(args, context)),
+        "/omfg" => Some(handle_omfg(args, context)),
+        "/handoff" => Some(handle_handoff(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1566,7 +1600,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/btw" | "/tan" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
