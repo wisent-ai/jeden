@@ -319,6 +319,89 @@ fn sorted_object_values(value: &Value) -> Vec<Value> {
     values
 }
 
+fn sanitize_marketplace_name(value: &str, fallback: &str) -> String {
+    let mut out = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
+            out.push(ch);
+        } else if matches!(ch, '@' | '/' | '\\') {
+            out.push('-');
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let trimmed = out.trim_matches('-').to_string();
+    if trimmed.is_empty() { fallback.to_string() } else { trimmed }
+}
+
+fn marketplace_source_name(source: &str) -> String {
+    let text = source.trim().trim_end_matches('/');
+    let tail = text.rsplit('/').next().unwrap_or(text);
+    sanitize_marketplace_name(if tail.is_empty() { text } else { tail }, "source")
+}
+
+fn marketplace_source_type(source: &str) -> &'static str {
+    let text = source.trim().to_ascii_lowercase();
+    if text.starts_with("http://") || text.starts_with("https://") { "url" }
+    else if text.starts_with("ssh://") || text.starts_with("git+ssh://") || text.starts_with("git@") { "git" }
+    else { "local" }
+}
+
+fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let verb = argv.first().map(String::as_str).unwrap_or("help");
+    let first = argv.get(1).map(String::as_str).unwrap_or("");
+    let mut registry = plugin_registry(context.cwd);
+    if verb == "help" {
+        return Ok("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace>. discover/update/install/upgrade require the JS marketplace scanner.".into());
+    }
+    if verb == "add" {
+        let source = argv.iter().skip(1).cloned().collect::<Vec<_>>().join(" ").trim().to_string();
+        if source.is_empty() { return Err("Usage: /marketplace add <source>".into()); }
+        let name = marketplace_source_name(&source);
+        let existing = registry.get("sources").and_then(Value::as_object).and_then(|sources| sources.get(&name)).cloned().unwrap_or_else(|| json!({}));
+        let added_at = existing.get("addedAt").cloned().unwrap_or_else(|| json!(now_text()));
+        registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(name.clone(), json!({
+            "name": name,
+            "source": source.clone(),
+            "type": marketplace_source_type(&source),
+            "enabled": true,
+            "addedAt": added_at,
+            "updatedAt": now_text(),
+            "plugins": existing.get("plugins").filter(|value| value.is_array()).cloned().unwrap_or_else(|| json!([])),
+        }));
+        let file = save_plugin_registry(context.cwd, &registry)?;
+        return Ok(format!("Added marketplace source {} ({}) in {}.", name, source, file.display()));
+    }
+    if verb == "remove" {
+        if first.is_empty() { return Err("Usage: /marketplace remove <name>".into()); }
+        let sources = registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?;
+        if sources.remove(first).is_none() { return Err(format!("Marketplace source not found: {first}")); }
+        let file = save_plugin_registry(context.cwd, &registry)?;
+        return Ok(format!("Removed marketplace source {} from {}. Installed plugin records were kept; uninstall them explicitly if desired.", first, file.display()));
+    }
+    if verb == "list" {
+        let mut sources = sorted_object_values(&registry["sources"]);
+        sources.sort_by(|a, b| a.get("name").and_then(Value::as_str).unwrap_or("").cmp(b.get("name").and_then(Value::as_str).unwrap_or("")));
+        return Ok(if sources.is_empty() { "No marketplace sources configured. Add one with /marketplace add <source>.".into() } else { ["Marketplace sources:".into()].into_iter().chain(sources.iter().map(format_plugin_source)).collect::<Vec<_>>().join("\n") });
+    }
+    if verb == "installed" {
+        let installed = sorted_object_values(&registry["installed"]);
+        return Ok(if installed.is_empty() { "No plugins installed.".into() } else { ["Installed plugins:".into()].into_iter().chain(installed.iter().map(format_plugin)).collect::<Vec<_>>().join("\n") });
+    }
+    if verb == "uninstall" {
+        if first.is_empty() { return Err("Usage: /marketplace uninstall <name@marketplace>".into()); }
+        let installed = registry.get_mut("installed").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?;
+        if installed.remove(first).is_none() { return Err(format!("Installed plugin not found: {first}")); }
+        let file = save_plugin_registry(context.cwd, &registry)?;
+        return Ok(format!("Uninstalled plugin {} from {}.", first, file.display()));
+    }
+    if matches!(verb, "discover" | "update" | "install" | "upgrade") {
+        return Err(format!("/marketplace {verb} requires plugin manifest discovery; use the JS entrypoint until the Rust-native scanner is ported."));
+    }
+    Err("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace> | help".into())
+}
+
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
     let mut sources = sorted_object_values(&registry["sources"]);
@@ -1114,6 +1197,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/extensions" | "/status" => Some(handle_extensions(context)),
         "/plugins" => Some(handle_plugins(args, context)),
         "/reload-plugins" => Some(handle_reload_plugins(context)),
+        "/marketplace" => Some(handle_marketplace(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1126,7 +1210,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/marketplace" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
