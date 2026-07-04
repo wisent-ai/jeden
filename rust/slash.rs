@@ -1,3 +1,7 @@
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::env;
@@ -694,6 +698,57 @@ fn handle_export(args: &str, context: &SlashContext<'_>) -> Result<String, Strin
     } else {
         Ok(payload)
     }
+}
+
+fn handle_share(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let copy_link = argv.iter().any(|arg| matches!(arg.as_str(), "copy" | "--copy" | "--clipboard"));
+    let session = slash_session_value(context, "")?;
+    let id = session.get("id").and_then(Value::as_str).unwrap_or("session");
+    let created_at = now_text();
+    let plain = serde_json::to_vec_pretty(&json!({ "version": 1, "kind": "jeden-session", "createdAt": created_at, "session": session })).map_err(|e| e.to_string())?;
+    let mut key = [0u8; 32];
+    let mut iv = [0u8; 12];
+    rand::thread_rng().fill_bytes(&mut key);
+    rand::thread_rng().fill_bytes(&mut iv);
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| e.to_string())?;
+    let encrypted = cipher.encrypt(Nonce::from_slice(&iv), plain.as_ref()).map_err(|e| e.to_string())?;
+    if encrypted.len() < 16 { return Err("encrypted share payload is unexpectedly short".into()); }
+    let split = encrypted.len() - 16;
+    let (ciphertext, tag) = encrypted.split_at(split);
+    let session_dir = slash_session_dir(context, "")?;
+    let artifact_dir = session_dir.join("artifacts");
+    fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
+    let file = artifact_dir.join(format!("share-{}-{}.jeden-share", sanitize_marketplace_name(id, "session"), created_at));
+    let bundle = json!({
+        "version": 1,
+        "kind": "jeden-encrypted-share",
+        "backend": "file",
+        "durable": true,
+        "algorithm": "AES-256-GCM",
+        "createdAt": created_at,
+        "sessionId": id,
+        "iv": URL_SAFE_NO_PAD.encode(iv),
+        "tag": URL_SAFE_NO_PAD.encode(tag),
+        "ciphertext": URL_SAFE_NO_PAD.encode(ciphertext),
+        "note": "Durable encrypted session bundle. The decryption key is carried only in the returned URL fragment; keep the fragment private."
+    });
+    fs::write(&file, serde_json::to_string_pretty(&bundle).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+    let url = format!("{}#key={}", file_url(&file), URL_SAFE_NO_PAD.encode(key));
+    let copy_status = if copy_link {
+        match write_clipboard(&url) {
+            Ok(command) => format!("Copied share URL to clipboard with {}.", command),
+            Err(error) => format!("Could not copy share URL to clipboard: {}", error),
+        }
+    } else {
+        "Add `copy`, `--copy`, or `--clipboard` to copy the share URL.".into()
+    };
+    Ok(format!(
+        "Encrypted durable share bundle written to {}\nShare URL with decryption key: {}\n{}\nBackend: durable local file bundle. Move or sync the file anywhere you trust; the URL fragment/key is never written into the bundle.",
+        file.display(),
+        url,
+        copy_status
+    ))
 }
 
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
@@ -1498,6 +1553,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/leave" => Some(handle_leave(context)),
         "/dump" => Some(handle_dump(args, context)),
         "/export" => Some(handle_export(args, context)),
+        "/share" => Some(handle_share(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1510,7 +1566,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/share" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
