@@ -816,9 +816,57 @@ fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<String, String> 
         "startedAt": now_text()
     });
     write_json_value(&metadata_path, &metadata)?;
+    let mut mode = read_json_value(&mode_state_path(context.cwd));
+    if !mode.is_object() { mode = json!({}); }
+    mode.as_object_mut().expect("mode object").insert("tanJobsSessionPath".into(), json!(session_dir));
+    write_json_value(&mode_state_path(context.cwd), &mode)?;
     std::mem::forget(child);
     Ok(format!("Started detached tan job {}.\nPID: {}\nMetadata: {}\nStdout: {}\nStderr: {}", job_id, pid, metadata_path.display(), stdout_path.display(), stderr_path.display()))
 }
+
+fn handle_jobs(context: &SlashContext<'_>) -> Result<String, String> {
+    let mode = read_json_value(&mode_state_path(context.cwd));
+    let session_dir = if let Some(path) = mode.get("tanJobsSessionPath").and_then(Value::as_str) {
+        PathBuf::from(path)
+    } else {
+        match slash_session_dir(context, "") {
+            Ok(dir) => dir,
+            Err(_) => return Ok("No background jobs are tracked for a Rust session yet.".into()),
+        }
+    };
+    let dir = session_dir.join("artifacts/tan-jobs");
+    let mut jobs = Vec::new();
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("json") { continue; }
+            let mut job = read_json_value(&path);
+            if !job.is_object() { continue; }
+            if let Some(map) = job.as_object_mut() {
+                map.insert("metadata".into(), json!(path));
+                for key in ["stdout", "stderr"] {
+                    if let Some(log_path) = map.get(key).and_then(Value::as_str) {
+                        if let Ok(meta) = fs::metadata(log_path) {
+                            map.insert(format!("{key}Bytes"), json!(meta.len()));
+                        }
+                    }
+                }
+            }
+            jobs.push(job);
+        }
+    }
+    jobs.sort_by(|a, b| {
+        a.get("startedAt").and_then(Value::as_str).unwrap_or("")
+            .cmp(b.get("startedAt").and_then(Value::as_str).unwrap_or(""))
+            .then_with(|| a.get("id").and_then(Value::as_str).unwrap_or("").cmp(b.get("id").and_then(Value::as_str).unwrap_or("")))
+    });
+    if jobs.is_empty() {
+        Ok(format!("No background jobs are tracked in {}.", dir.display()))
+    } else {
+        serde_json::to_string_pretty(&jobs).map_err(|e| e.to_string())
+    }
+}
+
 
 
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
@@ -1631,7 +1679,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
             handle_lifecycle(command.as_str(), args, &mut state, context)
         },
         "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
-        "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
+        "/jobs" => Some(handle_jobs(context)),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
         "/tan" => Some(handle_tan(args, context)),
