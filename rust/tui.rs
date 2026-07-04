@@ -4,22 +4,7 @@ const PRODUCT: &str = "Wisent";
 const APP: &str = "Agent";
 const VERSION: &str = "v0.1.0";
 const ASSISTANT_TITLE: &str = "wisent";
-const HEADER_MARK: &str = "◒";
 
-const WISENT_MARK: &[&str] = &[
-    "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",
-    "     ▄█▀▀             ▀▀▀█▄",
-    "  ▄██▀                    ▀██",
-    " ▄█▀▀▀█▄▄                   ▀█▄",
-    "▄█▀     ▀▀▀█▄▄▄              ▀█▄",
-    "██▄▄          ▀▀▀██▄▄▄        ██",
-    "██▀▀██               ▀▀▀▀██▄▄▄██",
-    "▀█▄ ██                       ▄█▀",
-    " ▀█▄ ██              ▄▄▄    ▄█▀",
-    "   ▀█▄██▄          ▄█▀▀▀▀▀███▀",
-    "     ▀████▄    ▄▄██▀  ▄▄▄█▀",
-    "        ▀▀▀██████▄▄██▀▀▀",
-];
 
 const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
     ("settings", "Open settings menu"),
@@ -133,6 +118,24 @@ fn wrap_line(line: &str, width: usize) -> Vec<String> {
     chars.chunks(width).map(|chunk| chunk.iter().collect()).collect()
 }
 
+fn compact_path(cwd: &str) -> String {
+    let parts = cwd.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    if parts.len() >= 2 {
+        format!("…/{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
+    } else {
+        cwd.to_string()
+    }
+}
+
+fn clamp_visible(value: &str, width: usize) -> String {
+    if visible_len(value) > width {
+        format!("{}…", take_visible(value, width.saturating_sub(1)))
+    } else {
+        value.to_string()
+    }
+}
+
+
 fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> Vec<String> {
     let clean_title = format!(" {} ", title);
     let inner = width.saturating_sub(4).max(clean_title.chars().count() + 2).max(8);
@@ -174,49 +177,51 @@ fn format_message(message: &Message, width: usize, color: bool) -> Vec<String> {
         .collect()
 }
 
-
 fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, color: bool) -> Vec<String> {
     let title = format!("{} {} {}", PRODUCT, APP, VERSION);
-    let mark_width = WISENT_MARK.iter().map(|line| visible_len(line)).max().unwrap_or(0);
-    let controls = [
-        "Controls",
-        "Type a prompt and press Enter",
-        "/help lists commands",
-        "/update shows upgrade steps",
-        "Ctrl-C exits",
+    let inner = width.saturating_sub(4).max(48);
+    let left_width = (inner / 3).clamp(24, 34);
+    let right_width = inner.saturating_sub(left_width + 3).max(24);
+    let cwd_label = compact_path(cwd);
+    let left = [
+        String::new(),
+        "Welcome back!".to_string(),
+        String::new(),
+        "▀██████████▀".to_string(),
+        " ╘██    ██".to_string(),
+        "  ██    ██".to_string(),
+        "  ██    ██".to_string(),
+        " ▄██▄  ▄██▄".to_string(),
+        String::new(),
+        if model.is_empty() { "default".to_string() } else { model.to_string() },
+        "rust".to_string(),
     ];
-    let mut rows = vec![
-        format!("{} private agent harness", PRODUCT),
-        format!("Model route: {}", if model.is_empty() { "default" } else { model }),
-        format!("Workspace: {}", cwd),
-        String::new(),
-    ];
-    for (index, line) in WISENT_MARK.iter().enumerate() {
-        rows.push(format!("{}   {}", pad_visible(line, mark_width), controls.get(index).copied().unwrap_or("")).trim_end().to_string());
-    }
-    rows.extend([
-        String::new(),
-        "Get started: type a task, /help for commands, /model to switch routes, /update for upgrade steps.".to_string(),
-        "Example: make a short plan for this repo".to_string(),
-        String::new(),
+    let right = [
+        "Tips".to_string(),
+        "Type a task and press Enter".to_string(),
+        "/help for commands".to_string(),
+        "/model to switch routes".to_string(),
+        "/update for upgrade steps".to_string(),
+        "! and $ shells are not wired yet".to_string(),
+        "────────────────────────".to_string(),
+        format!("Workspace: {}", cwd_label),
         format!("Tool gates: write {} · command {}", write_status, command_status),
-        "Sessions: local history and artifacts".to_string(),
-        "MCP: adapters loaded through Wisent registry".to_string(),
-    ]);
+        "CLI: jeden sessions".to_string(),
+        "CLI: jeden artifacts <id>".to_string(),
+    ];
+    let mut rows = Vec::new();
+    for index in 0..left.len().max(right.len()) {
+        let left_cell = clamp_visible(&left.get(index).cloned().unwrap_or_default(), left_width);
+        let right_cell = clamp_visible(&right.get(index).cloned().unwrap_or_default(), right_width);
+        rows.push(format!(
+            "{} │ {}",
+            pad_visible(&left_cell, left_width),
+            pad_visible(&right_cell, right_width)
+        ));
+    }
     boxed(&title, &rows, width, color)
 }
 
-fn brand_header(width: usize, model: &str, cwd: &str, color: bool) -> String {
-    let inner = width.saturating_sub(4).max(8);
-    let content_width = inner.saturating_sub(2).max(1);
-    let label = format!("{} {} {} {} · {} · {}", HEADER_MARK, PRODUCT, APP, VERSION, if model.is_empty() { "default" } else { model }, cwd);
-    let row = if visible_len(&label) > content_width {
-        format!("{}…", take_visible(&label, content_width.saturating_sub(1)))
-    } else {
-        label
-    };
-    format!("{} {} {}", paint("╭─", "cyan", color), pad_visible(&row, content_width), paint("─╮", "cyan", color))
-}
 
 fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> {
     let text = input_text.trim_start();
@@ -233,11 +238,10 @@ fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> 
     if rows.is_empty() { Vec::new() } else { boxed("slash commands", &rows, width, color) }
 }
 
-
 fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, _input_text: &str, _cursor_index: usize, busy: bool, color: bool) -> Vec<String> {
     let inner = width.saturating_sub(2).max(48);
     let state = if busy { paint("thinking", "yellow", color) } else { paint("ready", "green", color) };
-    let label = format!(" wisent > {} · {} > {} > write {} > command {} › ", if model.is_empty() { "default" } else { model }, state, cwd, write_status, command_status);
+    let label = format!(" wisent > {} · {} > {} > write {} > command {} ▶ ", if model.is_empty() { "default" } else { model }, state, compact_path(cwd), write_status, command_status);
     let safe_label = if visible_len(&label) > inner.saturating_sub(4) {
         format!("{}… ▶ ", take_visible(&label, inner.saturating_sub(7)))
     } else {
@@ -250,16 +254,11 @@ fn compact_prompt(width: usize, model: &str, cwd: &str, write_status: &str, comm
         paint(&"─".repeat(inner.saturating_sub(visible_len(&safe_label) + 2)), "cyan", color),
         paint("╮", "cyan", color)
     );
-    let mut out = vec![top];
-    out.push(format!("{} {} {}", paint("│", "cyan", color), pad_visible(&format!("Enter sends · /help commands · /update upgrades · Ctrl-C exits"), inner.saturating_sub(2)), paint("│", "cyan", color)));
-    let prompt = format!("{} wisent › ", paint("╰─", "cyan", color));
-    out.push(prompt);
-    out
+    vec![top, format!("{} ", paint("╰─", "cyan", color))]
 }
 
 pub fn render_terminal_frame(options: &FrameOptions) -> String {
     let width = options.columns.min(120).max(50);
-    let header = brand_header(width, &options.model, &options.cwd, options.color);
     let prompt = compact_prompt(
         width,
         &options.model,
@@ -272,7 +271,7 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
         options.color,
     );
     let slash_hints = slash_hint_panel(&options.input_text, width, options.color);
-    let reserved = 1 + prompt.len() + slash_hints.len() + 1;
+    let reserved = prompt.len() + slash_hints.len() + 1;
     let available_rows = options.rows.saturating_sub(reserved).max(4);
     let message_lines: Vec<String> = options.messages.iter().flat_map(|message| format_message(message, width, options.color)).collect();
     let mut main_lines = if message_lines.is_empty() {
@@ -283,7 +282,7 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
     if main_lines.len() > available_rows {
         main_lines = main_lines.split_off(main_lines.len() - available_rows);
     }
-    let mut lines = vec!["\x1b[2J\x1b[H".to_string(), header];
+    let mut lines = vec!["\x1b[2J\x1b[H".to_string()];
     lines.extend(main_lines.iter().cloned());
     lines.extend(std::iter::repeat(String::new()).take(available_rows.saturating_sub(main_lines.len())));
     lines.extend(slash_hints);
@@ -374,8 +373,8 @@ mod tests {
         assert!(frame.contains("Wisent Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
         assert!(frame.contains("wisent > test-model"));
-        assert!(frame.contains("Get started: type a task"));
-        assert!(frame.contains("/update upgrades"));
-        assert!(frame.ends_with("wisent › "));
+        assert!(frame.contains("Welcome back!"));
+        assert!(frame.contains("/update for upgrade steps"));
+        assert!(frame.ends_with("╰─ "));
     }
 }
