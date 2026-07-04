@@ -4,8 +4,9 @@
   "private": true,
   "type": "module",
   "bin": {
-    "jeden": "./src/cli.js",
-    "jeden-rust": "./bin/jeden-rust"
+    "jeden": "./bin/jeden-rust",
+    "jeden-rust": "./bin/jeden-rust",
+    "jeden-js": "./src/cli.js"
   },
   "scripts": {
     "check": "node scripts/check-syntax.mjs",
