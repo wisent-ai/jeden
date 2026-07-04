@@ -1828,6 +1828,175 @@ fn ask_user(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> 
     Ok(json!({"answer": answer.trim_end_matches(['\r', '\n']).to_string()}))
 }
 
+fn mcp_native_tool(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Option<Result<Value, String>> {
+    crate::tools::native_mcp_tool_target(runtime.cwd, tool)
+        .map(|(server, native_tool)| crate::mcp::call_tool(runtime.cwd, &server, &native_tool, input.clone(), 30_000))
+}
+
+fn custom_tool(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<Value, String> {
+    let runner = r#"
+import { readdir, readFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { homedir } from 'node:os';
+import { dirname, join, relative, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const MAX_OUTPUT_BYTES = 100000;
+function cap(v) { return v.length <= MAX_OUTPUT_BYTES ? v : v.slice(0, MAX_OUTPUT_BYTES); }
+function isLoadableModule(name) { return name.endsWith('.js') || name.endsWith('.mjs'); }
+function unique(values) { return [...new Set(values)]; }
+function jailPath(cwd, inputPath) {
+  const root = resolve(cwd);
+  const target = resolve(root, String(inputPath || '.'));
+  const rel = relative(root, target);
+  if (rel === '' || (rel.slice(0, 2) !== '..' && rel.slice(0, 1) !== '/')) return target;
+  throw new Error(`path escapes cwd: ${inputPath}`);
+}
+function optionalEnum(value, allowed, label) {
+  if (value == null) return null;
+  const text = String(value);
+  if (!allowed.has(text)) throw new Error(`invalid ${label}: ${text}`);
+  return text;
+}
+function isToolName(value) { return typeof value === 'string' && /^[A-Za-z0-9._-]{1,80}$/.test(value); }
+function exec(command, args = [], options = {}) {
+  if (!command || typeof command !== 'string') throw new Error('command is required');
+  if (!Array.isArray(args) || args.some((arg) => typeof arg !== 'string')) throw new Error('args must be strings');
+  const cwd = options.cwd ? resolve(String(options.cwd)) : process.cwd();
+  const timeoutMs = Math.min(Math.max(Number(options.timeoutMs) || 30000, 1000), 180000);
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, { cwd, env: { ...process.env, ...(options.env || {}) } });
+    let stdout = ''; let stderr = ''; let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; child.kill('SIGTERM'); }, timeoutMs);
+    child.stdout.on('data', (chunk) => { stdout = cap(stdout + chunk.toString('utf8')); });
+    child.stderr.on('data', (chunk) => { stderr = cap(stderr + chunk.toString('utf8')); });
+    child.on('close', (code, signal) => { clearTimeout(timer); resolvePromise({ code, signal, timedOut, stdout, stderr }); });
+  });
+}
+function normalizeTool(raw, source) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('tool must be an object');
+  if (!raw.name || typeof raw.name !== 'string') throw new Error('tool.name is required');
+  if (!isToolName(raw.name)) throw new Error(`invalid tool name: ${raw.name}`);
+  if (!raw.description || typeof raw.description !== 'string') throw new Error(`tool.description is required for ${raw.name}`);
+  if (typeof raw.execute !== 'function') throw new Error(`tool.execute is required for ${raw.name}`);
+  return {
+    name: raw.name,
+    description: raw.description,
+    input: raw.input && typeof raw.input === 'object' && !Array.isArray(raw.input) ? raw.input : {},
+    permission: optionalEnum(raw.permission, new Set(['write', 'command']), 'permission'),
+    hook: optionalEnum(raw.hook, new Set(['read', 'edit', 'bash']), 'hook'),
+    postHook: optionalEnum(raw.postHook, new Set(['read', 'edit', 'bash']), 'postHook'),
+    source,
+    execute: raw.execute,
+  };
+}
+async function listToolFiles(dir) {
+  try {
+    const entries = await readdir(dir, { withFileTypes: true });
+    return entries.filter((entry) => entry.isFile() && isLoadableModule(entry.name)).map((entry) => join(dir, entry.name)).sort();
+  } catch (error) {
+    if (error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) return [];
+    throw error;
+  }
+}
+async function loadToolFile(file, api) {
+  const module = await import(`${pathToFileURL(file).href}?mtime=${Date.now()}`);
+  const factory = module.default || module.tool || module.tools;
+  const produced = typeof factory === 'function' ? await factory(api) : factory;
+  const list = Array.isArray(produced) ? produced : [produced];
+  return list.map((candidate) => normalizeTool(candidate, file));
+}
+async function main() {
+  const cwd = process.env.JEDEN_CUSTOM_CWD;
+  const target = process.env.JEDEN_CUSTOM_TOOL;
+  const input = JSON.parse(process.env.JEDEN_CUSTOM_INPUT || '{}');
+  const allowWrite = process.env.JEDEN_CUSTOM_ALLOW_WRITE === '1';
+  const allowCommand = process.env.JEDEN_CUSTOM_ALLOW_COMMAND === '1';
+  const api = {
+    cwd: resolve(cwd),
+    exec: (command, args, options = {}) => {
+      if (!allowCommand) throw new Error('custom tool exec requires --allow-command');
+      return exec(command, args, { cwd: resolve(cwd), ...options });
+    },
+    readText: (path) => readFile(jailPath(cwd, path), 'utf8'),
+    dirname,
+  };
+  const files = (await Promise.all(unique([join(homedir(), '.jeden', 'tools'), join(resolve(cwd), '.jeden', 'tools')]).map(listToolFiles))).flat();
+  const errors = [];
+  const seen = new Set();
+  for (const file of files) {
+    try {
+      for (const loaded of await loadToolFile(file, api)) {
+        if (seen.has(loaded.name)) throw new Error(`tool name conflict: ${loaded.name}`);
+        seen.add(loaded.name);
+        if (loaded.name !== target) continue;
+        if (loaded.permission === 'write' && !allowWrite) throw new Error(`${target} requires --allow-write`);
+        if (loaded.permission === 'command' && !allowCommand) throw new Error(`${target} requires --allow-command`);
+        return { ok: true, found: true, result: await loaded.execute(input || {}) };
+      }
+    } catch (error) {
+      errors.push({ path: file, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return { ok: false, found: false, errors };
+}
+main().then((value) => {
+  console.log(`JEDEN_CUSTOM_RESULT\t${JSON.stringify(value)}`);
+}).catch((error) => {
+  console.log(`JEDEN_CUSTOM_RESULT\t${JSON.stringify({ ok: false, found: false, fatal: error instanceof Error ? error.message : String(error) })}`);
+});
+"#;
+    let node = std::env::var("JEDEN_NODE").unwrap_or_else(|_| "node".into());
+    let mut child = Command::new(node)
+        .arg("--input-type=module")
+        .arg("-e")
+        .arg(runner)
+        .env("JEDEN_CUSTOM_CWD", runtime.cwd)
+        .env("JEDEN_CUSTOM_TOOL", tool)
+        .env("JEDEN_CUSTOM_INPUT", input.to_string())
+        .env("JEDEN_CUSTOM_ALLOW_WRITE", if runtime.allow_write { "1" } else { "0" })
+        .env("JEDEN_CUSTOM_ALLOW_COMMAND", if runtime.allow_command { "1" } else { "0" })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("custom tool bridge failed to start node: {e}"))?;
+    let mut stdout_pipe = child.stdout.take().ok_or("custom tool bridge missing stdout")?;
+    let mut stderr_pipe = child.stderr.take().ok_or("custom tool bridge missing stderr")?;
+    let stdout_handle = std::thread::spawn(move || {
+        let mut stdout = String::new();
+        let _ = stdout_pipe.read_to_string(&mut stdout);
+        stdout
+    });
+    let stderr_handle = std::thread::spawn(move || {
+        let mut stderr = String::new();
+        let _ = stderr_pipe.read_to_string(&mut stderr);
+        stderr
+    });
+    let start = Instant::now();
+    loop {
+        if let Some(status) = child.try_wait().map_err(|e| e.to_string())? {
+            let stdout = stdout_handle.join().unwrap_or_default();
+            let stderr = stderr_handle.join().unwrap_or_default();
+            if !status.success() { return Err(format!("custom tool bridge exited with {status}: {stderr}")); }
+            let result_line = stdout.lines().rev().find_map(|line| line.strip_prefix("JEDEN_CUSTOM_RESULT\t"));
+            let Some(result_line) = result_line else { return Err(format!("custom tool bridge returned no result: {stdout}{stderr}")); };
+            let value: Value = serde_json::from_str(result_line).map_err(|e| e.to_string())?;
+            if value.get("found").and_then(Value::as_bool) == Some(true) {
+                return Ok(value.get("result").cloned().unwrap_or(Value::Null));
+            }
+            let errors = value.get("errors").cloned().unwrap_or(Value::Null);
+            return Err(format!("Rust tool runtime has not ported tool: {tool}; custom tool not found; errors: {errors}"));
+        }
+        if start.elapsed() > Duration::from_secs(180) {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_handle.join();
+            let _ = stderr_handle.join();
+            return Err("custom tool timed out".into());
+        }
+        sleep(Duration::from_millis(25));
+    }
+}
+
 
 
 
@@ -1917,7 +2086,9 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "mcp_read_resource" => mcp_read_resource(runtime, input),
         "mcp_list_prompts" => mcp_list_prompts(runtime, input),
         "mcp_get_prompt" => mcp_get_prompt(runtime, input),
-        other => Err(format!("Rust tool runtime has not ported tool: {other}")),
+        other => {
+            if let Some(result) = mcp_native_tool(runtime, other, input) { result } else { custom_tool(runtime, other, input) }
+        }
     }
 }
 

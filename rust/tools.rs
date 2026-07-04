@@ -180,6 +180,24 @@ fn static_mcp_tools(cwd: &Path, seen: &mut BTreeSet<String>) -> Vec<ToolInfo> {
     out
 }
 
+pub fn native_mcp_tool_target(cwd: &Path, native_name: &str) -> Option<(String, String)> {
+    let config = merge_mcp_config(cwd);
+    let disabled = config.get("disabledServers").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect::<BTreeSet<_>>();
+    let servers = config.get("mcpServers").and_then(Value::as_object)?;
+    let ordered: BTreeMap<_, _> = servers.iter().collect();
+    for (server_name, server) in ordered {
+        if disabled.contains(server_name.as_str()) { continue; }
+        let Some(tools) = server.get("tools").and_then(Value::as_array) else { continue };
+        for tool in tools {
+            let Some(raw_name) = tool.get("name").and_then(Value::as_str) else { continue };
+            if native_mcp_tool_name(server_name, raw_name) == native_name {
+                return Some((server_name.clone(), raw_name.to_string()));
+            }
+        }
+    }
+    None
+}
+
 pub fn list_tools(cwd: &Path) -> Vec<ToolInfo> {
     let mut seen = BTreeSet::new();
     let mut tools = built_in_tools();
