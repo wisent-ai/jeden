@@ -761,6 +761,318 @@ fn edit_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> 
     Ok(json!({"ok": true, "path": path, "sha256": sha256_hex(next.as_bytes()), "diff": simple_diff(&path, &current, &next), "ops": op_count, "bytes": next.len()}))
 }
 
+#[derive(Clone)]
+struct VisualPatchOp {
+    op: String,
+    start_line: Option<usize>,
+    end_line: Option<usize>,
+    line: Option<usize>,
+    content: Vec<String>,
+}
+
+struct VisualPatchSection {
+    path: String,
+    tag: String,
+    ops: Vec<VisualPatchOp>,
+    remove: bool,
+    move_to: Option<String>,
+}
+
+fn snapshot_tag(hash: &str) -> String {
+    hash.chars().take(4).collect::<String>().to_ascii_uppercase()
+}
+
+fn snapshot_name(path: &str, hash: &str) -> String {
+    format!("{}#{}", path, snapshot_tag(hash))
+}
+
+fn parse_visual_body(lines: &[&str], mut index: usize) -> Result<(Vec<String>, usize), String> {
+    let mut body = Vec::new();
+    while index < lines.len() {
+        let line = lines[index];
+        if line == "*** End Patch"
+            || (line.starts_with('[') && line.ends_with(']') && line.contains('#'))
+            || line.starts_with("SWAP ")
+            || line.starts_with("SWAP.BLK ")
+            || line.starts_with("DEL ")
+            || line.starts_with("DEL.BLK ")
+            || line.starts_with("INS.")
+            || line == "REM"
+            || line.starts_with("MV ")
+        {
+            break;
+        }
+        let Some(rest) = line.strip_prefix('+') else { return Err(format!("patch body line must start with +: {line}")); };
+        body.push(rest.to_string());
+        index += 1;
+    }
+    Ok((body, index))
+}
+
+fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSection>, String> {
+    if patch.trim().is_empty() { return Err("patch is required".into()); }
+    let normalized = patch.replace("\r\n", "\n");
+    let mut lines = normalized.split('\n').collect::<Vec<_>>();
+    while lines.last() == Some(&"") { lines.pop(); }
+    if lines.first() != Some(&"*** Begin Patch") { return Err("patch must start with *** Begin Patch".into()); }
+    if lines.last() != Some(&"*** End Patch") { return Err("patch must end with *** End Patch".into()); }
+    let mut sections: Vec<VisualPatchSection> = Vec::new();
+    let mut index = 1usize;
+    while index < lines.len() - 1 {
+        let line = lines[index];
+        if line.trim().is_empty() {
+            index += 1;
+            continue;
+        }
+        if line.starts_with('[') && line.ends_with(']') {
+            let inner = &line[1..line.len() - 1];
+            let Some((path, tag)) = inner.rsplit_once('#') else { return Err(format!("invalid file header: {line}")); };
+            sections.push(VisualPatchSection { path: path.to_string(), tag: tag.to_ascii_uppercase(), ops: Vec::new(), remove: false, move_to: None });
+            index += 1;
+            continue;
+        }
+        let Some(current) = sections.last_mut() else { return Err("patch hunk appears before file header".into()); };
+        if let Some(rest) = line.strip_prefix("SWAP.BLK ") {
+            let line_no = rest.strip_suffix(':').ok_or_else(|| format!("unsupported patch line: {line}"))?.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("SWAP.BLK hunk requires at least one + body line; use DEL.BLK to delete".into()); }
+            current.ops.push(VisualPatchOp { op: "replace_block".into(), start_line: None, end_line: None, line: Some(line_no), content });
+            index = next;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("DEL.BLK ") {
+            let line_no = rest.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            current.ops.push(VisualPatchOp { op: "delete_block".into(), start_line: None, end_line: None, line: Some(line_no), content: Vec::new() });
+            index += 1;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("INS.BLK.POST ") {
+            let line_no = rest.strip_suffix(':').ok_or_else(|| format!("unsupported patch line: {line}"))?.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("INS.BLK.POST hunk requires at least one + body line".into()); }
+            current.ops.push(VisualPatchOp { op: "insert_block_after".into(), start_line: None, end_line: None, line: Some(line_no), content });
+            index = next;
+            continue;
+        }
+        if line == "REM" {
+            current.remove = true;
+            index += 1;
+            continue;
+        }
+        if let Some(dest) = line.strip_prefix("MV ") {
+            current.move_to = Some(dest.trim().trim_matches('"').to_string());
+            index += 1;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("SWAP ") {
+            let range = rest.strip_suffix(':').ok_or_else(|| format!("unsupported patch line: {line}"))?;
+            let Some((start, end)) = range.split_once(".=") else { return Err(format!("unsupported patch line: {line}")); };
+            let start = start.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let end = end.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("SWAP hunk requires at least one + body line; use DEL to delete".into()); }
+            current.ops.push(VisualPatchOp { op: "replace".into(), start_line: Some(start), end_line: Some(end), line: None, content });
+            index = next;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("DEL ") {
+            let (start, end) = if let Some((start, end)) = rest.split_once(".=") {
+                (start.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?, end.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?)
+            } else {
+                let start = rest.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+                (start, start)
+            };
+            current.ops.push(VisualPatchOp { op: "delete".into(), start_line: Some(start), end_line: Some(end), line: None, content: Vec::new() });
+            index += 1;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("INS.PRE ") {
+            let line_no = rest.strip_suffix(':').ok_or_else(|| format!("unsupported patch line: {line}"))?.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("INS hunk requires at least one + body line".into()); }
+            current.ops.push(VisualPatchOp { op: "insert_before".into(), start_line: None, end_line: None, line: Some(line_no), content });
+            index = next;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("INS.POST ") {
+            let line_no = rest.strip_suffix(':').ok_or_else(|| format!("unsupported patch line: {line}"))?.parse::<usize>().map_err(|_| format!("unsupported patch line: {line}"))?;
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("INS hunk requires at least one + body line".into()); }
+            current.ops.push(VisualPatchOp { op: "insert_after".into(), start_line: None, end_line: None, line: Some(line_no), content });
+            index = next;
+            continue;
+        }
+        if line == "INS.HEAD:" || line == "INS.TAIL:" {
+            let (content, next) = parse_visual_body(&lines, index + 1)?;
+            if content.is_empty() { return Err("INS hunk requires at least one + body line".into()); }
+            current.ops.push(VisualPatchOp { op: if line == "INS.HEAD:" { "insert_head".into() } else { "insert_tail".into() }, start_line: None, end_line: None, line: None, content });
+            index = next;
+            continue;
+        }
+        return Err(format!("unsupported patch line: {line}"));
+    }
+    if sections.is_empty() { return Err("patch must include at least one file section".into()); }
+    for section in &sections {
+        if section.remove && (!section.ops.is_empty() || section.move_to.is_some()) { return Err(format!("REM cannot be combined with other hunks: {}", section.path)); }
+        if section.ops.is_empty() && !section.remove && section.move_to.is_none() { return Err(format!("patch file section has no hunks: {}", section.path)); }
+    }
+    Ok(sections)
+}
+
+fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize), String> {
+    let (lines, _) = split_edit_lines(content);
+    if start_line < 1 || start_line > lines.len() { return Err("block start is past end of file".into()); }
+    let line = &lines[start_line - 1];
+    if let Some(heading) = regex::Regex::new(r"^(#{1,6})\s").ok().and_then(|re| re.captures(line)) {
+        let level = heading.get(1).map(|m| m.as_str().len()).unwrap_or(1);
+        let heading_re = regex::Regex::new(r"^(#{1,6})\s").unwrap();
+        for index in start_line..lines.len() {
+            if let Some(next) = heading_re.captures(&lines[index]) {
+                if next.get(1).map(|m| m.as_str().len()).unwrap_or(7) <= level { return Ok((start_line, index)); }
+            }
+        }
+        return Ok((start_line, lines.len()));
+    }
+    if line.contains('{') {
+        let mut balance = 0i64;
+        let mut opened = false;
+        for (idx, text) in lines.iter().enumerate().skip(start_line - 1) {
+            for ch in text.chars() {
+                if ch == '{' { balance += 1; opened = true; }
+                if ch == '}' { balance -= 1; }
+            }
+            if opened && balance <= 0 { return Ok((start_line, idx + 1)); }
+        }
+    }
+    if line.trim_end().ends_with(':') {
+        let base_indent = line.chars().take_while(|ch| ch.is_whitespace()).count();
+        let mut end_line = start_line;
+        for (idx, text) in lines.iter().enumerate().skip(start_line) {
+            if text.trim().is_empty() {
+                end_line = idx + 1;
+                continue;
+            }
+            let indent = text.chars().take_while(|ch| ch.is_whitespace()).count();
+            if indent <= base_indent { break; }
+            end_line = idx + 1;
+        }
+        if end_line > start_line { return Ok((start_line, end_line)); }
+    }
+    Err(format!("unsupported block anchor at line {start_line}"))
+}
+
+fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Value>, String> {
+    let (lines, _) = split_edit_lines(content);
+    let mut out = Vec::new();
+    for op in ops {
+        match op.op.as_str() {
+            "insert_head" => out.push(json!({"op": "insert_before", "line": 1, "content": op.content})),
+            "insert_tail" => out.push(if lines.is_empty() { json!({"op": "insert_before", "line": 1, "content": op.content}) } else { json!({"op": "insert_after", "line": lines.len(), "content": op.content}) }),
+            "replace_block" => {
+                let (start, end) = visual_block_range(content, op.line.ok_or("replace_block requires line")?)?;
+                out.push(json!({"op": "replace", "startLine": start, "endLine": end, "content": op.content}));
+            }
+            "delete_block" => {
+                let (start, end) = visual_block_range(content, op.line.ok_or("delete_block requires line")?)?;
+                out.push(json!({"op": "delete", "startLine": start, "endLine": end}));
+            }
+            "insert_block_after" => {
+                let (_, end) = visual_block_range(content, op.line.ok_or("insert_block_after requires line")?)?;
+                out.push(json!({"op": "insert_after", "line": end, "content": op.content}));
+            }
+            "replace" => out.push(json!({"op": "replace", "startLine": op.start_line, "endLine": op.end_line, "content": op.content})),
+            "delete" => out.push(json!({"op": "delete", "startLine": op.start_line, "endLine": op.end_line})),
+            "insert_before" | "insert_after" => out.push(json!({"op": op.op, "line": op.line, "content": op.content})),
+            _ => return Err(format!("unknown visual op: {}", op.op)),
+        }
+    }
+    Ok(out)
+}
+
+struct PreparedVisualEdit {
+    file: PathBuf,
+    to_file: Option<PathBuf>,
+    path: String,
+    to_path: Option<String>,
+    before: String,
+    after: String,
+    ops: Vec<Value>,
+    remove: bool,
+}
+
+fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_write { return Err("edit requires --allow-write".into()); }
+    let patch = string_input(input, "patch").ok_or("edit requires patch")?;
+    let sections = parse_visual_edit_patch(&patch)?;
+    let mut source_files = std::collections::HashSet::new();
+    for section in &sections {
+        let source = jail_path(runtime.cwd, &section.path)?;
+        if !source_files.insert(source) { return Err(format!("duplicate patch file section: {}", section.path)); }
+    }
+    let mut destination_files = std::collections::HashSet::new();
+    let mut prepared = Vec::new();
+    for section in &sections {
+        let file = jail_path(runtime.cwd, &section.path)?;
+        let current_bytes = fs::read(&file).map_err(|e| e.to_string())?;
+        let current_hash = sha256_hex(&current_bytes);
+        let current_tag = snapshot_tag(&current_hash);
+        if current_tag != section.tag { return Err(format!("snapshot tag mismatch for {}: expected {}, got {}", section.path, current_tag, section.tag)); }
+        let to_file = section.move_to.as_ref().map(|dest| jail_path(runtime.cwd, dest)).transpose()?;
+        if let Some(to) = &to_file {
+            if !destination_files.insert(to.clone()) { return Err(format!("duplicate move destination: {}", section.move_to.as_deref().unwrap_or(""))); }
+            if source_files.contains(to) && to != &file { return Err(format!("move destination is another patched source: {}", section.move_to.as_deref().unwrap_or(""))); }
+            if to != &file && to.exists() { return Err(format!("destination exists: {}", section.move_to.as_deref().unwrap_or(""))); }
+        }
+        let before = String::from_utf8(current_bytes).map_err(|e| e.to_string())?;
+        let ops = if section.remove { Vec::new() } else { visual_ops_for_content(&before, &section.ops)? };
+        let after = if section.remove { String::new() } else if ops.is_empty() { before.clone() } else { apply_line_edit_ops(&before, &Value::Array(ops.clone()))? };
+        prepared.push(PreparedVisualEdit {
+            file,
+            to_path: section.move_to.clone(),
+            to_file,
+            path: section.path.clone(),
+            before,
+            after,
+            ops,
+            remove: section.remove,
+        });
+    }
+    for item in &prepared {
+        if item.remove {
+            fs::remove_file(&item.file).map_err(|e| e.to_string())?;
+        } else {
+            if !item.ops.is_empty() { fs::write(&item.file, item.after.as_bytes()).map_err(|e| e.to_string())?; }
+            if let Some(to_file) = &item.to_file {
+                if let Some(parent) = to_file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+                fs::rename(&item.file, to_file).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(json!({"files": prepared.iter().map(|item| {
+        let final_path = item.to_path.as_ref().unwrap_or(&item.path);
+        let next_hash = if item.remove { None } else { Some(sha256_hex(item.after.as_bytes())) };
+        let diff = if item.remove {
+            simple_diff(&item.path, &item.before, "")
+        } else if item.to_path.is_some() && item.ops.is_empty() {
+            format!("rename {} -> {}", item.path, final_path)
+        } else {
+            simple_diff(&item.path, &item.before, &item.after)
+        };
+        json!({
+            "path": final_path,
+            "from": item.to_path.as_ref().map(|_| item.path.clone()),
+            "to": item.to_path,
+            "moved": item.to_path.is_some(),
+            "deleted": item.remove,
+            "sha256": next_hash,
+            "snapshot": next_hash.as_ref().map(|hash| snapshot_name(final_path, hash)),
+            "diff": diff,
+            "ops": item.ops.len(),
+            "bytes": item.after.len()
+        })
+    }).collect::<Vec<_>>()}))
+}
+
 fn delete_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     if !runtime.allow_write { return Err("delete_file requires --allow-write".into()); }
     let path = string_input(input, "path").ok_or("delete_file requires path")?;
@@ -1577,6 +1889,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "write_file" => write_file(runtime, input),
         "apply_patch" => apply_patch_tool(runtime, input),
         "edit_file" => edit_file(runtime, input),
+        "edit" => visual_edit(runtime, input),
         "delete_file" => delete_file(runtime, input),
         "move_file" => move_file(runtime, input),
         "run_command" => run_command(runtime, input),

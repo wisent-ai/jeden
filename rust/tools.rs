@@ -36,6 +36,7 @@ fn built_in_tools() -> Vec<ToolInfo> {
         ToolInfo::new("write_file", "Create or overwrite a UTF-8 text file under cwd; overwrites require expectedSha256 from read_file; returns sha256 and visual diff; requires --allow-write"),
         ToolInfo::new("apply_patch", "Apply exact one-occurrence string replacements to an existing UTF-8 file; returns sha256 and visual diff; requires expectedSha256 and --allow-write"),
         ToolInfo::new("edit_file", "Apply line-based edits to a UTF-8 file under cwd; returns sha256 and visual diff; requires expectedSha256 and --allow-write"),
+        ToolInfo::new("edit", "Apply an OMP-style anchored visual patch string with [path#TAG], SWAP/DEL/INS/REM/MV and safe block hunks; returns visual diffs; requires --allow-write"),
         ToolInfo::new("delete_file", "Delete one UTF-8 file under cwd; returns visual diff; requires expectedSha256 and --allow-write"),
         ToolInfo::new("move_file", "Move or rename one file under cwd; returns rename preview; requires expectedSha256 and --allow-write"),
         ToolInfo::new("run_command", "Run a shell command in cwd; requires --allow-command; supports env overrides; timeout defaults to 30s and maxes at 120s"),
