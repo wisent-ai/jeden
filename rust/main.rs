@@ -453,6 +453,7 @@ fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("JEDEN_MODEL").ok())
         .or_else(|| env::var("MODEL").ok())
         .unwrap_or_else(|| "default".into());
+    let mut session_model = Some(model.clone());
     tui::run_basic_loop(
         tui::InteractiveConfig {
             cwd: args.cwd.display().to_string(),
@@ -462,10 +463,21 @@ fn interactive(args: &Args) -> Result<String, String> {
         },
         |input| {
             if input.trim_start().starts_with('/') {
-                handle_slash(&args.cwd, input, args.model.as_deref())
+                let trimmed = input.trim();
+                let (command, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
+                if matches!(command, "/model" | "/models" | "/switch") {
+                    let next = rest.trim();
+                    if next.is_empty() {
+                        return Ok(format!("Current model route: {}.", session_model.as_deref().unwrap_or("default")));
+                    }
+                    session_model = Some(next.to_string());
+                    return Ok(format!("Model route set to {}.", next));
+                }
+                handle_slash(&args.cwd, input, session_model.as_deref())
             } else {
                 let mut run_args = args.clone();
                 run_args.command = "run".into();
+                run_args.model = session_model.clone();
                 run_args.positionals = vec![input.to_string()];
                 run_args.json = false;
                 agent::run_command(&run_args).map(|text| text.trim().to_string())
