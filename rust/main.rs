@@ -334,8 +334,8 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/settings" | "/setup" | "/providers" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
-        "/usage" => Ok("Usage accounting is available through the JavaScript runtime; Rust usage parity is not complete.".into()),
-        _ => Err(format!("Unknown or unported Rust slash command: {}", command)),
+        "/usage" => Ok(crate::slash::handle_local(&slash_context, trimmed).transpose()?.unwrap_or_else(|| "Usage accounting is available in Rust mode-state.".into())),
+        _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
 }
 
