@@ -330,8 +330,8 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
     let mut parts = trimmed.split_whitespace();
     let command = parts.next().unwrap_or("");
     match command {
-        "/help" => Ok(format_slash_help()),
-        "/settings" | "/setup" => Ok(format_auth_status(cwd)),
+        "/help" | "/commands" => Ok(format_slash_help()),
+        "/settings" | "/setup" | "/providers" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
         "/logout" => logout(cwd, parts.next().unwrap_or("")),
         "/usage" => Ok("Usage accounting is available through the JavaScript runtime; Rust usage parity is not complete.".into()),

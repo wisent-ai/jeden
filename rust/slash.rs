@@ -784,6 +784,13 @@ fn handle_branching(command: &str, args: &str, state: &mut ModeState) -> Result<
     Ok(format!("{} created locally: {}", command.trim_start_matches('/'), id))
 }
 
+
+fn handle_unavailable(command: &str) -> Result<String, String> {
+    let name = command.trim_start_matches('/');
+    Err(format!("/{name} is recognized but this interactive-only command is not available in the Rust TUI yet. Use the JS entrypoint for this command until the Rust-native flow is implemented."))
+}
+
+
 pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<String, String>> {
     let trimmed = input.trim();
     let (command, args) = split_head(trimmed);
@@ -816,6 +823,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
+        "/browser" | "/extensions" | "/status" | "/marketplace" | "/plugins" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/retry" | "/force" | "/force:" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
