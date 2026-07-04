@@ -1088,6 +1088,16 @@ fn handle_plan(args: &str, state: &mut ModeState) -> Result<String, String> {
     }
 }
 
+fn handle_plan_review(state: &ModeState) -> Result<String, String> {
+    if !state.plan.enabled && state.plan.latest_plan.trim().is_empty() {
+        return Ok("Warning: Plan mode is not active.".into());
+    }
+    if state.plan.latest_plan.trim().is_empty() {
+        return Ok("No plan review is available yet.".into());
+    }
+    Ok(state.plan.latest_plan.clone())
+}
+
 fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, String> {
     let (head, rest) = split_head(args);
     let verb = head.to_ascii_lowercase();
@@ -1661,6 +1671,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
     let mut changed = false;
     let result = match command.as_str() {
         "/plan" => { changed = args.trim() != "status"; Some(handle_plan(args, &mut state)) },
+        "/plan-review" => Some(handle_plan_review(&state)),
         "/goal" => { changed = !matches!(split_head(args).0, "" | "show" | "status"); Some(handle_goal(args, &mut state)) },
         "/guided-goal" => { changed = true; Some(handle_guided_goal(args, &mut state)) },
         "/loop" => { changed = split_head(args).0 != "status"; Some(handle_loop(args, &mut state)) },

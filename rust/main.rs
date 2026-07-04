@@ -1,16 +1,12 @@
-use rand::{distributions::Alphanumeric, Rng};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
+use std::io::IsTerminal;
 use std::fs;
-use std::io::{Read, Write};
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use url::Url;
 
 mod tui;
 mod agent;
@@ -86,13 +82,9 @@ struct ProviderRecord {
 }
 
 fn usage() -> &'static str {
-    "Usage:\n  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]\n  jeden run \"task\" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]\n  jeden sessions [limit]\n  jeden show <session-id-or-path>\n  jeden export <session-id-or-path> [output.json]\n  jeden artifacts <session-id-or-path>\n  jeden artifact <session-id-or-path> <name> [output]\n  jeden config [--cwd path]\n  jeden doctor [--cwd path]\n  jeden capabilities [--cwd path]\n\nSlash commands:\n  /login [provider]      automated OAuth login from product provider registry\n  /logout <provider>     remove provider auth record\n  /settings              show auth settings\n  /help                  show slash command list\n"
+    "Usage:\n  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]\n  jeden run \"task\" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--max-steps n]\n  jeden sessions [limit]\n  jeden show <session-id-or-path>\n  jeden export <session-id-or-path> [output.json]\n  jeden artifacts <session-id-or-path>\n  jeden artifact <session-id-or-path> <name> [output]\n  jeden config [--cwd path]\n  jeden doctor [--cwd path]\n  jeden capabilities [--cwd path]\n\nSlash commands:\n  /login [provider]      use OMP auth-broker login/provider selection\n  /logout [provider]     use OMP auth-broker logout/provider selection\n  /settings              show auth settings and broker providers\n  /help                  show slash command list\n"
 }
 
-fn now_iso() -> String {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
-    format!("{}", secs)
-}
 
 fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let mut rest = argv.into_iter();
@@ -113,7 +105,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--allow-write" => args.allow_write = true,
             "--allow-command" => args.allow_command = true,
             "--json" => args.json = true,
-            other if other.starts_with("--") && matches!(args.command.as_str(), "export") => args.positionals.push(other.to_string()),
+            other if other.starts_with("--") && (matches!(args.command.as_str(), "export") || (args.command == "run" && !args.positionals.is_empty())) => args.positionals.push(other.to_string()),
             other if other.starts_with("--") => return Err(format!("unknown option: {}", other)),
             other => args.positionals.push(other.to_string()),
         }
@@ -164,11 +156,6 @@ fn load_env_files(cwd: &Path) -> Result<Vec<String>, String> {
     Ok(loaded)
 }
 
-fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
-    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())? + "\n";
-    fs::write(path, text).map_err(|e| e.to_string())
-}
 
 fn config_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/config.json") }
 fn auth_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/auth.json") }
@@ -192,143 +179,159 @@ fn provider_name(value: &str) -> Option<String> {
     if name.chars().enumerate().all(|(i,c)| c.is_ascii_lowercase() || c.is_ascii_digit() || (i > 0 && matches!(c, '.'|'_'|'-'))) { Some(name) } else { None }
 }
 
-fn env_key(provider: &str, suffix: &str) -> String { format!("JEDEN_{}_{}", provider.to_ascii_uppercase().replace(|c: char| !c.is_ascii_alphanumeric(), "_"), suffix) }
-fn pick(values: &[Option<String>]) -> String { values.iter().flatten().find(|s| !s.trim().is_empty()).cloned().unwrap_or_default() }
 
-#[derive(Debug, Clone)]
-struct OAuthPreset { auth_url: String, token_url: String, client_id: String, redirect_uri: String, scope: String, open: bool }
+fn auth_broker_bin() -> String {
+    env::var("JEDEN_AUTH_BROKER_BIN").ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| "omp".into())
+}
 
-fn oauth_preset(provider: &str, config: &Config) -> OAuthPreset {
-    let source = config.auth_providers.as_ref().and_then(|m| m.get(provider)).cloned().unwrap_or_default();
-    OAuthPreset {
-        auth_url: pick(&[source.auth_url, source.authorize_url, env::var(env_key(provider, "AUTH_URL")).ok(), env::var(env_key(provider, "AUTHORIZE_URL")).ok(), if provider == "wisent" { env::var("WISENT_AUTH_URL").ok() } else { None }, if provider == "wisent" { env::var("WISENT_AUTHORIZE_URL").ok() } else { None }]),
-        token_url: pick(&[source.token_url, env::var(env_key(provider, "TOKEN_URL")).ok(), if provider == "wisent" { env::var("WISENT_TOKEN_URL").ok() } else { None }]),
-        client_id: pick(&[source.client_id, env::var(env_key(provider, "CLIENT_ID")).ok(), if provider == "wisent" { env::var("WISENT_CLIENT_ID").ok() } else { None }]),
-        redirect_uri: pick(&[source.redirect_uri, env::var(env_key(provider, "REDIRECT_URI")).ok(), Some(format!("http://127.0.0.1:37371/oauth/{}", provider))]),
-        scope: pick(&[source.scope, env::var(env_key(provider, "SCOPE")).ok()]),
-        open: source.open.unwrap_or_else(|| env::var(env_key(provider, "OPEN")).map(|v| v != "false" && v != "0").unwrap_or(true)),
+fn auth_broker_output(args: &[&str]) -> Result<String, String> {
+    let bin = auth_broker_bin();
+    let output = Command::new(&bin)
+        .args(args)
+        .output()
+        .map_err(|error| format!("{} is unavailable: {}", bin, error))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.status.success() {
+        return Ok(stdout);
+    }
+    let details = [stdout, stderr].into_iter().filter(|part| !part.is_empty()).collect::<Vec<_>>().join("\n");
+    Err(if details.is_empty() {
+        format!("{} {} failed with {}", bin, args.join(" "), output.status)
+    } else {
+        format!("{} {} failed with {}\n{}", bin, args.join(" "), output.status, details)
+    })
+}
+
+fn broker_provider_ids() -> Result<Vec<String>, String> {
+    let text = auth_broker_output(&["auth-broker", "list", "--json"])?;
+    let value: Value = serde_json::from_str(&text).map_err(|error| format!("invalid auth-broker provider list: {}", error))?;
+    Ok(value.as_array().map(|providers| {
+        providers.iter().filter_map(|provider| provider.get("id").and_then(Value::as_str).map(str::to_string)).collect()
+    }).unwrap_or_default())
+}
+
+fn broker_provider_summary() -> String {
+    match auth_broker_output(&["auth-broker", "list", "--json"]) {
+        Ok(text) => {
+            let value: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+            let providers = value.as_array().cloned().unwrap_or_default();
+            let names = providers.iter().filter_map(|provider| {
+                let id = provider.get("id").and_then(Value::as_str)?;
+                let name = provider.get("name").and_then(Value::as_str).unwrap_or(id);
+                Some(format!("{} ({})", id, name))
+            }).take(12).collect::<Vec<_>>();
+            let suffix = if providers.len() > names.len() { format!("; +{} more", providers.len() - names.len()) } else { String::new() };
+            format!("OMP auth-broker providers: {}{}.", names.join(", "), suffix)
+        }
+        Err(error) => format!("OMP auth-broker providers: unavailable ({})", error.lines().next().unwrap_or("unknown error")),
     }
 }
 
 fn format_auth_status(cwd: &Path) -> String {
     let auth: AuthFile = read_json(&auth_path(cwd));
-    let mut out = vec!["Jeden provider/auth settings".to_string(), format!("Workspace: {}", cwd.display()), format!("Auth file: {}", auth_path(cwd).display())];
-    if auth.providers.is_empty() { out.push("Configured providers: none".into()); } else { out.push(format!("Configured providers ({})", auth.providers.len())); }
+    let mut out = vec![
+        "Jeden provider/auth settings".to_string(),
+        format!("Workspace: {}", cwd.display()),
+        format!("Auth backend: {} auth-broker", auth_broker_bin()),
+        broker_provider_summary(),
+        format!("Legacy auth file: {}", auth_path(cwd).display()),
+    ];
+    if auth.providers.is_empty() { out.push("Legacy configured providers: none".into()); } else { out.push(format!("Legacy configured providers ({})", auth.providers.len())); }
     for (name, record) in auth.providers { out.push(format!("- {}{}", name, if record.active { " (active)" } else { "" })); out.push(format!("  method: {}", record.method)); out.push(format!("  credentials: {} key(s)", record.credentials.len())); }
     out.push("".into());
     out.push("Actions:".into());
-    out.push("  /login                                      start configured Wisent OAuth login".into());
-    out.push("  /login <provider>                           start configured OAuth login for a provider".into());
-    out.push("  /logout <provider>                           remove provider profile".into());
+    out.push("  /login                                      open OMP auth-broker provider selection".into());
+    out.push("  /login <provider>                           run OMP auth-broker login for a provider".into());
+    out.push("  /logout [provider]                          run OMP auth-broker logout".into());
     out.join("\n")
 }
 
-fn random_state() -> String { rand::thread_rng().sample_iter(&Alphanumeric).take(24).map(char::from).collect() }
 
-fn open_url(url: &str) {
-    let _ = if cfg!(target_os = "macos") { Command::new("open").arg(url).status() } else if cfg!(target_os = "windows") { Command::new("cmd").args(["/C", "start", url]).status() } else { Command::new("xdg-open").arg(url).status() };
+fn auth_broker_command(action: &str, args: &[&str]) -> Result<String, String> {
+    let mut broker_args = vec!["auth-broker", action];
+    broker_args.extend_from_slice(args);
+    let should_capture = !std::io::stdin().is_terminal() || args.iter().any(|arg| *arg == "--dry-run" || *arg == "--json");
+    if should_capture {
+        return auth_broker_output(&broker_args);
+    }
+
+    let bin = auth_broker_bin();
+    let status = Command::new(&bin)
+        .args(&broker_args)
+        .status()
+        .map_err(|error| format!("{} auth-broker is unavailable: {}", bin, error))?;
+    if status.success() {
+        Ok(format!("{} auth-broker {} completed.", bin, action))
+    } else {
+        Err(format!("{} auth-broker {} failed with {}.", bin, action, status))
+    }
 }
 
-fn wait_for_callback(redirect_uri: &str, state: &str) -> Result<(String, String), String> {
-    let url = Url::parse(redirect_uri).map_err(|e| e.to_string())?;
-    let host = url.host_str().unwrap_or("127.0.0.1");
-    let port = url.port().unwrap_or(80);
-    let listener = TcpListener::bind((host, port)).map_err(|e| e.to_string())?;
-    listener.set_nonblocking(true).map_err(|e| e.to_string())?;
-    let deadline = SystemTime::now() + Duration::from_secs(120);
-    let (mut stream, _) = loop {
-        match listener.accept() {
-            Ok(pair) => break pair,
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                if SystemTime::now() > deadline { return Err("OAuth callback timed out".into()); }
-                std::thread::sleep(Duration::from_millis(100));
+fn parse_broker_args(raw: &str, allow_empty_provider: bool) -> Result<Vec<&str>, String> {
+    let mut out = Vec::new();
+    let mut saw_provider = false;
+    for token in raw.split_whitespace() {
+        if token.starts_with("--") {
+            if matches!(token, "--json" | "--dry-run") || token.starts_with("--via=") {
+                out.push(token);
+                continue;
             }
-            Err(error) => return Err(error.to_string()),
+            return Err(format!("Unsupported auth-broker flag for slash command: {}", token));
+        }
+        let name = provider_name(token).ok_or("invalid provider")?;
+        if saw_provider {
+            return Err("Only one auth provider may be supplied.".into());
+        }
+        saw_provider = true;
+        out.push(token);
+        if name != token {
+            return Err("Auth provider ids must be lowercase ASCII ids.".into());
+        }
+    }
+    if !allow_empty_provider && !saw_provider {
+        return Err("Usage: /logout <provider>".into());
+    }
+    Ok(out)
+}
+
+fn start_login(_cwd: &Path, args: &str) -> Result<String, String> {
+    let tokens = args.split_whitespace().collect::<Vec<_>>();
+    let provider_tokens = tokens.iter().copied().filter(|token| !token.starts_with("--")).collect::<Vec<_>>();
+    if provider_tokens.is_empty() {
+        let broker_args = parse_broker_args(args, true)?;
+        return auth_broker_command("login", &broker_args);
+    }
+    if provider_tokens.len() != 1 {
+        return Ok("Warning: No OAuth login is waiting for a manual callback.".into());
+    }
+    let candidate = provider_tokens[0];
+    let Some(name) = provider_name(candidate) else {
+        return Ok("Warning: No OAuth login is waiting for a manual callback.".into());
+    };
+    let providers = match broker_provider_ids() {
+        Ok(providers) if !providers.is_empty() => providers,
+        _ => {
+            let broker_args = parse_broker_args(args, true)?;
+            return auth_broker_command("login", &broker_args);
         }
     };
-    let mut buf = [0u8; 4096];
-    let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
-    let req = String::from_utf8_lossy(&buf[..n]);
-    let first = req.lines().next().ok_or("empty callback request")?;
-    let path = first.split_whitespace().nth(1).ok_or("bad callback request")?;
-    let callback = format!("{}://{}:{}{}", url.scheme(), host, port, path);
-    let cb = Url::parse(&callback).map_err(|e| e.to_string())?;
-    let code = cb.query_pairs().find(|(k,_)| k == "code").map(|(_,v)| v.to_string()).ok_or("OAuth callback URL has no authorization code")?;
-    let got_state = cb.query_pairs().find(|(k,_)| k == "state").map(|(_,v)| v.to_string()).unwrap_or_default();
-    let body = if got_state == state { "OAuth login completed. Return to Jeden.\n" } else { "OAuth state mismatch. Return to Jeden.\n" };
-    let _ = stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body).as_bytes());
-    if got_state != state { return Err("OAuth callback state mismatch".into()); }
-    Ok((code, callback))
+    if !providers.iter().any(|provider| provider == &name) {
+        return Ok("Warning: No OAuth login is waiting for a manual callback.".into());
+    }
+    let broker_args = parse_broker_args(args, true)?;
+    auth_broker_command("login", &broker_args)
 }
 
-fn exchange_code(preset: &OAuthPreset, code: &str) -> Result<BTreeMap<String, Value>, String> {
-    let client = reqwest::blocking::Client::builder().timeout(Duration::from_secs(30)).build().map_err(|e| e.to_string())?;
-    let mut form = BTreeMap::new();
-    form.insert("grant_type", "authorization_code".to_string());
-    form.insert("code", code.to_string());
-    form.insert("client_id", preset.client_id.clone());
-    form.insert("redirect_uri", preset.redirect_uri.clone());
-    let res = client.post(&preset.token_url).header("accept", "application/json").form(&form).send().map_err(|e| e.to_string())?;
-    let status = res.status();
-    let text = res.text().map_err(|e| e.to_string())?;
-    if !status.is_success() { return Err(format!("OAuth token exchange failed ({}) {}", status, text)); }
-    let value: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    let mut credentials = BTreeMap::new();
-    if let Some(v) = value.get("access_token") { credentials.insert("accessToken".into(), v.clone()); }
-    if let Some(v) = value.get("refresh_token") { credentials.insert("refreshToken".into(), v.clone()); }
-    if let Some(v) = value.get("scope") { credentials.insert("scope".into(), v.clone()); }
-    credentials.insert("raw".into(), value);
-    Ok(credentials)
-}
-
-fn start_login(cwd: &Path, provider: &str) -> Result<String, String> {
-    let name = provider_name(provider).ok_or("invalid provider")?;
-    let config = load_config(cwd);
-    let preset = oauth_preset(&name, &config);
-    let missing = [if preset.auth_url.is_empty() { Some("authorize URL") } else { None }, if preset.token_url.is_empty() { Some("token URL") } else { None }, if preset.client_id.is_empty() { Some("client id") } else { None }].into_iter().flatten().collect::<Vec<_>>();
-    if !missing.is_empty() { return Err(format!("Automated login is not configured for {}. Product OAuth preset is incomplete: {}. This is a product configuration error; /login stops here until the product OAuth preset is present.", name, missing.join(", "))); }
-    let state = random_state();
-    let mut auth_url = Url::parse(&preset.auth_url).map_err(|e| e.to_string())?;
-    auth_url.query_pairs_mut().append_pair("response_type", "code").append_pair("client_id", &preset.client_id).append_pair("redirect_uri", &preset.redirect_uri).append_pair("state", &state);
-    if !preset.scope.is_empty() { auth_url.query_pairs_mut().append_pair("scope", &preset.scope); }
-    let mut auth: AuthFile = read_json(&auth_path(cwd));
-    let mut oauth = BTreeMap::new();
-    oauth.insert("authUrl".into(), Value::String(preset.auth_url.clone()));
-    oauth.insert("tokenUrl".into(), Value::String(preset.token_url.clone()));
-    oauth.insert("clientId".into(), Value::String(preset.client_id.clone()));
-    oauth.insert("redirectUri".into(), Value::String(preset.redirect_uri.clone()));
-    oauth.insert("state".into(), Value::String(state.clone()));
-    auth.providers.insert(name.clone(), ProviderRecord { active: false, method: "oauth-pending".into(), updated_at: now_iso(), oauth, credentials: BTreeMap::new(), profile: BTreeMap::new() });
-    auth.active_provider = Some(name.clone());
-    write_json(&auth_path(cwd), &auth)?;
-    if preset.open { open_url(auth_url.as_str()); }
-    let (code, callback_url) = wait_for_callback(&preset.redirect_uri, &state)?;
-    let credentials = exchange_code(&preset, &code)?;
-    let mut auth: AuthFile = read_json(&auth_path(cwd));
-    let mut profile = BTreeMap::new();
-    profile.insert("callbackUrl".into(), Value::String(callback_url));
-    profile.insert("exchangedAt".into(), Value::String(now_iso()));
-    let mut oauth = auth.providers.get(&name).map(|r| r.oauth.clone()).unwrap_or_default();
-    oauth.insert("scope".into(), Value::String(preset.scope));
-    auth.providers.insert(name.clone(), ProviderRecord { active: true, method: "oauth-token".into(), updated_at: now_iso(), oauth, credentials, profile });
-    auth.active_provider = Some(name.clone());
-    write_json(&auth_path(cwd), &auth)?;
-    Ok(format!("OAuth login completed for {} in {}.", name, auth_path(cwd).display()))
-}
-
-fn logout(cwd: &Path, provider: &str) -> Result<String, String> {
-    let name = provider_name(provider).ok_or("Usage: /logout <provider>")?;
-    let mut auth: AuthFile = read_json(&auth_path(cwd));
-    if auth.providers.remove(&name).is_none() { return Err(format!("Provider profile not found: {}", name)); }
-    if auth.active_provider.as_deref() == Some(&name) { auth.active_provider = None; }
-    write_json(&auth_path(cwd), &auth)?;
-    Ok(format!("Removed provider profile {} from {}.", name, auth_path(cwd).display()))
+fn logout(_cwd: &Path, args: &str) -> Result<String, String> {
+    let broker_args = parse_broker_args(args, true)?;
+    auth_broker_command("logout", &broker_args)
 }
 
 
 const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("settings", "Open settings menu"), ("setup", "Open provider setup"), ("plan", "Toggle plan mode"),
-    ("goal", "Toggle goal mode"), ("loop", "Toggle loop mode"), ("model", "Switch model"),
+    ("plan-review", "Review latest plan"), ("goal", "Toggle goal mode"), ("loop", "Toggle loop mode"), ("model", "Switch model"),
     ("fast", "Toggle priority service tier"), ("advisor", "Toggle advisor reviewer"),
     ("export", "Export session"), ("dump", "Dump session"), ("share", "Share session"),
     ("collab", "Collaborate via relay"), ("join", "Join shared session"), ("leave", "Leave collab"),
@@ -349,10 +352,12 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
 ];
 
 fn format_slash_help() -> String {
-    let mut out = String::from("Jeden slash commands:
-");
-    for (name, description) in SLASH_COMMANDS { out.push_str(&format!("/{:<15} {}
-", name, description)); }
+    let mut out = String::from("Jeden slash commands matching the OMP slash inventory:\n");
+    for (name, description) in SLASH_COMMANDS {
+        if *name == "update" { continue; }
+        out.push_str(&format!("/{:<15} {}\n", name, description));
+    }
+    out.push_str("\nJeden-only conveniences:\n/help            show this command list\n/commands        show this command list\n/update          show manual update steps\n");
     out
 }
 
@@ -374,6 +379,26 @@ fn update_text() -> String {
     )
 }
 
+fn handle_model_slash(cwd: &Path, current_model: Option<&str>, args: &str) -> Result<String, String> {
+    let next = args.trim();
+    if next.is_empty() {
+        let configured = current_model
+            .map(str::to_string)
+            .or_else(|| load_config(cwd).model)
+            .or_else(|| env::var("JEDEN_MODEL").ok())
+            .or_else(|| env::var("MODEL").ok())
+            .unwrap_or_else(|| "default".into());
+        return Ok(format!("Current model route: {}.", configured));
+    }
+    let path = config_path(cwd);
+    let mut config = read_json::<Value>(&path);
+    if !config.is_object() { config = json!({}); }
+    config.as_object_mut().expect("object").insert("model".into(), Value::String(next.to_string()));
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|error| error.to_string())?; }
+    fs::write(&path, serde_json::to_string_pretty(&config).map_err(|error| error.to_string())? + "\n").map_err(|error| error.to_string())?;
+    Ok(format!("Model route set to {}.", next))
+}
+
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
     let session_root = session_root();
@@ -386,10 +411,12 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
     match command {
         "/help" | "/commands" => Ok(format_slash_help()),
         "/settings" | "/setup" | "/providers" => Ok(format_auth_status(cwd)),
-        "/login" => start_login(cwd, parts.next().unwrap_or("wisent")),
-        "/logout" => logout(cwd, parts.next().unwrap_or("")),
+        "/login" => start_login(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
+        "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
+        "/model" | "/models" | "/switch" => handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/usage" => Ok(crate::slash::handle_local(&slash_context, trimmed).transpose()?.unwrap_or_else(|| "Usage accounting is available in Rust mode-state.".into())),
         "/update" => Ok(update_text()),
+        "/exit" | "/quit" => Ok("Exit is handled by the interactive input loop.".into()),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
 }
@@ -668,4 +695,230 @@ fn main() {
         other => Err(format!("unknown command: {}", other)),
     };
     match result { Ok(text) => print!("{}", text), Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); } }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::sync::{Mutex, OnceLock};
+
+    fn temp_workspace(name: &str) -> PathBuf {
+        let path = env::temp_dir().join(format!("jeden-main-{}-{}-{}", name, std::process::id(), now_millis_for_test()));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn now_millis_for_test() -> u128 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+    }
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                env::set_var(self.key, previous);
+            } else {
+                env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn fake_auth_broker_bin_with_script(cwd: &Path, script: &str) -> PathBuf {
+        let bin = cwd.join("fake-omp");
+        fs::write(&bin, script).unwrap();
+        let mut permissions = fs::metadata(&bin).unwrap().permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&bin, permissions).unwrap();
+        bin
+    }
+
+    #[cfg(unix)]
+    fn fake_auth_broker_bin(cwd: &Path) -> PathBuf {
+        fake_auth_broker_bin_with_script(
+            cwd,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$JEDEN_TEST_BROKER_LOG"
+if [ "$1" = "auth-broker" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' '[{"id":"github","name":"GitHub"},{"id":"azure","name":"Azure Foundry"}]'
+  exit 0
+fi
+printf '%s\n' "unexpected broker command: $*" >&2
+exit 64
+"#,
+        )
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn slash_parity_login_unknown_provider_uses_pending_callback_warning_with_broker_list() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("login");
+        let broker = fake_auth_broker_bin(&cwd);
+        let log = cwd.join("broker.log");
+        let _broker_env = EnvVarGuard::set("JEDEN_AUTH_BROKER_BIN", &broker);
+        let _log_env = EnvVarGuard::set("JEDEN_TEST_BROKER_LOG", &log);
+
+        let result = handle_slash(&cwd, "/login bogus", None).unwrap();
+
+        assert_eq!(result, "Warning: No OAuth login is waiting for a manual callback.");
+        assert!(!result.to_ascii_lowercase().contains("wisent"));
+        assert_eq!(fs::read_to_string(&log).unwrap(), "auth-broker list --json\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn slash_parity_login_known_provider_returns_auth_broker_success_output() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("login-known-provider");
+        let broker = fake_auth_broker_bin_with_script(
+            &cwd,
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$JEDEN_TEST_BROKER_LOG"
+if [ "$1" = "auth-broker" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' '[{"id":"github","name":"GitHub"},{"id":"azure","name":"Azure Foundry"}]'
+  exit 0
+fi
+if [ "$1" = "auth-broker" ] && [ "$2" = "login" ] && [ "$3" = "github" ]; then
+  printf '%s\n' 'broker login succeeded for github'
+  exit 0
+fi
+printf '%s\n' "unexpected broker command: $*" >&2
+exit 64
+"#,
+        );
+        let log = cwd.join("broker.log");
+        let _broker_env = EnvVarGuard::set("JEDEN_AUTH_BROKER_BIN", &broker);
+        let _log_env = EnvVarGuard::set("JEDEN_TEST_BROKER_LOG", &log);
+
+        let result = handle_slash(&cwd, "/login github", None).unwrap();
+
+        assert_eq!(result, "broker login succeeded for github");
+        assert_eq!(fs::read_to_string(&log).unwrap(), "auth-broker list --json\nauth-broker login github\n");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn slash_parity_login_provider_shaped_arg_falls_back_when_broker_list_is_unavailable_or_malformed() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cases = [
+            (
+                "login-list-unavailable",
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> "$JEDEN_TEST_BROKER_LOG"
+if [ "$1" = "auth-broker" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' 'provider list unavailable' >&2
+  exit 70
+fi
+if [ "$1" = "auth-broker" ] && [ "$2" = "login" ] && [ "$3" = "github" ]; then
+  printf '%s\n' 'fallback login succeeded after unavailable list'
+  exit 0
+fi
+printf '%s\n' "unexpected broker command: $*" >&2
+exit 64
+"#,
+                "fallback login succeeded after unavailable list",
+            ),
+            (
+                "login-list-malformed",
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> "$JEDEN_TEST_BROKER_LOG"
+if [ "$1" = "auth-broker" ] && [ "$2" = "list" ] && [ "$3" = "--json" ]; then
+  printf '%s\n' 'not-json'
+  exit 0
+fi
+if [ "$1" = "auth-broker" ] && [ "$2" = "login" ] && [ "$3" = "github" ]; then
+  printf '%s\n' 'fallback login succeeded after malformed list'
+  exit 0
+fi
+printf '%s\n' "unexpected broker command: $*" >&2
+exit 64
+"#,
+                "fallback login succeeded after malformed list",
+            ),
+        ];
+
+        for (name, script, expected) in cases {
+            let cwd = temp_workspace(name);
+            let broker = fake_auth_broker_bin_with_script(&cwd, script);
+            let log = cwd.join("broker.log");
+            let _broker_env = EnvVarGuard::set("JEDEN_AUTH_BROKER_BIN", &broker);
+            let _log_env = EnvVarGuard::set("JEDEN_TEST_BROKER_LOG", &log);
+
+            let result = handle_slash(&cwd, "/login github", None).unwrap();
+
+            assert_eq!(result, expected, "{name}");
+            assert_eq!(fs::read_to_string(&log).unwrap(), "auth-broker list --json\nauth-broker login github\n", "{name}");
+        }
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn slash_parity_settings_reports_auth_broker_provider_summary() {
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("settings");
+        let broker = fake_auth_broker_bin(&cwd);
+        let log = cwd.join("broker.log");
+        let _broker_env = EnvVarGuard::set("JEDEN_AUTH_BROKER_BIN", &broker);
+        let _log_env = EnvVarGuard::set("JEDEN_TEST_BROKER_LOG", &log);
+
+        let result = handle_slash(&cwd, "/settings", None).unwrap();
+
+        assert!(result.contains(&format!("Auth backend: {} auth-broker", broker.display())));
+        assert!(result.contains("OMP auth-broker providers: github (GitHub), azure (Azure Foundry)."));
+        assert!(result.contains("Legacy configured providers: none"));
+        assert!(result.contains("/login                                      open OMP auth-broker provider selection"));
+        assert_eq!(fs::read_to_string(&log).unwrap(), "auth-broker list --json\n");
+    }
+
+    #[test]
+    fn slash_parity_model_selection_persists_project_config() {
+        let cwd = temp_workspace("model");
+        fs::create_dir_all(cwd.join(".jeden")).unwrap();
+        fs::write(cwd.join(".jeden/config.json"), r#"{"agentId":"keep-me"}"#).unwrap();
+
+        let result = handle_slash(&cwd, "/model claude-opus-4-1", None).unwrap();
+        let config: Value = read_json(&cwd.join(".jeden/config.json"));
+
+        assert_eq!(result, "Model route set to claude-opus-4-1.");
+        assert_eq!(config["model"], "claude-opus-4-1");
+        assert_eq!(config["agentId"], "keep-me");
+    }
+
+    #[test]
+    fn slash_parity_plan_review_reports_inactive_and_missing_plan() {
+        let cwd = temp_workspace("plan-review");
+
+        let inactive = handle_slash(&cwd, "/plan-review", None).unwrap();
+        assert_eq!(inactive, "Warning: Plan mode is not active.");
+
+        let enabled = handle_slash(&cwd, "/plan on", None).unwrap();
+        assert_eq!(enabled, "Plan mode enabled.");
+
+        let missing_plan = handle_slash(&cwd, "/plan-review", None).unwrap();
+        assert_eq!(missing_plan, "No plan review is available yet.");
+    }
 }

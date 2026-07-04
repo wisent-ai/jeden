@@ -24,6 +24,12 @@ struct SessionRecorder {
 }
 
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
+    let mode_state = read_mode_state(&args.cwd);
+    let mode_service_tier = if mode_state.pointer("/fast/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        mode_state.pointer("/fast/serviceTier").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).map(str::to_string)
+    } else {
+        None
+    };
     ChatConfig {
         url: env::var("MODEL_ROUTER_URL")
             .ok()
@@ -43,6 +49,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         service_tier: env::var("JEDEN_SERVICE_TIER")
             .ok()
             .or_else(|| env::var("MODEL_SERVICE_TIER").ok())
+            .or(mode_service_tier)
             .unwrap_or_default(),
     }
 }
