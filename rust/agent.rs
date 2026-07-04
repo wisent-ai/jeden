@@ -91,6 +91,13 @@ fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
     write_mode_state(cwd, &state)
 }
 
+fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), String> {
+    let mut state = read_mode_state(cwd);
+    if !state.is_object() { state = json!({}); }
+    state.as_object_mut().expect("mode state object").insert("lastSessionPath".into(), json!(path));
+    write_mode_state(cwd, &state)
+}
+
 fn split_head(args: &str) -> (&str, &str) {
     let text = args.trim();
     if text.is_empty() { return ("", ""); }
@@ -133,6 +140,9 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     }
     let result = result?;
     let _ = update_task_outcome(&args.cwd, &task, true);
+    if let Some(path) = &result.session_path {
+        let _ = update_last_session_path(&args.cwd, path);
+    }
     if args.json {
         return Ok(serde_json::to_string_pretty(&json!({
             "ok": true,

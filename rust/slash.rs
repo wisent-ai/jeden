@@ -598,6 +598,104 @@ fn handle_leave(context: &SlashContext<'_>) -> Result<String, String> {
     Ok(format!("Left collab relay.\nState: {}", file.display()))
 }
 
+fn slash_session_dir(context: &SlashContext<'_>, id_or_path: &str) -> Result<PathBuf, String> {
+    let target = if id_or_path.trim().is_empty() {
+        read_json_value(&mode_state_path(context.cwd))
+            .get("lastSessionPath")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or("No current Rust session is recorded yet; pass a session id or path.")?
+    } else {
+        id_or_path.trim().to_string()
+    };
+    let raw_path = PathBuf::from(&target);
+    let path = if target.contains('/') {
+        if raw_path.is_absolute() { raw_path } else { context.cwd.join(raw_path) }
+    } else {
+        context.session_root.join(target)
+    };
+    if !path.exists() { return Err(format!("session not found: {}", path.display())); }
+    Ok(path)
+}
+
+fn slash_session_events(dir: &Path) -> Vec<Value> {
+    fs::read_to_string(dir.join("transcript.jsonl")).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()
+}
+
+fn slash_session_value(context: &SlashContext<'_>, id_or_path: &str) -> Result<Value, String> {
+    let dir = slash_session_dir(context, id_or_path)?;
+    let state = read_json_value(&dir.join("state.json"));
+    let id = dir.file_name().map(|value| value.to_string_lossy().to_string()).unwrap_or_else(|| dir.display().to_string());
+    Ok(json!({ "id": id, "path": dir, "state": state, "events": slash_session_events(&dir) }))
+}
+
+fn slash_session_text(session: &Value) -> String {
+    let mut out = vec![format!("Session: {}", session.get("id").and_then(Value::as_str).unwrap_or("session")), format!("Path: {}", session.get("path").and_then(Value::as_str).unwrap_or("")), String::new()];
+    for event in session.get("events").and_then(Value::as_array).cloned().unwrap_or_default() {
+        out.push(format!("## {} {}", event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or("")).trim().to_string());
+        out.push(serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null)).unwrap_or_else(|_| "{}".into()));
+        out.push(String::new());
+    }
+    out.join("\n")
+}
+
+fn slash_html_escape(value: &str) -> String {
+    value.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+}
+
+fn slash_session_export(session: &Value, format: &str) -> Result<String, String> {
+    if format == "json" {
+        return Ok(serde_json::to_string_pretty(session).map_err(|e| e.to_string())? + "\n");
+    }
+    if format == "markdown" || format == "md" {
+        let mut out = format!("# Jeden session {}\n\n{}\n\n", session.get("id").and_then(Value::as_str).unwrap_or("session"), session.get("path").and_then(Value::as_str).unwrap_or(""));
+        for event in session.get("events").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let label = format!("{} {}", event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or("")).trim().to_string();
+            let data = serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null)).unwrap_or_else(|_| "{}".into());
+            out.push_str(&format!("## {}\n\n```json\n{}\n```\n\n", label, data));
+        }
+        return Ok(out);
+    }
+    if format == "html" {
+        let id = slash_html_escape(session.get("id").and_then(Value::as_str).unwrap_or("session"));
+        let path = slash_html_escape(session.get("path").and_then(Value::as_str).unwrap_or(""));
+        let mut body = String::new();
+        for event in session.get("events").and_then(Value::as_array).cloned().unwrap_or_default() {
+            let label = slash_html_escape(&format!("{} {}", event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or("")).trim().to_string());
+            let data = slash_html_escape(&serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null)).unwrap_or_else(|_| "{}".into()));
+            body.push_str(&format!("<section><h2>{}</h2><pre>{}</pre></section>\n", label, data));
+        }
+        return Ok(format!("<!doctype html><html><head><meta charset=\"utf-8\"><title>Jeden session {}</title></head><body><h1>Jeden session {}</h1><p>{}</p>{}</body></html>\n", id, id, path, body));
+    }
+    Err(format!("unsupported session export format: {}", format))
+}
+
+fn handle_dump(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    Ok(slash_session_text(&slash_session_value(context, args.trim())?))
+}
+
+fn handle_export(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let mut id = String::new();
+    let mut format = "json".to_string();
+    let mut output: Option<String> = None;
+    for arg in argv {
+        if arg == "--html" { format = "html".into(); }
+        else if arg == "--markdown" || arg == "--md" { format = "markdown".into(); }
+        else if id.is_empty() && !arg.starts_with("--") && slash_session_dir(context, &arg).is_ok() { id = arg; }
+        else { output = Some(arg); }
+    }
+    let payload = slash_session_export(&slash_session_value(context, &id)?, &format)?;
+    if let Some(path) = output {
+        let target = resolve_cwd_path(context.cwd, &path);
+        if let Some(parent) = target.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        fs::write(&target, &payload).map_err(|e| e.to_string())?;
+        Ok(target.display().to_string())
+    } else {
+        Ok(payload)
+    }
+}
+
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
     let mut sources = sorted_object_values(&registry["sources"]);
@@ -1398,6 +1496,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/collab" => Some(handle_collab(args, context)),
         "/join" => Some(handle_join(args, context)),
         "/leave" => Some(handle_leave(context)),
+        "/dump" => Some(handle_dump(args, context)),
+        "/export" => Some(handle_export(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/memory" => Some(handle_memory(args, context)),
@@ -1410,7 +1510,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/export" | "/dump" | "/share" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/share" | "/btw" | "/tan" | "/omfg" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {
