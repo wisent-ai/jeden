@@ -148,6 +148,54 @@ fn read_binary_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, S
     Ok(json!({"ok": true, "path": path, "bytes": bytes.len(), "truncated": truncated, "mimeType": mime_type_for_path(&file), "sha256": sha256_hex(&bytes), "base64": general_purpose::STANDARD.encode(slice)}))
 }
 
+fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32, &'static str)> {
+    if bytes.len() >= 24 && &bytes[0..8] == b"\x89PNG\r\n\x1a\n" {
+        let width = u32::from_be_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
+        let height = u32::from_be_bytes([bytes[20], bytes[21], bytes[22], bytes[23]]);
+        return Some((width, height, "image/png"));
+    }
+    if bytes.len() >= 10 && &bytes[0..3] == b"GIF" {
+        let width = u16::from_le_bytes([bytes[6], bytes[7]]) as u32;
+        let height = u16::from_le_bytes([bytes[8], bytes[9]]) as u32;
+        return Some((width, height, "image/gif"));
+    }
+    if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        return Some((0, 0, "image/webp"));
+    }
+    if bytes.len() > 4 && bytes[0] == 0xff && bytes[1] == 0xd8 {
+        let mut i = 2usize;
+        while i + 9 < bytes.len() {
+            if bytes[i] != 0xff { i += 1; continue; }
+            let marker = bytes[i + 1];
+            let len = u16::from_be_bytes([bytes[i + 2], bytes[i + 3]]) as usize;
+            if matches!(marker, 0xc0 | 0xc1 | 0xc2 | 0xc3) && i + 8 < bytes.len() {
+                let height = u16::from_be_bytes([bytes[i + 5], bytes[i + 6]]) as u32;
+                let width = u16::from_be_bytes([bytes[i + 7], bytes[i + 8]]) as u32;
+                return Some((width, height, "image/jpeg"));
+            }
+            if len < 2 { break; }
+            i += 2 + len;
+        }
+        return Some((0, 0, "image/jpeg"));
+    }
+    None
+}
+
+fn read_image(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let path = string_input(input, "path").ok_or("read_image requires path")?;
+    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    let file = jail_path(runtime.cwd, &path)?;
+    let bytes = fs::read(&file).map_err(|e| e.to_string())?;
+    let Some((width, height, mime_type)) = image_dimensions(&bytes) else {
+        return Err(format!("unsupported image type: {}", mime_type_for_path(&file)));
+    };
+    let truncated = bytes.len() > max_bytes;
+    let slice = &bytes[..bytes.len().min(max_bytes)];
+    Ok(json!({"ok": true, "path": path, "bytes": bytes.len(), "truncated": truncated, "mimeType": mime_type, "width": width, "height": height, "base64": general_purpose::STANDARD.encode(slice), "sha256": sha256_hex(&bytes)}))
+}
+
+
+
 
 fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     if !runtime.allow_write { return Err("write_file requires --allow-write".into()); }
@@ -550,6 +598,8 @@ fn fetch_url(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String>
 }
 
 
+
+
 fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let Some(dir) = runtime.artifact_dir else { return Err("save_artifact requires an active session artifact directory".into()); };
     let name = string_input(input, "name").unwrap_or_else(|| "artifact.txt".into());
@@ -635,6 +685,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "search_text" => search_text(runtime, input),
         "search_files" => search_files(runtime, input),
         "glob_paths" => glob_paths(runtime, input),
+        "read_image" => read_image(runtime, input),
         "grep_regex" => grep_regex(runtime, input),
         "write_file" => write_file(runtime, input),
         "delete_file" => delete_file(runtime, input),

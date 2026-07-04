@@ -175,6 +175,7 @@ fn rust_tool_specs() -> Vec<Value> {
         tool_spec("list_dir", "List a directory under cwd", json!({"path": {"type": "string"}, "limit": {"type": "number"}}), vec![]),
         tool_spec("read_file", "Read a UTF-8 file under cwd", json!({"path": {"type": "string"}}), vec!["path"]),
         tool_spec("read_binary_file", "Read one binary file under cwd as base64", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
+        tool_spec("read_image", "Read one PNG, JPEG, GIF, or WebP image under cwd as base64 with mime type and dimensions", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
         tool_spec("search_text", "Search one file for a literal string", json!({"path": {"type": "string"}, "query": {"type": "string"}, "caseSensitive": {"type": "boolean"}}), vec!["path", "query"]),
         tool_spec("search_files", "Recursively search text files under cwd for a literal string", json!({"path": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}}, "query": {"type": "string"}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "caseSensitive": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec!["query"]),
         tool_spec("glob_paths", "Find files under cwd with simple glob patterns", json!({"patterns": {"type": "string"}, "path": {"type": "string"}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec![]),
@@ -222,7 +223,7 @@ fn tool_spec(name: &str, description: &str, properties: Value, required: Vec<&st
 }
 
 fn system_prompt(cwd: &Path) -> String {
-    let executable = ["list_dir", "read_file", "read_binary_file", "search_text", "search_files", "glob_paths", "grep_regex", "write_file", "delete_file", "move_file", "run_command", "run_process", "node_eval", "python_eval", "list_package_scripts", "run_package_script", "git_status", "git_diff", "git_log", "git_show", "fetch_url", "save_artifact", "list_artifacts", "read_artifact", "mcp_list_tools", "mcp_call_tool", "mcp_list_resources", "mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"];
+    let executable = ["list_dir", "read_file", "read_binary_file", "read_image", "search_text", "search_files", "glob_paths", "grep_regex", "write_file", "delete_file", "move_file", "run_command", "run_process", "node_eval", "python_eval", "list_package_scripts", "run_package_script", "git_status", "git_diff", "git_log", "git_show", "fetch_url", "save_artifact", "list_artifacts", "read_artifact", "mcp_list_tools", "mcp_call_tool", "mcp_list_resources", "mcp_read_resource", "mcp_list_prompts", "mcp_get_prompt"];
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
         .filter(|tool| executable.contains(&tool.name.as_str()))
