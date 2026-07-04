@@ -784,6 +784,43 @@ fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<String, String>
 }
 
 
+fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let task = args.trim();
+    if task.is_empty() { return Err("Usage: /tan <work>".into()); }
+    let session_dir = slash_session_dir(context, "")?;
+    let dir = session_dir.join("artifacts/tan-jobs");
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let job_id = format!("tan-{}", now_text());
+    let stdout_path = dir.join(format!("{}.stdout.log", job_id));
+    let stderr_path = dir.join(format!("{}.stderr.log", job_id));
+    let metadata_path = dir.join(format!("{}.json", job_id));
+    let stdout = fs::File::create(&stdout_path).map_err(|e| e.to_string())?;
+    let stderr = fs::File::create(&stderr_path).map_err(|e| e.to_string())?;
+    let mut command = Command::new(std::env::current_exe().map_err(|e| e.to_string())?);
+    command.arg("run").arg(task).arg("--cwd").arg(context.cwd).arg("--json");
+    if let Some(model) = context.model.filter(|model| !model.trim().is_empty()) {
+        command.arg("--model").arg(model);
+    }
+    let child = command.stdin(Stdio::null()).stdout(Stdio::from(stdout)).stderr(Stdio::from(stderr)).spawn().map_err(|e| e.to_string())?;
+    let pid = child.id();
+    let metadata = json!({
+        "id": job_id,
+        "kind": "tan",
+        "status": "running",
+        "pid": pid,
+        "task": task,
+        "cwd": context.cwd,
+        "sessionPath": session_dir,
+        "stdout": stdout_path,
+        "stderr": stderr_path,
+        "startedAt": now_text()
+    });
+    write_json_value(&metadata_path, &metadata)?;
+    std::mem::forget(child);
+    Ok(format!("Started detached tan job {}.\nPID: {}\nMetadata: {}\nStdout: {}\nStderr: {}", job_id, pid, metadata_path.display(), stdout_path.display(), stderr_path.display()))
+}
+
+
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
     let mut sources = sorted_object_values(&registry["sources"]);
@@ -1547,10 +1584,6 @@ fn handle_branching(command: &str, args: &str, state: &mut ModeState) -> Result<
 }
 
 
-fn handle_unavailable(command: &str) -> Result<String, String> {
-    let name = command.trim_start_matches('/');
-    Err(format!("/{name} is recognized but this interactive-only command is not available in the Rust TUI yet. Use the JS entrypoint for this command until the Rust-native flow is implemented."))
-}
 
 
 pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<String, String>> {
@@ -1590,6 +1623,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/handoff" => Some(handle_handoff(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
+        "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
         "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
@@ -1600,7 +1634,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/btw" | "/tan" => Some(handle_unavailable(command.as_str())),
+        "/tan" => Some(handle_tan(args, context)),
         _ => None,
     };
     if changed {

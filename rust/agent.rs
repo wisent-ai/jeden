@@ -123,11 +123,24 @@ pub(crate) fn retry_command(args: &Args) -> Result<String, String> {
     run_command(&retry_args)
 }
 
+pub(crate) fn btw_command(args: &Args, question: &str) -> Result<String, String> {
+    let question = question.trim();
+    if question.is_empty() { return Err("Usage: /btw <side question>".into()); }
+    let mut side_args = args.clone();
+    side_args.command = "run".into();
+    side_args.positionals = vec![format!(
+        "Answer this side question using the current session context.\nKeep it separate from the main task: do not change files unless the side question explicitly asks for file changes.\nQuestion: {}",
+        question
+    )];
+    run_command(&side_args)
+}
+
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     let task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
-        let (command, _) = split_head(task.trim());
+        let (command, rest) = split_head(task.trim());
         if command == "/retry" { return retry_command(args); }
+        if command == "/btw" { return btw_command(args, rest); }
         let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
         return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
     }

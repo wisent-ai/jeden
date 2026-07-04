@@ -481,6 +481,14 @@ fn interactive(args: &Args) -> Result<String, String> {
                     run_args.json = false;
                     return agent::retry_command(&run_args).map(|text| text.trim().to_string());
                 }
+                if command == "/btw" {
+                    let mut run_args = args.clone();
+                    run_args.command = "run".into();
+                    run_args.model = session_model.clone();
+                    run_args.positionals = vec![trimmed.to_string()];
+                    run_args.json = false;
+                    return agent::btw_command(&run_args, rest).map(|text| text.trim().to_string());
+                }
                 handle_slash(&args.cwd, input, session_model.as_deref())
             } else {
                 let mut run_args = args.clone();
