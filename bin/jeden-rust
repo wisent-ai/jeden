@@ -1,6 +1,15 @@
 #!/usr/bin/env sh
 set -eu
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+PRG="$0"
+while [ -L "$PRG" ]; do
+  DIR="$(CDPATH= cd -- "$(dirname -- "$PRG")" && pwd)"
+  LINK="$(readlink "$PRG")"
+  case "$LINK" in
+    /*) PRG="$LINK" ;;
+    *) PRG="$DIR/$LINK" ;;
+  esac
+done
+ROOT="$(CDPATH= cd -- "$(dirname -- "$PRG")/.." && pwd)"
 BIN="$ROOT/target/release/jeden"
 if [ -x "$BIN" ]; then
   exec "$BIN" "$@"
