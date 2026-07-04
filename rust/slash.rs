@@ -30,6 +30,12 @@ struct ModeState {
     #[serde(default)]
     advisor: AdvisorState,
     #[serde(default)]
+    force: Option<ForceState>,
+    #[serde(rename = "lastFailedTask", default)]
+    last_failed_task: String,
+    #[serde(rename = "lastTask", default)]
+    last_task: String,
+    #[serde(default)]
     compact: bool,
     #[serde(default)]
     shake: String,
@@ -101,6 +107,14 @@ struct AdvisorState {
     model: String,
     #[serde(rename = "lastReview", default)]
     last_review: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct ForceState {
+    #[serde(default)]
+    tool: String,
+    #[serde(default)]
+    prompt: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -996,6 +1010,20 @@ fn handle_guided_goal(args: &str, state: &mut ModeState) -> Result<String, Strin
     Ok("Guided goal drafting started. Jeden will use the next turn to refine the objective instead of pretending to open an overlay.".into())
 }
 
+fn handle_force(args: &str, state: &mut ModeState, context: &SlashContext<'_>) -> Result<String, String> {
+    let (tool, prompt) = split_head(args);
+    if tool.is_empty() { return Err("Usage: /force <tool-name>".into()); }
+    if !prompt.trim().is_empty() {
+        return Err("/force <tool> <prompt> requires immediate runTask support; use /force <tool>, then send the prompt as the next turn.".into());
+    }
+    let names = tools::list_tools(context.cwd).into_iter().map(|tool| tool.name).collect::<Vec<_>>();
+    if !names.is_empty() && !names.iter().any(|name| name == tool) {
+        return Err(format!("Unknown or unavailable tool: {}. Visible tools: {}", tool, names.iter().take(20).cloned().collect::<Vec<_>>().join(", ")));
+    }
+    state.force = Some(ForceState { tool: tool.to_string(), prompt: String::new() });
+    Ok(format!("The next agent turn will be instructed to use {} first.", tool))
+}
+
 fn handle_branching(command: &str, args: &str, state: &mut ModeState) -> Result<String, String> {
     if command == "/tree" {
         if state.branches.is_empty() { return Ok(String::new()); }
@@ -1038,6 +1066,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/browser" => Some(handle_browser(args, context)),
         "/extensions" | "/status" => Some(handle_extensions(context)),
         "/plugins" => Some(handle_plugins(args, context)),
+        "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/memory" => Some(handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
         "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
@@ -1048,7 +1077,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/jobs" => Some(Ok("No background jobs are tracked inside this Jeden process.".into())),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden interactive hotkeys:\nEnter submits the prompt.\nCtrl-J inserts a newline.\nLeft/Right/Home/End edit inside the prompt.\nUp/Down navigate prompt history.\nCtrl-C exits input mode or denies approval.".into())),
-        "/marketplace" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/retry" | "/force" | "/force:" | "/handoff" => Some(handle_unavailable(command.as_str())),
+        "/marketplace" | "/reload-plugins" | "/export" | "/dump" | "/share" | "/copy" | "/collab" | "/join" | "/leave" | "/btw" | "/tan" | "/omfg" | "/retry" | "/handoff" => Some(handle_unavailable(command.as_str())),
         _ => None,
     };
     if changed {

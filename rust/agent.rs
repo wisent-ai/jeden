@@ -47,6 +47,50 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     }
 }
 
+fn mode_state_path(cwd: &Path) -> PathBuf {
+    cwd.join(".jeden/mode-state.json")
+}
+
+fn read_mode_state(cwd: &Path) -> Value {
+    fs::read_to_string(mode_state_path(cwd))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .unwrap_or_else(|| json!({}))
+}
+
+fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
+    let path = mode_state_path(cwd);
+    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    fs::write(path, serde_json::to_string_pretty(state).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())
+}
+
+fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
+    let mut state = read_mode_state(cwd);
+    let Some(map) = state.as_object_mut() else { return Ok(task.to_string()); };
+    let mut parts = Vec::new();
+    if let Some(force) = map.get("force").and_then(Value::as_object) {
+        if let Some(tool) = force.get("tool").and_then(Value::as_str).filter(|tool| !tool.is_empty()) {
+            parts.push(format!("Forced tool request for this turn: use tool \"{}\" first if it is applicable and available. If it is unsafe or inapplicable, explain why before using another tool.", tool));
+            map.insert("force".into(), Value::Null);
+            write_mode_state(cwd, &state)?;
+        }
+    }
+    if parts.is_empty() { Ok(task.to_string()) } else { Ok(format!("{}\n\n{}", parts.join("\n"), task)) }
+}
+
+fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
+    let mut state = read_mode_state(cwd);
+    if !state.is_object() { state = json!({}); }
+    let map = state.as_object_mut().expect("mode state object");
+    if ok {
+        map.insert("lastTask".into(), json!(task));
+        map.insert("lastFailedTask".into(), json!(""));
+    } else {
+        map.insert("lastFailedTask".into(), json!(task));
+    }
+    write_mode_state(cwd, &state)
+}
+
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     let task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
@@ -54,7 +98,14 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
         return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
     }
 
-    let result = run_no_tool_agent(args, &task)?;
+    let effective_task = apply_mode_instructions(&args.cwd, &task)?;
+    let result = run_no_tool_agent(args, &effective_task);
+    if let Err(error) = &result {
+        let _ = update_task_outcome(&args.cwd, &task, false);
+        return Err(error.clone());
+    }
+    let result = result?;
+    let _ = update_task_outcome(&args.cwd, &task, true);
     if args.json {
         return Ok(serde_json::to_string_pretty(&json!({
             "ok": true,
