@@ -6,7 +6,7 @@ use std::env;
 use std::io::IsTerminal;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 mod tui;
 mod agent;
@@ -366,9 +366,12 @@ fn update_tool(env_key: &str, default: &str) -> String {
 }
 
 fn run_update_step(label: &str, program: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(cwd)
+    let mut command = Command::new(program);
+    command.args(args).current_dir(cwd).stdin(Stdio::null());
+    if program.ends_with("git") {
+        command.env("GIT_TERMINAL_PROMPT", "0").env("GCM_INTERACTIVE", "never");
+    }
+    let output = command
         .output()
         .map_err(|error| format!("{} failed to start {}: {}", label, program, error))?;
     let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
