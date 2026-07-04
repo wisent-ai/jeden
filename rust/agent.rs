@@ -91,9 +91,36 @@ fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
     write_mode_state(cwd, &state)
 }
 
+fn split_head(args: &str) -> (&str, &str) {
+    let text = args.trim();
+    if text.is_empty() { return ("", ""); }
+    match text.find(char::is_whitespace) {
+        Some(index) => (&text[..index], text[index..].trim()),
+        None => (text, ""),
+    }
+}
+
+pub(crate) fn retry_command(args: &Args) -> Result<String, String> {
+    let state = read_mode_state(&args.cwd);
+    let task = state
+        .get("lastFailedTask")
+        .and_then(Value::as_str)
+        .filter(|task| !task.trim().is_empty())
+        .ok_or("No failed task is available to retry.")?;
+    if task.trim_start().starts_with('/') {
+        return Err("Refusing to retry a slash command; retry only replays agent prompts.".into());
+    }
+    let mut retry_args = args.clone();
+    retry_args.command = "run".into();
+    retry_args.positionals = vec![task.to_string()];
+    run_command(&retry_args)
+}
+
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     let task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
+        let (command, _) = split_head(task.trim());
+        if command == "/retry" { return retry_command(args); }
         let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
         return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
     }
