@@ -23,7 +23,6 @@ mod tool_runtime;
 
 #[derive(Debug, Clone)]
 struct Args {
-    raw: Vec<String>,
     command: String,
     cwd: PathBuf,
     model: Option<String>,
@@ -95,16 +94,15 @@ fn now_iso() -> String {
 }
 
 fn parse_args(argv: Vec<String>) -> Result<Args, String> {
-    let raw = argv.clone();
     let mut rest = argv.into_iter();
     let first = rest.next();
     let mut command = first.unwrap_or_else(|| "interactive".to_string());
-    if command == "--help" || command == "-h" { return Ok(Args { raw, command: "help".into(), cwd: env::current_dir().unwrap(), model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] }); }
+    if command == "--help" || command == "-h" { return Ok(Args { command: "help".into(), cwd: env::current_dir().unwrap(), model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] }); }
     if matches!(command.as_str(), "resume" | "recall_conversation" | "recall-conversation" | "search-sessions") {
-        return Ok(Args { raw, command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: rest.collect() });
+        return Ok(Args { command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: rest.collect() });
     }
     if command.starts_with("--") { rest = std::iter::once(command).chain(rest).collect::<Vec<_>>().into_iter(); command = "interactive".into(); }
-    let mut args = Args { raw, command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] };
+    let mut args = Args { command, cwd: env::current_dir().map_err(|e| e.to_string())?, model: None, max_tokens: 2048, max_steps: 8, allow_write: false, allow_command: false, json: false, positionals: vec![] };
     while let Some(arg) = rest.next() {
         match arg.as_str() {
             "--cwd" => args.cwd = PathBuf::from(rest.next().ok_or("--cwd requires a value")?),
@@ -384,6 +382,44 @@ fn list_sessions(limit: usize) -> String {
     if rows.is_empty() { "No sessions found.\n".into() } else { rows.join("\n") + "\n" }
 }
 
+fn search_sessions_command(args: &Args) -> Result<String, String> {
+    let query = args.positionals.get(0).ok_or("search-sessions requires a query")?.trim().to_ascii_lowercase();
+    if query.is_empty() { return Err("search-sessions requires a non-empty query".into()); }
+    let limit = args.positionals.get(1).and_then(|value| value.parse::<usize>().ok()).unwrap_or(50).clamp(1, 200);
+    let mut rows = Vec::new();
+    if let Ok(entries) = fs::read_dir(session_root()) {
+        let mut entries = entries.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+        entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+        for dir in entries.into_iter().take(limit) {
+            let session = match read_session_value(&dir.display().to_string()) {
+                Ok(session) => session,
+                Err(_) => continue,
+            };
+            let id = session.get("id").and_then(Value::as_str).unwrap_or("");
+            let events = session.get("events").and_then(Value::as_array).cloned().unwrap_or_default();
+            for event in events {
+                let text = serde_json::to_string(event.get("data").unwrap_or(&Value::Null)).unwrap_or_default();
+                let lower = text.to_ascii_lowercase();
+                let Some(at) = lower.find(&query) else { continue; };
+                let char_at = lower[..at].chars().count();
+                let take = query.chars().count() + 240;
+                let snippet = text
+                    .chars()
+                    .skip(char_at.saturating_sub(80))
+                    .take(take)
+                    .collect::<String>()
+                    .split_whitespace()
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                rows.push(format!("{}\t{}\t{}\t{}", id, event.get("ts").and_then(Value::as_str).unwrap_or(""), event.get("type").and_then(Value::as_str).unwrap_or(""), snippet));
+                break;
+            }
+        }
+    }
+    Ok(if rows.is_empty() { String::new() } else { rows.join("\n") + "\n" })
+}
+
+
 
 fn session_dir_for(id_or_path: &str) -> PathBuf {
     if id_or_path.contains('/') { PathBuf::from(id_or_path) } else { session_root().join(id_or_path) }
@@ -541,20 +577,6 @@ fn interactive(args: &Args) -> Result<String, String> {
     Ok(String::new())
 }
 
-fn delegate_to_node(args: &[String]) -> ! {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let status = Command::new("node")
-        .arg(root.join("src/cli.js"))
-        .args(args)
-        .status();
-    match status {
-        Ok(status) => std::process::exit(status.code().unwrap_or(1)),
-        Err(error) => {
-            eprintln!("Error: failed to delegate to legacy Node CLI: {}", error);
-            std::process::exit(1);
-        }
-    }
-}
 
 fn main() {
     let argv = env::args().skip(1).collect::<Vec<_>>();
@@ -573,7 +595,8 @@ fn main() {
         "artifacts" => args.positionals.get(0).map(|id| list_artifacts_command(id)).unwrap_or_else(|| Err("artifacts requires a session id".into())),
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_table(&args.cwd)),
-        "resume" | "recall_conversation" | "recall-conversation" | "search-sessions" => delegate_to_node(&args.raw),
+        "search-sessions" => search_sessions_command(&args),
+        "resume" | "recall_conversation" | "recall-conversation" => Err(format!("{} is not available in the Rust CLI yet; use sessions/show/export/search-sessions for recorded session inspection.", args.command)),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
         other => Err(format!("unknown command: {}", other)),
