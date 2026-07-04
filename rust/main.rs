@@ -362,7 +362,15 @@ fn format_slash_help() -> String {
 }
 
 fn update_tool(env_key: &str, default: &str) -> String {
-    env::var(env_key).ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| default.into())
+    #[cfg(test)]
+    {
+        return env::var(env_key).ok().filter(|value| !value.trim().is_empty()).unwrap_or_else(|| default.into());
+    }
+    #[cfg(not(test))]
+    {
+        let _ = env_key;
+        default.into()
+    }
 }
 
 fn run_update_step(label: &str, program: &str, args: &[&str], cwd: &Path) -> Result<String, String> {
