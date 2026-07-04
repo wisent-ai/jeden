@@ -668,6 +668,57 @@ fn resolve_cwd_path(cwd: &Path, target: &str) -> PathBuf {
     if path.is_absolute() { path } else { cwd.join(path) }
 }
 
+
+fn load_memory_lines() -> Result<Vec<Value>, String> {
+    let file = memory_file_path();
+    let raw = match fs::read_to_string(&file) {
+        Ok(raw) => raw,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    raw.lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| serde_json::from_str::<Value>(line).map_err(|e| e.to_string()))
+        .collect()
+}
+
+fn save_memory_lines(records: &[Value]) -> Result<(), String> {
+    let file = memory_file_path();
+    if let Some(parent) = file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let body = records.iter().map(|record| serde_json::to_string(record).map_err(|e| e.to_string())).collect::<Result<Vec<_>, _>>()?.join("\n");
+    fs::write(&file, if body.is_empty() { String::new() } else { format!("{body}\n") }).map_err(|e| e.to_string())
+}
+
+fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
+    let argv = split_args(args);
+    let verb = argv.first().map(String::as_str).unwrap_or("view");
+    let records = load_memory_lines()?;
+    let file = memory_file_path();
+    if matches!(verb, "stats" | "diagnose") {
+        return Ok(format!("Memory file: {}\nRecords: {}\nScope: {}", file.display(), records.len(), context.cwd.display()));
+    }
+    if matches!(verb, "clear" | "reset") {
+        save_memory_lines(&[])?;
+        return Ok(format!("Cleared memory file: {}", file.display()));
+    }
+    if matches!(verb, "view" | "list" | "") {
+        if records.is_empty() { return Ok("No memory records.".into()); }
+        let query = argv.iter().skip(1).cloned().collect::<Vec<_>>().join(" ").to_ascii_lowercase();
+        let mut shown = records;
+        if !query.is_empty() {
+            shown.retain(|record| record.get("text").and_then(Value::as_str).unwrap_or("").to_ascii_lowercase().contains(&query));
+        }
+        let start = shown.len().saturating_sub(20);
+        return Ok(shown[start..].iter().map(|record| {
+            let id = record.get("id").and_then(Value::as_str).unwrap_or("-");
+            let kind = record.get("kind").and_then(Value::as_str).unwrap_or("-");
+            let text = record.get("text").and_then(Value::as_str).or_else(|| record.get("content").and_then(Value::as_str)).unwrap_or("");
+            format!("{id}\t{kind}\t{text}")
+        }).collect::<Vec<_>>().join("\n"));
+    }
+    Err("Usage: /memory [view [query]|stats|diagnose|clear|reset]".into())
+}
+
 fn handle_todo(args: &str, state: &mut ModeState, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
     let verb = argv.first().map(String::as_str).unwrap_or("list");
@@ -755,6 +806,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(handle_todo(args, &mut state, context)) },
         "/mcp" => Some(handle_mcp(args, context)),
         "/ssh" => Some(handle_ssh(args, context)),
+        "/memory" => Some(handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
         "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
             changed = matches!(command.as_str(), "/compact" | "/shake");
@@ -826,5 +878,25 @@ mod tests {
         assert!(reset.contains("Reset usage accounting"));
         let reset_file = read_json_value(&cwd.join(".jeden/usage.json"));
         assert_eq!(reset_file["events"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn memory_view_stats_clear_use_jsonl_file() {
+        let cwd = temp_workspace("memory");
+        let sessions = cwd.join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let memory_file = cwd.join("memory.jsonl");
+        env::set_var("JEDEN_MEMORY_FILE", &memory_file);
+        fs::write(&memory_file, "{\"id\":\"m1\",\"kind\":\"note\",\"text\":\"alpha durable\"}\n").unwrap();
+        let context = test_context(&cwd, &sessions);
+
+        let stats = handle_local(&context, "/memory stats").unwrap().unwrap();
+        assert!(stats.contains("Records: 1"));
+        let view = handle_local(&context, "/memory view alpha").unwrap().unwrap();
+        assert!(view.contains("alpha durable"));
+        let cleared = handle_local(&context, "/memory clear").unwrap().unwrap();
+        assert!(cleared.contains("Cleared memory file"));
+        assert_eq!(fs::read_to_string(&memory_file).unwrap(), "");
+        env::remove_var("JEDEN_MEMORY_FILE");
     }
 }
