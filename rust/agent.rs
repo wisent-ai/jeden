@@ -474,7 +474,11 @@ impl Conversation {
     pub(crate) fn run_turn(&mut self, args: &Args, task: &str, hooks: &mut RunHooks) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
-        let effective_task = apply_mode_instructions(&args.cwd, task)?;
+        let mut effective_task = apply_mode_instructions(&args.cwd, task)?;
+        let hook_context = crate::hooks::user_prompt_submit(&args.cwd, task, args.allow_command);
+        if !hook_context.trim().is_empty() {
+            effective_task = format!("{}\n\n[Hook context]\n{}", effective_task, hook_context.trim());
+        }
         self.recorder.record(
             "user",
             json!({
@@ -548,12 +552,19 @@ impl Conversation {
                                 return Err(err);
                             }
                             let (aw, ac) = effective_allows(args, &tool, hooks);
-                            if tool_will_run(&tool, aw, ac) {
-                                hooks.note(&format!("tool: {}", tool));
+                            let result = if let Some(reason) = crate::hooks::pretool_block(&args.cwd, &tool, &input, args.allow_command) {
+                                hooks.note(&format!("tool blocked by hook: {}", tool));
+                                json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) })
                             } else {
-                                hooks.note(&format!("tool denied: {}", tool));
-                            }
-                            let result = run_tool_action(args, &mut self.recorder, step, &ToolAction { tool, input }, hooks.interactive, aw, ac)?;
+                                if tool_will_run(&tool, aw, ac) {
+                                    hooks.note(&format!("tool: {}", tool));
+                                } else {
+                                    hooks.note(&format!("tool denied: {}", tool));
+                                }
+                                let r = run_tool_action(args, &mut self.recorder, step, &ToolAction { tool: tool.clone(), input: input.clone() }, hooks.interactive, aw, ac)?;
+                                crate::hooks::posttool(&args.cwd, &tool, &r, args.allow_command);
+                                r
+                            };
                             self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&result) }));
                         }
                         Action::Tools { tools } => {
@@ -565,12 +576,19 @@ impl Conversation {
                                     return Err(err);
                                 }
                                 let (aw, ac) = effective_allows(args, &tool.tool, hooks);
+                                if let Some(reason) = crate::hooks::pretool_block(&args.cwd, &tool.tool, &tool.input, args.allow_command) {
+                                    hooks.note(&format!("tool blocked by hook: {}", tool.tool));
+                                    results.push(json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) }));
+                                    continue;
+                                }
                                 if tool_will_run(&tool.tool, aw, ac) {
                                     hooks.note(&format!("tool: {}", tool.tool));
                                 } else {
                                     hooks.note(&format!("tool denied: {}", tool.tool));
                                 }
-                                results.push(run_tool_action(args, &mut self.recorder, step, &tool, hooks.interactive, aw, ac)?);
+                                let r = run_tool_action(args, &mut self.recorder, step, &tool, hooks.interactive, aw, ac)?;
+                                crate::hooks::posttool(&args.cwd, &tool.tool, &r, args.allow_command);
+                                results.push(r);
                             }
                             self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&json!(results)) }));
                         }

@@ -1794,6 +1794,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/browser" => Some(handle_browser(args, context)),
         "/extensions" | "/status" => Some(handle_extensions(context)),
         "/plugins" => Some(handle_plugins(args, context)),
+        "/hooks" => Some(Ok(crate::hooks::describe_hooks(context.cwd))),
         "/reload-plugins" => Some(handle_reload_plugins(context)),
         "/marketplace" => Some(handle_marketplace(args, context)),
         "/copy" => Some(handle_copy(args, context)),

@@ -12,6 +12,7 @@ use std::process::{Command, Stdio};
 mod tui;
 mod agent;
 mod collab;
+mod hooks;
 mod mcp;
 mod model_router;
 mod protocol;
@@ -349,7 +350,7 @@ const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("tan", "Background agent"), ("omfg", "Forge local rule"), ("retry", "Retry last failed turn"),
     ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
     ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
-    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
+    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"), ("hooks", "Show lifecycle hooks"),
     ("update", "Run automated update"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
 ];
 
