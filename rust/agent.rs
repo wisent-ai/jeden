@@ -417,6 +417,35 @@ impl Conversation {
         Ok(format!("Handoff brief written to {} and a fresh session was started seeded with it.\n\n{}", file.display(), brief))
     }
 
+    /// If /advisor is enabled, run a second reviewer pass over the answer and
+    /// append its critique. Best-effort: a reviewer failure never fails the turn.
+    fn maybe_advisor_review(&mut self, args: &Args, answer: String, hooks: &mut RunHooks) -> Result<String, String> {
+        let state = read_mode_state(&args.cwd);
+        if !state.pointer("/advisor/enabled").and_then(Value::as_bool).unwrap_or(false) {
+            return Ok(answer);
+        }
+        if hooks.cancelled() {
+            return Ok(answer);
+        }
+        hooks.note("advisor review");
+        let config = load_config(&args.cwd);
+        let mut router = model_router_config(&config, args);
+        if let Some(model) = state.pointer("/advisor/model").and_then(Value::as_str).filter(|m| !m.trim().is_empty()) {
+            router.model = model.to_string();
+        }
+        let ask = vec![
+            json!({ "role": "system", "content": "You are a second-pass reviewer. Critique the assistant's answer for correctness, gaps, and risks in 2-4 concise bullet points. If it is sound, say so briefly. Reply with plain text only." }),
+            json!({ "role": "user", "content": format!("Assistant answer to review:\n\n{}", answer) }),
+        ];
+        match chat_completion(&router, ask, args.max_tokens as usize, &[]) {
+            Ok(review) => {
+                self.recorder.record("advisor", json!({ "review": review })).ok();
+                Ok(format!("{}\n\n— Advisor review —\n{}", answer, review))
+            }
+            Err(error) => Ok(format!("{}\n\n(advisor review unavailable: {})", answer, error)),
+        }
+    }
+
     pub(crate) fn run_turn(&mut self, args: &Args, task: &str, hooks: &mut RunHooks) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
@@ -458,7 +487,7 @@ impl Conversation {
                             if let Some(last) = self.messages.last_mut() {
                                 last["content"] = json!(text);
                             }
-                            return Ok(text);
+                            return self.maybe_advisor_review(args, text, hooks);
                         }
                         Action::Tool { tool, input } => {
                             if hooks.cancelled() {
