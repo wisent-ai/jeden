@@ -113,30 +113,60 @@ pub fn resolve_trusted_hooks(user: &Value, project: &Value, event: &str, tool: &
     }
 }
 
+/// Parse a hook's stdout as a JSON object, if it is one.
+fn parse_hook_json(stdout: &str) -> Option<Value> {
+    let trimmed = stdout.trim();
+    if !trimmed.starts_with('{') {
+        return None;
+    }
+    serde_json::from_str::<Value>(trimmed).ok().filter(|v| v.is_object())
+}
+
 /// A `PreToolUse` block decision: `Some(reason)` blocks the tool. A hook blocks
-/// by exiting with code 2; the reason is its stderr (or stdout) if present.
+/// either by exiting with code 2, or by printing JSON `{"decision":"block",
+/// "reason":"…"}` on stdout. The reason is the JSON `reason`, else stderr, else
+/// stdout (or a default).
 pub fn pretool_block_decision(outcomes: &[HookOutcome]) -> Option<String> {
-    outcomes.iter().find(|o| o.exit_code == 2).map(|o| {
-        let reason = if !o.stderr.trim().is_empty() {
-            o.stderr.trim()
-        } else {
-            o.stdout.trim()
-        };
-        if reason.is_empty() {
-            "PreToolUse hook denied this tool".to_string()
-        } else {
-            reason.to_string()
+    outcomes.iter().find_map(|o| {
+        let json = parse_hook_json(&o.stdout);
+        let json_block = json
+            .as_ref()
+            .and_then(|j| j.get("decision"))
+            .and_then(Value::as_str)
+            .map(|d| d.eq_ignore_ascii_case("block"))
+            .unwrap_or(false);
+        if o.exit_code != 2 && !json_block {
+            return None;
         }
+        let json_reason = json
+            .as_ref()
+            .and_then(|j| j.get("reason").or_else(|| j.get("userMessage")))
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let reason = json_reason
+            .map(str::to_string)
+            .or_else(|| Some(o.stderr.trim()).filter(|s| !s.is_empty()).map(str::to_string))
+            .or_else(|| Some(o.stdout.trim()).filter(|s| !s.is_empty() && parse_hook_json(&o.stdout).is_none()).map(str::to_string))
+            .unwrap_or_else(|| "PreToolUse hook denied this tool".to_string());
+        Some(reason)
     })
 }
 
-/// Non-empty stdout lines across `UserPromptSubmit` hook outcomes, joined — this
-/// is injected into the prompt as extra context.
+/// Injected context across prompt/session hook outcomes: each hook contributes
+/// its JSON `additionalContext` field if present, else its raw stdout. Joined.
 pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
     outcomes
         .iter()
-        .map(|o| o.stdout.trim())
-        .filter(|s| !s.is_empty())
+        .filter_map(|o| {
+            if let Some(json) = parse_hook_json(&o.stdout) {
+                let ctx = json.get("additionalContext").and_then(Value::as_str).unwrap_or("").trim().to_string();
+                if ctx.is_empty() { None } else { Some(ctx) }
+            } else {
+                let s = o.stdout.trim();
+                if s.is_empty() { None } else { Some(s.to_string()) }
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -393,5 +423,85 @@ mod tests {
             HookOutcome { exit_code: 0, stdout: "line two".into(), stderr: "".into() },
         ];
         assert_eq!(prompt_context(&outcomes), "line one\nline two");
+    }
+
+    #[test]
+    fn pretool_block_decision_blocks_on_json_decision() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 0,
+            stdout: r#"{"decision":"block","reason":"policy says no"}"#.into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), Some("policy says no".to_string()));
+    }
+
+    #[test]
+    fn pretool_block_decision_json_block_case_insensitive() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 0,
+            stdout: r#"{"decision":"BLOCK"}"#.into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), Some("PreToolUse hook denied this tool".to_string()));
+    }
+
+    #[test]
+    fn pretool_block_decision_json_allow_does_not_block() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 0,
+            stdout: r#"{"decision":"allow"}"#.into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), None);
+    }
+
+    #[test]
+    fn pretool_block_decision_prefers_json_reason_over_stderr() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 2,
+            stdout: r#"{"decision":"block","reason":"json reason"}"#.into(),
+            stderr: "stderr reason".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), Some("json reason".to_string()));
+    }
+
+    #[test]
+    fn pretool_block_decision_uses_user_message_when_no_reason() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 0,
+            stdout: r#"{"decision":"block","userMessage":"blocked by policy"}"#.into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), Some("blocked by policy".to_string()));
+    }
+
+    #[test]
+    fn pretool_block_decision_exit2_plain_still_blocks() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 2,
+            stdout: "plain text".into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(pretool_block_decision(&outcomes), Some("plain text".to_string()));
+    }
+
+    #[test]
+    fn prompt_context_prefers_additional_context_json() {
+        let outcomes = vec![
+            HookOutcome { exit_code: 0, stdout: r#"{"additionalContext":"ctx A"}"#.into(), stderr: "".into() },
+            HookOutcome { exit_code: 0, stdout: "plain B".into(), stderr: "".into() },
+            HookOutcome { exit_code: 0, stdout: r#"{"additionalContext":""}"#.into(), stderr: "".into() },
+        ];
+        assert_eq!(prompt_context(&outcomes), "ctx A\nplain B");
+    }
+
+    #[test]
+    fn prompt_context_skips_json_without_additional_context() {
+        let outcomes = vec![HookOutcome {
+            exit_code: 0,
+            stdout: r#"{"decision":"block"}"#.into(),
+            stderr: "".into(),
+        }];
+        assert_eq!(prompt_context(&outcomes), "");
     }
 }
