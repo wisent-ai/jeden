@@ -501,6 +501,17 @@ impl Conversation {
         self.recorder.ensure()
     }
 
+    /// Refresh the system prompt for a new working directory (keeps live turns)
+    /// so tools/commands visible from the new cwd are reflected — backs /move.
+    pub(crate) fn rebase(&mut self, cwd: &Path) -> Result<(), String> {
+        if let Some(first) = self.messages.first_mut() {
+            if first.get("role").and_then(Value::as_str) == Some("system") {
+                first["content"] = json!(system_prompt(cwd));
+            }
+        }
+        self.recorder.set_cwd(cwd)
+    }
+
     /// Replace the live history with prior user/assistant turns — backs /resume
     /// so a resumed session actually continues in-process.
     pub(crate) fn load_history(&mut self, cwd: &Path, turns: Vec<Value>) -> Result<(), String> {
@@ -992,6 +1003,22 @@ impl SessionRecorder {
             .open(self.dir.join("transcript.jsonl"))
             .map_err(|e| e.to_string())?;
         writeln!(file, "{}", event).map_err(|e| e.to_string())
+    }
+
+    /// Re-root this session's recorded workspace (backs /move): update the cwd
+    /// and rewrite state.json so exports/recall reflect the new workspace.
+    fn set_cwd(&mut self, cwd: &Path) -> Result<(), String> {
+        self.cwd = cwd.to_path_buf();
+        let state_path = self.dir.join("state.json");
+        let mut state = fs::read_to_string(&state_path)
+            .ok()
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok())
+            .unwrap_or_else(|| json!({ "id": self.id, "startedAt": now_stamp() }));
+        if let Some(obj) = state.as_object_mut() {
+            obj.insert("cwd".into(), json!(cwd));
+        }
+        if let Some(parent) = state_path.parent() { let _ = fs::create_dir_all(parent); }
+        fs::write(&state_path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())
     }
 
     fn artifact_dir(&self) -> PathBuf {

@@ -825,10 +825,15 @@ fn interactive(args: &Args) -> Result<String, String> {
         println!("{}", session_banner.trim());
     }
 
+    // Shared working directory so /move can re-root subsequent turns, the status
+    // line, git prompt, and file-command resolution together (OMP applyCwdChange).
+    let session_cwd = Arc::new(Mutex::new(args.cwd.clone()));
     let status_model = Arc::clone(&session_model);
     let status_conv = Arc::clone(&conversation);
+    let status_cwd = Arc::clone(&session_cwd);
     let status = move || {
-        let (branch, dirty_count) = git_prompt_status(&args.cwd);
+        let cwd = status_cwd.lock().clone();
+        let (branch, dirty_count) = git_prompt_status(&cwd);
         // try_lock: never block the frame on an in-flight turn; show the last
         // readable token estimate otherwise.
         let tokens = status_conv.try_lock().map(|c| c.approx_tokens());
@@ -838,11 +843,11 @@ fn interactive(args: &Args) -> Result<String, String> {
             _ => (None, None),
         };
         tui::PromptStatus {
-            cwd: args.cwd.display().to_string(),
+            cwd: cwd.display().to_string(),
             write_status: if args.allow_write { "allow".into() } else { "ask".into() },
             command_status: if args.allow_command { "allow".into() } else { "ask".into() },
             model: status_model.lock().clone().unwrap_or_else(|| "default".into()),
-            service_tier: service_tier_prompt(&args.cwd),
+            service_tier: service_tier_prompt(&cwd),
             branch,
             dirty_count,
             context_percent,
@@ -870,11 +875,13 @@ fn interactive(args: &Args) -> Result<String, String> {
 
     let handler_model = Arc::clone(&session_model);
     let handler_conv = Arc::clone(&conversation);
+    let handler_cwd = Arc::clone(&session_cwd);
     let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<String, String> {
         let mut run_args = args.clone();
         run_args.command = "run".into();
         run_args.model = handler_model.lock().clone();
         run_args.json = false;
+        run_args.cwd = handler_cwd.lock().clone();
         let mut hooks = agent::RunHooks {
             cancel: ctx.cancel.clone(),
             interactive: ctx.interactive,
@@ -912,17 +919,17 @@ fn interactive(args: &Args) -> Result<String, String> {
                     conv.handoff(&run_args, rest, &mut hooks)
                 }
                 "/clear" | "/new" | "/fresh" => {
-                    handler_conv.lock().reset(&args.cwd)?;
+                    handler_conv.lock().reset(&run_args.cwd)?;
                     Ok("Started a fresh conversation; prior turns cleared.".into())
                 }
                 "/fork" => {
-                    let path = handler_conv.lock().fork(&args.cwd)?;
+                    let path = handler_conv.lock().fork(&run_args.cwd)?;
                     Ok(format!("Forked into a new session at {}; the current context continues there.", path.display()))
                 }
                 "/branch" => {
                     let title = rest.trim();
-                    let path = handler_conv.lock().branch(&args.cwd)?;
-                    let id = agent::record_branch(&args.cwd, title, &path)?;
+                    let path = handler_conv.lock().branch(&run_args.cwd)?;
+                    let id = agent::record_branch(&run_args.cwd, title, &path)?;
                     Ok(format!("Branch {} created at {}; the current context continues on this branch. List with /tree, switch with /resume {}.", id, path.display(), path.display()))
                 }
                 "/force" => {
@@ -934,10 +941,10 @@ fn interactive(args: &Args) -> Result<String, String> {
                         }
                     };
                     if !tool.is_empty() && !prompt.is_empty() {
-                        agent::arm_force_tool(&args.cwd, &tool)?;
+                        agent::arm_force_tool(&run_args.cwd, &tool)?;
                         run_turn_shared(&handler_conv, &run_args, &prompt, &mut hooks)
                     } else {
-                        handle_slash(&args.cwd, input, handler_model.lock().as_deref())
+                        handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
                     }
                 }
                 "/rename" => {
@@ -954,7 +961,7 @@ fn interactive(args: &Args) -> Result<String, String> {
                 "/drop" => {
                     let dir = handler_conv.lock().session_path();
                     let _ = fs::remove_dir_all(&dir);
-                    handler_conv.lock().reset(&args.cwd)?;
+                    handler_conv.lock().reset(&run_args.cwd)?;
                     Ok(format!("Dropped session {} and started a fresh conversation.", dir.display()))
                 }
                 "/resume" => {
@@ -968,7 +975,7 @@ fn interactive(args: &Args) -> Result<String, String> {
                     }
                     let turns = session_conversation_turns(&dir);
                     let count = turns.len();
-                    handler_conv.lock().load_history(&args.cwd, turns)?;
+                    handler_conv.lock().load_history(&run_args.cwd, turns)?;
                     Ok(format!("Resumed {} into this conversation ({} prior turns loaded).", dir.display(), count))
                 }
                 "/context" => {
@@ -983,10 +990,21 @@ fn interactive(args: &Args) -> Result<String, String> {
                         }
                     ))
                 }
+                "/move" => {
+                    let target = rest.trim();
+                    if target.is_empty() { return Err("Usage: /move <directory>".into()); }
+                    let base = handler_cwd.lock().clone();
+                    let candidate = { let p = std::path::Path::new(target); if p.is_absolute() { p.to_path_buf() } else { base.join(p) } };
+                    let resolved = candidate.canonicalize().map_err(|e| format!("cannot move to {}: {}", candidate.display(), e))?;
+                    if !resolved.is_dir() { return Err(format!("not a directory: {}", resolved.display())); }
+                    handler_conv.lock().rebase(&resolved)?;
+                    *handler_cwd.lock() = resolved.clone();
+                    Ok(format!("Working directory moved to {}. Tools, git status, and file commands now resolve there.", resolved.display()))
+                }
                 _ => {
                     if is_builtin_slash(command) {
-                        handle_slash(&args.cwd, input, handler_model.lock().as_deref())
-                    } else if let Some(expanded) = resolve_file_command(&args.cwd, command, rest) {
+                        handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
+                    } else if let Some(expanded) = resolve_file_command(&run_args.cwd, command, rest) {
                         // File-based custom command: expand its template and run it.
                         run_turn_shared(&handler_conv, &run_args, &expanded, &mut hooks)
                     } else {
@@ -1001,7 +1019,7 @@ fn interactive(args: &Args) -> Result<String, String> {
     };
 
     tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
-    hooks::session_stop(&args.cwd, args.allow_command);
+    hooks::session_stop(&session_cwd.lock().clone(), args.allow_command);
     Ok(String::new())
 }
 
