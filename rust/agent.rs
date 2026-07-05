@@ -102,15 +102,31 @@ fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
 }
 
 fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
-    let mut state = read_mode_state(cwd);
-    let Some(map) = state.as_object_mut() else { return Ok(task.to_string()); };
+    let state = read_mode_state(cwd);
     let mut parts = Vec::new();
-    if let Some(force) = map.get("force").and_then(Value::as_object) {
-        if let Some(tool) = force.get("tool").and_then(Value::as_str).filter(|tool| !tool.is_empty()) {
-            parts.push(format!("Forced tool request for this turn: use tool \"{}\" first if it is applicable and available. If it is unsafe or inapplicable, explain why before using another tool.", tool));
+    // /force: one-shot forced tool for the next turn, then cleared.
+    if let Some(tool) = state.pointer("/force/tool").and_then(Value::as_str).filter(|tool| !tool.is_empty()) {
+        parts.push(format!("Forced tool request for this turn: use tool \"{}\" first if it is applicable and available. If it is unsafe or inapplicable, explain why before using another tool.", tool));
+        let mut cleared = state.clone();
+        if let Some(map) = cleared.as_object_mut() {
             map.insert("force".into(), Value::Null);
-            write_mode_state(cwd, &state)?;
+            write_mode_state(cwd, &cleared)?;
         }
+    }
+    // /plan: research + plan, no file changes.
+    if state.pointer("/plan/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        parts.push("Plan mode is active: research and lay out a concrete, ordered plan for this task before doing the work. Do not modify files unless the user explicitly asks in this turn; end with the plan.".to_string());
+    }
+    // /goal: keep every step aligned with the stored objective.
+    if state.pointer("/goal/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        if let Some(objective) = state.pointer("/goal/objective").and_then(Value::as_str).filter(|o| !o.trim().is_empty()) {
+            let budget = state.pointer("/goal/budget").and_then(Value::as_f64).map(|b| format!(" Respect the working budget of {}.", b)).unwrap_or_default();
+            parts.push(format!("Active goal: {}. Keep every step aligned with this goal and note progress toward it.{}", objective.trim(), budget));
+        }
+    }
+    // /shake: distrust heavy prior context unless re-read.
+    if let Some(shake) = state.get("shake").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
+        parts.push(format!("Shake mode ({}): do not rely on heavy prior context or artifacts unless you re-read them this turn; re-verify assumptions from source.", shake.trim()));
     }
     if parts.is_empty() { Ok(task.to_string()) } else { Ok(format!("{}\n\n{}", parts.join("\n"), task)) }
 }
@@ -818,5 +834,129 @@ mod tests {
         assert!(prompt.contains("why did the last build fail"), "question missing from prompt: {prompt}");
         // ...framed as a side question that must not touch files.
         assert!(prompt.contains("side question"), "prompt is not scoped as a side question: {prompt}");
+    }
+
+    // ---- apply_mode_instructions -------------------------------------------
+    // Per-turn directive injection wired to /plan, /goal, /shake, /force. Each
+    // test owns a private temp cwd with its own .jeden/mode-state.json, so they
+    // are order-independent, touch no env vars, and never reach ~/.jeden.
+
+    #[test]
+    fn apply_mode_instructions_returns_task_unchanged_when_no_state_file() {
+        // A cwd with no .jeden/mode-state.json: nothing to inject, so the task
+        // must pass through byte-for-byte.
+        let cwd = unique_temp_dir("mode-none");
+        let task = "summarize the changelog";
+
+        let out = apply_mode_instructions(&cwd, task).expect("a missing state file is not an error");
+
+        assert_eq!(out, task, "no mode-state must leave the task exactly as given");
+    }
+
+    #[test]
+    fn apply_mode_instructions_prepends_plan_directive_and_keeps_task_last() {
+        let cwd = unique_temp_dir("mode-plan");
+        write_mode_state(&cwd, &json!({ "plan": { "enabled": true } })).unwrap();
+
+        let task = "add streaming to the parser";
+        let out = apply_mode_instructions(&cwd, task).expect("plan mode applies");
+
+        // The plan directive is injected ahead of the task...
+        assert!(out.contains("Plan mode is active"), "plan directive missing: {out}");
+        // ...and the task itself stays verbatim at the tail.
+        assert!(out.ends_with(task), "task must remain, unchanged, at the end: {out}");
+        assert_ne!(out, task, "plan mode must actually prepend a directive, not pass through");
+    }
+
+    #[test]
+    fn apply_mode_instructions_does_not_inject_plan_directive_when_disabled() {
+        // plan present but enabled=false: the flag, not mere presence, gates it.
+        let cwd = unique_temp_dir("mode-plan-off");
+        write_mode_state(&cwd, &json!({ "plan": { "enabled": false } })).unwrap();
+
+        let task = "add streaming to the parser";
+        let out = apply_mode_instructions(&cwd, task).expect("disabled plan mode applies");
+
+        assert!(!out.contains("Plan mode is active"), "disabled plan must inject nothing: {out}");
+        assert_eq!(out, task, "no active mode means the task is returned unchanged");
+    }
+
+    #[test]
+    fn apply_mode_instructions_injects_goal_objective_and_budget_note() {
+        let cwd = unique_temp_dir("mode-goal");
+        write_mode_state(
+            &cwd,
+            &json!({ "goal": { "enabled": true, "objective": "ship the parser", "budget": 5.0 } }),
+        )
+        .unwrap();
+
+        let task = "keep working on the milestone";
+        let out = apply_mode_instructions(&cwd, task).expect("goal mode applies");
+
+        assert!(out.contains("Active goal:"), "goal label missing: {out}");
+        assert!(out.contains("ship the parser"), "objective must be carried into the directive: {out}");
+        // budget 5.0 renders via Display as `5`; the note must carry the value.
+        assert!(out.contains("working budget of 5"), "budget note missing or wrong value: {out}");
+        assert!(out.ends_with(task), "task must remain at the tail: {out}");
+    }
+
+    #[test]
+    fn apply_mode_instructions_omits_budget_note_when_budget_unset() {
+        // Objective without a budget: the goal directive fires, but there is no
+        // budget clause to append.
+        let cwd = unique_temp_dir("mode-goal-nobudget");
+        write_mode_state(
+            &cwd,
+            &json!({ "goal": { "enabled": true, "objective": "ship the parser" } }),
+        )
+        .unwrap();
+
+        let out = apply_mode_instructions(&cwd, "keep working").expect("goal mode applies");
+
+        assert!(out.contains("Active goal:"), "goal label missing: {out}");
+        assert!(out.contains("ship the parser"), "objective missing: {out}");
+        assert!(!out.contains("working budget"), "no budget was set, so no budget note: {out}");
+    }
+
+    #[test]
+    fn apply_mode_instructions_injects_shake_directive_with_its_value() {
+        let cwd = unique_temp_dir("mode-shake");
+        write_mode_state(&cwd, &json!({ "shake": "elide" })).unwrap();
+
+        let task = "re-derive the token counts";
+        let out = apply_mode_instructions(&cwd, task).expect("shake mode applies");
+
+        assert!(out.contains("Shake mode"), "shake directive missing: {out}");
+        // the concrete shake value labels the directive so it is specific.
+        assert!(out.contains("elide"), "shake value missing from directive: {out}");
+        assert!(out.ends_with(task), "task must remain at the tail: {out}");
+    }
+
+    #[test]
+    fn apply_mode_instructions_injects_forced_tool_then_clears_it_one_shot() {
+        let cwd = unique_temp_dir("mode-force");
+        write_mode_state(&cwd, &json!({ "force": { "tool": "read_file" } })).unwrap();
+
+        let task = "inspect the config";
+        let out = apply_mode_instructions(&cwd, task).expect("force mode applies");
+
+        // The forced-tool directive is injected for this turn, naming the tool.
+        assert!(out.contains("Forced tool request"), "force directive missing: {out}");
+        assert!(out.contains("read_file"), "forced tool name missing: {out}");
+
+        // It is one-shot: the on-disk `force` is cleared to null so the next
+        // turn is not forced again. Re-read the file and assert.
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.get("force"),
+            Some(&Value::Null),
+            "force must be cleared to null after use, got: {after}"
+        );
+
+        // Proof of the clear's effect: a second call sees no force and, with no
+        // other mode active, returns the task unchanged.
+        let out2 = apply_mode_instructions(&cwd, task).expect("second call succeeds");
+        assert!(!out2.contains("Forced tool request"), "force must not re-fire after being cleared: {out2}");
+        assert_eq!(out2, task, "with force cleared and no other mode, task is returned unchanged: {out2}");
     }
 }
