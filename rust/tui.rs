@@ -528,6 +528,8 @@ enum TurnMsg {
     Note(String),
     /// A chunk of live assistant text.
     Delta(String),
+    /// Approval request for a gated tool; the main loop prompts and replies.
+    Approve { tool: String, reply: mpsc::Sender<bool> },
 }
 
 /// Cooperative controls handed to a turn handler.
@@ -540,6 +542,8 @@ pub struct TurnCtx<'a> {
     pub progress: &'a dyn Fn(&str),
     /// Per-token streaming sink for live assistant text.
     pub stream: &'a dyn Fn(&str),
+    /// Ask the user to approve a gated tool; returns true to allow.
+    pub approve: &'a dyn Fn(&str) -> bool,
 }
 
 fn spinner_glyph(frame: usize) -> char {
@@ -590,10 +594,32 @@ where
         messages.push(Message::new("user", prompt));
         // Piped/non-tty: no threads, no cancel; run inline interactively.
         let _ = classify(prompt);
-        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {} };
+        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {}, approve: &|_| false };
         push_turn_result(&mut messages, prompt, handler(prompt, &ctx));
     }
     Ok(())
+}
+
+/// Prompt the user (in the live region) to approve one gated tool. Blocks on a
+/// keystroke: `y` allows, anything else (incl. Esc) denies. Returns the choice.
+fn prompt_tool_approval(renderer: &mut ReplRenderer, streamed: &str, tool: &str, columns: usize, color: bool) -> io::Result<bool> {
+    let mut lines = Vec::new();
+    if !streamed.trim().is_empty() {
+        lines.extend(message_block(&Message::new("assistant", streamed.to_string()), columns, color));
+    }
+    let ask = format!("Allow tool \"{}\" for this call? [y]es / [n]o", tool);
+    lines.extend(message_block(&Message::new("system", ask), columns, color));
+    renderer.flush(&[], &lines)?;
+    loop {
+        if event::poll(Duration::from_millis(250))? {
+            if let Event::Key(key) = event::read()? {
+                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                    continue;
+                }
+                return Ok(matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')));
+            }
+        }
+    }
 }
 
 /// Run a background turn on a worker thread while animating a spinner and
@@ -646,6 +672,7 @@ where
         let worker_cancel = cancel.clone();
         let note_tx = tx.clone();
         let delta_tx = tx.clone();
+        let approve_tx = tx.clone();
         let worker = scope.spawn(move || {
             let progress = move |message: &str| {
                 let _ = note_tx.send(TurnMsg::Note(message.to_string()));
@@ -653,17 +680,31 @@ where
             let stream = move |piece: &str| {
                 let _ = delta_tx.send(TurnMsg::Delta(piece.to_string()));
             };
-            let ctx = TurnCtx { cancel: worker_cancel, interactive: false, progress: &progress, stream: &stream };
+            let approve = move |tool: &str| -> bool {
+                let (reply, answer) = mpsc::channel::<bool>();
+                if approve_tx.send(TurnMsg::Approve { tool: tool.to_string(), reply }).is_err() {
+                    return false;
+                }
+                answer.recv().unwrap_or(false)
+            };
+            let ctx = TurnCtx { cancel: worker_cancel, interactive: false, progress: &progress, stream: &stream, approve: &approve };
             handler(prompt, &ctx)
         });
         drop(tx);
 
         loop {
+            let mut pending_approval: Option<(String, mpsc::Sender<bool>)> = None;
             while let Ok(message) = rx.try_recv() {
                 match message {
                     TurnMsg::Note(m) => { record_tool(&m, &mut tools_used); note = m; }
                     TurnMsg::Delta(p) => { streamed.push_str(&p); }
+                    TurnMsg::Approve { tool, reply } => { pending_approval = Some((tool, reply)); break; }
                 }
+            }
+            if let Some((tool, reply)) = pending_approval {
+                let decision = prompt_tool_approval(renderer, &streamed, &tool, columns, color)?;
+                let _ = reply.send(decision);
+                continue;
             }
             let cancelling = cancel.load(Ordering::Relaxed);
             let live = build_live(&streamed, &note, frame, cancelling);
@@ -689,6 +730,7 @@ where
             match message {
                 TurnMsg::Note(m) => { record_tool(&m, &mut tools_used); note = m; }
                 TurnMsg::Delta(p) => { streamed.push_str(&p); }
+                TurnMsg::Approve { reply, .. } => { let _ = reply.send(false); }
             }
         }
         let _ = (note, streamed);
@@ -805,7 +847,7 @@ where
                 match classify(&prompt) {
                     TurnKind::Foreground => {
                         disable_raw_mode()?;
-                        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {} };
+                        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {}, approve: &|_| false };
                         let result = handler(&prompt, &ctx);
                         enable_raw_mode()?;
                         renderer.reset();
@@ -1125,5 +1167,83 @@ mod tests {
         let mut messages = Vec::new();
         push_turn_result(&mut messages, "hello", Ok("  hi  ".to_string()));
         assert_eq!(messages[0].text, "hi");
+    }
+
+    /// Raw mode converts a bare `\n` into a line-feed with no carriage return,
+    /// so every newline `compose_repl` emits MUST be part of a `\r\n`. A single
+    /// stray `\n` would stair-step the sticky prompt. Scans byte-for-byte.
+    fn assert_no_bare_newline(rendered: &str) {
+        let bytes = rendered.as_bytes();
+        for (i, &b) in bytes.iter().enumerate() {
+            if b == b'\n' {
+                assert!(
+                    i > 0 && bytes[i - 1] == b'\r',
+                    "bare newline at byte {i} not preceded by CR: {rendered:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn compose_repl_first_paint_commits_lines_and_draws_live_region() {
+        // No prior live region (prev_height=0): committed lines flow into
+        // scrollback CRLF-separated, the live line is cleared-then-drawn, and the
+        // frame brackets its work by hiding the cursor + disabling autowrap up
+        // front and restoring both at the end.
+        let out = compose_repl(0, &["a".to_string(), "b".to_string()], &["p".to_string()]);
+        assert!(out.contains("a\r\nb\r\n"), "committed lines must be CRLF-joined into scrollback: {out:?}");
+        assert!(out.contains("\x1b[2Kp"), "live line must be erased-then-drawn: {out:?}");
+        assert!(out.contains("\x1b[?25l"), "must hide the cursor before painting: {out:?}");
+        assert!(out.contains("\x1b[?7h"), "must re-enable autowrap before returning: {out:?}");
+        // A first paint has no prior region to erase.
+        assert!(!out.contains("\x1b[0J"), "prev_height=0 must not emit an erase preamble: {out:?}");
+        assert_no_bare_newline(&out);
+    }
+
+    #[test]
+    fn compose_repl_erases_prior_live_region_by_moving_up_height_minus_one() {
+        // prev_height=3: to reach the top of a 3-line live region the cursor
+        // moves up 2 (height-1) rows, then clears from there downward. Both the
+        // relative move and the clear-to-end are required, or the stale region
+        // survives / the wrong rows are wiped.
+        let out = compose_repl(3, &["c".to_string()], &["p".to_string()]);
+        assert!(out.contains("\x1b[2A"), "prev_height=3 must move up 2 (height-1): {out:?}");
+        assert!(out.contains("\x1b[0J"), "must clear from the top of the region downward: {out:?}");
+        assert_no_bare_newline(&out);
+    }
+
+    #[test]
+    fn compose_repl_single_line_live_region_erases_without_moving_up() {
+        // prev_height=1 is the off-by-one boundary: the cursor is already on the
+        // sole live row, so it must clear-in-place with NO upward move. Emitting
+        // `\x1b[0A` (a degenerate move some terminals treat as up-1) or `\x1b[1A`
+        // would climb into committed scrollback and erase real history.
+        let out = compose_repl(1, &["c".to_string()], &["p".to_string()]);
+        assert!(out.contains("\x1b[0J"), "a single-line region still needs the clear: {out:?}");
+        assert!(!out.contains("\x1b[1A"), "must not move up when height-1 == 0: {out:?}");
+        assert!(!out.contains("\x1b[0A"), "must not emit a degenerate zero-row move: {out:?}");
+        assert_no_bare_newline(&out);
+    }
+
+    #[test]
+    fn compose_repl_multiline_live_joins_with_crlf_and_no_trailing_newline() {
+        // Multiple live rows are CRLF-joined and each individually cleared, but
+        // the output MUST NOT end in a newline: a trailing `\r\n` would scroll
+        // the sticky prompt into history instead of parking the cursor on it.
+        let out = compose_repl(0, &[], &["l1".to_string(), "l2".to_string()]);
+        assert!(out.contains("\x1b[2Kl1\r\n\x1b[2Kl2"), "live rows must be per-row cleared and CRLF-joined: {out:?}");
+        assert!(!out.ends_with('\n'), "live region must not end with a newline (parks cursor on prompt): {out:?}");
+        assert!(out.ends_with("\x1b[?7h\x1b[?25h"), "must end by restoring autowrap + cursor: {out:?}");
+        assert_no_bare_newline(&out);
+    }
+
+    #[test]
+    fn compose_repl_empty_live_region_commits_without_clear_line() {
+        // With no live rows the frame still commits the transcript CRLF-joined,
+        // but emits no `\x1b[2K` — there is no live row to clear-and-draw.
+        let out = compose_repl(0, &["x".to_string()], &[]);
+        assert!(out.contains("x\r\n"), "committed line must still flow into scrollback: {out:?}");
+        assert!(!out.contains("\x1b[2K"), "no live rows means no clear-line sequence: {out:?}");
+        assert_no_bare_newline(&out);
     }
 }

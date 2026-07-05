@@ -25,6 +25,9 @@ pub(crate) struct RunHooks<'a> {
     pub(crate) progress: Box<dyn Fn(&str) + 'a>,
     /// Per-token streaming sink for live assistant text.
     pub(crate) stream: Box<dyn Fn(&str) + 'a>,
+    /// Ask the user to approve a gated tool that isn't pre-authorized. Returns
+    /// true to allow this one call. Inert default denies (CLI = flags only).
+    pub(crate) approve: Box<dyn Fn(&str) -> bool + 'a>,
 }
 
 impl RunHooks<'static> {
@@ -35,6 +38,7 @@ impl RunHooks<'static> {
             interactive: true,
             progress: Box::new(|_| {}),
             stream: Box::new(|_| {}),
+            approve: Box::new(|_| false),
         }
     }
 }
@@ -51,6 +55,20 @@ impl RunHooks<'_> {
     fn push_delta(&self, piece: &str) {
         (self.stream)(piece);
     }
+
+    fn approve(&self, tool: &str) -> bool {
+        (self.approve)(tool)
+    }
+}
+
+/// Tools that mutate the filesystem (require write authorization).
+pub(crate) fn is_write_tool(tool: &str) -> bool {
+    matches!(tool, "write_file" | "apply_patch" | "edit_file" | "edit" | "delete_file" | "move_file")
+}
+
+/// Tools that execute commands/code (require command authorization).
+pub(crate) fn is_command_tool(tool: &str) -> bool {
+    matches!(tool, "run_command" | "run_process" | "node_eval" | "python_eval" | "run_package_script" | "delegate_task")
 }
 
 struct SessionRecorder {
@@ -529,8 +547,13 @@ impl Conversation {
                                 self.recorder.record("run_error", json!({ "message": err }))?;
                                 return Err(err);
                             }
-                            hooks.note(&format!("tool: {}", tool));
-                            let result = run_tool_action(args, &mut self.recorder, step, &ToolAction { tool, input }, hooks.interactive)?;
+                            let (aw, ac) = effective_allows(args, &tool, hooks);
+                            if tool_will_run(&tool, aw, ac) {
+                                hooks.note(&format!("tool: {}", tool));
+                            } else {
+                                hooks.note(&format!("tool denied: {}", tool));
+                            }
+                            let result = run_tool_action(args, &mut self.recorder, step, &ToolAction { tool, input }, hooks.interactive, aw, ac)?;
                             self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&result) }));
                         }
                         Action::Tools { tools } => {
@@ -541,8 +564,13 @@ impl Conversation {
                                     self.recorder.record("run_error", json!({ "message": err }))?;
                                     return Err(err);
                                 }
-                                hooks.note(&format!("tool: {}", tool.tool));
-                                results.push(run_tool_action(args, &mut self.recorder, step, &tool, hooks.interactive)?);
+                                let (aw, ac) = effective_allows(args, &tool.tool, hooks);
+                                if tool_will_run(&tool.tool, aw, ac) {
+                                    hooks.note(&format!("tool: {}", tool.tool));
+                                } else {
+                                    hooks.note(&format!("tool denied: {}", tool.tool));
+                                }
+                                results.push(run_tool_action(args, &mut self.recorder, step, &tool, hooks.interactive, aw, ac)?);
                             }
                             self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&json!(results)) }));
                         }
@@ -581,13 +609,39 @@ fn tool_to_value(action: &ToolAction) -> Value {
     json!({ "tool": action.tool, "input": action.input })
 }
 
-fn run_tool_action(args: &Args, recorder: &mut SessionRecorder, step: u32, action: &ToolAction, interactive: bool) -> Result<Value, String> {
+/// Effective (allow_write, allow_command) for one tool call. Pre-authorized by
+/// CLI flags, else the user is asked to approve a gated tool once via the hook.
+fn effective_allows(args: &Args, tool: &str, hooks: &RunHooks) -> (bool, bool) {
+    let mut allow_write = args.allow_write;
+    let mut allow_command = args.allow_command;
+    if is_write_tool(tool) && !allow_write && hooks.approve(tool) {
+        allow_write = true;
+    }
+    if is_command_tool(tool) && !allow_command && hooks.approve(tool) {
+        allow_command = true;
+    }
+    (allow_write, allow_command)
+}
+
+/// Whether a tool will actually execute given the effective authorization. A
+/// gated tool denied approval will error inside the runtime, so it never runs.
+fn tool_will_run(tool: &str, allow_write: bool, allow_command: bool) -> bool {
+    if is_write_tool(tool) {
+        return allow_write;
+    }
+    if is_command_tool(tool) {
+        return allow_command;
+    }
+    true
+}
+
+fn run_tool_action(args: &Args, recorder: &mut SessionRecorder, step: u32, action: &ToolAction, interactive: bool, allow_write: bool, allow_command: bool) -> Result<Value, String> {
     recorder.record("tool_call", json!({ "step": step, "tool": action.tool, "input": action.input }))?;
     let runtime = crate::tool_runtime::ToolRuntime {
         cwd: &args.cwd,
         artifact_dir: Some(&recorder.artifact_dir()),
-        allow_write: args.allow_write,
-        allow_command: args.allow_command,
+        allow_write,
+        allow_command,
         interactive,
     };
     let result = match crate::tool_runtime::execute(&runtime, &action.tool, &action.input) {
