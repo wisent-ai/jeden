@@ -509,6 +509,14 @@ pub fn default_turn_kind(input: &str) -> TurnKind {
     }
 }
 
+/// Worker→render-loop message during a background turn.
+enum TurnMsg {
+    /// Spinner status line ("thinking…", "tool: read_file").
+    Note(String),
+    /// A chunk of live assistant text.
+    Delta(String),
+}
+
 /// Cooperative controls handed to a turn handler.
 pub struct TurnCtx<'a> {
     /// Set true when the user presses Esc/Ctrl-C during a background turn.
@@ -517,6 +525,8 @@ pub struct TurnCtx<'a> {
     pub interactive: bool,
     /// Live status sink rendered next to the spinner.
     pub progress: &'a dyn Fn(&str),
+    /// Per-token streaming sink for live assistant text.
+    pub stream: &'a dyn Fn(&str),
 }
 
 fn spinner_glyph(frame: usize) -> char {
@@ -567,7 +577,7 @@ where
         messages.push(Message::new("user", prompt));
         // Piped/non-tty: no threads, no cancel; run inline interactively.
         let _ = classify(prompt);
-        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {} };
+        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {} };
         push_turn_result(&mut messages, prompt, handler(prompt, &ctx));
     }
     Ok(())
@@ -588,8 +598,10 @@ where
     H: Fn(&str, &TurnCtx) -> Result<String, String> + Sync,
 {
     let cancel = Arc::new(AtomicBool::new(false));
-    let (tx, rx) = mpsc::channel::<String>();
+    // Note = spinner status line; Delta = a live assistant text chunk.
+    let (tx, rx) = mpsc::channel::<TurnMsg>();
     let mut note = String::from("working…");
+    let mut streamed = String::new();
     let mut frame = 0usize;
     // Distinct tool names this turn ran, in first-seen order, for a transcript
     // line so tool execution is visible (not just a vanishing spinner).
@@ -608,18 +620,26 @@ where
 
     let outcome = thread::scope(|scope| -> io::Result<Result<String, String>> {
         let worker_cancel = cancel.clone();
+        let note_tx = tx.clone();
+        let delta_tx = tx.clone();
         let worker = scope.spawn(move || {
             let progress = move |message: &str| {
-                let _ = tx.send(message.to_string());
+                let _ = note_tx.send(TurnMsg::Note(message.to_string()));
             };
-            let ctx = TurnCtx { cancel: worker_cancel, interactive: false, progress: &progress };
+            let stream = move |piece: &str| {
+                let _ = delta_tx.send(TurnMsg::Delta(piece.to_string()));
+            };
+            let ctx = TurnCtx { cancel: worker_cancel, interactive: false, progress: &progress, stream: &stream };
             handler(prompt, &ctx)
         });
+        drop(tx);
 
         loop {
             while let Ok(message) = rx.try_recv() {
-                record_tool(&message, &mut tools_used);
-                note = message;
+                match message {
+                    TurnMsg::Note(m) => { record_tool(&m, &mut tools_used); note = m; }
+                    TurnMsg::Delta(p) => { streamed.push_str(&p); }
+                }
             }
             let cancelling = cancel.load(Ordering::Relaxed);
             let label = if cancelling {
@@ -628,6 +648,10 @@ where
                 format!("{} {} · esc to cancel", spinner_glyph(frame), note)
             };
             let mut view = messages.to_vec();
+            // Show streamed assistant text live above the spinner as it arrives.
+            if !streamed.trim().is_empty() {
+                view.push(Message::new("assistant", streamed.clone()));
+            }
             view.push(Message::new("system", label));
             let options = FrameOptions {
                 status: status.clone(),
@@ -657,11 +681,14 @@ where
             }
         }
 
-        // Drain any final progress and join.
+        // Drain any final messages and join.
         while let Ok(message) = rx.try_recv() {
-            record_tool(&message, &mut tools_used);
-            note = message;
+            match message {
+                TurnMsg::Note(m) => { record_tool(&m, &mut tools_used); note = m; }
+                TurnMsg::Delta(p) => { streamed.push_str(&p); }
+            }
         }
+        let _ = note;
         Ok(worker.join().unwrap_or_else(|_| Err("Turn thread panicked.".into())))
     })?;
 
@@ -752,7 +779,7 @@ where
                 match classify(&prompt) {
                     TurnKind::Foreground => {
                         disable_raw_mode()?;
-                        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {} };
+                        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {}, stream: &|_| {} };
                         let result = handler(&prompt, &ctx);
                         enable_raw_mode()?;
                         renderer.reset();

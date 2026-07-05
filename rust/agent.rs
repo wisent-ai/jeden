@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::model_router::{chat_completion, ChatConfig};
+use crate::model_router::{chat_completion, chat_completion_streaming, ChatConfig};
 use crate::protocol::{extract_json_object, parse_action, Action, ToolAction};
 use crate::{handle_slash, load_config, session_root, Args, Config};
 
@@ -23,6 +23,8 @@ pub(crate) struct RunHooks<'a> {
     pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     pub(crate) interactive: bool,
     pub(crate) progress: Box<dyn Fn(&str) + 'a>,
+    /// Per-token streaming sink for live assistant text.
+    pub(crate) stream: Box<dyn Fn(&str) + 'a>,
 }
 
 impl RunHooks<'static> {
@@ -32,6 +34,7 @@ impl RunHooks<'static> {
             cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             interactive: true,
             progress: Box::new(|_| {}),
+            stream: Box::new(|_| {}),
         }
     }
 }
@@ -43,6 +46,10 @@ impl RunHooks<'_> {
 
     fn note(&self, message: &str) {
         (self.progress)(message);
+    }
+
+    fn push_delta(&self, piece: &str) {
+        (self.stream)(piece);
     }
 }
 
@@ -471,8 +478,35 @@ impl Conversation {
                 self.recorder.record("run_error", json!({ "message": err }))?;
                 return Err(err);
             }
-            hooks.note(&format!("thinking (step {}/{})", step, args.max_steps));
-            match chat_completion(&router, self.messages.clone(), args.max_tokens as usize, &tool_specs) {
+        hooks.note(&format!("thinking (step {}/{})", step, args.max_steps));
+            // Stream deltas, but suppress anything that looks like a raw JSON
+            // action/tool blob so its syntax never leaks to the UI. Buffer until
+            // the first non-whitespace character decides plain-text vs JSON.
+            let decided = std::cell::Cell::new(false);
+            let suppress = std::cell::Cell::new(false);
+            let pending = std::cell::RefCell::new(String::new());
+            let mut on_delta = |piece: &str| {
+                if !decided.get() {
+                    pending.borrow_mut().push_str(piece);
+                    let buf = pending.borrow().clone();
+                    let lead = buf.trim_start();
+                    if lead.is_empty() {
+                        return; // only whitespace so far; keep buffering
+                    }
+                    decided.set(true);
+                    suppress.set(lead.starts_with('{') || lead.starts_with('['));
+                    if !suppress.get() {
+                        hooks.push_delta(&buf);
+                    }
+                    pending.borrow_mut().clear();
+                    return;
+                }
+                if !suppress.get() {
+                    hooks.push_delta(piece);
+                }
+            };
+            let call = chat_completion_streaming(&router, self.messages.clone(), args.max_tokens as usize, &tool_specs, &mut on_delta);
+            match call {
                 Ok(content) => {
                     self.recorder.record("assistant_raw", json!({ "step": step, "content": content }))?;
                     let action = action_or_text(&content)?;

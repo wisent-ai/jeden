@@ -825,6 +825,7 @@ fn interactive(args: &Args) -> Result<String, String> {
             cancel: ctx.cancel.clone(),
             interactive: ctx.interactive,
             progress: Box::new(|message: &str| (ctx.progress)(message)),
+            stream: Box::new(|piece: &str| (ctx.stream)(piece)),
         };
 
         if input.trim_start().starts_with('/') {
