@@ -142,6 +142,8 @@ struct BranchState {
     title: String,
     #[serde(rename = "createdAt", default)]
     created_at: String,
+    #[serde(default)]
+    path: String,
 }
 
 fn mode_state_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/mode-state.json") }
@@ -1702,14 +1704,21 @@ fn handle_force(args: &str, state: &mut ModeState, context: &SlashContext<'_>) -
     Ok(format!("The next agent turn will be instructed to use {} first.", tool))
 }
 
-fn handle_branching(command: &str, args: &str, state: &mut ModeState) -> Result<String, String> {
+fn handle_branching(command: &str, _args: &str, state: &ModeState) -> Result<String, String> {
     if command == "/tree" {
-        if state.branches.is_empty() { return Ok(String::new()); }
-        return Ok(state.branches.iter().map(|branch| format!("{}\t{}\t{}", branch.id, branch.title, branch.created_at)).collect::<Vec<_>>().join("\n"));
+        if state.branches.is_empty() {
+            return Ok("No branches yet. Create one in an interactive session with /branch <title>.".into());
+        }
+        return Ok(state
+            .branches
+            .iter()
+            .map(|branch| format!("{}\t{}\t{}\t{}", branch.id, branch.title, branch.created_at, branch.path))
+            .collect::<Vec<_>>()
+            .join("\n"));
     }
-    let id = format!("{}-{}", command.trim_start_matches('/'), state.branches.len() + 1);
-    state.branches.push(BranchState { id: id.clone(), title: if args.trim().is_empty() { id.clone() } else { args.trim().into() }, created_at: now_text() });
-    Ok(format!("{} created locally: {}", command.trim_start_matches('/'), id))
+    // /branch and /fork need a live conversation to fork; the interactive loop
+    // handles them directly. The one-shot CLI has no live conversation.
+    Err(format!("{} requires an interactive session (it forks the live conversation). Start `jeden` and run {} there.", command, command))
 }
 
 
@@ -1754,7 +1763,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(handle_memory(args, context)),
-        "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
+        "/branch" | "/fork" | "/tree" => Some(handle_branching(command.as_str(), args, &state)),
         "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             changed = command == "/shake";
             handle_lifecycle(command.as_str(), args, &mut state, context)

@@ -259,6 +259,21 @@ pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), St
     write_mode_state(cwd, &state)
 }
 
+/// Append a branch record to mode-state so `/tree` can list it and `/resume`
+/// can navigate to its session path. Backs a real fork-based `/branch`.
+pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<String, String> {
+    let mut state = read_mode_state(cwd);
+    if !state.is_object() { state = json!({}); }
+    let map = state.as_object_mut().expect("mode state object");
+    let branches = map.entry("branches").or_insert_with(|| json!([]));
+    let arr = branches.as_array_mut().ok_or("branches is not an array")?;
+    let id = format!("branch-{}", arr.len() + 1);
+    let title = if title.trim().is_empty() { id.clone() } else { title.trim().to_string() };
+    arr.push(json!({ "id": id, "title": title, "createdAt": now_stamp(), "path": path.to_string_lossy() }));
+    write_mode_state(cwd, &state)?;
+    Ok(id)
+}
+
 fn split_head(args: &str) -> (&str, &str) {
     let text = args.trim();
     if text.is_empty() { return ("", ""); }
@@ -463,6 +478,17 @@ impl Conversation {
     /// so a resumed session actually continues in-process.
     pub(crate) fn load_history(&mut self, cwd: &Path, turns: Vec<Value>) -> Result<(), String> {
         let mut messages = vec![json!({ "role": "system", "content": system_prompt(cwd) })];
+        // Also record the loaded turns into the live transcript so the resumed
+        // context is part of this session's export and any later /branch off it.
+        for turn in &turns {
+            let role = turn.get("role").and_then(Value::as_str).unwrap_or("");
+            let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
+            match role {
+                "user" => { self.recorder.record("user", json!({ "task": content }))?; }
+                "assistant" => { self.recorder.record("final", json!({ "text": content }))?; }
+                _ => {}
+            }
+        }
         messages.extend(turns);
         self.messages = messages;
         Ok(())
@@ -476,6 +502,29 @@ impl Conversation {
         self.recorder = SessionRecorder::new(cwd);
         self.recorder.ensure()?;
         self.recorder.record("fork", json!({ "parent": parent }))?;
+        Ok(self.recorder.path())
+    }
+
+    /// Like [`fork`] but also replays the parent session's clean user/final
+    /// turns into the new session's transcript so the branch is fully resumable
+    /// with its prior context — backs a navigable `/branch`. Seeding from the
+    /// parent transcript (not `self.messages`) avoids recording intermediate
+    /// tool-action/tool-result messages as conversation turns.
+    pub(crate) fn branch(&mut self, cwd: &Path) -> Result<PathBuf, String> {
+        let parent = self.recorder.path();
+        let prior = crate::session_conversation_turns(&parent);
+        self.recorder = SessionRecorder::new(cwd);
+        self.recorder.ensure()?;
+        self.recorder.record("fork", json!({ "parent": parent }))?;
+        for turn in &prior {
+            let role = turn.get("role").and_then(Value::as_str).unwrap_or("");
+            let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
+            match role {
+                "user" => { self.recorder.record("user", json!({ "task": content }))?; }
+                "assistant" => { self.recorder.record("final", json!({ "text": content }))?; }
+                _ => {}
+            }
+        }
         Ok(self.recorder.path())
     }
 

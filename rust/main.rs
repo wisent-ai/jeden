@@ -865,6 +865,12 @@ fn interactive(args: &Args) -> Result<String, String> {
                     let path = handler_conv.lock().fork(&args.cwd)?;
                     Ok(format!("Forked into a new session at {}; the current context continues there.", path.display()))
                 }
+                "/branch" => {
+                    let title = rest.trim();
+                    let path = handler_conv.lock().branch(&args.cwd)?;
+                    let id = agent::record_branch(&args.cwd, title, &path)?;
+                    Ok(format!("Branch {} created at {}; the current context continues on this branch. List with /tree, switch with /resume {}.", id, path.display(), path.display()))
+                }
                 "/rename" => {
                     let name = rest.trim();
                     if name.is_empty() { return Err("Usage: /rename <name>".into()); }
