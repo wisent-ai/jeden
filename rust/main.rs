@@ -950,7 +950,21 @@ fn run_turn_shared(
             let _ = agent::update_task_outcome(&args.cwd, task, false);
         }
     }
-    result.map(|text| text.trim().to_string())
+    let mut text = result.map(|text| text.trim().to_string())?;
+    // Loop mode: auto-resubmit until exhausted (bounded), same as the CLI path.
+    let mut iters = 0;
+    while iters < agent::MAX_LOOP_ITERS {
+        let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task) else { break; };
+        match conv.run_turn(args, &loop_prompt, hooks) {
+            Ok(more) => {
+                let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
+                text = format!("{}\n\n— loop resubmit —\n{}", text, more.trim());
+            }
+            Err(error) => { text = format!("{}\n\n— loop resubmit failed —\n{}", text, error); break; }
+        }
+        iters += 1;
+    }
+    Ok(text)
 }
 
 

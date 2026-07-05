@@ -149,11 +149,94 @@ fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
             parts.push(format!("Active goal: {}. Keep every step aligned with this goal and note progress toward it.{}", objective.trim(), budget));
         }
     }
+    // /guided-goal: one-shot — refine a rough objective this turn, then clear it.
+    if state.pointer("/guidedGoal/active").and_then(Value::as_bool).unwrap_or(false) {
+        if let Some(rough) = state.pointer("/guidedGoal/roughObjective").and_then(Value::as_str).filter(|o| !o.trim().is_empty()) {
+            parts.push(format!("Guided goal drafting: the user's rough objective is \"{}\". Before doing the work, restate it as a concrete, measurable goal with clear success criteria, then proceed toward it.", rough.trim()));
+        }
+        let mut cleared = state.clone();
+        if let Some(map) = cleared.as_object_mut() {
+            map.insert("guidedGoal".into(), json!({ "active": false, "roughObjective": "" }));
+            write_mode_state(cwd, &cleared)?;
+        }
+    }
     // /shake: distrust heavy prior context unless re-read.
     if let Some(shake) = state.get("shake").and_then(Value::as_str).filter(|s| !s.trim().is_empty()) {
         parts.push(format!("Shake mode ({}): do not rely on heavy prior context or artifacts unless you re-read them this turn; re-verify assumptions from source.", shake.trim()));
     }
     if parts.is_empty() { Ok(task.to_string()) } else { Ok(format!("{}\n\n{}", parts.join("\n"), task)) }
+}
+
+/// When plan mode is enabled, store `text` as the latest plan so `/plan-review`
+/// can surface it. Best-effort; a write failure never fails the turn.
+fn capture_plan_if_enabled(cwd: &Path, text: &str) {
+    let mut state = read_mode_state(cwd);
+    if !state.pointer("/plan/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        return;
+    }
+    if let Some(obj) = state.as_object_mut() {
+        let plan = obj.entry("plan").or_insert_with(|| json!({}));
+        if let Some(plan_obj) = plan.as_object_mut() {
+            plan_obj.insert("latestPlan".into(), json!(text));
+        }
+        let _ = write_mode_state(cwd, &state);
+    }
+}
+
+/// Hard ceiling on loop-mode auto-resubmissions in a single invocation, so an
+/// unbounded `/loop` can never spin forever.
+pub(crate) const MAX_LOOP_ITERS: u32 = 50;
+
+fn now_millis_u64() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
+
+/// If loop mode is active and not exhausted, return the prompt to resubmit
+/// (falling back to `current_task` when `/loop` set no explicit prompt) and
+/// consume one iteration (decrement `remaining`; disable when it hits zero or
+/// the `until` deadline passes). Returns `None` when the loop should stop.
+pub(crate) fn loop_next_prompt(cwd: &Path, current_task: &str) -> Option<String> {
+    let mut state = read_mode_state(cwd);
+    if !state.pointer("/loop_mode/enabled").and_then(Value::as_bool).unwrap_or(false) {
+        return None;
+    }
+    // Duration guard: stop once the deadline has passed.
+    if let Some(until) = state.pointer("/loop_mode/until").and_then(Value::as_u64) {
+        if now_millis_u64() >= until {
+            disable_loop(cwd, &mut state);
+            return None;
+        }
+    }
+    // Count guard: a remaining of 0 means exhausted.
+    let remaining = state.pointer("/loop_mode/remaining").and_then(Value::as_u64);
+    if remaining == Some(0) {
+        disable_loop(cwd, &mut state);
+        return None;
+    }
+    let stored = state.pointer("/loop_mode/prompt").and_then(Value::as_str).unwrap_or("").trim().to_string();
+    let prompt = if stored.is_empty() { current_task.to_string() } else { stored };
+    if prompt.trim().is_empty() {
+        disable_loop(cwd, &mut state);
+        return None;
+    }
+    // Consume one iteration.
+    if let Some(n) = remaining {
+        if let Some(obj) = state.as_object_mut() {
+            if let Some(lm) = obj.get_mut("loop_mode").and_then(Value::as_object_mut) {
+                let next = n.saturating_sub(1);
+                lm.insert("remaining".into(), json!(next));
+            }
+        }
+        let _ = write_mode_state(cwd, &state);
+    }
+    Some(prompt)
+}
+
+fn disable_loop(cwd: &Path, state: &mut Value) {
+    if let Some(obj) = state.as_object_mut() {
+        obj.insert("loop_mode".into(), json!({ "enabled": false }));
+    }
+    let _ = write_mode_state(cwd, state);
 }
 
 pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
@@ -266,8 +349,19 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         let _ = update_task_outcome(&args.cwd, &task, false);
         return Err(error.clone());
     }
-    let text = result?;
+    let mut text = result?;
     let _ = update_task_outcome(&args.cwd, &task, true);
+    // Loop mode: auto-resubmit the loop prompt until exhausted (bounded).
+    let mut iters = 0;
+    while iters < MAX_LOOP_ITERS {
+        let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) else { break; };
+        if hooks.cancelled() { break; }
+        match conversation.run_turn(args, &loop_prompt, hooks) {
+            Ok(more) => { text = format!("{}\n\n— loop resubmit —\n{}", text, more); }
+            Err(error) => { text = format!("{}\n\n— loop resubmit failed —\n{}", text, error); break; }
+        }
+        iters += 1;
+    }
     let session_path = Some(conversation.session_path());
     let result = RunResult { text, session_path: session_path.clone() };
     if let Some(path) = &session_path {
@@ -445,7 +539,7 @@ impl Conversation {
     /// If /advisor is enabled, run a second reviewer pass over the answer and
     /// append its critique. Best-effort: a reviewer failure never fails the turn.
     fn maybe_advisor_review(&mut self, args: &Args, answer: String, hooks: &mut RunHooks) -> Result<String, String> {
-        let state = read_mode_state(&args.cwd);
+        let mut state = read_mode_state(&args.cwd);
         if !state.pointer("/advisor/enabled").and_then(Value::as_bool).unwrap_or(false) {
             return Ok(answer);
         }
@@ -465,6 +559,14 @@ impl Conversation {
         match chat_completion(&router, ask, args.max_tokens as usize, &[]) {
             Ok(review) => {
                 self.recorder.record("advisor", json!({ "review": review })).ok();
+                // Persist the review so `/advisor dump` can surface it.
+                if let Some(obj) = state.as_object_mut() {
+                    let advisor = obj.entry("advisor").or_insert_with(|| json!({}));
+                    if let Some(advisor_obj) = advisor.as_object_mut() {
+                        advisor_obj.insert("lastReview".into(), json!({ "text": review, "at": now_stamp() }));
+                    }
+                    let _ = write_mode_state(&args.cwd, &state);
+                }
                 Ok(format!("{}\n\n— Advisor review —\n{}", answer, review))
             }
             Err(error) => Ok(format!("{}\n\n(advisor review unavailable: {})", answer, error)),
@@ -543,6 +645,9 @@ impl Conversation {
                             if let Some(last) = self.messages.last_mut() {
                                 last["content"] = json!(text);
                             }
+                            // When plan mode is on, the final answer IS the plan;
+                            // persist it so `/plan-review` can surface it.
+                            capture_plan_if_enabled(&args.cwd, &text);
                             return self.maybe_advisor_review(args, text, hooks);
                         }
                         Action::Tool { tool, input } => {
