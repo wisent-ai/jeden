@@ -1451,4 +1451,282 @@ mod tests {
         assert_eq!(allows, (false, false), "a non-gated tool leaves both flags untouched");
         assert_eq!(calls.get(), 0, "a non-gated tool must never consult approve");
     }
+
+    // ---- mode-state consumers: loop / plan-capture / branch / guided-goal ----
+    // These free fns read and write .jeden/mode-state.json under `cwd` only (no
+    // env vars, no threads, no PTY), so each test isolates on its own
+    // unique_temp_dir and needs neither env_lock nor a session root.
+
+    #[test]
+    fn loop_next_prompt_returns_none_when_disabled() {
+        // No state file at all: loop mode cannot be enabled, so no resubmit.
+        let missing = unique_temp_dir("loop-missing");
+        assert_eq!(
+            loop_next_prompt(&missing, "the task"),
+            None,
+            "a cwd with no mode-state must not drive an auto-resubmit"
+        );
+
+        // State present but the loop is explicitly disabled: still no resubmit.
+        let off = unique_temp_dir("loop-off");
+        write_mode_state(&off, &json!({ "loop_mode": { "enabled": false, "prompt": "redo" } })).unwrap();
+        assert_eq!(
+            loop_next_prompt(&off, "the task"),
+            None,
+            "a disabled loop must not resubmit even with a stored prompt"
+        );
+    }
+
+    #[test]
+    fn loop_next_prompt_uses_stored_prompt_and_decrements() {
+        let cwd = unique_temp_dir("loop-stored");
+        write_mode_state(
+            &cwd,
+            &json!({ "loop_mode": { "enabled": true, "remaining": 2, "prompt": "redo" } }),
+        )
+        .unwrap();
+
+        // The stored prompt wins over current_task, and it is returned as-is.
+        assert_eq!(
+            loop_next_prompt(&cwd, "current task"),
+            Some("redo".to_string()),
+            "an enabled bounded loop returns its stored prompt"
+        );
+
+        // The iteration was consumed: remaining dropped 2 -> 1 on disk.
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/loop_mode/remaining").and_then(Value::as_u64),
+            Some(1),
+            "consuming one iteration must decrement remaining by exactly one: {after}"
+        );
+        assert_eq!(
+            after.pointer("/loop_mode/enabled").and_then(Value::as_bool),
+            Some(true),
+            "a loop with iterations left stays enabled: {after}"
+        );
+    }
+
+    #[test]
+    fn loop_next_prompt_falls_back_to_current_task_when_prompt_empty() {
+        let cwd = unique_temp_dir("loop-fallback");
+        write_mode_state(
+            &cwd,
+            &json!({ "loop_mode": { "enabled": true, "remaining": 1, "prompt": "" } }),
+        )
+        .unwrap();
+
+        // An empty stored prompt is not a "stop" signal — the loop replays the
+        // caller's current task instead.
+        assert_eq!(
+            loop_next_prompt(&cwd, "do it"),
+            Some("do it".to_string()),
+            "an empty stored prompt falls back to the current task"
+        );
+    }
+
+    #[test]
+    fn loop_next_prompt_exhausts_and_disables() {
+        let cwd = unique_temp_dir("loop-exhausted");
+        write_mode_state(
+            &cwd,
+            &json!({ "loop_mode": { "enabled": true, "remaining": 0, "prompt": "redo" } }),
+        )
+        .unwrap();
+
+        // remaining==0 means the loop is spent: no resubmit...
+        assert_eq!(
+            loop_next_prompt(&cwd, "current task"),
+            None,
+            "a loop with zero iterations remaining must stop"
+        );
+        // ...and it disables itself on disk so a later turn can't resurrect it.
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/loop_mode/enabled").and_then(Value::as_bool),
+            Some(false),
+            "exhausting the count must disable the loop: {after}"
+        );
+    }
+
+    #[test]
+    fn loop_next_prompt_disables_after_until_deadline() {
+        let cwd = unique_temp_dir("loop-deadline");
+        // `until` is a ms epoch of 1 — comfortably in the past — so the duration
+        // guard fires regardless of iteration count.
+        write_mode_state(
+            &cwd,
+            &json!({ "loop_mode": { "enabled": true, "until": 1, "prompt": "redo" } }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            loop_next_prompt(&cwd, "current task"),
+            None,
+            "a loop past its until deadline must stop"
+        );
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/loop_mode/enabled").and_then(Value::as_bool),
+            Some(false),
+            "passing the until deadline must disable the loop: {after}"
+        );
+    }
+
+    #[test]
+    fn loop_next_prompt_unbounded_does_not_decrement() {
+        let cwd = unique_temp_dir("loop-unbounded");
+        // Enabled with a prompt but neither `remaining` nor `until`: unbounded,
+        // capped only by the caller's MAX_LOOP_ITERS.
+        write_mode_state(
+            &cwd,
+            &json!({ "loop_mode": { "enabled": true, "prompt": "go" } }),
+        )
+        .unwrap();
+
+        assert_eq!(
+            loop_next_prompt(&cwd, "current task"),
+            Some("go".to_string()),
+            "an unbounded loop returns its stored prompt"
+        );
+
+        // Nothing to consume: no `remaining` was introduced, and it stays enabled.
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/loop_mode/remaining"),
+            None,
+            "an unbounded loop must not invent a remaining counter: {after}"
+        );
+        assert_eq!(
+            after.pointer("/loop_mode/enabled").and_then(Value::as_bool),
+            Some(true),
+            "an unbounded loop stays enabled after a resubmit: {after}"
+        );
+    }
+
+    #[test]
+    fn capture_plan_if_enabled_writes_when_enabled() {
+        let cwd = unique_temp_dir("plan-capture-on");
+        write_mode_state(&cwd, &json!({ "plan": { "enabled": true } })).unwrap();
+
+        let plan = "1. read the parser\n2. add streaming\n3. test";
+        capture_plan_if_enabled(&cwd, plan);
+
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/plan/latestPlan").and_then(Value::as_str),
+            Some(plan),
+            "an enabled plan mode must persist the captured plan text verbatim: {after}"
+        );
+    }
+
+    #[test]
+    fn capture_plan_if_enabled_noop_when_disabled() {
+        let cwd = unique_temp_dir("plan-capture-off");
+        write_mode_state(&cwd, &json!({ "plan": { "enabled": false } })).unwrap();
+
+        capture_plan_if_enabled(&cwd, "a plan that must not be stored");
+
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/plan/latestPlan"),
+            None,
+            "a disabled plan mode must never write latestPlan: {after}"
+        );
+    }
+
+    #[test]
+    fn record_branch_appends_with_id_and_path() {
+        let cwd = unique_temp_dir("branch-append");
+        let first_path = Path::new("/tmp/jeden-sessions/session-a");
+
+        let id1 = record_branch(&cwd, "refactor parser", first_path).expect("first branch records");
+        assert_eq!(id1, "branch-1", "the first branch id is derived from the new length");
+
+        let after1 = read_mode_state(&cwd);
+        let arr1 = after1.pointer("/branches").and_then(Value::as_array).expect("branches array exists");
+        assert_eq!(arr1.len(), 1, "the first branch must be the sole entry: {after1}");
+        assert_eq!(arr1[0].pointer("/id").and_then(Value::as_str), Some("branch-1"));
+        assert_eq!(arr1[0].pointer("/title").and_then(Value::as_str), Some("refactor parser"));
+        assert_eq!(
+            arr1[0].pointer("/path").and_then(Value::as_str),
+            Some(first_path.to_string_lossy().as_ref()),
+            "the branch must record its session path: {after1}"
+        );
+
+        // A second branch appends without disturbing the first; id tracks length.
+        let second_path = Path::new("/tmp/jeden-sessions/session-b");
+        let id2 = record_branch(&cwd, "add streaming", second_path).expect("second branch records");
+        assert_eq!(id2, "branch-2", "the second branch id increments to branch-2");
+
+        let after2 = read_mode_state(&cwd);
+        let arr2 = after2.pointer("/branches").and_then(Value::as_array).expect("branches array exists");
+        assert_eq!(arr2.len(), 2, "the second branch appends, giving two entries: {after2}");
+        assert_eq!(arr2[1].pointer("/id").and_then(Value::as_str), Some("branch-2"));
+        assert_eq!(arr2[1].pointer("/title").and_then(Value::as_str), Some("add streaming"));
+    }
+
+    #[test]
+    fn record_branch_empty_title_falls_back_to_id() {
+        let cwd = unique_temp_dir("branch-empty-title");
+        let path = Path::new("/tmp/jeden-sessions/session-x");
+
+        // A blank/whitespace title is not a usable label, so it falls back to the
+        // generated id rather than storing an empty string.
+        let id = record_branch(&cwd, "   ", path).expect("branch with blank title records");
+        assert_eq!(id, "branch-1");
+
+        let after = read_mode_state(&cwd);
+        let arr = after.pointer("/branches").and_then(Value::as_array).expect("branches array exists");
+        assert_eq!(
+            arr[0].pointer("/title").and_then(Value::as_str),
+            Some("branch-1"),
+            "an empty title must fall back to the branch id: {after}"
+        );
+    }
+
+    #[test]
+    fn apply_mode_instructions_injects_and_clears_guided_goal() {
+        let cwd = unique_temp_dir("mode-guided");
+        write_mode_state(
+            &cwd,
+            &json!({ "guidedGoal": { "active": true, "roughObjective": "ship parser" } }),
+        )
+        .unwrap();
+
+        let task = "start on the milestone";
+        let out = apply_mode_instructions(&cwd, task).expect("guided goal applies");
+
+        // The drafting directive fires and carries the rough objective.
+        assert!(out.contains("Guided goal drafting"), "guided-goal directive missing: {out}");
+        assert!(out.contains("ship parser"), "rough objective must be carried into the directive: {out}");
+        assert!(out.ends_with(task), "task must remain at the tail: {out}");
+
+        // It is one-shot: the active flag is cleared on disk after use.
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/guidedGoal/active").and_then(Value::as_bool),
+            Some(false),
+            "guided-goal must clear its active flag after one injection: {after}"
+        );
+
+        // Proof of the clear's effect: a second call injects nothing.
+        let out2 = apply_mode_instructions(&cwd, task).expect("second call succeeds");
+        assert!(!out2.contains("Guided goal drafting"), "guided goal must not re-fire once cleared: {out2}");
+        assert_eq!(out2, task, "with guided goal cleared and no other mode, the task passes through: {out2}");
+    }
+
+    #[test]
+    fn apply_mode_instructions_no_guided_text_when_inactive() {
+        // Mode-state present but with no guidedGoal at all: the drafting directive
+        // must not fire and the task passes through unchanged.
+        let cwd = unique_temp_dir("mode-guided-absent");
+        write_mode_state(&cwd, &json!({ "lastTask": "prior work" })).unwrap();
+
+        let task = "keep going";
+        let out = apply_mode_instructions(&cwd, task).expect("no guided goal applies");
+
+        assert!(!out.contains("Guided goal"), "no guided goal means no drafting directive: {out}");
+        assert_eq!(out, task, "with no active mode the task is returned unchanged: {out}");
+    }
 }
