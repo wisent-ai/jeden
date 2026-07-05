@@ -399,73 +399,86 @@ pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     stdout.flush()
 }
 
-/// Differential, absolute-positioned renderer for raw-mode interactive use.
-///
-/// Raw mode disables ONLCR, so a bare `\n` moves the cursor down without a
-/// carriage return, and full-width lines autowrap. Both corrupt the layout.
-/// This renderer positions every line with an absolute cursor move, disables
-/// autowrap for the paint, and rewrites only the rows that changed since the
-/// previous frame — so idle/keystroke updates never clear or scroll the screen.
-struct DiffRenderer {
-    previous: Vec<String>,
-    columns: usize,
-    rows: usize,
+/// Sticky-prompt renderer for native scrollback. Finalized transcript blocks are
+/// printed once into the terminal's normal buffer (they scroll into real history
+/// and persist); only the bottom "live region" (prompt / spinner / streamed text)
+/// is repainted in place. All cursor moves are RELATIVE, so terminal scrolling
+/// from committed output never corrupts positioning.
+struct ReplRenderer {
+    live_height: usize,
 }
 
-impl DiffRenderer {
+impl ReplRenderer {
     fn new() -> Self {
-        Self { previous: Vec::new(), columns: 0, rows: 0 }
+        Self { live_height: 0 }
     }
 
-    /// Force a full repaint on the next `draw` (after a child process wrote to
-    /// the screen, e.g. an interactive provider selector).
     fn reset(&mut self) {
-        self.previous.clear();
+        self.live_height = 0;
     }
 
-    fn draw(&mut self, options: &FrameOptions) -> io::Result<()> {
-        let lines = frame_lines(options);
-        let size_changed = self.columns != options.columns || self.rows != options.rows;
-        let out = compose_update(&self.previous, &lines, options.columns.max(1), size_changed);
-
-        self.previous = lines;
-        self.columns = options.columns;
-        self.rows = options.rows;
-
+    /// Erase the current live region, print `committed` lines into scrollback,
+    /// then repaint `live` at the bottom. One atomic write.
+    fn flush(&mut self, committed: &[String], live: &[String]) -> io::Result<()> {
+        let out = compose_repl(self.live_height, committed, live);
         let mut stdout = io::stdout();
         stdout.write_all(out.as_bytes())?;
-        stdout.flush()
+        stdout.flush()?;
+        self.live_height = live.len();
+        Ok(())
     }
 }
 
-/// Pure ANSI generator for one differential frame update.
-///
-/// A full paint (first frame, row-count change, or terminal resize) clears the
-/// screen and writes every row; otherwise only rows that differ from `previous`
-/// are rewritten. Every row is placed with an absolute cursor move + line clear,
-/// never a bare `\n`, so raw mode (ONLCR off) can never stair-step or wrap it.
-fn compose_update(previous: &[String], lines: &[String], columns: usize, size_changed: bool) -> String {
-    let full = previous.len() != lines.len() || size_changed;
+/// Pure ANSI generator for the sticky-prompt renderer. Erases the previous live
+/// region (relative moves), prints committed lines (each `\r\n`, scrolling into
+/// history), then draws the new live region and parks the cursor after it.
+fn compose_repl(prev_height: usize, committed: &[String], live: &[String]) -> String {
     let mut out = String::new();
-    // Hide cursor and disable autowrap for the duration of the paint.
-    out.push_str("\x1b[?25l\x1b[?7l");
-    if full {
-        out.push_str("\x1b[2J\x1b[H");
-        for (index, line) in lines.iter().enumerate() {
-            out.push_str(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line));
+    out.push_str("\x1b[?25l\x1b[?7l"); // hide cursor, autowrap off
+    // Move to the top of the current live region and erase it downward.
+    if prev_height > 0 {
+        if prev_height > 1 {
+            out.push_str(&format!("\x1b[{}A", prev_height - 1));
         }
-    } else {
-        for (index, line) in lines.iter().enumerate() {
-            if previous[index] != *line {
-                out.push_str(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line));
-            }
-        }
+        out.push('\r');
+        out.push_str("\x1b[0J");
     }
-    // Re-enable autowrap, park the cursor after the prompt text, show it.
-    let last_row = lines.len().max(1);
-    let last_col = (visible_len(lines.last().map(String::as_str).unwrap_or("")) + 1).min(columns.max(1));
-    out.push_str(&format!("\x1b[?7h\x1b[{};{}H\x1b[?25h", last_row, last_col));
+    // Committed lines flow into scrollback; CRLF scrolls the terminal as needed.
+    for line in committed {
+        out.push_str(line);
+        out.push_str("\r\n");
+    }
+    // Live region: drawn in place, no trailing newline after the last line.
+    for (index, line) in live.iter().enumerate() {
+        if index > 0 {
+            out.push_str("\r\n");
+        }
+        out.push_str("\x1b[2K");
+        out.push_str(line);
+    }
+    out.push_str("\x1b[?7h\x1b[?25h"); // autowrap back on, show cursor
     out
+}
+
+/// One finalized message rendered as scrollback lines (boxed, newline-split).
+fn message_block(message: &Message, columns: usize, color: bool) -> Vec<String> {
+    let width = columns.min(120).max(50);
+    format_message(message, width, color)
+        .into_iter()
+        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+        .collect()
+}
+
+/// The bottom live region: optional slash-suggestion panel + the prompt line(s).
+fn live_lines(status: &PromptStatus, input: &str, slash_selection: usize, columns: usize, color: bool) -> Vec<String> {
+    let width = columns.min(120).max(50);
+    let mut lines = Vec::new();
+    lines.extend(slash_hint_panel(input, width, color, slash_selection));
+    lines.extend(compact_prompt(width, status, input, false, color));
+    lines
+        .into_iter()
+        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+        .collect()
 }
 
 struct RawModeGuard;
@@ -586,15 +599,12 @@ where
 /// Run a background turn on a worker thread while animating a spinner and
 /// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
 /// agent loop polls between steps. Returns the handler's result.
-fn run_background_turn<S, H>(
-    renderer: &mut DiffRenderer,
-    status_provider: &mut S,
-    messages: &[Message],
+fn run_background_turn<H>(
+    renderer: &mut ReplRenderer,
     handler: &H,
     prompt: &str,
 ) -> io::Result<(Result<String, String>, Vec<String>)>
 where
-    S: FnMut() -> PromptStatus,
     H: Fn(&str, &TurnCtx) -> Result<String, String> + Sync,
 {
     let cancel = Arc::new(AtomicBool::new(false));
@@ -603,8 +613,6 @@ where
     let mut note = String::from("working…");
     let mut streamed = String::new();
     let mut frame = 0usize;
-    // Distinct tool names this turn ran, in first-seen order, for a transcript
-    // line so tool execution is visible (not just a vanishing spinner).
     let mut tools_used: Vec<String> = Vec::new();
     let record_tool = |message: &str, tools: &mut Vec<String>| {
         if let Some(tool) = message.strip_prefix("tool: ") {
@@ -614,9 +622,25 @@ where
             }
         }
     };
-    // Status (git branch, model, cwd) is stable for the duration of a turn;
-    // snapshot it once so the ~8fps spinner loop does not re-shell git per frame.
-    let status = status_provider();
+    let _ = ();
+    let columns = default_columns();
+    let color = stdout_supports_color();
+
+    // Build the live region for a background turn: streamed assistant text (as it
+    // arrives) above the spinner status line.
+    let build_live = |streamed: &str, note: &str, frame: usize, cancelling: bool| -> Vec<String> {
+        let mut lines = Vec::new();
+        if !streamed.trim().is_empty() {
+            lines.extend(message_block(&Message::new("assistant", streamed.to_string()), columns, color));
+        }
+        let label = if cancelling {
+            format!("{} cancelling…", spinner_glyph(frame))
+        } else {
+            format!("{} {} · esc to cancel", spinner_glyph(frame), note)
+        };
+        lines.extend(message_block(&Message::new("system", label), columns, color));
+        lines
+    };
 
     let outcome = thread::scope(|scope| -> io::Result<Result<String, String>> {
         let worker_cancel = cancel.clone();
@@ -642,28 +666,8 @@ where
                 }
             }
             let cancelling = cancel.load(Ordering::Relaxed);
-            let label = if cancelling {
-                format!("{} cancelling…", spinner_glyph(frame))
-            } else {
-                format!("{} {} · esc to cancel", spinner_glyph(frame), note)
-            };
-            let mut view = messages.to_vec();
-            // Show streamed assistant text live above the spinner as it arrives.
-            if !streamed.trim().is_empty() {
-                view.push(Message::new("assistant", streamed.clone()));
-            }
-            view.push(Message::new("system", label));
-            let options = FrameOptions {
-                status: status.clone(),
-                messages: view,
-                input_text: String::new(),
-                busy: true,
-                columns: default_columns(),
-                rows: default_rows(),
-                color: stdout_supports_color(),
-                slash_selection: 0,
-            };
-            renderer.draw(&options)?;
+            let live = build_live(&streamed, &note, frame, cancelling);
+            renderer.flush(&[], &live)?;
             frame = frame.wrapping_add(1);
 
             if worker.is_finished() {
@@ -681,18 +685,18 @@ where
             }
         }
 
-        // Drain any final messages and join.
         while let Ok(message) = rx.try_recv() {
             match message {
                 TurnMsg::Note(m) => { record_tool(&m, &mut tools_used); note = m; }
                 TurnMsg::Delta(p) => { streamed.push_str(&p); }
             }
         }
-        let _ = note;
+        let _ = (note, streamed);
         Ok(worker.join().unwrap_or_else(|_| Err("Turn thread panicked.".into())))
     })?;
 
-    renderer.reset();
+    // Collapse the live region; the caller commits the finalized result.
+    renderer.flush(&[], &[])?;
     Ok((outcome, tools_used))
 }
 
@@ -707,28 +711,38 @@ where
     }
 
     let _raw = RawModeGuard::enter()?;
-    let mut messages = Vec::new();
+    let mut messages: Vec<Message> = Vec::new();
+    let mut committed = 0usize; // messages already printed to scrollback
     let mut input = String::new();
     let mut slash_selection = 0usize;
     let mut needs_render = true;
-    let mut renderer = DiffRenderer::new();
+    let mut renderer = ReplRenderer::new();
     // Submitted prompts, newest last; `history_index` is the cursor while
     // browsing with Up/Down (None = editing a fresh line).
     let mut history: Vec<String> = Vec::new();
     let mut history_index: Option<usize> = None;
+    // Print the welcome panel once into scrollback.
+    {
+        let status = status_provider();
+        let columns = default_columns();
+        let color = stdout_supports_color();
+        let welcome = welcome_panel(columns.min(120).max(50), &status.model, &status.cwd, &status.write_status, &status.command_status, color);
+        renderer.flush(&welcome, &live_lines(&status, "", 0, columns, color))?;
+    }
     loop {
         if needs_render {
-            let options = FrameOptions {
-                status: status_provider(),
-                messages: messages.clone(),
-                input_text: input.clone(),
-                busy: false,
-                columns: default_columns(),
-                rows: default_rows(),
-                color: stdout_supports_color(),
-                slash_selection,
-            };
-            renderer.draw(&options)?;
+            let status = status_provider();
+            let columns = default_columns();
+            let color = stdout_supports_color();
+            // Commit newly-finalized messages to scrollback, then repaint only
+            // the live region (slash hints + prompt).
+            let mut new_blocks: Vec<String> = Vec::new();
+            for message in &messages[committed..] {
+                new_blocks.extend(message_block(message, columns, color));
+            }
+            committed = messages.len();
+            let live = live_lines(&status, &input, slash_selection, columns, color);
+            renderer.flush(&new_blocks, &live)?;
             needs_render = false;
         }
 
@@ -776,6 +790,18 @@ where
                     history.push(prompt.clone());
                 }
                 messages.push(Message::new("user", prompt.clone()));
+                // Commit the user message (and any pending) to scrollback now, so
+                // it sits above the picker/spinner that follows.
+                {
+                    let columns = default_columns();
+                    let color = stdout_supports_color();
+                    let mut blocks: Vec<String> = Vec::new();
+                    for message in &messages[committed..] {
+                        blocks.extend(message_block(message, columns, color));
+                    }
+                    committed = messages.len();
+                    renderer.flush(&blocks, &[])?;
+                }
                 match classify(&prompt) {
                     TurnKind::Foreground => {
                         disable_raw_mode()?;
@@ -786,7 +812,7 @@ where
                         push_turn_result(&mut messages, &prompt, result);
                     }
                     TurnKind::Background => {
-                        let (result, tools_used) = run_background_turn(&mut renderer, &mut status_provider, &messages, &handler, &prompt)?;
+                        let (result, tools_used) = run_background_turn(&mut renderer, &handler, &prompt)?;
                         if !tools_used.is_empty() {
                             messages.push(Message::new("system", format!("tools: {}", tools_used.join(", "))));
                         }
@@ -1027,73 +1053,6 @@ mod tests {
             prompt.ends_with("╰─ /"),
             "prompt row must end with the typed input: {prompt:?}"
         );
-    }
-
-    #[test]
-    fn compose_update_first_frame_clears_once_and_uses_no_bare_newline() {
-        let lines = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
-        let out = compose_update(&[], &lines, 80, false);
-        assert_eq!(
-            out.matches("\x1b[2J").count(),
-            1,
-            "the first frame must clear the screen exactly once: {out:?}"
-        );
-        assert!(
-            !out.contains('\n'),
-            "raw mode forbids bare newlines in the emitted update: {out:?}"
-        );
-        for (index, line) in lines.iter().enumerate() {
-            assert!(
-                out.contains(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line)),
-                "row {index} was not placed with an absolute cursor move: {out:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn compose_update_incremental_rewrites_only_the_changed_row() {
-        let previous = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
-        let mut next = previous.clone();
-        next[2] = "gamma-2".to_string();
-        let out = compose_update(&previous, &next, 80, false);
-        assert_eq!(
-            out.matches("\x1b[2J").count(),
-            0,
-            "an in-place update must never clear the whole screen: {out:?}"
-        );
-        assert_eq!(
-            out.matches("\x1b[2K").count(),
-            1,
-            "exactly one row (the changed one) may be rewritten: {out:?}"
-        );
-        assert!(
-            out.contains("\x1b[3;1H\x1b[2Kgamma-2"),
-            "the changed row must be rewritten at its absolute position: {out:?}"
-        );
-        assert!(
-            !out.contains("alpha") && !out.contains("beta"),
-            "unchanged rows must not be repainted: {out:?}"
-        );
-    }
-
-    #[test]
-    fn compose_update_size_change_forces_a_full_paint() {
-        // Same length, identical content: only `size_changed` should force a
-        // full clear+repaint. Without it this call would emit nothing to rewrite.
-        let previous = vec!["alpha".to_string(), "beta".to_string()];
-        let identical = previous.clone();
-        let out = compose_update(&previous, &identical, 80, true);
-        assert_eq!(
-            out.matches("\x1b[2J").count(),
-            1,
-            "a size change must clear and fully repaint: {out:?}"
-        );
-        for (index, line) in identical.iter().enumerate() {
-            assert!(
-                out.contains(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line)),
-                "row {index} was not fully repainted after resize: {out:?}"
-            );
-        }
     }
 
     #[test]
