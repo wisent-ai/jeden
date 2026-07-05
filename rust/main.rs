@@ -546,8 +546,6 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/login" => start_login(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/model" | "/models" | "/switch" => handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str()),
-        "/usage" => Ok(crate::slash::handle_local(&slash_context, trimmed).transpose()?.unwrap_or_else(|| "Usage accounting is available in Rust mode-state.".into())),
-        "/update" => update_command(),
         "/exit" | "/quit" => Ok("Exit is handled by the interactive input loop.".into()),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
@@ -611,7 +609,7 @@ fn read_transcript_events(dir: &Path) -> Vec<Value> {
 
 /// Extract prior user/assistant turns from a session transcript so /resume can
 /// reload them into the live interactive conversation.
-fn session_conversation_turns(dir: &Path) -> Vec<Value> {
+pub(crate) fn session_conversation_turns(dir: &Path) -> Vec<Value> {
     let mut turns = Vec::new();
     for event in read_transcript_events(dir) {
         let kind = event.get("type").and_then(Value::as_str).unwrap_or("");

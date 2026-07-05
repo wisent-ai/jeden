@@ -326,12 +326,45 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     run_command_with(args, &mut RunHooks::inert())
 }
 
+/// Run a session-scoped slash (`/compact`, `/handoff`, `/context`) in the
+/// one-shot CLI by loading the last session's history into a Conversation and
+/// invoking the same real methods the interactive path uses — no divergent stub.
+fn run_session_command(args: &Args, command: &str, rest: &str, hooks: &mut RunHooks) -> Result<String, String> {
+    let last = read_mode_state(&args.cwd)
+        .pointer("/lastSessionPath")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|p| p.exists())
+        .ok_or("No prior session found. Run a task first, then /compact, /handoff, or /context.")?;
+    let turns = crate::session_conversation_turns(&last);
+    let mut conversation = Conversation::new(&args.cwd)?;
+    conversation.load_history(&args.cwd, turns)?;
+    match command {
+        "/compact" => conversation.compact(args, rest, hooks),
+        "/handoff" => conversation.handoff(args, rest, hooks),
+        "/context" => Ok(format!(
+            "Loaded conversation: {} message(s), ~{} tokens (from {}).",
+            conversation.turn_len(),
+            conversation.approx_tokens(),
+            last.display()
+        )),
+        _ => unreachable!(),
+    }
+}
+
 pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
     let mut task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
         let (command, rest) = split_head(task.trim());
         if command == "/retry" { return retry_command_with(args, hooks); }
         if command == "/btw" { return btw_command_with(args, rest, hooks); }
+        // /compact, /handoff, /context operate on the last session's history so
+        // the one-shot CLI matches the interactive implementations (no divergent
+        // flag-set / markdown-dump / tool-manifest stubs).
+        if matches!(command, "/compact" | "/handoff" | "/context") {
+            let text = run_session_command(args, command, rest, hooks)?;
+            return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+        }
         // Builtins handled locally; file-based custom commands expand to a
         // prompt; anything else falls through to the model literally (OMP parity).
         if crate::is_builtin_slash(command) {

@@ -827,18 +827,6 @@ fn handle_share(args: &str, context: &SlashContext<'_>) -> Result<String, String
     ))
 }
 
-fn handle_handoff(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
-    let session = slash_session_value(context, "")?;
-    let focus = args.trim();
-    let text = format!("{}{}", if focus.is_empty() { String::new() } else { format!("Focus: {}\n\n", focus) }, slash_session_export(&session, "markdown")?);
-    let session_dir = slash_session_dir(context, "")?;
-    let artifact_dir = session_dir.join("artifacts");
-    fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
-    let file = artifact_dir.join("handoff.md");
-    fs::write(&file, text).map_err(|e| e.to_string())?;
-    Ok(format!("Handoff written to {}", file.display()))
-}
-
 fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let complaint = args.trim();
     if complaint.is_empty() { return Err("Usage: /omfg <complaint>".into()); }
@@ -942,27 +930,6 @@ fn handle_jobs(context: &SlashContext<'_>) -> Result<String, String> {
         serde_json::to_string_pretty(&jobs).map_err(|e| e.to_string())
     }
 }
-
-fn handle_update() -> Result<String, String> {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let head = Command::new("git")
-        .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(&root)
-        .output()
-        .ok()
-        .and_then(|output| if output.status.success() { Some(String::from_utf8_lossy(&output.stdout).trim().to_string()) } else { None })
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "unknown".into());
-    Ok(format!(
-        "Jeden update\nCurrent source: {}\nCurrent git HEAD: {}\n\nTo update this source install:\n  cd {}\n  git pull --ff-only\n  cargo build --release\n\nIf your shell cannot find the linked bin after updating, run:\n  npm link\n  rehash",
-        root.display(),
-        head,
-        root.display()
-    ))
-}
-
-
-
 
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
@@ -1329,10 +1296,6 @@ fn handle_lifecycle(command: &str, args: &str, state: &mut ModeState, context: &
     match command {
         "/new" | "/fresh" => Some(Ok("Started a fresh logical turn context. Provider stream state is reset for the next prompt in this Jeden process.".into())),
         "/drop" => Some(Err("Refusing to delete the active session from inside itself. Use /new for a fresh context or exit and remove the session directory explicitly.".into())),
-        "/compact" => {
-            state.compact = true;
-            Some(Ok("Compact mode enabled for subsequent prompts: large prior context should be summarized before use.".into()))
-        },
         "/shake" => {
             state.shake = if args.trim().is_empty() { "elide".into() } else { args.trim().into() };
             Some(Ok(format!("Shake mode applied locally: {}. Subsequent prompts will instruct the model to avoid relying on heavy prior artifacts unless re-read.", state.shake)))
@@ -1517,23 +1480,6 @@ fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
         .into_iter()
         .map(|tool| json!({"name": tool.name, "description": tool.description, "input": {}}))
         .collect()
-}
-
-fn handle_context(context: &SlashContext<'_>) -> Result<String, String> {
-    let all = tool_values(context);
-    let manifest = json!({
-        "cwd": context.cwd,
-        "model": current_model_route(context),
-        "tools": {
-            "total": all.len(),
-            "all": all,
-        },
-        "memory": {
-            "backend": "local-jsonl",
-            "path": memory_file_path(),
-        },
-    });
-    serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())
 }
 
 fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String> {
@@ -1784,7 +1730,6 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/fast" => { changed = split_head(args).0 != "status"; Some(handle_fast(args, &mut state)) },
         "/advisor" => { changed = !matches!(split_head(args).0, "" | "status" | "dump"); Some(handle_advisor(args, &mut state, context)) },
         "/tools" => Some(Ok(tools::tools_slash_text(context.cwd))),
-        "/context" => Some(handle_context(context)),
         "/stats" | "/debug" => Some(handle_doctor(context)),
         "/usage" => Some(handle_usage(args, context)),
         "/session" => Some(handle_session(args, context)),
@@ -1805,21 +1750,19 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/export" => Some(handle_export(args, context)),
         "/share" => Some(handle_share(args, context)),
         "/omfg" => Some(handle_omfg(args, context)),
-        "/handoff" => Some(handle_handoff(args, context)),
         "/force" | "/force:" => { changed = true; Some(handle_force(args, &mut state, context)) },
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => { changed = command != "/tree"; Some(handle_branching(command.as_str(), args, &mut state)) },
-        "/new" | "/fresh" | "/drop" | "/compact" | "/shake" | "/resume" | "/rename" | "/move" => {
-            changed = matches!(command.as_str(), "/compact" | "/shake");
+        "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
+            changed = command == "/shake";
             handle_lifecycle(command.as_str(), args, &mut state, context)
         },
         "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
         "/jobs" => Some(handle_jobs(context)),
         "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
         "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `jeden >` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
-        "/update" => Some(handle_update()),
         "/tan" => Some(handle_tan(args, context)),
         _ => None,
     };
