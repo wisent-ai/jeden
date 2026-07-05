@@ -535,6 +535,35 @@ fn save_collab_state(cwd: &Path, state: &Value) -> Result<PathBuf, String> {
     Ok(file)
 }
 
+/// Encrypt a collab event under `key` and POST it to the HTTP relay. The relay
+/// only ever sees the ciphertext; the key never leaves this process.
+fn post_collab_http(base: &str, room: &str, key: &[u8; 32], event_type: &str, cwd: &Path) -> Result<(), String> {
+    let event = json!({ "ts": now_text(), "type": event_type, "cwd": cwd });
+    let plain = serde_json::to_vec(&event).map_err(|e| e.to_string())?;
+    let blob = crate::collab::encrypt_blob(key, &plain)?;
+    crate::collab::relay_post(base, room, &blob)?;
+    Ok(())
+}
+
+/// Status for an HTTP-backed collab role. Shows the relay base + room + live
+/// event count fetched from the relay (opaque blobs; contents stay encrypted).
+fn collab_http_role_status(role: &str, entry: &Value) -> String {
+    let base = entry.get("relayBase").and_then(Value::as_str).unwrap_or("");
+    let room = entry.get("room").and_then(Value::as_str).unwrap_or("");
+    let count = crate::collab::relay_get(base, room, 0).map(|(events, _)| events.len());
+    let events_line = match count {
+        Ok(n) => format!("Events: {} (encrypted)", n),
+        Err(e) => format!("Events: unavailable ({})", e),
+    };
+    [
+        format!("Collab {role}: HTTP relay {}", base),
+        format!("Room: {}", room),
+        events_line,
+        "Payloads are end-to-end encrypted; the relay never sees plaintext or the key.".to_string(),
+    ]
+    .join("\n")
+}
+
 fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let (verb, rest) = split_head(args);
     let verb = if verb.is_empty() { "status" } else { verb };
@@ -548,12 +577,35 @@ fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, Strin
             return Ok(format!("Collab off.\nRust backend: durable local file relay in .jeden/collab-relay.jsonl.\nState: {}", file.display()));
         }
         let mut sections = Vec::new();
-        if !host.is_null() { sections.push(collab_role_status("host", host, verb == "view")); }
-        if !guest.is_null() { sections.push(collab_role_status("guest", guest, verb == "view")); }
+        if !host.is_null() {
+            sections.push(if host.get("backend").and_then(Value::as_str) == Some("http") { collab_http_role_status("host", host) } else { collab_role_status("host", host, verb == "view") });
+        }
+        if !guest.is_null() {
+            sections.push(if guest.get("backend").and_then(Value::as_str) == Some("http") { collab_http_role_status("guest", guest) } else { collab_role_status("guest", guest, verb == "view") });
+        }
         sections.push(format!("State: {}", file.display()));
         return Ok(sections.join("\n\n"));
     }
     if verb == "start" {
+        let target = rest.trim();
+        if target.starts_with("http://") || target.starts_with("https://") {
+            let parsed = crate::collab::parse_relay_url(target)?;
+            let (room, key) = if parsed.room.is_empty() {
+                crate::collab::new_room_and_key()
+            } else {
+                (parsed.room.clone(), parsed.key.ok_or("HTTP relay start URL with a room must include #key=<k>")?)
+            };
+            post_collab_http(&parsed.base, &room, &key, "host-start", context.cwd)?;
+            // Persist only the base + room; the key never touches disk.
+            let entry = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "startedAt": now_text(), "cwd": context.cwd });
+            state["host"] = entry;
+            save_collab_state(context.cwd, &state)?;
+            let join_url = format!("{}/room/{}#key={}", parsed.base, room, crate::collab::encode_key(&key));
+            return Ok(format!(
+                "Collab started on HTTP relay {}.\nJoin with: /join {}\nBackend: HTTP relay (end-to-end encrypted).\nShare the join URL privately; its #key fragment is the decryption key and is never sent to the relay.",
+                parsed.base, join_url
+            ));
+        }
         let relay = collab_path(context.cwd, rest)?;
         append_collab_event(&relay, "host-start", context.cwd)?;
         let entry = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "startedAt": now_text(), "cwd": context.cwd });
@@ -571,12 +623,36 @@ fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, Strin
         let file = save_collab_state(context.cwd, &state)?;
         return Ok(format!("Collab hosting stopped.\nState: {}", file.display()));
     }
-    Err("Usage: /collab [start|status|view|stop] [relay-file]".into())
+    Err("Usage: /collab [start|status|view|stop] [relay-file | http://relay-host[:port]]".into())
 }
 
 fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let target = args.trim();
     if target.is_empty() { return Err("Usage: /join <relay-file-or-file-url>".into()); }
+    if target.starts_with("http://") || target.starts_with("https://") {
+        let parsed = crate::collab::parse_relay_url(target)?;
+        if parsed.room.is_empty() { return Err("Join URL must include a room: http://host/room/<id>#key=<k>".into()); }
+        let key = parsed.key.ok_or("Join URL must include the #key=<k> fragment")?;
+        // Fetch + decrypt existing events to prove the E2EE round-trip works.
+        let (blobs, _) = crate::collab::relay_get(&parsed.base, &parsed.room, 0)?;
+        if blobs.is_empty() {
+            return Err("No events in that relay room yet — check the room id, or wait for the host to run /collab start.".into());
+        }
+        let mut decrypted = 0usize;
+        for blob in &blobs {
+            crate::collab::decrypt_blob(&key, blob).map_err(|e| format!("relay payload failed to decrypt (wrong key?): {}", e))?;
+            decrypted += 1;
+        }
+        post_collab_http(&parsed.base, &parsed.room, &key, "guest-join", context.cwd)?;
+        let mut state = read_json_value(&collab_state_path(context.cwd));
+        if !state.is_object() { state = json!({}); }
+        state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": parsed.room, "joinedAt": now_text(), "cwd": context.cwd });
+        save_collab_state(context.cwd, &state)?;
+        return Ok(format!(
+            "Joined HTTP collab relay {} room {}.\nDecrypted {} existing event(s) end-to-end.\nBackend: HTTP relay (end-to-end encrypted); the key stays local and was never sent to the relay.",
+            parsed.base, parsed.room, decrypted
+        ));
+    }
     let relay = collab_path(context.cwd, target)?;
     append_collab_event(&relay, "guest-join", context.cwd)?;
     let mut state = read_json_value(&collab_state_path(context.cwd));

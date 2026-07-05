@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 
 mod tui;
 mod agent;
+mod collab;
 mod mcp;
 mod model_router;
 mod protocol;
@@ -963,6 +964,10 @@ fn main() {
         "help" => Ok(usage().to_string()),
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
+        "collab-relay" => {
+            let addr = args.positionals.get(0).cloned().unwrap_or_else(|| "127.0.0.1:8877".to_string());
+            collab::serve(&addr).map(|_| String::new())
+        }
         "sessions" => Ok(list_sessions(args.positionals.get(0).and_then(|s| s.parse().ok()).unwrap_or(20))),
         "show" => args.positionals.get(0).map(|id| render_session_export(&read_session_value(id).unwrap_or_else(|e| json!({"error": e})), "json").unwrap_or_default()).ok_or("show requires a session id".into()),
         "export" => export_session_command(&args),

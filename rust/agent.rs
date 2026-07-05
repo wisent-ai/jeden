@@ -1090,4 +1090,160 @@ mod tests {
         assert!(!out2.contains("Forced tool request"), "force must not re-fire after being cleared: {out2}");
         assert_eq!(out2, task, "with force cleared and no other mode, task is returned unchanged: {out2}");
     }
+
+    // ---- tiered approval: pure classification & authorization --------------
+    // is_write_tool / is_command_tool / tool_will_run / effective_allows are
+    // pure over their string+flag inputs (no fs, no threads, no PTY), so these
+    // tests need no temp dirs, no env lock, and no session root.
+
+    /// Build an `Args` with just the two authorization flags toggled; the cwd
+    /// is never touched by the pure functions under test.
+    fn args_with_flags(allow_write: bool, allow_command: bool) -> Args {
+        let mut args = args_with_cwd(Path::new("/nonexistent"));
+        args.allow_write = allow_write;
+        args.allow_command = allow_command;
+        args
+    }
+
+    /// A `RunHooks` whose only meaningful field is `approve`; everything else
+    /// mirrors `RunHooks::inert()`. Lets a test inject an approve closure that
+    /// records or decides, without spinning up the interactive machinery.
+    fn hooks_with_approve<'a>(approve: impl Fn(&str) -> bool + 'a) -> RunHooks<'a> {
+        RunHooks {
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            interactive: true,
+            progress: Box::new(|_| {}),
+            stream: Box::new(|_| {}),
+            approve: Box::new(approve),
+        }
+    }
+
+    #[test]
+    fn is_write_tool_matches_exactly_the_filesystem_mutators() {
+        // Every tool that mutates the filesystem must be classified as a write
+        // tool, or it would run without --allow-write / approval.
+        for tool in ["write_file", "apply_patch", "edit_file", "edit", "delete_file", "move_file"] {
+            assert!(is_write_tool(tool), "{tool} mutates the filesystem and must be a write tool");
+        }
+        // Read-only and command tools must NOT be gated as writes, or a harmless
+        // read would demand write authorization.
+        for tool in ["read_file", "list_dir", "run_command"] {
+            assert!(!is_write_tool(tool), "{tool} does not write files and must not be a write tool");
+        }
+    }
+
+    #[test]
+    fn is_command_tool_matches_exactly_the_executors() {
+        // Every tool that executes commands/code must be classified as a command
+        // tool, or it would run without --allow-command / approval.
+        for tool in ["run_command", "run_process", "node_eval", "python_eval", "run_package_script", "delegate_task"] {
+            assert!(is_command_tool(tool), "{tool} executes code and must be a command tool");
+        }
+        // A read and a write tool are not executors: they must not trip the
+        // command gate.
+        for tool in ["read_file", "write_file"] {
+            assert!(!is_command_tool(tool), "{tool} does not execute code and must not be a command tool");
+        }
+    }
+
+    #[test]
+    fn tool_will_run_gates_write_tools_on_allow_write() {
+        // A write tool runs only when write authorization is present; the
+        // command flag is irrelevant to it.
+        assert!(!tool_will_run("write_file", false, true), "write tool must be blocked without allow_write");
+        assert!(tool_will_run("write_file", true, false), "write tool must run with allow_write");
+    }
+
+    #[test]
+    fn tool_will_run_gates_command_tools_on_allow_command() {
+        // A command tool runs only when command authorization is present; the
+        // write flag is irrelevant to it.
+        assert!(!tool_will_run("run_command", true, false), "command tool must be blocked without allow_command");
+        assert!(tool_will_run("run_command", false, true), "command tool must run with allow_command");
+    }
+
+    #[test]
+    fn tool_will_run_lets_non_gated_tools_run_regardless_of_flags() {
+        // A non-gated tool (read_file) is never authorization-gated: it must run
+        // even with both flags denied. This is the branch a mutation from
+        // `true` to `allow_write` would break.
+        assert!(tool_will_run("read_file", false, false), "non-gated tool must run even with both flags false");
+    }
+
+    #[test]
+    fn effective_allows_honors_preauthorized_write_without_consulting_approve() {
+        // Pre-authorized by the CLI flag: the write flag is already true, so the
+        // hook must never be asked. The panicking closure fails the test if it is.
+        let args = args_with_flags(true, false);
+        let hooks = hooks_with_approve(|_| panic!("approve must not be consulted when the tool is pre-authorized"));
+
+        let (allow_write, allow_command) = effective_allows(&args, "write_file", &hooks);
+
+        assert!(allow_write, "a pre-authorized write flag must remain granted");
+        assert!(!allow_command, "the unrelated command flag must stay as the args left it");
+    }
+
+    #[test]
+    fn effective_allows_elevates_write_when_approve_grants_it() {
+        // Not pre-authorized, but the user approves: the write flag must be
+        // elevated, and approve is consulted exactly once (only the write gate).
+        let calls = std::cell::Cell::new(0usize);
+        let args = args_with_flags(false, false);
+        let hooks = hooks_with_approve(|_| {
+            calls.set(calls.get() + 1);
+            true
+        });
+
+        let (allow_write, allow_command) = effective_allows(&args, "write_file", &hooks);
+
+        assert!(allow_write, "an approved write tool must be elevated to allowed");
+        assert!(!allow_command, "approving a write tool must not touch the command flag");
+        assert_eq!(calls.get(), 1, "only the write gate should consult approve, exactly once");
+    }
+
+    #[test]
+    fn effective_allows_elevates_command_when_approve_grants_it() {
+        // Symmetric to the write case: an approved command tool elevates only the
+        // command flag, consulting approve exactly once.
+        let calls = std::cell::Cell::new(0usize);
+        let args = args_with_flags(false, false);
+        let hooks = hooks_with_approve(|_| {
+            calls.set(calls.get() + 1);
+            true
+        });
+
+        let (allow_write, allow_command) = effective_allows(&args, "run_command", &hooks);
+
+        assert!(allow_command, "an approved command tool must be elevated to allowed");
+        assert!(!allow_write, "approving a command tool must not touch the write flag");
+        assert_eq!(calls.get(), 1, "only the command gate should consult approve, exactly once");
+    }
+
+    #[test]
+    fn effective_allows_stays_denied_when_approve_refuses() {
+        // The user declines the one-shot approval: neither flag may be elevated.
+        let args = args_with_flags(false, false);
+        let hooks = hooks_with_approve(|_| false);
+
+        let allows = effective_allows(&args, "write_file", &hooks);
+
+        assert_eq!(allows, (false, false), "a refused write tool must stay fully denied");
+    }
+
+    #[test]
+    fn effective_allows_never_consults_approve_for_non_gated_tools() {
+        // A non-gated tool (read_file) is neither write nor command, so the hook
+        // must never be asked and the flags pass through unchanged.
+        let calls = std::cell::Cell::new(0usize);
+        let args = args_with_flags(false, false);
+        let hooks = hooks_with_approve(|_| {
+            calls.set(calls.get() + 1);
+            true
+        });
+
+        let allows = effective_allows(&args, "read_file", &hooks);
+
+        assert_eq!(allows, (false, false), "a non-gated tool leaves both flags untouched");
+        assert_eq!(calls.get(), 0, "a non-gated tool must never consult approve");
+    }
 }
