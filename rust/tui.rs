@@ -1,4 +1,8 @@
 use std::io::{self, IsTerminal, Write};
+use std::time::Duration;
+
+use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 const PRODUCT: &str = "Wisent";
 const APP: &str = "Agent";
@@ -23,21 +27,26 @@ const WISENT_MARK: &[&str] = &[
 
 
 const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
-    ("settings", "Open settings menu"),
-    ("setup", "Open provider setup"),
-    ("plan", "Toggle plan mode"),
-    ("goal", "Toggle goal mode"),
-    ("loop", "Toggle loop mode"),
-    ("model", "Switch model"),
-    ("fast", "Toggle priority service tier"),
-    ("advisor", "Toggle advisor reviewer"),
-    ("help", "Show slash commands"),
-    ("login", "Automated OAuth login"),
-    ("logout", "Logout provider"),
-    ("usage", "Show provider usage"),
-    ("update", "Show update command"),
-    ("exit", "Exit"),
-    ("quit", "Quit"),
+    ("login", "Automated OAuth login"), ("logout", "Logout provider"), ("model", "Switch model"),
+    ("help", "Show slash commands"), ("mcp", "Manage MCP servers"), ("settings", "Open settings menu"), ("setup", "Open provider setup"),
+    ("plan", "Toggle plan mode"), ("plan-review", "Review latest plan"), ("goal", "Toggle goal mode"),
+    ("loop", "Toggle loop mode"), ("fast", "Toggle priority service tier"), ("advisor", "Toggle advisor reviewer"),
+    ("export", "Export session"), ("dump", "Dump session"), ("share", "Share session"),
+    ("collab", "Collaborate via relay"), ("join", "Join shared session"), ("leave", "Leave collab"),
+    ("browser", "Configure browser runtime"), ("copy", "Copy conversation text"), ("todo", "Manage todos"),
+    ("session", "Session management"), ("jobs", "Show jobs"), ("usage", "Show provider usage"),
+    ("stats", "Launch stats dashboard"), ("changelog", "Show changelog"), ("hotkeys", "Show hotkeys"),
+    ("tools", "Show tools"), ("context", "Show context usage"), ("extensions", "Manage extensions"),
+    ("agents", "Agent controls"), ("branch", "Create branch"), ("fork", "Create fork"), ("tree", "Navigate tree"),
+    ("ssh", "Manage SSH hosts"), ("new", "Start new session"), ("fresh", "Reset provider stream state"),
+    ("drop", "Drop current session"), ("compact", "Compact session"), ("shake", "Shake session context"),
+    ("handoff", "Hand off session"), ("resume", "Resume session"), ("btw", "Side question"),
+    ("tan", "Background agent"), ("omfg", "Forge local rule"), ("retry", "Retry last failed turn"),
+    ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
+    ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
+    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
+    ("update", "Run automated update"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
+    ("commands", "Show slash commands"),
 ];
 
 #[derive(Debug, Clone)]
@@ -76,6 +85,7 @@ pub struct FrameOptions {
     pub columns: usize,
     pub rows: usize,
     pub color: bool,
+    pub slash_selection: usize,
 }
 
 pub fn default_columns() -> usize {
@@ -226,7 +236,7 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
         "Type a task and press Enter".to_string(),
         "/help for commands".to_string(),
         "/model to switch routes".to_string(),
-        "/update for upgrade steps".to_string(),
+        "/update runs automated self-update".to_string(),
         "! and $ shells are not wired yet".to_string(),
         "────────────────────────".to_string(),
         format!("Workspace: {}", cwd_label),
@@ -248,22 +258,54 @@ fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, comma
 }
 
 
-fn slash_hint_panel(input_text: &str, width: usize, color: bool) -> Vec<String> {
+fn slash_query(input_text: &str) -> Option<String> {
     let text = input_text.trim_start();
     if !text.starts_with('/') || text.contains('\n') {
-        return Vec::new();
+        return None;
     }
-    let prefix = text.trim_start_matches('/').split_whitespace().next().unwrap_or("").to_ascii_lowercase();
-    let rows: Vec<String> = SLASH_COMMAND_HINTS
+    let query = text.trim_start_matches('/');
+    if query.contains(char::is_whitespace) {
+        return None;
+    }
+    Some(query.to_ascii_lowercase())
+}
+
+fn slash_matches(input_text: &str) -> Vec<(&'static str, &'static str)> {
+    let Some(prefix) = slash_query(input_text) else {
+        return Vec::new();
+    };
+    SLASH_COMMAND_HINTS
         .iter()
         .filter(|(name, _)| name.starts_with(&prefix))
         .take(6)
-        .map(|(name, description)| format!("/{:<15} — {}", name, description))
-        .collect();
-    if rows.is_empty() { Vec::new() } else { boxed("slash commands", &rows, width, color) }
+        .copied()
+        .collect()
 }
 
-fn compact_prompt(width: usize, status: &PromptStatus, _busy: bool, color: bool) -> Vec<String> {
+fn complete_slash_input(input_text: &str, selected: usize) -> Option<String> {
+    let matches = slash_matches(input_text);
+    let (name, _) = matches.get(selected.min(matches.len().saturating_sub(1)))?;
+    Some(format!("/{name} "))
+}
+
+fn slash_hint_panel(input_text: &str, width: usize, color: bool, selected: usize) -> Vec<String> {
+    let matches = slash_matches(input_text);
+    if matches.is_empty() {
+        return Vec::new();
+    }
+    let selected = selected.min(matches.len().saturating_sub(1));
+    let rows: Vec<String> = matches
+        .iter()
+        .enumerate()
+        .map(|(index, (name, description))| {
+            let marker = if index == selected { "›" } else { " " };
+            format!("{marker} /{:<15} — {}", name, description)
+        })
+        .collect();
+    boxed("slash suggestions", &rows, width, color)
+}
+
+fn compact_prompt(width: usize, status: &PromptStatus, input_text: &str, _busy: bool, color: bool) -> Vec<String> {
     let inner = width.saturating_sub(2).max(48);
     let model = if status.model.is_empty() { "default" } else { status.model.as_str() };
     let tier = if status.service_tier.is_empty() { "default" } else { status.service_tier.as_str() };
@@ -299,13 +341,13 @@ fn compact_prompt(width: usize, status: &PromptStatus, _busy: bool, color: bool)
         paint(&"─".repeat(inner.saturating_sub(visible_len(&safe_label) + 2)), "cyan", color),
         paint("╮", "cyan", color)
     );
-    vec![top, format!("{} ", paint("╰─", "cyan", color))]
+    vec![top, format!("{} {}", paint("╰─", "cyan", color), input_text)]
 }
 
 pub fn render_terminal_frame(options: &FrameOptions) -> String {
     let width = options.columns.min(120).max(50);
-    let prompt = compact_prompt(width, &options.status, options.busy, options.color);
-    let slash_hints = slash_hint_panel(&options.input_text, width, options.color);
+    let prompt = compact_prompt(width, &options.status, &options.input_text, options.busy, options.color);
+    let slash_hints = slash_hint_panel(&options.input_text, width, options.color, options.slash_selection);
     let reserved = prompt.len() + slash_hints.len() + 1;
     let available_rows = options.rows.saturating_sub(reserved).max(4);
     let message_lines: Vec<String> = options.messages.iter().flat_map(|message| format_message(message, width, options.color)).collect();
@@ -332,7 +374,22 @@ pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     stdout.flush()
 }
 
-pub fn run_basic_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
+struct RawModeGuard;
+
+impl RawModeGuard {
+    fn enter() -> io::Result<Self> {
+        enable_raw_mode()?;
+        Ok(Self)
+    }
+}
+
+impl Drop for RawModeGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+    }
+}
+
+fn old_read_line_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
 where
     S: FnMut() -> PromptStatus,
     F: FnMut(&str) -> Result<String, String>,
@@ -347,6 +404,7 @@ where
             columns: default_columns(),
             rows: default_rows(),
             color: stdout_supports_color(),
+            slash_selection: 0,
         };
         render_to_stdout(&options)?;
 
@@ -369,6 +427,101 @@ where
             Err(error) => messages.push(Message::new("error", error)),
         }
     }
+    Ok(())
+}
+
+pub fn run_basic_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
+where
+    S: FnMut() -> PromptStatus,
+    F: FnMut(&str) -> Result<String, String>,
+{
+    if !io::stdin().is_terminal() {
+        return old_read_line_loop(status_provider, handle_prompt);
+    }
+
+    let _raw = RawModeGuard::enter()?;
+    let mut messages = Vec::new();
+    let mut input = String::new();
+    let mut slash_selection = 0usize;
+    loop {
+        let options = FrameOptions {
+            status: status_provider(),
+            messages: messages.clone(),
+            input_text: input.clone(),
+            busy: false,
+            columns: default_columns(),
+            rows: default_rows(),
+            color: stdout_supports_color(),
+            slash_selection,
+        };
+        render_to_stdout(&options)?;
+
+        if !event::poll(Duration::from_millis(250))? {
+            continue;
+        }
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+            continue;
+        }
+        match key.code {
+            KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) && input.is_empty() => break,
+            KeyCode::Esc => {
+                input.clear();
+                slash_selection = 0;
+            }
+            KeyCode::Backspace => {
+                input.pop();
+                slash_selection = slash_selection.min(slash_matches(&input).len().saturating_sub(1));
+            }
+            KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') | KeyCode::Char('m') | KeyCode::Char('j')
+                if matches!(key.code, KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n'))
+                    || key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if input.trim().is_empty() {
+                    continue;
+                }
+                let prompt = input.trim().to_string();
+                input.clear();
+                slash_selection = 0;
+                if matches!(prompt.as_str(), "/exit" | "/quit") {
+                    break;
+                }
+                disable_raw_mode()?;
+                let result = handle_prompt(&prompt);
+                enable_raw_mode()?;
+                messages.push(Message::new("user", prompt.clone()));
+                match result {
+                    Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
+                    Err(error) => messages.push(Message::new("error", error)),
+                }
+            }
+            KeyCode::Char(ch) => {
+                input.push(ch);
+                slash_selection = 0;
+            }
+            KeyCode::Up => {
+                let count = slash_matches(&input).len();
+                if count > 0 {
+                    slash_selection = if slash_selection == 0 { count - 1 } else { slash_selection - 1 };
+                }
+            }
+            KeyCode::Down => {
+                let count = slash_matches(&input).len();
+                if count > 0 {
+                    slash_selection = (slash_selection + 1) % count;
+                }
+            }
+            KeyCode::Tab | KeyCode::Right => {
+                if let Some(completed) = complete_slash_input(&input, slash_selection) {
+                    input = completed;
+                    slash_selection = 0;
+                }
+            }
+            _ => {}
+        }
+    }
 
     let mut stdout = io::stdout();
     stdout.write_all(b"\x1b[?25h\n")?;
@@ -378,6 +531,35 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_status() -> PromptStatus {
+        PromptStatus {
+            cwd: "/tmp/work".to_string(),
+            write_status: "ask".to_string(),
+            command_status: "ask".to_string(),
+            model: "test-model".to_string(),
+            service_tier: "priority".to_string(),
+            branch: Some("main".to_string()),
+            dirty_count: 1,
+            context_percent: None,
+            context_limit: Some("2048".to_string()),
+            cost: None,
+        }
+    }
+
+    fn render_with_input(input_text: &str, slash_selection: usize) -> String {
+        render_terminal_frame(&FrameOptions {
+            status: test_status(),
+            messages: vec![Message::new("assistant", "ready")],
+            input_text: input_text.to_string(),
+            busy: false,
+            columns: 80,
+            rows: 24,
+            color: false,
+            slash_selection,
+        })
+    }
+
 
     #[test]
     fn renders_welcome_and_prompt() {
@@ -400,12 +582,40 @@ mod tests {
             columns: 80,
             rows: 24,
             color: false,
+            slash_selection: 0,
         });
         assert!(frame.contains("Wisent Agent v0.1.0"));
         assert!(frame.contains("Tool gates: write ask · command ask"));
         assert!(frame.contains("jeden > ⬢ test-model"));
         assert!(frame.contains("Welcome back!"));
-        assert!(frame.contains("/update for upgrade steps"));
+        assert!(frame.contains("/update runs automated self-update"));
         assert!(frame.ends_with("╰─ "));
+    }
+
+    #[test]
+    fn slash_input_renders_suggestions_and_keeps_typed_slash_in_prompt() {
+        let frame = render_with_input("/", 0);
+
+        assert!(frame.contains("slash suggestions"), "{frame}");
+        assert!(frame.contains("› /login"), "{frame}");
+        assert!(frame.contains("  /logout"), "{frame}");
+        assert!(frame.ends_with("╰─ /"), "{frame}");
+    }
+
+    #[test]
+    fn slash_prefix_filters_plan_commands_before_enter() {
+        let frame = render_with_input("/pl", 0);
+
+        assert!(frame.contains("slash suggestions"), "{frame}");
+        assert!(frame.contains("› /plan"), "{frame}");
+        assert!(frame.contains("  /plan-review"), "{frame}");
+        assert!(!frame.contains("/settings"), "{frame}");
+        assert!(frame.ends_with("╰─ /pl"), "{frame}");
+    }
+
+    #[test]
+    fn slash_tab_completion_accepts_selected_suggestion() {
+        assert_eq!(complete_slash_input("/pl", 0), Some("/plan ".to_string()));
+        assert_eq!(complete_slash_input("/pl", 1), Some("/plan-review ".to_string()));
     }
 }

@@ -10,6 +10,7 @@ path = "rust/main.rs"
 [dependencies]
 base64 = "0.22"
 aes-gcm = "0.10"
+crossterm = "0.28"
 hex = "0.4"
 flate2 = "1"
 hmac = "0.12"
