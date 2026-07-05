@@ -443,18 +443,22 @@ where
     let mut messages = Vec::new();
     let mut input = String::new();
     let mut slash_selection = 0usize;
+    let mut needs_render = true;
     loop {
-        let options = FrameOptions {
-            status: status_provider(),
-            messages: messages.clone(),
-            input_text: input.clone(),
-            busy: false,
-            columns: default_columns(),
-            rows: default_rows(),
-            color: stdout_supports_color(),
-            slash_selection,
-        };
-        render_to_stdout(&options)?;
+        if needs_render {
+            let options = FrameOptions {
+                status: status_provider(),
+                messages: messages.clone(),
+                input_text: input.clone(),
+                busy: false,
+                columns: default_columns(),
+                rows: default_rows(),
+                color: stdout_supports_color(),
+                slash_selection,
+            };
+            render_to_stdout(&options)?;
+            needs_render = false;
+        }
 
         if !event::poll(Duration::from_millis(250))? {
             continue;
@@ -465,6 +469,7 @@ where
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
             continue;
         }
+        needs_render = true;
         match key.code {
             KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => break,
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) && input.is_empty() => break,
