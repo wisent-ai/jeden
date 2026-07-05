@@ -1180,6 +1180,68 @@ mod tests {
     }
 
     #[test]
+    fn rebase_preserves_turns_across_a_move() {
+        let _env = env_lock().lock().unwrap();
+        let _root = temp_session_root("rebase-turns");
+        let cwd_a = unique_temp_dir("rebase-turns-a");
+        let cwd_b = unique_temp_dir("rebase-turns-b");
+
+        let mut conv = Conversation::new(&cwd_a).expect("conversation constructs");
+        conv.load_history(
+            &cwd_a,
+            vec![
+                user_turn("Summarize why the last build failed."),
+                assistant_turn("rustc could not resolve serde_json; add it to Cargo.toml."),
+            ],
+        )
+        .expect("load_history succeeds");
+        assert_eq!(conv.turn_len(), 2, "precondition: two turns are loaded before the move");
+
+        conv.rebase(&cwd_b).expect("rebase to a new cwd succeeds");
+
+        // /move refreshes the system prompt for the new workspace but must not
+        // drop any live turns: the non-system history is exactly what it was.
+        assert_eq!(conv.turn_len(), 2, "rebase must keep every loaded turn");
+    }
+
+    #[test]
+    fn rebase_rewrites_recorder_state_cwd_to_the_new_workspace() {
+        let _env = env_lock().lock().unwrap();
+        let _root = temp_session_root("rebase-state");
+        let cwd_a = unique_temp_dir("rebase-state-a");
+        let cwd_b = unique_temp_dir("rebase-state-b");
+
+        let mut conv = Conversation::new(&cwd_a).expect("conversation constructs");
+        let state_path = conv.session_path().join("state.json");
+
+        let recorded_cwd = |path: &Path| -> String {
+            let text = fs::read_to_string(path).expect("state.json exists");
+            let state: Value = serde_json::from_str(&text).expect("state.json is valid JSON");
+            state
+                .get("cwd")
+                .and_then(Value::as_str)
+                .expect("state.json records a cwd")
+                .to_string()
+        };
+
+        // Construction roots the recorder at cwd_a...
+        assert_eq!(
+            recorded_cwd(&state_path),
+            cwd_a.to_str().unwrap(),
+            "precondition: recorder state starts at cwd_a"
+        );
+
+        conv.rebase(&cwd_b).expect("rebase to a new cwd succeeds");
+
+        // ...and /move must re-root the persisted session state at cwd_b.
+        assert_eq!(
+            recorded_cwd(&state_path),
+            cwd_b.to_str().unwrap(),
+            "rebase must rewrite state.json cwd to the new workspace"
+        );
+    }
+
+    #[test]
     fn retry_task_errors_when_no_failed_task_is_recorded() {
         // No mode-state file at all: nothing to retry.
         let cwd = unique_temp_dir("retry-missing");
