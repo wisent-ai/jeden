@@ -582,7 +582,7 @@ fn run_background_turn<S, H>(
     messages: &[Message],
     handler: &H,
     prompt: &str,
-) -> io::Result<Result<String, String>>
+) -> io::Result<(Result<String, String>, Vec<String>)>
 where
     S: FnMut() -> PromptStatus,
     H: Fn(&str, &TurnCtx) -> Result<String, String> + Sync,
@@ -591,6 +591,17 @@ where
     let (tx, rx) = mpsc::channel::<String>();
     let mut note = String::from("working…");
     let mut frame = 0usize;
+    // Distinct tool names this turn ran, in first-seen order, for a transcript
+    // line so tool execution is visible (not just a vanishing spinner).
+    let mut tools_used: Vec<String> = Vec::new();
+    let record_tool = |message: &str, tools: &mut Vec<String>| {
+        if let Some(tool) = message.strip_prefix("tool: ") {
+            let tool = tool.trim().to_string();
+            if !tool.is_empty() && !tools.contains(&tool) {
+                tools.push(tool);
+            }
+        }
+    };
     // Status (git branch, model, cwd) is stable for the duration of a turn;
     // snapshot it once so the ~8fps spinner loop does not re-shell git per frame.
     let status = status_provider();
@@ -607,6 +618,7 @@ where
 
         loop {
             while let Ok(message) = rx.try_recv() {
+                record_tool(&message, &mut tools_used);
                 note = message;
             }
             let cancelling = cancel.load(Ordering::Relaxed);
@@ -647,13 +659,14 @@ where
 
         // Drain any final progress and join.
         while let Ok(message) = rx.try_recv() {
+            record_tool(&message, &mut tools_used);
             note = message;
         }
         Ok(worker.join().unwrap_or_else(|_| Err("Turn thread panicked.".into())))
     })?;
 
     renderer.reset();
-    Ok(outcome)
+    Ok((outcome, tools_used))
 }
 
 pub fn run_basic_loop<S, C, H>(mut status_provider: S, mut classify: C, handler: H) -> io::Result<()>
@@ -746,7 +759,10 @@ where
                         push_turn_result(&mut messages, &prompt, result);
                     }
                     TurnKind::Background => {
-                        let result = run_background_turn(&mut renderer, &mut status_provider, &messages, &handler, &prompt)?;
+                        let (result, tools_used) = run_background_turn(&mut renderer, &mut status_provider, &messages, &handler, &prompt)?;
+                        if !tools_used.is_empty() {
+                            messages.push(Message::new("system", format!("tools: {}", tools_used.join(", "))));
+                        }
                         push_turn_result(&mut messages, &prompt, result);
                     }
                 }
