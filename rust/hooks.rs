@@ -228,7 +228,16 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
 pub fn fire_event(cwd: &Path, event: &str, tool: &str, payload: &Value, allow_project: bool) -> Vec<HookOutcome> {
     let project = read_config(&project_hooks_path(cwd));
     let user = user_hooks_path().map(|p| read_config(&p)).unwrap_or(Value::Null);
-    let hooks = resolve_trusted_hooks(&user, &project, event, tool, allow_project);
+    let mut hooks = resolve_trusted_hooks(&user, &project, event, tool, allow_project);
+    // Installed plugins contribute their own hooks.json. User-scope plugin hooks
+    // always run; project-scope plugin hooks obey the same `allow_project` gate.
+    for config in crate::slash::installed_plugin_hook_configs(cwd, allow_project) {
+        let mut plugin_hooks = parse_event_hooks(&config, event);
+        if !tool.is_empty() {
+            plugin_hooks.retain(|h| hook_matches(h, tool));
+        }
+        hooks.extend(plugin_hooks);
+    }
     hooks.iter().map(|hook| run_hook(cwd, hook, payload)).collect()
 }
 

@@ -356,18 +356,540 @@ fn marketplace_source_type(source: &str) -> &'static str {
     else { "local" }
 }
 
+// ---------------------------------------------------------------------------
+// Marketplace plugin discovery / install / activation (OMP parity).
+//
+// On-disk layout under the user home (`~/.jeden`):
+//   plugins/cache/marketplaces/<mktname>/   cloned repo / fetched catalog / copy
+//   plugins/cache/plugins/<mkt>___<plugin>___<version>/   materialized plugin dir
+// Installed records live in the existing plugin registry (`.jeden/plugins.json`,
+// project scope, or `~/.jeden/plugins.json`, user scope) under `installed`, so
+// `/marketplace installed` and `/plugins` keep working. Each installed entry now
+// also carries the on-disk `path`, whether it ships `commands/` and `hooks.json`.
+// ---------------------------------------------------------------------------
+
+/// Home dir for plugin cache + user-scope registry. Overridable via
+/// `JEDEN_PLUGINS_HOME` (used to keep tests hermetic); defaults to `~`.
+fn plugins_home() -> PathBuf {
+    env::var_os("JEDEN_PLUGINS_HOME").map(PathBuf::from).unwrap_or_else(dirs_home)
+}
+fn marketplace_cache_root() -> PathBuf { plugins_home().join(".jeden/plugins/cache/marketplaces") }
+fn plugin_cache_root() -> PathBuf { plugins_home().join(".jeden/plugins/cache/plugins") }
+fn marketplace_cache_dir(name: &str) -> PathBuf { marketplace_cache_root().join(name) }
+
+/// Validate an OMP plugin/marketplace name: lowercase alphanumeric plus `-`/`.`,
+/// first and last char alphanumeric, at most `max` chars.
+fn valid_component_name(name: &str, max: usize) -> bool {
+    let bytes = name.as_bytes();
+    if name.is_empty() || name.len() > max { return false; }
+    if !bytes[0].is_ascii_alphanumeric() || !bytes[bytes.len() - 1].is_ascii_alphanumeric() { return false; }
+    name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.')
+}
+fn valid_plugin_name(name: &str) -> bool { valid_component_name(name, 64) }
+fn valid_marketplace_name(name: &str) -> bool { valid_component_name(name, 64) }
+/// A plugin id is `plugin@marketplace`, each part a valid name, total <= 128.
+fn valid_plugin_id(id: &str) -> bool {
+    if id.len() > 128 { return false; }
+    match id.split_once('@') {
+        Some((plugin, mkt)) => valid_plugin_name(plugin) && valid_marketplace_name(mkt),
+        None => false,
+    }
+}
+
+/// Reject anything unsafe to hand to `git` as an argument: empty, an option-like
+/// leading `-`, control chars, or shell metacharacters. `git` is invoked via
+/// `Command` (no shell) but this is defense in depth against injection through
+/// catalog-controlled URLs/refs/paths.
+fn git_arg_safe(value: &str) -> bool {
+    if value.is_empty() || value.starts_with('-') { return false; }
+    !value.chars().any(|c| c.is_control() || matches!(c,
+        ' ' | '\t' | '\n' | '\r' | ';' | '&' | '|' | '`' | '$' | '(' | ')' | '{' | '}' |
+        '<' | '>' | '*' | '?' | '[' | ']' | '!' | '\\' | '\'' | '"'))
+}
+
+enum FetchKind { Local, Github, GitUrl, JsonUrl }
+
+/// Classify a marketplace source string for fetching (distinct from the display
+/// `type` recorded by `/marketplace add`): local path, `owner/repo` github
+/// shorthand, a direct `*.json` catalog URL, or a generic git URL.
+fn classify_fetch(source: &str) -> FetchKind {
+    let text = source.trim();
+    let lower = text.to_ascii_lowercase();
+    if text.starts_with("./") || text.starts_with("../") || text.starts_with("~/") || text.starts_with('/') {
+        return FetchKind::Local;
+    }
+    if (lower.starts_with("http://") || lower.starts_with("https://")) && lower.ends_with(".json") {
+        return FetchKind::JsonUrl;
+    }
+    if lower.starts_with("http://") || lower.starts_with("https://") || lower.starts_with("git@")
+        || lower.starts_with("ssh://") || lower.starts_with("git+ssh://") {
+        return FetchKind::GitUrl;
+    }
+    if text.contains('/') && !text.contains(':') { return FetchKind::Github; }
+    FetchKind::Local
+}
+
+/// Split an optional `#ref` suffix off a source string.
+fn split_ref(source: &str) -> (String, Option<String>) {
+    match source.split_once('#') {
+        Some((base, git_ref)) if !git_ref.trim().is_empty() => (base.trim().to_string(), Some(git_ref.trim().to_string())),
+        _ => (source.trim().to_string(), None),
+    }
+}
+
+fn expand_local_path(cwd: &Path, source: &str) -> PathBuf {
+    let text = source.trim();
+    if let Some(rest) = text.strip_prefix("~/") { return dirs_home().join(rest); }
+    let path = Path::new(text);
+    if path.is_absolute() { path.to_path_buf() } else { cwd.join(path) }
+}
+
+/// Recursively copy `src` into `dst` (skipping any `.git` directory).
+fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
+    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        if name == ".git" { continue; }
+        let from = entry.path();
+        let to = dst.join(&name);
+        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        if file_type.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if file_type.is_symlink() {
+            match fs::metadata(&from) {
+                Ok(meta) if meta.is_dir() => copy_dir_recursive(&from, &to)?,
+                Ok(_) => { fs::copy(&from, &to).map_err(|e| e.to_string())?; }
+                Err(_) => {} // dangling symlink: skip
+            }
+        } else {
+            fs::copy(&from, &to).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String, String> {
+    let mut command = Command::new("git");
+    command.args(args).stdin(Stdio::null()).env("GIT_TERMINAL_PROMPT", "0").env("GCM_INTERACTIVE", "never");
+    if let Some(dir) = cwd { command.current_dir(dir); }
+    let output = command.output().map_err(|e| format!("git failed to start: {e}"))?;
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(format!("git {}: {}", args.join(" "), String::from_utf8_lossy(&output.stderr).trim()))
+    }
+}
+
+fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result<(), String> {
+    if !git_arg_safe(url) { return Err(format!("Unsafe git URL rejected: {url}")); }
+    if let Some(git_ref) = git_ref {
+        if !git_arg_safe(git_ref) { return Err(format!("Unsafe git ref rejected: {git_ref}")); }
+    }
+    if dest.exists() { fs::remove_dir_all(dest).map_err(|e| e.to_string())?; }
+    if let Some(parent) = dest.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let dest_str = dest.to_string_lossy().to_string();
+    let mut args: Vec<&str> = vec!["clone", "--depth", "1"];
+    if let Some(git_ref) = git_ref { args.push("--branch"); args.push(git_ref); }
+    args.push(url);
+    args.push(&dest_str);
+    run_git(&args, None).map(|_| ())
+}
+
+fn http_get_text(url: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client.get(url).send().map_err(|e| e.to_string())?;
+    let status = response.status();
+    if !status.is_success() { return Err(format!("GET {url} failed: HTTP {}", status.as_u16())); }
+    response.text().map_err(|e| e.to_string())
+}
+
+/// Fetch (or re-fetch) a marketplace source into its cache dir and return it.
+fn fetch_marketplace(cwd: &Path, name: &str, source: &str) -> Result<PathBuf, String> {
+    if !valid_marketplace_name(name) { return Err(format!("Invalid marketplace name: {name}")); }
+    let dest = marketplace_cache_dir(name);
+    match classify_fetch(source) {
+        FetchKind::Local => {
+            let src = expand_local_path(cwd, source);
+            if !src.is_dir() { return Err(format!("Local marketplace path not found: {}", src.display())); }
+            if dest.exists() { fs::remove_dir_all(&dest).map_err(|e| e.to_string())?; }
+            copy_dir_recursive(&src, &dest)?;
+        }
+        FetchKind::JsonUrl => {
+            let body = http_get_text(source)?;
+            serde_json::from_str::<Value>(&body).map_err(|e| format!("catalog is not valid JSON: {e}"))?;
+            if dest.exists() { fs::remove_dir_all(&dest).map_err(|e| e.to_string())?; }
+            fs::create_dir_all(dest.join(".omp-plugin")).map_err(|e| e.to_string())?;
+            fs::write(dest.join(".omp-plugin/marketplace.json"), body).map_err(|e| e.to_string())?;
+        }
+        FetchKind::Github => {
+            let (repo, git_ref) = split_ref(source);
+            let url = format!("https://github.com/{}.git", repo.trim_end_matches(".git"));
+            git_clone(&url, git_ref.as_deref(), &dest)?;
+        }
+        FetchKind::GitUrl => {
+            let (url, git_ref) = split_ref(source);
+            git_clone(&url, git_ref.as_deref(), &dest)?;
+        }
+    }
+    Ok(dest)
+}
+
+/// Read a marketplace catalog, preferring `.omp-plugin/marketplace.json` then
+/// `.claude-plugin/marketplace.json`.
+fn read_marketplace_catalog(cache_dir: &Path) -> Result<Value, String> {
+    for rel in [".omp-plugin/marketplace.json", ".claude-plugin/marketplace.json"] {
+        let path = cache_dir.join(rel);
+        if path.is_file() {
+            let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+            return serde_json::from_str(&text).map_err(|e| format!("{}: invalid JSON: {e}", path.display()));
+        }
+    }
+    Err(format!("No marketplace.json in {} (.omp-plugin or .claude-plugin)", cache_dir.display()))
+}
+
+fn catalog_plugin_root(catalog: &Value) -> String {
+    catalog.get("metadata").and_then(|m| m.get("pluginRoot")).and_then(Value::as_str).unwrap_or("").trim().trim_matches('/').to_string()
+}
+fn catalog_plugins(catalog: &Value) -> Vec<Value> {
+    catalog.get("plugins").and_then(Value::as_array).cloned().unwrap_or_default()
+}
+fn catalog_find_plugin(catalog: &Value, name: &str) -> Option<Value> {
+    catalog_plugins(catalog).into_iter().find(|p| p.get("name").and_then(Value::as_str) == Some(name))
+}
+
+/// Resolve a relative (`./…`) plugin source inside a marketplace cache, applying
+/// `plugin_root` and rejecting path traversal outside the repo root.
+fn resolve_relative_plugin_path(mkt_cache: &Path, plugin_root: &str, source: &str) -> Result<PathBuf, String> {
+    let rel = source.trim();
+    let stripped = rel.strip_prefix("./").ok_or_else(|| format!("relative plugin source must start with ./: {rel}"))?;
+    if stripped.is_empty() { return Err("empty relative plugin source".into()); }
+    for comp in stripped.split('/') {
+        if comp.is_empty() || comp == "." || comp == ".." {
+            return Err(format!("path traversal rejected in plugin source: {rel}"));
+        }
+    }
+    let mut path = mkt_cache.to_path_buf();
+    let root = plugin_root.trim().trim_matches('/');
+    if !root.is_empty() {
+        for comp in root.split('/') {
+            if comp.is_empty() || comp == "." || comp == ".." { return Err(format!("invalid pluginRoot: {plugin_root}")); }
+            path.push(comp);
+        }
+    }
+    for comp in stripped.split('/') { path.push(comp); }
+    Ok(path)
+}
+
+fn plugin_manifest_version(plugin_dir: &Path) -> Option<String> {
+    read_json_value(&plugin_dir.join("package.json")).get("version").and_then(Value::as_str).map(str::to_string)
+        .or_else(|| read_json_value(&plugin_dir.join(".claude-plugin/plugin.json")).get("version").and_then(Value::as_str).map(str::to_string))
+}
+
+struct Materialized { staging: PathBuf, source_desc: String, sha: Option<String> }
+
+/// Materialize a plugin's directory (from its catalog `source`) into a staging
+/// dir under the plugin cache. Caller renames it to the final versioned dir.
+fn materialize_plugin(mkt_cache: &Path, catalog: &Value, entry: &Value) -> Result<Materialized, String> {
+    let staging = plugin_cache_root().join(format!("staging-{}", now_millis()));
+    if staging.exists() { let _ = fs::remove_dir_all(&staging); }
+    if let Some(parent) = staging.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    let plugin_root = catalog_plugin_root(catalog);
+    let source = entry.get("source").cloned().unwrap_or(Value::Null);
+    let result = (|| -> Result<Materialized, String> {
+        match &source {
+            Value::String(rel) => {
+                let src = resolve_relative_plugin_path(mkt_cache, &plugin_root, rel)?;
+                if !src.is_dir() { return Err(format!("plugin path not found in marketplace: {}", src.display())); }
+                copy_dir_recursive(&src, &staging)?;
+                Ok(Materialized { staging: staging.clone(), source_desc: rel.clone(), sha: None })
+            }
+            Value::Object(map) => {
+                let kind = map.get("source").and_then(Value::as_str).unwrap_or("");
+                match kind {
+                    "github" => {
+                        let repo = map.get("repo").and_then(Value::as_str).ok_or("github plugin source missing repo")?;
+                        let git_ref = map.get("ref").and_then(Value::as_str);
+                        let url = format!("https://github.com/{}.git", repo.trim_end_matches(".git"));
+                        git_clone(&url, git_ref, &staging)?;
+                        let sha = run_git(&["rev-parse", "HEAD"], Some(&staging)).ok();
+                        let _ = fs::remove_dir_all(staging.join(".git"));
+                        Ok(Materialized { staging: staging.clone(), source_desc: format!("github:{repo}"), sha })
+                    }
+                    "url" => {
+                        let url = map.get("url").and_then(Value::as_str).ok_or("url plugin source missing url")?;
+                        let git_ref = map.get("ref").and_then(Value::as_str);
+                        git_clone(url, git_ref, &staging)?;
+                        let sha = run_git(&["rev-parse", "HEAD"], Some(&staging)).ok();
+                        let _ = fs::remove_dir_all(staging.join(".git"));
+                        Ok(Materialized { staging: staging.clone(), source_desc: format!("url:{url}"), sha })
+                    }
+                    "git-subdir" => {
+                        let url = map.get("url").and_then(Value::as_str).ok_or("git-subdir plugin source missing url")?;
+                        let subpath = map.get("path").and_then(Value::as_str).ok_or("git-subdir plugin source missing path")?;
+                        let git_ref = map.get("ref").and_then(Value::as_str);
+                        let tmp = plugin_cache_root().join(format!("clone-{}", now_millis()));
+                        git_clone(url, git_ref, &tmp)?;
+                        let sha = run_git(&["rev-parse", "HEAD"], Some(&tmp)).ok();
+                        let normalized = format!("./{}", subpath.trim_start_matches("./").trim_start_matches('/'));
+                        let sub = match resolve_relative_plugin_path(&tmp, "", &normalized) {
+                            Ok(sub) => sub,
+                            Err(e) => { let _ = fs::remove_dir_all(&tmp); return Err(e); }
+                        };
+                        if !sub.is_dir() { let _ = fs::remove_dir_all(&tmp); return Err(format!("git-subdir path not found: {subpath}")); }
+                        copy_dir_recursive(&sub, &staging)?;
+                        let _ = fs::remove_dir_all(&tmp);
+                        Ok(Materialized { staging: staging.clone(), source_desc: format!("git-subdir:{url}#{subpath}"), sha })
+                    }
+                    "npm" => Err("npm plugin sources are not yet supported".into()),
+                    other => Err(format!("unknown plugin source type: {other}")),
+                }
+            }
+            _ => Err("plugin entry missing source".into()),
+        }
+    })();
+    if result.is_err() { let _ = fs::remove_dir_all(&staging); }
+    result
+}
+
+fn registry_scope_dir(cwd: &Path, scope: &str) -> PathBuf {
+    if scope == "project" { cwd.to_path_buf() } else { plugins_home() }
+}
+
+/// Look up a marketplace source string by name across project then user scopes.
+fn find_marketplace_source(cwd: &Path, name: &str) -> Option<String> {
+    for dir in [cwd.to_path_buf(), plugins_home()] {
+        if let Some(src) = plugin_registry(&dir).get("sources").and_then(Value::as_object)
+            .and_then(|s| s.get(name)).and_then(|s| s.get("source")).and_then(Value::as_str) {
+            return Some(src.to_string());
+        }
+    }
+    None
+}
+
+/// All configured marketplace sources (name -> source) across both scopes.
+fn all_marketplace_sources(cwd: &Path) -> Vec<(String, String)> {
+    let mut out: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for dir in [cwd.to_path_buf(), plugins_home()] {
+        if let Some(map) = plugin_registry(&dir).get("sources").and_then(Value::as_object) {
+            for (name, value) in map {
+                if let Some(src) = value.get("source").and_then(Value::as_str) {
+                    out.entry(name.clone()).or_insert_with(|| src.to_string());
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Record the freshly fetched plugin list into whichever scope holds `name`.
+fn update_source_plugins(cwd: &Path, name: &str, plugins: &[Value]) {
+    let summary: Vec<Value> = plugins.iter().map(|p| json!({
+        "name": p.get("name").and_then(Value::as_str).unwrap_or(""),
+        "description": p.get("description").and_then(Value::as_str).unwrap_or(""),
+        "version": p.get("version").and_then(Value::as_str).unwrap_or(""),
+    })).collect();
+    for dir in [cwd.to_path_buf(), plugins_home()] {
+        let mut registry = plugin_registry(&dir);
+        let has = registry.get("sources").and_then(Value::as_object).map(|s| s.contains_key(name)).unwrap_or(false);
+        if !has { continue; }
+        if let Some(src) = registry.get_mut("sources").and_then(Value::as_object_mut).and_then(|s| s.get_mut(name)).and_then(Value::as_object_mut) {
+            src.insert("plugins".into(), json!(summary));
+            src.insert("updatedAt".into(), json!(now_text()));
+        }
+        let _ = save_plugin_registry(&dir, &registry);
+    }
+}
+
+/// Merged installed-plugin records across scopes (project overrides user).
+fn merged_installed_values(cwd: &Path) -> Vec<Value> {
+    let mut map: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
+    for dir in [plugins_home(), cwd.to_path_buf()] {
+        if let Some(installed) = plugin_registry(&dir).get("installed").and_then(Value::as_object) {
+            for (id, entry) in installed { map.insert(id.clone(), entry.clone()); }
+        }
+    }
+    map.into_values().collect()
+}
+
+fn split_plugin_id(id: &str) -> Result<(String, String), String> {
+    match id.split_once('@') {
+        Some((plugin, mkt)) if !plugin.is_empty() && !mkt.is_empty() => Ok((plugin.to_string(), mkt.to_string())),
+        _ => Err(format!("Expected name@marketplace, got: {id}")),
+    }
+}
+
+/// Parse `install`/`upgrade` flags: `--force`, `--scope <user|project>`, and the
+/// remaining positional targets.
+fn parse_marketplace_flags(argv: &[String]) -> (bool, Option<String>, Vec<String>) {
+    let mut force = false;
+    let mut scope = None;
+    let mut rest = Vec::new();
+    let mut it = argv.iter();
+    while let Some(arg) = it.next() {
+        match arg.as_str() {
+            "--force" | "-f" => force = true,
+            "--scope" => scope = it.next().cloned(),
+            s if s.starts_with("--scope=") => scope = Some(s.trim_start_matches("--scope=").to_string()),
+            other => rest.push(other.to_string()),
+        }
+    }
+    (force, scope, rest)
+}
+
+fn normalize_scope(scope: Option<String>) -> Result<String, String> {
+    match scope.as_deref() {
+        None | Some("user") => Ok("user".into()),
+        Some("project") => Ok("project".into()),
+        Some(other) => Err(format!("Invalid scope: {other}. Use user or project.")),
+    }
+}
+
+/// Resolve, materialize, activate and record one plugin. Returns a report line.
+fn install_one(cwd: &Path, mkt_name: &str, plugin_name: &str, scope: &str, force: bool) -> Result<String, String> {
+    if !valid_marketplace_name(mkt_name) { return Err(format!("Invalid marketplace name: {mkt_name}")); }
+    if !valid_plugin_name(plugin_name) { return Err(format!("Invalid plugin name: {plugin_name}")); }
+    let id = format!("{plugin_name}@{mkt_name}");
+    if !valid_plugin_id(&id) { return Err(format!("Invalid plugin id: {id}")); }
+    let source = find_marketplace_source(cwd, mkt_name)
+        .ok_or_else(|| format!("Marketplace source not found: {mkt_name}. Add it with /marketplace add <source>."))?;
+    let mkt_cache = marketplace_cache_dir(mkt_name);
+    if !mkt_cache.exists() { fetch_marketplace(cwd, mkt_name, &source)?; }
+    let catalog = read_marketplace_catalog(&mkt_cache)?;
+    let entry = catalog_find_plugin(&catalog, plugin_name)
+        .ok_or_else(|| format!("Plugin {plugin_name} not found in marketplace {mkt_name}."))?;
+    let mat = materialize_plugin(&mkt_cache, &catalog, &entry)?;
+    let version = entry.get("version").and_then(Value::as_str).map(str::to_string)
+        .or_else(|| plugin_manifest_version(&mat.staging))
+        .or_else(|| mat.sha.clone())
+        .unwrap_or_else(|| "0.0.0".into());
+    let final_dir = plugin_cache_root().join(format!(
+        "{}___{}___{}", mkt_name, plugin_name, sanitize_marketplace_name(&version, "0.0.0")));
+    if final_dir.exists() {
+        if force { fs::remove_dir_all(&final_dir).map_err(|e| e.to_string())?; }
+        else {
+            let _ = fs::remove_dir_all(&mat.staging);
+            return Err(format!("{id} is already installed (version {version}). Use --force to reinstall."));
+        }
+    }
+    if let Some(parent) = final_dir.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    if fs::rename(&mat.staging, &final_dir).is_err() {
+        copy_dir_recursive(&mat.staging, &final_dir)?;
+        let _ = fs::remove_dir_all(&mat.staging);
+    }
+    let commands_dir = final_dir.join("commands");
+    let has_commands = commands_dir.is_dir();
+    let command_count = if has_commands {
+        fs::read_dir(&commands_dir).map(|rd| rd.flatten()
+            .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("md")).count()).unwrap_or(0)
+    } else { 0 };
+    let has_hooks = final_dir.join("hooks.json").is_file();
+    let reg_dir = registry_scope_dir(cwd, scope);
+    let mut registry = plugin_registry(&reg_dir);
+    let record = json!({
+        "id": id,
+        "name": plugin_name,
+        "marketplace": mkt_name,
+        "version": version,
+        "source": mat.source_desc,
+        "path": final_dir.to_string_lossy(),
+        "commands": has_commands,
+        "commandCount": command_count,
+        "hooks": has_hooks,
+        "scope": scope,
+        "enabled": true,
+        "installedAt": now_text(),
+        "updatedAt": now_text(),
+    });
+    registry.get_mut("installed").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(id.clone(), record);
+    save_plugin_registry(&reg_dir, &registry)?;
+    Ok(format!(
+        "installed {id} ({} command{}, hooks: {}) [scope: {scope}, {}]",
+        command_count,
+        if command_count == 1 { "" } else { "s" },
+        if has_hooks { "yes" } else { "no" },
+        final_dir.display(),
+    ))
+}
+
+fn installed_entries_for_scope(dir: &Path) -> Vec<Value> {
+    plugin_registry(dir).get("installed").and_then(Value::as_object)
+        .map(|m| m.values().cloned().collect()).unwrap_or_default()
+}
+
+/// Command directories contributed by ENABLED installed plugins, across project
+/// then user scope. Appended after the project/user `.jeden/commands` dirs so
+/// local commands win; each plugin's `commands/` dir is a fallback source.
+pub(crate) fn installed_plugin_command_dirs(cwd: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    for dir in [cwd.to_path_buf(), plugins_home()] {
+        for entry in installed_entries_for_scope(&dir) {
+            if entry.get("enabled").and_then(Value::as_bool) == Some(false) { continue; }
+            if let Some(path) = entry.get("path").and_then(Value::as_str) {
+                let commands = Path::new(path).join("commands");
+                if commands.is_dir() && !dirs.contains(&commands) { dirs.push(commands); }
+            }
+        }
+    }
+    dirs
+}
+
+/// Parsed `hooks.json` configs from ENABLED installed plugins. User-scope plugin
+/// hooks always apply; project-scope plugin hooks only when `allow_project`
+/// (mirrors the `.jeden/hooks.json` trust gate in [`crate::hooks`]).
+pub(crate) fn installed_plugin_hook_configs(cwd: &Path, allow_project: bool) -> Vec<Value> {
+    let mut configs = Vec::new();
+    for (dir, include) in [(cwd.to_path_buf(), allow_project), (plugins_home(), true)] {
+        if !include { continue; }
+        for entry in installed_entries_for_scope(&dir) {
+            if entry.get("enabled").and_then(Value::as_bool) == Some(false) { continue; }
+            if let Some(path) = entry.get("path").and_then(Value::as_str) {
+                let hooks_path = Path::new(path).join("hooks.json");
+                if hooks_path.is_file() {
+                    if let Ok(text) = fs::read_to_string(&hooks_path) {
+                        if let Ok(value) = serde_json::from_str::<Value>(&text) { configs.push(value); }
+                    }
+                }
+            }
+        }
+    }
+    configs
+}
+
 fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
     let verb = argv.first().map(String::as_str).unwrap_or("help");
     let first = argv.get(1).map(String::as_str).unwrap_or("");
     let mut registry = plugin_registry(context.cwd);
     if verb == "help" {
-        return Ok("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace>. discover/update/install/upgrade require Rust plugin manifest discovery, which is not ported yet.".into());
+        return Ok("Usage: /marketplace add <source> | remove <name> | list | update [name] | discover [marketplace] | install [--force] [--scope user|project] <name@marketplace> | upgrade [--scope user|project] [name@marketplace] | installed | uninstall <name@marketplace>.".into());
     }
     if verb == "add" {
         let source = argv.iter().skip(1).cloned().collect::<Vec<_>>().join(" ").trim().to_string();
         if source.is_empty() { return Err("Usage: /marketplace add <source>".into()); }
-        let name = marketplace_source_name(&source);
+        let provisional = marketplace_source_name(&source);
+        if !valid_marketplace_name(&provisional) {
+            return Err(format!("Cannot derive a valid marketplace name from '{source}'."));
+        }
+        // OMP keys a marketplace by its catalog `name`. Fetch + read the catalog
+        // authoritatively (errors surface), then rekey the cache to that name.
+        let cache = fetch_marketplace(context.cwd, &provisional, &source)?;
+        let catalog = read_marketplace_catalog(&cache)?;
+        let cn = catalog.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let name = if valid_marketplace_name(&cn) {
+            if cn != provisional {
+                let to = marketplace_cache_dir(&cn);
+                if let Some(parent) = to.parent() { let _ = fs::create_dir_all(parent); }
+                let _ = fs::remove_dir_all(&to);
+                fs::rename(&cache, &to).map_err(|e| format!("failed to key marketplace cache to '{cn}': {e}"))?;
+            }
+            cn
+        } else {
+            return Err(format!("Marketplace catalog at '{source}' has an invalid or missing name."));
+        };
         let existing = registry.get("sources").and_then(Value::as_object).and_then(|sources| sources.get(&name)).cloned().unwrap_or_else(|| json!({}));
         let added_at = existing.get("addedAt").cloned().unwrap_or_else(|| json!(now_text()));
         registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(name.clone(), json!({
@@ -395,20 +917,121 @@ fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, 
         return Ok(if sources.is_empty() { "No marketplace sources configured. Add one with /marketplace add <source>.".into() } else { ["Marketplace sources:".into()].into_iter().chain(sources.iter().map(format_plugin_source)).collect::<Vec<_>>().join("\n") });
     }
     if verb == "installed" {
-        let installed = sorted_object_values(&registry["installed"]);
+        let mut installed = merged_installed_values(context.cwd);
+        installed.sort_by(|a, b| a.get("id").and_then(Value::as_str).unwrap_or("").cmp(b.get("id").and_then(Value::as_str).unwrap_or("")));
         return Ok(if installed.is_empty() { "No plugins installed.".into() } else { ["Installed plugins:".into()].into_iter().chain(installed.iter().map(format_plugin)).collect::<Vec<_>>().join("\n") });
     }
     if verb == "uninstall" {
         if first.is_empty() { return Err("Usage: /marketplace uninstall <name@marketplace>".into()); }
-        let installed = registry.get_mut("installed").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?;
-        if installed.remove(first).is_none() { return Err(format!("Installed plugin not found: {first}")); }
-        let file = save_plugin_registry(context.cwd, &registry)?;
-        return Ok(format!("Uninstalled plugin {} from {}.", first, file.display()));
+        let mut removed_from = None;
+        for dir in [context.cwd.to_path_buf(), dirs_home()] {
+            let mut scoped = plugin_registry(&dir);
+            let removed = scoped.get_mut("installed").and_then(Value::as_object_mut).map(|m| m.remove(first)).flatten();
+            if removed.is_some() {
+                let file = save_plugin_registry(&dir, &scoped)?;
+                removed_from = Some(file);
+            }
+        }
+        match removed_from {
+            Some(file) => return Ok(format!("Uninstalled plugin {} from {}.", first, file.display())),
+            None => return Err(format!("Installed plugin not found: {first}")),
+        }
     }
-    if matches!(verb, "discover" | "update" | "install" | "upgrade") {
-        return Err(format!("/marketplace {verb} requires plugin manifest discovery, which is not ported yet."));
+    if verb == "discover" {
+        let sources: Vec<(String, String)> = if first.is_empty() {
+            all_marketplace_sources(context.cwd)
+        } else {
+            match find_marketplace_source(context.cwd, first) {
+                Some(src) => vec![(first.to_string(), src)],
+                None => return Err(format!("Marketplace source not found: {first}")),
+            }
+        };
+        if sources.is_empty() { return Ok("No marketplace sources configured. Add one with /marketplace add <source>.".into()); }
+        let mut lines = vec!["Available plugins:".to_string()];
+        let mut errors = Vec::new();
+        for (name, source) in sources {
+            let cache = marketplace_cache_dir(&name);
+            if !cache.exists() {
+                if let Err(error) = fetch_marketplace(context.cwd, &name, &source) { errors.push(format!("- {name}: {error}")); continue; }
+            }
+            let catalog = match read_marketplace_catalog(&cache) { Ok(catalog) => catalog, Err(error) => { errors.push(format!("- {name}: {error}")); continue; } };
+            let mut plugins = catalog_plugins(&catalog);
+            plugins.sort_by(|a, b| a.get("name").and_then(Value::as_str).unwrap_or("").cmp(b.get("name").and_then(Value::as_str).unwrap_or("")));
+            for plugin in plugins {
+                let pname = plugin.get("name").and_then(Value::as_str).unwrap_or("-");
+                let desc = plugin.get("description").and_then(Value::as_str).unwrap_or("");
+                lines.push(format!("{pname}@{name}\t{desc}"));
+            }
+        }
+        if lines.len() == 1 { lines.push("- none".into()); }
+        lines.extend(errors);
+        return Ok(lines.join("\n"));
     }
-    Err("Usage: /marketplace add <source> | remove <name> | list | installed | uninstall <name@marketplace> | help".into())
+    if verb == "update" {
+        let sources: Vec<(String, String)> = if first.is_empty() {
+            all_marketplace_sources(context.cwd)
+        } else {
+            match find_marketplace_source(context.cwd, first) {
+                Some(src) => vec![(first.to_string(), src)],
+                None => return Err(format!("Marketplace source not found: {first}")),
+            }
+        };
+        if sources.is_empty() { return Ok("No marketplace sources configured. Add one with /marketplace add <source>.".into()); }
+        let mut updated = 0usize;
+        let mut total_plugins = 0usize;
+        let mut errors = Vec::new();
+        for (name, source) in sources {
+            match fetch_marketplace(context.cwd, &name, &source).and_then(|cache| read_marketplace_catalog(&cache)) {
+                Ok(catalog) => {
+                    let plugins = catalog_plugins(&catalog);
+                    total_plugins += plugins.len();
+                    update_source_plugins(context.cwd, &name, &plugins);
+                    updated += 1;
+                }
+                Err(error) => errors.push(format!("- {name}: {error}")),
+            }
+        }
+        let mut out = vec![format!("Updated {updated} marketplace source(s), {total_plugins} plugin(s) available.")];
+        out.extend(errors);
+        return Ok(out.join("\n"));
+    }
+    if verb == "install" {
+        let (force, scope, targets) = parse_marketplace_flags(&argv[1..]);
+        let scope = normalize_scope(scope)?;
+        if targets.is_empty() { return Err("Usage: /marketplace install [--force] [--scope user|project] <name@marketplace>".into()); }
+        let mut lines = Vec::new();
+        for target in targets {
+            let (plugin, mkt) = split_plugin_id(&target)?;
+            lines.push(install_one(context.cwd, &mkt, &plugin, &scope, force)?);
+        }
+        return Ok(lines.join("\n"));
+    }
+    if verb == "upgrade" {
+        let (_force, scope, targets) = parse_marketplace_flags(&argv[1..]);
+        let scoped = match scope.as_deref() {
+            Some(s) => vec![normalize_scope(Some(s.to_string()))?],
+            None => vec!["project".to_string(), "user".to_string()],
+        };
+        let mut ids: Vec<(String, String)> = Vec::new();
+        if targets.is_empty() {
+            for scope in &scoped {
+                for entry in installed_entries_for_scope(&registry_scope_dir(context.cwd, scope)) {
+                    if let Some(id) = entry.get("id").and_then(Value::as_str) { ids.push((id.to_string(), scope.clone())); }
+                }
+            }
+        } else {
+            let scope = normalize_scope(scope)?;
+            for target in targets { ids.push((target, scope.clone())); }
+        }
+        if ids.is_empty() { return Ok("No installed plugins to upgrade.".into()); }
+        let mut lines = Vec::new();
+        for (id, scope) in ids {
+            let (plugin, mkt) = split_plugin_id(&id)?;
+            lines.push(install_one(context.cwd, &mkt, &plugin, &scope, true)?);
+        }
+        return Ok(lines.join("\n"));
+    }
+    Err("Usage: /marketplace add <source> | remove <name> | list | update [name] | discover [marketplace] | install <name@marketplace> | upgrade [name@marketplace] | installed | uninstall <name@marketplace> | help".into())
 }
 
 fn clipboard_candidates() -> Vec<(&'static str, Vec<&'static str>)> {
@@ -1871,5 +2494,210 @@ mod tests {
         assert!(cleared.contains("Cleared memory file"));
         assert_eq!(fs::read_to_string(&memory_file).unwrap(), "");
         env::remove_var("JEDEN_MEMORY_FILE");
+    }
+
+    // --- Marketplace plugin discovery / install / activation tests ---------
+
+    /// Serializes tests that mutate process-global env (`JEDEN_PLUGINS_HOME`,
+    /// `HOME`) so parallel runs stay hermetic.
+    static ENV_LOCK: std::sync::LazyLock<parking_lot::Mutex<()>> =
+        std::sync::LazyLock::new(|| parking_lot::Mutex::new(()));
+
+    struct EnvGuard {
+        key: &'static str,
+        prev: Option<std::ffi::OsString>,
+    }
+    impl EnvGuard {
+        fn set(key: &'static str, value: &Path) -> Self {
+            let prev = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, prev }
+        }
+    }
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.prev {
+                Some(v) => env::set_var(self.key, v),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn write_registry(dir: &Path, value: &Value) {
+        write_json_value(&dir.join(".jeden/plugins.json"), value).unwrap();
+    }
+
+    /// Build a local marketplace `mkt/` under `root` with a `demo` plugin that
+    /// ships one command (`hello.md`) and a `UserPromptSubmit` hook.
+    fn make_local_marketplace(root: &Path) -> PathBuf {
+        let mkt = root.join("mkt");
+        let plugin = mkt.join("plugins/demo");
+        fs::create_dir_all(mkt.join(".omp-plugin")).unwrap();
+        fs::create_dir_all(plugin.join("commands")).unwrap();
+        fs::write(
+            mkt.join(".omp-plugin/marketplace.json"),
+            r#"{"name":"mkt","owner":{"name":"tester"},"plugins":[{"name":"demo","source":"./plugins/demo","description":"Demo plugin"}]}"#,
+        )
+        .unwrap();
+        fs::write(plugin.join("commands/hello.md"), "Say hi to $ARGUMENTS").unwrap();
+        fs::write(
+            plugin.join("hooks.json"),
+            r#"{"version":1,"hooks":{"UserPromptSubmit":[{"command":"echo hi"}]}}"#,
+        )
+        .unwrap();
+        mkt
+    }
+
+    #[test]
+    fn marketplace_name_validation_accepts_valid_and_rejects_invalid() {
+        for ok in ["demo", "a", "my-plugin", "plugin.v2", "a1b2", &"a".repeat(64)] {
+            assert!(valid_plugin_name(ok), "expected valid: {ok}");
+        }
+        for bad in ["", "-lead", "trail-", ".dot", "dot.", "Upper", "has_underscore", "sp ace", &"a".repeat(65)] {
+            assert!(!valid_plugin_name(bad), "expected invalid: {bad}");
+        }
+        assert!(valid_plugin_id("demo@mkt"));
+        assert!(!valid_plugin_id("demo"));
+        assert!(!valid_plugin_id("Demo@mkt"));
+        assert!(!valid_plugin_id("demo@"));
+        assert!(!valid_plugin_id(&format!("{}@{}", "a".repeat(64), "b".repeat(70))));
+    }
+
+    #[test]
+    fn git_arg_safety_rejects_metachars_and_options() {
+        for ok in ["https://github.com/o/r.git", "o/r", "v1.2.3", "main"] {
+            assert!(git_arg_safe(ok), "expected safe: {ok}");
+        }
+        for bad in ["", "-x", "--upload-pack=evil", "a;b", "a b", "a|b", "$(x)", "a`b`", "a&b", "a>b"] {
+            assert!(!git_arg_safe(bad), "expected unsafe: {bad}");
+        }
+    }
+
+    #[test]
+    fn catalog_parse_prefers_omp_plugin_over_claude_plugin() {
+        let cwd = temp_workspace("catalog-pref");
+        let cache = cwd.join("cache");
+        fs::create_dir_all(cache.join(".omp-plugin")).unwrap();
+        fs::create_dir_all(cache.join(".claude-plugin")).unwrap();
+        fs::write(cache.join(".omp-plugin/marketplace.json"), r#"{"name":"omp","plugins":[]}"#).unwrap();
+        fs::write(cache.join(".claude-plugin/marketplace.json"), r#"{"name":"claude","plugins":[]}"#).unwrap();
+        let catalog = read_marketplace_catalog(&cache).unwrap();
+        assert_eq!(catalog.get("name").and_then(Value::as_str), Some("omp"));
+
+        // Falls back to .claude-plugin when .omp-plugin is absent.
+        fs::remove_file(cache.join(".omp-plugin/marketplace.json")).unwrap();
+        let catalog = read_marketplace_catalog(&cache).unwrap();
+        assert_eq!(catalog.get("name").and_then(Value::as_str), Some("claude"));
+    }
+
+    #[test]
+    fn relative_plugin_source_applies_plugin_root_and_rejects_traversal() {
+        let cache = Path::new("/tmp/mkt-cache");
+        // pluginRoot is prepended.
+        let resolved = resolve_relative_plugin_path(cache, "plugins", "./demo").unwrap();
+        assert_eq!(resolved, cache.join("plugins").join("demo"));
+        // No pluginRoot.
+        let resolved = resolve_relative_plugin_path(cache, "", "./demo").unwrap();
+        assert_eq!(resolved, cache.join("demo"));
+        // Traversal is rejected.
+        assert!(resolve_relative_plugin_path(cache, "", "./../evil").is_err());
+        assert!(resolve_relative_plugin_path(cache, "", "./a/../../b").is_err());
+        // Must start with ./ .
+        assert!(resolve_relative_plugin_path(cache, "", "demo").is_err());
+        // Malicious pluginRoot is rejected.
+        assert!(resolve_relative_plugin_path(cache, "../escape", "./demo").is_err());
+    }
+
+    #[test]
+    fn installed_plugin_command_dirs_respects_enabled_flag() {
+        let _lock = ENV_LOCK.lock();
+        let cwd = temp_workspace("cmd-dirs");
+        let empty_home = temp_workspace("cmd-dirs-home");
+        let _home = EnvGuard::set("JEDEN_PLUGINS_HOME", &empty_home);
+        let on = cwd.join("plugins/on");
+        let off = cwd.join("plugins/off");
+        fs::create_dir_all(on.join("commands")).unwrap();
+        fs::create_dir_all(off.join("commands")).unwrap();
+        write_registry(&cwd, &json!({
+            "installed": {
+                "on@mkt": {"id":"on@mkt","enabled":true,"path": on.to_string_lossy()},
+                "off@mkt": {"id":"off@mkt","enabled":false,"path": off.to_string_lossy()},
+            }
+        }));
+        let dirs = installed_plugin_command_dirs(&cwd);
+        assert!(dirs.contains(&on.join("commands")), "enabled plugin dir must be present: {dirs:?}");
+        assert!(!dirs.contains(&off.join("commands")), "disabled plugin dir must be absent: {dirs:?}");
+    }
+
+    #[test]
+    fn installed_plugin_hook_configs_returns_enabled_plugin_hooks() {
+        let _lock = ENV_LOCK.lock();
+        let cwd = temp_workspace("hook-cfgs");
+        let empty_home = temp_workspace("hook-cfgs-home");
+        let _home = EnvGuard::set("JEDEN_PLUGINS_HOME", &empty_home);
+        let plugin = cwd.join("plugins/demo");
+        fs::create_dir_all(&plugin).unwrap();
+        fs::write(plugin.join("hooks.json"), r#"{"version":1,"hooks":{"UserPromptSubmit":[{"command":"echo hi"}]}}"#).unwrap();
+        write_registry(&cwd, &json!({
+            "installed": { "demo@mkt": {"id":"demo@mkt","enabled":true,"path": plugin.to_string_lossy()} }
+        }));
+        // Project-scope hooks require allow_project.
+        assert!(installed_plugin_hook_configs(&cwd, false).is_empty());
+        let configs = installed_plugin_hook_configs(&cwd, true);
+        assert_eq!(configs.len(), 1);
+        let hooks = crate::hooks::parse_event_hooks(&configs[0], "UserPromptSubmit");
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].command, "echo hi");
+    }
+
+    #[test]
+    fn marketplace_install_activates_commands_and_hooks_end_to_end() {
+        let _lock = ENV_LOCK.lock();
+        let cwd = temp_workspace("install-e2e");
+        let sessions = cwd.join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        // Isolate both the plugin cache/user-registry and the user commands dir.
+        let home = temp_workspace("install-e2e-home");
+        let _plugins_home = EnvGuard::set("JEDEN_PLUGINS_HOME", &home);
+        let _home_env = EnvGuard::set("HOME", &home);
+        make_local_marketplace(&cwd);
+        let context = test_context(&cwd, &sessions);
+
+        let added = handle_local(&context, "/marketplace add ./mkt").unwrap().unwrap();
+        assert!(added.contains("Added marketplace source mkt"), "add output: {added}");
+
+        let discover = handle_local(&context, "/marketplace discover").unwrap().unwrap();
+        assert!(discover.contains("demo@mkt"), "discover output: {discover}");
+        assert!(discover.contains("Demo plugin"), "discover output: {discover}");
+
+        let install = handle_local(&context, "/marketplace install demo@mkt").unwrap().unwrap();
+        assert!(install.contains("installed demo@mkt"), "install output: {install}");
+        assert!(install.contains("1 command"), "install output: {install}");
+        assert!(install.contains("hooks: yes"), "install output: {install}");
+
+        // (a) The installed plugin's commands dir is now an active command dir,
+        //     and /hello resolves + expands through the exact CLI resolver.
+        let dirs = installed_plugin_command_dirs(&cwd);
+        assert!(dirs.iter().any(|d| d.join("hello.md").is_file()), "plugin commands dir missing: {dirs:?}");
+        let expanded = crate::resolve_file_command(&cwd, "/hello", "World");
+        assert_eq!(expanded, Some("Say hi to World".to_string()), "/hello did not expand from installed plugin");
+
+        // (b) The plugin's hooks.json is merged into the hook runtime.
+        let configs = installed_plugin_hook_configs(&cwd, true);
+        assert_eq!(configs.len(), 1);
+        assert_eq!(crate::hooks::parse_event_hooks(&configs[0], "UserPromptSubmit").len(), 1);
+
+        // Re-install without --force is rejected; --force succeeds.
+        let dup = handle_local(&context, "/marketplace install demo@mkt");
+        assert!(dup.unwrap().is_err(), "duplicate install should be rejected");
+        let forced = handle_local(&context, "/marketplace install --force demo@mkt").unwrap().unwrap();
+        assert!(forced.contains("installed demo@mkt"), "force reinstall output: {forced}");
+
+        // installed lists the plugin; uninstall removes it.
+        let installed = handle_local(&context, "/marketplace installed").unwrap().unwrap();
+        assert!(installed.contains("demo@mkt"), "installed output: {installed}");
+        let removed = handle_local(&context, "/marketplace uninstall demo@mkt").unwrap().unwrap();
+        assert!(removed.contains("Uninstalled plugin demo@mkt"), "uninstall output: {removed}");
+        assert_eq!(installed_plugin_command_dirs(&cwd).len(), 0, "command dirs must be empty after uninstall");
     }
 }

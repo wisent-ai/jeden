@@ -379,7 +379,9 @@ pub(crate) fn is_builtin_slash(command: &str) -> bool {
 /// Directories searched for file-based custom slash commands, project first.
 /// Each `<name>.md` becomes `/<name>`; the body is a prompt template.
 fn command_dirs(cwd: &Path) -> Vec<PathBuf> {
-    vec![cwd.join(".jeden/commands"), dirs_home().join(".jeden/commands")]
+    let mut dirs = vec![cwd.join(".jeden/commands"), dirs_home().join(".jeden/commands")];
+    dirs.extend(slash::installed_plugin_command_dirs(cwd));
+    dirs
 }
 
 /// Resolve a file-based custom command `<name>` to its template body (frontmatter
