@@ -48,7 +48,7 @@ const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
     ("tan", "Background agent"), ("omfg", "Forge local rule"), ("retry", "Retry last failed turn"),
     ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
     ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
-    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"),
+    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"), ("hooks", "Show lifecycle hooks"),
     ("update", "Run automated update"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
     ("commands", "Show slash commands"),
 ];
