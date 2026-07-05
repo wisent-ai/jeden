@@ -859,6 +859,10 @@ fn interactive(args: &Args) -> Result<String, String> {
                     handler_conv.lock().reset(&args.cwd)?;
                     Ok("Started a fresh conversation; prior turns cleared.".into())
                 }
+                "/fork" => {
+                    let path = handler_conv.lock().fork(&args.cwd)?;
+                    Ok(format!("Forked into a new session at {}; the current context continues there.", path.display()))
+                }
                 "/rename" => {
                     let name = rest.trim();
                     if name.is_empty() { return Err("Usage: /rename <name>".into()); }

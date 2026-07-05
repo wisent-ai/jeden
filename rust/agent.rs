@@ -316,6 +316,17 @@ impl Conversation {
         Ok(())
     }
 
+    /// Fork: keep the current in-memory history but switch to a NEW session dir
+    /// so subsequent turns record into a separate lineage — backs /fork as a
+    /// real session split, not a mode-state label. Returns the new session path.
+    pub(crate) fn fork(&mut self, cwd: &Path) -> Result<PathBuf, String> {
+        let parent = self.recorder.path();
+        self.recorder = SessionRecorder::new(cwd);
+        self.recorder.ensure()?;
+        self.recorder.record("fork", json!({ "parent": parent }))?;
+        Ok(self.recorder.path())
+    }
+
     /// Summarize the live history into a single compact system note and drop the
     /// detailed turns — backs a real /compact instead of a mode-state flag.
     pub(crate) fn compact(&mut self, args: &Args, instructions: &str, hooks: &mut RunHooks) -> Result<String, String> {
