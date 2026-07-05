@@ -1756,4 +1756,75 @@ mod tests {
         assert!(!out.contains("Guided goal"), "no guided goal means no drafting directive: {out}");
         assert_eq!(out, task, "with no active mode the task is returned unchanged: {out}");
     }
+
+    // ---- arm_force_tool: /force <tool> <prompt> arming ---------------------
+    // Backs the combined `/force <tool> <prompt>` form: validate the tool name
+    // against the visible set, then persist force = { tool, prompt: "" } into
+    // .jeden/mode-state.json without disturbing sibling mode state. Each test
+    // owns a private temp cwd, so they are order-independent and touch no env.
+
+    #[test]
+    fn arm_force_tool_writes_force_for_valid_tool() {
+        // A real built-in tool arms cleanly: Ok, and the on-disk force names the
+        // tool with an empty prompt (the combined form's runner supplies the
+        // prompt separately; arming stores the tool only).
+        let cwd = unique_temp_dir("force-valid");
+
+        arm_force_tool(&cwd, "read_file").expect("a real built-in tool arms");
+
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/force/tool").and_then(Value::as_str),
+            Some("read_file"),
+            "armed force must name the tool: {after}"
+        );
+        assert_eq!(
+            after.pointer("/force/prompt").and_then(Value::as_str),
+            Some(""),
+            "armed force stores an empty prompt: {after}"
+        );
+    }
+
+    #[test]
+    fn arm_force_tool_rejects_unknown_tool() {
+        // A name absent from the visible tool set is rejected with the mapped
+        // error, and nothing is written: no partial force key may leak onto disk.
+        let cwd = unique_temp_dir("force-unknown");
+
+        let err = arm_force_tool(&cwd, "definitely_not_a_tool")
+            .expect_err("an unknown tool name must be rejected");
+        assert!(
+            err.contains("Unknown or unavailable tool"),
+            "unexpected error: {err}"
+        );
+
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/force/tool"),
+            None,
+            "rejection must not write a partial force key: {after}"
+        );
+    }
+
+    #[test]
+    fn arm_force_tool_preserves_other_mode_state() {
+        // Arming force must merge into existing mode-state, not replace it: a
+        // pre-existing plan.enabled must survive alongside the new force key.
+        let cwd = unique_temp_dir("force-preserve");
+        write_mode_state(&cwd, &json!({ "plan": { "enabled": true } })).unwrap();
+
+        arm_force_tool(&cwd, "run_command").expect("a real built-in tool arms");
+
+        let after = read_mode_state(&cwd);
+        assert_eq!(
+            after.pointer("/force/tool").and_then(Value::as_str),
+            Some("run_command"),
+            "armed force must name the tool: {after}"
+        );
+        assert_eq!(
+            after.pointer("/plan/enabled").and_then(Value::as_bool),
+            Some(true),
+            "arming force must not clobber sibling mode state: {after}"
+        );
+    }
 }
