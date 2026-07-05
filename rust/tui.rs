@@ -344,7 +344,7 @@ fn compact_prompt(width: usize, status: &PromptStatus, input_text: &str, _busy: 
     vec![top, format!("{} {}", paint("╰─", "cyan", color), input_text)]
 }
 
-pub fn render_terminal_frame(options: &FrameOptions) -> String {
+fn frame_lines(options: &FrameOptions) -> Vec<String> {
     let width = options.columns.min(120).max(50);
     let prompt = compact_prompt(width, &options.status, &options.input_text, options.busy, options.color);
     let slash_hints = slash_hint_panel(&options.input_text, width, options.color, options.slash_selection);
@@ -359,11 +359,21 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
     if main_lines.len() > available_rows {
         main_lines = main_lines.split_off(main_lines.len() - available_rows);
     }
-    let mut lines = vec!["\x1b[2J\x1b[H".to_string()];
-    lines.extend(main_lines.iter().cloned());
-    lines.extend(std::iter::repeat(String::new()).take(available_rows.saturating_sub(main_lines.len())));
+    let mut lines = Vec::new();
+    lines.extend(main_lines);
+    lines.extend(std::iter::repeat(String::new()).take(available_rows.saturating_sub(lines.len())));
     lines.extend(slash_hints);
     lines.extend(prompt);
+    // Never let an embedded newline reach the absolute-positioned diff renderer.
+    lines
+        .into_iter()
+        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+        .collect()
+}
+
+pub fn render_terminal_frame(options: &FrameOptions) -> String {
+    let mut lines = vec!["\x1b[2J\x1b[H".to_string()];
+    lines.extend(frame_lines(options));
     lines.join("\n")
 }
 
@@ -372,6 +382,75 @@ pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     stdout.write_all(render_terminal_frame(options).as_bytes())?;
     stdout.write_all(b"\x1b[?25h")?;
     stdout.flush()
+}
+
+/// Differential, absolute-positioned renderer for raw-mode interactive use.
+///
+/// Raw mode disables ONLCR, so a bare `\n` moves the cursor down without a
+/// carriage return, and full-width lines autowrap. Both corrupt the layout.
+/// This renderer positions every line with an absolute cursor move, disables
+/// autowrap for the paint, and rewrites only the rows that changed since the
+/// previous frame — so idle/keystroke updates never clear or scroll the screen.
+struct DiffRenderer {
+    previous: Vec<String>,
+    columns: usize,
+    rows: usize,
+}
+
+impl DiffRenderer {
+    fn new() -> Self {
+        Self { previous: Vec::new(), columns: 0, rows: 0 }
+    }
+
+    /// Force a full repaint on the next `draw` (after a child process wrote to
+    /// the screen, e.g. an interactive provider selector).
+    fn reset(&mut self) {
+        self.previous.clear();
+    }
+
+    fn draw(&mut self, options: &FrameOptions) -> io::Result<()> {
+        let lines = frame_lines(options);
+        let size_changed = self.columns != options.columns || self.rows != options.rows;
+        let out = compose_update(&self.previous, &lines, options.columns.max(1), size_changed);
+
+        self.previous = lines;
+        self.columns = options.columns;
+        self.rows = options.rows;
+
+        let mut stdout = io::stdout();
+        stdout.write_all(out.as_bytes())?;
+        stdout.flush()
+    }
+}
+
+/// Pure ANSI generator for one differential frame update.
+///
+/// A full paint (first frame, row-count change, or terminal resize) clears the
+/// screen and writes every row; otherwise only rows that differ from `previous`
+/// are rewritten. Every row is placed with an absolute cursor move + line clear,
+/// never a bare `\n`, so raw mode (ONLCR off) can never stair-step or wrap it.
+fn compose_update(previous: &[String], lines: &[String], columns: usize, size_changed: bool) -> String {
+    let full = previous.len() != lines.len() || size_changed;
+    let mut out = String::new();
+    // Hide cursor and disable autowrap for the duration of the paint.
+    out.push_str("\x1b[?25l\x1b[?7l");
+    if full {
+        out.push_str("\x1b[2J\x1b[H");
+        for (index, line) in lines.iter().enumerate() {
+            out.push_str(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line));
+        }
+    } else {
+        for (index, line) in lines.iter().enumerate() {
+            if previous[index] != *line {
+                out.push_str(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line));
+            }
+        }
+    }
+    // Re-enable autowrap, park the cursor after the prompt text, show it.
+    let last_row = lines.len().max(1);
+    let last_col = (visible_len(lines.last().map(String::as_str).unwrap_or("")) + 1).min(columns.max(1));
+    out.push_str(&format!("\x1b[?7h\x1b[{};{}H\x1b[?25h", last_row, last_col));
+    out
 }
 
 struct RawModeGuard;
@@ -444,6 +523,7 @@ where
     let mut input = String::new();
     let mut slash_selection = 0usize;
     let mut needs_render = true;
+    let mut renderer = DiffRenderer::new();
     loop {
         if needs_render {
             let options = FrameOptions {
@@ -456,7 +536,7 @@ where
                 color: stdout_supports_color(),
                 slash_selection,
             };
-            render_to_stdout(&options)?;
+            renderer.draw(&options)?;
             needs_render = false;
         }
 
@@ -496,6 +576,7 @@ where
                 disable_raw_mode()?;
                 let result = handle_prompt(&prompt);
                 enable_raw_mode()?;
+                renderer.reset();
                 messages.push(Message::new("user", prompt.clone()));
                 match result {
                     Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
@@ -622,5 +703,168 @@ mod tests {
     fn slash_tab_completion_accepts_selected_suggestion() {
         assert_eq!(complete_slash_input("/pl", 0), Some("/plan ".to_string()));
         assert_eq!(complete_slash_input("/pl", 1), Some("/plan-review ".to_string()));
+    }
+
+    fn frame_options(input_text: &str, messages: Vec<Message>, columns: usize, rows: usize) -> FrameOptions {
+        FrameOptions {
+            status: test_status(),
+            messages,
+            input_text: input_text.to_string(),
+            busy: false,
+            columns,
+            rows,
+            color: false,
+            slash_selection: 0,
+        }
+    }
+
+    #[test]
+    fn frame_lines_never_embed_a_newline_for_multiline_message() {
+        // Raw mode turns a bare `\n` into a bare line-feed (no carriage return),
+        // so the frame the diff renderer positions must be one row per element.
+        let options = frame_options(
+            "",
+            vec![
+                Message::new("assistant", "line-a\nline-b"),
+                Message::new("user", "just one line"),
+            ],
+            80,
+            24,
+        );
+        let lines = frame_lines(&options);
+        assert!(
+            lines.iter().all(|line| !line.contains('\n')),
+            "an embedded newline reached the absolute-positioned renderer: {lines:?}"
+        );
+        // The two halves of the multi-line message must occupy distinct rows,
+        // proving the newline became a real row break rather than being dropped.
+        let first = lines.iter().position(|line| line.contains("line-a"));
+        let second = lines.iter().position(|line| line.contains("line-b"));
+        assert!(first.is_some() && second.is_some(), "both message halves must render: {lines:?}");
+        assert_ne!(first, second, "multi-line content must split onto separate rows: {lines:?}");
+    }
+
+    #[test]
+    fn frame_lines_split_a_newline_carried_by_raw_prompt_input() {
+        // `compact_prompt` embeds `input_text` verbatim, so a newline typed (or
+        // pasted) into the prompt reaches the frame un-split by the message path.
+        // Only the frame_lines backstop keeps it off the absolute-positioned
+        // renderer — this is the row the ticket's split exists to defend.
+        let options = frame_options("first\nsecond", vec![Message::new("assistant", "ready")], 80, 24);
+        let lines = frame_lines(&options);
+        assert!(
+            lines.iter().all(|line| !line.contains('\n')),
+            "a newline pasted into the prompt leaked past the backstop: {lines:?}"
+        );
+        let first = lines.iter().position(|line| line.contains("first"));
+        let second = lines.iter().position(|line| line.contains("second"));
+        assert!(first.is_some() && second.is_some(), "both prompt fragments must render: {lines:?}");
+        assert_ne!(first, second, "the pasted newline must break onto a separate row: {lines:?}");
+    }
+
+    #[test]
+    fn frame_lines_never_exceed_the_effective_render_width() {
+        // The renderer clamps columns to [50, 120]; any wider row would autowrap
+        // in raw mode and stair-step the layout. A 400-char message forces the
+        // wrap path across the lower clamp, mid range, and the upper clamp.
+        let wide_message = "x".repeat(400);
+        for columns in [30usize, 50, 80, 100, 120, 200] {
+            let effective = columns.min(120).max(50);
+            let options = frame_options(
+                "/plan",
+                vec![Message::new("assistant", wide_message.clone())],
+                columns,
+                40,
+            );
+            for line in frame_lines(&options) {
+                let width = visible_len(&line);
+                assert!(
+                    width <= effective,
+                    "columns={columns} effective={effective}: line of visible width {width} would autowrap: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn frame_lines_show_slash_suggestions_and_keep_typed_input_in_prompt() {
+        let options = frame_options("/", vec![Message::new("assistant", "ready")], 80, 24);
+        let lines = frame_lines(&options);
+        assert!(
+            lines.iter().any(|line| line.contains("slash suggestions")),
+            "slash suggestion panel missing when input is '/': {lines:?}"
+        );
+        let prompt = lines.last().expect("frame_lines always ends with the prompt row");
+        assert!(
+            prompt.ends_with("╰─ /"),
+            "prompt row must end with the typed input: {prompt:?}"
+        );
+    }
+
+    #[test]
+    fn compose_update_first_frame_clears_once_and_uses_no_bare_newline() {
+        let lines = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let out = compose_update(&[], &lines, 80, false);
+        assert_eq!(
+            out.matches("\x1b[2J").count(),
+            1,
+            "the first frame must clear the screen exactly once: {out:?}"
+        );
+        assert!(
+            !out.contains('\n'),
+            "raw mode forbids bare newlines in the emitted update: {out:?}"
+        );
+        for (index, line) in lines.iter().enumerate() {
+            assert!(
+                out.contains(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line)),
+                "row {index} was not placed with an absolute cursor move: {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn compose_update_incremental_rewrites_only_the_changed_row() {
+        let previous = vec!["alpha".to_string(), "beta".to_string(), "gamma".to_string()];
+        let mut next = previous.clone();
+        next[2] = "gamma-2".to_string();
+        let out = compose_update(&previous, &next, 80, false);
+        assert_eq!(
+            out.matches("\x1b[2J").count(),
+            0,
+            "an in-place update must never clear the whole screen: {out:?}"
+        );
+        assert_eq!(
+            out.matches("\x1b[2K").count(),
+            1,
+            "exactly one row (the changed one) may be rewritten: {out:?}"
+        );
+        assert!(
+            out.contains("\x1b[3;1H\x1b[2Kgamma-2"),
+            "the changed row must be rewritten at its absolute position: {out:?}"
+        );
+        assert!(
+            !out.contains("alpha") && !out.contains("beta"),
+            "unchanged rows must not be repainted: {out:?}"
+        );
+    }
+
+    #[test]
+    fn compose_update_size_change_forces_a_full_paint() {
+        // Same length, identical content: only `size_changed` should force a
+        // full clear+repaint. Without it this call would emit nothing to rewrite.
+        let previous = vec!["alpha".to_string(), "beta".to_string()];
+        let identical = previous.clone();
+        let out = compose_update(&previous, &identical, 80, true);
+        assert_eq!(
+            out.matches("\x1b[2J").count(),
+            1,
+            "a size change must clear and fully repaint: {out:?}"
+        );
+        for (index, line) in identical.iter().enumerate() {
+            assert!(
+                out.contains(&format!("\x1b[{};1H\x1b[2K{}", index + 1, line)),
+                "row {index} was not fully repainted after resize: {out:?}"
+            );
+        }
     }
 }
