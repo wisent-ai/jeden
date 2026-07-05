@@ -320,7 +320,7 @@ fn compact_prompt(width: usize, status: &PromptStatus, input_text: &str, _busy: 
         .unwrap_or_default();
     let context = match (status.context_percent, status.context_limit.as_deref()) {
         (Some(percent), Some(limit)) => format!(" > ◫ {:.1}%/{}", percent, limit),
-        (_, Some(limit)) => format!(" > ◫ n/a/{}", limit),
+        (_, Some(limit)) => format!(" > ◫ {}", limit),
         _ => String::new(),
     };
     let cost = status.cost.as_ref().map(|cost| format!(" > {}", cost)).unwrap_or_default();
@@ -345,7 +345,18 @@ fn compact_prompt(width: usize, status: &PromptStatus, input_text: &str, _busy: 
         paint(&"─".repeat(inner.saturating_sub(visible_len(&safe_label) + 2)), "cyan", color),
         paint("╮", "cyan", color)
     );
-    vec![top, format!("{} {}", paint("╰─", "cyan", color), input_text)]
+    // Render the (possibly multiline) input: first line after the ╰─ caret,
+    // continuation lines indented under it. Single-line input is unchanged.
+    let mut out = vec![top];
+    let input_lines: Vec<&str> = input_text.split('\n').collect();
+    for (index, line) in input_lines.iter().enumerate() {
+        if index == 0 {
+            out.push(format!("{} {}", paint("╰─", "cyan", color), line));
+        } else {
+            out.push(format!("   {}", line));
+        }
+    }
+    out
 }
 
 fn frame_lines(options: &FrameOptions) -> Vec<String> {
@@ -661,6 +672,10 @@ where
     let mut slash_selection = 0usize;
     let mut needs_render = true;
     let mut renderer = DiffRenderer::new();
+    // Submitted prompts, newest last; `history_index` is the cursor while
+    // browsing with Up/Down (None = editing a fresh line).
+    let mut history: Vec<String> = Vec::new();
+    let mut history_index: Option<usize> = None;
     loop {
         if needs_render {
             let options = FrameOptions {
@@ -698,6 +713,12 @@ where
                 input.pop();
                 slash_selection = slash_selection.min(slash_matches(&input).len().saturating_sub(1));
             }
+            KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
+                // Alt+Enter inserts a newline for multiline input; Enter submits.
+                input.push('\n');
+                slash_selection = 0;
+                history_index = None;
+            }
             KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') | KeyCode::Char('m') | KeyCode::Char('j')
                 if matches!(key.code, KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n'))
                     || key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -707,8 +728,12 @@ where
                 let prompt = input.trim().to_string();
                 input.clear();
                 slash_selection = 0;
+                history_index = None;
                 if matches!(prompt.as_str(), "/exit" | "/quit") {
                     break;
+                }
+                if history.last().map(|h| h != &prompt).unwrap_or(true) {
+                    history.push(prompt.clone());
                 }
                 messages.push(Message::new("user", prompt.clone()));
                 match classify(&prompt) {
@@ -729,17 +754,34 @@ where
             KeyCode::Char(ch) => {
                 input.push(ch);
                 slash_selection = 0;
+                history_index = None;
             }
             KeyCode::Up => {
                 let count = slash_matches(&input).len();
                 if count > 0 {
                     slash_selection = if slash_selection == 0 { count - 1 } else { slash_selection - 1 };
+                } else if !history.is_empty() {
+                    let idx = match history_index {
+                        None => history.len() - 1,
+                        Some(0) => 0,
+                        Some(i) => i - 1,
+                    };
+                    history_index = Some(idx);
+                    input = history[idx].clone();
                 }
             }
             KeyCode::Down => {
                 let count = slash_matches(&input).len();
                 if count > 0 {
                     slash_selection = (slash_selection + 1) % count;
+                } else if let Some(i) = history_index {
+                    if i + 1 < history.len() {
+                        history_index = Some(i + 1);
+                        input = history[i + 1].clone();
+                    } else {
+                        history_index = None;
+                        input.clear();
+                    }
                 }
             }
             KeyCode::Tab | KeyCode::Right => {

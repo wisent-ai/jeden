@@ -745,6 +745,7 @@ dependencies = [
  "glob",
  "hex",
  "hmac",
+ "parking_lot",
  "rand",
  "regex",
  "reqwest",

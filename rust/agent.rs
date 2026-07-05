@@ -115,7 +115,7 @@ fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
     if parts.is_empty() { Ok(task.to_string()) } else { Ok(format!("{}\n\n{}", parts.join("\n"), task)) }
 }
 
-fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
+pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
     let mut state = read_mode_state(cwd);
     if !state.is_object() { state = json!({}); }
     let map = state.as_object_mut().expect("mode state object");
@@ -128,7 +128,7 @@ fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
     write_mode_state(cwd, &state)
 }
 
-fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), String> {
+pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), String> {
     let mut state = read_mode_state(cwd);
     if !state.is_object() { state = json!({}); }
     state.as_object_mut().expect("mode state object").insert("lastSessionPath".into(), json!(path));
@@ -142,6 +142,32 @@ fn split_head(args: &str) -> (&str, &str) {
         Some(index) => (&text[..index], text[index..].trim()),
         None => (text, ""),
     }
+}
+
+/// Resolve the prompt text a `/retry` should replay, or an error. Lets the
+/// interactive loop replay through the shared Conversation instead of a
+/// transient one.
+pub(crate) fn retry_task(args: &Args) -> Result<String, String> {
+    let state = read_mode_state(&args.cwd);
+    let task = state
+        .get("lastFailedTask")
+        .and_then(Value::as_str)
+        .filter(|task| !task.trim().is_empty())
+        .ok_or("No failed task is available to retry.")?;
+    if task.trim_start().starts_with('/') {
+        return Err("Refusing to retry a slash command; retry only replays agent prompts.".into());
+    }
+    Ok(task.to_string())
+}
+
+/// Build the scoped prompt text for a `/btw` side question.
+pub(crate) fn btw_task(question: &str) -> Result<String, String> {
+    let question = question.trim();
+    if question.is_empty() { return Err("Usage: /btw <side question>".into()); }
+    Ok(format!(
+        "Answer this side question using the current session context.\nKeep it separate from the main task: do not change files unless the side question explicitly asks for file changes.\nQuestion: {}",
+        question
+    ))
 }
 
 pub(crate) fn retry_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
@@ -182,19 +208,25 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         let (command, rest) = split_head(task.trim());
         if command == "/retry" { return retry_command_with(args, hooks); }
         if command == "/btw" { return btw_command_with(args, rest, hooks); }
-        let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
-        return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+        // Unknown slash commands fall through to the model as a prompt (OMP
+        // parity) instead of hard-erroring; builtins are handled locally.
+        if crate::is_builtin_slash(command) {
+            let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
+            return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+        }
     }
 
-    let effective_task = apply_mode_instructions(&args.cwd, &task)?;
-    let result = run_no_tool_agent(args, &effective_task, hooks);
+    let mut conversation = Conversation::new(&args.cwd)?;
+    let result = conversation.run_turn(args, &task, hooks);
     if let Err(error) = &result {
         let _ = update_task_outcome(&args.cwd, &task, false);
         return Err(error.clone());
     }
-    let result = result?;
+    let text = result?;
     let _ = update_task_outcome(&args.cwd, &task, true);
-    if let Some(path) = &result.session_path {
+    let session_path = Some(conversation.session_path());
+    let result = RunResult { text, session_path: session_path.clone() };
+    if let Some(path) = &session_path {
         let _ = update_last_session_path(&args.cwd, path);
     }
     if args.json {
@@ -215,83 +247,176 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     Ok(result.text + "\n")
 }
 
-fn run_no_tool_agent(args: &Args, task: &str, hooks: &mut RunHooks) -> Result<RunResult, String> {
-    let config = load_config(&args.cwd);
-    let router = model_router_config(&config, args);
-    let mut recorder = SessionRecorder::new(&args.cwd);
-    recorder.ensure()?;
-    recorder.record(
-        "user",
-        json!({
-            "task": task,
-            "cwd": args.cwd,
-            "allowWrite": args.allow_write,
-            "allowCommand": args.allow_command,
-            "maxSteps": args.max_steps,
-            "maxTokens": args.max_tokens,
-        }),
-    )?;
+/// A persistent agent conversation. In interactive mode one `Conversation`
+/// lives for the whole session so each turn sees the full prior history (real
+/// chat memory); the CLI one-shot builds a transient one per invocation.
+pub(crate) struct Conversation {
+    messages: Vec<Value>,
+    recorder: SessionRecorder,
+}
 
-    let tool_specs = rust_tool_specs();
-    let mut messages = vec![
-        json!({ "role": "system", "content": system_prompt(&args.cwd) }),
-        json!({ "role": "user", "content": task }),
-    ];
-
-    for step in 1..=args.max_steps {
-        if hooks.cancelled() {
-            let err = "Turn cancelled.".to_string();
-            recorder.record("run_error", json!({ "message": err }))?;
-            return Err(err);
-        }
-        hooks.note(&format!("thinking (step {}/{})", step, args.max_steps));
-        match chat_completion(&router, messages.clone(), args.max_tokens as usize, &tool_specs) {
-            Ok(content) => {
-                recorder.record("assistant_raw", json!({ "step": step, "content": content }))?;
-                let action = action_or_text(&content)?;
-                recorder.record("action", json!({ "step": step, "action": action_to_value(&action) }))?;
-                messages.push(json!({ "role": "assistant", "content": content }));
-
-                match action {
-                    Action::Final { text } => {
-                        recorder.record("final", json!({ "step": step, "text": text }))?;
-                        return Ok(RunResult { text, session_path: Some(recorder.path()) });
-                    }
-                    Action::Tool { tool, input } => {
-                        if hooks.cancelled() {
-                            let err = "Turn cancelled.".to_string();
-                            recorder.record("run_error", json!({ "message": err }))?;
-                            return Err(err);
-                        }
-                        hooks.note(&format!("tool: {}", tool));
-                        let result = run_tool_action(args, &mut recorder, step, &ToolAction { tool, input }, hooks.interactive)?;
-                        messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&result) }));
-                    }
-                    Action::Tools { tools } => {
-                        let mut results = Vec::new();
-                        for tool in tools {
-                            if hooks.cancelled() {
-                                let err = "Turn cancelled.".to_string();
-                                recorder.record("run_error", json!({ "message": err }))?;
-                                return Err(err);
-                            }
-                            hooks.note(&format!("tool: {}", tool.tool));
-                            results.push(run_tool_action(args, &mut recorder, step, &tool, hooks.interactive)?);
-                        }
-                        messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&json!(results)) }));
-                    }
-                }
-            }
-            Err(error) => {
-                recorder.record("run_error", json!({ "message": error }))?;
-                return Err(error);
-            }
-        }
+impl Conversation {
+    pub(crate) fn new(cwd: &Path) -> Result<Self, String> {
+        let mut recorder = SessionRecorder::new(cwd);
+        recorder.ensure()?;
+        Ok(Self {
+            messages: vec![json!({ "role": "system", "content": system_prompt(cwd) })],
+            recorder,
+        })
     }
 
-    let err = format!("max steps exceeded: {}", args.max_steps);
-    recorder.record("run_error", json!({ "message": err }))?;
-    Err(err)
+    pub(crate) fn session_path(&self) -> PathBuf {
+        self.recorder.path()
+    }
+
+    /// Rough token estimate (~4 chars/token) over the live message window, for
+    /// the status line. Not billing-accurate; a live signal, not a guess.
+    pub(crate) fn approx_tokens(&self) -> usize {
+        let chars: usize = self.messages.iter().map(|m| m.to_string().chars().count()).sum();
+        chars / 4
+    }
+
+    /// Number of non-system messages currently held.
+    pub(crate) fn turn_len(&self) -> usize {
+        self.messages.iter().filter(|m| m.get("role").and_then(Value::as_str) != Some("system")).count()
+    }
+
+    /// Drop all turns, keeping the system prompt — backs /clear and /new.
+    pub(crate) fn reset(&mut self, cwd: &Path) -> Result<(), String> {
+        self.messages = vec![json!({ "role": "system", "content": system_prompt(cwd) })];
+        self.recorder = SessionRecorder::new(cwd);
+        self.recorder.ensure()
+    }
+
+    /// Replace the live history with prior user/assistant turns — backs /resume
+    /// so a resumed session actually continues in-process.
+    pub(crate) fn load_history(&mut self, cwd: &Path, turns: Vec<Value>) -> Result<(), String> {
+        let mut messages = vec![json!({ "role": "system", "content": system_prompt(cwd) })];
+        messages.extend(turns);
+        self.messages = messages;
+        Ok(())
+    }
+
+    /// Summarize the live history into a single compact system note and drop the
+    /// detailed turns — backs a real /compact instead of a mode-state flag.
+    pub(crate) fn compact(&mut self, args: &Args, instructions: &str, hooks: &mut RunHooks) -> Result<String, String> {
+        if self.turn_len() == 0 {
+            return Err("Nothing to compact yet; the conversation is empty.".into());
+        }
+        if hooks.cancelled() {
+            return Err("Turn cancelled.".into());
+        }
+        hooks.note("compacting conversation");
+        let config = load_config(&args.cwd);
+        let router = model_router_config(&config, args);
+        let transcript = self
+            .messages
+            .iter()
+            .skip(1)
+            .map(|m| {
+                let role = m.get("role").and_then(Value::as_str).unwrap_or("?");
+                let content = m.get("content").and_then(Value::as_str).unwrap_or("");
+                format!("{}: {}", role, content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let extra = if instructions.trim().is_empty() { String::new() } else { format!("\nFocus the summary on: {}", instructions.trim()) };
+        let ask = vec![
+            json!({ "role": "system", "content": "You compress a coding-agent conversation into a durable brief. Reply with plain text only." }),
+            json!({ "role": "user", "content": format!("Summarize the conversation below so work can continue with full context but far fewer tokens. Preserve decisions, file paths, open tasks, and constraints.{}\n\n---\n{}", extra, transcript) }),
+        ];
+        let summary = chat_completion(&router, ask, args.max_tokens as usize, &[])?;
+        if hooks.cancelled() {
+            return Err("Turn cancelled.".into());
+        }
+        let before = self.turn_len();
+        self.recorder.record("compaction", json!({ "before": before, "summary": summary }))?;
+        self.messages = vec![
+            json!({ "role": "system", "content": system_prompt(&args.cwd) }),
+            json!({ "role": "system", "content": format!("Prior conversation summary (compacted from {} messages):\n{}", before, summary) }),
+        ];
+        Ok(format!("Compacted {} messages into a summary.\n\n{}", before, summary))
+    }
+
+    pub(crate) fn run_turn(&mut self, args: &Args, task: &str, hooks: &mut RunHooks) -> Result<String, String> {
+        let config = load_config(&args.cwd);
+        let router = model_router_config(&config, args);
+        let effective_task = apply_mode_instructions(&args.cwd, task)?;
+        self.recorder.record(
+            "user",
+            json!({
+                "task": effective_task,
+                "cwd": args.cwd,
+                "allowWrite": args.allow_write,
+                "allowCommand": args.allow_command,
+                "maxSteps": args.max_steps,
+                "maxTokens": args.max_tokens,
+            }),
+        )?;
+
+        let tool_specs = rust_tool_specs();
+        self.messages.push(json!({ "role": "user", "content": effective_task }));
+
+        for step in 1..=args.max_steps {
+            if hooks.cancelled() {
+                let err = "Turn cancelled.".to_string();
+                self.recorder.record("run_error", json!({ "message": err }))?;
+                return Err(err);
+            }
+            hooks.note(&format!("thinking (step {}/{})", step, args.max_steps));
+            match chat_completion(&router, self.messages.clone(), args.max_tokens as usize, &tool_specs) {
+                Ok(content) => {
+                    self.recorder.record("assistant_raw", json!({ "step": step, "content": content }))?;
+                    let action = action_or_text(&content)?;
+                    self.recorder.record("action", json!({ "step": step, "action": action_to_value(&action) }))?;
+                    self.messages.push(json!({ "role": "assistant", "content": content }));
+
+                    match action {
+                        Action::Final { text } => {
+                            self.recorder.record("final", json!({ "step": step, "text": text }))?;
+                            // Persist the user-visible answer (not the raw JSON
+                            // action blob) so the next turn's context is clean.
+                            if let Some(last) = self.messages.last_mut() {
+                                last["content"] = json!(text);
+                            }
+                            return Ok(text);
+                        }
+                        Action::Tool { tool, input } => {
+                            if hooks.cancelled() {
+                                let err = "Turn cancelled.".to_string();
+                                self.recorder.record("run_error", json!({ "message": err }))?;
+                                return Err(err);
+                            }
+                            hooks.note(&format!("tool: {}", tool));
+                            let result = run_tool_action(args, &mut self.recorder, step, &ToolAction { tool, input }, hooks.interactive)?;
+                            self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&result) }));
+                        }
+                        Action::Tools { tools } => {
+                            let mut results = Vec::new();
+                            for tool in tools {
+                                if hooks.cancelled() {
+                                    let err = "Turn cancelled.".to_string();
+                                    self.recorder.record("run_error", json!({ "message": err }))?;
+                                    return Err(err);
+                                }
+                                hooks.note(&format!("tool: {}", tool.tool));
+                                results.push(run_tool_action(args, &mut self.recorder, step, &tool, hooks.interactive)?);
+                            }
+                            self.messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&json!(results)) }));
+                        }
+                    }
+                }
+                Err(error) => {
+                    self.recorder.record("run_error", json!({ "message": error }))?;
+                    return Err(error);
+                }
+            }
+        }
+
+        let err = format!("max steps exceeded: {}", args.max_steps);
+        self.recorder.record("run_error", json!({ "message": err }))?;
+        Err(err)
+    }
 }
 
 fn action_or_text(content: &str) -> Result<Action, String> {
@@ -458,4 +583,191 @@ fn stamp() -> String {
 
 fn now_stamp() -> String {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    // Env vars are process-global; serialize every test that mutates
+    // JEDEN_SESSION_ROOT so a temp session root set by one test can never leak
+    // into a concurrently running one.
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = env::var_os(key);
+            env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(previous) => env::set_var(self.key, previous),
+                None => env::remove_var(self.key),
+            }
+        }
+    }
+
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        static COUNTER: AtomicU32 = AtomicU32::new(0);
+        let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = env::temp_dir().join(format!("jeden-agent-{}-{}-{}-{}", name, std::process::id(), nanos, seq));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    /// A `Conversation` writes a session dir on construction; point it at a
+    /// throwaway root so tests never touch ~/.jeden. Returns the guard so the
+    /// caller keeps the env var alive for the whole test.
+    fn temp_session_root(name: &str) -> EnvVarGuard {
+        EnvVarGuard::set("JEDEN_SESSION_ROOT", unique_temp_dir(name))
+    }
+
+    fn args_with_cwd(cwd: &Path) -> Args {
+        Args {
+            command: "interactive".into(),
+            cwd: cwd.to_path_buf(),
+            model: None,
+            max_tokens: 2048,
+            max_steps: 8,
+            allow_write: false,
+            allow_command: false,
+            json: false,
+            positionals: vec![],
+        }
+    }
+
+    fn user_turn(text: &str) -> Value {
+        json!({ "role": "user", "content": text })
+    }
+
+    fn assistant_turn(text: &str) -> Value {
+        json!({ "role": "assistant", "content": text })
+    }
+
+    #[test]
+    fn new_conversation_holds_no_turns_but_counts_the_system_prompt() {
+        let _env = env_lock().lock().unwrap();
+        let _root = temp_session_root("new");
+        let cwd = unique_temp_dir("new-cwd");
+
+        let conv = Conversation::new(&cwd).expect("conversation constructs under a temp session root");
+
+        // A fresh conversation carries only the system message: zero turns...
+        assert_eq!(conv.turn_len(), 0);
+        // ...but the system prompt itself is real text, so the token estimate
+        // is strictly positive (the system message is counted).
+        assert!(conv.approx_tokens() > 0, "system prompt should contribute tokens, got {}", conv.approx_tokens());
+    }
+
+    #[test]
+    fn load_history_installs_the_given_turns_and_grows_the_token_estimate() {
+        let _env = env_lock().lock().unwrap();
+        let _root = temp_session_root("load");
+        let cwd = unique_temp_dir("load-cwd");
+
+        let mut conv = Conversation::new(&cwd).expect("conversation constructs");
+        let empty_tokens = conv.approx_tokens();
+        assert_eq!(conv.turn_len(), 0, "sanity: starts empty");
+
+        conv.load_history(
+            &cwd,
+            vec![
+                user_turn("Refactor the parser to stream tokens instead of buffering the whole file."),
+                assistant_turn("Done — parser now streams; see rust/protocol.rs for the new incremental reader."),
+            ],
+        )
+        .expect("load_history succeeds");
+
+        // Two non-system turns were loaded (system prompt is not a turn).
+        assert_eq!(conv.turn_len(), 2);
+        // Adding real turns strictly increases the character count, so the
+        // (chars/4) estimate must exceed the empty-conversation estimate.
+        assert!(
+            conv.approx_tokens() > empty_tokens,
+            "loading turns should grow tokens: {} !> {}",
+            conv.approx_tokens(),
+            empty_tokens
+        );
+    }
+
+    #[test]
+    fn reset_after_load_history_drops_back_to_the_system_prompt() {
+        let _env = env_lock().lock().unwrap();
+        let _root = temp_session_root("reset");
+        let cwd = unique_temp_dir("reset-cwd");
+
+        let mut conv = Conversation::new(&cwd).expect("conversation constructs");
+        conv.load_history(&cwd, vec![user_turn("first task"), assistant_turn("first answer")])
+            .expect("load_history succeeds");
+        assert_eq!(conv.turn_len(), 2, "precondition: history is loaded");
+
+        conv.reset(&cwd).expect("reset succeeds");
+
+        // /clear semantics: every turn is gone, only the system prompt remains.
+        assert_eq!(conv.turn_len(), 0);
+        assert!(conv.approx_tokens() > 0, "system prompt survives reset");
+    }
+
+    #[test]
+    fn retry_task_errors_when_no_failed_task_is_recorded() {
+        // No mode-state file at all: nothing to retry.
+        let cwd = unique_temp_dir("retry-missing");
+        let err = retry_task(&args_with_cwd(&cwd)).expect_err("missing mode-state has no task to retry");
+        assert!(err.contains("No failed task"), "unexpected error: {err}");
+
+        // Mode-state exists but lastFailedTask is blank: still nothing to retry.
+        let cwd = unique_temp_dir("retry-blank");
+        write_mode_state(&cwd, &json!({ "lastFailedTask": "   " })).unwrap();
+        let err = retry_task(&args_with_cwd(&cwd)).expect_err("blank lastFailedTask is not retryable");
+        assert!(err.contains("No failed task"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn retry_task_returns_the_recorded_failed_task() {
+        let cwd = unique_temp_dir("retry-set");
+        write_mode_state(&cwd, &json!({ "lastFailedTask": "rebuild the search index" })).unwrap();
+
+        let task = retry_task(&args_with_cwd(&cwd)).expect("a recorded failed task is replayable");
+        assert_eq!(task, "rebuild the search index");
+    }
+
+    #[test]
+    fn retry_task_refuses_to_replay_a_slash_command() {
+        let cwd = unique_temp_dir("retry-slash");
+        write_mode_state(&cwd, &json!({ "lastFailedTask": "/compact focus on the parser" })).unwrap();
+
+        let err = retry_task(&args_with_cwd(&cwd)).expect_err("slash commands must not be retried as prompts");
+        assert!(err.contains("slash command"), "unexpected error: {err}");
+    }
+
+    #[test]
+    fn btw_task_rejects_empty_or_blank_questions() {
+        assert!(btw_task("").is_err(), "empty question is a usage error");
+        assert!(btw_task("   ").is_err(), "whitespace-only question is a usage error");
+    }
+
+    #[test]
+    fn btw_task_scopes_the_prompt_and_carries_the_question() {
+        let prompt = btw_task("why did the last build fail").expect("a real question yields a prompt");
+        // The caller's question must survive verbatim into the scoped prompt...
+        assert!(prompt.contains("why did the last build fail"), "question missing from prompt: {prompt}");
+        // ...framed as a side question that must not touch files.
+        assert!(prompt.contains("side question"), "prompt is not scoped as a side question: {prompt}");
+    }
 }

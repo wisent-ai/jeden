@@ -1295,7 +1295,37 @@ fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<String, String> 
             }?;
             serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
         },
-        "reload" | "reconnect" => Ok("MCP clients closed; Rust has no persistent MCP clients in this one-shot command.".into()),
+        "reload" => {
+            // Stateless client: re-read config and health-probe every server by
+            // spawning it and listing tools. This is the real reconnect for a
+            // one-shot MCP client — no persistent handle to recycle.
+            let names = tools::configured_mcp_server_names(context.cwd);
+            if names.is_empty() {
+                return Ok("No MCP servers configured.".into());
+            }
+            let mut lines = vec![format!("Reloaded MCP config: {} server(s).", names.len())];
+            for name in &names {
+                match crate::mcp::list_tools(context.cwd, name, 10_000) {
+                    Ok(result) => {
+                        let count = result.get("tools").and_then(Value::as_array).map(|t| t.len()).unwrap_or(0);
+                        lines.push(format!("- {}: ok ({} tools)", name, count));
+                    }
+                    Err(error) => lines.push(format!("- {}: unreachable ({})", name, error.lines().next().unwrap_or("error"))),
+                }
+            }
+            Ok(lines.join("\n"))
+        }
+        "reconnect" => {
+            let (server, _) = split_head(rest);
+            if server.is_empty() { return Err("Usage: /mcp reconnect <server>".into()); }
+            match crate::mcp::list_tools(context.cwd, server, 10_000) {
+                Ok(result) => {
+                    let count = result.get("tools").and_then(Value::as_array).map(|t| t.len()).unwrap_or(0);
+                    Ok(format!("Reconnected to {} by re-spawning it: ok ({} tools).", server, count))
+                }
+                Err(error) => Err(format!("Reconnect to {} failed: {}", server, error)),
+            }
+        }
         _ => Err("Usage: /mcp list | tools <server> | resources <server> | prompts <server> | test <server> | reload | reconnect".into()),
     }
 }

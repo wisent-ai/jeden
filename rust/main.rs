@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use parking_lot::Mutex;
 use std::collections::BTreeMap;
 use std::env;
 use std::io::IsTerminal;
@@ -361,6 +362,18 @@ fn format_slash_help() -> String {
     out
 }
 
+/// True for every slash command Jeden handles itself (canonical list + aliases).
+/// Unknown slash input forwards to the model as a prompt, matching OMP, instead
+/// of hard-erroring.
+pub(crate) fn is_builtin_slash(command: &str) -> bool {
+    let name = command.trim().trim_start_matches('/');
+    const ALIASES: &[&str] = &[
+        "help", "commands", "setup", "providers", "models", "switch",
+        "stats", "debug", "status", "guided-goal", "clear",
+    ];
+    ALIASES.contains(&name) || SLASH_COMMANDS.iter().any(|(n, _)| *n == name)
+}
+
 fn update_tool(env_key: &str, default: &str) -> String {
     #[cfg(test)]
     {
@@ -508,6 +521,32 @@ fn read_transcript_events(dir: &Path) -> Vec<Value> {
     fs::read_to_string(file).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()
 }
 
+/// Extract prior user/assistant turns from a session transcript so /resume can
+/// reload them into the live interactive conversation.
+fn session_conversation_turns(dir: &Path) -> Vec<Value> {
+    let mut turns = Vec::new();
+    for event in read_transcript_events(dir) {
+        let kind = event.get("type").and_then(Value::as_str).unwrap_or("");
+        let data = event.get("data").cloned().unwrap_or(Value::Null);
+        match kind {
+            "user" => {
+                if let Some(task) = data.get("task").and_then(Value::as_str) {
+                    if !task.trim().is_empty() {
+                        turns.push(json!({ "role": "user", "content": task }));
+                    }
+                }
+            }
+            "final" => {
+                if let Some(text) = data.get("text").and_then(Value::as_str) {
+                    turns.push(json!({ "role": "assistant", "content": text }));
+                }
+            }
+            _ => {}
+        }
+    }
+    turns
+}
+
 fn read_session_value(id_or_path: &str) -> Result<Value, String> {
     let dir = session_dir_for(id_or_path);
     if !dir.exists() { return Err(format!("session not found: {}", dir.display())); }
@@ -641,77 +680,159 @@ fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("MODEL").ok())
         .unwrap_or_else(|| "default".into());
     let session_model = Arc::new(Mutex::new(Some(model)));
+    // One persistent conversation for the whole interactive session — real
+    // cross-turn memory, matching OMP's continuous session model.
+    let conversation = Arc::new(Mutex::new(agent::Conversation::new(&args.cwd)?));
+    let context_limit = env::var("JEDEN_CONTEXT_LIMIT").ok().and_then(|v| v.trim().parse::<usize>().ok()).filter(|v| *v > 0);
 
     let status_model = Arc::clone(&session_model);
+    let status_conv = Arc::clone(&conversation);
     let status = move || {
         let (branch, dirty_count) = git_prompt_status(&args.cwd);
+        // try_lock: never block the frame on an in-flight turn; show the last
+        // readable token estimate otherwise.
+        let tokens = status_conv.try_lock().map(|c| c.approx_tokens());
+        let (context_percent, context_limit_label) = match (tokens, context_limit) {
+            (Some(tokens), Some(limit)) => (Some((tokens as f64 / limit as f64) * 100.0), Some(format!("{} tok", limit))),
+            (Some(tokens), None) => (None, Some(format!("~{} tok", tokens))),
+            _ => (None, None),
+        };
         tui::PromptStatus {
             cwd: args.cwd.display().to_string(),
             write_status: if args.allow_write { "allow".into() } else { "ask".into() },
             command_status: if args.allow_command { "allow".into() } else { "ask".into() },
-            model: status_model.lock().unwrap().clone().unwrap_or_else(|| "default".into()),
+            model: status_model.lock().clone().unwrap_or_else(|| "default".into()),
             service_tier: service_tier_prompt(&args.cwd),
             branch,
             dirty_count,
-            context_percent: None,
-            context_limit: None,
+            context_percent,
+            context_limit: context_limit_label,
             cost: None,
         }
     };
 
-    // Agent turns (plain prompts, /retry, /btw) run in the background so the
-    // TUI stays live; other slash commands run inline (some need the cooked
-    // terminal, e.g. the interactive `omp auth-broker login` picker).
-    let classify = |input: &str| tui::default_turn_kind(input);
+    // Agent turns (plain prompts, /retry, /btw) and /compact run in the
+    // background so the TUI stays live; other slash commands run inline (some
+    // need the cooked terminal, e.g. the interactive `omp auth-broker login`).
+    let classify = |input: &str| {
+        let trimmed = input.trim();
+        let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
+        if command == "/compact" {
+            return tui::TurnKind::Background;
+        }
+        // Unknown slash commands forward to the model, so background them for
+        // a live spinner instead of a frozen inline turn.
+        if command.starts_with('/') && !is_builtin_slash(command) {
+            return tui::TurnKind::Background;
+        }
+        tui::default_turn_kind(input)
+    };
 
     let handler_model = Arc::clone(&session_model);
+    let handler_conv = Arc::clone(&conversation);
     let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<String, String> {
+        let mut run_args = args.clone();
+        run_args.command = "run".into();
+        run_args.model = handler_model.lock().clone();
+        run_args.json = false;
+        let mut hooks = agent::RunHooks {
+            cancel: ctx.cancel.clone(),
+            interactive: ctx.interactive,
+            progress: Box::new(|message: &str| (ctx.progress)(message)),
+        };
+
         if input.trim_start().starts_with('/') {
             let trimmed = input.trim();
             let (command, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
-            if matches!(command, "/model" | "/models" | "/switch") {
-                let next = rest.trim();
-                if next.is_empty() {
-                    return Ok(format!("Current model route: {}.", handler_model.lock().unwrap().as_deref().unwrap_or("default")));
+            match command {
+                "/model" | "/models" | "/switch" => {
+                    let next = rest.trim();
+                    if next.is_empty() {
+                        return Ok(format!("Current model route: {}.", handler_model.lock().as_deref().unwrap_or("default")));
+                    }
+                    *handler_model.lock() = Some(next.to_string());
+                    Ok(format!("Model route set to {}.", next))
                 }
-                *handler_model.lock().unwrap() = Some(next.to_string());
-                return Ok(format!("Model route set to {}.", next));
+                "/retry" => {
+                    let task = agent::retry_task(&run_args)?;
+                    run_turn_shared(&handler_conv, &run_args, &task, &mut hooks)
+                }
+                "/btw" => {
+                    let task = agent::btw_task(rest)?;
+                    run_turn_shared(&handler_conv, &run_args, &task, &mut hooks)
+                }
+                "/compact" => {
+                    let mut conv = handler_conv.lock();
+                    conv.compact(&run_args, rest, &mut hooks)
+                }
+                "/clear" | "/new" | "/fresh" => {
+                    handler_conv.lock().reset(&args.cwd)?;
+                    Ok("Started a fresh conversation; prior turns cleared.".into())
+                }
+                "/resume" => {
+                    let target = rest.trim();
+                    if target.is_empty() {
+                        return Err("Usage: /resume <session-id-or-path>".into());
+                    }
+                    let dir = session_dir_for(target);
+                    if !dir.exists() {
+                        return Err(format!("session not found: {}", dir.display()));
+                    }
+                    let turns = session_conversation_turns(&dir);
+                    let count = turns.len();
+                    handler_conv.lock().load_history(&args.cwd, turns)?;
+                    Ok(format!("Resumed {} into this conversation ({} prior turns loaded).", dir.display(), count))
+                }
+                "/context" => {
+                    let conv = handler_conv.lock();
+                    Ok(format!(
+                        "Live conversation: {} message(s), ~{} tokens.{}",
+                        conv.turn_len(),
+                        conv.approx_tokens(),
+                        match context_limit {
+                            Some(limit) => format!(" Context limit: {} tokens (JEDEN_CONTEXT_LIMIT).", limit),
+                            None => " No context limit set (JEDEN_CONTEXT_LIMIT unset).".into(),
+                        }
+                    ))
+                }
+                _ => {
+                    if is_builtin_slash(command) {
+                        handle_slash(&args.cwd, input, handler_model.lock().as_deref())
+                    } else {
+                        // Unknown slash: forward the whole line to the model (OMP parity).
+                        run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
+                    }
+                }
             }
-            if command == "/retry" || command == "/btw" {
-                let mut run_args = args.clone();
-                run_args.command = "run".into();
-                run_args.model = handler_model.lock().unwrap().clone();
-                run_args.positionals = vec![trimmed.to_string()];
-                run_args.json = false;
-                let mut hooks = agent::RunHooks {
-                    cancel: ctx.cancel.clone(),
-                    interactive: ctx.interactive,
-                    progress: Box::new(|message: &str| (ctx.progress)(message)),
-                };
-                return if command == "/retry" {
-                    agent::retry_command_with(&run_args, &mut hooks).map(|text| text.trim().to_string())
-                } else {
-                    agent::btw_command_with(&run_args, rest, &mut hooks).map(|text| text.trim().to_string())
-                };
-            }
-            handle_slash(&args.cwd, input, handler_model.lock().unwrap().as_deref())
         } else {
-            let mut run_args = args.clone();
-            run_args.command = "run".into();
-            run_args.model = handler_model.lock().unwrap().clone();
-            run_args.positionals = vec![input.to_string()];
-            run_args.json = false;
-            let mut hooks = agent::RunHooks {
-                cancel: ctx.cancel.clone(),
-                interactive: ctx.interactive,
-                progress: Box::new(|message: &str| (ctx.progress)(message)),
-            };
-            agent::run_command_with(&run_args, &mut hooks).map(|text| text.trim().to_string())
+            run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
         }
     };
 
     tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
     Ok(String::new())
+}
+
+/// Run one agent turn against the shared conversation and persist retry/session
+/// bookkeeping, mirroring the CLI `run` path.
+fn run_turn_shared(
+    conversation: &Arc<Mutex<agent::Conversation>>,
+    args: &Args,
+    task: &str,
+    hooks: &mut agent::RunHooks,
+) -> Result<String, String> {
+    let mut conv = conversation.lock();
+    let result = conv.run_turn(args, task, hooks);
+    match &result {
+        Ok(_) => {
+            let _ = agent::update_task_outcome(&args.cwd, task, true);
+            let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
+        }
+        Err(_) => {
+            let _ = agent::update_task_outcome(&args.cwd, task, false);
+        }
+    }
+    result.map(|text| text.trim().to_string())
 }
 
 
@@ -1123,5 +1244,49 @@ exit 64
 
         let missing_plan = handle_slash(&cwd, "/plan-review", None).unwrap();
         assert_eq!(missing_plan, "No plan review is available yet.");
+    }
+
+    #[test]
+    fn is_builtin_slash_recognizes_canonical_commands_and_aliases() {
+        // Canonical SLASH_COMMANDS names and Jeden aliases are handled in-process;
+        // leading slash and surrounding whitespace are tolerated.
+        for known in [
+            "/help", "/compact", "/login", "/mcp", "/clear", "/model", "/context",
+            "help", "  /help  ",
+        ] {
+            assert!(is_builtin_slash(known), "expected {known:?} to be a builtin slash command");
+        }
+
+        // Unknown slash input must forward to the model as a prompt, so it is NOT builtin.
+        // "/" trims to an empty name and must not be mistaken for a command.
+        for unknown in ["/foobar", "/", "/nonsense"] {
+            assert!(!is_builtin_slash(unknown), "expected {unknown:?} to be forwarded, not builtin");
+        }
+    }
+
+    #[test]
+    fn session_conversation_turns_extracts_user_and_final_events_in_order() {
+        let dir = temp_workspace("resume-turns");
+        // Transcript interleaves the two event types we care about with lines that
+        // must be dropped: a non-user/final event carrying task/text fields, and a
+        // whitespace-only user task guarded out by the extractor.
+        let events = [
+            json!({"type": "user", "data": {"task": "first question"}}),
+            json!({"type": "tool", "data": {"task": "ignored task", "text": "ignored text"}}),
+            json!({"type": "user", "data": {"task": "   "}}),
+            json!({"type": "final", "data": {"text": "the answer"}}),
+        ];
+        let jsonl = events.iter().map(Value::to_string).collect::<Vec<_>>().join("\n");
+        fs::write(dir.join("transcript.jsonl"), jsonl).unwrap();
+
+        let turns = session_conversation_turns(&dir);
+
+        assert_eq!(
+            turns,
+            vec![
+                json!({"role": "user", "content": "first question"}),
+                json!({"role": "assistant", "content": "the answer"}),
+            ]
+        );
     }
 }
