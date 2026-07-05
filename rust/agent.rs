@@ -219,16 +219,19 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
 }
 
 pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
-    let task = args.positionals.join(" ").trim().to_string();
+    let mut task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
         let (command, rest) = split_head(task.trim());
         if command == "/retry" { return retry_command_with(args, hooks); }
         if command == "/btw" { return btw_command_with(args, rest, hooks); }
-        // Unknown slash commands fall through to the model as a prompt (OMP
-        // parity) instead of hard-erroring; builtins are handled locally.
+        // Builtins handled locally; file-based custom commands expand to a
+        // prompt; anything else falls through to the model literally (OMP parity).
         if crate::is_builtin_slash(command) {
             let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
             return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+        }
+        if let Some(expanded) = crate::resolve_file_command(&args.cwd, command, rest) {
+            task = expanded;
         }
     }
 

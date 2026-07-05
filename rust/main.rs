@@ -374,6 +374,64 @@ pub(crate) fn is_builtin_slash(command: &str) -> bool {
     ALIASES.contains(&name) || SLASH_COMMANDS.iter().any(|(n, _)| *n == name)
 }
 
+/// Directories searched for file-based custom slash commands, project first.
+/// Each `<name>.md` becomes `/<name>`; the body is a prompt template.
+fn command_dirs(cwd: &Path) -> Vec<PathBuf> {
+    vec![cwd.join(".jeden/commands"), dirs_home().join(".jeden/commands")]
+}
+
+/// Resolve a file-based custom command `<name>` to its template body (frontmatter
+/// stripped), searching project then user dirs. Returns None if none matches.
+fn find_file_command(cwd: &Path, name: &str) -> Option<String> {
+    let safe = name.trim().trim_start_matches('/');
+    if safe.is_empty() || !safe.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_')) {
+        return None;
+    }
+    for dir in command_dirs(cwd) {
+        let path = dir.join(format!("{}.md", safe));
+        if let Ok(text) = fs::read_to_string(&path) {
+            return Some(strip_frontmatter(&text));
+        }
+    }
+    None
+}
+
+/// Drop a leading `---\n...\n---` YAML frontmatter block if present.
+fn strip_frontmatter(text: &str) -> String {
+    let trimmed = text.trim_start_matches('\u{feff}');
+    if let Some(rest) = trimmed.strip_prefix("---\n") {
+        if let Some(end) = rest.find("\n---") {
+            let after = &rest[end + 4..];
+            return after.trim_start_matches('\n').to_string();
+        }
+    }
+    text.to_string()
+}
+
+/// Expand a command template with args: `$ARGUMENTS`/`$@` = all args, `$1..$9` =
+/// positionals. If the template uses no placeholder and args exist, they are
+/// appended so a bare-body command still receives its arguments.
+pub(crate) fn expand_file_command(template: &str, args: &str) -> String {
+    let args = args.trim();
+    let positionals: Vec<&str> = args.split_whitespace().collect();
+    let mut out = template.to_string();
+    let used_placeholder = out.contains("$ARGUMENTS") || out.contains("$@") || (1..=9).any(|n| out.contains(&format!("${}", n)));
+    out = out.replace("$ARGUMENTS", args).replace("$@", args);
+    for n in 1..=9 {
+        out = out.replace(&format!("${}", n), positionals.get(n - 1).copied().unwrap_or(""));
+    }
+    if !used_placeholder && !args.is_empty() {
+        out = format!("{}\n\n{}", out.trim_end(), args);
+    }
+    out
+}
+
+/// A file command resolved to its runnable prompt, or None. Public so both the
+/// CLI run path and the interactive handler share one discovery.
+pub(crate) fn resolve_file_command(cwd: &Path, command: &str, args: &str) -> Option<String> {
+    find_file_command(cwd, command).map(|template| expand_file_command(&template, args))
+}
+
 fn update_tool(env_key: &str, default: &str) -> String {
     #[cfg(test)]
     {
@@ -440,6 +498,24 @@ fn handle_model_slash(cwd: &Path, current_model: Option<&str>, args: &str) -> Re
     Ok(format!("Model route set to {}.", next))
 }
 
+/// List discovered file-based custom commands for /help, project then user.
+fn list_file_commands(cwd: &Path) -> Vec<String> {
+    let mut names = std::collections::BTreeSet::new();
+    for dir in command_dirs(cwd) {
+        if let Ok(entries) = fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) == Some("md") {
+                    if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                        names.insert(stem.to_string());
+                    }
+                }
+            }
+        }
+    }
+    names.into_iter().collect()
+}
+
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
     let mut parts = trimmed.split_whitespace();
@@ -453,7 +529,17 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         return result;
     }
     match command {
-        "/help" | "/commands" => Ok(format_slash_help()),
+        "/help" | "/commands" => {
+            let mut help = format_slash_help();
+            let file_cmds = list_file_commands(cwd);
+            if !file_cmds.is_empty() {
+                help.push_str("\nFile-based custom commands (.jeden/commands/*.md):\n");
+                for name in file_cmds {
+                    help.push_str(&format!("/{}\n", name));
+                }
+            }
+            Ok(help)
+        }
         "/settings" | "/setup" | "/providers" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
@@ -819,6 +905,9 @@ fn interactive(args: &Args) -> Result<String, String> {
                 _ => {
                     if is_builtin_slash(command) {
                         handle_slash(&args.cwd, input, handler_model.lock().as_deref())
+                    } else if let Some(expanded) = resolve_file_command(&args.cwd, command, rest) {
+                        // File-based custom command: expand its template and run it.
+                        run_turn_shared(&handler_conv, &run_args, &expanded, &mut hooks)
                     } else {
                         // Unknown slash: forward the whole line to the model (OMP parity).
                         run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
@@ -1309,5 +1398,70 @@ exit 64
                 json!({"role": "assistant", "content": "the answer"}),
             ]
         );
+    }
+
+    #[test]
+    fn expand_file_command_substitutes_all_args_and_positionals() {
+        // $ARGUMENTS/$@ inject the full argument string; $1..$9 inject positionals
+        // with a missing position collapsing to empty. Each row names the exact
+        // substitution rule it defends so a failure points at the broken rule.
+        let cases = [
+            ("all args via $ARGUMENTS", "hi $ARGUMENTS", "World", "hi World"),
+            ("all args via $@", "run $@ now", "a b c", "run a b c now"),
+            ("positional $1 and $2", "$1 and $2", "a b", "a and b"),
+            ("missing positional collapses to empty", "$1 and $2", "a", "a and "),
+            ("placeholder present + empty args fills empty (no append)", "x=$ARGUMENTS", "", "x="),
+        ];
+        for (name, template, args, expected) in cases {
+            assert_eq!(expand_file_command(template, args), expected, "case: {name}");
+        }
+    }
+
+    #[test]
+    fn expand_file_command_appends_bare_args_only_when_no_placeholder_and_args_present() {
+        // A placeholder-free body still receives its args, appended after a blank
+        // line; the original body is preserved verbatim ahead of the separator.
+        assert_eq!(expand_file_command("no placeholder", "x y"), "no placeholder\n\nx y");
+        // No args => body returned unchanged: no trailing blank line, no separator.
+        assert_eq!(expand_file_command("no placeholder", ""), "no placeholder");
+        // Whitespace-only args are treated as no args (args are trimmed first).
+        assert_eq!(expand_file_command("no placeholder", "   "), "no placeholder");
+    }
+
+    #[test]
+    fn resolve_file_command_reads_project_command_strips_frontmatter_and_expands() {
+        let cwd = temp_workspace("file-cmd-greet");
+        let commands = cwd.join(".jeden/commands");
+        fs::create_dir_all(&commands).unwrap();
+        // Leading `---\n...\n---` frontmatter must be dropped; only the body
+        // template survives and is expanded against the args. The project dir is
+        // searched before ~/.jeden, so this case has no HOME dependency.
+        fs::write(
+            commands.join("greet.md"),
+            "---\ndescription: greet someone\nmodel: opus\n---\n$ARGUMENTS",
+        )
+        .unwrap();
+
+        let resolved = resolve_file_command(&cwd, "/greet", "Bob");
+
+        // Exactly the expanded body: frontmatter gone (no "description"/"---"),
+        // `$ARGUMENTS` replaced by the args. Either regression breaks equality.
+        assert_eq!(resolved, Some("Bob".to_string()));
+    }
+
+    #[test]
+    fn resolve_file_command_returns_none_for_missing_file_and_invalid_name() {
+        // find_file_command falls back to ~/.jeden/commands after the project dir,
+        // so isolate HOME to an empty temp dir to keep the "missing" case hermetic:
+        // a stray real ~/.jeden/commands/missing.md must not mask the None contract.
+        let _env_guard = env_lock().lock().unwrap();
+        let cwd = temp_workspace("file-cmd-none-cwd");
+        let home = temp_workspace("file-cmd-none-home");
+        let _home_env = EnvVarGuard::set("HOME", &home);
+
+        // No matching file in either the empty project or the empty user dir.
+        assert_eq!(resolve_file_command(&cwd, "/missing", ""), None);
+        // A name containing a space is rejected before any filesystem lookup.
+        assert_eq!(resolve_file_command(&cwd, "/bad name", ""), None);
     }
 }
