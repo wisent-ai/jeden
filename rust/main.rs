@@ -717,7 +717,7 @@ fn interactive(args: &Args) -> Result<String, String> {
     let classify = |input: &str| {
         let trimmed = input.trim();
         let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
-        if command == "/compact" {
+        if command == "/compact" || command == "/handoff" {
             return tui::TurnKind::Background;
         }
         // Unknown slash commands forward to the model, so background them for
@@ -765,9 +765,30 @@ fn interactive(args: &Args) -> Result<String, String> {
                     let mut conv = handler_conv.lock();
                     conv.compact(&run_args, rest, &mut hooks)
                 }
+                "/handoff" => {
+                    let mut conv = handler_conv.lock();
+                    conv.handoff(&run_args, rest, &mut hooks)
+                }
                 "/clear" | "/new" | "/fresh" => {
                     handler_conv.lock().reset(&args.cwd)?;
                     Ok("Started a fresh conversation; prior turns cleared.".into())
+                }
+                "/rename" => {
+                    let name = rest.trim();
+                    if name.is_empty() { return Err("Usage: /rename <name>".into()); }
+                    let dir = handler_conv.lock().session_path();
+                    let state_path = dir.join("state.json");
+                    let mut state = read_json::<Value>(&state_path);
+                    if !state.is_object() { state = json!({}); }
+                    state.as_object_mut().expect("state object").insert("name".into(), json!(name));
+                    fs::write(&state_path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+                    Ok(format!("Session renamed to \"{}\".", name))
+                }
+                "/drop" => {
+                    let dir = handler_conv.lock().session_path();
+                    let _ = fs::remove_dir_all(&dir);
+                    handler_conv.lock().reset(&args.cwd)?;
+                    Ok(format!("Dropped session {} and started a fresh conversation.", dir.display()))
                 }
                 "/resume" => {
                     let target = rest.trim();

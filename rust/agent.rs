@@ -338,6 +338,55 @@ impl Conversation {
         Ok(format!("Compacted {} messages into a summary.\n\n{}", before, summary))
     }
 
+    /// Generate an LLM handoff brief from the live history, write it to the
+    /// session artifacts, then start a fresh session seeded with the brief —
+    /// a real /handoff (OMP generateHandoff parity), not a raw transcript dump.
+    pub(crate) fn handoff(&mut self, args: &Args, focus: &str, hooks: &mut RunHooks) -> Result<String, String> {
+        if self.turn_len() == 0 {
+            return Err("Nothing to hand off yet; the conversation is empty.".into());
+        }
+        if hooks.cancelled() {
+            return Err("Turn cancelled.".into());
+        }
+        hooks.note("generating handoff");
+        let config = load_config(&args.cwd);
+        let router = model_router_config(&config, args);
+        let transcript = self
+            .messages
+            .iter()
+            .skip(1)
+            .map(|m| {
+                let role = m.get("role").and_then(Value::as_str).unwrap_or("?");
+                let content = m.get("content").and_then(Value::as_str).unwrap_or("");
+                format!("{}: {}", role, content)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let extra = if focus.trim().is_empty() { String::new() } else { format!("\nFocus the handoff on: {}", focus.trim()) };
+        let ask = vec![
+            json!({ "role": "system", "content": "You write a handoff brief so a fresh agent session can continue this work with no prior context. Reply with a concise plain-text brief: goal, decisions, files touched, open tasks, next steps." }),
+            json!({ "role": "user", "content": format!("Write the handoff brief for the conversation below.{}\n\n---\n{}", extra, transcript) }),
+        ];
+        let brief = chat_completion(&router, ask, args.max_tokens as usize, &[])?;
+        if hooks.cancelled() {
+            return Err("Turn cancelled.".into());
+        }
+        let artifact_dir = self.recorder.artifact_dir();
+        fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
+        let file = artifact_dir.join("handoff.md");
+        let doc = if focus.trim().is_empty() { brief.clone() } else { format!("Focus: {}\n\n{}", focus.trim(), brief) };
+        fs::write(&file, &doc).map_err(|e| e.to_string())?;
+        self.recorder.record("handoff", json!({ "focus": focus, "brief": brief, "file": file }))?;
+        // Start a fresh session seeded with the handoff brief.
+        self.recorder = SessionRecorder::new(&args.cwd);
+        self.recorder.ensure()?;
+        self.messages = vec![
+            json!({ "role": "system", "content": system_prompt(&args.cwd) }),
+            json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),
+        ];
+        Ok(format!("Handoff brief written to {} and a fresh session was started seeded with it.\n\n{}", file.display(), brief))
+    }
+
     pub(crate) fn run_turn(&mut self, args: &Args, task: &str, hooks: &mut RunHooks) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
