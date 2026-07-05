@@ -19,6 +19,10 @@ pub struct ToolRuntime<'a> {
     pub artifact_dir: Option<&'a Path>,
     pub allow_write: bool,
     pub allow_command: bool,
+    /// False when the turn runs on a background thread while the TUI owns the
+    /// terminal; stdin-reading tools (ask_user) must refuse instead of stealing
+    /// keystrokes from the interactive event loop.
+    pub interactive: bool,
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {
@@ -1386,6 +1390,7 @@ fn run_read_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, S
         artifact_dir: runtime.artifact_dir,
         allow_write: runtime.allow_write,
         allow_command: true,
+        interactive: runtime.interactive,
     };
     run_process(&elevated, input)
 }
@@ -1808,9 +1813,11 @@ fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String
     }
     Err(format!("unknown memory op: {op}"))
 }
-
-fn ask_user(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let question = string_input(input, "question").ok_or("ask_user requires question")?;
+    if !runtime.interactive {
+        return Err("ask_user is unavailable during a background turn; run without the interactive TUI or answer inline.".into());
+    }
     let options = input.get("options").and_then(Value::as_array).map(|items| {
         items.iter().filter_map(Value::as_str).map(ToString::to_string).collect::<Vec<_>>()
     }).unwrap_or_default();

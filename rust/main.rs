@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
 use std::env;
 use std::io::IsTerminal;
@@ -640,63 +640,77 @@ fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("JEDEN_MODEL").ok())
         .or_else(|| env::var("MODEL").ok())
         .unwrap_or_else(|| "default".into());
-    let session_model = RefCell::new(Some(model));
-    tui::run_basic_loop(
-        || {
-            let (branch, dirty_count) = git_prompt_status(&args.cwd);
-            tui::PromptStatus {
-                cwd: args.cwd.display().to_string(),
-                write_status: if args.allow_write { "allow".into() } else { "ask".into() },
-                command_status: if args.allow_command { "allow".into() } else { "ask".into() },
-                model: session_model.borrow().clone().unwrap_or_else(|| "default".into()),
-                service_tier: service_tier_prompt(&args.cwd),
-                branch,
-                dirty_count,
-                context_percent: None,
-                context_limit: None,
-                cost: None,
+    let session_model = Arc::new(Mutex::new(Some(model)));
+
+    let status_model = Arc::clone(&session_model);
+    let status = move || {
+        let (branch, dirty_count) = git_prompt_status(&args.cwd);
+        tui::PromptStatus {
+            cwd: args.cwd.display().to_string(),
+            write_status: if args.allow_write { "allow".into() } else { "ask".into() },
+            command_status: if args.allow_command { "allow".into() } else { "ask".into() },
+            model: status_model.lock().unwrap().clone().unwrap_or_else(|| "default".into()),
+            service_tier: service_tier_prompt(&args.cwd),
+            branch,
+            dirty_count,
+            context_percent: None,
+            context_limit: None,
+            cost: None,
+        }
+    };
+
+    // Agent turns (plain prompts, /retry, /btw) run in the background so the
+    // TUI stays live; other slash commands run inline (some need the cooked
+    // terminal, e.g. the interactive `omp auth-broker login` picker).
+    let classify = |input: &str| tui::default_turn_kind(input);
+
+    let handler_model = Arc::clone(&session_model);
+    let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<String, String> {
+        if input.trim_start().starts_with('/') {
+            let trimmed = input.trim();
+            let (command, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
+            if matches!(command, "/model" | "/models" | "/switch") {
+                let next = rest.trim();
+                if next.is_empty() {
+                    return Ok(format!("Current model route: {}.", handler_model.lock().unwrap().as_deref().unwrap_or("default")));
+                }
+                *handler_model.lock().unwrap() = Some(next.to_string());
+                return Ok(format!("Model route set to {}.", next));
             }
-        },
-        |input| {
-            if input.trim_start().starts_with('/') {
-                let trimmed = input.trim();
-                let (command, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
-                if matches!(command, "/model" | "/models" | "/switch") {
-                    let next = rest.trim();
-                    if next.is_empty() {
-                        return Ok(format!("Current model route: {}.", session_model.borrow().as_deref().unwrap_or("default")));
-                    }
-                    *session_model.borrow_mut() = Some(next.to_string());
-                    return Ok(format!("Model route set to {}.", next));
-                }
-                if command == "/retry" {
-                    let mut run_args = args.clone();
-                    run_args.command = "run".into();
-                    run_args.model = session_model.borrow().clone();
-                    run_args.positionals = vec![trimmed.to_string()];
-                    run_args.json = false;
-                    return agent::retry_command(&run_args).map(|text| text.trim().to_string());
-                }
-                if command == "/btw" {
-                    let mut run_args = args.clone();
-                    run_args.command = "run".into();
-                    run_args.model = session_model.borrow().clone();
-                    run_args.positionals = vec![trimmed.to_string()];
-                    run_args.json = false;
-                    return agent::btw_command(&run_args, rest).map(|text| text.trim().to_string());
-                }
-                handle_slash(&args.cwd, input, session_model.borrow().as_deref())
-            } else {
+            if command == "/retry" || command == "/btw" {
                 let mut run_args = args.clone();
                 run_args.command = "run".into();
-                run_args.model = session_model.borrow().clone();
-                run_args.positionals = vec![input.to_string()];
+                run_args.model = handler_model.lock().unwrap().clone();
+                run_args.positionals = vec![trimmed.to_string()];
                 run_args.json = false;
-                agent::run_command(&run_args).map(|text| text.trim().to_string())
+                let mut hooks = agent::RunHooks {
+                    cancel: ctx.cancel.clone(),
+                    interactive: ctx.interactive,
+                    progress: Box::new(|message: &str| (ctx.progress)(message)),
+                };
+                return if command == "/retry" {
+                    agent::retry_command_with(&run_args, &mut hooks).map(|text| text.trim().to_string())
+                } else {
+                    agent::btw_command_with(&run_args, rest, &mut hooks).map(|text| text.trim().to_string())
+                };
             }
-        },
-    )
-    .map_err(|e| e.to_string())?;
+            handle_slash(&args.cwd, input, handler_model.lock().unwrap().as_deref())
+        } else {
+            let mut run_args = args.clone();
+            run_args.command = "run".into();
+            run_args.model = handler_model.lock().unwrap().clone();
+            run_args.positionals = vec![input.to_string()];
+            run_args.json = false;
+            let mut hooks = agent::RunHooks {
+                cancel: ctx.cancel.clone(),
+                interactive: ctx.interactive,
+                progress: Box::new(|message: &str| (ctx.progress)(message)),
+            };
+            agent::run_command_with(&run_args, &mut hooks).map(|text| text.trim().to_string())
+        }
+    };
+
+    tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
     Ok(String::new())
 }
 

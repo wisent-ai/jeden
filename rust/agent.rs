@@ -16,6 +16,36 @@ pub(crate) struct RunResult {
     pub(crate) session_path: Option<PathBuf>,
 }
 
+/// Cooperative controls for a turn: cancellation polled between steps, a
+/// progress sink for live TUI status, and an interactive flag that gates
+/// stdin-reading tools when the turn runs on a background thread.
+pub(crate) struct RunHooks<'a> {
+    pub(crate) cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub(crate) interactive: bool,
+    pub(crate) progress: Box<dyn Fn(&str) + 'a>,
+}
+
+impl RunHooks<'static> {
+    /// Non-interactive-safe default for the CLI `run` path (no TUI, no cancel).
+    pub(crate) fn inert() -> Self {
+        Self {
+            cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            interactive: true,
+            progress: Box::new(|_| {}),
+        }
+    }
+}
+
+impl RunHooks<'_> {
+    fn cancelled(&self) -> bool {
+        self.cancel.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn note(&self, message: &str) {
+        (self.progress)(message);
+    }
+}
+
 struct SessionRecorder {
     id: String,
     dir: PathBuf,
@@ -114,7 +144,7 @@ fn split_head(args: &str) -> (&str, &str) {
     }
 }
 
-pub(crate) fn retry_command(args: &Args) -> Result<String, String> {
+pub(crate) fn retry_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
     let state = read_mode_state(&args.cwd);
     let task = state
         .get("lastFailedTask")
@@ -127,10 +157,10 @@ pub(crate) fn retry_command(args: &Args) -> Result<String, String> {
     let mut retry_args = args.clone();
     retry_args.command = "run".into();
     retry_args.positionals = vec![task.to_string()];
-    run_command(&retry_args)
+    run_command_with(&retry_args, hooks)
 }
 
-pub(crate) fn btw_command(args: &Args, question: &str) -> Result<String, String> {
+pub(crate) fn btw_command_with(args: &Args, question: &str, hooks: &mut RunHooks) -> Result<String, String> {
     let question = question.trim();
     if question.is_empty() { return Err("Usage: /btw <side question>".into()); }
     let mut side_args = args.clone();
@@ -139,21 +169,25 @@ pub(crate) fn btw_command(args: &Args, question: &str) -> Result<String, String>
         "Answer this side question using the current session context.\nKeep it separate from the main task: do not change files unless the side question explicitly asks for file changes.\nQuestion: {}",
         question
     )];
-    run_command(&side_args)
+    run_command_with(&side_args, hooks)
 }
 
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
+    run_command_with(args, &mut RunHooks::inert())
+}
+
+pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
     let task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
         let (command, rest) = split_head(task.trim());
-        if command == "/retry" { return retry_command(args); }
-        if command == "/btw" { return btw_command(args, rest); }
+        if command == "/retry" { return retry_command_with(args, hooks); }
+        if command == "/btw" { return btw_command_with(args, rest, hooks); }
         let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
         return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
     }
 
     let effective_task = apply_mode_instructions(&args.cwd, &task)?;
-    let result = run_no_tool_agent(args, &effective_task);
+    let result = run_no_tool_agent(args, &effective_task, hooks);
     if let Err(error) = &result {
         let _ = update_task_outcome(&args.cwd, &task, false);
         return Err(error.clone());
@@ -181,7 +215,7 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     Ok(result.text + "\n")
 }
 
-fn run_no_tool_agent(args: &Args, task: &str) -> Result<RunResult, String> {
+fn run_no_tool_agent(args: &Args, task: &str, hooks: &mut RunHooks) -> Result<RunResult, String> {
     let config = load_config(&args.cwd);
     let router = model_router_config(&config, args);
     let mut recorder = SessionRecorder::new(&args.cwd);
@@ -205,6 +239,12 @@ fn run_no_tool_agent(args: &Args, task: &str) -> Result<RunResult, String> {
     ];
 
     for step in 1..=args.max_steps {
+        if hooks.cancelled() {
+            let err = "Turn cancelled.".to_string();
+            recorder.record("run_error", json!({ "message": err }))?;
+            return Err(err);
+        }
+        hooks.note(&format!("thinking (step {}/{})", step, args.max_steps));
         match chat_completion(&router, messages.clone(), args.max_tokens as usize, &tool_specs) {
             Ok(content) => {
                 recorder.record("assistant_raw", json!({ "step": step, "content": content }))?;
@@ -218,13 +258,25 @@ fn run_no_tool_agent(args: &Args, task: &str) -> Result<RunResult, String> {
                         return Ok(RunResult { text, session_path: Some(recorder.path()) });
                     }
                     Action::Tool { tool, input } => {
-                        let result = run_tool_action(args, &mut recorder, step, &ToolAction { tool, input })?;
+                        if hooks.cancelled() {
+                            let err = "Turn cancelled.".to_string();
+                            recorder.record("run_error", json!({ "message": err }))?;
+                            return Err(err);
+                        }
+                        hooks.note(&format!("tool: {}", tool));
+                        let result = run_tool_action(args, &mut recorder, step, &ToolAction { tool, input }, hooks.interactive)?;
                         messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&result) }));
                     }
                     Action::Tools { tools } => {
                         let mut results = Vec::new();
                         for tool in tools {
-                            results.push(run_tool_action(args, &mut recorder, step, &tool)?);
+                            if hooks.cancelled() {
+                                let err = "Turn cancelled.".to_string();
+                                recorder.record("run_error", json!({ "message": err }))?;
+                                return Err(err);
+                            }
+                            hooks.note(&format!("tool: {}", tool.tool));
+                            results.push(run_tool_action(args, &mut recorder, step, &tool, hooks.interactive)?);
                         }
                         messages.push(json!({ "role": "user", "content": crate::tool_runtime::format_tool_result(&json!(results)) }));
                     }
@@ -262,13 +314,14 @@ fn tool_to_value(action: &ToolAction) -> Value {
     json!({ "tool": action.tool, "input": action.input })
 }
 
-fn run_tool_action(args: &Args, recorder: &mut SessionRecorder, step: u32, action: &ToolAction) -> Result<Value, String> {
+fn run_tool_action(args: &Args, recorder: &mut SessionRecorder, step: u32, action: &ToolAction, interactive: bool) -> Result<Value, String> {
     recorder.record("tool_call", json!({ "step": step, "tool": action.tool, "input": action.input }))?;
     let runtime = crate::tool_runtime::ToolRuntime {
         cwd: &args.cwd,
         artifact_dir: Some(&recorder.artifact_dir()),
         allow_write: args.allow_write,
         allow_command: args.allow_command,
+        interactive,
     };
     let result = match crate::tool_runtime::execute(&runtime, &action.tool, &action.input) {
         Ok(result) => result,

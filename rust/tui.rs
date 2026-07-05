@@ -1,4 +1,8 @@
 use std::io::{self, IsTerminal, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
@@ -468,10 +472,59 @@ impl Drop for RawModeGuard {
     }
 }
 
-fn old_read_line_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
+/// How a submitted line should run relative to the terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TurnKind {
+    /// Runs inline on the main thread with raw mode suspended — for commands
+    /// that need the cooked terminal (interactive `omp auth-broker login`) or
+    /// that return instantly.
+    Foreground,
+    /// Runs on a worker thread while the TUI stays live (spinner + Esc-cancel).
+    Background,
+}
+
+/// Default policy: agent turns (plain prompts, `/retry`, `/btw`) run in the
+/// background so the TUI stays live; every other slash command runs inline
+/// (some need the cooked terminal, most return instantly).
+pub fn default_turn_kind(input: &str) -> TurnKind {
+    let trimmed = input.trim();
+    if !trimmed.starts_with('/') {
+        return TurnKind::Background;
+    }
+    let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
+    match command {
+        "/retry" | "/btw" => TurnKind::Background,
+        _ => TurnKind::Foreground,
+    }
+}
+
+/// Cooperative controls handed to a turn handler.
+pub struct TurnCtx<'a> {
+    /// Set true when the user presses Esc/Ctrl-C during a background turn.
+    pub cancel: Arc<AtomicBool>,
+    /// False on a background turn: stdin-reading tools must refuse.
+    pub interactive: bool,
+    /// Live status sink rendered next to the spinner.
+    pub progress: &'a dyn Fn(&str),
+}
+
+fn spinner_glyph(frame: usize) -> char {
+    const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+    FRAMES[frame % FRAMES.len()]
+}
+
+fn push_turn_result(messages: &mut Vec<Message>, prompt: &str, result: Result<String, String>) {
+    match result {
+        Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
+        Err(error) => messages.push(Message::new("error", error)),
+    }
+}
+
+fn old_read_line_loop<S, C, H>(mut status_provider: S, mut classify: C, handler: H) -> io::Result<()>
 where
     S: FnMut() -> PromptStatus,
-    F: FnMut(&str) -> Result<String, String>,
+    C: FnMut(&str) -> TurnKind,
+    H: Fn(&str, &TurnCtx) -> Result<String, String>,
 {
     let mut messages = Vec::new();
     loop {
@@ -501,21 +554,105 @@ where
             break;
         }
         messages.push(Message::new("user", prompt));
-        match handle_prompt(prompt) {
-            Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
-            Err(error) => messages.push(Message::new("error", error)),
-        }
+        // Piped/non-tty: no threads, no cancel; run inline interactively.
+        let _ = classify(prompt);
+        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {} };
+        push_turn_result(&mut messages, prompt, handler(prompt, &ctx));
     }
     Ok(())
 }
 
-pub fn run_basic_loop<S, F>(mut status_provider: S, mut handle_prompt: F) -> io::Result<()>
+/// Run a background turn on a worker thread while animating a spinner and
+/// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
+/// agent loop polls between steps. Returns the handler's result.
+fn run_background_turn<S, H>(
+    renderer: &mut DiffRenderer,
+    status_provider: &mut S,
+    messages: &[Message],
+    handler: &H,
+    prompt: &str,
+) -> io::Result<Result<String, String>>
 where
     S: FnMut() -> PromptStatus,
-    F: FnMut(&str) -> Result<String, String>,
+    H: Fn(&str, &TurnCtx) -> Result<String, String> + Sync,
+{
+    let cancel = Arc::new(AtomicBool::new(false));
+    let (tx, rx) = mpsc::channel::<String>();
+    let mut note = String::from("working…");
+    let mut frame = 0usize;
+    // Status (git branch, model, cwd) is stable for the duration of a turn;
+    // snapshot it once so the ~8fps spinner loop does not re-shell git per frame.
+    let status = status_provider();
+
+    let outcome = thread::scope(|scope| -> io::Result<Result<String, String>> {
+        let worker_cancel = cancel.clone();
+        let worker = scope.spawn(move || {
+            let progress = move |message: &str| {
+                let _ = tx.send(message.to_string());
+            };
+            let ctx = TurnCtx { cancel: worker_cancel, interactive: false, progress: &progress };
+            handler(prompt, &ctx)
+        });
+
+        loop {
+            while let Ok(message) = rx.try_recv() {
+                note = message;
+            }
+            let cancelling = cancel.load(Ordering::Relaxed);
+            let label = if cancelling {
+                format!("{} cancelling…", spinner_glyph(frame))
+            } else {
+                format!("{} {} · esc to cancel", spinner_glyph(frame), note)
+            };
+            let mut view = messages.to_vec();
+            view.push(Message::new("system", label));
+            let options = FrameOptions {
+                status: status.clone(),
+                messages: view,
+                input_text: String::new(),
+                busy: true,
+                columns: default_columns(),
+                rows: default_rows(),
+                color: stdout_supports_color(),
+                slash_selection: 0,
+            };
+            renderer.draw(&options)?;
+            frame = frame.wrapping_add(1);
+
+            if worker.is_finished() {
+                break;
+            }
+            if event::poll(Duration::from_millis(120))? {
+                if let Event::Key(key) = event::read()? {
+                    if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                        let is_ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+                        if key.code == KeyCode::Esc || is_ctrl_c {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Drain any final progress and join.
+        while let Ok(message) = rx.try_recv() {
+            note = message;
+        }
+        Ok(worker.join().unwrap_or_else(|_| Err("Turn thread panicked.".into())))
+    })?;
+
+    renderer.reset();
+    Ok(outcome)
+}
+
+pub fn run_basic_loop<S, C, H>(mut status_provider: S, mut classify: C, handler: H) -> io::Result<()>
+where
+    S: FnMut() -> PromptStatus,
+    C: FnMut(&str) -> TurnKind,
+    H: Fn(&str, &TurnCtx) -> Result<String, String> + Sync,
 {
     if !io::stdin().is_terminal() {
-        return old_read_line_loop(status_provider, handle_prompt);
+        return old_read_line_loop(status_provider, classify, handler);
     }
 
     let _raw = RawModeGuard::enter()?;
@@ -573,14 +710,20 @@ where
                 if matches!(prompt.as_str(), "/exit" | "/quit") {
                     break;
                 }
-                disable_raw_mode()?;
-                let result = handle_prompt(&prompt);
-                enable_raw_mode()?;
-                renderer.reset();
                 messages.push(Message::new("user", prompt.clone()));
-                match result {
-                    Ok(text) => messages.push(Message::new(if prompt.starts_with('/') { "system" } else { "assistant" }, text.trim().to_string())),
-                    Err(error) => messages.push(Message::new("error", error)),
+                match classify(&prompt) {
+                    TurnKind::Foreground => {
+                        disable_raw_mode()?;
+                        let ctx = TurnCtx { cancel: Arc::new(AtomicBool::new(false)), interactive: true, progress: &|_| {} };
+                        let result = handler(&prompt, &ctx);
+                        enable_raw_mode()?;
+                        renderer.reset();
+                        push_turn_result(&mut messages, &prompt, result);
+                    }
+                    TurnKind::Background => {
+                        let result = run_background_turn(&mut renderer, &mut status_provider, &messages, &handler, &prompt)?;
+                        push_turn_result(&mut messages, &prompt, result);
+                    }
                 }
             }
             KeyCode::Char(ch) => {
@@ -866,5 +1009,77 @@ mod tests {
                 "row {index} was not fully repainted after resize: {out:?}"
             );
         }
+    }
+
+    #[test]
+    fn default_turn_kind_routes_prompts_and_slash_commands() {
+        // Agent turns (plain prompts, `/retry`, `/btw`) run in the background so
+        // the TUI stays live; every other slash command runs inline. Leading and
+        // trailing whitespace is tolerated and must not flip the routing.
+        let cases = [
+            ("hello", TurnKind::Background),
+            ("  do it ", TurnKind::Background),
+            ("/retry", TurnKind::Background),
+            ("/btw why", TurnKind::Background),
+            ("  /retry  ", TurnKind::Background),
+            ("/login", TurnKind::Foreground),
+            ("/help", TurnKind::Foreground),
+            ("/model x", TurnKind::Foreground),
+            ("/settings", TurnKind::Foreground),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(default_turn_kind(input), expected, "routing for {input:?}");
+        }
+    }
+
+    #[test]
+    fn spinner_glyph_wraps_modulo_the_frame_count() {
+        // The braille cycle has ten frames; frame 10 must wrap back to frame 0
+        // rather than indexing past the array (which would panic).
+        assert_eq!(spinner_glyph(0), spinner_glyph(10));
+    }
+
+    #[test]
+    fn spinner_glyph_exposes_ten_distinct_frames() {
+        // One full cycle (frames 0..10) must show every glyph exactly once; a
+        // duplicate entry or a wrong index would stall or skip in the animation.
+        let glyphs: std::collections::HashSet<char> = (0..10).map(spinner_glyph).collect();
+        assert_eq!(glyphs.len(), 10, "expected ten distinct spinner frames, got {glyphs:?}");
+    }
+
+    #[test]
+    fn push_turn_result_maps_ok_slash_prompt_to_a_system_message() {
+        // A successful slash command surfaces as a system line.
+        let mut messages = Vec::new();
+        push_turn_result(&mut messages, "/help", Ok("help text".to_string()));
+        assert_eq!(messages.len(), 1, "exactly one message must be pushed");
+        assert_eq!(messages[0].role, "system");
+    }
+
+    #[test]
+    fn push_turn_result_maps_ok_plain_prompt_to_an_assistant_message() {
+        // A successful plain prompt surfaces as an assistant reply.
+        let mut messages = Vec::new();
+        push_turn_result(&mut messages, "hello", Ok("reply".to_string()));
+        assert_eq!(messages.len(), 1, "exactly one message must be pushed");
+        assert_eq!(messages[0].role, "assistant");
+    }
+
+    #[test]
+    fn push_turn_result_maps_err_to_an_error_message() {
+        // Any failure surfaces as an error line regardless of the prompt.
+        let mut messages = Vec::new();
+        push_turn_result(&mut messages, "hello", Err("boom".to_string()));
+        assert_eq!(messages.len(), 1, "exactly one message must be pushed");
+        assert_eq!(messages[0].role, "error");
+    }
+
+    #[test]
+    fn push_turn_result_trims_surrounding_whitespace_from_ok_text() {
+        // Ok text is trimmed before it reaches the transcript so stray agent
+        // padding never widens the rendered row.
+        let mut messages = Vec::new();
+        push_turn_result(&mut messages, "hello", Ok("  hi  ".to_string()));
+        assert_eq!(messages[0].text, "hi");
     }
 }
