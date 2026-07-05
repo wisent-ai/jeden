@@ -367,26 +367,53 @@ fn run_session_command(args: &Args, command: &str, rest: &str, hooks: &mut RunHo
     }
 }
 
+/// Validate `tool` against the visible tool set and write it to mode-state so
+/// the next turn's apply_mode_instructions injects (and clears) the force
+/// directive. Backs the combined `/force <tool> <prompt>` form.
+pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
+    let names: Vec<String> = crate::tools::list_tools(cwd).into_iter().map(|t| t.name).collect();
+    if !names.is_empty() && !names.iter().any(|n| n == tool) {
+        return Err(format!("Unknown or unavailable tool: {}. Visible tools: {}", tool, names.iter().take(20).cloned().collect::<Vec<_>>().join(", ")));
+    }
+    let mut state = read_mode_state(cwd);
+    if !state.is_object() { state = json!({}); }
+    state.as_object_mut().expect("mode state object").insert("force".into(), json!({ "tool": tool, "prompt": "" }));
+    write_mode_state(cwd, &state)
+}
+
 pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
     let mut task = args.positionals.join(" ").trim().to_string();
     if task.trim_start().starts_with('/') {
         let (command, rest) = split_head(task.trim());
+        let (command, rest) = (command.to_string(), rest.to_string());
         if command == "/retry" { return retry_command_with(args, hooks); }
-        if command == "/btw" { return btw_command_with(args, rest, hooks); }
+        if command == "/btw" { return btw_command_with(args, &rest, hooks); }
         // /compact, /handoff, /context operate on the last session's history so
         // the one-shot CLI matches the interactive implementations (no divergent
         // flag-set / markdown-dump / tool-manifest stubs).
-        if matches!(command, "/compact" | "/handoff" | "/context") {
-            let text = run_session_command(args, command, rest, hooks)?;
+        if matches!(command.as_str(), "/compact" | "/handoff" | "/context") {
+            let text = run_session_command(args, &command, &rest, hooks)?;
             return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
         }
-        // Builtins handled locally; file-based custom commands expand to a
-        // prompt; anything else falls through to the model literally (OMP parity).
-        if crate::is_builtin_slash(command) {
+        // /force <tool> <prompt>: arm the forced tool, then run the prompt now
+        // (apply_mode_instructions injects the directive and clears it). The bare
+        // /force <tool> form falls through to handle_slash (deferred).
+        if command == "/force" {
+            let (tool, prompt) = split_head(&rest);
+            if !tool.is_empty() && !prompt.trim().is_empty() {
+                arm_force_tool(&args.cwd, tool)?;
+                task = prompt.trim().to_string();
+                // fall through to run the turn below with force armed.
+            } else {
+                let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
+                return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+            }
+        } else if crate::is_builtin_slash(&command) {
+            // Builtins handled locally; file-based custom commands expand to a
+            // prompt; anything else falls through to the model literally (OMP parity).
             let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
             return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
-        }
-        if let Some(expanded) = crate::resolve_file_command(&args.cwd, command, rest) {
+        } else if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest) {
             task = expanded;
         }
     }

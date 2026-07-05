@@ -222,12 +222,26 @@ pub fn user_prompt_submit(cwd: &Path, prompt: &str, allow_project: bool) -> Stri
     prompt_context(&outcomes)
 }
 
+/// Fire `SessionStart` at the beginning of a session; returns joined hook
+/// stdout (a banner/context line the caller may surface).
+pub fn session_start(cwd: &Path, allow_project: bool) -> String {
+    let payload = json!({ "event": "SessionStart", "cwd": cwd });
+    let outcomes = fire_event(cwd, "SessionStart", "", &payload, allow_project);
+    prompt_context(&outcomes)
+}
+
+/// Fire `Stop` at the end of a session (best-effort side effects).
+pub fn session_stop(cwd: &Path, allow_project: bool) {
+    let payload = json!({ "event": "Stop", "cwd": cwd });
+    let _ = fire_event(cwd, "Stop", "", &payload, allow_project);
+}
+
 /// Human summary of configured hooks (for `/hooks`), split by trust origin.
 /// Only lists the events the runtime actually fires.
 pub fn describe_hooks(cwd: &Path) -> String {
     let project = read_config(&project_hooks_path(cwd));
     let user = user_hooks_path().map(|p| read_config(&p)).unwrap_or(Value::Null);
-    let events = ["UserPromptSubmit", "PreToolUse", "PostToolUse"];
+    let events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
     let mut lines = Vec::new();
     for (label, config) in [("User (~/.jeden/hooks.json, always trusted)", &user), ("Project (.jeden/hooks.json, runs only with --allow-command)", &project)] {
         let mut section = Vec::new();
@@ -245,7 +259,7 @@ pub fn describe_hooks(cwd: &Path) -> String {
     }
     if lines.is_empty() {
         format!(
-            "No hooks configured.\nAdd them to {} (project) or ~/.jeden/hooks.json (user).\nEvents: UserPromptSubmit, PreToolUse (exit 2 blocks), PostToolUse.\nProject hooks run only with --allow-command.",
+            "No hooks configured.\nAdd them to {} (project) or ~/.jeden/hooks.json (user).\nEvents: SessionStart, UserPromptSubmit, PreToolUse (exit 2 blocks), PostToolUse, Stop.\nProject hooks run only with --allow-command.",
             project_hooks_path(cwd).display()
         )
     } else {

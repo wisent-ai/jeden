@@ -933,6 +933,25 @@ fn handle_jobs(context: &SlashContext<'_>) -> Result<String, String> {
     }
 }
 
+/// Render recent release notes from the source repo's git history — the real
+/// changelog for this package (no bundled CHANGELOG file exists).
+fn handle_changelog() -> Result<String, String> {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let output = Command::new("git")
+        .args(["log", "-20", "--pretty=format:%h  %ad  %s", "--date=short"])
+        .current_dir(&root)
+        .output()
+        .map_err(|e| format!("git log failed: {e}"))?;
+    if !output.status.success() {
+        return Ok("No git history available for a changelog in this source tree.".into());
+    }
+    let log = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if log.is_empty() {
+        return Ok("No commits found for a changelog.".into());
+    }
+    Ok(format!("Recent changes (git history, {}):\n{}", root.display(), log))
+}
+
 fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     let registry = plugin_registry(context.cwd);
     let mut sources = sorted_object_values(&registry["sources"]);
@@ -1691,11 +1710,8 @@ fn handle_guided_goal(args: &str, state: &mut ModeState) -> Result<String, Strin
 }
 
 fn handle_force(args: &str, state: &mut ModeState, context: &SlashContext<'_>) -> Result<String, String> {
-    let (tool, prompt) = split_head(args);
-    if tool.is_empty() { return Err("Usage: /force <tool-name>".into()); }
-    if !prompt.trim().is_empty() {
-        return Err("/force <tool> <prompt> requires immediate runTask support; use /force <tool>, then send the prompt as the next turn.".into());
-    }
+    let (tool, _prompt) = split_head(args);
+    if tool.is_empty() { return Err("Usage: /force <tool-name> [prompt]".into()); }
     let names = tools::list_tools(context.cwd).into_iter().map(|tool| tool.name).collect::<Vec<_>>();
     if !names.is_empty() && !names.iter().any(|name| name == tool) {
         return Err(format!("Unknown or unavailable tool: {}. Visible tools: {}", tool, names.iter().take(20).cloned().collect::<Vec<_>>().join(", ")));
@@ -1770,7 +1786,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         },
         "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
         "/jobs" => Some(handle_jobs(context)),
-        "/changelog" => Some(Ok("No bundled changelog is present in Jeden. Git history is the source of release notes for this package.".into())),
+        "/changelog" => Some(handle_changelog()),
         "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `jeden >` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
         "/tan" => Some(handle_tan(args, context)),
         _ => None,

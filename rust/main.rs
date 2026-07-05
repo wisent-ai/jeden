@@ -602,6 +602,55 @@ fn session_dir_for(id_or_path: &str) -> PathBuf {
     if id_or_path.contains('/') { PathBuf::from(id_or_path) } else { session_root().join(id_or_path) }
 }
 
+/// `jeden resume <id-or-path> ["<task>"]`: load a recorded session's turns into
+/// a fresh conversation and, when a task is given, continue it with a real turn
+/// (a genuine in-process resume, not just inspection). Accepts `--allow-write`
+/// / `--allow-command` among the trailing args (the resume parse skips normal
+/// flag handling).
+fn resume_command(args: &Args) -> Result<String, String> {
+    let id = args.positionals.first().ok_or("Usage: jeden resume <session-id-or-path> [\"<task>\"]")?;
+    let dir = session_dir_for(id);
+    if !dir.exists() {
+        return Err(format!("session not found: {}", dir.display()));
+    }
+    let turns = session_conversation_turns(&dir);
+    let count = turns.len();
+    let mut allow_write = false;
+    let mut allow_command = false;
+    let mut task_parts = Vec::new();
+    for part in args.positionals.iter().skip(1) {
+        match part.as_str() {
+            "--allow-write" => allow_write = true,
+            "--allow-command" => allow_command = true,
+            other => task_parts.push(other.to_string()),
+        }
+    }
+    let task = task_parts.join(" ").trim().to_string();
+    let mut conversation = agent::Conversation::new(&args.cwd)?;
+    conversation.load_history(&args.cwd, turns)?;
+    if task.is_empty() {
+        return Ok(format!(
+            "Loaded {} prior turn(s) from {} into a new session. Continue with: jeden resume {} \"<task>\"\n",
+            count, dir.display(), id
+        ));
+    }
+    let mut run_args = args.clone();
+    run_args.allow_write = allow_write;
+    run_args.allow_command = allow_command;
+    let mut hooks = agent::RunHooks::inert();
+    let text = conversation.run_turn(&run_args, &task, &mut hooks)?;
+    let _ = agent::update_last_session_path(&args.cwd, &conversation.session_path());
+    Ok(format!("[resumed {} prior turn(s) from {}]\n{}\n", count, dir.display(), text))
+}
+
+/// `jeden recall_conversation <id-or-path>`: render a recorded session's full
+/// transcript as markdown (recall/inspection).
+fn recall_conversation_command(args: &Args) -> Result<String, String> {
+    let id = args.positionals.first().ok_or("Usage: jeden recall_conversation <session-id-or-path>")?;
+    let value = read_session_value(id)?;
+    render_session_export(&value, "markdown")
+}
+
 fn read_transcript_events(dir: &Path) -> Vec<Value> {
     let file = dir.join("transcript.jsonl");
     fs::read_to_string(file).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()
@@ -770,6 +819,11 @@ fn interactive(args: &Args) -> Result<String, String> {
     // cross-turn memory, matching OMP's continuous session model.
     let conversation = Arc::new(Mutex::new(agent::Conversation::new(&args.cwd)?));
     let context_limit = env::var("JEDEN_CONTEXT_LIMIT").ok().and_then(|v| v.trim().parse::<usize>().ok()).filter(|v| *v > 0);
+    // SessionStart hooks fire once when the interactive session opens.
+    let session_banner = hooks::session_start(&args.cwd, args.allow_command);
+    if !session_banner.trim().is_empty() {
+        println!("{}", session_banner.trim());
+    }
 
     let status_model = Arc::clone(&session_model);
     let status_conv = Arc::clone(&conversation);
@@ -871,6 +925,21 @@ fn interactive(args: &Args) -> Result<String, String> {
                     let id = agent::record_branch(&args.cwd, title, &path)?;
                     Ok(format!("Branch {} created at {}; the current context continues on this branch. List with /tree, switch with /resume {}.", id, path.display(), path.display()))
                 }
+                "/force" => {
+                    let (tool, prompt) = {
+                        let t = rest.trim();
+                        match t.find(char::is_whitespace) {
+                            Some(i) => (t[..i].to_string(), t[i..].trim().to_string()),
+                            None => (t.to_string(), String::new()),
+                        }
+                    };
+                    if !tool.is_empty() && !prompt.is_empty() {
+                        agent::arm_force_tool(&args.cwd, &tool)?;
+                        run_turn_shared(&handler_conv, &run_args, &prompt, &mut hooks)
+                    } else {
+                        handle_slash(&args.cwd, input, handler_model.lock().as_deref())
+                    }
+                }
                 "/rename" => {
                     let name = rest.trim();
                     if name.is_empty() { return Err("Usage: /rename <name>".into()); }
@@ -932,6 +1001,7 @@ fn interactive(args: &Args) -> Result<String, String> {
     };
 
     tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
+    hooks::session_stop(&args.cwd, args.allow_command);
     Ok(String::new())
 }
 
@@ -994,7 +1064,8 @@ fn main() {
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_table(&args.cwd)),
         "search-sessions" => search_sessions_command(&args),
-        "resume" | "recall_conversation" | "recall-conversation" => Err(format!("{} is not available in the Rust CLI yet; use sessions/show/export/search-sessions for recorded session inspection.", args.command)),
+        "resume" => resume_command(&args),
+        "recall_conversation" | "recall-conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => Ok(serde_json::to_string_pretty(&load_config(&args.cwd)).unwrap() + "\n"),
         "doctor" | "capabilities" => Ok(doctor(&args)),
