@@ -2700,4 +2700,60 @@ mod tests {
         assert!(removed.contains("Uninstalled plugin demo@mkt"), "uninstall output: {removed}");
         assert_eq!(installed_plugin_command_dirs(&cwd).len(), 0, "command dirs must be empty after uninstall");
     }
+
+    /// Regression: `/marketplace add <local-dir>` must key the marketplace by
+    /// the catalog's declared `name`, NOT the source directory basename (OMP
+    /// parity). Here the source dir basename (`mktsrc`) differs from the catalog
+    /// `name` (`acme`); every downstream surface must use `acme`.
+    #[test]
+    fn marketplace_add_keys_by_catalog_name_not_dir_basename() {
+        let _lock = ENV_LOCK.lock();
+        let cwd = temp_workspace("keying-e2e");
+        let sessions = cwd.join("sessions");
+        fs::create_dir_all(&sessions).unwrap();
+        let home = temp_workspace("keying-e2e-home");
+        let _plugins_home = EnvGuard::set("JEDEN_PLUGINS_HOME", &home);
+        let _home_env = EnvGuard::set("HOME", &home);
+
+        // Marketplace whose DIRECTORY basename (`mktsrc`) != catalog `name`
+        // (`acme`). If these were equal, basename-keying would masquerade as
+        // catalog-name keying and the regression would slip through.
+        let mkt = cwd.join("mktsrc");
+        let plugin = mkt.join("plugins/demo");
+        fs::create_dir_all(mkt.join(".omp-plugin")).unwrap();
+        fs::create_dir_all(plugin.join("commands")).unwrap();
+        fs::write(
+            mkt.join(".omp-plugin/marketplace.json"),
+            r#"{"name":"acme","owner":{"name":"tester"},"plugins":[{"name":"demo","source":"./plugins/demo","description":"Demo plugin"}]}"#,
+        )
+        .unwrap();
+        fs::write(plugin.join("commands/hello.md"), "Say hi to $ARGUMENTS").unwrap();
+        assert_ne!(
+            mkt.file_name().and_then(|n| n.to_str()),
+            Some("acme"),
+            "test invariant: source dir basename must differ from catalog name",
+        );
+        let context = test_context(&cwd, &sessions);
+
+        // (1) add keys by catalog name `acme`, not basename `mktsrc`.
+        let added = handle_local(&context, "/marketplace add ./mktsrc").unwrap().unwrap();
+        assert!(added.contains("Added marketplace source acme"), "add output: {added}");
+        let registry = plugin_registry(&cwd);
+        let sources = registry.get("sources").and_then(Value::as_object).unwrap();
+        assert!(sources.contains_key("acme"), "registry sources must be keyed by catalog name: {sources:?}");
+        assert!(!sources.contains_key("mktsrc"), "registry must not be keyed by dir basename: {sources:?}");
+
+        // (2) discover lists the plugin under the catalog name.
+        let discover = handle_local(&context, "/marketplace discover").unwrap().unwrap();
+        assert!(discover.contains("demo@acme"), "discover output: {discover}");
+        assert!(!discover.contains("demo@mktsrc"), "discover must not use basename: {discover}");
+
+        // (3) install by the catalog-name id succeeds.
+        let install = handle_local(&context, "/marketplace install demo@acme").unwrap().unwrap();
+        assert!(install.contains("demo@acme"), "install output: {install}");
+
+        // (4) activation is keyed correctly: /hello resolves + expands.
+        let expanded = crate::resolve_file_command(&cwd, "/hello", "World");
+        assert_eq!(expanded, Some("Say hi to World".to_string()), "/hello did not expand from catalog-name-keyed install");
+    }
 }
