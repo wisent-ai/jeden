@@ -22,7 +22,7 @@ pub(crate) use cli::config::schema::config_command;
 pub(crate) use cli::commands::expand::resolve_file_command;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
 pub(crate) use cli::run::interactive::interactive;
-pub(crate) use cli::sessions::{artifact_command, export_session_command, list_artifacts_command, list_sessions, read_session_value, recall_conversation_command, render_session_export, resume_command, search_sessions_command, session_conversation_turns};
+pub(crate) use cli::sessions::{artifact_command, export_session_command, list_artifacts_command, list_sessions, read_session_value, recall_conversation_command, recall_conversation_text, render_session_export, resume_command, search_sessions_command, session_conversation_turns};
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Args {

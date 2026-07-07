@@ -102,6 +102,23 @@ pub(crate) fn recall_conversation_command(args: &Args) -> Result<String, String>
     render_session_export(&value, "markdown")
 }
 
+/// Text-only transcript of a recorded session — user prompts and final answers
+/// only, with tool calls/results and images stripped. Mirrors the external
+/// `recall_conversation.sh` extraction, exposed so the agent `recall_conversation`
+/// tool can reload a session's readable history into context.
+pub(crate) fn recall_conversation_text(id_or_path: &str) -> Result<String, String> {
+    let dir = session_dir_for(id_or_path);
+    if !dir.exists() { return Err(format!("session not found: {}", dir.display())); }
+    let turns = session_conversation_turns(&dir);
+    if turns.is_empty() { return Ok(String::new()); }
+    let body = turns.iter().map(|turn| {
+        let role = turn.get("role").and_then(Value::as_str).unwrap_or("").to_ascii_uppercase();
+        let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
+        format!("[{}]\n{}", role, content)
+    }).collect::<Vec<_>>().join("\n\n");
+    Ok(body)
+}
+
 fn read_transcript_events(dir: &Path) -> Vec<Value> {
     let file = dir.join("transcript.jsonl");
     fs::read_to_string(file).unwrap_or_default().lines().filter_map(|line| serde_json::from_str::<Value>(line).ok()).collect()

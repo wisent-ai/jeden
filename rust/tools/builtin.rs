@@ -34,6 +34,7 @@ pub(super) fn built_in_tools() -> Vec<ToolInfo> {
         ToolInfo::new("save_artifact", "Save UTF-8 content into the current session artifacts directory"),
         ToolInfo::new("list_artifacts", "List files in the current session artifact directory"),
         ToolInfo::new("read_artifact", "Read one UTF-8 artifact from the current session artifact directory"),
+        ToolInfo::new("recall_conversation", "Return the text-only transcript of a recorded session (user prompts and final answers; tool calls, results, and images stripped); defaults to the current session, or pass session=<id-or-path>"),
         ToolInfo::new("ask_user", "Ask the human user a question during an interactive session"),
         ToolInfo::new("todo", "Manage the current session todo list with init, append, start, done, drop, rm, and view operations; supports phased lists"),
         ToolInfo::new("delegate_task", "Run a focused subtask in a fresh Jeden session and return its result"),

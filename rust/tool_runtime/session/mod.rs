@@ -46,6 +46,22 @@ pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     Ok(json!({"ok": true, "name": name, "bytes": bytes.len(), "truncated": truncated, "content": String::from_utf8_lossy(slice), "sha256": sha256_hex(&bytes)}))
 }
 
+pub(crate) fn recall_conversation(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    // Explicit session id/path, else the current session (its dir is the parent
+    // of the artifact dir). Text-only transcript: user prompts + final answers,
+    // tool calls/results and images stripped (recall_conversation.sh parity).
+    let target = match string_input(input, "session") {
+        Some(session) => session,
+        None => {
+            let dir = runtime.artifact_dir.and_then(|d| d.parent())
+                .ok_or("recall_conversation needs a session id/path or an active session")?;
+            dir.display().to_string()
+        }
+    };
+    let transcript = crate::recall_conversation_text(&target)?;
+    Ok(json!({"ok": true, "session": target, "transcript": transcript, "empty": transcript.is_empty()}))
+}
+
 pub(crate) fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let question = string_input(input, "question").ok_or("ask_user requires question")?;
     if !runtime.interactive {

@@ -34,6 +34,7 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
         tool_spec("save_artifact", "Save UTF-8 content into the current session artifacts directory", json!({"name": {"type": "string"}, "content": {"type": "string"}}), vec!["content"]),
         tool_spec("list_artifacts", "List files in the current session artifact directory", json!({}), vec![]),
         tool_spec("read_artifact", "Read one UTF-8 artifact from the current session artifact directory", json!({"name": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["name"]),
+        tool_spec("recall_conversation", "Return the text-only transcript of a recorded session (user prompts and final answers; tool calls, results, and images stripped); defaults to the current session, or pass session=<id-or-path>", json!({"session": {"type": "string"}}), vec![]),
         tool_spec("ask_user", "Ask the human user a question during an interactive session", json!({"question": {"type": "string"}, "options": {"type": "array"}}), vec!["question"]),
         tool_spec("todo", "Manage the current session todo list with init, append, start, done, drop, rm, and view operations", json!({"op": {"type": "string"}, "list": {"type": "array"}, "phase": {"type": "string"}, "items": {"type": "array"}, "task": {"type": "string"}}), vec!["op"]),
         tool_spec("delegate_task", "Run a focused subtask in a fresh Jeden session and return its result; requires exec-tier approval", json!({"task": {"type": "string"}, "maxSteps": {"type": "number"}}), vec!["task"]),

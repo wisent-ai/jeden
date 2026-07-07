@@ -12,7 +12,7 @@ use custom::{custom_tool, mcp_call_tool, mcp_get_prompt, mcp_list_prompts, mcp_l
 use edit::{apply_patch_tool, delete_file, edit_file, move_file, visual_edit, write_file};
 use exec::{delegate_task, fetch_url, git_diff, git_log, git_show, git_status, glob_paths, grep_regex, list_package_scripts, node_eval, python_eval, run_command, run_package_script, run_process, search_files, search_text};
 use read::{fetch_readable_url, list_dir, read_archive, read_binary_file, read_document, read_file, read_image, read_sqlite};
-use session::{ask_user, list_artifacts, memory_tool, read_artifact, save_artifact, todo_tool};
+use session::{ask_user, list_artifacts, memory_tool, read_artifact, recall_conversation, save_artifact, todo_tool};
 
 #[derive(Debug, Clone)]
 pub struct ToolRuntime<'a> {
@@ -62,6 +62,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "save_artifact" => save_artifact(runtime, input),
         "list_artifacts" => list_artifacts(runtime),
         "read_artifact" => read_artifact(runtime, input),
+        "recall_conversation" => recall_conversation(runtime, input),
         "memory" => memory_tool(runtime, input),
         "ask_user" => ask_user(runtime, input),
         "mcp_list_tools" => mcp_list_tools(runtime, input),
