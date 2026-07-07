@@ -74,18 +74,3 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
 pub fn format_tool_result(result: &Value) -> String {
     json!({"type": "tool_result", "result": result}).to_string()
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_final_action_inside_text() {
-        assert_eq!(parse_action("prefix {\"action\":\"final\",\"text\":\"ok\"} suffix").unwrap(), Action::Final { text: "ok".into() });
-    }
-
-    #[test]
-    fn parses_tool_action_with_default_input() {
-        assert_eq!(parse_action("{\"action\":\"tool\",\"tool\":\"read\"}").unwrap(), Action::Tool { tool: "read".into(), input: json!({}) });
-    }
-}

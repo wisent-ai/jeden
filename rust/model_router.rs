@@ -15,6 +15,22 @@ pub struct ChatConfig {
     pub service_tier: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct CompletionUsage {
+    pub input_tokens: f64,
+    pub output_tokens: f64,
+    pub cache_read_tokens: f64,
+    pub cache_write_tokens: f64,
+    pub total_tokens: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Completion {
+    pub content: String,
+    pub usage: Option<CompletionUsage>,
+}
+
+
 pub fn hmac_headers(body: &str, agent_id: &str, secret: &str) -> Result<(String, String, String), String> {
     if secret.is_empty() {
         return Err("WISENT_APP_AGENT_AUTH_SECRET is required".into());
@@ -44,12 +60,12 @@ fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, String> {
     }
 }
 
-pub fn chat_completion(config: &ChatConfig, messages: Vec<Value>, max_tokens: usize, tools: &[Value]) -> Result<String, String> {
+pub fn chat_completion(config: &ChatConfig, messages: Vec<Value>, max_tokens: Option<usize>, tools: &[Value]) -> Result<Completion, String> {
     let mut body = json!({
         "model": config.model,
-        "max_tokens": max_tokens,
         "messages": messages,
     });
+    if let Some(max_tokens) = max_tokens { body["max_tokens"] = json!(max_tokens); }
     if !config.service_tier.trim().is_empty() {
         body["service_tier"] = Value::String(config.service_tier.clone());
     }
@@ -79,18 +95,43 @@ pub fn chat_completion(config: &ChatConfig, messages: Vec<Value>, max_tokens: us
 }
 
 /// Parse a full (non-streamed) completion body into an action string / content.
-fn parse_completion_response(text: &str) -> Result<String, String> {
+fn value_number(value: &Value, paths: &[&str]) -> f64 {
+    paths.iter().find_map(|path| value.pointer(path).and_then(Value::as_f64)).unwrap_or(0.0)
+}
+
+fn usage_from_value(data: &Value) -> Option<CompletionUsage> {
+    let usage = data.get("usage")?;
+    let input_tokens = value_number(usage, &["/input_tokens", "/prompt_tokens", "/input"]);
+    let output_tokens = value_number(usage, &["/output_tokens", "/completion_tokens", "/output"]);
+    let cache_read_tokens = value_number(usage, &["/cache_read_tokens", "/cacheRead", "/prompt_tokens_details/cached_tokens"]);
+    let cache_write_tokens = value_number(usage, &["/cache_write_tokens", "/cacheWrite"]);
+    let total_tokens = value_number(usage, &["/total_tokens", "/totalTokens", "/total"]);
+    let total_tokens = if total_tokens > 0.0 { total_tokens } else { input_tokens + output_tokens + cache_read_tokens + cache_write_tokens };
+    if input_tokens == 0.0 && output_tokens == 0.0 && cache_read_tokens == 0.0 && cache_write_tokens == 0.0 && total_tokens == 0.0 {
+        None
+    } else {
+        Some(CompletionUsage { input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_tokens })
+    }
+}
+
+/// Parse a full (non-streamed) completion body into an action string / content.
+fn parse_completion_response(text: &str) -> Result<Completion, String> {
     let data: Value = serde_json::from_str(text).map_err(|e| format!("invalid model router JSON: {e}"))?;
+    let usage = usage_from_value(&data);
     let message = data.pointer("/choices/0/message").ok_or("model router returned no message")?;
+    let finish_reason = data.pointer("/choices/0/finish_reason").and_then(Value::as_str).unwrap_or("");
+    if matches!(finish_reason, "length" | "max_tokens") {
+        return Err("model response incomplete: length".into());
+    }
     let tool_calls = message.get("tool_calls").and_then(Value::as_array).cloned().unwrap_or_default();
     if !tool_calls.is_empty() {
-        return tool_calls_to_action(&tool_calls);
+        return Ok(Completion { content: tool_calls_to_action(&tool_calls)?, usage });
     }
     let content = message.get("content").and_then(Value::as_str).unwrap_or("");
     if content.trim().is_empty() {
         return Err("model router returned no message content".into());
     }
-    Ok(content.to_string())
+    Ok(Completion { content: content.to_string(), usage })
 }
 
 /// Streaming chat completion. Requests SSE (`stream: true`); for each content
@@ -101,17 +142,18 @@ fn parse_completion_response(text: &str) -> Result<String, String> {
 pub fn chat_completion_streaming(
     config: &ChatConfig,
     messages: Vec<Value>,
-    max_tokens: usize,
+    max_tokens: Option<usize>,
     tools: &[Value],
     on_delta: &mut dyn FnMut(&str),
-) -> Result<String, String> {
+) -> Result<Completion, String> {
     use std::io::{BufRead, BufReader};
     let mut body = json!({
         "model": config.model,
-        "max_tokens": max_tokens,
         "messages": messages,
         "stream": true,
     });
+    body["stream_options"] = json!({"include_usage": true});
+    if let Some(max_tokens) = max_tokens { body["max_tokens"] = json!(max_tokens); }
     if !config.service_tier.trim().is_empty() {
         body["service_tier"] = Value::String(config.service_tier.clone());
     }
@@ -148,6 +190,8 @@ pub fn chat_completion_streaming(
     // Parse the SSE stream: `data: {json}` lines, `[DONE]` terminates.
     let mut content = String::new();
     let mut tool_calls: Vec<Value> = Vec::new();
+    let mut incomplete = false;
+    let mut usage: Option<CompletionUsage> = None;
     let reader = BufReader::new(response);
     for line in reader.lines() {
         let line = line.map_err(|e| e.to_string())?;
@@ -159,6 +203,13 @@ pub fn chat_completion_streaming(
             break;
         }
         let Ok(chunk) = serde_json::from_str::<Value>(payload) else { continue; };
+        if usage.is_none() {
+            usage = usage_from_value(&chunk);
+        }
+        let finish_reason = chunk.pointer("/choices/0/finish_reason").and_then(Value::as_str).unwrap_or("");
+        if matches!(finish_reason, "length" | "max_tokens") {
+            incomplete = true;
+        }
         let Some(delta) = chunk.pointer("/choices/0/delta") else { continue; };
         if let Some(piece) = delta.get("content").and_then(Value::as_str) {
             if !piece.is_empty() {
@@ -170,16 +221,19 @@ pub fn chat_completion_streaming(
             accumulate_tool_call_deltas(&mut tool_calls, calls);
         }
     }
+    if incomplete {
+        return Err("model response incomplete: length".into());
+    }
     if !tool_calls.is_empty() {
-        return tool_calls_to_action(&tool_calls);
+        return Ok(Completion { content: tool_calls_to_action(&tool_calls)?, usage });
     }
     if content.trim().is_empty() {
         return Err("model router returned no message content".into());
     }
-    Ok(content)
+    Ok(Completion { content, usage })
 }
 
-/// Merge OpenAI streaming tool-call deltas (indexed) into a growing list.
+/// Merge streaming tool-call deltas (indexed) into a growing list.
 fn accumulate_tool_call_deltas(acc: &mut Vec<Value>, deltas: &[Value]) {
     for delta in deltas {
         let index = delta.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
