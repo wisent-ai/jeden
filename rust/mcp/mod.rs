@@ -112,6 +112,16 @@ pub fn list_prompts(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Va
     with_client(cwd, server_name, timeout_ms, |client| client.request("prompts/list", json!({}), timeout_ms))
 }
 
+/// The server's declared capabilities from the initialize handshake — the
+/// faithful source for `/mcp notifications` (a stateless one-shot client holds
+/// no live subscriptions, so it reports what the server advertises: the
+/// `listChanged`/`subscribe`/`logging` notification-related capability flags).
+pub fn server_capabilities(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Value, String> {
+    let server = configured_server(cwd, server_name)?;
+    let mut client = McpClient::start(&server, cwd)?;
+    client.initialize(timeout_ms)
+}
+
 pub fn get_prompt(cwd: &Path, server_name: &str, name: &str, args: Value, timeout_ms: u64) -> Result<Value, String> {
     if name.is_empty() {
         return Err("name is required".into());

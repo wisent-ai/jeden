@@ -150,6 +150,17 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             }?;
             serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
         },
+        "notifications" => {
+            let (server, _) = split_head(rest);
+            if server.is_empty() { return Err("Usage: /mcp notifications <server>".into()); }
+            let init = mcp::server_capabilities(context.cwd, server, u64::MAX)?;
+            let capabilities = init.get("capabilities").cloned().unwrap_or_else(|| json!({}));
+            Ok(format!(
+                "MCP notification capabilities for {} (declared at initialize; a stateless one-shot client holds no live subscriptions):\n{}",
+                server,
+                serde_json::to_string_pretty(&capabilities).map_err(|e| e.to_string())?
+            ))
+        },
         "reload" => {
             // Stateless client: re-read config and health-probe every server by
             // spawning it and listing tools. This is the real reconnect for a
@@ -181,6 +192,6 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
                 Err(error) => Err(format!("Reconnect to {} failed: {}", server, error)),
             }
         }
-        _ => Err("Usage: /mcp list | add [--scope user|project] <name> [stdio] <command> [args...] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | test <server> | reload | reconnect <server>".into()),
+        _ => Err("Usage: /mcp list | add [--scope user|project] <name> [stdio] <command> [args...] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | notifications <server> | test <server> | reload | reconnect <server>".into()),
     }
 }

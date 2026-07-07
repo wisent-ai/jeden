@@ -179,8 +179,8 @@ impl McpClient {
         stdin.flush().map_err(|e| e.to_string())
     }
 
-    pub(super) fn initialize(&mut self, timeout_ms: u64) -> Result<(), String> {
-        let _ = self.request(
+    pub(super) fn initialize(&mut self, timeout_ms: u64) -> Result<Value, String> {
+        let init = self.request(
             "initialize",
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
@@ -189,7 +189,8 @@ impl McpClient {
             }),
             timeout_ms,
         )?;
-        self.notify("notifications/initialized", json!({}))
+        self.notify("notifications/initialized", json!({}))?;
+        Ok(init)
     }
 
     fn close(&mut self) {
