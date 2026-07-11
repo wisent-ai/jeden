@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Correct terminal-width rendering for a narrow viewport without emitting control noise.\n","src/input.txt":"synthetic-tui-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

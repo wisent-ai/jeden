@@ -19,26 +19,21 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-mod run;
 #[path = "../extensions/mod.rs"]
 mod extensions;
+mod run;
 
-
-pub use run::{posttool, pretool_block, session_start, session_stop, user_prompt_submit};
 pub(crate) use extensions::{
-    agent_dirs as extension_agent_dirs,
-    capability_descriptors as extension_capability_descriptors,
-    command_dirs as extension_command_dirs,
-    execute_tool as execute_extension_tool,
-    prompt_context as extension_prompt_context,
-    model_entries as extension_model_entries,
-    provider_entries as extension_provider_entries,
-    reload as reload_extensions,
+    agent_dirs as extension_agent_dirs, capability_descriptors as extension_capability_descriptors,
+    command_dirs as extension_command_dirs, execute_tool as execute_extension_tool,
+    model_entries as extension_model_entries, prompt_context as extension_prompt_context,
     skill_context as extension_skill_context,
-    status as extension_status,
-    tools as extension_tools,
-    PromptContribution as ExtensionPromptContribution,
 };
+pub use extensions::{
+    provider_entries as extension_provider_entries, reload as reload_extensions,
+    status as extension_status, ReloadReport,
+};
+pub use run::{posttool, pretool_block, session_start, session_stop, user_prompt_submit};
 
 /// One configured hook: an optional matcher (regex over the tool name; empty =
 /// match everything) and the shell command to run.

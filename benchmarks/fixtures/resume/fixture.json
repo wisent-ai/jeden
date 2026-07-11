@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Resume an interrupted operation idempotently without duplicating completed work.\n","src/input.txt":"synthetic-resume-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 3,
+  "store": "plugin-lock",
+  "fixture": "future",
+  "payload": {
+    "preserved": true
+  }
+}

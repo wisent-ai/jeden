@@ -6,7 +6,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
-use crate::tool_runtime::runtime_ops::{ManagedCommand, OperationContext, ProcessManager, TerminationReason};
+use crate::tool_runtime::runtime_ops::{
+    ManagedCommand, OperationContext, ProcessManager, TerminationReason,
+};
 
 use super::super::EditorState;
 
@@ -51,7 +53,11 @@ impl ExternalEditorCommand {
     fn is_available(&self, cwd: &Path) -> bool {
         let program = Path::new(&self.program);
         if program.components().count() > 1 {
-            let resolved = if program.is_absolute() { program.to_path_buf() } else { cwd.join(program) };
+            let resolved = if program.is_absolute() {
+                program.to_path_buf()
+            } else {
+                cwd.join(program)
+            };
             return is_executable(&resolved);
         }
         env::var_os("PATH")
@@ -116,13 +122,20 @@ fn external_editor_with(
     if !result.status.success() {
         return Err(format!(
             "external editor exited with status {}",
-            result.status.code().map_or_else(|| "unknown".into(), |code| code.to_string())
+            result
+                .status
+                .code()
+                .map_or_else(|| "unknown".into(), |code| code.to_string())
         ));
     }
 
-    let bytes = fs::read(temporary.path()).map_err(|error| format!("read external editor file: {error}"))?;
-    let text = String::from_utf8(bytes).map_err(|_| "external editor produced invalid UTF-8".to_string())?;
-    editor.replace_all_transaction(text).map_err(|error| error.to_string())
+    let bytes = fs::read(temporary.path())
+        .map_err(|error| format!("read external editor file: {error}"))?;
+    let text = String::from_utf8(bytes)
+        .map_err(|_| "external editor produced invalid UTF-8".to_string())?;
+    editor
+        .replace_all_transaction(text)
+        .map_err(|error| error.to_string())
 }
 
 struct TemporaryEditorFile {
@@ -143,7 +156,12 @@ impl TemporaryEditorFile {
                 options.mode(0o600);
             }
             match options.open(&path) {
-                Ok(file) => return Ok(Self { path, file: Some(file) }),
+                Ok(file) => {
+                    return Ok(Self {
+                        path,
+                        file: Some(file),
+                    })
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(format!("create external editor file: {error}")),
             }
@@ -156,9 +174,14 @@ impl TemporaryEditorFile {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
-        let mut file = self.file.take().expect("temporary editor file is written once");
-        file.write_all(bytes).map_err(|error| format!("write external editor file: {error}"))?;
-        file.sync_all().map_err(|error| format!("sync external editor file: {error}"))?;
+        let mut file = self
+            .file
+            .take()
+            .expect("temporary editor file is written once");
+        file.write_all(bytes)
+            .map_err(|error| format!("write external editor file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("sync external editor file: {error}"))?;
         Ok(())
     }
 }
@@ -221,7 +244,8 @@ mod tests {
             let mut options = OpenOptions::new();
             options.write(true).create_new(true).mode(0o700);
             let mut file = options.open(&path).expect("create fixture script");
-            file.write_all(body.as_bytes()).expect("write fixture script");
+            file.write_all(body.as_bytes())
+                .expect("write fixture script");
             file.sync_all().expect("sync fixture script");
             path
         }
@@ -239,7 +263,10 @@ mod tests {
                 .map(|entry| entry.expect("read fixture entry").file_name())
                 .filter(|name| name.to_string_lossy().starts_with("jeden-editor-"))
                 .collect::<Vec<_>>();
-            assert!(leftovers.is_empty(), "temporary editor files remain: {leftovers:?}");
+            assert!(
+                leftovers.is_empty(),
+                "temporary editor files remain: {leftovers:?}"
+            );
         }
     }
 
@@ -254,7 +281,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let fixture = Fixture::create("temporary-permissions");
-        let temporary = TemporaryEditorFile::create(&fixture.root).expect("create temporary editor file");
+        let temporary =
+            TemporaryEditorFile::create(&fixture.root).expect("create temporary editor file");
 
         let mode = temporary
             .path()
@@ -272,14 +300,20 @@ mod tests {
     #[test]
     fn external_editor_configuration_prefers_visual_falls_back_to_editor_and_rejects_blanks() {
         assert_eq!(
-            ExternalEditorCommand::from_configuration(Some("visual --wait"), Some("editor --fallback")),
+            ExternalEditorCommand::from_configuration(
+                Some("visual --wait"),
+                Some("editor --fallback")
+            ),
             Ok(ExternalEditorCommand {
                 program: "visual".into(),
                 args: vec!["--wait".into()],
             })
         );
         assert_eq!(
-            ExternalEditorCommand::from_configuration(Some(" \t"), Some("editor 'argument with spaces'")),
+            ExternalEditorCommand::from_configuration(
+                Some(" \t"),
+                Some("editor 'argument with spaces'")
+            ),
             Ok(ExternalEditorCommand {
                 program: "editor".into(),
                 args: vec!["argument with spaces".into()],
@@ -287,7 +321,10 @@ mod tests {
         );
 
         let unavailable = Err("external editor unavailable: set VISUAL or EDITOR".to_string());
-        assert_eq!(ExternalEditorCommand::from_configuration(None, None), unavailable);
+        assert_eq!(
+            ExternalEditorCommand::from_configuration(None, None),
+            unavailable
+        );
         assert_eq!(
             ExternalEditorCommand::from_configuration(Some("  "), Some("\n\t")),
             unavailable
@@ -306,9 +343,15 @@ mod tests {
             "{} 'argument with spaces; $(touch shell-interpreted)'",
             shell_words::quote(&script.to_string_lossy())
         );
-        let command = ExternalEditorCommand::parse(&configured).expect("parse fixture editor command");
+        let command =
+            ExternalEditorCommand::parse(&configured).expect("parse fixture editor command");
         assert_eq!(command.program, script.as_os_str());
-        assert_eq!(command.args, [OsStr::new("argument with spaces; $(touch shell-interpreted)")]);
+        assert_eq!(
+            command.args,
+            [OsStr::new(
+                "argument with spaces; $(touch shell-interpreted)"
+            )]
+        );
 
         let mut editor = EditorState::default();
         editor.set_text("exact original");
@@ -316,11 +359,20 @@ mod tests {
         let original = editor.text().to_owned();
 
         assert_eq!(
-            external_editor_with(&mut editor, &fixture.root, &fixture.operation(), command, &fixture.root),
+            external_editor_with(
+                &mut editor,
+                &fixture.root,
+                &fixture.operation(),
+                command,
+                &fixture.root
+            ),
             Ok(true)
         );
         assert_eq!(editor.text(), "Zażółć 👩🏽‍💻\n第二行");
-        assert!(!sentinel.exists(), "editor arguments were interpreted by a shell");
+        assert!(
+            !sentinel.exists(),
+            "editor arguments were interpreted by a shell"
+        );
         fixture.assert_no_editor_temp_files();
 
         editor.apply(EditorAction::Undo);
@@ -332,7 +384,10 @@ mod tests {
     #[test]
     fn external_editor_nonzero_exit_preserves_text_and_cleans_temp_file() {
         let fixture = Fixture::create("nonzero");
-        let script = fixture.script("editor.sh", "#!/bin/sh\nprintf 'discard me' > \"$1\"\nexit 17\n");
+        let script = fixture.script(
+            "editor.sh",
+            "#!/bin/sh\nprintf 'discard me' > \"$1\"\nexit 17\n",
+        );
         let mut editor = EditorState::default();
         editor.set_text("keep this 🧪");
 
@@ -340,7 +395,10 @@ mod tests {
             &mut editor,
             &fixture.root,
             &fixture.operation(),
-            ExternalEditorCommand { program: script.into_os_string(), args: Vec::new() },
+            ExternalEditorCommand {
+                program: script.into_os_string(),
+                args: Vec::new(),
+            },
             &fixture.root,
         );
 
@@ -360,7 +418,10 @@ mod tests {
             &mut editor,
             &fixture.root,
             &fixture.operation(),
-            ExternalEditorCommand { program: script.into_os_string(), args: Vec::new() },
+            ExternalEditorCommand {
+                program: script.into_os_string(),
+                args: Vec::new(),
+            },
             &fixture.root,
         );
 
@@ -373,10 +434,16 @@ mod tests {
     fn external_editor_pre_cancel_preserves_text_without_running_editor_or_leaving_temp_file() {
         let fixture = Fixture::create("pre-cancel");
         let sentinel = fixture.root.join("editor-ran");
-        let script = fixture.script("editor.sh", "#!/bin/sh\ntouch editor-ran\nprintf 'discard me' > \"$1\"\n");
+        let script = fixture.script(
+            "editor.sh",
+            "#!/bin/sh\ntouch editor-ran\nprintf 'discard me' > \"$1\"\n",
+        );
         let cancellation = CancellationToken::new();
         cancellation.cancel();
-        let operation = OperationContext::new(cancellation, ArtifactSink::new(fixture.root.join("artifacts")));
+        let operation = OperationContext::new(
+            cancellation,
+            ArtifactSink::new(fixture.root.join("artifacts")),
+        );
         let mut editor = EditorState::default();
         editor.set_text("keep this 🧪");
 
@@ -384,7 +451,10 @@ mod tests {
             &mut editor,
             &fixture.root,
             &operation,
-            ExternalEditorCommand { program: script.into_os_string(), args: Vec::new() },
+            ExternalEditorCommand {
+                program: script.into_os_string(),
+                args: Vec::new(),
+            },
             &fixture.root,
         );
 

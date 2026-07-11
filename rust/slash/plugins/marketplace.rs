@@ -5,8 +5,8 @@ use super::fetch::{catalog_plugins, fetch_marketplace, read_marketplace_catalog}
 use super::marketplace_cache_dir;
 use super::ops::{
     all_marketplace_sources, find_marketplace_source, install_one, installed_entries_for_scope,
-    merged_installed_values, normalize_scope, parse_marketplace_flags, registry_scope_dir,
-    split_plugin_id, update_source_plugins,
+    merged_installed_values, normalize_scope, parse_marketplace_flags, production_service,
+    registry_scope_dir, split_plugin_id, update_source_plugins,
 };
 use super::registry::{
     format_plugin, format_plugin_source, plugin_registry, save_plugin_registry,
@@ -194,7 +194,24 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
     let first = rest.first().map(String::as_str).unwrap_or("");
     let mut registry = plugin_registry(context.cwd);
     if verb == "help" {
-        return Ok("Usage: /marketplace add <source> | remove <name> | list | update [name] | discover [marketplace] | install [--force] [--scope user|project] <name@marketplace> | upgrade [--scope user|project] [name@marketplace] | installed | uninstall <name@marketplace>.".into());
+        return Ok("Usage: /marketplace add <signed-source> | dev-link [--scope user|project] <id> <local-path> [entrypoint] | remove <name> | list | update [name] | discover [marketplace] | install [--force] [--scope user|project] <name@marketplace> | upgrade [--scope user|project] [name@marketplace] | installed | uninstall <name@marketplace>.".into());
+    }
+    if verb == "dev-link" {
+        let (_, requested_scope, positional) = parse_marketplace_flags(rest);
+        if positional.len() < 2 || positional.len() > 3 {
+            return Err("Usage: /marketplace dev-link [--scope user|project] <id> <local-path> [entrypoint]".into());
+        }
+        let scope = normalize_scope(requested_scope)?;
+        let scope_dir = registry_scope_dir(context.cwd, &scope);
+        let raw_path = std::path::PathBuf::from(&positional[1]);
+        let path = if raw_path.is_absolute() {
+            raw_path
+        } else {
+            context.cwd.join(raw_path)
+        };
+        let entrypoint = positional.get(2).map(String::as_str).unwrap_or("index.js");
+        let record = production_service(&scope_dir).dev_link(&positional[0], &path, entrypoint)?;
+        return Ok(format!("Registered explicit untrusted dev-link {} at {} as installed/inactive; marketplace verification was not bypassed.", record.id, record.path.display()));
     }
     if verb == "add" {
         let source = rest
@@ -218,7 +235,8 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         let cache = fetch_marketplace(context.cwd, &provisional, &source)?;
         let catalog = read_marketplace_catalog(&cache)?;
         let cn = catalog
-            .get("name")
+            .pointer("/catalog/catalogId")
+            .or_else(|| catalog.get("name"))
             .and_then(Value::as_str)
             .unwrap_or("")
             .trim()

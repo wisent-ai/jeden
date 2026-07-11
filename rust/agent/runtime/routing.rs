@@ -1,5 +1,10 @@
 use super::*;
+use crate::control_plane::billing::{AccountState, SubscriptionState, MAX_BILLING_ITEMS};
+use crate::control_plane::contract::{RequestMeta, WelesApiV2};
+use crate::control_plane::weles::WelesClient;
 use crate::model_router::{RetryPolicy, RouteDescriptor};
+use crate::routing::{SubscriptionPoolSnapshot, SubscriptionTarget};
+use sha2::{Digest, Sha256};
 
 const MAX_CONFIGURED_ROUTES: usize = 16;
 
@@ -40,7 +45,9 @@ fn route_descriptors(value: Option<&Value>, key: &str) -> Result<Vec<RouteDescri
             .and_then(Value::as_str)
             .map(str::trim)
             .filter(|model| !model.is_empty())
-            .ok_or_else(|| format!("modelRouting.{key}[{index}].model must be a non-empty string"))?;
+            .ok_or_else(|| {
+                format!("modelRouting.{key}[{index}].model must be a non-empty string")
+            })?;
         let service_tier = match object.get("serviceTier") {
             None | Some(Value::Null) => None,
             Some(raw) => Some(
@@ -48,7 +55,9 @@ fn route_descriptors(value: Option<&Value>, key: &str) -> Result<Vec<RouteDescri
                     .map(str::trim)
                     .filter(|tier| !tier.is_empty())
                     .ok_or_else(|| {
-                        format!("modelRouting.{key}[{index}].serviceTier must be a non-empty string")
+                        format!(
+                            "modelRouting.{key}[{index}].serviceTier must be a non-empty string"
+                        )
                     })?
                     .to_string(),
             ),
@@ -100,6 +109,99 @@ fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
     })
 }
 
+fn subscription_pool_from_weles() -> Result<Option<SubscriptionPoolSnapshot>, String> {
+    if env::var("WELES_URL")
+        .ok()
+        .is_none_or(|value| value.trim().is_empty())
+    {
+        return Ok(None);
+    }
+    let client = WelesClient::from_env();
+    let accounts = client
+        .accounts(None)
+        .map_err(|error| format!("cannot list Weles accounts for subscription routing: {error}"))?;
+    let mut targets = Vec::new();
+    let mut revisions = Vec::new();
+    'accounts: for (account_index, account) in accounts.into_iter().enumerate() {
+        if account.status != "active" {
+            continue;
+        }
+        let correlation = format!("subscription-discovery-{account_index}");
+        let Ok(status) = client.billing_status(
+            &account.id,
+            &RequestMeta::read_v2(format!("{correlation}-status")),
+        ) else {
+            continue;
+        };
+        if status.status != AccountState::Active || status.provider_id != account.provider {
+            continue;
+        }
+        let Ok(subscriptions) = client.subscriptions(
+            &account.id,
+            &RequestMeta::read_v2(format!("{correlation}-subscriptions")),
+        ) else {
+            continue;
+        };
+        for (subscription_index, subscription) in subscriptions.into_iter().enumerate() {
+            if subscription.status != SubscriptionState::Active
+                || subscription.provider_id != status.provider_id
+            {
+                continue;
+            }
+            let Ok(quota) = client.quota(
+                &subscription.id,
+                &RequestMeta::read_v2(format!("{correlation}-quota-{subscription_index}")),
+            ) else {
+                continue;
+            };
+            let limiting_bucket =
+                quota
+                    .buckets
+                    .into_iter()
+                    .min_by(|left, right| match (left.limit, right.limit) {
+                        (0, 0) => left.bucket_id.cmp(&right.bucket_id),
+                        (0, _) => std::cmp::Ordering::Less,
+                        (_, 0) => std::cmp::Ordering::Greater,
+                        _ => (u128::from(left.remaining) * u128::from(right.limit))
+                            .cmp(&(u128::from(right.remaining) * u128::from(left.limit)))
+                            .then_with(|| left.bucket_id.cmp(&right.bucket_id)),
+                    });
+            let Some(bucket) = limiting_bucket else {
+                continue;
+            };
+            revisions.push(quota.revision);
+            targets.push(SubscriptionTarget {
+                provider_id: subscription.provider_id,
+                account_id: account.id.clone(),
+                subscription_id: subscription.id,
+                quota_bucket: bucket.bucket_id,
+                priority: 0,
+                remaining: bucket.remaining,
+                limit: bucket.limit,
+                capabilities: ["chat".to_string()].into_iter().collect(),
+                active: true,
+                valid_until_ms: u64::MAX,
+                policy_allowed: true,
+            });
+            if targets.len() >= MAX_BILLING_ITEMS {
+                break 'accounts;
+            }
+        }
+    }
+    if targets.is_empty() {
+        return Ok(None);
+    }
+    targets.sort_by_key(SubscriptionTarget::identity);
+    revisions.sort();
+    revisions.dedup();
+    let encoded = serde_json::to_vec(&(revisions, &targets)).map_err(|error| error.to_string())?;
+    let revision = hex::encode(Sha256::digest(encoded));
+    Ok(Some(SubscriptionPoolSnapshot {
+        revision,
+        rendezvous_salt: "weles-subscription-routing-v1".into(),
+        targets,
+    }))
+}
 
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let mode_state = read_mode_state(&args.cwd);
@@ -120,11 +222,24 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let routing = merged.get("modelRouting").unwrap_or(&Value::Null);
     let retry = retry_policy(routing);
     let configured_fallbacks = route_descriptors(routing.get("fallbacks"), "fallbacks");
-    let configured_promotions = route_descriptors(routing.get("contextPromotions"), "contextPromotions");
-    let endpoint = env::var("BRAMA_URL").ok().or(config.model_router_url.clone()).filter(|value| !value.trim().is_empty());
-    let selected_model = args.model.clone().or(config.model.clone()).or_else(|| env::var("JEDEN_MODEL").ok()).filter(|value| !value.trim().is_empty());
-    let catalog_client = crate::control_plane::brama::BramaClient::configured(endpoint.clone(), env::var("BRAMA_TOKEN").ok());
+    let configured_promotions =
+        route_descriptors(routing.get("contextPromotions"), "contextPromotions");
+    let endpoint = env::var("BRAMA_URL")
+        .ok()
+        .or(config.model_router_url.clone())
+        .filter(|value| !value.trim().is_empty());
+    let selected_model = args
+        .model
+        .clone()
+        .or(config.model.clone())
+        .or_else(|| env::var("JEDEN_MODEL").ok())
+        .filter(|value| !value.trim().is_empty());
+    let catalog_client = crate::control_plane::brama::BramaClient::configured(
+        endpoint.clone(),
+        env::var("BRAMA_TOKEN").ok(),
+    );
     let catalog = crate::control_plane::model_catalog(&args.cwd, &catalog_client, false);
+    let subscription_pool = subscription_pool_from_weles();
     let catalog_error = match (&selected_model, &catalog) {
         (None, _) => Some("no model selected; choose a model advertised by Brama".to_string()),
         (_, Err(error)) => Some(error.to_string()),
@@ -132,34 +247,79 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     };
     let validate_routes = |routes: &Result<Vec<RouteDescriptor>, String>| -> Option<String> {
         let catalog = catalog.as_ref().ok()?;
-        routes.as_ref().ok()?.iter().find_map(|route| catalog.resolve(&route.model).err().map(|error| error.to_string()))
+        routes.as_ref().ok()?.iter().find_map(|route| {
+            catalog
+                .resolve(&route.model)
+                .err()
+                .map(|error| error.to_string())
+        })
     };
-    let config_error = retry.as_ref().err().cloned()
+    let config_error = retry
+        .as_ref()
+        .err()
+        .cloned()
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned())
         .or(catalog_error)
         .or_else(|| validate_routes(&configured_fallbacks))
         .or_else(|| validate_routes(&configured_promotions));
     let catalog_routes = |fallback: bool| -> Vec<RouteDescriptor> {
-        let Some(model) = selected_model.as_deref() else { return Vec::new(); };
-        let Ok(catalog) = &catalog else { return Vec::new(); };
-        let Ok(entry) = catalog.resolve(model) else { return Vec::new(); };
-        let ids = if fallback { &entry.fallback } else { &entry.promotion };
-        ids.iter().filter(|id| catalog.resolve(id).is_ok()).map(|id| RouteDescriptor { model: id.clone(), service_tier: None }).collect()
+        let Some(model) = selected_model.as_deref() else {
+            return Vec::new();
+        };
+        let Ok(catalog) = &catalog else {
+            return Vec::new();
+        };
+        let Ok(entry) = catalog.resolve(model) else {
+            return Vec::new();
+        };
+        let ids = if fallback {
+            &entry.fallback
+        } else {
+            &entry.promotion
+        };
+        ids.iter()
+            .filter(|id| catalog.resolve(id).is_ok())
+            .map(|id| RouteDescriptor {
+                model: id.clone(),
+                service_tier: None,
+            })
+            .collect()
     };
     let fallbacks = configured_fallbacks.unwrap_or_default();
     let promotions = configured_promotions.unwrap_or_default();
-    let resolved_fallbacks = if fallbacks.is_empty() { catalog_routes(true) } else { fallbacks };
-    let resolved_promotions = if promotions.is_empty() { catalog_routes(false) } else { promotions };
+    let resolved_fallbacks = if fallbacks.is_empty() {
+        catalog_routes(true)
+    } else {
+        fallbacks
+    };
+    let resolved_promotions = if promotions.is_empty() {
+        catalog_routes(false)
+    } else {
+        promotions
+    };
+    let subscription_pool = subscription_pool.unwrap_or(None);
+    let subscription_cooldown_path = subscription_pool
+        .as_ref()
+        .map(|_| args.cwd.join(".jeden/subscription-cooldowns.json"));
     ChatConfig {
         url: endpoint.unwrap_or_default(),
-        agent_id: env::var("WISENT_APP_AGENT_ID").ok().or(config.agent_id.clone()).unwrap_or_else(|| "wisent-app".into()),
+        agent_id: env::var("WISENT_APP_AGENT_ID")
+            .ok()
+            .or(config.agent_id.clone())
+            .unwrap_or_else(|| "wisent-app".into()),
         secret: env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
         model: selected_model.unwrap_or_default(),
-        service_tier: env::var("JEDEN_SERVICE_TIER").ok().or_else(|| env::var("MODEL_SERVICE_TIER").ok()).or(mode_service_tier).unwrap_or_default(),
+        service_tier: env::var("JEDEN_SERVICE_TIER")
+            .ok()
+            .or_else(|| env::var("MODEL_SERVICE_TIER").ok())
+            .or(mode_service_tier)
+            .unwrap_or_default(),
         retry: retry.unwrap_or_default(),
         fallbacks: resolved_fallbacks,
         context_promotions: resolved_promotions,
+        subscription_pool,
+        subscription_cooldown_path,
         config_error,
     }
 }
@@ -172,8 +332,12 @@ pub(in crate::agent) fn env_usize(name: &str) -> Option<usize> {
 }
 
 pub(in crate::agent) fn memory_guidance_for_prompt(cwd: &Path) -> Option<String> {
-    let store = crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path()).ok()?;
-    let scope = crate::memory::MemoryScope { kind: "repo".into(), id: cwd.display().to_string() };
+    let store =
+        crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path()).ok()?;
+    let scope = crate::memory::MemoryScope {
+        kind: "repo".into(),
+        id: cwd.display().to_string(),
+    };
     let context = store.pre_compaction_context(&scope, "", 12_000).ok()?;
     (!context.is_empty()).then_some(context)
 }
@@ -201,8 +365,13 @@ pub(in crate::agent) fn usage_cost(
     model: &str,
     usage: &CompletionUsage,
 ) -> Option<Value> {
-    let endpoint = env::var("BRAMA_URL").ok().or(config.model_router_url.clone());
-    let client = crate::control_plane::brama::BramaClient::configured(endpoint, env::var("BRAMA_TOKEN").ok());
+    let endpoint = env::var("BRAMA_URL")
+        .ok()
+        .or(config.model_router_url.clone());
+    let client = crate::control_plane::brama::BramaClient::configured(
+        endpoint,
+        env::var("BRAMA_TOKEN").ok(),
+    );
     let catalog = crate::control_plane::model_catalog(cwd, &client, false).ok()?;
     let cost = catalog.price(model)?;
     let input = usage.input_tokens * cost.input / 1_000_000.0;
@@ -223,6 +392,8 @@ pub(in crate::agent) fn append_usage_event(
     router: &ChatConfig,
     usage: &CompletionUsage,
     cost: Option<Value>,
+    subscription_target: Option<&SubscriptionTarget>,
+    subscription_decision_id: Option<&str>,
 ) -> Result<(), String> {
     let path = usage_path(cwd);
     let mut document = fs::read_to_string(&path)
@@ -252,6 +423,15 @@ pub(in crate::agent) fn append_usage_event(
     });
     if let Some(cost) = cost {
         event["cost"] = cost;
+    }
+    if let Some(target) = subscription_target {
+        event["billing"] = json!({
+            "providerId": target.provider_id,
+            "accountId": target.account_id,
+            "subscriptionId": target.subscription_id,
+            "quotaBucket": target.quota_bucket,
+            "decisionId": subscription_decision_id,
+        });
     }
     events.push(event);
     if let Some(obj) = document.as_object_mut() {

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "jeden.behavior-check.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["protocolVersion", "checkVersion", "fixtureDigest", "commandOrScenarioId", "startedAt", "finishedAt", "expiresAt", "attempts", "outcome"],
+  "properties": {
+    "protocolVersion": { "const": "jeden.behavior-check.v2" },
+    "checkVersion": { "const": 2 },
+    "fixtureDigest": { "type": "string", "pattern": "^[0-9a-fA-F]{64}$" },
+    "commandOrScenarioId": { "type": "string", "minLength": 1 },
+    "startedAt": { "type": "integer", "minimum": 0 },
+    "finishedAt": { "type": "integer", "minimum": 0 },
+    "expiresAt": { "type": "integer", "minimum": 0 },
+    "attempts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["attempt", "startedAt", "finishedAt", "outcome"],
+        "properties": {
+          "attempt": { "type": "integer", "minimum": 1 },
+          "startedAt": { "type": "integer", "minimum": 0 },
+          "finishedAt": { "type": "integer", "minimum": 0 },
+          "outcome": { "enum": ["passed", "failed", "external-blocked"] },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "outcome": { "enum": ["passed", "failed", "external-blocked"] }
+  }
+}

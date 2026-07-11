@@ -3,9 +3,9 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 mod attachments;
+mod editor;
 mod integration;
 mod queue;
-mod editor;
 mod theme;
 
 mod render;
@@ -14,24 +14,13 @@ mod text;
 mod view;
 mod view_render;
 
-#[allow(unused_imports)]
-pub use attachments::{
-    Attachment, AttachmentError, AttachmentId, AttachmentKind, AttachmentSource, AttachmentTray,
-    ClipboardContent,
-};
-#[allow(unused_imports)]
-pub use integration::{
-    FeatureAvailability, RegistryUiRuntime, RuntimeStatus, UiFeature, UiRuntimeAdapter,
-};
-#[allow(unused_imports)]
-pub use queue::{
-    DeliveryAction, DeliveryBinding, DeliveryKeyMap, FollowUpQueue, QueueError, QueuedMessage,
-};
+pub(super) use attachments::{AttachmentTray, ClipboardContent};
+pub(super) use integration::{RegistryUiRuntime, UiFeature, UiRuntimeAdapter};
+pub(super) use queue::{DeliveryAction, FollowUpQueue};
 
-#[allow(unused_imports)]
-pub use editor::{ActionKeyMap, EditorAction, EditorLimitError, EditorState, KeyBinding, EDITOR_KEYMAP_NAMESPACE, EXTERNAL_EDITOR_ACTION_ID};
-#[allow(unused_imports)]
-pub use theme::{Emphasis, ResolvedStyle, SemanticColor, Theme, ThemeId};
+pub(super) use editor::{
+    EditorAction, EditorState, EDITOR_KEYMAP_NAMESPACE, EXTERNAL_EDITOR_ACTION_ID,
+};
 
 pub use view::{
     CommandOutcome, ConfirmEvent, ConfirmState, PickerEvent, PickerItem, PickerSpec, PickerState,
@@ -39,8 +28,12 @@ pub use view::{
 
 pub use repl::loops::run_basic_loop;
 
-pub(crate) fn external_editor_capability_descriptor(cwd: &std::path::Path) -> crate::capability::CapabilityDescriptor {
-    use crate::capability::{CapabilityDescriptor, CapabilityHealth, CapabilityKind, FunctionTarget};
+pub(crate) fn external_editor_capability_descriptor(
+    cwd: &std::path::Path,
+) -> crate::capability::CapabilityDescriptor {
+    use crate::capability::{
+        CapabilityDescriptor, CapabilityHealth, CapabilityKind, FunctionTarget,
+    };
 
     let health = repl::external_editor::external_editor_health(cwd);
     let mut descriptor = CapabilityDescriptor::new(
@@ -49,7 +42,9 @@ pub(crate) fn external_editor_capability_descriptor(cwd: &std::path::Path) -> cr
         "jeden-core",
         "External editor",
         "Edit the current prompt with VISUAL or EDITOR",
-        FunctionTarget::NativeView { command: "external-editor".into() },
+        FunctionTarget::NativeView {
+            command: "external-editor".into(),
+        },
     )
     .operation("external-editor")
     .metadata(serde_json::json!({"keymapNamespace": EDITOR_KEYMAP_NAMESPACE}));
@@ -69,15 +64,9 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
     render::render_terminal_frame(options)
 }
 
-pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
-    let _capabilities = crate::capability::for_cwd(std::path::Path::new(&options.status.cwd));
-    render::render_to_stdout(options)
-}
-
 const PRODUCT: &str = "jeden.";
 const VERSION: &str = "v0.1.0";
 const ASSISTANT_TITLE: &str = "jeden.";
-
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -173,8 +162,6 @@ pub struct TurnCtx<'a> {
     /// True when a picker selection submitted this command; prevents reopening
     /// the same empty-command view for parameterless actions.
     pub from_view: bool,
-    /// Immutable typed attachments captured for this turn; bytes are shared handles.
-    pub attachments: &'a [Attachment],
     /// Live status sink rendered next to the spinner.
     pub progress: &'a dyn Fn(&str),
     /// Per-token streaming sink for live assistant text.

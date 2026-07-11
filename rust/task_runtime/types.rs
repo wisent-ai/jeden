@@ -17,7 +17,15 @@ pub struct TaskLimits {
 
 impl Default for TaskLimits {
     fn default() -> Self {
-        Self { max_parallel: 4, max_batch: 32, max_depth: 4, max_children: 16, max_output_bytes: 2 * 1024 * 1024, wait_timeout_ms: 300_000, kill_grace_ms: 1_500 }
+        Self {
+            max_parallel: 4,
+            max_batch: 32,
+            max_depth: 4,
+            max_children: 16,
+            max_output_bytes: 2 * 1024 * 1024,
+            wait_timeout_ms: 300_000,
+            kill_grace_ms: 1_500,
+        }
     }
 }
 
@@ -56,10 +64,23 @@ pub struct AgentDefinition {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum JobStatus { Queued, Running, Waiting, Succeeded, Failed, Cancelled, Interrupted }
+pub enum JobStatus {
+    Queued,
+    Running,
+    Waiting,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Interrupted,
+}
 
 impl JobStatus {
-    pub fn terminal(&self) -> bool { matches!(self, Self::Succeeded | Self::Failed | Self::Cancelled | Self::Interrupted) }
+    pub fn terminal(&self) -> bool {
+        matches!(
+            self,
+            Self::Succeeded | Self::Failed | Self::Cancelled | Self::Interrupted
+        )
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -119,19 +140,45 @@ pub struct CapabilityHealth {
 
 #[derive(Debug)]
 pub enum TaskError {
-    Io(String), Invalid(String), NotFound(String), Capacity { running: usize, limit: usize },
-    RecursionDenied { agent: String, depth: u32 }, Cancelled(String), Timeout(String), Conflict(String), Process(String),
+    Io(String),
+    Invalid(String),
+    NotFound(String),
+    Capacity { running: usize, limit: usize },
+    RecursionDenied { agent: String, depth: u32 },
+    Cancelled(String),
+    Timeout(String),
+    Conflict(String),
+    Process(String),
 }
 
 impl std::fmt::Display for TaskError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Io(v) | Self::Invalid(v) | Self::NotFound(v) | Self::Cancelled(v) | Self::Timeout(v) | Self::Conflict(v) | Self::Process(v) => f.write_str(v),
-            Self::Capacity { running, limit } => write!(f, "task capacity exhausted: {running}/{limit} jobs running"),
-            Self::RecursionDenied { agent, depth } => write!(f, "spawn policy denied recursive agent {agent} at depth {depth}"),
+            Self::Io(v)
+            | Self::Invalid(v)
+            | Self::NotFound(v)
+            | Self::Cancelled(v)
+            | Self::Timeout(v)
+            | Self::Conflict(v)
+            | Self::Process(v) => f.write_str(v),
+            Self::Capacity { running, limit } => {
+                write!(f, "task capacity exhausted: {running}/{limit} jobs running")
+            }
+            Self::RecursionDenied { agent, depth } => write!(
+                f,
+                "spawn policy denied recursive agent {agent} at depth {depth}"
+            ),
         }
     }
 }
 impl std::error::Error for TaskError {}
-impl From<std::io::Error> for TaskError { fn from(value: std::io::Error) -> Self { Self::Io(value.to_string()) } }
-impl From<serde_json::Error> for TaskError { fn from(value: serde_json::Error) -> Self { Self::Invalid(value.to_string()) } }
+impl From<std::io::Error> for TaskError {
+    fn from(value: std::io::Error) -> Self {
+        Self::Io(value.to_string())
+    }
+}
+impl From<serde_json::Error> for TaskError {
+    fn from(value: serde_json::Error) -> Self {
+        Self::Invalid(value.to_string())
+    }
+}

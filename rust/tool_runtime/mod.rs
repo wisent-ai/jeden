@@ -7,18 +7,21 @@ mod edit;
 mod exec;
 mod language;
 mod read;
+#[path = "../runtime_ops/mod.rs"]
+pub mod runtime_ops;
 mod session;
 mod shared;
 #[cfg(test)]
 mod tests;
-#[path = "../runtime_ops/mod.rs"]
-pub mod runtime_ops;
 
 use custom::{
     custom_tool, mcp_call_tool, mcp_get_prompt, mcp_list_prompts, mcp_list_resources,
     mcp_list_tools, mcp_native_tool, mcp_read_resource,
 };
-use edit::{apply_patch_tool, delete_file, edit_file, move_file, visual_edit, write_any, write_archive, write_file, write_sqlite};
+use edit::{
+    apply_patch_tool, delete_file, edit_file, move_file, visual_edit, write_any, write_archive,
+    write_file, write_sqlite,
+};
 use exec::{
     delegate_task, eval_session, fetch_url, git_diff, git_log, git_show, git_status, glob_paths,
     grep_regex, list_package_scripts, node_eval, pty_resize, pty_session, python_eval, run_command,
@@ -57,16 +60,32 @@ static DYNAMIC_TOOLS: LazyLock<RwLock<Vec<DynamicToolRegistration>>> =
 
 pub fn register_dynamic_tools(registration: DynamicToolRegistration) -> Result<(), String> {
     let proposed = (registration.descriptors)();
-    if proposed.iter().any(|descriptor| descriptor.name.trim().is_empty()) {
-        return Err(format!("dynamic tool registration {} contains an empty name", registration.owner));
+    if proposed
+        .iter()
+        .any(|descriptor| descriptor.name.trim().is_empty())
+    {
+        return Err(format!(
+            "dynamic tool registration {} contains an empty name",
+            registration.owner
+        ));
     }
-    let mut registrations = DYNAMIC_TOOLS.write().map_err(|_| "dynamic tool registry poisoned")?;
-    if registrations.iter().any(|current| current.owner == registration.owner) {
+    let mut registrations = DYNAMIC_TOOLS
+        .write()
+        .map_err(|_| "dynamic tool registry poisoned")?;
+    if registrations
+        .iter()
+        .any(|current| current.owner == registration.owner)
+    {
         return Ok(());
     }
     for current in registrations.iter() {
         let existing = (current.descriptors)();
-        if let Some(name) = proposed.iter().find_map(|candidate| existing.iter().find(|item| item.name == candidate.name).map(|_| candidate.name.clone())) {
+        if let Some(name) = proposed.iter().find_map(|candidate| {
+            existing
+                .iter()
+                .find(|item| item.name == candidate.name)
+                .map(|_| candidate.name.clone())
+        }) {
             return Err(format!("dynamic tool name already registered: {name}"));
         }
     }
@@ -84,12 +103,27 @@ fn ensure_dynamic_registrations() {
 
 pub fn dynamic_tool_descriptors() -> Vec<DynamicToolDescriptor> {
     ensure_dynamic_registrations();
-    DYNAMIC_TOOLS.read().map(|registrations| registrations.iter().flat_map(|registration| (registration.descriptors)()).filter(|descriptor| descriptor.healthy).collect()).unwrap_or_default()
+    DYNAMIC_TOOLS
+        .read()
+        .map(|registrations| {
+            registrations
+                .iter()
+                .flat_map(|registration| (registration.descriptors)())
+                .filter(|descriptor| descriptor.healthy)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
-fn execute_dynamic(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Option<Result<Value, String>> {
+fn execute_dynamic(
+    runtime: &ToolRuntime<'_>,
+    tool: &str,
+    input: &Value,
+) -> Option<Result<Value, String>> {
     let registrations = DYNAMIC_TOOLS.read().ok()?;
-    registrations.iter().find_map(|registration| (registration.execute)(runtime, tool, input))
+    registrations
+        .iter()
+        .find_map(|registration| (registration.execute)(runtime, tool, input))
 }
 
 pub struct ToolRuntime<'a> {
@@ -105,10 +139,19 @@ pub struct ToolRuntime<'a> {
 }
 
 pub(crate) fn tool_allowed_by_env(tool: &str) -> bool {
-    let Some(raw) = std::env::var_os("JEDEN_AGENT_TOOLS") else { return true; };
+    let Some(raw) = std::env::var_os("JEDEN_AGENT_TOOLS") else {
+        return true;
+    };
     let allowed = raw.to_string_lossy();
     let mut any = false;
-    let matched = allowed.split(',').map(str::trim).filter(|name| !name.is_empty()).any(|name| { any = true; name == tool });
+    let matched = allowed
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .any(|name| {
+            any = true;
+            name == tool
+        });
     !any || matched
 }
 

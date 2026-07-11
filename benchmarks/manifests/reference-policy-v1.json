@@ -1,0 +1,1 @@
+{"allowedRoutes":["scripted/reference"],"forbiddenActions":["network.unscoped","fs.outside-workspace","secret.read","process.unbounded"],"revision":"reference-1","schema":"jeden.eval-policy.v1"}

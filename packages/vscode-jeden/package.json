@@ -1,0 +1,82 @@
+{
+  "name": "vscode-jeden",
+  "displayName": "Jeden",
+  "description": "Jeden ACP client for Visual Studio Code",
+  "version": "0.1.0",
+  "publisher": "wisent-ai",
+  "license": "UNLICENSED",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Machine Learning", "Other"],
+  "activationEvents": ["onView:jeden.chat", "onCommand:jeden.connect"],
+  "main": "./dist/src/extension.js",
+  "files": ["dist/src", "package.json"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test dist/test/*.test.js"
+  },
+  "contributes": {
+    "commands": [
+      { "command": "jeden.connect", "title": "Jeden: Connect" },
+      { "command": "jeden.disconnect", "title": "Jeden: Disconnect" },
+      { "command": "jeden.newSession", "title": "Jeden: New Session" },
+      { "command": "jeden.loadSession", "title": "Jeden: Load Session" },
+      { "command": "jeden.prompt", "title": "Jeden: Prompt" },
+      { "command": "jeden.cancel", "title": "Jeden: Cancel Current Turn" },
+      { "command": "jeden.approvePending", "title": "Jeden: Approve Pending Action" },
+      { "command": "jeden.rejectPending", "title": "Jeden: Reject Pending Action" },
+      { "command": "jeden.openArtifact", "title": "Jeden: Open Artifact" },
+      { "command": "jeden.openDiff", "title": "Jeden: Open Pending Diff" },
+      { "command": "jeden.refresh", "title": "Jeden: Refresh Views" }
+    ],
+    "configuration": {
+      "title": "Jeden",
+      "properties": {
+        "jeden.acp.command": { "type": "string", "default": "jeden", "description": "Jeden executable. Arguments are configured separately; the value is never shell-expanded." },
+        "jeden.acp.arguments": { "type": "array", "items": { "type": "string" }, "default": ["acp"], "description": "Arguments passed to the Jeden ACP executable." },
+        "jeden.acp.autoReconnect": { "type": "boolean", "default": true, "description": "Reconnect and reload the active session after an unexpected ACP exit." },
+        "jeden.acp.reconnectLimit": { "type": "integer", "minimum": 0, "maximum": 20, "default": 5 },
+        "jeden.acp.trace": { "type": "boolean", "default": false, "description": "Log redacted ACP metadata. Prompt, content, paths, tool input and credentials are never logged." }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [{ "id": "jeden", "title": "Jeden", "icon": "$(sparkle)" }]
+    },
+    "views": {
+      "jeden": [
+        { "id": "jeden.chat", "name": "Session", "type": "webview" },
+        { "id": "jeden.pending", "name": "Pending Actions" },
+        { "id": "jeden.artifacts", "name": "Artifacts" },
+        { "id": "jeden.jobs", "name": "Jobs" },
+        { "id": "jeden.diagnostics", "name": "Diagnostics" }
+      ]
+    },
+    "menus": {
+      "commandPalette": [
+        { "command": "jeden.disconnect", "when": "jeden.connected" },
+        { "command": "jeden.newSession", "when": "jeden.connected && jeden.capability.sessionNew" },
+        { "command": "jeden.loadSession", "when": "jeden.connected && jeden.capability.sessionLoad" },
+        { "command": "jeden.prompt", "when": "jeden.sessionActive && jeden.capability.prompt" },
+        { "command": "jeden.cancel", "when": "jeden.turnActive && jeden.capability.cancel" },
+        { "command": "jeden.approvePending", "when": "jeden.pendingAction" },
+        { "command": "jeden.rejectPending", "when": "jeden.pendingAction" }
+      ],
+      "view/title": [
+        { "command": "jeden.connect", "when": "view == jeden.chat && !jeden.connected", "group": "navigation" },
+        { "command": "jeden.newSession", "when": "view == jeden.chat && jeden.connected && jeden.capability.sessionNew", "group": "navigation" },
+        { "command": "jeden.refresh", "when": "view == jeden.pending || view == jeden.artifacts || view == jeden.jobs || view == jeden.diagnostics", "group": "navigation" }
+      ],
+      "view/item/context": [
+        { "command": "jeden.openDiff", "when": "view == jeden.pending && viewItem == jeden.diff", "group": "inline" },
+        { "command": "jeden.approvePending", "when": "view == jeden.pending", "group": "inline" },
+        { "command": "jeden.rejectPending", "when": "view == jeden.pending", "group": "inline" },
+        { "command": "jeden.openArtifact", "when": "view == jeden.artifacts", "group": "inline" }
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.90.0",
+    "typescript": "^5.7.2"
+  }
+}

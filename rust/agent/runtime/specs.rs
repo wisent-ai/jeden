@@ -82,7 +82,12 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
                 .to_string(),
         );
     }
-    specs.retain(|spec| spec.get("function").and_then(|function| function.get("name")).and_then(Value::as_str).is_none_or(crate::tool_runtime::tool_allowed_by_env));
+    specs.retain(|spec| {
+        spec.get("function")
+            .and_then(|function| function.get("name"))
+            .and_then(Value::as_str)
+            .is_none_or(crate::tool_runtime::tool_allowed_by_env)
+    });
     specs
 }
 
@@ -122,7 +127,6 @@ pub(in crate::agent) fn system_prompt_checked(cwd: &Path) -> Result<String, Stri
     Ok(policy.protect_model_text(&prompt))
 }
 
-
 pub(in crate::agent) fn prepare_outbound_messages(
     cwd: &Path,
     messages: &[Value],
@@ -130,4 +134,3 @@ pub(in crate::agent) fn prepare_outbound_messages(
     let config = crate::load_config(cwd);
     crate::context::prepare_model_messages(cwd, &config, messages)
 }
-

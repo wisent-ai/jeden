@@ -11,7 +11,6 @@ use super::discovery::project_root;
 
 #[derive(Debug, Clone)]
 pub(crate) struct SecretSource {
-    pub(crate) provenance: String,
     pub(crate) value: String,
 }
 
@@ -26,40 +25,28 @@ impl SecretPolicy {
     pub(crate) fn load(cwd: &Path, config: &SecretsConfig) -> Result<Self, String> {
         let root = project_root(cwd)?;
         let mut sources = Vec::new();
-        for (index, value) in config.values.iter().enumerate() {
-            add_secret(
-                &mut sources,
-                format!("config:secrets.values[{index}]"),
-                value,
-                1,
-            );
+        for value in &config.values {
+            add_secret(&mut sources, value, 1);
         }
         for name in &config.environment {
             let value = env::var(name)
                 .map_err(|_| format!("configured secret environment variable {name} is not set"))?;
-            add_secret(
-                &mut sources,
-                format!("environment:{name}"),
-                &value,
-                1,
-            );
+            add_secret(&mut sources, &value, 1);
         }
         if config.discover_environment {
             for (name, value) in env::vars() {
                 if looks_secret_name(&name) {
-                    add_secret(
-                        &mut sources,
-                        format!("environment:{name}"),
-                        &value,
-                        config.min_length,
-                    );
+                    add_secret(&mut sources, &value, config.min_length);
                 }
             }
         }
         for configured in &config.files {
             let requested = root.join(configured);
             let canonical = requested.canonicalize().map_err(|error| {
-                format!("configured secret file {} cannot be resolved: {error}", requested.display())
+                format!(
+                    "configured secret file {} cannot be resolved: {error}",
+                    requested.display()
+                )
             })?;
             if !canonical.starts_with(&root) {
                 return Err(format!(
@@ -78,13 +65,6 @@ impl SecretPolicy {
             replacement: config.replacement.clone(),
             secrets: sources,
         })
-    }
-
-    pub(crate) fn provenance(&self) -> Vec<&str> {
-        self.secrets
-            .iter()
-            .map(|source| source.provenance.as_str())
-            .collect()
     }
 
     pub(crate) fn protect_text(&self, text: &str) -> String {
@@ -121,14 +101,16 @@ impl SecretPolicy {
     }
 
     pub(crate) fn protect_messages(&self, messages: &[Value]) -> Vec<Value> {
-        messages.iter().map(|message| self.protect_json(message)).collect()
+        messages
+            .iter()
+            .map(|message| self.protect_json(message))
+            .collect()
     }
 }
 
-fn add_secret(sources: &mut Vec<SecretSource>, provenance: String, value: &str, min_length: usize) {
+fn add_secret(sources: &mut Vec<SecretSource>, value: &str, min_length: usize) {
     if !value.is_empty() && value.len() >= min_length {
         sources.push(SecretSource {
-            provenance,
             value: value.to_string(),
         });
     }
@@ -136,9 +118,17 @@ fn add_secret(sources: &mut Vec<SecretSource>, provenance: String, value: &str, 
 
 fn looks_secret_name(name: &str) -> bool {
     let upper = name.to_ascii_uppercase();
-    ["TOKEN", "SECRET", "PASSWORD", "PASSWD", "API_KEY", "PRIVATE_KEY", "ACCESS_KEY"]
-        .iter()
-        .any(|marker| upper.contains(marker))
+    [
+        "TOKEN",
+        "SECRET",
+        "PASSWORD",
+        "PASSWD",
+        "API_KEY",
+        "PRIVATE_KEY",
+        "ACCESS_KEY",
+    ]
+    .iter()
+    .any(|marker| upper.contains(marker))
 }
 
 fn load_secret_file(
@@ -148,7 +138,7 @@ fn load_secret_file(
 ) -> Result<(), String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read secret file {}: {error}", path.display()))?;
-    for (line_index, line) in text.lines().enumerate() {
+    for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
@@ -157,12 +147,7 @@ fn load_secret_file(
             .split_once('=')
             .map(|(_, value)| value.trim().trim_matches(['\'', '"']))
             .unwrap_or(trimmed);
-        add_secret(
-            sources,
-            format!("file:{}:{}", path.display(), line_index + 1),
-            value,
-            min_length,
-        );
+        add_secret(sources, value, min_length);
     }
     Ok(())
 }
@@ -179,4 +164,3 @@ fn obfuscate(value: &str) -> String {
         chars[chars.len() - 1]
     )
 }
-

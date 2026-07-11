@@ -88,6 +88,20 @@ WISENT_APP_AGENT_ID=wisent-app
 
 `ENTITLEMENTS_ROUTER_BIN` optionally overrides the local `entitlements-router` executable used by authentication status commands.
 
+## Billing and subscription routing
+
+Billing is owned by Weles. Configure `WELES_URL` and `WELES_TOKEN`; Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` only opens a Weles-hosted HTTPS setup URL.
+
+The interactive slash surface provides:
+
+- `/billing policy get|set|reset` for an explicit, revision-pinned purchase policy with product, currency, per-purchase, and per-period caps;
+- `/subscriptions list|status` for redacted subscription and quota views;
+- `/subscriptions purchase|renew|disable` for approved, caller-idempotent mutations.
+
+`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Weles.
+
+For model calls, Jeden discovers active Weles subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
+
 ## Configuration and context
 
 User config loads from `~/.jeden/config.json` and `~/.jeden/config.yml`. Project config loads from `<cwd>/.jeden/config.json` and overrides user config. Environment variables still win over file config.

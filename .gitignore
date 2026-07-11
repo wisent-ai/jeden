@@ -8,5 +8,8 @@ coverage/
 sessions/
 artifacts/
 .jeden/
+benchmarks/output/
 
 target/
+*.rmeta
+packages/*/dist/

@@ -62,7 +62,11 @@ fn ranged_read_of_large_file_returns_only_the_requested_line() {
     let path = root.path().join("large.txt");
     let mut writer = BufWriter::new(File::create(&path).unwrap());
     for line in 1..=10_000 {
-        writeln!(writer, "line-{line:05}-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ").unwrap();
+        writeln!(
+            writer,
+            "line-{line:05}-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        )
+        .unwrap();
     }
     writer.flush().unwrap();
     assert!(fs::metadata(&path).unwrap().len() > 512_000);
@@ -77,14 +81,23 @@ fn ranged_read_of_large_file_returns_only_the_requested_line() {
     )
     .unwrap();
 
-    assert_eq!(result["content"], "line-05000-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    assert_eq!(result["lines"], json!([{
-        "line": 5000,
-        "text": "line-05000-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    }]));
+    assert_eq!(
+        result["content"],
+        "line-05000-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    );
+    assert_eq!(
+        result["lines"],
+        json!([{
+            "line": 5000,
+            "text": "line-05000-abcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        }])
+    );
     assert_eq!(result["scannedLines"], 10_000);
     assert_eq!(result["truncated"], false);
-    assert!(result.to_string().len() < 2_000, "ranged response unexpectedly embedded the file");
+    assert!(
+        result.to_string().len() < 2_000,
+        "ranged response unexpectedly embedded the file"
+    );
 }
 
 #[test]
@@ -94,7 +107,11 @@ fn recursive_search_honors_nested_gitignore_and_can_explicitly_override_it() {
     fs::create_dir(root.path().join(".git")).unwrap();
     fs::write(root.path().join("nested/.gitignore"), "*.secret\n").unwrap();
     fs::write(root.path().join("nested/visible.txt"), "shared needle\n").unwrap();
-    fs::write(root.path().join("nested/deeper/ignored.secret"), "shared needle\n").unwrap();
+    fs::write(
+        root.path().join("nested/deeper/ignored.secret"),
+        "shared needle\n",
+    )
+    .unwrap();
 
     let honored = run(
         root.path(),
@@ -105,11 +122,14 @@ fn recursive_search_honors_nested_gitignore_and_can_explicitly_override_it() {
         json!({"path":".", "query":"shared needle", "gitignore":true}),
     )
     .unwrap();
-    assert_eq!(honored["matches"], json!([{
-        "path": "nested/visible.txt",
-        "line": 1,
-        "text": "shared needle"
-    }]));
+    assert_eq!(
+        honored["matches"],
+        json!([{
+            "path": "nested/visible.txt",
+            "line": 1,
+            "text": "shared needle"
+        }])
+    );
 
     let overridden = run(
         root.path(),
@@ -120,10 +140,13 @@ fn recursive_search_honors_nested_gitignore_and_can_explicitly_override_it() {
         json!({"path":".", "query":"shared needle", "gitignore":false}),
     )
     .unwrap();
-    assert_eq!(overridden["matches"], json!([
-        {"path":"nested/deeper/ignored.secret", "line":1, "text":"shared needle"},
-        {"path":"nested/visible.txt", "line":1, "text":"shared needle"}
-    ]));
+    assert_eq!(
+        overridden["matches"],
+        json!([
+            {"path":"nested/deeper/ignored.secret", "line":1, "text":"shared needle"},
+            {"path":"nested/visible.txt", "line":1, "text":"shared needle"}
+        ])
+    );
 }
 
 #[test]
@@ -162,12 +185,15 @@ fn glob_returns_recursive_directories_in_stable_path_order() {
     )
     .unwrap();
 
-    assert_eq!(result["matches"], json!([
-        {"path":"alpha", "type":"directory"},
-        {"path":"alpha/deep", "type":"directory"},
-        {"path":"zeta", "type":"directory"},
-        {"path":"zeta/inner", "type":"directory"}
-    ]));
+    assert_eq!(
+        result["matches"],
+        json!([
+            {"path":"alpha", "type":"directory"},
+            {"path":"alpha/deep", "type":"directory"},
+            {"path":"zeta", "type":"directory"},
+            {"path":"zeta/inner", "type":"directory"}
+        ])
+    );
 }
 
 #[test]
@@ -195,7 +221,10 @@ fn notebook_text_roundtrip_preserves_cell_boundaries_and_updated_content() {
     .unwrap();
     assert_eq!(first_read["text"], initial);
 
-    let updated = first_read["text"].as_str().unwrap().replace("before", "after");
+    let updated = first_read["text"]
+        .as_str()
+        .unwrap()
+        .replace("before", "after");
     run(
         root.path(),
         None,
@@ -219,9 +248,13 @@ fn notebook_text_roundtrip_preserves_cell_boundaries_and_updated_content() {
         json!({"path":"work.ipynb"}),
     )
     .unwrap();
-    assert_eq!(second_read["text"], "# %% [markdown] cell:1\n# Heading\n\n# %% [code] cell:2\nprint('after')");
+    assert_eq!(
+        second_read["text"],
+        "# %% [markdown] cell:1\n# Heading\n\n# %% [code] cell:2\nprint('after')"
+    );
 
-    let notebook: Value = serde_json::from_slice(&fs::read(root.path().join("work.ipynb")).unwrap()).unwrap();
+    let notebook: Value =
+        serde_json::from_slice(&fs::read(root.path().join("work.ipynb")).unwrap()).unwrap();
     assert_eq!(notebook["cells"][0]["cell_type"], "markdown");
     assert_eq!(notebook["cells"][1]["cell_type"], "code");
     assert_eq!(notebook["cells"][1]["source"], json!(["print('after')"]));
@@ -235,7 +268,11 @@ fn ast_query_and_durable_rewrite_support_apply_and_discard() {
     fs::create_dir_all(&artifacts).unwrap();
     fs::write(session.join("transcript.jsonl"), "").unwrap();
     fs::write(session.join("state.json"), "{}").unwrap();
-    fs::write(root.path().join("sample.rs"), "fn alpha() {}\nfn beta() {}\n").unwrap();
+    fs::write(
+        root.path().join("sample.rs"),
+        "fn alpha() {}\nfn beta() {}\n",
+    )
+    .unwrap();
     let query = "(function_item name: (identifier) @name)";
 
     let searched = run(
@@ -247,8 +284,19 @@ fn ast_query_and_durable_rewrite_support_apply_and_discard() {
         json!({"path":"sample.rs", "query":query, "capture":"name"}),
     )
     .unwrap();
-    assert_eq!(searched["matches"].as_array().unwrap().iter().map(|item| item["text"].as_str().unwrap()).collect::<Vec<_>>(), vec!["alpha", "beta"]);
-    assert_eq!(searched["matches"][0]["start"], json!({"line":1, "column":4}));
+    assert_eq!(
+        searched["matches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| item["text"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["alpha", "beta"]
+    );
+    assert_eq!(
+        searched["matches"][0]["start"],
+        json!({"line":1, "column":4})
+    );
 
     let preview = run(
         root.path(),
@@ -260,8 +308,14 @@ fn ast_query_and_durable_rewrite_support_apply_and_discard() {
     )
     .unwrap();
     assert_eq!(preview["matchCount"], 2);
-    assert!(preview["diff"].as_str().unwrap().contains("fn renamed_alpha() {}"));
-    assert_eq!(fs::read_to_string(root.path().join("sample.rs")).unwrap(), "fn alpha() {}\nfn beta() {}\n");
+    assert!(preview["diff"]
+        .as_str()
+        .unwrap()
+        .contains("fn renamed_alpha() {}"));
+    assert_eq!(
+        fs::read_to_string(root.path().join("sample.rs")).unwrap(),
+        "fn alpha() {}\nfn beta() {}\n"
+    );
     let apply_id = preview["pendingId"].as_str().unwrap().to_string();
 
     let applied = run(
@@ -274,7 +328,10 @@ fn ast_query_and_durable_rewrite_support_apply_and_discard() {
     )
     .unwrap();
     assert_eq!(applied["applied"], true);
-    assert_eq!(fs::read_to_string(root.path().join("sample.rs")).unwrap(), "fn renamed_alpha() {}\nfn renamed_beta() {}\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("sample.rs")).unwrap(),
+        "fn renamed_alpha() {}\nfn renamed_beta() {}\n"
+    );
 
     let discard_preview = run(
         root.path(),
@@ -296,7 +353,10 @@ fn ast_query_and_durable_rewrite_support_apply_and_discard() {
     )
     .unwrap();
     assert_eq!(discarded["discarded"], true);
-    assert_eq!(fs::read_to_string(root.path().join("sample.rs")).unwrap(), "fn renamed_alpha() {}\nfn renamed_beta() {}\n");
+    assert_eq!(
+        fs::read_to_string(root.path().join("sample.rs")).unwrap(),
+        "fn renamed_alpha() {}\nfn renamed_beta() {}\n"
+    );
 }
 
 #[test]
@@ -304,7 +364,12 @@ fn sqlite_mutation_requires_current_digest_and_archive_rejects_escaping_entry() 
     let root = TempDir::new("guarded-storage");
     let database = root.path().join("records.sqlite");
     let connection = Connection::open(&database).unwrap();
-    connection.execute("CREATE TABLE records (id INTEGER PRIMARY KEY, name TEXT NOT NULL)", []).unwrap();
+    connection
+        .execute(
+            "CREATE TABLE records (id INTEGER PRIMARY KEY, name TEXT NOT NULL)",
+            [],
+        )
+        .unwrap();
     drop(connection);
 
     let snapshot = run(
@@ -401,7 +466,11 @@ fn configured_agent_tool_allowlist_hard_denies_execution_outside_the_list() {
     }
 
     let root = TempDir::new("agent-tool-deny");
-    fs::write(root.path().join("available.txt"), "content that must not be read\n").unwrap();
+    fs::write(
+        root.path().join("available.txt"),
+        "content that must not be read\n",
+    )
+    .unwrap();
     let discovered = crate::tools::list_tools(root.path());
     assert!(discovered.iter().any(|tool| tool.name == "glob_paths"));
     assert!(!discovered.iter().any(|tool| tool.name == "read_file"));

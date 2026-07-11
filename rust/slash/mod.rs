@@ -115,11 +115,18 @@ fn tools_picker(context: &SlashContext<'_>) -> PickerSpec {
 }
 
 fn capability_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let mut items = crate::capability::management_items(context.cwd).into_iter().map(|(label, detail, badge, action, disabled)| {
-        let mut item = PickerItem::action(label, action.unwrap_or_default()).detail(detail).badge(badge);
-        if disabled { item = item.disabled(true); }
-        item
-    }).collect::<Vec<_>>();
+    let mut items = crate::capability::management_items(context.cwd)
+        .into_iter()
+        .map(|(label, detail, badge, action, disabled)| {
+            let mut item = PickerItem::action(label, action.unwrap_or_default())
+                .detail(detail)
+                .badge(badge);
+            if disabled {
+                item = item.disabled(true);
+            }
+            item
+        })
+        .collect::<Vec<_>>();
     if items.is_empty() {
         items.push(PickerItem::action("No capabilities discovered", "").disabled(true));
     }
@@ -136,10 +143,16 @@ pub(crate) fn interactive_picker(
     }
     let view = crate::capability::view_descriptor(context.cwd, command)?;
     if !view.health.is_executable() || !view.ui.executable {
-        let detail = view.health.detail.unwrap_or_else(|| "Capability backend unavailable".into());
+        let detail = view
+            .health
+            .detail
+            .unwrap_or_else(|| "Capability backend unavailable".into());
         return Some(Ok(PickerSpec::new(
             format!("{} unavailable", view.ui.label),
-            vec![PickerItem::action(view.ui.label, "").detail(detail).badge("UNAVAILABLE").disabled(true)],
+            vec![PickerItem::action(view.ui.label, "")
+                .detail(detail)
+                .badge("UNAVAILABLE")
+                .disabled(true)],
         )));
     }
     let state = read_mode_state(context.cwd);
@@ -158,7 +171,7 @@ pub(crate) fn interactive_picker(
         }
         "/mcp" => Ok(commands::mcp::mcp_picker(context)),
         "/ssh" => Ok(commands::ssh::ssh_picker(context)),
-        "/memory" => commands::memory::memory_picker(context),
+        "/memory" => commands::memory::memory_picker(),
         "/usage" => Ok(commands::usage::usage_picker(context)),
         "/browser" => Ok(browser::browser_picker(context)),
         "/stats" => Ok(commands::stats_picker(context)),

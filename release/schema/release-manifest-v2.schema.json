@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.jeden.dev/release/release-manifest-v2.schema.json",
+  "title": "ReleaseManifestV2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "version", "channel", "targetTriple", "artifactUrl", "sha256", "size", "publishedAt", "expiresAt", "minimumVersion", "keyId", "provenanceRef", "sbomRef"],
+  "properties": {
+    "schemaVersion": { "const": 2 },
+    "version": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "maxLength": 128 },
+    "channel": { "enum": ["canary", "stable"] },
+    "targetTriple": { "type": "string", "pattern": "^[A-Za-z0-9_]+-[A-Za-z0-9_.-]+$", "maxLength": 128 },
+    "artifactUrl": { "$ref": "#/$defs/absoluteOrRelativeUri" },
+    "sha256": { "$ref": "#/$defs/sha256" },
+    "size": { "type": "integer", "minimum": 1, "maximum": 268435456 },
+    "publishedAt": { "type": "string", "format": "date-time" },
+    "expiresAt": { "type": "string", "format": "date-time" },
+    "minimumVersion": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$", "maxLength": 128 },
+    "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+    "provenanceRef": { "$ref": "#/$defs/digestBoundReference" },
+    "sbomRef": { "$ref": "#/$defs/digestBoundReference" }
+  },
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "absoluteOrRelativeUri": { "type": "string", "minLength": 1, "maxLength": 4096 },
+    "digestBoundReference": { "type": "string", "pattern": "^.+#sha256=[0-9a-f]{64}$", "maxLength": 4168 }
+  }
+}

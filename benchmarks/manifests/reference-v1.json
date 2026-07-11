@@ -1,0 +1,1 @@
+{"catalog":"benchmarks/manifests/scripted-catalog-v1.json","codeDigest":"bac7f622513fd50dd27c8c6eab3bf268ea93a48e67e4f46fbe738eb781ffe0b0","dataset":"benchmarks/datasets/jeden-synthetic-reference-v1.json","policy":"benchmarks/manifests/reference-policy-v1.json","schema":"jeden.eval-manifest.v1"}

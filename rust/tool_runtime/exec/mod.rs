@@ -5,12 +5,13 @@ use std::io::Read;
 use std::time::Duration;
 
 use super::runtime_ops::{
-    BoundedOutput, ManagedCommand, ManagedProcessResult, OperationProgress, OutputLimits,
-    ProcessManager, TerminationReason,
     kernel::{self, KernelLanguage},
-    pty,
+    pty, BoundedOutput, ManagedCommand, ManagedProcessResult, OperationProgress, OutputLimits,
+    ProcessManager, TerminationReason,
 };
-use super::shared::{bool_input, jail_path, line_window, run_read_process, string_input, u64_input};
+use super::shared::{
+    bool_input, jail_path, line_window, run_read_process, string_input, u64_input,
+};
 use super::ToolRuntime;
 
 mod search;
@@ -239,11 +240,18 @@ pub(crate) fn pty_resize(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         return Err("pty_resize requires --allow-command".into());
     }
     let session_id = string_input(input, "sessionId").ok_or("pty_resize requires sessionId")?;
-    let cols_value = input.get("cols").and_then(Value::as_u64).ok_or("pty_resize requires integer cols")?;
-    let rows_value = input.get("rows").and_then(Value::as_u64).ok_or("pty_resize requires integer rows")?;
+    let cols_value = input
+        .get("cols")
+        .and_then(Value::as_u64)
+        .ok_or("pty_resize requires integer cols")?;
+    let rows_value = input
+        .get("rows")
+        .and_then(Value::as_u64)
+        .ok_or("pty_resize requires integer rows")?;
     let cols = u16::try_from(cols_value).unwrap_or(u16::MAX);
     let rows = u16::try_from(rows_value).unwrap_or(u16::MAX);
-    let session = pty::resize(&runtime.operation, &session_id, cols, rows).map_err(|error| error.to_string())?;
+    let session = pty::resize(&runtime.operation, &session_id, cols, rows)
+        .map_err(|error| error.to_string())?;
     Ok(json!({
         "ok": true,
         "sessionId": session.session_id,
@@ -444,6 +452,11 @@ pub(crate) fn delegate_task(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     if runtime.operation.cancellation().is_cancelled() {
         return Err("delegate_task cancelled before scheduling".into());
     }
+    crate::tool_runtime::runtime_ops::untrusted_child(
+        &runtime.operation,
+        format!("{}:delegate-task", runtime.operation.operation_id()),
+    )
+    .map_err(|error| error.to_string())?;
     crate::task_runtime::execute_delegate(runtime.cwd, runtime.artifact_dir, input)
         .map_err(|error| error.to_string())
 }

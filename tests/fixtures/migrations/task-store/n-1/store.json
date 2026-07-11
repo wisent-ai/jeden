@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "store": "task-store",
+  "fixture": "n-1",
+  "payload": {
+    "preserved": true
+  }
+}

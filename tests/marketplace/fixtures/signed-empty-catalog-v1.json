@@ -1,0 +1,24 @@
+{
+  "schema": "jeden.marketplace.v1",
+  "rootVersion": 1,
+  "catalog": {
+    "catalogId": "fixture-production",
+    "sequence": 1,
+    "issuedAt": 1,
+    "expiresAt": 4102444800,
+    "releases": [],
+    "revokedKeys": [],
+    "revokedArtifacts": [],
+    "metadata": {}
+  },
+  "signatures": [
+    {
+      "keyId": "fixture-key-0",
+      "signature": "9100f72285c6cd053b8ac4e728e9d469167dd278e225dcfd7071c1b62aa616673722dcac38269e7878139780c19f7b2df00dc290a12646217490991ae937de07"
+    },
+    {
+      "keyId": "fixture-key-1",
+      "signature": "485a2beaab06fea9d030ab42eeeb04405b7a5995465b34f9db5c24dfa6e52ff43a8a4569402e8e26cb73d44e7eb6f96483e899c4ade09305c9033d4a1fc89d01"
+    }
+  ]
+}

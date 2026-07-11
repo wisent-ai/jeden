@@ -1,0 +1,207 @@
+name: Promote canary digest to stable
+
+on:
+  workflow_dispatch:
+    inputs:
+      canary_run_id:
+        description: Successful Signed canary release workflow run ID
+        required: true
+        type: string
+      version:
+        description: Exact SemVer being promoted
+        required: true
+        type: string
+      gate_digests_json:
+        description: JSON object of required staging, soak, fault, conformance, and benchmark evidence SHA-256 digests
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: stable-promotion-${{ inputs.version }}
+  cancel-in-progress: false
+
+env:
+  DSSE_PAYLOAD_TYPE: application/vnd.jeden.release-manifest.v2+json
+
+jobs:
+  promote-identical-digest:
+    name: Promote identical bytes (${{ matrix.target }})
+    environment: release-stable
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - aarch64-apple-darwin
+          - x86_64-pc-windows-msvc
+    env:
+      RELEASE_STORE_BASE_URL: ${{ secrets.RELEASE_STORE_BASE_URL }}
+      RELEASE_OIDC_EXCHANGE_URL: ${{ secrets.RELEASE_OIDC_EXCHANGE_URL }}
+      RELEASE_OIDC_AUDIENCE: ${{ secrets.RELEASE_OIDC_AUDIENCE }}
+      STABLE_KMS_SIGN_URL: ${{ secrets.STABLE_KMS_SIGN_URL }}
+      STABLE_KMS_KEY_ID: ${{ secrets.STABLE_KMS_KEY_ID }}
+      STABLE_PUBLIC_KEY_PEM: ${{ secrets.STABLE_PUBLIC_KEY_PEM }}
+      CANARY_PUBLIC_KEY_PEM: ${{ secrets.CANARY_PUBLIC_KEY_PEM }}
+    steps:
+      - name: Check out promotion schemas only
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Fail closed on promotion prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in RELEASE_STORE_BASE_URL RELEASE_OIDC_EXCHANGE_URL RELEASE_OIDC_AUDIENCE STABLE_KMS_SIGN_URL STABLE_KMS_KEY_ID STABLE_PUBLIC_KEY_PEM CANARY_PUBLIC_KEY_PEM; do
+            [ -n "${!name:-}" ] || { echo "::error::Missing promotion prerequisite: $name"; exit 1; }
+          done
+          case "$RELEASE_STORE_BASE_URL $RELEASE_OIDC_EXCHANGE_URL $STABLE_KMS_SIGN_URL" in
+            *http://*) echo '::error::Promotion endpoints must use HTTPS'; exit 1 ;;
+          esac
+
+      - name: Download immutable canary release evidence
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.canary_run_id }}
+          pattern: canary-${{ matrix.target }}-*
+          path: canary
+
+      - name: Verify canary signature, artifact and all gate evidence
+        id: verify
+        shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
+          EXPECTED_TARGET: ${{ matrix.target }}
+          REQUIRED_GATES: ${{ inputs.gate_digests_json }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import base64, hashlib, json, os, pathlib, re
+          roots = [p for p in pathlib.Path('canary').iterdir() if p.is_dir()]
+          if len(roots) != 1: raise SystemExit(f'expected exactly one canary artifact, got {len(roots)}')
+          root = roots[0]
+          envelope_bytes = (root / 'manifest.dsse.json').read_bytes()
+          envelope = json.loads(envelope_bytes)
+          if envelope.get('payloadType') != os.environ['DSSE_PAYLOAD_TYPE']: raise SystemExit('wrong DSSE payload type')
+          payload_bytes = base64.b64decode(envelope['payload'], validate=True)
+          payload = json.loads(payload_bytes)
+          canonical = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
+          if canonical != payload_bytes: raise SystemExit('non-canonical canary payload')
+          if payload.get('schemaVersion') != 2 or payload.get('channel') != 'canary': raise SystemExit('input is not ReleaseManifestV2 canary')
+          if payload.get('version') != os.environ['EXPECTED_VERSION'] or payload.get('targetTriple') != os.environ['EXPECTED_TARGET']: raise SystemExit('version/target mismatch')
+          archives = [p for p in root.glob('jeden-*.tar.gz')]
+          if len(archives) != 1: raise SystemExit('expected exactly one immutable artifact archive')
+          artifact = archives[0]
+          digest = hashlib.sha256(artifact.read_bytes()).hexdigest()
+          if digest != payload['sha256'] or artifact.stat().st_size != payload['size']: raise SystemExit('canary artifact digest/size mismatch')
+          gates = json.loads((root / 'release-gate-digests.json').read_text())
+          if gates.get('artifactSha256') != digest or not re.fullmatch(r'[0-9a-f]{40}', gates.get('sourceSha','')): raise SystemExit('invalid release gate identity')
+          required = json.loads(os.environ['REQUIRED_GATES'])
+          names = {'staging','soak','fault','conformance','benchmark'}
+          if set(required) != names or any(not re.fullmatch(r'[0-9a-f]{64}', value) for value in required.values()): raise SystemExit('all five canonical gate digests are required')
+          typ = envelope['payloadType'].encode()
+          pae = b'DSSEv1 ' + str(len(typ)).encode() + b' ' + typ + b' ' + str(len(payload_bytes)).encode() + b' ' + payload_bytes
+          pathlib.Path('canary.pae').write_bytes(pae)
+          pathlib.Path('canary.sig').write_bytes(base64.b64decode(envelope['signatures'][0]['sig'], validate=True))
+          pathlib.Path('canary-public.pem').write_text(os.environ['CANARY_PUBLIC_KEY_PEM'])
+          print(f'root={root}')
+          print(f'artifact_sha256={digest}')
+          print(f'canary_manifest_sha256={hashlib.sha256(envelope_bytes).hexdigest()}')
+          print(f'source_sha={gates["sourceSha"]}')
+          print('gate_digests=' + json.dumps(required, sort_keys=True, separators=(',', ':')))
+          PY
+          openssl pkeyutl -verify -pubin -inkey canary-public.pem -rawin -in canary.pae -sigfile canary.sig
+
+      - name: Obtain short-lived stable publisher identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          oidc_json="$(curl --fail-with-body --silent --show-error -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$RELEASE_OIDC_AUDIENCE")"
+          oidc_token="$(printf '%s' "$oidc_json" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("value",""))')"
+          [ -n "$oidc_token" ] || { echo '::error::GitHub OIDC issued no token'; exit 1; }
+          exchange_json="$(curl --fail-with-body --silent --show-error -H 'Content-Type: application/json' --data "$(OIDC_TOKEN="$oidc_token" python3 -c 'import json,os;print(json.dumps({"subject_token":os.environ["OIDC_TOKEN"],"audience":os.environ["RELEASE_OIDC_AUDIENCE"]},separators=(",",":")))')" "$RELEASE_OIDC_EXCHANGE_URL")"
+          access_token="$(printf '%s' "$exchange_json" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("access_token",""))')"
+          [ -n "$access_token" ] || { echo '::error::OIDC exchange issued no token'; exit 1; }
+          echo "::add-mask::$access_token"
+          printf 'RELEASE_ACCESS_TOKEN=%s\n' "$access_token" >> "$GITHUB_ENV"
+
+      - name: Re-sign stable channel pointer without rebuilding artifact
+        id: stable
+        shell: bash
+        env:
+          CANARY_ROOT: ${{ steps.verify.outputs.root }}
+          ARTIFACT_SHA256: ${{ steps.verify.outputs.artifact_sha256 }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import base64, datetime, hashlib, json, os, pathlib
+          envelope = json.loads((pathlib.Path(os.environ['CANARY_ROOT']) / 'manifest.dsse.json').read_text())
+          payload = json.loads(base64.b64decode(envelope['payload'], validate=True))
+          now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+          payload.update(channel='stable', keyId=os.environ['STABLE_KMS_KEY_ID'], publishedAt=now.isoformat().replace('+00:00','Z'), expiresAt=(now+datetime.timedelta(days=30)).isoformat().replace('+00:00','Z'))
+          if payload['sha256'] != os.environ['ARTIFACT_SHA256']: raise SystemExit('promotion attempted to change artifact digest')
+          raw = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
+          typ = os.environ['DSSE_PAYLOAD_TYPE'].encode()
+          pae = b'DSSEv1 ' + str(len(typ)).encode() + b' ' + typ + b' ' + str(len(raw)).encode() + b' ' + raw
+          pathlib.Path('stable.payload').write_bytes(raw)
+          pathlib.Path('stable.pae').write_bytes(pae)
+          print('payload_base64='+base64.b64encode(raw).decode())
+          print('pae_base64='+base64.b64encode(pae).decode())
+          PY
+          pae_base64="$(grep '^pae_base64=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
+          payload_base64="$(grep '^payload_base64=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
+          request="$(PAE_BASE64="$pae_base64" python3 -c 'import json,os;print(json.dumps({"keyId":os.environ["STABLE_KMS_KEY_ID"],"algorithm":"Ed25519","messageBase64":os.environ["PAE_BASE64"]},separators=(",",":")))')"
+          response="$(curl --fail-with-body --silent --show-error -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data "$request" "$STABLE_KMS_SIGN_URL")"
+          signature="$(printf '%s' "$response" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("signature",""))')"
+          [ -n "$signature" ] || { echo '::error::Stable KMS returned no signature'; exit 1; }
+          SIGNATURE="$signature" PAYLOAD="$payload_base64" python3 <<'PY'
+          import base64, json, os, pathlib
+          pathlib.Path('stable.sig').write_bytes(base64.b64decode(os.environ['SIGNATURE'], validate=True))
+          envelope={'payloadType':os.environ['DSSE_PAYLOAD_TYPE'],'payload':os.environ['PAYLOAD'],'signatures':[{'keyid':os.environ['STABLE_KMS_KEY_ID'],'sig':os.environ['SIGNATURE']}]}
+          pathlib.Path('stable.dsse.json').write_text(json.dumps(envelope,sort_keys=True,separators=(',',':'))+'\n')
+          pathlib.Path('stable-public.pem').write_text(os.environ['STABLE_PUBLIC_KEY_PEM'])
+          PY
+          openssl pkeyutl -verify -pubin -inkey stable-public.pem -rawin -in stable.pae -sigfile stable.sig
+
+      - name: Publish stable manifest and signed promotion evidence
+        shell: bash
+        env:
+          ARTIFACT_SHA256: ${{ steps.verify.outputs.artifact_sha256 }}
+          CANARY_MANIFEST_SHA256: ${{ steps.verify.outputs.canary_manifest_sha256 }}
+          SOURCE_SHA: ${{ steps.verify.outputs.source_sha }}
+          GATE_DIGESTS: ${{ steps.verify.outputs.gate_digests }}
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          import datetime, hashlib, json, os, pathlib
+          stable_digest=hashlib.sha256(pathlib.Path('stable.dsse.json').read_bytes()).hexdigest()
+          record={'schemaVersion':1,'sourceSha':os.environ['SOURCE_SHA'],'version':'${{ inputs.version }}','targetTriple':'${{ matrix.target }}','canaryArtifactSha256':os.environ['ARTIFACT_SHA256'],'stableArtifactSha256':os.environ['ARTIFACT_SHA256'],'canaryManifestSha256':os.environ['CANARY_MANIFEST_SHA256'],'stableManifestSha256':stable_digest,'gateDigests':json.loads(os.environ['GATE_DIGESTS']),'approvals':['github-environment:release-stable',f'actor:{os.environ["GITHUB_ACTOR"]}'],'promotedAt':datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00','Z'),'workflowRun':f'{os.environ["GITHUB_RUN_ID"]}/{os.environ["GITHUB_RUN_ATTEMPT"]}'}
+          if record['canaryArtifactSha256'] != record['stableArtifactSha256']: raise SystemExit('stable promotion digest differs from canary')
+          pathlib.Path('promotion-record.json').write_text(json.dumps(record,sort_keys=True,separators=(',',':'))+'\n')
+          print(stable_digest, file=open('stable.digest','w'))
+          PY
+          stable_digest="$(cat stable.digest)"
+          base="${RELEASE_STORE_BASE_URL%/}"
+          put_immutable() { curl --fail-with-body --silent --show-error --request PUT -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" -H 'If-None-Match: *' -H 'Cache-Control: public, max-age=31536000, immutable' --upload-file "$1" "$2"; }
+          put_immutable stable.dsse.json "$base/manifests/stable/sha256/$stable_digest/manifest.dsse.json"
+          record_digest="$(shasum -a 256 promotion-record.json | cut -d' ' -f1)"
+          put_immutable promotion-record.json "$base/promotions/sha256/$record_digest/promotion-record.json"
+          curl --fail-with-body --silent --show-error --request PUT -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" -H 'Content-Type: application/json' --data "{\"manifestSha256\":\"$stable_digest\",\"artifactSha256\":\"$ARTIFACT_SHA256\"}" "$base/channels/stable/${{ matrix.target }}.json"
+
+      - name: Retain promotion audit artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-promotion-${{ matrix.target }}-${{ steps.verify.outputs.artifact_sha256 }}
+          if-no-files-found: error
+          retention-days: 365
+          path: |
+            stable.dsse.json
+            promotion-record.json

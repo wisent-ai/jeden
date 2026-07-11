@@ -5,13 +5,31 @@ use super::theme::{Emphasis, SemanticColor, Theme};
 
 pub(super) fn paint(value: &str, style: &str, enabled: bool) -> String {
     let (token, emphasis) = match style {
-        "dim" => (SemanticColor::TextMuted, Emphasis { dim: true, ..Emphasis::default() }),
-        "bold" => (SemanticColor::TextPrimary, Emphasis { bold: true, ..Emphasis::default() }),
+        "dim" => (
+            SemanticColor::TextMuted,
+            Emphasis {
+                dim: true,
+                ..Emphasis::default()
+            },
+        ),
+        "bold" => (
+            SemanticColor::TextPrimary,
+            Emphasis {
+                bold: true,
+                ..Emphasis::default()
+            },
+        ),
         "cyan" => (SemanticColor::Info, Emphasis::default()),
         "green" => (SemanticColor::Success, Emphasis::default()),
         "yellow" => (SemanticColor::Warning, Emphasis::default()),
         "magenta" => (SemanticColor::Accent, Emphasis::default()),
-        "red" => (SemanticColor::Danger, Emphasis { bold: true, ..Emphasis::default() }),
+        "red" => (
+            SemanticColor::Danger,
+            Emphasis {
+                bold: true,
+                ..Emphasis::default()
+            },
+        ),
         _ => (SemanticColor::TextPrimary, Emphasis::default()),
     };
     Theme::from_env(enabled).paint(value, token, emphasis)
@@ -26,7 +44,10 @@ pub(super) fn sanitize_terminal_text(value: &str) -> String {
             index += consumed;
             continue;
         }
-        let ch = rest.chars().next().expect("index remains on UTF-8 boundary");
+        let ch = rest
+            .chars()
+            .next()
+            .expect("index remains on UTF-8 boundary");
         index += ch.len_utf8();
         match ch {
             '\n' => out.push('\n'),
@@ -47,7 +68,9 @@ pub(super) fn visible_len(value: &str) -> usize {
 }
 
 pub(super) fn take_visible(value: &str, max: usize) -> String {
-    if max == 0 { return String::new(); }
+    if max == 0 {
+        return String::new();
+    }
     let mut out = String::with_capacity(value.len().min(max.saturating_mul(4)));
     let mut width = 0;
     let mut index = 0;
@@ -60,7 +83,9 @@ pub(super) fn take_visible(value: &str, max: usize) -> String {
         }
         let grapheme = rest.graphemes(true).next().expect("non-empty remainder");
         let grapheme_width = UnicodeWidthStr::width(grapheme);
-        if width + grapheme_width > max { break; }
+        if width + grapheme_width > max {
+            break;
+        }
         if grapheme.chars().all(|ch| !ch.is_control()) {
             out.push_str(grapheme);
             width += grapheme_width;
@@ -70,14 +95,13 @@ pub(super) fn take_visible(value: &str, max: usize) -> String {
     out
 }
 
-pub(super) fn pad_visible(value: &str, width: usize) -> String {
-    let extra = width.saturating_sub(visible_len(value));
-    format!("{}{}", value, " ".repeat(extra))
-}
-
 pub(super) fn wrap_line(line: &str, width: usize) -> Vec<String> {
-    if width == 0 { return vec![String::new()]; }
-    if visible_len(line) <= width { return vec![line.to_string()]; }
+    if width == 0 {
+        return vec![String::new()];
+    }
+    if visible_len(line) <= width {
+        return vec![line.to_string()];
+    }
     let mut lines = Vec::new();
     let mut current = String::new();
     let mut current_width = 0;
@@ -91,7 +115,9 @@ pub(super) fn wrap_line(line: &str, width: usize) -> Vec<String> {
         }
         let grapheme = rest.graphemes(true).next().expect("non-empty remainder");
         index += grapheme.len();
-        if grapheme.chars().any(char::is_control) { continue; }
+        if grapheme.chars().any(char::is_control) {
+            continue;
+        }
         let grapheme_width = UnicodeWidthStr::width(grapheme);
         if current_width > 0 && current_width + grapheme_width > width {
             lines.push(std::mem::take(&mut current));
@@ -105,7 +131,10 @@ pub(super) fn wrap_line(line: &str, width: usize) -> Vec<String> {
 }
 
 pub(super) fn compact_path(cwd: &str) -> String {
-    let parts = cwd.split('/').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+    let parts = cwd
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
     if parts.len() >= 2 {
         format!("…/{}/{}", parts[parts.len() - 2], parts[parts.len() - 1])
     } else {
@@ -115,7 +144,11 @@ pub(super) fn compact_path(cwd: &str) -> String {
 
 pub(super) fn clamp_visible(value: &str, width: usize) -> String {
     if visible_len(value) > width {
-        if width == 0 { String::new() } else { format!("{}…", take_visible(value, width.saturating_sub(1))) }
+        if width == 0 {
+            String::new()
+        } else {
+            format!("{}…", take_visible(value, width.saturating_sub(1)))
+        }
     } else {
         value.to_string()
     }
@@ -136,19 +169,28 @@ fn terminal_sequence_len(value: &str) -> Option<usize> {
     if matches!(first, 0x90 | 0x98 | 0x9d | 0x9e | 0x9f) {
         return Some(string_sequence_len(bytes));
     }
-    if first == 0x9b { return Some(csi_len(bytes)); }
+    if first == 0x9b {
+        return Some(csi_len(bytes));
+    }
     None
 }
 
 fn csi_len(bytes: &[u8]) -> usize {
-    bytes.iter().position(|byte| (0x40..=0x7e).contains(byte) && *byte != 0x5b).map_or(bytes.len(), |index| index + 1)
+    bytes
+        .iter()
+        .position(|byte| (0x40..=0x7e).contains(byte) && *byte != 0x5b)
+        .map_or(bytes.len(), |index| index + 1)
 }
 
 fn string_sequence_len(bytes: &[u8]) -> usize {
     let mut index = 1;
     while index < bytes.len() {
-        if bytes[index] == 0x07 || bytes[index] == 0x9c { return index + 1; }
-        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') { return index + 2; }
+        if bytes[index] == 0x07 || bytes[index] == 0x9c {
+            return index + 1;
+        }
+        if bytes[index] == 0x1b && bytes.get(index + 1) == Some(&b'\\') {
+            return index + 2;
+        }
         index += 1;
     }
     bytes.len()
@@ -175,12 +217,22 @@ mod tests {
     #[test]
     fn native_tui_text_visible_operations_never_split_extended_graphemes() {
         for (name, input, width, expected_take, expected_wrap) in [
-            ("combining mark", "e\u{301}x", 1, "e\u{301}", vec!["e\u{301}", "x"]),
+            (
+                "combining mark",
+                "e\u{301}x",
+                1,
+                "e\u{301}",
+                vec!["e\u{301}", "x"],
+            ),
             ("emoji modifier", "👍🏽x", 2, "👍🏽", vec!["👍🏽", "x"]),
             ("ZWJ emoji", "👩🏽‍💻x", 2, "👩🏽‍💻", vec!["👩🏽‍💻", "x"]),
             ("wide CJK", "界x", 2, "界", vec!["界", "x"]),
         ] {
-            assert_eq!(take_visible(input, width), expected_take, "take case: {name}");
+            assert_eq!(
+                take_visible(input, width),
+                expected_take,
+                "take case: {name}"
+            );
             assert_eq!(wrap_line(input, width), expected_wrap, "wrap case: {name}");
         }
     }

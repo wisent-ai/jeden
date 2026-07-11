@@ -1,0 +1,52 @@
+[
+  {
+    "type": "request",
+    "id": "request-replay-001",
+    "method": "session.replay",
+    "params": {
+      "sessionId": "session-001",
+      "cursor": "cursor-00000041",
+      "limit": 100
+    },
+    "meta": {
+      "protocolVersion": "jeden.session.v1",
+      "idempotencyKey": "idem-replay-001",
+      "deadline": "2026-07-11T12:00:00Z",
+      "traceId": "trace-001"
+    }
+  },
+  {
+    "type": "response",
+    "id": "request-replay-001",
+    "result": {
+      "accepted": true,
+      "replayedThroughCursor": "cursor-00000141"
+    }
+  },
+  {
+    "type": "event",
+    "sessionId": "session-001",
+    "streamId": "stream-main-001",
+    "sequence": 42,
+    "cursor": "cursor-00000042",
+    "eventId": "event-00000042",
+    "requestId": "request-replay-001",
+    "kind": "session.output.delta",
+    "payload": {
+      "text": "hello from replay"
+    }
+  },
+  {
+    "type": "error",
+    "id": "request-replay-001",
+    "error": {
+      "code": "session.temporarily_unavailable",
+      "message": "The session is temporarily unavailable.",
+      "retryable": true,
+      "details": {
+        "retryAfterMs": 250,
+        "sessionId": "session-001"
+      }
+    }
+  }
+]

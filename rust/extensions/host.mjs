@@ -1,4 +1,4 @@
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, realpath } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { dirname, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -120,6 +120,7 @@ async function artifact(name, content) {
 }
 
 async function activate(file) {
+  const importFile = await realpath(file);
   const tools = []; const commands = []; const hooks = []; const capabilities = []; const providers = []; const models = [];
   const api = {
     abiVersion: 1, cwd, generation, signal: abortController.signal, hasUI: false, ui: null, zod, typebox, pi: null,
@@ -152,7 +153,7 @@ async function activate(file) {
     artifact,
   };
   api.pi = api;
-  const imported = await import(`${pathToFileURL(file).href}?jeden_generation=${generation}&nonce=${Date.now()}`);
+  const imported = await import(`${pathToFileURL(importFile).href}?jeden_generation=${generation}&nonce=${Date.now()}`);
   const factory = imported.default ?? imported.extension ?? imported.activate ?? imported.tool ?? imported.tools;
   let produced = typeof factory === 'function' ? await factory(api) : factory;
   if (produced && typeof produced === 'object' && !Array.isArray(produced) && (produced.tools || produced.commands || produced.hooks || produced.capabilities || produced.providers || produced.models)) {

@@ -120,8 +120,23 @@ impl Conversation {
             match call {
                 Ok(streaming) => {
                     for result in &streaming.route_results {
-                        self.recorder
-                            .record("model_route_result", json!({ "step": step, "result": result }))?;
+                        self.recorder.record(
+                            "model_route_result",
+                            json!({ "step": step, "result": result }),
+                        )?;
+                    }
+                    if let Some(target) = &streaming.subscription_target {
+                        self.recorder.record(
+                            "model_subscription_route",
+                            json!({
+                                "step": step,
+                                "decisionId": streaming.subscription_decision_id.as_deref(),
+                                "providerId": target.provider_id.as_str(),
+                                "accountId": target.account_id.as_str(),
+                                "subscriptionId": target.subscription_id.as_str(),
+                                "quotaBucket": target.quota_bucket.as_str(),
+                            }),
+                        )?;
                     }
                     router.model = streaming.route.model.clone();
                     router.service_tier = streaming.route.service_tier.clone().unwrap_or_default();
@@ -132,6 +147,8 @@ impl Conversation {
                             &router,
                             usage,
                             usage_cost(&args.cwd, &config, &router.model, usage),
+                            streaming.subscription_target.as_ref(),
+                            streaming.subscription_decision_id.as_deref(),
                         ) {
                             self.recorder
                                 .record("usage_error", json!({ "message": error }))
@@ -271,11 +288,14 @@ impl Conversation {
                 }
                 Err(failure) => {
                     for result in &failure.route_results {
-                        self.recorder
-                            .record("model_route_result", json!({ "step": step, "result": result }))?;
+                        self.recorder.record(
+                            "model_route_result",
+                            json!({ "step": step, "result": result }),
+                        )?;
                     }
                     let error = failure.message;
-                    let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow
+                    let overflow = failure.class
+                        == crate::model_router::StreamErrorClass::ContextOverflow
                         || is_context_overflow_error(&error);
                     if overflow && !failure.visible_output {
                         while !router.context_promotions.is_empty() {
@@ -310,8 +330,8 @@ impl Conversation {
                     } else {
                         None
                     };
-                    if let Some(reason) = recovery_reason
-                        .filter(|_| !failure.visible_output && self.turn_len() > 1)
+                    if let Some(reason) =
+                        recovery_reason.filter(|_| !failure.visible_output && self.turn_len() > 1)
                     {
                         self.recorder.record(
                             "run_error",

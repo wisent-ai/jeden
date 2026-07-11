@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Repair an off-by-one defect at the upper boundary and preserve the documented API.\n","src/input.txt":"synthetic-bugfix-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

@@ -10,21 +10,47 @@ path = "rust/lib.rs"
 name = "jeden"
 path = "rust/main.rs"
 
+[[bin]]
+name = "jeden-quality-report"
+path = "rust/report/main.rs"
+
+[[bin]]
+name = "jeden-reference-benchmark"
+path = "rust/bin/jeden-reference-benchmark.rs"
+
+[[test]]
+name = "crash_matrix"
+path = "tests/fault/crash_matrix.rs"
+
+[[test]]
+name = "reliability"
+path = "tests/soak/reliability.rs"
+
 [dependencies]
+agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
 base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
 aes-gcm = "0.10"
 crossterm = "0.28"
 hex = "0.4"
 flate2 = "1"
+futures = "0.3"
 hmac = "0.12"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
 glob = "0.3"
 regex = "1"
 parking_lot = "0.12"
+rustls = "0.23"
+rustls-pemfile = "2"
+x509-parser = "0.18"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
+semver = { version = "1", features = ["serde"] }
+tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
+tokio-stream = "0.1"
+tokio-rustls = "0.26"
 serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
@@ -41,3 +67,6 @@ tree-sitter-typescript = "0.23"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ignore = "0.4"
+
+[dev-dependencies]
+rcgen = "0.13"

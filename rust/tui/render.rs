@@ -1,4 +1,4 @@
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, IsTerminal};
 use std::path::Path;
 
 use super::text::{
@@ -38,9 +38,16 @@ pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Ve
     } else {
         width.max(1)
     };
-    let title = sanitize_terminal_text(if message.role == "assistant" { ASSISTANT_TITLE } else { message.role.as_str() });
+    let title = sanitize_terminal_text(if message.role == "assistant" {
+        ASSISTANT_TITLE
+    } else {
+        message.role.as_str()
+    });
     let safe = sanitize_terminal_text(&message.text);
-    let rows = safe.split('\n').map(|line| format!("  {line}")).collect::<Vec<_>>();
+    let rows = safe
+        .split('\n')
+        .map(|line| format!("  {line}"))
+        .collect::<Vec<_>>();
     boxed(&title, &rows, width.max(1), color)
         .into_iter()
         .map(|line| paint(&line, role_color(&message.role), color))
@@ -65,8 +72,15 @@ pub(super) fn welcome_panel(
     vec![
         clamp_visible(&format!("{brand}  {version}"), width),
         clamp_visible(&format!("model {model} | workspace {workspace}"), width),
-        clamp_visible(&format!("permissions: write {write_status} | command {command_status}"), width),
-        paint("[Enter] send  [Alt+Enter] newline  [Ctrl+C] exit", "dim", color),
+        clamp_visible(
+            &format!("permissions: write {write_status} | command {command_status}"),
+            width,
+        ),
+        paint(
+            "[Enter] send  [Alt+Enter] newline  [Ctrl+C] exit",
+            "dim",
+            color,
+        ),
         String::new(),
     ]
 }
@@ -91,7 +105,9 @@ pub(super) fn slash_matches(input_text: &str) -> Vec<(String, String)> {
         .executable_kind(crate::capability::CapabilityKind::SlashCommand)
         .filter_map(|descriptor| {
             let action = descriptor.ui.action.as_deref()?.strip_prefix('/')?;
-            action.starts_with(&prefix).then(|| (action.to_string(), descriptor.ui.description.clone()))
+            action
+                .starts_with(&prefix)
+                .then(|| (action.to_string(), descriptor.ui.description.clone()))
         })
         .take(6)
         .collect()
@@ -134,26 +150,59 @@ pub(super) fn compact_prompt(
 ) -> Vec<String> {
     let width = width.max(1);
     let content_width = width.saturating_sub(2).max(1);
-    let model = sanitize_terminal_text(if status.model.is_empty() { "default" } else { status.model.as_str() });
-    let mut segments = vec![format!("jeden. {model}"), sanitize_terminal_text(&compact_path(&status.cwd))];
-    if !status.service_tier.is_empty() { segments.push(format!("route {}", sanitize_terminal_text(&status.service_tier))); }
+    let model = sanitize_terminal_text(if status.model.is_empty() {
+        "default"
+    } else {
+        status.model.as_str()
+    });
+    let mut segments = vec![
+        format!("jeden. {model}"),
+        sanitize_terminal_text(&compact_path(&status.cwd)),
+    ];
+    if !status.service_tier.is_empty() {
+        segments.push(format!(
+            "route {}",
+            sanitize_terminal_text(&status.service_tier)
+        ));
+    }
     if let Some(branch) = &status.branch {
-        segments.push(format!("{}{}", sanitize_terminal_text(branch), if status.dirty_count > 0 { " dirty" } else { "" }));
+        segments.push(format!(
+            "{}{}",
+            sanitize_terminal_text(branch),
+            if status.dirty_count > 0 { " dirty" } else { "" }
+        ));
     }
     match (status.context_percent, status.context_limit.as_deref()) {
-        (Some(percent), Some(limit)) => segments.push(format!("context {percent:.1}% {}", sanitize_terminal_text(limit))),
+        (Some(percent), Some(limit)) => segments.push(format!(
+            "context {percent:.1}% {}",
+            sanitize_terminal_text(limit)
+        )),
         (_, Some(limit)) => segments.push(format!("context {}", sanitize_terminal_text(limit))),
         (Some(percent), None) => segments.push(format!("context {percent:.1}%")),
         _ => {}
     }
-    if let Some(cost) = &status.cost { segments.push(format!("cost {}", sanitize_terminal_text(cost))); }
-    let runtime = RegistryUiRuntime.runtime_status(Path::new(&status.cwd));
-    if let Some(route_health) = runtime.route_health { segments.push(format!("route {route_health}")); }
-    if let Some(active_jobs) = runtime.active_jobs { segments.push(format!("jobs {active_jobs}")); }
-    if runtime.services_degraded > 0 || runtime.services_unavailable > 0 {
-        segments.push(format!("services {}/{}", runtime.services_degraded, runtime.services_unavailable));
+    if let Some(cost) = &status.cost {
+        segments.push(format!("cost {}", sanitize_terminal_text(cost)));
     }
-    if !status.write_status.is_empty() { segments.push(format!("write {}", sanitize_terminal_text(&status.write_status))); }
+    let runtime = RegistryUiRuntime.runtime_status(Path::new(&status.cwd));
+    if let Some(route_health) = runtime.route_health {
+        segments.push(format!("route {route_health}"));
+    }
+    if let Some(active_jobs) = runtime.active_jobs {
+        segments.push(format!("jobs {active_jobs}"));
+    }
+    if runtime.services_degraded > 0 || runtime.services_unavailable > 0 {
+        segments.push(format!(
+            "services {}/{}",
+            runtime.services_degraded, runtime.services_unavailable
+        ));
+    }
+    if !status.write_status.is_empty() {
+        segments.push(format!(
+            "write {}",
+            sanitize_terminal_text(&status.write_status)
+        ));
+    }
     let status_line = clamp_visible(&segments.join(" | "), width);
     let mut out = vec![paint(&status_line, "dim", color)];
     let safe_input = sanitize_terminal_text(input_text);
@@ -164,9 +213,13 @@ pub(super) fn compact_prompt(
             out.push(format!("{}{}", if first { "> " } else { "  " }, line));
             first = false;
         }
-        if logical.is_empty() && !first { continue; }
+        if logical.is_empty() && !first {
+            continue;
+        }
     }
-    if first { out.push("> ".to_string()); }
+    if first {
+        out.push("> ".to_string());
+    }
     out
 }
 
@@ -177,7 +230,9 @@ pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usi
     let mut cursor_row = 0usize;
     let mut cursor_column = 0usize;
     for logical in safe_prefix.split('\n') {
-        if cursor_row > 0 || cursor_column > 0 { cursor_row += 1; }
+        if cursor_row > 0 || cursor_column > 0 {
+            cursor_row += 1;
+        }
         let logical_width = visible_len(logical);
         if logical_width == 0 {
             cursor_column = 0;
@@ -187,18 +242,33 @@ pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usi
         }
     }
     let up = rendered_input_rows.saturating_sub(cursor_row + 1);
-    let Some(last) = lines.last_mut() else { return; };
-    if up > 0 { last.push_str(&format!("\x1b[{up}A")); }
+    let Some(last) = lines.last_mut() else {
+        return;
+    };
+    if up > 0 {
+        last.push_str(&format!("\x1b[{up}A"));
+    }
     last.push('\r');
     let column = cursor_column + 2;
-    if column > 0 { last.push_str(&format!("\x1b[{column}C")); }
+    if column > 0 {
+        last.push_str(&format!("\x1b[{column}C"));
+    }
 }
 
 pub(super) fn attachment_lines(tray: &AttachmentTray, width: usize, color: bool) -> Vec<String> {
-    if tray.items().is_empty() { return Vec::new(); }
-    let mut lines = vec![paint(&format!("Attachments ({})", tray.items().len()), "bold", color)];
+    if tray.items().is_empty() {
+        return Vec::new();
+    }
+    let mut lines = vec![paint(
+        &format!("Attachments ({})", tray.items().len()),
+        "bold",
+        color,
+    )];
     for attachment in tray.items() {
-        lines.push(clamp_visible(&format!("  {}", attachment.fallback_label()), width.max(1)));
+        lines.push(clamp_visible(
+            &format!("  {}", attachment.fallback_label()),
+            width.max(1),
+        ));
     }
     lines
 }
@@ -211,8 +281,19 @@ pub(super) fn busy_editor_lines(
 ) -> Vec<String> {
     let width = width.max(1);
     let content_width = width.saturating_sub(2).max(1);
-    let label = if queue.is_empty() { "Follow-up".to_string() } else { format!("Follow-up ({} queued)", queue.len()) };
-    let mut lines = vec![paint("[Enter] queue  [Ctrl+Enter] steer  [Alt+Up] recall", "dim", color), paint(&label, "dim", color)];
+    let label = if queue.is_empty() {
+        "Follow-up".to_string()
+    } else {
+        format!("Follow-up ({} queued)", queue.len())
+    };
+    let mut lines = vec![
+        paint(
+            "[Enter] queue  [Ctrl+Enter] steer  [Alt+Up] recall",
+            "dim",
+            color,
+        ),
+        paint(&label, "dim", color),
+    ];
     let safe = sanitize_terminal_text(editor.text());
     let mut first = true;
     for logical in safe.split('\n') {
@@ -221,7 +302,9 @@ pub(super) fn busy_editor_lines(
             first = false;
         }
     }
-    if first { lines.push("> ".into()); }
+    if first {
+        lines.push("> ".into());
+    }
     lines
 }
 
@@ -279,23 +362,10 @@ pub fn render_terminal_frame(options: &FrameOptions) -> String {
     if options.color {
         format!("\x1b[2J\x1b[H{}", lines.join("\n"))
     } else {
-        lines.into_iter().map(|line| sanitize_terminal_text(&line)).collect::<Vec<_>>().join("\n")
-    }
-}
-
-pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
-    let mut stdout = io::stdout();
-    if stdout.is_terminal() {
-        stdout.write_all(render_terminal_frame(options).as_bytes())?;
-        stdout.write_all(b"\x1b[?25h")?;
-    } else {
-        let plain = frame_lines(options)
+        lines
             .into_iter()
             .map(|line| sanitize_terminal_text(&line))
             .collect::<Vec<_>>()
-            .join("\n");
-        stdout.write_all(plain.as_bytes())?;
-        stdout.write_all(b"\n")?;
+            .join("\n")
     }
-    stdout.flush()
 }

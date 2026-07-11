@@ -33,30 +33,6 @@ fn mcp_write_file(path: &Path, mut config: Value) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
-fn active_mcp_server_names(cwd: &Path) -> Vec<String> {
-    let config = mcp::load_config(cwd);
-    let disabled = config
-        .get("disabledServers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut names = config
-        .get("mcpServers")
-        .and_then(Value::as_object)
-        .map(|servers| {
-            servers
-                .keys()
-                .filter(|name| !disabled.contains(name.as_str()))
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    names.sort();
-    names
-}
-
 fn format_mcp_list(cwd: &Path) -> String {
     let user = read_json_value(&dirs_home().join(".jeden/mcp.json"));
     let project = read_json_value(&cwd.join(".jeden/mcp.json"));

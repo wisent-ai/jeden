@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.jeden.dev/release/trust-roots-v1.schema.json",
+  "title": "Jeden Release Public Trust Roots",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "roots"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "roots": {
+      "type": "array",
+      "minItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "keyId", "publicKey"],
+        "properties": {
+          "channel": { "enum": ["canary", "stable"] },
+          "keyId": { "type": "string", "pattern": "^[A-Za-z0-9._:-]{1,128}$" },
+          "publicKey": { "type": "string", "contentEncoding": "base64", "minLength": 44, "maxLength": 44 }
+        }
+      }
+    }
+  }
+}

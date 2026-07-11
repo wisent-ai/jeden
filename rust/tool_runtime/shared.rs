@@ -1,8 +1,7 @@
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::{Component, Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::{Path, PathBuf};
 
 use super::ToolRuntime;
 
@@ -18,20 +17,7 @@ pub(crate) fn jail_path(cwd: &Path, input: &str) -> Result<PathBuf, String> {
     } else {
         input.trim()
     };
-    let path = Path::new(raw);
-    if path.is_absolute() {
-        return Err(format!("path must be relative to cwd: {raw}"));
-    }
-    let mut out = cwd.to_path_buf();
-    for component in path.components() {
-        match component {
-            Component::Normal(part) => out.push(part),
-            Component::CurDir => {}
-            Component::ParentDir => return Err(format!("path escapes cwd: {raw}")),
-            _ => return Err(format!("unsupported path component in {raw}")),
-        }
-    }
-    Ok(out)
+    super::runtime_ops::fs::validate_relative(cwd, raw).map_err(|error| error.to_string())
 }
 
 pub(crate) fn string_input(input: &Value, key: &str) -> Option<String> {
@@ -219,11 +205,4 @@ pub(crate) fn run_read_process(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
         ask_user: runtime.ask_user,
     };
     super::exec::run_process(&elevated, input)
-}
-
-pub(crate) fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
 }

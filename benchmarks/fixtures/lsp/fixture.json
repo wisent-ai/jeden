@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Apply the supplied language-server diagnostics and leave the source warning-free.\n","src/input.txt":"synthetic-lsp-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

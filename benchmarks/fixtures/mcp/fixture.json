@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Handle a malformed tool response as a typed terminal error without retry storms.\n","src/input.txt":"synthetic-mcp-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

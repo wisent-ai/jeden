@@ -5,26 +5,33 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-mod agent;
-mod capability;
-mod cli;
-mod collab;
-mod context;
-mod control_plane;
-mod conformance;
-mod hooks;
-mod mcp;
-mod memory;
-mod model_router;
-mod protocol;
-mod slash;
+pub mod agent;
+pub mod capability;
+pub mod cas;
+pub mod cli;
+pub mod collab;
+pub mod conformance;
+pub mod context;
+pub mod control_plane;
+pub mod eval;
+pub mod hooks;
+pub mod marketplace;
+pub mod mcp;
+pub mod memory;
+pub mod model_router;
+pub mod protocol;
+pub mod report;
+pub mod routing;
 pub mod rpc;
 pub mod sdk;
-mod tool_runtime;
-mod tool_services;
+pub mod slash;
 pub mod task_runtime;
-mod tools;
-mod tui;
+pub mod telemetry;
+pub mod tool_runtime;
+pub mod tool_services;
+pub mod tools;
+pub mod tui;
+pub mod update;
 
 pub(crate) use cli::commands::expand::resolve_file_command;
 pub(crate) use cli::config::schema::config_command;
@@ -57,6 +64,7 @@ fn usage() -> String {
         "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden run \"task\" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
+        "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
         "  jeden sessions [limit]\n",
         "  jeden show <session-id-or-path>\n",
@@ -269,8 +277,7 @@ fn user_config_path() -> PathBuf {
     dirs_home().join(".jeden/config.yml")
 }
 
-
-fn main() -> ExitCode {
+pub fn main() -> ExitCode {
     let argv = env::args().skip(usize::from(true)).collect::<Vec<_>>();
     let args = match parse_args(argv) {
         Ok(v) => v,
@@ -284,25 +291,46 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     if args.command == "doctor" {
-        let report = conformance::health::doctor(&args);
+        let report = conformance::health::doctor(&args.cwd);
         match serde_json::to_string(&report) {
             Ok(text) => println!("{text}"),
-            Err(error) => { eprintln!("Error: failed to serialize doctor report: {error}"); return ExitCode::FAILURE; }
+            Err(error) => {
+                eprintln!("Error: failed to serialize doctor report: {error}");
+                return ExitCode::FAILURE;
+            }
         }
-        return if report.healthy { ExitCode::SUCCESS } else { ExitCode::FAILURE };
+        return if report.healthy {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::FAILURE
+        };
     }
     if args.command == "conformance" {
-        return match conformance::run(&args.cwd).and_then(|report| conformance::canonical_json(&report).map(|text| (report, text))) {
-            Ok((report, text)) => { print!("{text}"); if report.complete { ExitCode::SUCCESS } else { ExitCode::FAILURE } },
-            Err(error) => { eprintln!("Error: {error}"); ExitCode::FAILURE }
+        return match conformance::run(&args.cwd)
+            .and_then(|report| conformance::canonical_json(&report).map(|text| (report, text)))
+        {
+            Ok((report, text)) => {
+                print!("{text}");
+                if report.complete {
+                    ExitCode::SUCCESS
+                } else {
+                    ExitCode::FAILURE
+                }
+            }
+            Err(error) => {
+                eprintln!("Error: {error}");
+                ExitCode::FAILURE
+            }
         };
     }
     let result = match args.command.as_str() {
         "help" => Ok(usage()),
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
-        "rpc" => rpc::serve_stdio(rpc::RpcMode::JsonRpc).map(|_| String::new()),
-        "acp" => rpc::serve_stdio(rpc::RpcMode::Acp).map(|_| String::new()),
+        "rpc" => rpc::serve_stdio().map(|_| String::new()),
+        "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
+            .map(|_| String::new()),
+        "acp" => rpc::serve_acp_stdio().map(|_| String::new()),
         "collab-relay" => {
             let addr = args
                 .positionals

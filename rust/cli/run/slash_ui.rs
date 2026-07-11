@@ -7,30 +7,64 @@ use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
 fn model_picker(cwd: &Path, current_model: Option<&str>) -> Result<PickerSpec, String> {
     let config = load_config(cwd);
-    let endpoint = std::env::var("BRAMA_URL").ok().or(config.model_router_url.clone());
-    let active = current_model.map(str::to_string).or(config.model).or_else(|| std::env::var("JEDEN_MODEL").ok());
-    let client = crate::control_plane::brama::BramaClient::configured(endpoint, std::env::var("BRAMA_TOKEN").ok());
-    if !client.health().available { return Err(client.health().detail); }
-    let catalog = crate::control_plane::model_catalog(cwd, &client, false).map_err(|error| error.to_string())?;
-    let items = catalog.models.into_iter().map(|model| {
-        let selected = active.as_deref() == Some(model.id.as_str());
-        let detail = format!("context {} · output {} · {}{}", model.context_window, model.max_output_tokens, if model.tools { "tools" } else { "no tools" }, if model.reasoning { " · reasoning" } else { "" });
-        PickerItem::action(&model.id, format!("/model {}", model.id))
-            .detail(model.unavailable_reason.unwrap_or(detail))
-            .badge(if !model.available { "UNAVAILABLE" } else if selected { "ACTIVE" } else { "AVAILABLE" })
-            .disabled(selected || !model.available)
-    }).collect();
+    let endpoint = std::env::var("BRAMA_URL")
+        .ok()
+        .or(config.model_router_url.clone());
+    let active = current_model
+        .map(str::to_string)
+        .or(config.model)
+        .or_else(|| std::env::var("JEDEN_MODEL").ok());
+    let client = crate::control_plane::brama::BramaClient::configured(
+        endpoint,
+        std::env::var("BRAMA_TOKEN").ok(),
+    );
+    if !client.health().available {
+        return Err(client.health().detail);
+    }
+    let catalog = crate::control_plane::model_catalog(cwd, &client, false)
+        .map_err(|error| error.to_string())?;
+    let items = catalog
+        .models
+        .into_iter()
+        .map(|model| {
+            let selected = active.as_deref() == Some(model.id.as_str());
+            let detail = format!(
+                "context {} · output {} · {}{}",
+                model.context_window,
+                model.max_output_tokens,
+                if model.tools { "tools" } else { "no tools" },
+                if model.reasoning { " · reasoning" } else { "" }
+            );
+            PickerItem::action(&model.id, format!("/model {}", model.id))
+                .detail(model.unavailable_reason.unwrap_or(detail))
+                .badge(if !model.available {
+                    "UNAVAILABLE"
+                } else if selected {
+                    "ACTIVE"
+                } else {
+                    "AVAILABLE"
+                })
+                .disabled(selected || !model.available)
+        })
+        .collect();
     Ok(PickerSpec::new("Select model route", items))
 }
 
 fn logout_picker() -> Result<PickerSpec, String> {
     let client = crate::control_plane::weles::WelesClient::from_env();
-    if !client.health().available { return Err(client.health().detail); }
-    let items = client.accounts(None).map_err(|error| error.to_string())?.into_iter().map(|account| {
-        PickerItem::action(&account.display_name, format!("/logout {}", account.id))
-            .detail(format!("{} · {}", account.provider, account.status))
-            .badge("ACCOUNT")
-    }).collect();
+    if !client.health().available {
+        return Err(client.health().detail);
+    }
+    let items = client
+        .accounts(None)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|account| {
+            PickerItem::action(&account.display_name, format!("/logout {}", account.id))
+                .detail(format!("{} · {}", account.provider, account.status))
+                .badge("ACCOUNT")
+        })
+        .collect();
     Ok(PickerSpec::new("Select account to logout", items))
 }
 
@@ -49,10 +83,16 @@ pub(crate) fn interactive_view(
     }
     if let Some(view) = crate::capability::view_descriptor(cwd, command) {
         if !view.health.is_executable() || !view.ui.executable {
-            let detail = view.health.detail.unwrap_or_else(|| "Capability backend unavailable".into());
+            let detail = view
+                .health
+                .detail
+                .unwrap_or_else(|| "Capability backend unavailable".into());
             return Some(Ok(CommandOutcome::Picker(PickerSpec::new(
                 format!("{} unavailable", view.ui.label),
-                vec![PickerItem::action(view.ui.label, "").detail(detail).badge("UNAVAILABLE").disabled(true)],
+                vec![PickerItem::action(view.ui.label, "")
+                    .detail(detail)
+                    .badge("UNAVAILABLE")
+                    .disabled(true)],
             ))));
         }
     }
@@ -100,7 +140,15 @@ mod tests {
             "startup.showSplash",
             "startup.quiet",
         ] {
-            assert!(settings.items.iter().any(|item| item.command.as_deref().is_some_and(|command| command.starts_with(&format!("/settings set {key} ")))), "settings picker omitted an action for {key}");
+            assert!(
+                settings
+                    .items
+                    .iter()
+                    .any(|item| item.command.as_deref().is_some_and(
+                        |command| command.starts_with(&format!("/settings set {key} "))
+                    )),
+                "settings picker omitted an action for {key}"
+            );
         }
     }
 
@@ -119,8 +167,15 @@ mod tests {
         }
 
         let picker = picker_for(cwd, "/settings", Some("route-z"));
-        for command in picker.items.iter().filter_map(|item| item.command.as_deref()) {
-            assert!(interactive_view(cwd, command, Some("route-z")).is_none(), "picker submission {command:?} must not reopen /settings");
+        for command in picker
+            .items
+            .iter()
+            .filter_map(|item| item.command.as_deref())
+        {
+            assert!(
+                interactive_view(cwd, command, Some("route-z")).is_none(),
+                "picker submission {command:?} must not reopen /settings"
+            );
         }
     }
 }

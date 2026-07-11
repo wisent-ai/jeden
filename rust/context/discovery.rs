@@ -28,7 +28,6 @@ pub(crate) struct ContextEntry {
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ContextBundle {
-    pub(crate) root: PathBuf,
     pub(crate) entries: Vec<ContextEntry>,
     pub(crate) warnings: Vec<String>,
 }
@@ -87,12 +86,30 @@ struct Descriptor {
 // Ordered from lowest to highest precedence within one directory. The array is
 // the stable schema descriptor; discovery never depends on directory iteration.
 const DESCRIPTORS: &[Descriptor] = &[
-    Descriptor { relative: "CLAUDE.md", kind: ContextKind::Rule },
-    Descriptor { relative: "AGENTS.md", kind: ContextKind::Rule },
-    Descriptor { relative: "RULES.md", kind: ContextKind::Rule },
-    Descriptor { relative: "JEDEN.md", kind: ContextKind::Rule },
-    Descriptor { relative: ".jeden/instructions.md", kind: ContextKind::Rule },
-    Descriptor { relative: ".jeden/context.md", kind: ContextKind::Context },
+    Descriptor {
+        relative: "CLAUDE.md",
+        kind: ContextKind::Rule,
+    },
+    Descriptor {
+        relative: "AGENTS.md",
+        kind: ContextKind::Rule,
+    },
+    Descriptor {
+        relative: "RULES.md",
+        kind: ContextKind::Rule,
+    },
+    Descriptor {
+        relative: "JEDEN.md",
+        kind: ContextKind::Rule,
+    },
+    Descriptor {
+        relative: ".jeden/instructions.md",
+        kind: ContextKind::Rule,
+    },
+    Descriptor {
+        relative: ".jeden/context.md",
+        kind: ContextKind::Context,
+    },
 ];
 
 struct Budget {
@@ -160,7 +177,11 @@ fn parse_import(line: &str) -> Option<&str> {
     let raw = trimmed
         .strip_prefix("@import ")
         .or_else(|| trimmed.strip_prefix("@include "))
-        .or_else(|| trimmed.strip_prefix('@').filter(|rest| !rest.contains(char::is_whitespace)))?;
+        .or_else(|| {
+            trimmed
+                .strip_prefix('@')
+                .filter(|rest| !rest.contains(char::is_whitespace))
+        })?;
     let path = raw.trim().trim_matches(['\'', '"']);
     (!path.is_empty()).then_some(path)
 }
@@ -173,9 +194,12 @@ fn load_expanded(
     provenance: &mut Vec<Provenance>,
     imported_by: Option<&Path>,
 ) -> Result<String, String> {
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| format!("context import {} cannot be resolved: {error}", path.display()))?;
+    let canonical = path.canonicalize().map_err(|error| {
+        format!(
+            "context import {} cannot be resolved: {error}",
+            path.display()
+        )
+    })?;
     budget.files_read = budget.files_read.saturating_add(1);
     if budget.files_read > 256 {
         return Err(format!(
@@ -210,14 +234,8 @@ fn load_expanded(
         if let Some(import) = parse_import(line.trim_end_matches(['\r', '\n'])) {
             let parent = canonical.parent().unwrap_or(jail);
             let imported = parent.join(import);
-            let content = load_expanded(
-                &imported,
-                jail,
-                budget,
-                stack,
-                provenance,
-                Some(&canonical),
-            )?;
+            let content =
+                load_expanded(&imported, jail, budget, stack, provenance, Some(&canonical))?;
             expanded.push_str(&content);
             if !content.ends_with('\n') {
                 expanded.push('\n');
@@ -305,13 +323,13 @@ pub(crate) fn discover_context(
     let mut seen_ids = BTreeSet::new();
     for entry in &entries {
         if !seen_ids.insert(entry.id.clone()) {
-            budget
-                .warnings
-                .push(format!("rule id '{}' is repeated; higher precedence applies later", entry.id));
+            budget.warnings.push(format!(
+                "rule id '{}' is repeated; higher precedence applies later",
+                entry.id
+            ));
         }
     }
     Ok(ContextBundle {
-        root,
         entries,
         warnings: budget.warnings,
     })
@@ -328,7 +346,10 @@ fn append_configured_rules(
         let (content, provenance) = match (&rule.content, &rule.source) {
             (Some(content), None) => (
                 budget.include(Path::new("<config>"), content),
-                vec![Provenance { path: PathBuf::from("<config>"), imported_by: None }],
+                vec![Provenance {
+                    path: PathBuf::from("<config>"),
+                    imported_by: None,
+                }],
             ),
             (None, Some(source)) => {
                 let mut provenance = Vec::new();
@@ -342,10 +363,12 @@ fn append_configured_rules(
                 )?;
                 (content, provenance)
             }
-            _ => return Err(format!(
-                "always-apply rule '{}' must set exactly one of content or source",
-                rule.id
-            )),
+            _ => {
+                return Err(format!(
+                    "always-apply rule '{}' must set exactly one of content or source",
+                    rule.id
+                ))
+            }
         };
         entries.push(ContextEntry {
             id: rule.id.clone(),

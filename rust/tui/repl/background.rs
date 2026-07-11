@@ -8,8 +8,8 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::super::render::{busy_editor_lines, place_editor_cursor};
 use super::super::{
-    default_columns, stdout_supports_color, Attachment, CommandOutcome, DeliveryAction,
-    EditorAction, EditorState, FollowUpQueue, Message, TurnCtx,
+    default_columns, stdout_supports_color, CommandOutcome, DeliveryAction, EditorAction,
+    EditorState, FollowUpQueue, Message, TurnCtx,
 };
 use super::questions::prompt_user_question;
 use super::{message_block, spinner_glyph, ReplRenderer};
@@ -81,7 +81,6 @@ pub(super) fn run_background_turn<H>(
     handler: &H,
     prompt: &str,
     from_view: bool,
-    attachments: &[Attachment],
     editor: &mut EditorState,
     queue: &mut FollowUpQueue,
     steering_available: bool,
@@ -181,7 +180,6 @@ where
                 cancel: worker_cancel,
                 interactive: false,
                 from_view,
-                attachments,
                 progress: &progress,
                 stream: &stream,
                 ask_user: Some(&ask_user),
@@ -254,13 +252,22 @@ where
             if event::poll(Duration::from_millis(120))? {
                 match event::read()? {
                     Event::Paste(text) => editor.paste(&text),
-                    Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
-                        let is_ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+                    Event::Key(key)
+                        if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+                    {
+                        let is_ctrl_c = key.code == KeyCode::Char('c')
+                            && key.modifiers.contains(KeyModifiers::CONTROL);
                         if key.code == KeyCode::Esc || is_ctrl_c {
                             cancel.store(true, Ordering::Relaxed);
-                        } else if key.code == KeyCode::Up && key.modifiers.contains(KeyModifiers::ALT) {
-                            if let Some(recalled) = queue.recall_last() { editor.set_text(recalled.text); }
-                        } else if key.code == KeyCode::Enter && key.modifiers.contains(KeyModifiers::ALT) {
+                        } else if key.code == KeyCode::Up
+                            && key.modifiers.contains(KeyModifiers::ALT)
+                        {
+                            if let Some(recalled) = queue.recall_last() {
+                                editor.set_text(recalled.text);
+                            }
+                        } else if key.code == KeyCode::Enter
+                            && key.modifiers.contains(KeyModifiers::ALT)
+                        {
                             editor.apply(EditorAction::InsertNewline);
                         } else if let Some(mut action) = queue.action_for(key) {
                             let text = editor.take();
@@ -268,11 +275,15 @@ where
                                 action = DeliveryAction::FollowUp;
                                 note = "Steering unavailable; queued as follow-up".into();
                             }
-                            if let Err(error) = queue.push(text, action) { note = error.to_string(); }
+                            if let Err(error) = queue.push(text, action) {
+                                note = error.to_string();
+                            }
                         } else {
                             editor.handle_key(key);
                         }
-                        if let Some(error) = editor.take_error() { note = error.to_string(); }
+                        if let Some(error) = editor.take_error() {
+                            note = error.to_string();
+                        }
                     }
                     Event::Resize(_, _) => {}
                     _ => {}

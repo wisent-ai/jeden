@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 3,
+  "store": "ledger",
+  "fixture": "future",
+  "payload": {
+    "preserved": true
+  }
+}

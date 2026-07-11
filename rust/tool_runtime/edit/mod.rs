@@ -11,8 +11,8 @@ mod storage;
 mod visual_apply;
 mod visual_parse;
 
-pub(crate) use visual_apply::visual_edit;
 pub(crate) use storage::{write_archive, write_sqlite};
+pub(crate) use visual_apply::visual_edit;
 
 #[derive(Clone)]
 struct VisualPatchOp {
@@ -32,51 +32,103 @@ struct VisualPatchSection {
 }
 
 fn notebook_bytes(file: &std::path::Path, content: &str) -> Result<Vec<u8>, String> {
-    if file.extension().and_then(|value| value.to_str()) != Some("ipynb") || !content.starts_with("# %% [") {
+    if file.extension().and_then(|value| value.to_str()) != Some("ipynb")
+        || !content.starts_with("# %% [")
+    {
         return Ok(content.as_bytes().to_vec());
     }
     let mut parsed = if file.exists() {
-        serde_json::from_slice::<Value>(&fs::read(file).map_err(|error| error.to_string())?).map_err(|error| error.to_string())?
+        serde_json::from_slice::<Value>(&fs::read(file).map_err(|error| error.to_string())?)
+            .map_err(|error| error.to_string())?
     } else {
         json!({"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5})
     };
-    let mut cells = Vec::<(String,String)>::new();
+    let mut cells = Vec::<(String, String)>::new();
     let mut kind = None::<String>;
     let mut source = String::new();
     for line in content.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r','\n']);
+        let trimmed = line.trim_end_matches(['\r', '\n']);
         if let Some(rest) = trimmed.strip_prefix("# %% [") {
             if let Some((next_kind, suffix)) = rest.split_once("] cell:") {
-                suffix.parse::<usize>().map_err(|_| format!("invalid notebook cell marker: {trimmed}"))?;
-                if let Some(previous) = kind.replace(next_kind.to_string()) { cells.push((previous,std::mem::take(&mut source).trim_end_matches('\n').to_string())); }
+                suffix
+                    .parse::<usize>()
+                    .map_err(|_| format!("invalid notebook cell marker: {trimmed}"))?;
+                if let Some(previous) = kind.replace(next_kind.to_string()) {
+                    cells.push((
+                        previous,
+                        std::mem::take(&mut source)
+                            .trim_end_matches('\n')
+                            .to_string(),
+                    ));
+                }
                 continue;
             }
         }
-        if kind.is_none() { return Err("notebook content must begin with a cell marker".into()); }
+        if kind.is_none() {
+            return Err("notebook content must begin with a cell marker".into());
+        }
         source.push_str(line);
     }
-    if let Some(previous)=kind { cells.push((previous,source.trim_end_matches('\n').to_string())); }
-    let existing=parsed.get("cells").and_then(Value::as_array).cloned().unwrap_or_default();
-    let rebuilt=cells.into_iter().enumerate().map(|(index,(kind,source))| {
-        let mut cell=existing.get(index).cloned().unwrap_or_else(||json!({"metadata":{}}));
-        let object=cell.as_object_mut().ok_or("notebook cell must be an object")?;
-        object.insert("cell_type".into(),json!(kind));
-        object.insert("source".into(),json!(source.split_inclusive('\n').map(ToString::to_string).collect::<Vec<_>>()));
-        if object.get("cell_type").and_then(Value::as_str)==Some("code") { object.entry("outputs").or_insert_with(||json!([])); object.entry("execution_count").or_insert(Value::Null); }
-        Ok(cell)
-    }).collect::<Result<Vec<_>,String>>()?;
-    parsed.as_object_mut().ok_or("notebook root must be an object")?.insert("cells".into(),json!(rebuilt));
+    if let Some(previous) = kind {
+        cells.push((previous, source.trim_end_matches('\n').to_string()));
+    }
+    let existing = parsed
+        .get("cells")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let rebuilt = cells
+        .into_iter()
+        .enumerate()
+        .map(|(index, (kind, source))| {
+            let mut cell = existing
+                .get(index)
+                .cloned()
+                .unwrap_or_else(|| json!({"metadata":{}}));
+            let object = cell
+                .as_object_mut()
+                .ok_or("notebook cell must be an object")?;
+            object.insert("cell_type".into(), json!(kind));
+            object.insert(
+                "source".into(),
+                json!(source
+                    .split_inclusive('\n')
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()),
+            );
+            if object.get("cell_type").and_then(Value::as_str) == Some("code") {
+                object.entry("outputs").or_insert_with(|| json!([]));
+                object.entry("execution_count").or_insert(Value::Null);
+            }
+            Ok(cell)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    parsed
+        .as_object_mut()
+        .ok_or("notebook root must be an object")?
+        .insert("cells".into(), json!(rebuilt));
     serde_json::to_vec_pretty(&parsed).map_err(|error| error.to_string())
 }
 
 pub(crate) fn write_any(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let path=string_input(input,"path").ok_or("write requires path")?;
-    let lower=path.to_ascii_lowercase();
-    for suffix in [".tar.gz:",".tgz:",".tar:",".zip:"] {
-        if let Some(index)=lower.find(suffix){let split=index+suffix.len()-1;let mut routed=input.clone();let object=routed.as_object_mut().ok_or("write input must be an object")?;object.insert("path".into(),json!(&path[..split]));object.insert("entry".into(),json!(&path[split+1..]));return write_archive(runtime,&routed);}
+    let path = string_input(input, "path").ok_or("write requires path")?;
+    let lower = path.to_ascii_lowercase();
+    for suffix in [".tar.gz:", ".tgz:", ".tar:", ".zip:"] {
+        if let Some(index) = lower.find(suffix) {
+            let split = index + suffix.len() - 1;
+            let mut routed = input.clone();
+            let object = routed
+                .as_object_mut()
+                .ok_or("write input must be an object")?;
+            object.insert("path".into(), json!(&path[..split]));
+            object.insert("entry".into(), json!(&path[split + 1..]));
+            return write_archive(runtime, &routed);
+        }
     }
-    if (lower.ends_with(".sqlite")||lower.ends_with(".db")) && input.get("table").is_some(){return write_sqlite(runtime,input);}
-    write_file(runtime,input)
+    if (lower.ends_with(".sqlite") || lower.ends_with(".db")) && input.get("table").is_some() {
+        return write_sqlite(runtime, input);
+    }
+    write_file(runtime, input)
 }
 
 pub(crate) fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {

@@ -39,24 +39,13 @@ impl ContextPolicy {
         )
     }
 
-    pub(crate) fn rules(&self) -> &RuleRegistry {
-        &self.rules
-    }
-
+    #[cfg(test)]
     pub(crate) fn bundle(&self) -> &ContextBundle {
         &self.bundle
     }
 
-    pub(crate) fn secret_provenance(&self) -> Vec<&str> {
-        self.secrets.provenance()
-    }
-
     pub(crate) fn protect_model_text(&self, text: &str) -> String {
         self.secrets.protect_text(text)
-    }
-
-    pub(crate) fn protect_model_value(&self, value: &Value) -> Value {
-        self.secrets.protect_json(value)
     }
 
     pub(crate) fn protect_model_messages(&self, messages: &[Value]) -> Vec<Value> {
@@ -143,8 +132,7 @@ mod tests {
         fs::create_dir_all(descendant.join(".jeden")).expect("create descendant");
         project(&root);
         fs::write(root.join("JEDEN.md"), "root rule").expect("write root rule");
-        fs::write(descendant.join("CLAUDE.md"), "descendant rule")
-            .expect("write descendant rule");
+        fs::write(descendant.join("CLAUDE.md"), "descendant rule").expect("write descendant rule");
         fs::write(descendant.join(".jeden/context.md"), "descendant context")
             .expect("write descendant context");
 
@@ -208,8 +196,7 @@ mod tests {
         let chain = root.join("chain");
         fs::create_dir_all(&chain).expect("create import chain");
         project(&root);
-        fs::write(root.join("RULES.md"), "@import chain/000.md\n")
-            .expect("write chain root");
+        fs::write(root.join("RULES.md"), "@import chain/000.md\n").expect("write chain root");
         for index in 0..255 {
             let content = if index == 254 {
                 "terminal\n".to_string()
@@ -246,8 +233,7 @@ mod tests {
         project(&root);
         let outside = fixture.path().join("outside.md");
         fs::write(&outside, "outside policy").expect("write outside context");
-        fs::write(root.join("RULES.md"), "@import ../outside.md\n")
-            .expect("write escaping import");
+        fs::write(root.join("RULES.md"), "@import ../outside.md\n").expect("write escaping import");
 
         let error = ContextPolicy::load(&root, &config(4_096, 1_024))
             .expect_err("escaping context import must be rejected");
@@ -273,8 +259,8 @@ mod tests {
         let mut config = config(4_096, 1_024);
         config.secrets.files.push(PathBuf::from("../outside.env"));
 
-        let error = ContextPolicy::load(&root, &config)
-            .expect_err("escaping secret file must be rejected");
+        let error =
+            ContextPolicy::load(&root, &config).expect_err("escaping secret file must be rejected");
 
         assert_eq!(
             error,

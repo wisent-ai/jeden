@@ -1,10 +1,12 @@
+use super::contract::{ModelRequest, ModelStreamResultV1, RequestMeta, RouteRequest};
+use super::transport::{
+    ControlPlaneTransport, ReqwestTransport, SecretRef, TransportRequest, TransportResponse,
+};
 use super::{now_ms, ServiceHealth};
-use reqwest::blocking::Client;
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::io::Read;
-use std::sync::{LazyLock, Mutex};
+use std::collections::{BTreeMap, HashMap};
+use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const API_VERSION: &str = "v1";
@@ -14,63 +16,103 @@ const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ModelPrice {
-    #[serde(default)] pub input: f64,
-    #[serde(default)] pub output: f64,
-    #[serde(default)] pub cache_read: f64,
-    #[serde(default)] pub cache_write: f64,
+pub struct ModelPrice {
+    #[serde(default)]
+    pub input: f64,
+    #[serde(default)]
+    pub output: f64,
+    #[serde(default)]
+    pub cache_read: f64,
+    #[serde(default)]
+    pub cache_write: f64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ModelEntry {
+pub struct ModelEntry {
     pub id: String,
-    #[serde(default = "default_true")] pub available: bool,
-    #[serde(default)] pub context_window: u64,
-    #[serde(default)] pub max_output_tokens: u64,
-    #[serde(default)] pub input_modalities: Vec<String>,
-    #[serde(default)] pub output_modalities: Vec<String>,
-    #[serde(default)] pub tools: bool,
-    #[serde(default)] pub reasoning: bool,
-    #[serde(default, alias = "cost", alias = "pricing")] pub price: ModelPrice,
-    #[serde(default)] pub fallback: Vec<String>,
-    #[serde(default)] pub promotion: Vec<String>,
-    #[serde(default)] pub unavailable_reason: Option<String>,
+    #[serde(default = "default_true")]
+    pub available: bool,
+    #[serde(default)]
+    pub context_window: u64,
+    #[serde(default)]
+    pub max_output_tokens: u64,
+    #[serde(default)]
+    pub input_modalities: Vec<String>,
+    #[serde(default)]
+    pub output_modalities: Vec<String>,
+    #[serde(default)]
+    pub tools: bool,
+    #[serde(default)]
+    pub reasoning: bool,
+    #[serde(default, alias = "cost", alias = "pricing")]
+    pub price: ModelPrice,
+    #[serde(default)]
+    pub fallback: Vec<String>,
+    #[serde(default)]
+    pub promotion: Vec<String>,
+    #[serde(default)]
+    pub unavailable_reason: Option<String>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ModelCatalog {
-    #[serde(default = "api_version")] pub version: String,
-    #[serde(default)] pub models: Vec<ModelEntry>,
+pub struct ModelCatalog {
+    #[serde(default, alias = "revision")]
+    pub catalog_revision: String,
+    #[serde(default = "api_version")]
+    pub version: String,
+    #[serde(default)]
+    pub models: Vec<ModelEntry>,
+    #[serde(default)]
+    pub degraded: bool,
 }
-fn api_version() -> String { API_VERSION.into() }
+fn api_version() -> String {
+    API_VERSION.into()
+}
 
 impl ModelCatalog {
-    pub(crate) fn resolve(&self, id: &str) -> Result<&ModelEntry, BramaError> {
-        let model = self.models.iter().find(|model| model.id == id)
+    pub fn resolve(&self, id: &str) -> Result<&ModelEntry, BramaError> {
+        let model = self
+            .models
+            .iter()
+            .find(|model| model.id == id)
             .ok_or_else(|| BramaError::UnknownModel(id.to_string()))?;
         if !model.available {
-            return Err(BramaError::UnavailableModel { model: id.to_string(), reason: model.unavailable_reason.clone().unwrap_or_else(|| "catalog marks route unavailable".into()) });
+            return Err(BramaError::UnavailableModel {
+                model: id.to_string(),
+                reason: model
+                    .unavailable_reason
+                    .clone()
+                    .unwrap_or_else(|| "catalog marks route unavailable".into()),
+            });
         }
         Ok(model)
     }
 
-    pub(crate) fn price(&self, id: &str) -> Option<&ModelPrice> {
-        self.models.iter().find(|model| model.id == id && model.available).map(|model| &model.price)
+    pub fn price(&self, id: &str) -> Option<&ModelPrice> {
+        self.models
+            .iter()
+            .find(|model| model.id == id && model.available)
+            .map(|model| &model.price)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum BramaError {
+pub enum BramaError {
     Unconfigured,
     Transport(String),
     Http { status: u16, message: String },
+    RateLimited { retry_after_ms: Option<u64> },
     InvalidCatalog(String),
+    InvalidResponse(String),
     UnknownModel(String),
     UnavailableModel { model: String, reason: String },
+    Cancelled,
 }
 impl std::fmt::Display for BramaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -78,97 +120,410 @@ impl std::fmt::Display for BramaError {
             Self::Unconfigured => f.write_str("Brama service endpoint is not configured"),
             Self::Transport(e) => write!(f, "Brama transport error: {e}"),
             Self::Http { status, message } => write!(f, "Brama returned HTTP {status}: {message}"),
+            Self::RateLimited { retry_after_ms } => write!(
+                f,
+                "Brama rate limited the request; retry after {:?} ms",
+                retry_after_ms
+            ),
             Self::InvalidCatalog(e) => write!(f, "invalid Brama catalog: {e}"),
+            Self::InvalidResponse(e) => write!(f, "invalid Brama response: {e}"),
             Self::UnknownModel(id) => write!(f, "model `{id}` is not in the Brama catalog"),
-            Self::UnavailableModel { model, reason } => write!(f, "model `{model}` is unavailable: {reason}"),
+            Self::UnavailableModel { model, reason } => {
+                write!(f, "model `{model}` is unavailable: {reason}")
+            }
+            Self::Cancelled => f.write_str("Brama request cancelled"),
         }
     }
 }
 
 #[derive(Clone)]
-pub(crate) struct BramaClient {
+pub struct BramaClient {
     endpoint: Option<String>,
-    bearer: Option<String>,
+    authorization: Option<SecretRef>,
     ttl: Duration,
-    http: Client,
+    transport: Arc<dyn ControlPlaneTransport>,
+    correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 #[derive(Clone)]
-struct CachedCatalog { catalog: ModelCatalog, etag: Option<String>, fetched: Instant }
-static CACHE: LazyLock<Mutex<HashMap<String, CachedCatalog>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+struct CachedCatalog {
+    catalog: ModelCatalog,
+    etag: Option<String>,
+    fetched: Instant,
+}
+static CACHE: LazyLock<Mutex<HashMap<String, CachedCatalog>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 impl BramaClient {
-    pub(crate) fn from_env() -> Self {
-        Self::configured(std::env::var("BRAMA_URL").ok(), std::env::var("BRAMA_TOKEN").ok())
+    pub fn from_env() -> Self {
+        Self::with_secret_ref(
+            std::env::var("BRAMA_URL").ok(),
+            Some(SecretRef::environment("BRAMA_TOKEN")),
+            DEFAULT_TTL,
+            ReqwestTransport::production(),
+        )
     }
 
-    pub(crate) fn configured(endpoint: Option<String>, bearer: Option<String>) -> Self {
-        let ttl = std::env::var("BRAMA_CATALOG_TTL_MS").ok().and_then(|value| value.parse::<u64>().ok()).filter(|value| *value > 0).map(Duration::from_millis).unwrap_or(DEFAULT_TTL);
+    pub fn configured(endpoint: Option<String>, bearer: Option<String>) -> Self {
+        let ttl = std::env::var("BRAMA_CATALOG_TTL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(DEFAULT_TTL);
         Self::new(endpoint, bearer, ttl)
     }
 
-    pub(crate) fn new(endpoint: Option<String>, bearer: Option<String>, ttl: Duration) -> Self {
-        let endpoint = endpoint.map(|v| v.trim_end_matches('/').to_string()).filter(|v| !v.is_empty());
-        let http = Client::builder().connect_timeout(Duration::from_secs(5)).timeout(Duration::from_secs(20)).build().unwrap_or_else(|_| Client::new());
-        Self { endpoint, bearer: bearer.filter(|v| !v.trim().is_empty()), ttl: if ttl.is_zero() { DEFAULT_TTL } else { ttl }, http }
+    pub fn new(endpoint: Option<String>, bearer: Option<String>, ttl: Duration) -> Self {
+        Self::with_transport(endpoint, bearer, ttl, ReqwestTransport::production())
+    }
+
+    pub fn with_transport(
+        endpoint: Option<String>,
+        bearer: Option<String>,
+        ttl: Duration,
+        transport: Arc<dyn ControlPlaneTransport>,
+    ) -> Self {
+        Self::with_secret_ref(endpoint, bearer.map(SecretRef::inline), ttl, transport)
+    }
+
+    pub fn with_secret_ref(
+        endpoint: Option<String>,
+        authorization: Option<SecretRef>,
+        ttl: Duration,
+        transport: Arc<dyn ControlPlaneTransport>,
+    ) -> Self {
+        let endpoint = endpoint
+            .map(|v| v.trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty());
+        Self {
+            endpoint,
+            authorization,
+            ttl: if ttl.is_zero() { DEFAULT_TTL } else { ttl },
+            transport,
+            correlation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        }
     }
 
     fn key(&self) -> Result<String, BramaError> {
         self.endpoint.clone().ok_or(BramaError::Unconfigured)
     }
 
-    pub(crate) fn health(&self) -> ServiceHealth {
+    pub fn health(&self) -> ServiceHealth {
         let available = self.endpoint.is_some();
-        ServiceHealth { service: "brama".into(), version: API_VERSION.into(), available, endpoint: self.endpoint.clone(), detail: if available { "configured; catalog is resolved on demand".into() } else { "BRAMA_URL is not configured".into() }, checked_at_ms: now_ms() }
+        ServiceHealth {
+            service: "brama".into(),
+            version: API_VERSION.into(),
+            available,
+            endpoint: self.endpoint.clone(),
+            detail: if available {
+                "configured; catalog is resolved on demand".into()
+            } else {
+                "BRAMA_URL is not configured".into()
+            },
+            checked_at_ms: now_ms(),
+        }
     }
 
-    pub(crate) fn invalidate(&self) {
-        if let Some(endpoint) = &self.endpoint { if let Ok(mut cache) = CACHE.lock() { cache.remove(endpoint); } }
+    pub fn invalidate(&self) {
+        if let Some(endpoint) = &self.endpoint {
+            if let Ok(mut cache) = CACHE.lock() {
+                cache.remove(endpoint);
+            }
+        }
     }
 
-    pub(crate) fn invalidate_all() {
-        if let Ok(mut cache) = CACHE.lock() { cache.clear(); }
+    pub fn invalidate_all() {
+        if let Ok(mut cache) = CACHE.lock() {
+            cache.clear();
+        }
     }
 
-    pub(crate) fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
+    pub fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
         let key = self.key()?;
-        let prior = CACHE.lock().map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?.get(&key).cloned();
-        if !force { if let Some(cached) = &prior { if cached.fetched.elapsed() < self.ttl { return Ok(cached.catalog.clone()); } } }
-        let mut request = self.http.get(format!("{key}/{API_VERSION}/models"));
-        if let Some(token) = &self.bearer { request = request.bearer_auth(token); }
-        if let Some(etag) = prior.as_ref().and_then(|entry| entry.etag.as_ref()) { request = request.header("if-none-match", etag); }
-        let response = request.send().map_err(|e| BramaError::Transport(e.to_string()))?;
-        if response.status() == StatusCode::NOT_MODIFIED {
-            let mut cached = prior.ok_or_else(|| BramaError::InvalidCatalog("304 without a cached catalog".into()))?;
+        let prior = CACHE
+            .lock()
+            .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+            .get(&key)
+            .cloned();
+        if !force {
+            if let Some(cached) = &prior {
+                if cached.fetched.elapsed() < self.ttl {
+                    return Ok(cached.catalog.clone());
+                }
+            }
+        }
+        let mut headers = BTreeMap::new();
+        headers.insert("x-jeden-schema-min".into(), "1".into());
+        headers.insert("x-jeden-schema-max".into(), "1".into());
+        headers.insert(
+            "x-correlation-id".into(),
+            format!(
+                "brama-{}",
+                self.correlation
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ),
+        );
+        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+            headers.insert("authorization".into(), format!("Bearer {token}"));
+        }
+        if let Some(etag) = prior.as_ref().and_then(|entry| entry.etag.as_ref()) {
+            headers.insert("if-none-match".into(), etag.clone());
+        }
+        let response = match self.transport.execute(TransportRequest {
+            method: reqwest::Method::GET,
+            url: format!("{key}/{API_VERSION}/models"),
+            headers,
+            body: None,
+            max_response_bytes: MAX_RESPONSE_BYTES,
+        }) {
+            Ok(response) => response,
+            Err(error) => {
+                if let Some(mut cached) = prior.map(|entry| entry.catalog) {
+                    cached.degraded = true;
+                    return Ok(cached);
+                }
+                return Err(BramaError::Transport(error));
+            }
+        };
+        super::contract::negotiate_response(&response.headers).map_err(|error| {
+            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
+        })?;
+        if response.status == StatusCode::NOT_MODIFIED.as_u16() {
+            let mut cached = prior
+                .ok_or_else(|| BramaError::InvalidCatalog("304 without a cached catalog".into()))?;
             cached.fetched = Instant::now();
             let catalog = cached.catalog.clone();
-            CACHE.lock().map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?.insert(key, cached);
+            CACHE
+                .lock()
+                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+                .insert(key, cached);
             return Ok(catalog);
         }
-        let status = response.status();
-        let etag = response.headers().get("etag").and_then(|v| v.to_str().ok()).map(str::to_string);
-        if response.content_length().is_some_and(|length| length > MAX_RESPONSE_BYTES) { return Err(BramaError::InvalidCatalog("response exceeds 4 MiB".into())); }
-        let mut body = Vec::new();
-        std::io::Read::take(response, MAX_RESPONSE_BYTES + 1).read_to_end(&mut body).map_err(|e| BramaError::Transport(e.to_string()))?;
-        if body.len() as u64 > MAX_RESPONSE_BYTES { return Err(BramaError::InvalidCatalog("response exceeds 4 MiB".into())); }
-        let text = String::from_utf8(body).map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
-        if !status.is_success() { return Err(BramaError::Http { status: status.as_u16(), message: text.chars().take(800).collect() }); }
-        let catalog: ModelCatalog = serde_json::from_str(&text).map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
+        let status = response.status;
+        let etag = response.headers.get("etag").cloned();
+        let text = String::from_utf8(response.body)
+            .map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
+        if !(200..300).contains(&status) {
+            return Err(BramaError::Http {
+                status,
+                message: "request failed; response body suppressed".into(),
+            });
+        }
+        let mut catalog: ModelCatalog =
+            serde_json::from_str(&text).map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
+        if catalog.catalog_revision.is_empty() {
+            catalog.catalog_revision = response
+                .headers
+                .get("x-catalog-revision")
+                .cloned()
+                .or_else(|| etag.clone())
+                .unwrap_or_else(|| catalog.version.clone());
+        }
         validate_catalog(&catalog)?;
-        let mut cache = CACHE.lock().map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
-        if cache.len() >= MAX_CACHES && !cache.contains_key(&key) { if let Some(oldest) = cache.iter().min_by_key(|(_, value)| value.fetched).map(|(key, _)| key.clone()) { cache.remove(&oldest); } }
-        cache.insert(key, CachedCatalog { catalog: catalog.clone(), etag, fetched: Instant::now() });
+        let mut cache = CACHE
+            .lock()
+            .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
+        if cache.len() >= MAX_CACHES && !cache.contains_key(&key) {
+            if let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, value)| value.fetched)
+                .map(|(key, _)| key.clone())
+            {
+                cache.remove(&oldest);
+            }
+        }
+        cache.insert(
+            key,
+            CachedCatalog {
+                catalog: catalog.clone(),
+                etag,
+                fetched: Instant::now(),
+            },
+        );
         Ok(catalog)
+    }
+    fn request_json(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+        meta: &RequestMeta,
+    ) -> Result<TransportResponse, BramaError> {
+        super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
+            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
+        })?;
+        let mut headers = BTreeMap::new();
+        headers.insert("x-jeden-schema-min".into(), meta.schema_min.to_string());
+        headers.insert("x-jeden-schema-max".into(), meta.schema_max.to_string());
+        headers.insert("x-correlation-id".into(), meta.correlation_id.clone());
+        if let Some(key) = &meta.idempotency_key {
+            headers.insert("idempotency-key".into(), key.clone());
+        }
+        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+            headers.insert("authorization".into(), format!("Bearer {token}"));
+        }
+        let response = self
+            .transport
+            .execute(TransportRequest {
+                method,
+                url: format!("{}/{API_VERSION}{path}", self.key()?),
+                headers,
+                body,
+                max_response_bytes: MAX_RESPONSE_BYTES,
+            })
+            .map_err(BramaError::Transport)?;
+        super::contract::negotiate_response(&response.headers).map_err(|error| {
+            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
+        })?;
+        if response.status == 429 {
+            let retry_after_ms = response
+                .headers
+                .get("retry-after")
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|seconds| seconds.saturating_mul(1000));
+            return Err(BramaError::RateLimited { retry_after_ms });
+        }
+        if !(200..300).contains(&response.status) {
+            return Err(BramaError::Http {
+                status: response.status,
+                message: "request failed; response body suppressed".into(),
+            });
+        }
+        Ok(response)
     }
 }
 
 fn validate_catalog(catalog: &ModelCatalog) -> Result<(), BramaError> {
-    if catalog.version != API_VERSION { return Err(BramaError::InvalidCatalog(format!("unsupported version `{}`", catalog.version))); }
+    if catalog.version != API_VERSION {
+        return Err(BramaError::InvalidCatalog(format!(
+            "unsupported version `{}`",
+            catalog.version
+        )));
+    }
     let mut ids = std::collections::HashSet::with_capacity(catalog.models.len());
     for model in &catalog.models {
-        if model.id.trim().is_empty() { return Err(BramaError::InvalidCatalog("model id is empty".into())); }
-        if !ids.insert(&model.id) { return Err(BramaError::InvalidCatalog(format!("duplicate model `{}`", model.id))); }
-        if !model.price.input.is_finite() || !model.price.output.is_finite() || model.price.input < 0.0 || model.price.output < 0.0 { return Err(BramaError::InvalidCatalog(format!("invalid price for `{}`", model.id))); }
+        if model.id.trim().is_empty() {
+            return Err(BramaError::InvalidCatalog("model id is empty".into()));
+        }
+        if !ids.insert(&model.id) {
+            return Err(BramaError::InvalidCatalog(format!(
+                "duplicate model `{}`",
+                model.id
+            )));
+        }
+        if !model.price.input.is_finite()
+            || !model.price.output.is_finite()
+            || model.price.input < 0.0
+            || model.price.output < 0.0
+        {
+            return Err(BramaError::InvalidCatalog(format!(
+                "invalid price for `{}`",
+                model.id
+            )));
+        }
     }
     Ok(())
+}
+
+impl super::contract::BramaApiV1 for BramaClient {
+    fn health(&self) -> ServiceHealth {
+        BramaClient::health(self)
+    }
+
+    fn readiness(&self) -> Result<super::contract::Readiness, BramaError> {
+        let catalog = self.catalog(false)?;
+        super::contract::negotiate(1, 1).map_err(|error| {
+            BramaError::InvalidCatalog(format!("schema negotiation failed: {error:?}"))
+        })?;
+        Ok(super::contract::Readiness {
+            ready: true,
+            schema_min: 1,
+            schema_max: 1,
+            max_payload_bytes: MAX_RESPONSE_BYTES,
+            detail: format!(
+                "{} routes available",
+                catalog
+                    .models
+                    .iter()
+                    .filter(|model| model.available)
+                    .count()
+            ),
+        })
+    }
+
+    fn capabilities(&self, meta: &RequestMeta) -> Result<Vec<String>, BramaError> {
+        let response = self.request_json(reqwest::Method::GET, "/capabilities", None, meta)?;
+        let value: serde_json::Value = serde_json::from_slice(&response.body)
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
+        serde_json::from_value(value.get("capabilities").cloned().unwrap_or(value))
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))
+    }
+
+    fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
+        BramaClient::catalog(self, force)
+    }
+
+    fn resolve(
+        &self,
+        request: &RouteRequest,
+        meta: &RequestMeta,
+    ) -> Result<ModelEntry, BramaError> {
+        let body = serde_json::to_vec(request)
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
+        let response = self.request_json(reqwest::Method::POST, "/resolve", Some(body), meta)?;
+        let route: ModelEntry = serde_json::from_slice(&response.body)
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
+        if route.id.trim().is_empty() {
+            return Err(BramaError::InvalidResponse("served route is empty".into()));
+        }
+        Ok(route)
+    }
+
+    fn stream(
+        &self,
+        request: &ModelRequest,
+        meta: &RequestMeta,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<ModelStreamResultV1, BramaError> {
+        if cancelled() {
+            return Err(BramaError::Cancelled);
+        }
+        let body = serde_json::to_vec(request)
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
+        let response = self.request_json(reqwest::Method::POST, "/stream", Some(body), meta)?;
+        if cancelled() {
+            return Err(BramaError::Cancelled);
+        }
+        let mut result: ModelStreamResultV1 = serde_json::from_slice(&response.body)
+            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
+        if result.served_route.trim().is_empty()
+            || result.finish_reason.trim().is_empty()
+            || result.correlation_id != meta.correlation_id
+        {
+            return Err(BramaError::InvalidResponse(
+                "stream terminal metadata is incomplete or correlation mismatched".into(),
+            ));
+        }
+        if result.selected_route.is_empty() {
+            result.selected_route = request.route.clone();
+        }
+        if result.selected_route != request.route {
+            return Err(BramaError::InvalidResponse(
+                "selected route does not match the requested route".into(),
+            ));
+        }
+        if let Some(snapshot) = &result.billing {
+            if snapshot.provider_id.is_empty()
+                || snapshot.account_id.is_empty()
+                || snapshot.subscription_id.is_empty()
+                || snapshot.quota.subscription_id != snapshot.subscription_id
+            {
+                return Err(BramaError::InvalidResponse(
+                    "billing attribution is incomplete or mismatched".into(),
+                ));
+            }
+        }
+        Ok(result)
+    }
 }

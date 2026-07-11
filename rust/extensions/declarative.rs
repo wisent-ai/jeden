@@ -21,7 +21,6 @@ pub(super) struct LoadedCapability {
     pub active: bool,
     pub id: String,
     pub path: PathBuf,
-    pub precedence: usize,
     pub healthy: bool,
     pub error: Option<String>,
     pub description: String,
@@ -93,7 +92,10 @@ fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else {
         return;
     };
-    let mut paths = entries.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+    let mut paths = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .collect::<Vec<_>>();
     paths.sort();
     for path in paths {
         collect(&path, extensions, out);
@@ -171,7 +173,10 @@ fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<PathBuf>, S
 }
 
 fn skill_file_id(path: &Path) -> String {
-    let file = path.file_stem().and_then(|value| value.to_str()).unwrap_or("skill");
+    let file = path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("skill");
     if file.eq_ignore_ascii_case("skill") {
         path.parent()
             .and_then(Path::file_name)
@@ -214,7 +219,11 @@ fn load_skill(path: &Path, precedence: usize) -> Result<Skill, String> {
         .unwrap_or("")
         .trim()
         .to_string();
-    let matchers = string_list(frontmatter.get("match").or_else(|| frontmatter.get("matchers")))?;
+    let matchers = string_list(
+        frontmatter
+            .get("match")
+            .or_else(|| frontmatter.get("matchers")),
+    )?;
     validate_matchers(&matchers)?;
     let always_apply = frontmatter
         .get("alwaysApply")
@@ -241,19 +250,31 @@ fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> {
     }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let (value, fallback_body) = match path.extension().and_then(|value| value.to_str()) {
-        Some("json") => (serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?, String::new()),
-        Some("yaml" | "yml") => (serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?, String::new()),
+        Some("json") => (
+            serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?,
+            String::new(),
+        ),
+        Some("yaml" | "yml") => (
+            serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?,
+            String::new(),
+        ),
         _ => {
             let (frontmatter, body) = parse_frontmatter(&text)?;
             (Value::Object(frontmatter), body)
         }
     };
-    let object = value.as_object().ok_or("rule definition must be an object")?;
+    let object = value
+        .as_object()
+        .ok_or("rule definition must be an object")?;
     let id = object
         .get("id")
         .and_then(Value::as_str)
         .map(str::to_string)
-        .or_else(|| path.file_stem().and_then(|value| value.to_str()).map(str::to_string))
+        .or_else(|| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::to_string)
+        })
         .ok_or("rule id is missing")?;
     if !valid_id(&id) {
         return Err(format!("invalid rule id: {id}"));
@@ -279,7 +300,11 @@ fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> {
     }
     Ok(Rule {
         id,
-        description: object.get("description").and_then(Value::as_str).unwrap_or("").to_string(),
+        description: object
+            .get("description")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string(),
         content,
         source: path.to_path_buf(),
         precedence,
@@ -295,16 +320,27 @@ fn load_agent(path: &Path, precedence: usize) -> Result<Agent, String> {
     }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let value = match path.extension().and_then(|value| value.to_str()) {
-        Some("yaml" | "yml") => serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?,
+        Some("yaml" | "yml") => {
+            serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?
+        }
         _ => serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?,
     };
-    let object = value.as_object().ok_or("agent definition must be an object")?;
-    let id = object.get("id").and_then(Value::as_str).ok_or("agent id is missing")?.to_string();
+    let object = value
+        .as_object()
+        .ok_or("agent definition must be an object")?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("agent id is missing")?
+        .to_string();
     if !valid_id(&id) {
         return Err(format!("invalid agent id: {id}"));
     }
     for key in ["description", "prompt", "model"] {
-        if object.get(key).is_some_and(|value| !value.is_null() && !value.is_string()) {
+        if object
+            .get(key)
+            .is_some_and(|value| !value.is_null() && !value.is_string())
+        {
             return Err(format!("agent.{key} must be a string"));
         }
     }
@@ -313,22 +349,34 @@ fn load_agent(path: &Path, precedence: usize) -> Result<Agent, String> {
     }
     if let Some(spawn) = object.get("spawn") {
         let spawn = spawn.as_object().ok_or("agent.spawn must be an object")?;
-        string_list(spawn.get("allowAgents")).map_err(|error| format!("agent.spawn.allowAgents: {error}"))?;
-        string_list(spawn.get("denyAgents")).map_err(|error| format!("agent.spawn.denyAgents: {error}"))?;
-        if spawn.get("allowRecursive").is_some_and(|value| !value.is_boolean()) {
+        string_list(spawn.get("allowAgents"))
+            .map_err(|error| format!("agent.spawn.allowAgents: {error}"))?;
+        string_list(spawn.get("denyAgents"))
+            .map_err(|error| format!("agent.spawn.denyAgents: {error}"))?;
+        if spawn
+            .get("allowRecursive")
+            .is_some_and(|value| !value.is_boolean())
+        {
             return Err("agent.spawn.allowRecursive must be boolean".into());
         }
     }
-    if object.get("output").is_some_and(|value| !value.is_null() && !value.is_object()) {
+    if object
+        .get("output")
+        .is_some_and(|value| !value.is_null() && !value.is_object())
+    {
         return Err("agent.output must be a JSON schema object".into());
     }
-    Ok(Agent { id, source: path.to_path_buf(), precedence, value })
+    Ok(Agent {
+        id,
+        source: path.to_path_buf(),
+        precedence,
+        value,
+    })
 }
 
 fn capability_from_result<T>(
     kind: &'static str,
     path: &Path,
-    precedence: usize,
     result: &Result<T, String>,
     id: String,
     description: String,
@@ -339,7 +387,6 @@ fn capability_from_result<T>(
         active: result.is_ok(),
         id,
         path: path.to_path_buf(),
-        precedence,
         healthy: result.is_ok(),
         error: result.as_ref().err().cloned(),
         description,
@@ -368,36 +415,101 @@ pub(super) fn load(inputs: &[Input]) -> Loaded {
             match input.kind {
                 "skills" => {
                     let result = load_skill(&path, input.precedence);
-                    let id = result.as_ref().map(|value| value.id.clone()).unwrap_or_else(|_| skill_file_id(&path));
-                    let description = result.as_ref().map(|value| value.description.clone()).unwrap_or_default();
+                    let id = result
+                        .as_ref()
+                        .map(|value| value.id.clone())
+                        .unwrap_or_else(|_| skill_file_id(&path));
+                    let description = result
+                        .as_ref()
+                        .map(|value| value.description.clone())
+                        .unwrap_or_default();
                     let metadata = result.as_ref().map(|value| json!({"assets": value.assets, "alwaysApply": value.always_apply, "matchers": value.matchers, "promptMetadata": value.metadata})).unwrap_or(Value::Null);
-                    loaded.capabilities.push(capability_from_result("skill", &path, input.precedence, &result, id.clone(), description, metadata));
+                    loaded.capabilities.push(capability_from_result(
+                        "skill",
+                        &path,
+                        &result,
+                        id.clone(),
+                        description,
+                        metadata,
+                    ));
                     if let Ok(skill) = result {
-                        if loaded.skills.get(&id).is_none_or(|prior| prior.precedence <= skill.precedence) {
+                        if loaded
+                            .skills
+                            .get(&id)
+                            .is_none_or(|prior| prior.precedence <= skill.precedence)
+                        {
                             loaded.skills.insert(id, skill);
                         }
                     }
                 }
                 "rules" => {
                     let result = load_rule(&path, input.precedence);
-                    let id = result.as_ref().map(|value| value.id.clone()).unwrap_or_else(|_| path.file_stem().and_then(|value| value.to_str()).unwrap_or("rule").to_string());
-                    let description = result.as_ref().map(|value| value.description.clone()).unwrap_or_default();
+                    let id = result
+                        .as_ref()
+                        .map(|value| value.id.clone())
+                        .unwrap_or_else(|_| {
+                            path.file_stem()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("rule")
+                                .to_string()
+                        });
+                    let description = result
+                        .as_ref()
+                        .map(|value| value.description.clone())
+                        .unwrap_or_default();
                     let metadata = result.as_ref().map(|value| json!({"alwaysApply": value.always_apply, "matchers": value.matchers})).unwrap_or(Value::Null);
-                    loaded.capabilities.push(capability_from_result("rule", &path, input.precedence, &result, id.clone(), description, metadata));
+                    loaded.capabilities.push(capability_from_result(
+                        "rule",
+                        &path,
+                        &result,
+                        id.clone(),
+                        description,
+                        metadata,
+                    ));
                     if let Ok(rule) = result {
-                        if loaded.rules.get(&id).is_none_or(|prior| prior.precedence <= rule.precedence) {
+                        if loaded
+                            .rules
+                            .get(&id)
+                            .is_none_or(|prior| prior.precedence <= rule.precedence)
+                        {
                             loaded.rules.insert(id, rule);
                         }
                     }
                 }
                 "agents" => {
                     let result = load_agent(&path, input.precedence);
-                    let id = result.as_ref().map(|value| value.id.clone()).unwrap_or_else(|_| path.file_stem().and_then(|value| value.to_str()).unwrap_or("agent").to_string());
-                    let metadata = result.as_ref().map(|value| value.value.clone()).unwrap_or(Value::Null);
-                    let description = metadata.get("description").and_then(Value::as_str).unwrap_or("").to_string();
-                    loaded.capabilities.push(capability_from_result("agent", &path, input.precedence, &result, id.clone(), description, metadata));
+                    let id = result
+                        .as_ref()
+                        .map(|value| value.id.clone())
+                        .unwrap_or_else(|_| {
+                            path.file_stem()
+                                .and_then(|value| value.to_str())
+                                .unwrap_or("agent")
+                                .to_string()
+                        });
+                    let metadata = result
+                        .as_ref()
+                        .map(|value| value.value.clone())
+                        .unwrap_or(Value::Null);
+                    let description = metadata
+                        .get("description")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    loaded.capabilities.push(capability_from_result(
+                        "agent",
+                        &path,
+                        &result,
+                        id.clone(),
+                        description,
+                        metadata,
+                    ));
                     if let Ok(agent) = result {
-                        if loaded.agents.get(&id).is_none_or(|prior| prior.precedence <= agent.precedence) {
+                        if loaded
+                            .agents
+                            .get(&id)
+                            .is_none_or(|prior| prior.precedence <= agent.precedence)
+                        {
                             loaded.agents.insert(id, agent);
                         }
                     }
@@ -454,10 +566,16 @@ pub(super) fn prompt_context(loaded: &Loaded, prompt: &str) -> Vec<PromptContrib
     contributions
 }
 
-pub(super) fn skill_context(loaded: &Loaded, ids: &[String]) -> Result<Vec<PromptContribution>, String> {
+pub(super) fn skill_context(
+    loaded: &Loaded,
+    ids: &[String],
+) -> Result<Vec<PromptContribution>, String> {
     let mut out = Vec::new();
     for id in ids {
-        let skill = loaded.skills.get(id).ok_or_else(|| format!("active skill not found: {id}"))?;
+        let skill = loaded
+            .skills
+            .get(id)
+            .ok_or_else(|| format!("active skill not found: {id}"))?;
         out.push(PromptContribution {
             id: skill.id.clone(),
             kind: "skill",

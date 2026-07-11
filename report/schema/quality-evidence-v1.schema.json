@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.jeden.dev/report/quality-evidence-v1.schema.json",
+  "title": "Jeden signed quality evidence payload v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "area", "status", "metrics", "environment", "revision", "evidence_uri", "evidence_digest", "artifact_digests", "prerequisites", "observed_at_epoch_seconds"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "area": {"type": "string", "minLength": 1},
+    "status": {"enum": ["Passed", "Failed", "ExternalBlocked"]},
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "numerator", "denominator"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "numerator": {"type": "integer", "minimum": 0},
+          "denominator": {"type": "integer", "minimum": 1}
+        }
+      }
+    },
+    "environment": {"type": "string", "minLength": 1},
+    "revision": {"type": "string", "minLength": 1},
+    "evidence_uri": {"type": "string", "pattern": "^artifact://[^\\s]+$"},
+    "evidence_digest": {"$ref": "#/$defs/sha256"},
+    "artifact_digests": {"type": "object", "additionalProperties": {"$ref": "#/$defs/sha256"}},
+    "prerequisites": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "observed_at_epoch_seconds": {"type": "integer", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "ExternalBlocked"}}, "required": ["status"]},
+      "then": {"properties": {"prerequisites": {"minItems": 1}}},
+      "else": {"properties": {"prerequisites": {"maxItems": 0}}}
+    }
+  ],
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

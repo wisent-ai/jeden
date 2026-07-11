@@ -22,19 +22,27 @@ impl Conversation {
     /// Replace the live history with prior user/assistant turns — backs /resume
     /// so a resumed session actually continues in-process.
     pub(crate) fn load_history(&mut self, cwd: &Path, mut turns: Vec<Value>) -> Result<(), String> {
-        let needs_base_system = turns.first().and_then(|message| message.get("_jedenNeedsBaseSystem"))
-            .and_then(Value::as_bool).unwrap_or(false);
+        let needs_base_system = turns
+            .first()
+            .and_then(|message| message.get("_jedenNeedsBaseSystem"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         if needs_base_system {
             if let Some(first) = turns.first_mut().and_then(Value::as_object_mut) {
                 first.remove("_jedenNeedsBaseSystem");
             }
         }
         let messages = if !needs_base_system
-            && turns.first().and_then(|message| message.get("role")).and_then(Value::as_str) == Some("system")
+            && turns
+                .first()
+                .and_then(|message| message.get("role"))
+                .and_then(Value::as_str)
+                == Some("system")
         {
             turns
         } else {
-            let mut messages = vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
+            let mut messages =
+                vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
             messages.extend(turns);
             messages
         };
@@ -60,24 +68,8 @@ impl Conversation {
         let parent_entry = self.recorder.active_leaf()?;
         self.recorder = SessionRecorder::child(cwd, parent, parent_entry);
         self.recorder.ensure()?;
-        self.recorder.record_context("branch_seed", &self.messages)?;
-        Ok(self.recorder.path())
-    }
-
-    pub(crate) fn checkpoint(&mut self, label: &str) -> Result<String, String> {
-        self.recorder.checkpoint(label, &self.messages)
-    }
-
-    /// Rewind creates a child ledger rooted at the selected graph entry; the
-    /// original branch remains immutable and navigable.
-    pub(crate) fn rewind(&mut self, cwd: &Path, checkpoint_entry: &str) -> Result<PathBuf, String> {
-        let parent = self.recorder.path();
-        let messages = crate::cli::sessions::session_messages_at(&parent, checkpoint_entry)?;
-        self.recorder = SessionRecorder::child(cwd, parent, Some(checkpoint_entry.to_string()));
-        self.recorder.ensure()?;
-        self.recorder.record("rewind", json!({ "checkpointEntry": checkpoint_entry }))?;
-        self.messages = messages;
-        self.recorder.record_context("rewind_seed", &self.messages)?;
+        self.recorder
+            .record_context("branch_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
 }

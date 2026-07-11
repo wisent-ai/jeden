@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Perform a syntax-aware rename without modifying strings or comments.\n","src/input.txt":"synthetic-ast-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

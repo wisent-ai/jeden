@@ -8,6 +8,7 @@ use crate::{agent, Args};
 pub(crate) mod interactive;
 pub(crate) mod slash;
 pub(crate) mod slash_ui;
+pub(crate) use crate::update;
 
 /// Run one agent turn against the shared conversation and persist retry/session
 /// bookkeeping, mirroring the CLI `run` path.

@@ -17,10 +17,6 @@ impl RuleRegistry {
         Self { rules }
     }
 
-    pub(crate) fn always_apply(&self) -> &[ContextEntry] {
-        &self.rules
-    }
-
     pub(crate) fn render_for_prompt(&self) -> String {
         if self.rules.is_empty() {
             return String::new();

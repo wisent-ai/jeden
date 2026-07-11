@@ -11,33 +11,10 @@ use rand::RngCore;
 mod client;
 mod relay;
 
-pub use client::{relay_get, relay_post, relay_post_authorized, relay_rotate_write_token, LiveClient};
+pub use client::{
+    relay_get, relay_post, relay_post_authorized, relay_rotate_write_token, LiveClient,
+};
 pub use relay::serve;
-
-pub(crate) fn health() -> Result<serde_json::Value, String> { relay::RelayStore::new().health() }
-
-pub(crate) fn replicate_ledger_entry(cwd: &std::path::Path, entry: &crate::cli::sessions::LedgerEntry) -> Result<(), String> {
-    let state_path = cwd.join(".jeden/collab.json");
-    let raw = match std::fs::read_to_string(&state_path) { Ok(raw) => raw, Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()), Err(error) => return Err(error.to_string()) };
-    let mut state: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
-    let slot = if state.pointer("/host/backend").and_then(serde_json::Value::as_str) == Some("http") { "host" } else if state.pointer("/guest/backend").and_then(serde_json::Value::as_str) == Some("http") { "guest" } else { return Ok(()) };
-    let active = state.get(slot).cloned().ok_or("collab state lost active role")?;
-    let Some(token) = active.get("writeToken").and_then(serde_json::Value::as_str) else { return Ok(()) };
-    let key = decode_key(active.get("key").and_then(serde_json::Value::as_str).ok_or("collab state missing encryption key")?)?;
-    let role = match active.get("role").and_then(serde_json::Value::as_str).unwrap_or("full") { "prompt" => CollabRole::Prompt, "abort" => CollabRole::Abort, "view" => CollabRole::View, _ => CollabRole::Full };
-    if role != CollabRole::Full { return Ok(()); }
-    let kind = match entry.kind.as_str() {
-        "tool_result" => FrameKind::Tool { tool_call_id: entry.id.clone(), value: entry.data.clone() },
-        "agent" | "agent_state" => FrameKind::Agent { agent_id: entry.data.get("agentId").and_then(serde_json::Value::as_str).unwrap_or("main").to_string(), value: entry.data.clone() },
-        "context_snapshot" | "compaction" | "checkpoint" => FrameKind::State { value: entry.data.clone() },
-        _ => FrameKind::Transcript { entry: entry.clone() },
-    };
-    let mut client = LiveClient::new(active.get("relayBase").and_then(serde_json::Value::as_str).ok_or("collab state missing relay base")?, active.get("room").and_then(serde_json::Value::as_str).ok_or("collab state missing room")?, key, Some(token.to_string()), role, "session-runtime");
-    client.reconnect_from(active.get("cursor").and_then(serde_json::Value::as_u64).unwrap_or_default() as usize);
-    let cursor = client.publish(kind)?;
-    state[slot]["cursor"] = serde_json::json!(cursor);
-    std::fs::write(&state_path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())
-}
 
 /// Max size of a single relay blob (base64 E2EE payload). Rejects larger POSTs.
 pub const MAX_BLOB_BYTES: usize = 1024 * 1024;
@@ -46,7 +23,12 @@ pub const MAX_ROOM_EVENTS: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum CollabRole { View, Prompt, Abort, Full }
+pub enum CollabRole {
+    View,
+    Prompt,
+    Abort,
+    Full,
+}
 
 impl CollabRole {
     pub fn permits(self, kind: &FrameKind) -> bool {
@@ -62,12 +44,26 @@ impl CollabRole {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FrameKind {
-    Transcript { entry: crate::cli::sessions::LedgerEntry },
-    State { value: serde_json::Value },
-    Tool { tool_call_id: String, value: serde_json::Value },
-    Agent { agent_id: String, value: serde_json::Value },
-    Prompt { text: String },
-    Abort { operation_id: String },
+    Transcript {
+        entry: serde_json::Value,
+    },
+    State {
+        value: serde_json::Value,
+    },
+    Tool {
+        tool_call_id: String,
+        value: serde_json::Value,
+    },
+    Agent {
+        agent_id: String,
+        value: serde_json::Value,
+    },
+    Prompt {
+        text: String,
+    },
+    Abort {
+        operation_id: String,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -82,11 +78,29 @@ pub struct ProtocolFrame {
 }
 
 impl ProtocolFrame {
-    pub fn new(client_id: impl Into<String>, role: CollabRole, kind: FrameKind) -> Result<Self, String> {
-        if !role.permits(&kind) && role != CollabRole::Full { return Err("collaboration role does not permit this frame".into()); }
-        let mut id = [0u8; 16]; rand::thread_rng().fill_bytes(&mut id);
-        let created_at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis().min(u64::MAX as u128) as u64;
-        Ok(Self { version: 1, id: hex::encode(id), client_id: client_id.into(), created_at, role, kind })
+    pub fn new(
+        client_id: impl Into<String>,
+        role: CollabRole,
+        kind: FrameKind,
+    ) -> Result<Self, String> {
+        if !role.permits(&kind) && role != CollabRole::Full {
+            return Err("collaboration role does not permit this frame".into());
+        }
+        let mut id = [0u8; 16];
+        rand::thread_rng().fill_bytes(&mut id);
+        let created_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis()
+            .min(u64::MAX as u128) as u64;
+        Ok(Self {
+            version: 1,
+            id: hex::encode(id),
+            client_id: client_id.into(),
+            created_at,
+            role,
+            kind,
+        })
     }
 }
 
@@ -95,20 +109,35 @@ pub fn seal_frame(key: &[u8; 32], frame: &ProtocolFrame) -> Result<String, Strin
 }
 
 pub fn open_frame(key: &[u8; 32], blob: &str) -> Result<ProtocolFrame, String> {
-    let frame: ProtocolFrame = serde_json::from_slice(&decrypt_blob(key, blob)?).map_err(|e| e.to_string())?;
-    if frame.version != 1 { return Err(format!("unsupported collab frame version {}", frame.version)); }
-    if !frame.role.permits(&frame.kind) && frame.role != CollabRole::Full { return Err("frame role does not permit its operation".into()); }
+    let frame: ProtocolFrame =
+        serde_json::from_slice(&decrypt_blob(key, blob)?).map_err(|e| e.to_string())?;
+    if frame.version != 1 {
+        return Err(format!(
+            "unsupported collab frame version {}",
+            frame.version
+        ));
+    }
+    if !frame.role.permits(&frame.kind) && frame.role != CollabRole::Full {
+        return Err("frame role does not permit its operation".into());
+    }
     Ok(frame)
 }
 
 pub fn new_role_write_token(role: CollabRole) -> String {
     let mut token = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut token);
-    let role = match role { CollabRole::View => "view", CollabRole::Prompt => "prompt", CollabRole::Abort => "abort", CollabRole::Full => "full" };
+    let role = match role {
+        CollabRole::View => "view",
+        CollabRole::Prompt => "prompt",
+        CollabRole::Abort => "abort",
+        CollabRole::Full => "full",
+    };
     format!("{role}.{}", URL_SAFE_NO_PAD.encode(token))
 }
 
-pub fn new_write_token() -> String { new_role_write_token(CollabRole::Full) }
+pub fn new_write_token() -> String {
+    new_role_write_token(CollabRole::Full)
+}
 
 // ---------------------------------------------------------------------------
 // E2EE blob helpers (pure, round-trippable)
@@ -190,18 +219,30 @@ pub struct RelayUrl {
 /// A missing room yields an empty `room` (caller generates one for `start`).
 pub fn parse_relay_url(text: &str) -> Result<RelayUrl, String> {
     let text = text.trim();
-    if !(text.starts_with("http://") || text.starts_with("https://")) { return Err("relay URL must start with http:// or https://".into()); }
+    if !(text.starts_with("http://") || text.starts_with("https://")) {
+        return Err("relay URL must start with http:// or https://".into());
+    }
     let (without_frag, key, write_token, role) = match text.split_once('#') {
         Some((head, frag)) => {
             let mut key = None;
             let mut write_token = None;
             let mut role = CollabRole::View;
             for pair in frag.split('&') {
-                let (name, value) = pair.split_once('=').ok_or("relay fragment fields must be name=value")?;
+                let (name, value) = pair
+                    .split_once('=')
+                    .ok_or("relay fragment fields must be name=value")?;
                 match name {
                     "key" => key = Some(decode_key(value)?),
                     "write" => write_token = Some(value.to_string()),
-                    "role" => role = match value { "view" => CollabRole::View, "prompt" => CollabRole::Prompt, "abort" => CollabRole::Abort, "full" => CollabRole::Full, _ => return Err("unknown collaboration role".into()) },
+                    "role" => {
+                        role = match value {
+                            "view" => CollabRole::View,
+                            "prompt" => CollabRole::Prompt,
+                            "abort" => CollabRole::Abort,
+                            "full" => CollabRole::Full,
+                            _ => return Err("unknown collaboration role".into()),
+                        }
+                    }
                     _ => return Err(format!("unknown relay fragment field: {name}")),
                 }
             }
@@ -225,5 +266,11 @@ pub fn parse_relay_url(text: &str) -> Result<RelayUrl, String> {
         .strip_prefix("room/")
         .map(|r| r.trim_matches('/').to_string())
         .unwrap_or_default();
-    Ok(RelayUrl { base, room, key, write_token, role })
+    Ok(RelayUrl {
+        base,
+        room,
+        key,
+        write_token,
+        role,
+    })
 }

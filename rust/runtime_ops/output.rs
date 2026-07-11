@@ -1,3 +1,4 @@
+use super::{ExecutionGrant, GrantError};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -30,18 +31,77 @@ impl Default for OutputLimits {
 #[derive(Clone, Debug)]
 pub struct ArtifactSink {
     root: PathBuf,
+    grant: Option<ExecutionGrant>,
 }
 
 impl ArtifactSink {
     pub fn new(root: impl Into<PathBuf>) -> Self {
-        Self { root: root.into() }
+        Self {
+            root: root.into(),
+            grant: None,
+        }
+    }
+
+    pub(crate) fn with_grant(mut self, grant: ExecutionGrant) -> Self {
+        self.grant = Some(grant);
+        self
     }
 
     pub fn root(&self) -> &Path {
         &self.root
     }
 
+    fn authorize_root(&self) -> io::Result<()> {
+        let Some(grant) = &self.grant else {
+            return Ok(());
+        };
+        if grant.is_expired() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                GrantError::Expired,
+            ));
+        }
+        let canonical = self.root.canonicalize().or_else(|_| {
+            let parent = self.root.parent().ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "artifact root has no parent",
+                )
+            })?;
+            Ok::<PathBuf, io::Error>(parent.canonicalize()?.join(
+                self.root.file_name().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::PermissionDenied, "artifact root has no name")
+                })?,
+            ))
+        })?;
+        if !grant
+            .filesystem
+            .write_roots
+            .iter()
+            .any(|root| canonical.starts_with(root))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                GrantError::FilesystemDenied(format!(
+                    "artifact root {} is outside grant",
+                    canonical.display()
+                )),
+            ));
+        }
+        Ok(())
+    }
+
+    fn maximum_bytes(&self) -> u64 {
+        self.grant.as_ref().map_or(u64::MAX, |grant| {
+            grant
+                .filesystem
+                .max_file_bytes
+                .min(grant.resource_limits.file_bytes)
+        })
+    }
+
     fn create_output(&self, stream: &str) -> io::Result<(PathBuf, File)> {
+        self.authorize_root()?;
         fs::create_dir_all(&self.root)?;
         loop {
             let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
@@ -110,13 +170,17 @@ impl BoundedOutput {
         if bytes.is_empty() {
             return Ok(());
         }
+        if self.total_bytes.saturating_add(bytes.len() as u64) > self.artifacts.maximum_bytes() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "artifact output exceeds execution grant file limit",
+            ));
+        }
         let previous_total = self.total_bytes;
         self.total_bytes = self.total_bytes.saturating_add(bytes.len() as u64);
         self.digest.update(bytes);
 
-        if self.spill.is_none()
-            && self.total_bytes > self.limits.inline_bytes() as u64
-        {
+        if self.spill.is_none() && self.total_bytes > self.limits.inline_bytes() as u64 {
             let (path, mut file) = self.artifacts.create_output(self.stream)?;
             file.write_all(&self.head)?;
             file.write_all(&self.tail)?;
@@ -137,7 +201,8 @@ impl BoundedOutput {
             let tail_input = &bytes[head_take..];
             if tail_input.len() >= self.limits.tail_bytes {
                 self.tail.clear();
-                self.tail.extend_from_slice(&tail_input[tail_input.len() - self.limits.tail_bytes..]);
+                self.tail
+                    .extend_from_slice(&tail_input[tail_input.len() - self.limits.tail_bytes..]);
             } else if !tail_input.is_empty() {
                 let overflow = self
                     .tail
@@ -168,9 +233,8 @@ impl BoundedOutput {
         let text = if truncated {
             format!(
                 "{head}\n[... {} bytes omitted; full output in artifact ...]\n{tail}",
-                self.total_bytes.saturating_sub(
-                    self.head.len().saturating_add(self.tail.len()) as u64
-                )
+                self.total_bytes
+                    .saturating_sub(self.head.len().saturating_add(self.tail.len()) as u64)
             )
         } else {
             format!("{head}{tail}")
@@ -184,5 +248,165 @@ impl BoundedOutput {
             artifact,
             sha256: hex::encode(self.digest.finalize()),
         })
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::super::{CancellationToken, OperationContext};
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    const CANARY: &[u8] = b"JEDEN_ARTIFACT_PLAINTEXT_CANARY";
+    static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(1);
+
+    struct ArtifactFixture {
+        root: PathBuf,
+        allowed: PathBuf,
+        outside: PathBuf,
+    }
+
+    impl ArtifactFixture {
+        fn new(name: &str) -> Self {
+            let unique = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "jeden-output-{name}-{}-{unique}",
+                std::process::id()
+            ));
+            let allowed = root.join("allowed");
+            let outside = root.join("outside");
+            fs::create_dir_all(&allowed).unwrap();
+            fs::create_dir_all(&outside).unwrap();
+            Self {
+                root,
+                allowed,
+                outside,
+            }
+        }
+
+        fn grant(&self) -> ExecutionGrant {
+            ExecutionGrant::trusted_host("output-test", self.allowed.clone())
+        }
+
+        fn assert_no_canary(&self) {
+            assert!(
+                !tree_contains(&self.root, CANARY),
+                "denied artifact output wrote the plaintext canary under {}",
+                self.root.display()
+            );
+        }
+    }
+
+    impl Drop for ArtifactFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn tree_contains(root: &Path, needle: &[u8]) -> bool {
+        let Ok(entries) = fs::read_dir(root) else {
+            return false;
+        };
+        for entry in entries {
+            let entry = entry.unwrap();
+            let file_type = entry.file_type().unwrap();
+            if file_type.is_dir() {
+                if tree_contains(&entry.path(), needle) {
+                    return true;
+                }
+            } else if file_type.is_file() {
+                let bytes = fs::read(entry.path()).unwrap();
+                if bytes.windows(needle.len()).any(|window| window == needle) {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn bounded(context: &OperationContext<'_>) -> BoundedOutput {
+        BoundedOutput::new(
+            "stdout",
+            OutputLimits {
+                head_bytes: 0,
+                tail_bytes: 0,
+            },
+            context.artifacts().clone(),
+        )
+    }
+
+    #[test]
+    fn artifact_root_outside_write_grant_is_denied_before_creating_or_writing() {
+        let fixture = ArtifactFixture::new("outside-root");
+        let artifact_root = fixture.outside.join("artifacts");
+        let context =
+            OperationContext::new(CancellationToken::new(), ArtifactSink::new(&artifact_root))
+                .with_execution_grant(fixture.grant());
+        let mut output = bounded(&context);
+
+        let error = output.write_chunk(CANARY).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert!(
+            !artifact_root.exists(),
+            "denied artifact root was created outside the write grant"
+        );
+        fixture.assert_no_canary();
+    }
+
+    #[test]
+    fn symlink_artifact_root_to_outside_is_denied_without_outside_side_effects() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = ArtifactFixture::new("symlink-root");
+        let artifact_root = fixture.allowed.join("artifacts-link");
+        symlink(&fixture.outside, &artifact_root).unwrap();
+
+        let parent_grant = ExecutionGrant::trusted_host("output-test", fixture.root.clone());
+        let parent =
+            OperationContext::new(CancellationToken::new(), ArtifactSink::new(&artifact_root))
+                .with_execution_grant(parent_grant);
+        let child = parent.child("restricted-output", &fixture.grant()).unwrap();
+        let mut output = bounded(&child);
+
+        let error = output.write_chunk(CANARY).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+        assert_eq!(fs::read_dir(&fixture.outside).unwrap().count(), 0);
+        fixture.assert_no_canary();
+    }
+
+    #[test]
+    fn artifact_spill_uses_the_lower_filesystem_or_resource_byte_limit() {
+        let fixture = ArtifactFixture::new("byte-limits");
+        let canary_bytes = CANARY.len() as u64;
+        let cases = [
+            ("filesystem", canary_bytes - 1, canary_bytes + 10),
+            ("resource", canary_bytes + 10, canary_bytes - 1),
+        ];
+
+        for (name, filesystem_limit, resource_limit) in cases {
+            let artifact_root = fixture.allowed.join(format!("{name}-artifacts"));
+            let mut grant = fixture.grant();
+            grant.filesystem.max_file_bytes = filesystem_limit;
+            grant.resource_limits.file_bytes = resource_limit;
+            let context =
+                OperationContext::new(CancellationToken::new(), ArtifactSink::new(&artifact_root))
+                    .with_execution_grant(grant);
+            let mut output = bounded(&context);
+
+            let error = output.write_chunk(CANARY).unwrap_err();
+
+            assert_eq!(
+                error.kind(),
+                io::ErrorKind::PermissionDenied,
+                "{name} limit did not deny over-limit artifact output"
+            );
+            assert!(
+                !artifact_root.exists(),
+                "{name} limit created an artifact spill before denial"
+            );
+        }
+        fixture.assert_no_canary();
     }
 }

@@ -1,0 +1,72 @@
+name: contractual-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contractual-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  RUSTFLAGS: '-D warnings'
+
+jobs:
+  interface-migration-conformance:
+    name: Contract fixtures and negative gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Shared interface fixture contract
+        run: python3 tests/e2e/interfaces/run_interface_contract.py > interface-equivalence-report.json
+      - name: Interface contract tests
+        run: python3 -m unittest discover -s tests/e2e/interfaces -p 'test_*.py' -v
+      - name: Migration fixture matrix and behavior classification
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          python3 tests/migrations/run_migration_matrix.py > migration-matrix-report.json || status=$?
+          test "$status" -eq 3
+          python3 -m unittest discover -s tests/migrations -p 'test_*.py' -v
+      - name: Negative behavioral evidence gates
+        run: python3 -m unittest discover -s tests/conformance -p 'test_*.py' -v
+      - name: Rust conformance contracts
+        run: 'cargo test --locked --lib conformance:: -- --test-threads=1'
+      - name: Upload deterministic contract reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: contractual-reports-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            interface-equivalence-report.json
+            migration-matrix-report.json
+          if-no-files-found: error
+          retention-days: 14
+
+  native-platform:
+    name: Native contract (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile all native targets and tests
+        run: cargo test --locked --all-targets --no-run

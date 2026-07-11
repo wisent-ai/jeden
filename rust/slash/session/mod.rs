@@ -3,9 +3,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::slash::common::{
-    file_url, now_text, read_json_value, resolve_cwd_path, split_args,
-};
+use crate::slash::common::{file_url, now_text, read_json_value, resolve_cwd_path, split_args};
 use crate::slash::state::mode_state_path;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
@@ -437,7 +435,9 @@ pub(crate) fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<Stri
     ))
 }
 
-fn task_scheduler(context: &SlashContext<'_>) -> Result<crate::task_runtime::TaskScheduler, String> {
+fn task_scheduler(
+    context: &SlashContext<'_>,
+) -> Result<crate::task_runtime::TaskScheduler, String> {
     let session_dir = slash_session_dir(context, "")?;
     crate::task_runtime::TaskScheduler::open(
         context.cwd,
@@ -457,9 +457,14 @@ pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<Strin
         .spawn(crate::task_runtime::SpawnRequest {
             task: task.into(),
             agent: "default".into(),
-            model: context.model.filter(|model| !model.trim().is_empty()).map(str::to_string),
+            model: context
+                .model
+                .filter(|model| !model.trim().is_empty())
+                .map(str::to_string),
             max_steps: 6,
-            parent_job: std::env::var("JEDEN_TASK_JOB").ok().filter(|value| !value.is_empty()),
+            parent_job: std::env::var("JEDEN_TASK_JOB")
+                .ok()
+                .filter(|value| !value.is_empty()),
             isolate: Some(true),
         })
         .map_err(|error| error.to_string())?;

@@ -91,6 +91,8 @@ impl Conversation {
                 &router,
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
+                None,
+                None,
             );
         }
         let summary = summary_completion.content;
@@ -98,7 +100,10 @@ impl Conversation {
             return Err("Turn cancelled.".into());
         }
         let memory = crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path())?;
-        let scope = crate::memory::MemoryScope { kind: "repo".into(), id: args.cwd.display().to_string() };
+        let scope = crate::memory::MemoryScope {
+            kind: "repo".into(),
+            id: args.cwd.display().to_string(),
+        };
         memory.persist_model_consolidation(&scope, &summary)?;
         let before = self.turn_len();
         self.recorder.record(
@@ -163,6 +168,8 @@ impl Conversation {
                 &router,
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
+                None,
+                None,
             );
         }
         let brief = brief_completion.content;
@@ -190,7 +197,8 @@ impl Conversation {
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),
         ];
-        self.recorder.record_context("handoff_seed", &self.messages)?;
+        self.recorder
+            .record_context("handoff_seed", &self.messages)?;
         Ok(format!(
             "Handoff brief written to {} and a fresh session was started seeded with it.\n\n{}",
             file.display(),
@@ -240,6 +248,8 @@ impl Conversation {
                         &router,
                         usage,
                         usage_cost(&args.cwd, &config, &router.model, usage),
+                        None,
+                        None,
                     );
                 }
                 let review = review_completion.content;

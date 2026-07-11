@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.jeden.dev/report/dsse-envelope-v1.schema.json",
+  "title": "Jeden single-signature DSSE envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["payloadType", "payload", "signatures"],
+  "properties": {
+    "payloadType": {"enum": ["application/vnd.jeden.quality-evidence.v1+json", "application/vnd.jeden.quality-report.v1+json"]},
+    "payload": {"type": "string", "contentEncoding": "base64"},
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["keyid", "sig"],
+        "properties": {
+          "keyid": {"type": "string", "pattern": "^ed25519:[0-9a-f]{64}$"},
+          "sig": {"type": "string", "contentEncoding": "base64"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 3,
+  "store": "quality",
+  "fixture": "future",
+  "payload": {
+    "preserved": true
+  }
+}

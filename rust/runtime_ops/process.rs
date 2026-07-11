@@ -1,10 +1,13 @@
-use super::{BoundedOutput, OperationContext, OperationProgress, OutputCapture};
+use super::{
+    platform::{native, ProcessSignal, ProcessTree},
+    BoundedOutput, OperationContext, OperationProgress, OutputCapture,
+};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::thread;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 use std::time::{Duration, Instant};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -68,7 +71,42 @@ impl ProcessManager {
         command: ManagedCommand,
         timeout: Duration,
     ) -> Result<ManagedProcessResult, String> {
+        let grant = context.execution_grant();
+        super::SecureRuntime::detect()
+            .authorize(grant)
+            .map_err(|error| error.to_string())?;
+        if !grant.permits_program(&command.program) {
+            return Err(super::GrantError::ProgramDenied(
+                command.program.to_string_lossy().into_owned(),
+            )
+            .to_string());
+        }
+        let cwd = command
+            .cwd
+            .canonicalize()
+            .map_err(|error| format!("process cwd unavailable: {error}"))?;
+        if !grant
+            .filesystem
+            .read_roots
+            .iter()
+            .any(|root| cwd.starts_with(root))
+        {
+            return Err(super::GrantError::FilesystemDenied(format!(
+                "process cwd {} is outside grant",
+                cwd.display()
+            ))
+            .to_string());
+        }
+        if command.stdio == ManagedStdio::InheritedForeground && !grant.process.inherit_stdio {
+            return Err("process inherited stdio denied by execution grant".into());
+        }
         let mut builder = Command::new(&command.program);
+        builder.env_clear();
+        for key in &grant.process.environment {
+            if let Some(value) = std::env::var_os(key) {
+                builder.env(key, value);
+            }
+        }
         builder
             .args(&command.args)
             .current_dir(&command.cwd)
@@ -79,8 +117,28 @@ impl ProcessManager {
             } else {
                 Stdio::null()
             })
-            .stdout(if command.stdio == ManagedStdio::InheritedForeground { Stdio::inherit() } else { Stdio::piped() })
-            .stderr(if command.stdio == ManagedStdio::InheritedForeground { Stdio::inherit() } else { Stdio::piped() });
+            .stdout(if command.stdio == ManagedStdio::InheritedForeground {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            })
+            .stderr(if command.stdio == ManagedStdio::InheritedForeground {
+                Stdio::inherit()
+            } else {
+                Stdio::piped()
+            });
+        for (key, _) in &command.env {
+            if !grant
+                .process
+                .environment
+                .contains(&key.to_string_lossy().into_owned())
+            {
+                return Err(format!(
+                    "process environment variable {} denied",
+                    key.to_string_lossy()
+                ));
+            }
+        }
         for (key, value) in &command.env {
             if let Some(value) = value {
                 builder.env(key, value);
@@ -88,15 +146,25 @@ impl ProcessManager {
                 builder.env_remove(key);
             }
         }
-        configure_process_group(&mut builder);
+        native()
+            .configure_command(&mut builder)
+            .map_err(|error| error.to_string())?;
+        configure_resource_limits(&mut builder, grant.resource_limits)?;
         let mut child = builder.spawn().map_err(|error| error.to_string())?;
-        let group = child.id();
+        let mut process_tree = match native().attach_process_tree(&child) {
+            Ok(tree) => tree,
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(error.to_string());
+            }
+        };
         if command.stdio == ManagedStdio::InheritedForeground {
             let deadline = context.effective_deadline(timeout);
             let (_progress_tx, progress_rx) = mpsc::channel();
             let (status, reason) = wait_owned_process(
                 &mut child,
-                group,
+                process_tree.as_mut(),
                 deadline,
                 context,
                 &progress_rx,
@@ -108,8 +176,14 @@ impl ProcessManager {
                 stderr: OutputCapture::uncaptured(),
             });
         }
-        let stdout = child.stdout.take().ok_or("managed process stdout unavailable")?;
-        let stderr = child.stderr.take().ok_or("managed process stderr unavailable")?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or("managed process stdout unavailable")?;
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or("managed process stderr unavailable")?;
         let stdin = child.stdin.take();
         let deadline = context.effective_deadline(timeout);
         let limits = context.output_limits();
@@ -123,9 +197,8 @@ impl ProcessManager {
                 capture_stream("stdout", stdout, limits, stdout_artifacts, stdout_tx)
             });
             let stderr_tx = progress_tx.clone();
-            let stderr_reader = scope.spawn(move || {
-                capture_stream("stderr", stderr, limits, artifacts, stderr_tx)
-            });
+            let stderr_reader =
+                scope.spawn(move || capture_stream("stderr", stderr, limits, artifacts, stderr_tx));
             drop(progress_tx);
             let stdin_writer = scope.spawn(move || -> io::Result<()> {
                 if let (Some(mut pipe), Some(bytes)) = (stdin, command.stdin) {
@@ -136,7 +209,7 @@ impl ProcessManager {
 
             let (status, reason) = wait_owned_process(
                 &mut child,
-                group,
+                process_tree.as_mut(),
                 deadline,
                 context,
                 &progress_rx,
@@ -177,7 +250,9 @@ fn capture_stream(
     let mut buffer = [0u8; 8192];
     let mut total = 0u64;
     loop {
-        let count = reader.read(&mut buffer).map_err(|error| error.to_string())?;
+        let count = reader
+            .read(&mut buffer)
+            .map_err(|error| error.to_string())?;
         if count == 0 {
             break;
         }
@@ -202,25 +277,25 @@ fn drain_progress(context: &OperationContext<'_>, progress: &Receiver<OperationP
 
 fn wait_owned_process(
     child: &mut Child,
-    group: u32,
+    process_tree: &mut dyn ProcessTree,
     deadline: Instant,
     context: &OperationContext<'_>,
     progress: &Receiver<OperationProgress>,
 ) -> Result<(ExitStatus, TerminationReason), String> {
     if context.cancellation().is_cancelled() {
-        return terminate(child, group, TerminationReason::Cancelled);
+        return terminate(child, process_tree, TerminationReason::Cancelled);
     }
     loop {
         drain_progress(context, progress);
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            cleanup_descendants(group);
+            cleanup_descendants(process_tree);
             return Ok((status, TerminationReason::Completed));
         }
         if context.cancellation().is_cancelled() {
-            return terminate(child, group, TerminationReason::Cancelled);
+            return terminate(child, process_tree, TerminationReason::Cancelled);
         }
         if Instant::now() >= deadline {
-            return terminate(child, group, TerminationReason::TimedOut);
+            return terminate(child, process_tree, TerminationReason::TimedOut);
         }
         thread::sleep(POLL_INTERVAL);
     }
@@ -228,14 +303,18 @@ fn wait_owned_process(
 
 fn terminate(
     child: &mut Child,
-    group: u32,
+    process_tree: &mut dyn ProcessTree,
     reason: TerminationReason,
 ) -> Result<(ExitStatus, TerminationReason), String> {
-    signal_group(group, Signal::Terminate);
+    process_tree
+        .signal(ProcessSignal::Terminate)
+        .map_err(|error| error.to_string())?;
     let grace_deadline = Instant::now() + TERMINATION_GRACE;
     loop {
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            signal_group(group, Signal::Kill);
+            process_tree
+                .signal(ProcessSignal::Kill)
+                .map_err(|error| error.to_string())?;
             return Ok((status, reason));
         }
         if Instant::now() >= grace_deadline {
@@ -243,56 +322,191 @@ fn terminate(
         }
         thread::sleep(POLL_INTERVAL);
     }
-    signal_group(group, Signal::Kill);
+    process_tree
+        .signal(ProcessSignal::Kill)
+        .map_err(|error| error.to_string())?;
     let status = child.wait().map_err(|error| error.to_string())?;
     Ok((status, reason))
 }
 
-fn cleanup_descendants(group: u32) {
-    signal_group(group, Signal::Terminate);
+fn cleanup_descendants(process_tree: &mut dyn ProcessTree) {
+    let _ = process_tree.signal(ProcessSignal::Terminate);
     thread::sleep(Duration::from_millis(20));
-    signal_group(group, Signal::Kill);
-}
-
-#[derive(Clone, Copy)]
-enum Signal {
-    Terminate,
-    Kill,
+    let _ = process_tree.signal(ProcessSignal::Kill);
 }
 
 #[cfg(unix)]
-fn configure_process_group(command: &mut Command) {
+fn configure_resource_limits(
+    command: &mut Command,
+    limits: super::ResourceLimits,
+) -> Result<(), String> {
     use std::os::unix::process::CommandExt;
+    if limits.cpu_seconds == 0
+        || limits.address_space_bytes < 16 * 1024 * 1024
+        || limits.open_files < 3
+        || limits.processes == 0
+        || limits.file_bytes == 0
+    {
+        return Err("invalid zero/unsafe process resource limit".into());
+    }
+    let inherited_fds = inherited_fds();
     unsafe {
-        command.pre_exec(|| {
-            if setpgid(0, 0) == 0 {
-                Ok(())
-            } else {
-                Err(io::Error::last_os_error())
-            }
+        command.pre_exec(move || {
+            mark_inherited_fds_close_on_exec(&inherited_fds);
+            set_limit(RLIMIT_CPU, limits.cpu_seconds)?;
+            #[cfg(target_os = "linux")]
+            set_limit(RLIMIT_AS, limits.address_space_bytes)?;
+            set_limit(RLIMIT_NOFILE, limits.open_files)?;
+            #[cfg(target_os = "linux")]
+            set_limit(RLIMIT_NPROC, limits.processes)?;
+            set_limit(RLIMIT_FSIZE, limits.file_bytes)?;
+            Ok(())
         });
     }
+    Ok(())
 }
-
 #[cfg(not(unix))]
-fn configure_process_group(_command: &mut Command) {}
-
-#[cfg(unix)]
-fn signal_group(group: u32, signal: Signal) {
-    let number = match signal {
-        Signal::Terminate => 15,
-        Signal::Kill => 9,
-    };
+fn configure_resource_limits(
+    _command: &mut Command,
+    _limits: super::ResourceLimits,
+) -> Result<(), String> {
+    Err("native resource-limit backend unavailable".into())
+}
+#[cfg(target_os = "linux")]
+fn inherited_fds() -> Vec<i32> {
+    Vec::new()
+}
+#[cfg(target_os = "macos")]
+fn inherited_fds() -> Vec<i32> {
+    std::fs::read_dir("/dev/fd")
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| {
+            entry
+                .ok()?
+                .file_name()
+                .to_string_lossy()
+                .parse::<i32>()
+                .ok()
+        })
+        .filter(|fd| *fd > 2)
+        .collect()
+}
+#[cfg(target_os = "linux")]
+fn mark_inherited_fds_close_on_exec(_fds: &[i32]) {
     unsafe {
-        kill(-(group as i32), number);
+        syscall(436usize, 3u32, u32::MAX, 4u32);
     }
 }
-
-#[cfg(not(unix))]
-fn signal_group(_group: u32, _signal: Signal) {}
-
+#[cfg(target_os = "macos")]
+fn mark_inherited_fds_close_on_exec(fds: &[i32]) {
+    for fd in fds {
+        unsafe {
+            fcntl(*fd, 2, 1);
+        }
+    }
+}
+#[cfg(unix)]
+fn set_limit(resource: i32, value: u64) -> io::Result<()> {
+    let limit = RLimit {
+        current: value,
+        maximum: value,
+    };
+    if unsafe { setrlimit(resource, &limit) } == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+#[cfg(unix)]
+#[repr(C)]
+struct RLimit {
+    current: u64,
+    maximum: u64,
+}
 #[cfg(unix)]
 extern "C" {
-    fn setpgid(pid: i32, pgid: i32) -> i32;
-    fn kill(pid: i32, signal: i32) -> i32;
+    fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
+}
+#[cfg(target_os = "linux")]
+extern "C" {
+    fn syscall(number: usize, ...) -> isize;
+}
+#[cfg(target_os = "macos")]
+extern "C" {
+    fn fcntl(fd: i32, command: i32, ...) -> i32;
+}
+#[cfg(unix)]
+const RLIMIT_CPU: i32 = 0;
+#[cfg(unix)]
+const RLIMIT_FSIZE: i32 = 1;
+#[cfg(target_os = "linux")]
+const RLIMIT_NPROC: i32 = 6;
+#[cfg(target_os = "linux")]
+const RLIMIT_NOFILE: i32 = 7;
+#[cfg(target_os = "linux")]
+const RLIMIT_AS: i32 = 9;
+#[cfg(target_os = "macos")]
+const RLIMIT_NOFILE: i32 = 8;
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::tool_runtime::runtime_ops::{ArtifactSink, CancellationToken, OperationContext};
+    fn context(root: &std::path::Path) -> OperationContext<'static> {
+        OperationContext::new(
+            CancellationToken::new(),
+            ArtifactSink::new(root.join("artifacts")),
+        )
+    }
+    #[test]
+    fn process_clears_environment_rejects_ungranted_env_and_applies_fd_limit() {
+        let root = std::env::current_dir().unwrap();
+        let context = context(&root);
+        let mut denied = ManagedCommand::new("/bin/sh", &root);
+        denied
+            .env
+            .push(("SSH_AUTH_SOCK".into(), Some("/tmp/agent".into())));
+        assert!(ProcessManager
+            .run(&context, denied, Duration::from_secs(1))
+            .unwrap_err()
+            .contains("SSH_AUTH_SOCK denied"));
+        let mut command = ManagedCommand::new("/bin/sh", &root);
+        command.args = [
+            "-c",
+            "test -z \"$HOME$SSH_AUTH_SOCK\" && test $(ulimit -n) -le 256",
+        ]
+        .into_iter()
+        .map(OsString::from)
+        .collect();
+        let result = ProcessManager
+            .run(&context, command, Duration::from_secs(2))
+            .unwrap();
+        assert!(result.status.success(), "{}", result.stderr.text);
+    }
+    #[test]
+    fn cancellation_reaps_process_tree() {
+        let root = std::env::current_dir().unwrap();
+        let token = CancellationToken::new();
+        let context = OperationContext::new(
+            token.clone(),
+            ArtifactSink::new(root.join("target/security-cancel-artifacts")),
+        );
+        let mut command = ManagedCommand::new("/bin/sh", &root);
+        command.args = ["-c", "sleep 30 & wait"]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+        let canceller = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(80));
+            token.cancel();
+        });
+        let started = Instant::now();
+        let result = ProcessManager
+            .run(&context, command, Duration::from_secs(10))
+            .unwrap();
+        canceller.join().unwrap();
+        assert_eq!(result.reason, TerminationReason::Cancelled);
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

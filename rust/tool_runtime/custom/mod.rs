@@ -7,11 +7,23 @@ mod runtime;
 
 pub(crate) use runtime::custom_tool;
 
+fn secure_mcp(runtime: &ToolRuntime<'_>) -> Result<(), String> {
+    crate::tool_runtime::runtime_ops::untrusted_child(
+        &runtime.operation,
+        format!("{}:mcp", runtime.operation.operation_id()),
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
 pub(crate) fn mcp_native_tool(
     runtime: &ToolRuntime<'_>,
     tool: &str,
     input: &Value,
 ) -> Option<Result<Value, String>> {
+    if let Err(error) = secure_mcp(runtime) {
+        return Some(Err(error));
+    }
     crate::tools::native_mcp_tool_target(runtime.cwd, tool).map(|(server, native_tool)| {
         crate::mcp::call_tool(runtime.cwd, &server, &native_tool, input.clone(), 30_000)
     })
@@ -28,12 +40,14 @@ fn mcp_server(input: &Value) -> Result<String, String> {
 }
 
 pub(crate) fn mcp_list_tools(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    secure_mcp(runtime)?;
     let server = mcp_server(input)?;
     crate::mcp::list_tools(runtime.cwd, &server, mcp_timeout_ms(input))
 }
 
 pub(crate) fn mcp_call_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let server = mcp_server(input)?;
+    secure_mcp(runtime)?;
     let tool = string_input(input, "tool")
         .filter(|tool| !tool.is_empty())
         .ok_or_else(|| "tool is required".to_string())?;
@@ -51,11 +65,13 @@ pub(crate) fn mcp_list_resources(
     input: &Value,
 ) -> Result<Value, String> {
     let server = mcp_server(input)?;
+    secure_mcp(runtime)?;
     crate::mcp::list_resources(runtime.cwd, &server, mcp_timeout_ms(input))
 }
 
 pub(crate) fn mcp_read_resource(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let server = mcp_server(input)?;
+    secure_mcp(runtime)?;
     let uri = string_input(input, "uri")
         .filter(|uri| !uri.is_empty())
         .ok_or_else(|| "uri is required".to_string())?;
@@ -64,11 +80,13 @@ pub(crate) fn mcp_read_resource(runtime: &ToolRuntime<'_>, input: &Value) -> Res
 
 pub(crate) fn mcp_list_prompts(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let server = mcp_server(input)?;
+    secure_mcp(runtime)?;
     crate::mcp::list_prompts(runtime.cwd, &server, mcp_timeout_ms(input))
 }
 
 pub(crate) fn mcp_get_prompt(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let server = mcp_server(input)?;
+    secure_mcp(runtime)?;
     let name = string_input(input, "name")
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "name is required".to_string())?;

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.jeden.dev/release/promotion-record-v1.schema.json",
+  "title": "Jeden Stable Promotion Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sourceSha", "version", "targetTriple", "canaryArtifactSha256", "stableArtifactSha256", "canaryManifestSha256", "stableManifestSha256", "gateDigests", "approvals", "promotedAt", "workflowRun"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sourceSha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "version": { "type": "string", "minLength": 5, "maxLength": 128 },
+    "targetTriple": { "type": "string", "minLength": 3, "maxLength": 128 },
+    "canaryArtifactSha256": { "$ref": "#/$defs/sha256" },
+    "stableArtifactSha256": { "$ref": "#/$defs/sha256" },
+    "canaryManifestSha256": { "$ref": "#/$defs/sha256" },
+    "stableManifestSha256": { "$ref": "#/$defs/sha256" },
+    "gateDigests": { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/sha256" } },
+    "approvals": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "uniqueItems": true },
+    "promotedAt": { "type": "string", "format": "date-time" },
+    "workflowRun": { "type": "string", "minLength": 1, "maxLength": 256 }
+  },
+  "allOf": [{ "properties": { "stableArtifactSha256": { "$ref": "#/$defs/sha256" } } }],
+  "$defs": { "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" } }
+}

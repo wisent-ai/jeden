@@ -17,9 +17,6 @@ pub enum SemanticColor {
     Success,
     Warning,
     Danger,
-    CodeAdd,
-    CodeRemove,
-    Selection,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -43,8 +40,6 @@ impl ResolvedStyle {
             format!("{}{}\x1b[0m", self.prefix, value)
         }
     }
-
-    pub fn prefix(&self) -> &str { &self.prefix }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,25 +55,44 @@ impl Theme {
             .ok()
             .and_then(|value| ThemeId::parse(&value))
             .unwrap_or(ThemeId::Auto);
-        Self { id, color: color_requested && !no_color }
+        Self {
+            id,
+            color: color_requested && !no_color,
+        }
     }
 
     pub fn resolve(self, token: SemanticColor, mut emphasis: Emphasis) -> ResolvedStyle {
         if !self.color {
-            return ResolvedStyle { prefix: String::new() };
+            return ResolvedStyle {
+                prefix: String::new(),
+            };
         }
         if matches!(self.id, ThemeId::HighContrast) {
             emphasis.dim = false;
         }
         let mut codes: Vec<&str> = Vec::with_capacity(3);
-        if emphasis.bold { codes.push("1"); }
-        if emphasis.dim && self.color { codes.push("2"); }
-        if emphasis.underline { codes.push("4"); }
-        if emphasis.reverse { codes.push("7"); }
-        if self.color && !matches!(self.id, ThemeId::Mono | ThemeId::HighContrast) {
-            if let Some(code) = color_code(self.id, token) { codes.push(code); }
+        if emphasis.bold {
+            codes.push("1");
         }
-        let prefix = if codes.is_empty() { String::new() } else { format!("\x1b[{}m", codes.join(";")) };
+        if emphasis.dim && self.color {
+            codes.push("2");
+        }
+        if emphasis.underline {
+            codes.push("4");
+        }
+        if emphasis.reverse {
+            codes.push("7");
+        }
+        if self.color && !matches!(self.id, ThemeId::Mono | ThemeId::HighContrast) {
+            if let Some(code) = color_code(self.id, token) {
+                codes.push(code);
+            }
+        }
+        let prefix = if codes.is_empty() {
+            String::new()
+        } else {
+            format!("\x1b[{}m", codes.join(";"))
+        };
         ResolvedStyle { prefix }
     }
 
@@ -108,26 +122,23 @@ fn color_code(theme: ThemeId, token: SemanticColor) -> Option<&'static str> {
             Accent | Warning => "38;5;130",
             TextMuted => "38;5;59",
             Info => "38;5;30",
-            Success | CodeAdd => "38;5;28",
-            Danger | CodeRemove => "38;5;124",
-            Selection => "7",
+            Success => "38;5;28",
+            Danger => "38;5;124",
             TextPrimary => return None,
         },
         ThemeId::GraphiteDark | ThemeId::Auto => match token {
             Accent | Warning => "38;5;215",
             TextMuted => "38;5;245",
             Info => "38;5;109",
-            Success | CodeAdd => "38;5;108",
-            Danger | CodeRemove => "38;5;174",
-            Selection => "7",
+            Success => "38;5;108",
+            Danger => "38;5;174",
             TextPrimary => return None,
         },
         ThemeId::ColorBlind => match token {
             Accent | Warning => "38;5;214",
             TextMuted => "38;5;245",
-            Info | Success | CodeAdd => "38;5;39",
-            Danger | CodeRemove => "38;5;201",
-            Selection => "7",
+            Info | Success => "38;5;39",
+            Danger => "38;5;201",
             TextPrimary => return None,
         },
         ThemeId::Mono | ThemeId::HighContrast => return None,

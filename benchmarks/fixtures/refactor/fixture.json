@@ -1,0 +1,1 @@
+{"files":{"TASK.txt":"Refactor duplicated parsing logic without changing externally observable behavior.\n","src/input.txt":"synthetic-refactor-input\n"},"license":"Apache-2.0","provenance":"Original synthetic fixture authored for Jeden; no external benchmark content.","schema":"jeden.eval-fixture.v1"}

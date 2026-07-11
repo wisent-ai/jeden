@@ -77,16 +77,26 @@ impl SessionRecorder {
         .map_err(|e| e.to_string())
     }
 
-    pub(in crate::agent) fn record(&mut self, event_type: &str, mut data: Value) -> Result<(), String> {
+    pub(in crate::agent) fn record(
+        &mut self,
+        event_type: &str,
+        mut data: Value,
+    ) -> Result<(), String> {
         self.ensure()?;
         if event_type == "action" {
-            let count = data.pointer("/action/tools").and_then(Value::as_array).map(Vec::len);
-            self.pending_tool_results = count.filter(|count| *count > 0).map(|count| (count, Vec::with_capacity(count)));
+            let count = data
+                .pointer("/action/tools")
+                .and_then(Value::as_array)
+                .map(Vec::len);
+            self.pending_tool_results = count
+                .filter(|count| *count > 0)
+                .map(|count| (count, Vec::with_capacity(count)));
         } else if event_type == "tool_result" {
             let result = data.get("result").cloned().unwrap_or(Value::Null);
             if self.pending_tool_results.is_some() {
                 let completed = {
-                    let (remaining, results) = self.pending_tool_results.as_mut().expect("checked above");
+                    let (remaining, results) =
+                        self.pending_tool_results.as_mut().expect("checked above");
                     results.push(result);
                     *remaining = remaining.saturating_sub(1);
                     if *remaining == 0 {
@@ -104,33 +114,28 @@ impl SessionRecorder {
                 data["replayMessage"] = json!(crate::tool_runtime::format_tool_result(&result));
             }
         }
-        let entry = crate::cli::sessions::append_ledger_entry(&self.dir, now_stamp(), event_type, data)?;
-        let memory = crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path())?;
-        let scope = crate::memory::MemoryScope { kind: "repo".into(), id: self.cwd.display().to_string() };
-        crate::memory::extract_ledger_entry(&memory, &self.id, &entry, &scope)?;
-        memory.process_one(&format!("session:{}", self.id))?;
-        crate::collab::replicate_ledger_entry(&self.cwd, &entry)?;
+        let entry =
+            crate::cli::sessions::append_ledger_entry(&self.dir, now_stamp(), event_type, data)?;
         self.active_leaf = Some(entry.id);
         Ok(())
     }
 
-    pub(in crate::agent) fn record_context(&mut self, reason: &str, messages: &[Value]) -> Result<(), String> {
-        self.record("context_snapshot", json!({ "reason": reason, "messages": messages }))
-    }
-    pub(in crate::agent) fn checkpoint(&mut self, label: &str, messages: &[Value]) -> Result<String, String> {
-        self.record_context("checkpoint", messages)?;
-        let checkpoint_entry = self.active_leaf.clone().ok_or("checkpoint has no ledger entry")?;
-        self.record("checkpoint", json!({ "label": label, "checkpointEntry": checkpoint_entry }))?;
-        Ok(checkpoint_entry)
+    pub(in crate::agent) fn record_context(
+        &mut self,
+        reason: &str,
+        messages: &[Value],
+    ) -> Result<(), String> {
+        self.record(
+            "context_snapshot",
+            json!({ "reason": reason, "messages": messages }),
+        )
     }
 
     pub(in crate::agent) fn active_leaf(&self) -> Result<Option<String>, String> {
-        let state_path = self.dir.join("state.json");
-        let text = fs::read_to_string(&state_path).map_err(|e| e.to_string())?;
-        let state: Value = serde_json::from_str(&text)
-            .map_err(|e| format!("invalid {}: {}", state_path.display(), e))?;
-        Ok(state.get("activeLeaf").and_then(Value::as_str).map(str::to_string)
-            .or_else(|| self.active_leaf.clone()))
+        if !self.ready && !self.dir.join("state.json").exists() {
+            return Ok(self.active_leaf.clone());
+        }
+        crate::cli::sessions::session_active_leaf(&self.dir)
     }
 
     pub(in crate::agent) fn set_cwd(&mut self, cwd: &Path) -> Result<(), String> {
@@ -139,11 +144,15 @@ impl SessionRecorder {
         let text = fs::read_to_string(&state_path).map_err(|e| e.to_string())?;
         let mut state: Value = serde_json::from_str(&text)
             .map_err(|e| format!("invalid {}: {}", state_path.display(), e))?;
-        let object = state.as_object_mut()
+        let object = state
+            .as_object_mut()
             .ok_or_else(|| format!("invalid {}: expected object", state_path.display()))?;
         object.insert("cwd".into(), json!(cwd));
-        fs::write(&state_path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n")
-            .map_err(|e| e.to_string())
+        fs::write(
+            &state_path,
+            serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n",
+        )
+        .map_err(|e| e.to_string())
     }
 
     pub(in crate::agent) fn artifact_dir(&self) -> PathBuf {
@@ -274,7 +283,9 @@ mod tests {
         assert_eq!(events[1]["parentId"], "legacy-1");
         assert_eq!(events[2]["id"], appended.id);
         assert_eq!(events[2]["parentId"], "legacy-2");
-        assert!(events.iter().all(|event| event["version"] == 1));
+        assert!(events
+            .iter()
+            .all(|event| event["version"] == crate::cli::sessions::SESSION_LEDGER_VERSION));
         assert_eq!(
             crate::cli::sessions::session_conversation_turns(&session).unwrap(),
             vec![
@@ -300,7 +311,10 @@ mod tests {
         .unwrap();
 
         let error = crate::cli::sessions::session_conversation_turns(&session).unwrap_err();
-        assert!(error.contains("transcript.jsonl:2 is malformed JSON"), "{error}");
+        assert!(
+            error.contains("transcript.jsonl:2 is malformed JSON"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -347,7 +361,10 @@ mod tests {
             )
             .unwrap();
         recorder
-            .record("tool_result", json!({"result": {"path": "a.rs", "text": "alpha"}}))
+            .record(
+                "tool_result",
+                json!({"result": {"path": "a.rs", "text": "alpha"}}),
+            )
             .unwrap();
         recorder
             .record("tool_result", json!({"result": {"matches": [2, 5]}}))
@@ -374,7 +391,10 @@ mod tests {
         let mut recorder = recorder_at(session.clone(), &fixture.path);
         recorder.ensure().unwrap();
         recorder
-            .record("compaction", json!({"before": 4, "summary": "keep decision A"}))
+            .record(
+                "compaction",
+                json!({"before": 4, "summary": "keep decision A"}),
+            )
             .unwrap();
         recorder.record_context("compaction", &compacted).unwrap();
         drop(recorder);
@@ -413,8 +433,12 @@ mod tests {
             child_recorder.record_context(reason, &seed).unwrap();
             drop(child_recorder);
 
-            let child_value = crate::cli::sessions::read_session_value(child.to_str().unwrap()).unwrap();
-            assert_eq!(child_value["state"]["lineage"]["parentSession"], json!(parent));
+            let child_value =
+                crate::cli::sessions::read_session_value(child.to_str().unwrap()).unwrap();
+            assert_eq!(
+                child_value["state"]["lineage"]["parentSession"],
+                json!(parent)
+            );
             assert_eq!(child_value["state"]["lineage"]["parentEntry"], parent_leaf);
             assert_eq!(child_value["events"][0]["type"], "lineage");
             assert_eq!(child_value["events"][0]["data"]["parentEntry"], parent_leaf);
@@ -449,15 +473,137 @@ mod tests {
             parent_leaf.clone(),
         );
         child_recorder.ensure().unwrap();
-        child_recorder.record_context("handoff_seed", &seed).unwrap();
+        child_recorder
+            .record_context("handoff_seed", &seed)
+            .unwrap();
         drop(child_recorder);
 
         let restarted = crate::cli::sessions::read_session_value(child.to_str().unwrap()).unwrap();
-        assert_eq!(restarted["state"]["lineage"]["parentSession"], json!(parent));
+        assert_eq!(
+            restarted["state"]["lineage"]["parentSession"],
+            json!(parent)
+        );
         assert_eq!(restarted["state"]["lineage"]["parentEntry"], parent_leaf);
         assert_eq!(
             crate::cli::sessions::session_conversation_turns(&child).unwrap(),
             seed
         );
+    }
+
+    struct CountingConsumer {
+        deliveries: usize,
+        fail_once: bool,
+    }
+
+    impl crate::cli::sessions::ledger_v2::SessionOutboxConsumer for CountingConsumer {
+        fn consumer(&self) -> crate::cli::sessions::ledger_v2::OutboxConsumer {
+            crate::cli::sessions::ledger_v2::OutboxConsumer::Memory
+        }
+
+        fn deliver(
+            &mut self,
+            _event: &crate::cli::sessions::ledger_v2::SessionEventV2,
+            idempotency_key: &str,
+        ) -> Result<(), String> {
+            assert!(idempotency_key.starts_with("session-event:"));
+            self.deliveries += 1;
+            if std::mem::take(&mut self.fail_once) {
+                Err("fixture outage".into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    #[test]
+    fn session_outbox_retries_then_delivers_once_across_restart() {
+        let fixture = Fixture::new("outbox-restart");
+        let session = fixture.session("outbox");
+        crate::cli::sessions::append_ledger_entry(
+            &session,
+            "1".into(),
+            "user",
+            json!({"task":"durable event"}),
+        )
+        .unwrap();
+
+        let mut first_process = CountingConsumer {
+            deliveries: 0,
+            fail_once: true,
+        };
+        let first =
+            crate::cli::sessions::ledger_v2::drain_outbox(&session, &mut first_process, 10, 1)
+                .unwrap();
+        assert_eq!((first.delivered, first.retried), (0, 1));
+
+        let mut restarted_process = CountingConsumer {
+            deliveries: 0,
+            fail_once: false,
+        };
+        let second =
+            crate::cli::sessions::ledger_v2::drain_outbox(&session, &mut restarted_process, 11, 10)
+                .unwrap();
+        assert_eq!((second.delivered, second.retried), (1, 0));
+        let third =
+            crate::cli::sessions::ledger_v2::drain_outbox(&session, &mut restarted_process, 12, 10)
+                .unwrap();
+        assert_eq!(third.delivered, 0);
+        assert_eq!(restarted_process.deliveries, 1);
+    }
+
+    #[test]
+    fn session_outbox_expired_lease_is_reclaimed_with_fencing() {
+        use crate::cli::sessions::ledger_v2::{outbox, store, OutboxConsumer};
+        let fixture = Fixture::new("outbox-lease");
+        let session = fixture.session("leased");
+        crate::cli::sessions::append_ledger_entry(
+            &session,
+            "1".into(),
+            "user",
+            json!({"task":"lease me"}),
+        )
+        .unwrap();
+        let events = store::read_events(&session).unwrap().events;
+        let first = outbox::claim(&session, &events, OutboxConsumer::Memory, 10, 30, 12)
+            .unwrap()
+            .unwrap();
+        assert!(
+            outbox::claim(&session, &events, OutboxConsumer::Memory, 39, 30, 12)
+                .unwrap()
+                .is_none()
+        );
+        let reclaimed = outbox::claim(&session, &events, OutboxConsumer::Memory, 40, 30, 12)
+            .unwrap()
+            .unwrap();
+        assert_eq!(reclaimed.attempt, first.attempt + 1);
+        assert!(outbox::complete(&session, &first)
+            .unwrap_err()
+            .contains("stale outbox lease"));
+        outbox::complete(&session, &reclaimed).unwrap();
+        assert!(
+            outbox::claim(&session, &events, OutboxConsumer::Memory, 100, 30, 12)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn session_ledger_rejects_checksum_tampering() {
+        let fixture = Fixture::new("checksum");
+        let session = fixture.session("tampered");
+        crate::cli::sessions::append_ledger_entry(
+            &session,
+            "1".into(),
+            "user",
+            json!({"task":"original"}),
+        )
+        .unwrap();
+        let path = session.join("transcript.jsonl");
+        let raw = fs::read_to_string(&path)
+            .unwrap()
+            .replace("original", "modified");
+        fs::write(&path, raw).unwrap();
+        let error = crate::cli::sessions::session_conversation_turns(&session).unwrap_err();
+        assert!(error.contains("checksum mismatch"), "{error}");
     }
 }

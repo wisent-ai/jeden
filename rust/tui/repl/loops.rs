@@ -1,10 +1,12 @@
 use std::io::{self, IsTerminal, Write};
+use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use std::path::Path;
 
-use crossterm::event::{self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEventKind, KeyModifiers,
+};
 use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode};
 
 use crate::tool_runtime::runtime_ops::{ArtifactSink, CancellationToken, OperationContext};
@@ -37,15 +39,20 @@ where
     let mut stdout = io::stdout();
     loop {
         let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 { break; }
+        if io::stdin().read_line(&mut input)? == 0 {
+            break;
+        }
         let prompt = input.trim_end_matches(['\r', '\n']);
-        if prompt.trim().is_empty() { continue; }
-        if matches!(prompt.trim(), "/exit" | "/quit") { break; }
+        if prompt.trim().is_empty() {
+            continue;
+        }
+        if matches!(prompt.trim(), "/exit" | "/quit") {
+            break;
+        }
         let ctx = TurnCtx {
             cancel: Arc::new(AtomicBool::new(false)),
             interactive: false,
             from_view: false,
-            attachments: &[],
             progress: &|_| {},
             stream: &|_| {},
             ask_user: None,
@@ -97,7 +104,12 @@ fn editor_live_lines(
         .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
         .collect();
     if picker.is_none() && confirm.is_none() {
-        place_editor_cursor(&mut lines[prompt_start..], editor.text(), editor.cursor(), width);
+        place_editor_cursor(
+            &mut lines[prompt_start..],
+            editor.text(),
+            editor.cursor(),
+            width,
+        );
     }
     lines
 }
@@ -164,7 +176,17 @@ where
             &status.command_status,
             color,
         );
-        let live = editor_live_lines(&status, &editor, &attachments, 0, None, None, columns, rows, color);
+        let live = editor_live_lines(
+            &status,
+            &editor,
+            &attachments,
+            0,
+            None,
+            None,
+            columns,
+            rows,
+            color,
+        );
         renderer.flush(&welcome, &live)?;
     }
 
@@ -194,7 +216,9 @@ where
             needs_render = false;
         }
 
-        if !event::poll(Duration::from_millis(250))? { continue; }
+        if !event::poll(Duration::from_millis(250))? {
+            continue;
+        }
         let event = event::read()?;
         match event {
             Event::Resize(_, _) => {
@@ -214,16 +238,22 @@ where
             }
             Event::Key(key) if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) => {
                 needs_render = true;
-                let ctrl_c = key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
+                let ctrl_c =
+                    key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL);
                 let ctrl_d = key.code == KeyCode::Char('d')
                     && key.modifiers.contains(KeyModifiers::CONTROL)
                     && editor.is_empty();
-                if ctrl_c || ctrl_d { break; }
+                if ctrl_c || ctrl_d {
+                    break;
+                }
 
                 if let Some(active_confirm) = confirm.as_mut() {
                     match active_confirm.handle_key(key) {
                         ConfirmEvent::Pending => continue,
-                        ConfirmEvent::Cancelled => { confirm = None; continue; }
+                        ConfirmEvent::Cancelled => {
+                            confirm = None;
+                            continue;
+                        }
                         ConfirmEvent::Submit(command) => {
                             confirm = None;
                             picker = None;
@@ -235,7 +265,10 @@ where
                 if let Some(active_picker) = picker.as_mut() {
                     match active_picker.handle_key(key) {
                         PickerEvent::Pending => continue,
-                        PickerEvent::Cancelled => { picker = None; continue; }
+                        PickerEvent::Cancelled => {
+                            picker = None;
+                            continue;
+                        }
                         PickerEvent::Submit(command) => {
                             picker = None;
                             editor.set_text(command);
@@ -247,7 +280,11 @@ where
                             submission_from_view = false;
                             continue;
                         }
-                        PickerEvent::Confirm { label, detail, command } => {
+                        PickerEvent::Confirm {
+                            label,
+                            detail,
+                            command,
+                        } => {
                             confirm = Some(ConfirmState::new(label, detail, command));
                             continue;
                         }
@@ -266,7 +303,9 @@ where
                         disable_raw_mode()?;
                         let operation = OperationContext::new(
                             CancellationToken::new(),
-                            ArtifactSink::new(std::env::temp_dir().join("jeden-external-editor-artifacts")),
+                            ArtifactSink::new(
+                                std::env::temp_dir().join("jeden-external-editor-artifacts"),
+                            ),
                         );
                         let result = external_editor(&mut editor, Path::new(&cwd), &operation);
                         enable_raw_mode()?;
@@ -304,17 +343,28 @@ where
                         slash_selection = 0;
                     }
                     KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => submit = true,
-                    KeyCode::Char('m') | KeyCode::Char('j') if key.modifiers.contains(KeyModifiers::CONTROL) => submit = true,
+                    KeyCode::Char('m') | KeyCode::Char('j')
+                        if key.modifiers.contains(KeyModifiers::CONTROL) =>
+                    {
+                        submit = true
+                    }
                     KeyCode::Tab => {
-                        if let Some(completed) = complete_slash_input(editor.text(), slash_selection) {
+                        if let Some(completed) =
+                            complete_slash_input(editor.text(), slash_selection)
+                        {
                             editor.set_text(completed);
                         } else {
                             editor.insert("  ");
                         }
                         slash_selection = 0;
                     }
-                    KeyCode::Right if editor.cursor() == editor.text().len() && !slash_matches(editor.text()).is_empty() => {
-                        if let Some(completed) = complete_slash_input(editor.text(), slash_selection) {
+                    KeyCode::Right
+                        if editor.cursor() == editor.text().len()
+                            && !slash_matches(editor.text()).is_empty() =>
+                    {
+                        if let Some(completed) =
+                            complete_slash_input(editor.text(), slash_selection)
+                        {
                             editor.set_text(completed);
                             slash_selection = 0;
                         }
@@ -322,7 +372,11 @@ where
                     KeyCode::Up => {
                         let count = slash_matches(editor.text()).len();
                         if count > 0 {
-                            slash_selection = if slash_selection == 0 { count - 1 } else { slash_selection - 1 };
+                            slash_selection = if slash_selection == 0 {
+                                count - 1
+                            } else {
+                                slash_selection - 1
+                            };
                         } else if editor.text()[..editor.cursor()].contains('\n') {
                             editor.apply(EditorAction::MoveUp);
                         } else {
@@ -341,7 +395,8 @@ where
                     }
                     _ => {
                         if editor.handle_key(key) {
-                            slash_selection = slash_selection.min(slash_matches(editor.text()).len().saturating_sub(1));
+                            slash_selection = slash_selection
+                                .min(slash_matches(editor.text()).len().saturating_sub(1));
                         }
                     }
                 }
@@ -350,15 +405,21 @@ where
                     messages.push(Message::new("error", error.to_string()));
                     continue;
                 }
-                if !submit { continue; }
+                if !submit {
+                    continue;
+                }
 
-                if editor.text().trim().is_empty() { continue; }
+                if editor.text().trim().is_empty() {
+                    continue;
+                }
                 let mut active_prompt = editor.take();
-                let mut active_attachments = attachments.take_all();
+                attachments.clear();
                 let mut active_from_view = submission_from_view;
                 submission_from_view = false;
                 slash_selection = 0;
-                if matches!(active_prompt.trim(), "/exit" | "/quit") { break; }
+                if matches!(active_prompt.trim(), "/exit" | "/quit") {
+                    break;
+                }
                 editor.push_history(active_prompt.clone());
                 messages.push(Message::new("user", active_prompt.clone()));
 
@@ -384,7 +445,6 @@ where
                                 interactive: true,
                                 from_view: active_from_view,
                                 progress: &|_| {},
-                                attachments: &active_attachments,
                                 stream: &|_| {},
                                 ask_user: None,
                                 approve: &|_, _| false,
@@ -397,28 +457,34 @@ where
                         }
                         TurnKind::Background => {
                             let steering_available = runtime
-                                .availability(Path::new(&status_provider().cwd), UiFeature::Steering)
+                                .availability(
+                                    Path::new(&status_provider().cwd),
+                                    UiFeature::Steering,
+                                )
                                 .available;
                             let (result, tools_used) = run_background_turn(
                                 &mut renderer,
                                 &handler,
                                 &active_prompt,
                                 active_from_view,
-                                &active_attachments,
                                 &mut editor,
                                 &mut follow_ups,
                                 steering_available,
                             )?;
                             if !tools_used.is_empty() {
-                                messages.push(Message::new("system", format!("tools: {}", tools_used.join(", "))));
+                                messages.push(Message::new(
+                                    "system",
+                                    format!("tools: {}", tools_used.join(", ")),
+                                ));
                             }
                             apply_turn_result(&mut messages, &active_prompt, result, &mut picker);
                         }
                     }
 
-                    let Some(queued) = follow_ups.pop_next() else { break; };
+                    let Some(queued) = follow_ups.pop_next() else {
+                        break;
+                    };
                     active_prompt = queued.text;
-                    active_attachments = Vec::new();
                     active_from_view = false;
                     editor.push_history(active_prompt.clone());
                     messages.push(Message::new("user", active_prompt.clone()));

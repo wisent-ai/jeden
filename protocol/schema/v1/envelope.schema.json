@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Jeden Session Protocol Envelope v1",
+  "description": "Canonical envelope for the jeden.session.v1 protocol.",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/request"
+    },
+    {
+      "$ref": "#/$defs/response"
+    },
+    {
+      "$ref": "#/$defs/event"
+    },
+    {
+      "$ref": "#/$defs/error"
+    }
+  ],
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestMeta": {
+      "type": "object",
+      "properties": {
+        "protocolVersion": {
+          "const": "jeden.session.v1"
+        },
+        "idempotencyKey": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "deadline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "traceId": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "required": [
+        "protocolVersion",
+        "idempotencyKey"
+      ],
+      "additionalProperties": false
+    },
+    "replayParams": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "cursor": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1
+        }
+      },
+      "required": [
+        "sessionId"
+      ],
+      "additionalProperties": false
+    },
+    "request": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "request"
+        },
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "method": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "params": {},
+        "meta": {
+          "$ref": "#/$defs/requestMeta"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "method",
+        "params",
+        "meta"
+      ],
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "method": {
+                "const": "session.replay"
+              }
+            },
+            "required": [
+              "method"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/replayParams"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "response": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "response"
+        },
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "result": {}
+      },
+      "required": [
+        "type",
+        "id",
+        "result"
+      ],
+      "additionalProperties": false
+    },
+    "event": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "event"
+        },
+        "sessionId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "streamId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cursor": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "eventId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "requestId": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "kind": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "payload": {}
+      },
+      "required": [
+        "type",
+        "sessionId",
+        "streamId",
+        "sequence",
+        "cursor",
+        "eventId",
+        "kind",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "errorBody": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "retryable": {
+          "type": "boolean"
+        },
+        "details": {}
+      },
+      "required": [
+        "code",
+        "message",
+        "retryable",
+        "details"
+      ],
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "error"
+        },
+        "id": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "error": {
+          "$ref": "#/$defs/errorBody"
+        }
+      },
+      "required": [
+        "type",
+        "error"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

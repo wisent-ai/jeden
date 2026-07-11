@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "jeden.interface-capture-overlay.v1",
+  "base": "fixture-contract-captures-v1.json",
+  "replace": {
+    "adapter": "headless",
+    "eventIndex": 5,
+    "event": {"kind": "session.completed", "payload": {"terminalReason": "cancelled"}}
+  }
+}

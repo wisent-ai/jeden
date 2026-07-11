@@ -1,0 +1,40 @@
+[
+  {
+    "type": "request",
+    "id": "req-001",
+    "method": "session.replay",
+    "params": { "sessionId": "session-001", "cursor": "cursor-006", "limit": 25 },
+    "meta": {
+      "protocolVersion": "jeden.session.v1",
+      "idempotencyKey": "idem-replay-001",
+      "deadline": "2026-07-11T12:00:00Z",
+      "traceId": "trace-001"
+    }
+  },
+  {
+    "type": "response",
+    "id": "req-001",
+    "result": { "accepted": true }
+  },
+  {
+    "type": "event",
+    "sessionId": "session-001",
+    "streamId": "stream-001",
+    "sequence": 7,
+    "cursor": "cursor-007",
+    "eventId": "event-007",
+    "requestId": "req-001",
+    "kind": "session.output",
+    "payload": { "text": "hello" }
+  },
+  {
+    "type": "error",
+    "id": "req-002",
+    "error": {
+      "code": "session.conflict",
+      "message": "Session state changed",
+      "retryable": true,
+      "details": { "cursor": "cursor-008" }
+    }
+  }
+]

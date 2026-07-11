@@ -15,8 +15,10 @@ use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, LazyLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use crate::tools::ToolInfo;
-use crate::capability::{CapabilityDescriptor as RegistryDescriptor, CapabilityHealth, CapabilityKind, CapabilityPolicy, FunctionTarget};
+use crate::capability::{
+    CapabilityDescriptor as RegistryDescriptor, CapabilityHealth, CapabilityKind, CapabilityPolicy,
+    FunctionTarget,
+};
 
 const ABI_VERSION: u32 = 1;
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
@@ -129,7 +131,7 @@ struct Registry {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ReloadReport {
+pub struct ReloadReport {
     pub generation: u64,
     pub active_extensions: usize,
     pub unhealthy_extensions: usize,
@@ -220,11 +222,21 @@ fn declarative_paths(root: &Path, precedence: usize) -> Vec<DeclarativeCapabilit
             let health = if kind == "hooks" {
                 fs::read_to_string(&path)
                     .map_err(|error| error.to_string())
-                    .and_then(|text| serde_json::from_str::<Value>(&text).map_err(|error| error.to_string()))
+                    .and_then(|text| {
+                        serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())
+                    })
                     .map(|value| value.is_object())
-                    .and_then(|valid| if valid { Ok(()) } else { Err("hooks manifest must be an object".into()) })
+                    .and_then(|valid| {
+                        if valid {
+                            Ok(())
+                        } else {
+                            Err("hooks manifest must be an object".into())
+                        }
+                    })
             } else {
-                fs::read_dir(&path).map(|_| ()).map_err(|error| error.to_string())
+                fs::read_dir(&path)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
             };
             values.push(DeclarativeCapability {
                 kind,
@@ -255,7 +267,10 @@ fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher, remaining: &mut usize
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
-        let mut children = entries.flatten().map(|entry| entry.path()).collect::<Vec<_>>();
+        let mut children = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .collect::<Vec<_>>();
         children.sort();
         for child in children {
             hash_path_tree(&child, hasher, remaining);
@@ -265,7 +280,6 @@ fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher, remaining: &mut usize
         }
     }
 }
-
 
 fn read_json(path: &Path) -> Value {
     fs::read_to_string(path)
@@ -302,14 +316,26 @@ fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
                 continue;
             };
             roots.push(InstalledPluginRoot {
-                id: value.get("id").and_then(Value::as_str).unwrap_or(registry_id).to_string(),
-                version: value.get("version").and_then(Value::as_str).unwrap_or("unversioned").to_string(),
+                id: value
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or(registry_id)
+                    .to_string(),
+                version: value
+                    .get("version")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unversioned")
+                    .to_string(),
                 path: PathBuf::from(path),
                 enabled: value.get("enabled").and_then(Value::as_bool) != Some(false),
             });
         }
     }
-    roots.sort_by(|left, right| left.id.cmp(&right.id).then_with(|| left.path.cmp(&right.path)));
+    roots.sort_by(|left, right| {
+        left.id
+            .cmp(&right.id)
+            .then_with(|| left.path.cmp(&right.path))
+    });
     roots
 }
 
@@ -329,7 +355,11 @@ fn source_set(cwd: &Path) -> Result<SourceSet, String> {
         for value in configured {
             if let Some(path) = value.as_str() {
                 let path = PathBuf::from(path);
-                roots.push(if path.is_absolute() { path } else { cwd.join(path) });
+                roots.push(if path.is_absolute() {
+                    path
+                } else {
+                    cwd.join(path)
+                });
             }
         }
     }
@@ -364,9 +394,13 @@ fn source_set(cwd: &Path) -> Result<SourceSet, String> {
         .collect();
     modules.retain(|path| {
         let text = path.to_string_lossy();
-        !disabled.iter().any(|id| text.ends_with(id) || text.contains(&format!("/{id}/")))
+        !disabled
+            .iter()
+            .any(|id| text.ends_with(id) || text.contains(&format!("/{id}/")))
     });
-    let home_jeden = env::var_os("HOME").map(PathBuf::from).map(|home| home.join(".jeden"));
+    let home_jeden = env::var_os("HOME")
+        .map(PathBuf::from)
+        .map(|home| home.join(".jeden"));
     let mut module_precedence = BTreeMap::new();
     for module in &modules {
         let precedence = installed_plugins
@@ -374,7 +408,12 @@ fn source_set(cwd: &Path) -> Result<SourceSet, String> {
             .enumerate()
             .find(|(_, plugin)| plugin.enabled && module.starts_with(&plugin.path))
             .map(|(index, _)| 10_000 + index)
-            .or_else(|| home_jeden.as_ref().filter(|root| module.starts_with(root)).map(|_| 20_000))
+            .or_else(|| {
+                home_jeden
+                    .as_ref()
+                    .filter(|root| module.starts_with(root))
+                    .map(|_| 20_000)
+            })
             .unwrap_or(30_000);
         module_precedence.insert(module.clone(), precedence);
     }
@@ -424,24 +463,134 @@ fn run_host(
     generation: u64,
     timeout: Duration,
     envs: &[(&str, String)],
+    source_paths: &[PathBuf],
     allow_write: bool,
     allow_command: bool,
     artifact_dir: Option<&Path>,
     operation: Option<&crate::tool_runtime::runtime_ops::OperationContext<'_>>,
 ) -> Result<Value, String> {
+    let canonical_sources = source_paths
+        .iter()
+        .map(|path| {
+            path.canonicalize()
+                .map_err(|error| format!("extension source unavailable: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let owned_context;
+    let secured = if let Some(context) = operation {
+        crate::tool_runtime::runtime_ops::untrusted_child(
+            context,
+            format!("{}:extension:{mode}", context.operation_id()),
+        )
+        .map_err(|error| error.to_string())?
+    } else {
+        let mut grant = crate::tool_runtime::runtime_ops::ExecutionGrant::trusted_host(
+            "extension-discovery",
+            cwd.to_path_buf(),
+        );
+        grant
+            .filesystem
+            .read_roots
+            .extend(canonical_sources.iter().cloned());
+        grant.sandbox = crate::tool_runtime::runtime_ops::SandboxRequirement::Enforced;
+        owned_context = crate::tool_runtime::runtime_ops::OperationContext::new(
+            crate::tool_runtime::runtime_ops::CancellationToken::new(),
+            crate::tool_runtime::runtime_ops::ArtifactSink::new(
+                artifact_dir.unwrap_or(cwd).to_path_buf(),
+            ),
+        )
+        .with_execution_grant(grant);
+        crate::tool_runtime::runtime_ops::untrusted_child(
+            &owned_context,
+            format!("extension:{mode}"),
+        )
+        .map_err(|error| error.to_string())?
+    };
+    let grant = secured.execution_grant();
     if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
         return Err("extension operation cancelled".into());
     }
     let timeout = operation
-        .and_then(|context| context.deadline().and_then(|deadline| deadline.checked_duration_since(Instant::now())))
+        .and_then(|context| {
+            context
+                .deadline()
+                .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+        })
         .map(|remaining| remaining.min(timeout))
         .unwrap_or(timeout);
     if timeout.is_zero() {
         return Err("extension operation deadline exceeded".into());
     }
     let node = env::var("JEDEN_NODE").unwrap_or_else(|_| "node".into());
-    let enable_ts = envs.iter().any(|(_, value)| value.contains(".ts")) && node_supports_typescript(&node);
-    let mut command = Command::new(node);
+    if !grant.permits_program(std::ffi::OsStr::new(&node)) {
+        return Err(
+            crate::tool_runtime::runtime_ops::GrantError::ProgramDenied(node.clone()).to_string(),
+        );
+    }
+    let canonical_cwd = cwd
+        .canonicalize()
+        .map_err(|error| format!("extension cwd unavailable: {error}"))?;
+    if !grant
+        .filesystem
+        .read_roots
+        .iter()
+        .any(|root| canonical_cwd.starts_with(root))
+    {
+        return Err(
+            crate::tool_runtime::runtime_ops::GrantError::FilesystemDenied(format!(
+                "extension cwd {} is outside grant",
+                canonical_cwd.display()
+            ))
+            .to_string(),
+        );
+    }
+    for source in &canonical_sources {
+        if !grant
+            .filesystem
+            .read_roots
+            .iter()
+            .any(|root| source.starts_with(root))
+        {
+            return Err(
+                crate::tool_runtime::runtime_ops::GrantError::FilesystemDenied(format!(
+                    "extension source {} is outside grant",
+                    source.display()
+                ))
+                .to_string(),
+            );
+        }
+    }
+    let mut read_paths = Vec::with_capacity((source_paths.len() + 1) * 2);
+    read_paths.push(cwd.to_path_buf());
+    read_paths.push(canonical_cwd.clone());
+    read_paths.extend(source_paths.iter().cloned());
+    read_paths.extend(canonical_sources);
+    #[cfg(test)]
+    let write_path = allow_write
+        .then(|| {
+            operation
+                .map(|context| context.artifacts().root())
+                .or(artifact_dir)
+        })
+        .flatten();
+    let enable_ts =
+        envs.iter().any(|(_, value)| value.contains(".ts")) && node_supports_typescript(&node);
+    #[cfg(test)]
+    let mut command = crate::tool_runtime::runtime_ops::sandbox::test_command(
+        &node,
+        &read_paths,
+        write_path,
+        allow_command,
+    )?
+    .unwrap_or_else(|| Command::new(&node));
+    #[cfg(not(test))]
+    let mut command = Command::new(&node);
+    command.env_clear();
+    for key in &grant.process.environment {
+        if let Some(value) = env::var_os(key) {
+            command.env(key, value);
+        }
+    }
     command.arg("--input-type=module");
     if enable_ts {
         command.arg("--experimental-strip-types");
@@ -449,17 +598,26 @@ fn run_host(
     command
         .args(["-e", HOST])
         .env("JEDEN_EXTENSION_MODE", mode)
-        .env("JEDEN_EXTENSION_CWD", cwd)
+        .env("JEDEN_EXTENSION_CWD", &canonical_cwd)
         .env("JEDEN_EXTENSION_GENERATION", generation.to_string())
         .env(
             "JEDEN_EXTENSION_TIMEOUT_MS",
             timeout.as_millis().saturating_sub(250).max(1).to_string(),
         )
-        .env("JEDEN_EXTENSION_ALLOW_WRITE", if allow_write { "1" } else { "0" })
-        .env("JEDEN_EXTENSION_ALLOW_COMMAND", if allow_command { "1" } else { "0" })
+        .env(
+            "JEDEN_EXTENSION_ALLOW_WRITE",
+            if allow_write { "1" } else { "0" },
+        )
+        .env(
+            "JEDEN_EXTENSION_ALLOW_COMMAND",
+            if allow_command { "1" } else { "0" },
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    if let Some(dir) = operation.map(|context| context.artifacts().root()).or(artifact_dir) {
+    if let Some(dir) = operation
+        .map(|context| context.artifacts().root())
+        .or(artifact_dir)
+    {
         command.env("JEDEN_EXTENSION_ARTIFACT_DIR", dir);
     }
     for (key, value) in envs {
@@ -478,7 +636,9 @@ fn run_host(
         let mut total = 0u64;
         loop {
             let count = stdout.read(&mut buffer).unwrap_or_default();
-            if count == 0 { break; }
+            if count == 0 {
+                break;
+            }
             total = total.saturating_add(count as u64);
             let remaining = (MAX_DESCRIPTOR_BYTES + 1).saturating_sub(bytes.len());
             bytes.extend_from_slice(&buffer[..count.min(remaining)]);
@@ -491,7 +651,9 @@ fn run_host(
         let mut buffer = [0u8; 8192];
         loop {
             let count = stderr.read(&mut buffer).unwrap_or_default();
-            if count == 0 { break; }
+            if count == 0 {
+                break;
+            }
             let remaining = (MAX_DESCRIPTOR_BYTES + 1).saturating_sub(bytes.len());
             bytes.extend_from_slice(&buffer[..count.min(remaining)]);
         }
@@ -502,7 +664,11 @@ fn run_host(
     let status = loop {
         while let Ok((stream, bytes, total_bytes)) = progress_rx.try_recv() {
             if let Some(context) = operation {
-                context.progress(crate::tool_runtime::runtime_ops::OperationProgress { stream, bytes, total_bytes });
+                context.progress(crate::tool_runtime::runtime_ops::OperationProgress {
+                    stream,
+                    bytes,
+                    total_bytes,
+                });
             }
         }
         if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
@@ -520,7 +686,10 @@ fn run_host(
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
-            return Err(format!("extension host timed out after {} seconds", timeout.as_secs()));
+            return Err(format!(
+                "extension host timed out after {} seconds",
+                timeout.as_secs()
+            ));
         }
         std::thread::sleep(Duration::from_millis(20));
     };
@@ -532,8 +701,12 @@ fn run_host(
             context.output_limits(),
             context.artifacts().clone(),
         );
-        output.write_chunk(&stdout).map_err(|error| error.to_string())?;
-        output.write_chunk(&stderr).map_err(|error| error.to_string())?;
+        output
+            .write_chunk(&stdout)
+            .map_err(|error| error.to_string())?;
+        output
+            .write_chunk(&stderr)
+            .map_err(|error| error.to_string())?;
         output.finish().map_err(|error| error.to_string())?;
     }
     if stdout.len() > MAX_DESCRIPTOR_BYTES || stderr.len() > MAX_DESCRIPTOR_BYTES {
@@ -558,13 +731,20 @@ fn run_host(
     Ok(value)
 }
 
-fn materialize_commands(cwd: &Path, generation: u64, commands: &[CommandDescriptor]) -> Result<Option<PathBuf>, String> {
+fn materialize_commands(
+    cwd: &Path,
+    generation: u64,
+    commands: &[CommandDescriptor],
+) -> Result<Option<PathBuf>, String> {
     if commands.is_empty() {
         return Ok(None);
     }
     let root = cwd.join(".jeden/runtime/extensions");
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-    let stage = root.join(format!("commands-{generation}.stage-{}", std::process::id()));
+    let stage = root.join(format!(
+        "commands-{generation}.stage-{}",
+        std::process::id()
+    ));
     if stage.exists() {
         fs::remove_dir_all(&stage).map_err(|error| error.to_string())?;
     }
@@ -618,7 +798,6 @@ fn materialize_agents(
     Ok(Some(final_dir))
 }
 
-
 fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
     let files = serde_json::to_string(&sources.modules).map_err(|error| error.to_string())?;
     let response = run_host(
@@ -627,6 +806,7 @@ fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Reg
         generation,
         DISCOVERY_TIMEOUT,
         &[("JEDEN_EXTENSION_FILES", files)],
+        &sources.modules,
         false,
         false,
         None,
@@ -636,15 +816,27 @@ fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Reg
         return Err("extension host ABI mismatch".into());
     }
     let mut extensions: Vec<HostExtension> = serde_json::from_value(
-        response.get("extensions").cloned().unwrap_or_else(|| json!([])),
+        response
+            .get("extensions")
+            .cloned()
+            .unwrap_or_else(|| json!([])),
     )
     .map_err(|error| format!("invalid extension descriptors: {error}"))?;
     let source_set: BTreeSet<PathBuf> = sources.modules.iter().cloned().collect();
     extensions.retain(|extension| source_set.contains(&extension.source));
     for extension in &mut extensions {
-        extension.precedence = sources.module_precedence.get(&extension.source).copied().unwrap_or_default();
+        extension.precedence = sources
+            .module_precedence
+            .get(&extension.source)
+            .copied()
+            .unwrap_or_default();
     }
-    extensions.sort_by(|left, right| right.precedence.cmp(&left.precedence).then_with(|| left.source.cmp(&right.source)));
+    extensions.sort_by(|left, right| {
+        right
+            .precedence
+            .cmp(&left.precedence)
+            .then_with(|| left.source.cmp(&right.source))
+    });
     let mut tools = BTreeMap::new();
     let mut hooks = Vec::new();
     let mut commands = BTreeMap::new();
@@ -714,8 +906,16 @@ fn retire_generated_dirs(previous: Option<&Arc<Registry>>, current: &Registry) {
         return;
     };
     for (label, path, retained) in [
-        ("command", previous.command_dir.as_ref(), current.command_dir.as_ref()),
-        ("agent", previous.agent_dir.as_ref(), current.agent_dir.as_ref()),
+        (
+            "command",
+            previous.command_dir.as_ref(),
+            current.command_dir.as_ref(),
+        ),
+        (
+            "agent",
+            previous.agent_dir.as_ref(),
+            current.agent_dir.as_ref(),
+        ),
     ] {
         let Some(path) = path else {
             continue;
@@ -725,7 +925,10 @@ fn retire_generated_dirs(previous: Option<&Arc<Registry>>, current: &Registry) {
         }
         if let Err(error) = fs::remove_dir_all(path) {
             if error.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("failed to retire extension {label} generation {}: {error}", path.display());
+                eprintln!(
+                    "failed to retire extension {label} generation {}: {error}",
+                    path.display()
+                );
             }
         }
     }
@@ -762,7 +965,7 @@ fn current(cwd: &Path) -> Result<Arc<Registry>, String> {
     Ok(built)
 }
 
-pub(crate) fn reload(cwd: &Path) -> Result<ReloadReport, String> {
+pub fn reload(cwd: &Path) -> Result<ReloadReport, String> {
     let key = canonical_key(cwd);
     let sources = source_set(cwd)?;
     let previous = REGISTRIES
@@ -787,12 +990,31 @@ pub(crate) fn reload(cwd: &Path) -> Result<ReloadReport, String> {
         .filter(|extension| extension.active)
         .map(|extension| extension.capabilities.len())
         .sum::<usize>()
-        + built.declarative.iter().filter(|capability| capability.healthy && matches!(capability.kind, "commands" | "hooks")).count()
-        + built.declarative_runtime.capabilities.iter().filter(|capability| capability.active).count();
+        + built
+            .declarative
+            .iter()
+            .filter(|capability| {
+                capability.healthy && matches!(capability.kind, "commands" | "hooks")
+            })
+            .count()
+        + built
+            .declarative_runtime
+            .capabilities
+            .iter()
+            .filter(|capability| capability.active)
+            .count();
     let report = ReloadReport {
         generation,
-        active_extensions: built.extensions.iter().filter(|extension| extension.active).count(),
-        unhealthy_extensions: built.extensions.iter().filter(|extension| !extension.active).count(),
+        active_extensions: built
+            .extensions
+            .iter()
+            .filter(|extension| extension.active)
+            .count(),
+        unhealthy_extensions: built
+            .extensions
+            .iter()
+            .filter(|extension| !extension.active)
+            .count(),
         tools: built.tools.len(),
         commands,
         hooks: built.hooks.len(),
@@ -814,32 +1036,85 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         let health = if extension.active {
             CapabilityHealth::healthy()
         } else {
-            CapabilityHealth::unavailable(extension.error.clone().unwrap_or_else(|| extension.health.clone()))
+            CapabilityHealth::unavailable(
+                extension
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| extension.health.clone()),
+            )
         };
-        out.push(RegistryDescriptor::new(
-            format!("extension/{}", extension.source.to_string_lossy().replace(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_' && ch != '.', "_")),
-            CapabilityKind::Extension,
-            extension.source.display().to_string(),
-            extension.source.file_name().and_then(|name| name.to_str()).unwrap_or("extension"),
-            format!("Extension module {}", extension.source.display()),
-            FunctionTarget::Extension { source: extension.source.clone() },
-        ).operation("activate").health(health.clone()));
+        out.push(
+            RegistryDescriptor::new(
+                format!(
+                    "extension/{}",
+                    extension.source.to_string_lossy().replace(
+                        |ch: char| !ch.is_ascii_alphanumeric()
+                            && ch != '-'
+                            && ch != '_'
+                            && ch != '.',
+                        "_"
+                    )
+                ),
+                CapabilityKind::Extension,
+                extension.source.display().to_string(),
+                extension
+                    .source
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("extension"),
+                format!("Extension module {}", extension.source.display()),
+                FunctionTarget::Extension {
+                    source: extension.source.clone(),
+                },
+            )
+            .operation("activate")
+            .health(health.clone()),
+        );
         for tool in &extension.tools {
-            out.push(RegistryDescriptor::new(
-                format!("tool/{}", tool.name), CapabilityKind::Tool, extension.source.display().to_string(),
-                tool.name.clone(), tool.description.clone(),
-                FunctionTarget::ExtensionTool { name: tool.name.clone(), source: extension.source.clone() },
-            ).operation("execute").policy(match tool.permission.as_deref() {
-                Some("write") | Some("command") => CapabilityPolicy::ApprovalRequired,
-                _ => CapabilityPolicy::Sandboxed,
-            }).health(health.clone()).executable(tool.name.clone()).metadata(json!({"input": tool.input})));
+            out.push(
+                RegistryDescriptor::new(
+                    format!("tool/{}", tool.name),
+                    CapabilityKind::Tool,
+                    extension.source.display().to_string(),
+                    tool.name.clone(),
+                    tool.description.clone(),
+                    FunctionTarget::ExtensionTool {
+                        name: tool.name.clone(),
+                        source: extension.source.clone(),
+                    },
+                )
+                .operation("execute")
+                .policy(match tool.permission.as_deref() {
+                    Some("write") | Some("command") => CapabilityPolicy::ApprovalRequired,
+                    _ => CapabilityPolicy::Sandboxed,
+                })
+                .health(health.clone())
+                .executable(tool.name.clone())
+                .metadata(json!({"input": tool.input})),
+            );
         }
         for command in &extension.commands {
-            out.push(RegistryDescriptor::new(
-                format!("slash/{}", command.name), CapabilityKind::SlashCommand, extension.source.display().to_string(),
-                command.name.clone(), command.description.clone(),
-                FunctionTarget::FileSlash { command: command.name.clone(), path: registry.command_dir.clone().unwrap_or_default().join(format!("{}.md", command.name)) },
-            ).operation("expand").policy(CapabilityPolicy::Sandboxed).health(health.clone()).executable(format!("/{}", command.name)));
+            out.push(
+                RegistryDescriptor::new(
+                    format!("slash/{}", command.name),
+                    CapabilityKind::SlashCommand,
+                    extension.source.display().to_string(),
+                    command.name.clone(),
+                    command.description.clone(),
+                    FunctionTarget::FileSlash {
+                        command: command.name.clone(),
+                        path: registry
+                            .command_dir
+                            .clone()
+                            .unwrap_or_default()
+                            .join(format!("{}.md", command.name)),
+                    },
+                )
+                .operation("expand")
+                .policy(CapabilityPolicy::Sandboxed)
+                .health(health.clone())
+                .executable(format!("/{}", command.name)),
+            );
         }
         for declared in &extension.capabilities {
             let kind = match declared.kind.as_str() {
@@ -850,53 +1125,111 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
                 _ => CapabilityKind::PluginContribution,
             };
             let mut descriptor = RegistryDescriptor::new(
-                format!("{}/{}", declared.kind.trim_end_matches('s'), declared.id), kind,
-                extension.source.display().to_string(), declared.id.clone(), declared.description.clone(),
-                FunctionTarget::Extension { source: extension.source.clone() },
-            ).operation("activate").health(health.clone());
+                format!("{}/{}", declared.kind.trim_end_matches('s'), declared.id),
+                kind,
+                extension.source.display().to_string(),
+                declared.id.clone(),
+                declared.description.clone(),
+                FunctionTarget::Extension {
+                    source: extension.source.clone(),
+                },
+            )
+            .operation("activate")
+            .health(health.clone());
             descriptor.version = declared.version.clone();
             out.push(descriptor);
         }
     }
     for plugin in &registry.installed_plugins {
-        let active = registry.extensions.iter().any(|extension| {
-            extension.active && extension.source.starts_with(&plugin.path)
-        }) || registry.declarative_runtime.capabilities.iter().any(|capability| {
-            capability.active && capability.path.starts_with(&plugin.path)
-        }) || registry.declarative.iter().any(|capability| {
-            capability.healthy
-                && matches!(capability.kind, "commands" | "hooks")
-                && capability.path.starts_with(&plugin.path)
-        });
+        let active = registry
+            .extensions
+            .iter()
+            .any(|extension| extension.active && extension.source.starts_with(&plugin.path))
+            || registry
+                .declarative_runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability.active && capability.path.starts_with(&plugin.path))
+            || registry.declarative.iter().any(|capability| {
+                capability.healthy
+                    && matches!(capability.kind, "commands" | "hooks")
+                    && capability.path.starts_with(&plugin.path)
+            });
         let health = if !plugin.enabled {
             CapabilityHealth::disabled("plugin disabled by configuration")
         } else if active {
             CapabilityHealth::healthy()
         } else {
-            CapabilityHealth::unavailable("installed plugin has no successfully activated capabilities")
+            CapabilityHealth::unavailable(
+                "installed plugin has no successfully activated capabilities",
+            )
         };
         let mut descriptor = RegistryDescriptor::new(
-            format!("plugin/{}", plugin.id), CapabilityKind::PluginContribution,
-            plugin.path.display().to_string(), plugin.id.clone(), "Installed plugin contribution",
-            FunctionTarget::Declarative { path: plugin.path.clone() },
-        ).operation("discover").health(health).metadata(json!({"installed": true, "enabled": plugin.enabled, "active": active}));
+            format!("plugin/{}", plugin.id),
+            CapabilityKind::PluginContribution,
+            plugin.path.display().to_string(),
+            plugin.id.clone(),
+            "Installed plugin contribution",
+            FunctionTarget::Declarative {
+                path: plugin.path.clone(),
+            },
+        )
+        .operation("discover")
+        .health(health)
+        .metadata(json!({"installed": true, "enabled": plugin.enabled, "active": active}));
         descriptor.version = plugin.version.clone();
         out.push(descriptor);
     }
-    for capability in registry.declarative.iter().filter(|capability| matches!(capability.kind, "commands" | "hooks")) {
+    for capability in registry
+        .declarative
+        .iter()
+        .filter(|capability| matches!(capability.kind, "commands" | "hooks"))
+    {
         let health = if capability.healthy {
             CapabilityHealth::healthy()
         } else {
-            CapabilityHealth::unavailable(capability.error.clone().unwrap_or_else(|| "declarative capability unavailable".into()))
+            CapabilityHealth::unavailable(
+                capability
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "declarative capability unavailable".into()),
+            )
         };
-        out.push(RegistryDescriptor::new(
-            format!("contribution/{}", capability.path.to_string_lossy().replace(|ch: char| !ch.is_ascii_alphanumeric() && ch != '-' && ch != '_' && ch != '.', "_")),
-            CapabilityKind::PluginContribution, capability.path.display().to_string(),
-            capability.path.file_name().and_then(|name| name.to_str()).unwrap_or(capability.kind),
-            format!("Activated {} contribution", capability.kind), FunctionTarget::Declarative { path: capability.path.clone() },
-        ).operation("load").policy(CapabilityPolicy::ReadOnly).health(health));
+        out.push(
+            RegistryDescriptor::new(
+                format!(
+                    "contribution/{}",
+                    capability.path.to_string_lossy().replace(
+                        |ch: char| !ch.is_ascii_alphanumeric()
+                            && ch != '-'
+                            && ch != '_'
+                            && ch != '.',
+                        "_"
+                    )
+                ),
+                CapabilityKind::PluginContribution,
+                capability.path.display().to_string(),
+                capability
+                    .path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or(capability.kind),
+                format!("Activated {} contribution", capability.kind),
+                FunctionTarget::Declarative {
+                    path: capability.path.clone(),
+                },
+            )
+            .operation("load")
+            .policy(CapabilityPolicy::ReadOnly)
+            .health(health),
+        );
     }
-    for capability in registry.declarative_runtime.capabilities.iter().filter(|capability| capability.active || !capability.healthy) {
+    for capability in registry
+        .declarative_runtime
+        .capabilities
+        .iter()
+        .filter(|capability| capability.active || !capability.healthy)
+    {
         let kind = match capability.kind {
             "skill" => CapabilityKind::Skill,
             "agent" => CapabilityKind::Agent,
@@ -906,27 +1239,31 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         let health = if capability.healthy {
             CapabilityHealth::healthy()
         } else {
-            CapabilityHealth::unavailable(capability.error.clone().unwrap_or_else(|| "definition activation failed".into()))
+            CapabilityHealth::unavailable(
+                capability
+                    .error
+                    .clone()
+                    .unwrap_or_else(|| "definition activation failed".into()),
+            )
         };
-        out.push(RegistryDescriptor::new(
-            format!("{}/{}", capability.kind, capability.id), kind,
-            capability.path.display().to_string(), capability.id.clone(), capability.description.clone(),
-            FunctionTarget::Declarative { path: capability.path.clone() },
-        ).operation("load").policy(CapabilityPolicy::ReadOnly).health(health).metadata(capability.metadata.clone()));
+        out.push(
+            RegistryDescriptor::new(
+                format!("{}/{}", capability.kind, capability.id),
+                kind,
+                capability.path.display().to_string(),
+                capability.id.clone(),
+                capability.description.clone(),
+                FunctionTarget::Declarative {
+                    path: capability.path.clone(),
+                },
+            )
+            .operation("load")
+            .policy(CapabilityPolicy::ReadOnly)
+            .health(health)
+            .metadata(capability.metadata.clone()),
+        );
     }
     Ok(out)
-}
-
-pub(crate) fn tools(cwd: &Path) -> Result<Vec<ToolInfo>, String> {
-    Ok(current(cwd)?
-        .tools
-        .values()
-        .map(|tool| ToolInfo {
-            name: tool.name.clone(),
-            description: tool.description.clone(),
-            input: tool.input.clone(),
-        })
-        .collect())
 }
 
 pub(crate) fn command_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
@@ -944,12 +1281,23 @@ pub(crate) fn model_entries(cwd: &Path) -> Vec<crate::control_plane::brama::Mode
             return Vec::new();
         }
     };
-    let mut extensions = registry.extensions.iter().filter(|extension| extension.active).collect::<Vec<_>>();
-    extensions.sort_by(|left, right| left.precedence.cmp(&right.precedence).then_with(|| left.source.cmp(&right.source)));
-    extensions.into_iter().flat_map(|extension| extension.models.clone()).collect()
+    let mut extensions = registry
+        .extensions
+        .iter()
+        .filter(|extension| extension.active)
+        .collect::<Vec<_>>();
+    extensions.sort_by(|left, right| {
+        left.precedence
+            .cmp(&right.precedence)
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    extensions
+        .into_iter()
+        .flat_map(|extension| extension.models.clone())
+        .collect()
 }
 
-pub(crate) fn provider_entries(cwd: &Path) -> Vec<crate::control_plane::weles::Provider> {
+pub fn provider_entries(cwd: &Path) -> Vec<crate::control_plane::weles::Provider> {
     let registry = match current(cwd) {
         Ok(registry) => registry,
         Err(error) => {
@@ -957,15 +1305,29 @@ pub(crate) fn provider_entries(cwd: &Path) -> Vec<crate::control_plane::weles::P
             return Vec::new();
         }
     };
-    let mut extensions = registry.extensions.iter().filter(|extension| extension.active).collect::<Vec<_>>();
-    extensions.sort_by(|left, right| left.precedence.cmp(&right.precedence).then_with(|| left.source.cmp(&right.source)));
-    extensions.into_iter().flat_map(|extension| extension.providers.clone()).collect()
+    let mut extensions = registry
+        .extensions
+        .iter()
+        .filter(|extension| extension.active)
+        .collect::<Vec<_>>();
+    extensions.sort_by(|left, right| {
+        left.precedence
+            .cmp(&right.precedence)
+            .then_with(|| left.source.cmp(&right.source))
+    });
+    extensions
+        .into_iter()
+        .flat_map(|extension| extension.providers.clone())
+        .collect()
 }
 pub(crate) fn prompt_context(
     cwd: &Path,
     prompt: &str,
 ) -> Result<Vec<declarative::PromptContribution>, String> {
-    Ok(declarative::prompt_context(&current(cwd)?.declarative_runtime, prompt))
+    Ok(declarative::prompt_context(
+        &current(cwd)?.declarative_runtime,
+        prompt,
+    ))
 }
 
 pub(crate) fn skill_context(
@@ -974,8 +1336,6 @@ pub(crate) fn skill_context(
 ) -> Result<Vec<declarative::PromptContribution>, String> {
     declarative::skill_context(&current(cwd)?.declarative_runtime, skill_ids)
 }
-
-pub(crate) use declarative::PromptContribution;
 
 pub(crate) fn execute_tool(
     cwd: &Path,
@@ -996,10 +1356,14 @@ pub(crate) fn execute_tool(
         registry.generation,
         INVOCATION_TIMEOUT,
         &[
-            ("JEDEN_EXTENSION_SOURCE", tool.source.to_string_lossy().into_owned()),
+            (
+                "JEDEN_EXTENSION_SOURCE",
+                tool.source.to_string_lossy().into_owned(),
+            ),
             ("JEDEN_EXTENSION_TARGET", name.to_string()),
             ("JEDEN_EXTENSION_INPUT", input.to_string()),
         ],
+        std::slice::from_ref(&tool.source),
         allow_write,
         allow_command,
         artifact_dir,
@@ -1032,11 +1396,15 @@ pub(crate) fn fire_hooks(
             registry.generation,
             INVOCATION_TIMEOUT,
             &[
-                ("JEDEN_EXTENSION_SOURCE", hook.source.to_string_lossy().into_owned()),
+                (
+                    "JEDEN_EXTENSION_SOURCE",
+                    hook.source.to_string_lossy().into_owned(),
+                ),
                 ("JEDEN_EXTENSION_EVENT", event.to_string()),
                 ("JEDEN_EXTENSION_HOOK_INDEX", index.to_string()),
                 ("JEDEN_EXTENSION_INPUT", payload.to_string()),
             ],
+            std::slice::from_ref(&hook.source),
             false,
             allow_command,
             None,
@@ -1047,44 +1415,83 @@ pub(crate) fn fire_hooks(
     Ok(results)
 }
 
-pub(crate) fn status(cwd: &Path) -> Result<String, String> {
+pub fn status(cwd: &Path) -> Result<String, String> {
     let registry = current(cwd)?;
     let mut lines = vec![format!(
         "Extension registry ABI {} generation {}: {} active, {} unhealthy",
         ABI_VERSION,
         registry.generation,
-        registry.extensions.iter().filter(|extension| extension.active).count(),
-        registry.extensions.iter().filter(|extension| !extension.active).count()
+        registry
+            .extensions
+            .iter()
+            .filter(|extension| extension.active)
+            .count(),
+        registry
+            .extensions
+            .iter()
+            .filter(|extension| !extension.active)
+            .count()
     )];
     for extension in &registry.extensions {
         lines.push(format!(
             "- {} [{}] tools={} commands={} hooks={} providers={} models={}{}",
             extension.source.display(),
-            if extension.active { "active" } else { &extension.health },
+            if extension.active {
+                "active"
+            } else {
+                &extension.health
+            },
             extension.tools.len(),
             extension.commands.len(),
             extension.hooks.len(),
             extension.providers.len(),
             extension.models.len(),
-            extension.error.as_ref().map(|error| format!(": {error}")).unwrap_or_default()
+            extension
+                .error
+                .as_ref()
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default()
         ));
     }
     for plugin in &registry.installed_plugins {
-        let active = registry.extensions.iter().any(|extension| extension.active && extension.source.starts_with(&plugin.path))
-            || registry.declarative_runtime.capabilities.iter().any(|capability| capability.active && capability.path.starts_with(&plugin.path))
-            || registry.declarative.iter().any(|capability| capability.healthy && matches!(capability.kind, "commands" | "hooks") && capability.path.starts_with(&plugin.path));
+        let active = registry
+            .extensions
+            .iter()
+            .any(|extension| extension.active && extension.source.starts_with(&plugin.path))
+            || registry
+                .declarative_runtime
+                .capabilities
+                .iter()
+                .any(|capability| capability.active && capability.path.starts_with(&plugin.path))
+            || registry.declarative.iter().any(|capability| {
+                capability.healthy
+                    && matches!(capability.kind, "commands" | "hooks")
+                    && capability.path.starts_with(&plugin.path)
+            });
         lines.push(format!(
             "- plugin {} version={} installed=yes enabled={} active={}",
             plugin.id, plugin.version, plugin.enabled, active
         ));
     }
-    for capability in registry.declarative.iter().filter(|capability| matches!(capability.kind, "commands" | "hooks")) {
+    for capability in registry
+        .declarative
+        .iter()
+        .filter(|capability| matches!(capability.kind, "commands" | "hooks"))
+    {
         lines.push(format!(
             "- {} {} [{}]{}",
             capability.kind,
             capability.path.display(),
-            if capability.healthy { "active" } else { "unhealthy" },
-            capability.error.as_ref().map(|error| format!(": {error}")).unwrap_or_default()
+            if capability.healthy {
+                "active"
+            } else {
+                "unhealthy"
+            },
+            capability
+                .error
+                .as_ref()
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default()
         ));
     }
     for capability in &registry.declarative_runtime.capabilities {
@@ -1093,8 +1500,18 @@ pub(crate) fn status(cwd: &Path) -> Result<String, String> {
             capability.kind,
             capability.id,
             capability.path.display(),
-            if capability.active { "active" } else if capability.healthy { "shadowed" } else { "unhealthy" },
-            capability.error.as_ref().map(|error| format!(": {error}")).unwrap_or_default()
+            if capability.active {
+                "active"
+            } else if capability.healthy {
+                "shadowed"
+            } else {
+                "unhealthy"
+            },
+            capability
+                .error
+                .as_ref()
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default()
         ));
     }
     Ok(lines.join("\n"))

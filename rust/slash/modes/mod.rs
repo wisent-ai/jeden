@@ -6,8 +6,8 @@ use crate::slash::state::{AdvisorState, ForceState, GoalState, LoopState, ModeSt
 use crate::slash::SlashContext;
 use crate::tools;
 
-pub(crate) mod session; pub(crate) use session::{advisor_picker, approval_picker, lifecycle_picker, session_picker, tree_picker};
-pub(crate) mod todo; pub(crate) use todo::{fast_picker, goal_picker, loop_picker, plan_picker, todo_picker};
+pub(crate) mod session;
+pub(crate) mod todo;
 
 fn format_goal_status(goal: &GoalState) -> String {
     if goal.objective.is_empty() {

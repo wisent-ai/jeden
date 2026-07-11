@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "control-plane-contract-v1",
+  "transport": "injected",
+  "services": ["brama", "weles"],
+  "cases": [
+    "200",
+    "304",
+    "401",
+    "403",
+    "409",
+    "429-retry-after",
+    "500",
+    "503",
+    "malformed-json",
+    "oversize-response",
+    "request-timeout",
+    "delayed-first-event",
+    "idle-timeout",
+    "cancel-before-request",
+    "cancel-after-response",
+    "degraded-stale-catalog",
+    "schema-skew",
+    "weles-expiry",
+    "weles-cursor-input",
+    "weles-cancel-race",
+    "brama-resolve-stream-usage",
+    "late-bound-auth",
+    "auth-catalog-invalidation"
+  ],
+  "secretPolicy": "No credential material is stored in fixtures or response evidence"
+}

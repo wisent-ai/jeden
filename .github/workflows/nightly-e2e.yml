@@ -1,0 +1,120 @@
+name: nightly-e2e-certification
+
+on:
+  schedule:
+    - cron: '41 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  shared-interface-scenario:
+    name: Shared TUI line JSON Rust TS Python ACP headless scenario
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Execute deterministic shared-scenario adapter comparison
+        run: python3 tests/e2e/interfaces/run_interface_contract.py > interface-equivalence-report.json
+      - name: Exercise positive and divergent adapter captures
+        run: python3 -m unittest discover -s tests/e2e/interfaces -p 'test_*.py' -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-interface-equivalence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: interface-equivalence-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  native-platform:
+    name: Native runtime (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-14, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile native adapters and test executables
+        run: cargo test --locked --all-targets --no-run
+      - name: Run native capability and platform contracts
+        run: 'cargo test --locked --lib runtime_ops::security::tests:: -- --test-threads=1'
+
+  migrations:
+    name: Migration N-2 N-1 N future matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Inspect immutable matrix without claiming unavailable adapters passed
+        shell: bash
+        run: |
+          set -euo pipefail
+          status=0
+          python3 tests/migrations/run_migration_matrix.py > migration-matrix-report.json || status=$?
+          test "$status" -eq 3
+      - name: Exercise digest corruption and truncated-store failures
+        run: python3 -m unittest discover -s tests/migrations -p 'test_*.py' -v
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nightly-migration-matrix-${{ github.run_id }}-${{ github.run_attempt }}
+          path: migration-matrix-report.json
+          if-no-files-found: error
+          retention-days: 30
+
+  fault-soak-privacy:
+    name: Deterministic fault soak and privacy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compile and execute crash fault matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --edition=2021 --test tests/fault/crash_matrix.rs -o /tmp/jeden-fault-matrix
+          /tmp/jeden-fault-matrix
+      - name: Execute fixed-seed 10000-operation soak
+        shell: bash
+        env:
+          JEDEN_SOAK_OPERATIONS: '10000'
+          JEDEN_SOAK_REAL_SECONDS: '0'
+        run: |
+          set -euo pipefail
+          rustc --edition=2021 --test tests/soak/reliability.rs -o /tmp/jeden-soak
+          /tmp/jeden-soak
+      - name: Verify private telemetry canaries retention and opt-out
+        run: 'cargo test --locked --lib telemetry::tests:: -- --test-threads=1'
+
+  negative-behavioral-gates:
+    name: Negative behavioral evidence is never promoted
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Reject failed and stale evidence fixtures
+        run: python3 -m unittest discover -s tests/conformance -p 'test_*.py' -v
+      - name: Reject symbol-only and stale Rust evidence
+        run: 'cargo test --locked --lib conformance::probes::tests:: -- --test-threads=1'

@@ -14,14 +14,13 @@ pub(crate) mod fetch;
 pub(crate) mod marketplace;
 pub(crate) mod ops;
 pub(crate) mod registry;
+pub(crate) use crate::marketplace as production;
 
 use ops::{
     installed_entries_for_scope, merged_installed_values, normalize_scope, parse_marketplace_flags,
     registry_scope_dir,
 };
-use registry::{
-    format_plugin, plugin_registry, save_plugin_registry, sorted_object_values,
-};
+use registry::{format_plugin, plugin_registry, save_plugin_registry, sorted_object_values};
 
 /// Plugin cache home. Honors `JEDEN_PLUGINS_HOME` (used to keep tests hermetic);
 /// defaults to `~`.
@@ -32,9 +31,6 @@ pub(crate) fn plugins_home() -> PathBuf {
 }
 pub(crate) fn marketplace_cache_root() -> PathBuf {
     plugins_home().join(".jeden/plugins/cache/marketplaces")
-}
-pub(crate) fn plugin_cache_root() -> PathBuf {
-    plugins_home().join(".jeden/plugins/cache/plugins")
 }
 pub(crate) fn marketplace_cache_dir(name: &str) -> PathBuf {
     marketplace_cache_root().join(name)
@@ -131,37 +127,6 @@ fn configured_extension_paths(cwd: &Path) -> Vec<PathBuf> {
         .filter_map(Value::as_str)
         .map(|raw| resolve_cwd_path(cwd, raw))
         .collect()
-}
-
-fn disabled_extension_ids(cwd: &Path) -> Vec<String> {
-    merged_config(cwd)
-        .get("disabledExtensions")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(str::to_string)
-        .collect()
-}
-
-fn installed_plugin_extension_files(cwd: &Path) -> Vec<PathBuf> {
-    let mut files = Vec::new();
-    for dir in [cwd.to_path_buf(), plugins_home()] {
-        for entry in installed_entries_for_scope(&dir) {
-            if entry.get("enabled").and_then(Value::as_bool) == Some(false) {
-                continue;
-            }
-            if let Some(path) = entry.get("path").and_then(Value::as_str) {
-                for file in discover_extension_module_files(Path::new(path)) {
-                    if !files.contains(&file) {
-                        files.push(file);
-                    }
-                }
-            }
-        }
-    }
-    files.sort();
-    files
 }
 
 fn empty_picker_item(message: &str) -> PickerItem {
@@ -321,7 +286,6 @@ pub(crate) fn reload_plugins_picker(context: &SlashContext<'_>) -> PickerSpec {
 pub(crate) fn handle_extensions(context: &SlashContext<'_>) -> Result<String, String> {
     crate::hooks::extension_status(context.cwd)
 }
-
 
 fn discover_custom_tool_files(cwd: &Path) -> Vec<String> {
     let mut out = Vec::new();

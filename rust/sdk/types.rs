@@ -52,12 +52,28 @@ pub struct PromptResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum SessionEventKind {
-    Status { message: String },
-    TextDelta { text: String },
-    Elicitation { token: String, question: String, options: Vec<String> },
-    Approval { token: String, tool: String, detail: String },
-    Result { text: String },
-    Error { message: String },
+    Status {
+        message: String,
+    },
+    TextDelta {
+        text: String,
+    },
+    Elicitation {
+        token: String,
+        question: String,
+        options: Vec<String>,
+    },
+    Approval {
+        token: String,
+        tool: String,
+        detail: String,
+    },
+    Result {
+        text: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

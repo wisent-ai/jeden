@@ -2,13 +2,12 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::fetch::{
-    catalog_find_plugin, copy_dir_recursive, fetch_marketplace, materialize_plugin,
-    plugin_manifest_version, read_marketplace_catalog,
-};
-use super::marketplace::sanitize_marketplace_name;
+use super::fetch::{fetch_marketplace, read_marketplace_catalog};
+use super::production::manifest::{MarketplaceEnvelopeV1, PluginDependency};
+use super::production::service::MarketplaceService;
+use super::production::trust::TrustRootV1;
 use super::registry::{plugin_registry, save_plugin_registry};
-use super::{marketplace_cache_dir, plugin_cache_root, plugins_home};
+use super::{marketplace_cache_dir, plugins_home};
 use crate::slash::common::now_text;
 use crate::slash::validate::{valid_marketplace_name, valid_plugin_id, valid_plugin_name};
 
@@ -89,28 +88,18 @@ pub(crate) fn update_source_plugins(cwd: &Path, name: &str, plugins: &[Value]) {
     }
 }
 
-/// Merged installed-plugin records across scopes. Enabled project records shadow
-/// user records; disabled project records do not hide an enabled user install.
+/// Merge only verified active records. Legacy `installed` entries are inventory,
+/// never executable capability state.
 pub(crate) fn merged_installed_values(cwd: &Path) -> Vec<Value> {
-    let mut map: std::collections::BTreeMap<String, Value> = std::collections::BTreeMap::new();
-    if let Some(installed) = plugin_registry(&plugins_home())
-        .get("installed")
-        .and_then(Value::as_object)
-    {
-        for (id, entry) in installed {
-            map.insert(id.clone(), entry.clone());
+    let mut map = std::collections::BTreeMap::<String, Value>::new();
+    for entry in installed_entries_for_scope(&plugins_home()) {
+        if let Some(id) = entry.get("id").and_then(Value::as_str).map(str::to_string) {
+            map.insert(id, entry);
         }
     }
-    if let Some(installed) = plugin_registry(cwd)
-        .get("installed")
-        .and_then(Value::as_object)
-    {
-        for (id, entry) in installed {
-            if entry.get("enabled").and_then(Value::as_bool) == Some(false) && map.contains_key(id)
-            {
-                continue;
-            }
-            map.insert(id.clone(), entry.clone());
+    for entry in installed_entries_for_scope(cwd) {
+        if let Some(id) = entry.get("id").and_then(Value::as_str).map(str::to_string) {
+            map.insert(id, entry);
         }
     }
     map.into_values().collect()
@@ -153,7 +142,38 @@ pub(crate) fn normalize_scope(scope: Option<String>) -> Result<String, String> {
     }
 }
 
-/// Resolve, materialize, activate and record one plugin. Returns a report line.
+pub(crate) fn production_service(scope_dir: &Path) -> MarketplaceService {
+    MarketplaceService::new(scope_dir.join(".jeden/plugins/v2"))
+}
+
+fn artifact_bytes(cache: &Path, location: &str) -> Result<Vec<u8>, String> {
+    if let Some(path) = location.strip_prefix("file://") {
+        return fs::read(path).map_err(|error| error.to_string());
+    }
+    if location.starts_with("https://") {
+        let response = reqwest::blocking::get(location).map_err(|error| error.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!(
+                "artifact download failed with {}",
+                response.status()
+            ));
+        }
+        return response
+            .bytes()
+            .map(|bytes| bytes.to_vec())
+            .map_err(|error| error.to_string());
+    }
+    let path = cache.join(location);
+    let canonical_cache = cache.canonicalize().map_err(|error| error.to_string())?;
+    let canonical_path = path.canonicalize().map_err(|error| error.to_string())?;
+    if !canonical_path.starts_with(canonical_cache) {
+        return Err("artifact path escapes verified catalog cache".into());
+    }
+    fs::read(canonical_path).map_err(|error| error.to_string())
+}
+
+/// Resolve and transactionally activate a signed production catalog. Unsigned
+/// legacy catalogs are deliberately rejected; local development uses dev-link.
 pub(crate) fn install_one(
     cwd: &Path,
     mkt_name: &str,
@@ -172,104 +192,86 @@ pub(crate) fn install_one(
         return Err(format!("Invalid plugin id: {id}"));
     }
     let source = find_marketplace_source(cwd, mkt_name).ok_or_else(|| {
-        format!("Marketplace source not found: {mkt_name}. Add it with /marketplace add <source>.")
+        format!("Marketplace source not found: {mkt_name}. Add a signed source first.")
     })?;
-    let mkt_cache = marketplace_cache_dir(mkt_name);
-    if !mkt_cache.exists() {
+    let cache = marketplace_cache_dir(mkt_name);
+    if !cache.exists() {
         fetch_marketplace(cwd, mkt_name, &source)?;
     }
-    let catalog = read_marketplace_catalog(&mkt_cache)?;
-    let entry = catalog_find_plugin(&catalog, plugin_name)
-        .ok_or_else(|| format!("Plugin {plugin_name} not found in marketplace {mkt_name}."))?;
-    let mat = materialize_plugin(&mkt_cache, &catalog, &entry)?;
-    let version = entry
-        .get("version")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| plugin_manifest_version(&mat.staging))
-        .or_else(|| mat.sha.clone())
-        .unwrap_or_else(|| "unversioned".into());
-    let final_dir = plugin_cache_root().join(format!(
-        "{}___{}___{}",
-        mkt_name,
-        plugin_name,
-        sanitize_marketplace_name(&version)
-    ));
-    if final_dir.exists() {
-        if force {
-            fs::remove_dir_all(&final_dir).map_err(|e| e.to_string())?;
-        } else {
-            let _ = fs::remove_dir_all(&mat.staging);
-            return Err(format!(
-                "{id} is already installed (version {version}). Use --force to reinstall."
-            ));
-        }
+    let envelope: MarketplaceEnvelopeV1 = serde_json::from_value(read_marketplace_catalog(&cache)?).map_err(|error| format!("marketplace catalog is not a signed MarketplaceEnvelopeV1: {error}; use explicit dev-link for local development"))?;
+    let scope_dir = registry_scope_dir(cwd, scope);
+    let trust_path = scope_dir.join(".jeden/marketplace-trust-root.json");
+    let trust: TrustRootV1 = serde_json::from_slice(&fs::read(&trust_path).map_err(|error| {
+        format!(
+            "cannot load marketplace trust root {}: {error}",
+            trust_path.display()
+        )
+    })?)
+    .map_err(|error| format!("invalid marketplace trust root: {error}"))?;
+    let service = production_service(&scope_dir);
+    if !force
+        && service
+            .active_packages()?
+            .iter()
+            .any(|record| record.id == plugin_name)
+    {
+        return Err(format!(
+            "{id} is already active; use --force to replace it transactionally"
+        ));
     }
-    if let Some(parent) = final_dir.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-    }
-    if fs::rename(&mat.staging, &final_dir).is_err() {
-        copy_dir_recursive(&mat.staging, &final_dir)?;
-        let _ = fs::remove_dir_all(&mat.staging);
-    }
-    let commands_dir = final_dir.join("commands");
-    let has_commands = commands_dir.is_dir();
-    let command_files: Vec<PathBuf> = if has_commands {
-        fs::read_dir(&commands_dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter(|e| e.path().extension().and_then(|x| x.to_str()) == Some("md"))
-                    .map(|e| e.path())
-                    .collect()
-            })
-            .unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let command_count = command_files.len();
-    let has_hooks = final_dir.join("hooks.json").is_file();
-    let reg_dir = registry_scope_dir(cwd, scope);
-    let mut registry = plugin_registry(&reg_dir);
-    let record = json!({
-        "id": id,
-        "name": plugin_name,
-        "marketplace": mkt_name,
-        "version": version,
-        "source": mat.source_desc,
-        "path": final_dir.to_string_lossy(),
-        "commands": has_commands,
-        "commandCount": command_count,
-        "hooks": has_hooks,
-        "scope": scope,
-        "enabled": true,
-        "installedAt": now_text(),
-        "updatedAt": now_text(),
-    });
-    registry
-        .get_mut("installed")
-        .and_then(Value::as_object_mut)
-        .ok_or("invalid plugin registry")?
-        .insert(id.clone(), record);
-    save_plugin_registry(&reg_dir, &registry)?;
-    let plural = match command_files.as_slice() {
-        [_] => "",
-        _ => "s",
-    };
+    let requested = [PluginDependency {
+        id: plugin_name.into(),
+        requirement: "*".into(),
+        features: Default::default(),
+        optional: false,
+    }];
+    let previous = service
+        .registry()?
+        .catalog_sequence
+        .checked_sub(0)
+        .filter(|sequence| *sequence > 0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let active = service.install_and_activate(
+        &trust,
+        &envelope,
+        previous,
+        now,
+        &requested,
+        std::env::consts::OS,
+        |location| artifact_bytes(&cache, location),
+    )?;
+    let record = active
+        .packages
+        .get(plugin_name)
+        .ok_or_else(|| format!("resolved activation omitted requested plugin {plugin_name}"))?;
     Ok(format!(
-        "installed {id} ({command_count} command{plural}, hooks: {}) [scope: {scope}, {}]",
-        if has_hooks { "yes" } else { "no" },
-        final_dir.display(),
+        "activated signed {id} version {} at generation {} [scope: {scope}, digest {}]",
+        record.version, active.generation, record.digest
     ))
 }
 
 pub(crate) fn installed_entries_for_scope(dir: &Path) -> Vec<Value> {
-    plugin_registry(dir)
-        .get("installed")
-        .and_then(Value::as_object)
-        .map(|m| m.values().cloned().collect())
+    production_service(dir)
+        .active_packages()
         .unwrap_or_default()
+        .into_iter()
+        .map(|record| {
+            json!({
+                "id": record.id,
+                "name": record.id,
+                "version": record.version,
+                "path": record.path,
+                "source": record.trust,
+                "state": "active",
+                "enabled": true,
+                "generation": record.generation,
+            })
+        })
+        .collect()
 }
-
 
 /// Command directories contributed by ENABLED installed plugins, across project
 /// then user scope. Appended after the project/user `.jeden/commands` dirs so

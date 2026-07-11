@@ -4,6 +4,7 @@ use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -57,6 +58,11 @@ pub enum RouteResult {
         to: RouteDescriptor,
         reason: String,
     },
+    SubscriptionChanged {
+        from: crate::routing::SubscriptionTarget,
+        to: crate::routing::SubscriptionTarget,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -67,6 +73,7 @@ pub enum StreamErrorClass {
     TransientHttp,
     Network,
     ContextOverflow,
+    QuotaExhausted,
     MalformedEvent,
     Incomplete,
     Permanent,
@@ -91,6 +98,42 @@ pub struct StreamingCompletion {
     pub completion: Completion,
     pub route: RouteDescriptor,
     pub route_results: Vec<RouteResult>,
+    pub subscription_target: Option<crate::routing::SubscriptionTarget>,
+    pub subscription_decision_id: Option<String>,
+}
+
+impl StreamingCompletion {
+    /// Converts transport retry/failover results into evidence attributed to
+    /// the route that actually produced the completion.
+    pub fn served_route_evidence(
+        &self,
+        decision: &crate::routing::RouteDecisionV1,
+    ) -> crate::routing::ServedRouteEvidence {
+        let retries = self
+            .route_results
+            .iter()
+            .filter(|result| matches!(result, RouteResult::RetryScheduled { .. }))
+            .count() as u32;
+        let attempt = retries.saturating_add(1);
+        if self.route.model != decision.selected_route {
+            crate::routing::ServedRouteEvidence::initial(
+                decision.decision_id.clone(),
+                decision.selected_route.clone(),
+            )
+            .fallback(self.route.model.clone(), attempt)
+        } else if retries > 0 {
+            crate::routing::ServedRouteEvidence::initial(
+                decision.decision_id.clone(),
+                decision.selected_route.clone(),
+            )
+            .retry(attempt)
+        } else {
+            crate::routing::ServedRouteEvidence::initial(
+                decision.decision_id.clone(),
+                decision.selected_route.clone(),
+            )
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -103,6 +146,8 @@ pub struct ChatConfig {
     pub retry: RetryPolicy,
     pub fallbacks: Vec<RouteDescriptor>,
     pub context_promotions: Vec<RouteDescriptor>,
+    pub subscription_pool: Option<crate::routing::SubscriptionPoolSnapshot>,
+    pub subscription_cooldown_path: Option<PathBuf>,
     pub config_error: Option<String>,
 }
 
@@ -341,62 +386,159 @@ pub fn chat_completion_streaming(
     }
 
     let attempts = config.retry.max_attempts.clamp(1, MAX_RETRY_ATTEMPTS);
-    let mut route_results = Vec::with_capacity(routes.len().saturating_mul(attempts));
-    let mut last_error: Option<AttemptError> = None;
-    for (route_index, route) in routes.iter().enumerate() {
-        for attempt in 1..=attempts {
-            if cancelled() {
-                return Err(stream_failure(
-                    StreamErrorClass::Cancelled,
-                    "Turn cancelled.".into(),
-                    route_results,
+    let (request_id, idempotency_key, sticky_key) = logical_request_keys(&primary, &messages);
+    let cooldown_store = match config.subscription_cooldown_path.as_ref() {
+        Some(path) => Some(
+            crate::routing::CooldownStore::open(path).map_err(|message| {
+                stream_failure(
+                    StreamErrorClass::Permanent,
+                    format!("cannot open subscription cooldown store: {message}"),
+                    Vec::new(),
                     false,
-                ));
+                )
+            })?,
+        ),
+        None => None,
+    };
+    let subscription_decision = match config.subscription_pool.as_ref() {
+        Some(pool) if !pool.targets.is_empty() => {
+            let required = ["chat".to_string()].into_iter().collect();
+            let now_ms = epoch_millis();
+            Some(
+                crate::routing::RouteDecisionV2::freeze(
+                    pool,
+                    request_id,
+                    idempotency_key,
+                    &sticky_key,
+                    &required,
+                    now_ms,
+                    |identity| {
+                        cooldown_store.as_ref().is_some_and(|store| {
+                            store.is_cooling_down(identity, now_ms).unwrap_or(true)
+                        })
+                    },
+                )
+                .map_err(|message| {
+                    stream_failure(StreamErrorClass::QuotaExhausted, message, Vec::new(), false)
+                })?,
+            )
+        }
+        _ => None,
+    };
+    let target_count = subscription_decision
+        .as_ref()
+        .map_or(1, |decision| decision.targets.len());
+    let mut route_results = Vec::with_capacity(
+        routes
+            .len()
+            .saturating_mul(target_count)
+            .saturating_mul(attempts),
+    );
+    let mut last_error: Option<AttemptError> = None;
+    let mut exhausted_targets = std::collections::BTreeSet::new();
+    for (route_index, route) in routes.iter().enumerate() {
+        for target_index in 0..target_count {
+            let target = subscription_decision
+                .as_ref()
+                .and_then(|decision| decision.targets.get(target_index));
+            if target.is_some_and(|target| exhausted_targets.contains(&target.identity())) {
+                continue;
             }
-            match streaming_attempt(
-                config,
-                route,
-                &messages,
-                max_tokens,
-                tools,
-                on_delta,
-                cancelled,
-            ) {
-                Ok(completion) => {
-                    return Ok(StreamingCompletion {
-                        completion,
-                        route: route.clone(),
+            for attempt in 1..=attempts {
+                if cancelled() {
+                    return Err(stream_failure(
+                        StreamErrorClass::Cancelled,
+                        "Turn cancelled.".into(),
                         route_results,
-                    });
+                        false,
+                    ));
                 }
-                Err(error) => {
-                    let retryable = error.is_transient() && !error.visible_output;
-                    if !retryable {
-                        return Err(stream_failure(
-                            error.class,
-                            error.message,
-                            route_results,
-                            error.visible_output,
-                        ));
-                    }
-                    if attempt < attempts {
-                        let delay = retry_delay(&config.retry, attempt, error.retry_after);
-                        route_results.push(RouteResult::RetryScheduled {
+                match streaming_attempt(
+                    config,
+                    route,
+                    &messages,
+                    max_tokens,
+                    tools,
+                    target,
+                    subscription_decision.as_ref(),
+                    on_delta,
+                    cancelled,
+                ) {
+                    Ok(completion) => {
+                        return Ok(StreamingCompletion {
+                            completion,
                             route: route.clone(),
-                            attempt: attempt + 1,
-                            delay_ms: duration_millis(delay),
-                            reason: error.message.clone(),
+                            route_results,
+                            subscription_target: target.cloned(),
+                            subscription_decision_id: subscription_decision
+                                .as_ref()
+                                .map(|decision| decision.decision_id.clone()),
                         });
-                        cancellable_sleep(delay, cancelled).map_err(|message| {
-                            stream_failure(
-                                StreamErrorClass::Cancelled,
-                                message,
-                                route_results.clone(),
-                                false,
-                            )
-                        })?;
                     }
-                    last_error = Some(error);
+                    Err(error) => {
+                        if error.class == StreamErrorClass::QuotaExhausted && !error.visible_output
+                        {
+                            if let Some(target) = target {
+                                exhausted_targets.insert(target.identity());
+                            }
+                            if let (Some(store), Some(target)) = (cooldown_store.as_ref(), target) {
+                                let now_ms = epoch_millis();
+                                let delay = error.retry_after.unwrap_or(Duration::from_secs(60));
+                                let until_ms = now_ms.saturating_add(duration_millis(delay).max(1));
+                                if let Err(message) =
+                                    store.record(target.identity(), until_ms, now_ms)
+                                {
+                                    return Err(stream_failure(
+                                        StreamErrorClass::Permanent,
+                                        format!("cannot persist subscription cooldown: {message}"),
+                                        route_results,
+                                        false,
+                                    ));
+                                }
+                            }
+                            last_error = Some(error);
+                            break;
+                        }
+                        let retryable = error.is_transient() && !error.visible_output;
+                        if !retryable {
+                            return Err(stream_failure(
+                                error.class,
+                                error.message,
+                                route_results,
+                                error.visible_output,
+                            ));
+                        }
+                        if attempt < attempts {
+                            let delay = retry_delay(&config.retry, attempt, error.retry_after);
+                            route_results.push(RouteResult::RetryScheduled {
+                                route: route.clone(),
+                                attempt: attempt + 1,
+                                delay_ms: duration_millis(delay),
+                                reason: error.message.clone(),
+                            });
+                            cancellable_sleep(delay, cancelled).map_err(|message| {
+                                stream_failure(
+                                    StreamErrorClass::Cancelled,
+                                    message,
+                                    route_results.clone(),
+                                    false,
+                                )
+                            })?;
+                        }
+                        last_error = Some(error);
+                    }
+                }
+            }
+            if let Some(decision) = subscription_decision.as_ref() {
+                if let (Some(from), Some(to)) = (
+                    decision.targets.get(target_index),
+                    decision.targets.get(target_index + 1),
+                ) {
+                    route_results.push(RouteResult::SubscriptionChanged {
+                        from: from.clone(),
+                        to: to.clone(),
+                        reason: "subscription quota or transient attempts exhausted".into(),
+                    });
                 }
             }
         }
@@ -404,7 +546,7 @@ pub fn chat_completion_streaming(
             route_results.push(RouteResult::RouteChanged {
                 from: route.clone(),
                 to: next.clone(),
-                reason: "transient attempts exhausted".into(),
+                reason: "subscription targets and transient attempts exhausted".into(),
             });
         }
     }
@@ -469,15 +611,14 @@ enum WireMessage {
     Network(String),
 }
 
-fn streaming_attempt(
-    config: &ChatConfig,
+fn build_streaming_body(
     route: &RouteDescriptor,
     messages: &[Value],
     max_tokens: Option<usize>,
     tools: &[Value],
-    on_delta: &mut dyn FnMut(&str) -> bool,
-    cancelled: &dyn Fn() -> bool,
-) -> Result<Completion, AttemptError> {
+    target: Option<&crate::routing::SubscriptionTarget>,
+    decision: Option<&crate::routing::RouteDecisionV2>,
+) -> Result<Value, String> {
     let mut body = json!({
         "model": route.model,
         "messages": messages,
@@ -494,7 +635,32 @@ fn streaming_attempt(
         body["tools"] = Value::Array(tools.to_vec());
         body["tool_choice"] = Value::String("auto".into());
     }
-    let body_text = serde_json::to_string(&body).map_err(|error| AttemptError::permanent(error.to_string()))?;
+    if let Some(target) = target {
+        body["billingTarget"] = serde_json::to_value(target).map_err(|error| error.to_string())?;
+    }
+    if let Some(decision) = decision {
+        body["subscriptionDecisionId"] = Value::String(decision.decision_id.clone());
+        body["requestId"] = Value::String(decision.request_id.clone());
+        body["idempotencyKey"] = Value::String(decision.idempotency_key.clone());
+    }
+    Ok(body)
+}
+
+fn streaming_attempt(
+    config: &ChatConfig,
+    route: &RouteDescriptor,
+    messages: &[Value],
+    max_tokens: Option<usize>,
+    tools: &[Value],
+    target: Option<&crate::routing::SubscriptionTarget>,
+    decision: Option<&crate::routing::RouteDecisionV2>,
+    on_delta: &mut dyn FnMut(&str) -> bool,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Completion, AttemptError> {
+    let body = build_streaming_body(route, messages, max_tokens, tools, target, decision)
+        .map_err(AttemptError::permanent)?;
+    let body_text =
+        serde_json::to_string(&body).map_err(|error| AttemptError::permanent(error.to_string()))?;
     let (sender, receiver) = mpsc::sync_channel(16);
     spawn_openai_stream_adapter(config, body_text, sender)?;
 
@@ -504,7 +670,11 @@ fn streaming_attempt(
     let mut first_event_seen = false;
     let mut content_type = String::new();
     loop {
-        let deadline = if first_event_seen { idle_deadline } else { first_deadline };
+        let deadline = if first_event_seen {
+            idle_deadline
+        } else {
+            first_deadline
+        };
         let message = recv_until(&receiver, deadline, cancelled).map_err(|class| AttemptError {
             class,
             message: match class {
@@ -519,12 +689,18 @@ fn streaming_attempt(
         })?;
         idle_deadline = Instant::now() + config.retry.idle_timeout;
         match message {
-            WireMessage::Headers { status, content_type: kind, retry_after } => {
+            WireMessage::Headers {
+                status,
+                content_type: kind,
+                retry_after,
+            } => {
                 content_type = kind;
                 if !(200..300).contains(&status) {
                     let body = match recv_until(&receiver, idle_deadline, cancelled) {
                         Ok(WireMessage::FullBody(Ok(body))) => body,
-                        Ok(WireMessage::FullBody(Err(error))) | Ok(WireMessage::Network(error)) => error,
+                        Ok(WireMessage::FullBody(Err(error))) | Ok(WireMessage::Network(error)) => {
+                            error
+                        }
                         _ => String::new(),
                     };
                     return Err(http_error(status, body, retry_after));
@@ -538,9 +714,13 @@ fn streaming_attempt(
                     visible_output: false,
                 })?;
                 if content_type.contains("event-stream") {
-                    return Err(malformed("event-stream response arrived without SSE framing", false));
+                    return Err(malformed(
+                        "event-stream response arrived without SSE framing",
+                        false,
+                    ));
                 }
-                return parse_completion_response(&text).map_err(|message| malformed(message, false));
+                return parse_completion_response(&text)
+                    .map_err(|message| malformed(message, false));
             }
             WireMessage::Line(result) => {
                 let line = result.map_err(|message| AttemptError {
@@ -549,7 +729,11 @@ fn streaming_attempt(
                     retry_after: None,
                     visible_output: state.visible_output,
                 })?;
-                if let Some(payload) = state.sse.push_line(&line).map_err(|message| malformed(message, state.visible_output))? {
+                if let Some(payload) = state
+                    .sse
+                    .push_line(&line)
+                    .map_err(|message| malformed(message, state.visible_output))?
+                {
                     first_event_seen = true;
                     if state.apply_payload(&payload, on_delta)? {
                         return state.finish();
@@ -557,7 +741,11 @@ fn streaming_attempt(
                 }
             }
             WireMessage::Eof => {
-                if let Some(payload) = state.sse.finish().map_err(|message| malformed(message, state.visible_output))? {
+                if let Some(payload) = state
+                    .sse
+                    .finish()
+                    .map_err(|message| malformed(message, state.visible_output))?
+                {
                     if state.apply_payload(&payload, on_delta)? {
                         return state.finish();
                     }
@@ -630,7 +818,14 @@ fn spawn_openai_stream_adapter(
                 .get("retry-after")
                 .and_then(|value| value.to_str().ok())
                 .and_then(parse_retry_after);
-            if sender.send(WireMessage::Headers { status, content_type: content_type.clone(), retry_after }).is_err() {
+            if sender
+                .send(WireMessage::Headers {
+                    status,
+                    content_type: content_type.clone(),
+                    retry_after,
+                })
+                .is_err()
+            {
                 return;
             }
             if !(200..300).contains(&status) || !content_type.contains("event-stream") {
@@ -639,13 +834,18 @@ fn spawn_openai_stream_adapter(
                 return;
             }
             for line in BufReader::new(response).lines() {
-                if sender.send(WireMessage::Line(line.map_err(|error| error.to_string()))).is_err() {
+                if sender
+                    .send(WireMessage::Line(line.map_err(|error| error.to_string())))
+                    .is_err()
+                {
                     return;
                 }
             }
             let _ = sender.send(WireMessage::Eof);
         })
-        .map_err(|error| AttemptError::permanent(format!("cannot start model stream adapter: {error}")))?;
+        .map_err(|error| {
+            AttemptError::permanent(format!("cannot start model stream adapter: {error}"))
+        })?;
     Ok(())
 }
 
@@ -715,7 +915,9 @@ impl OpenAiStreamState {
         payload: &str,
         on_delta: &mut dyn FnMut(&str) -> bool,
     ) -> Result<bool, AttemptError> {
-        for event in parse_stream_events(payload).map_err(|message| malformed(message, self.visible_output))? {
+        for event in parse_stream_events(payload)
+            .map_err(|message| malformed(message, self.visible_output))?
+        {
             match event {
                 OpenAiStreamEvent::Text(piece) => {
                     self.content.push_str(&piece);
@@ -749,7 +951,9 @@ impl OpenAiStreamState {
             });
         }
         if self.content.trim().is_empty() {
-            return Err(AttemptError::permanent("model router returned no message content"));
+            return Err(AttemptError::permanent(
+                "model router returned no message content",
+            ));
         }
         Ok(Completion {
             content: std::mem::take(&mut self.content),
@@ -771,7 +975,9 @@ fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent>, String> 
     if let Some(usage) = usage_from_value(&chunk) {
         events.push(OpenAiStreamEvent::Usage(usage));
     }
-    let choices = chunk.get("choices").and_then(Value::as_array)
+    let choices = chunk
+        .get("choices")
+        .and_then(Value::as_array)
         .ok_or("model stream event has no choices array")?;
     if choices.is_empty() {
         if events.is_empty() {
@@ -779,11 +985,18 @@ fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent>, String> 
         }
         return Ok(events);
     }
-    let choice = choices.first().ok_or("model stream event has no first choice")?;
-    if matches!(choice.get("finish_reason").and_then(Value::as_str), Some("length" | "max_tokens")) {
+    let choice = choices
+        .first()
+        .ok_or("model stream event has no first choice")?;
+    if matches!(
+        choice.get("finish_reason").and_then(Value::as_str),
+        Some("length" | "max_tokens")
+    ) {
         events.push(OpenAiStreamEvent::Incomplete);
     }
-    let delta = choice.get("delta").ok_or("model stream choice has no delta")?;
+    let delta = choice
+        .get("delta")
+        .ok_or("model stream choice has no delta")?;
     let mut recognized = false;
     if let Some(content) = delta.get("content") {
         match content {
@@ -796,7 +1009,10 @@ fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent>, String> 
         }
         recognized = true;
     }
-    if let Some(reasoning) = delta.get("reasoning_content").or_else(|| delta.get("reasoning")) {
+    if let Some(reasoning) = delta
+        .get("reasoning_content")
+        .or_else(|| delta.get("reasoning"))
+    {
         if !reasoning.is_null() && !reasoning.is_string() {
             return Err("model stream reasoning delta is not a string or null".into());
         }
@@ -805,7 +1021,10 @@ fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent>, String> 
     }
     if let Some(calls) = delta.get("tool_calls") {
         events.push(OpenAiStreamEvent::ToolCalls(
-            calls.as_array().ok_or("model stream tool_calls delta is not an array")?.clone(),
+            calls
+                .as_array()
+                .ok_or("model stream tool_calls delta is not an array")?
+                .clone(),
         ));
         recognized = true;
     }
@@ -829,7 +1048,12 @@ fn malformed(message: impl Into<String>, visible_output: bool) -> AttemptError {
 }
 
 fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> AttemptError {
-    let class = if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
+    let normalized = body.to_ascii_lowercase();
+    let quota_exhausted = status == 402
+        || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
+    let class = if quota_exhausted {
+        StreamErrorClass::QuotaExhausted
+    } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
     } else if is_context_overflow_body(&body) {
         StreamErrorClass::ContextOverflow
@@ -838,7 +1062,10 @@ fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> Attem
     };
     AttemptError {
         class,
-        message: format!("model router {status}: {}", body.chars().take(800).collect::<String>()),
+        message: format!(
+            "model router {status}: {}",
+            body.chars().take(800).collect::<String>()
+        ),
         retry_after,
         visible_output: false,
     }
@@ -866,7 +1093,9 @@ fn recv_until(
         if now >= deadline {
             return Err(StreamErrorClass::Timeout);
         }
-        let wait = deadline.saturating_duration_since(now).min(Duration::from_millis(25));
+        let wait = deadline
+            .saturating_duration_since(now)
+            .min(Duration::from_millis(25));
         match receiver.recv_timeout(wait) {
             Ok(message) => return Ok(message),
             Err(RecvTimeoutError::Timeout) => {}
@@ -877,10 +1106,13 @@ fn recv_until(
 
 fn retry_delay(policy: &RetryPolicy, attempt: usize, retry_after: Option<Duration>) -> Duration {
     if let Some(delay) = retry_after {
-        return delay.min(policy.max_delay);
+        return delay;
     }
     let exponent = (attempt.saturating_sub(1)).min(20) as u32;
-    let base_ms = policy.base_delay.as_millis().saturating_mul(1u128 << exponent);
+    let base_ms = policy
+        .base_delay
+        .as_millis()
+        .saturating_mul(1u128 << exponent);
     let capped_ms = base_ms.min(policy.max_delay.as_millis()) as f64;
     let jitter = policy.jitter_ratio.clamp(0.0, 1.0);
     let factor = rand::thread_rng().gen_range((1.0 - jitter)..=(1.0 + jitter));
@@ -893,7 +1125,11 @@ fn cancellable_sleep(delay: Duration, cancelled: &dyn Fn() -> bool) -> Result<()
         if cancelled() {
             return Err("Turn cancelled.".into());
         }
-        std::thread::sleep(deadline.saturating_duration_since(Instant::now()).min(Duration::from_millis(25)));
+        std::thread::sleep(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .min(Duration::from_millis(25)),
+        );
     }
     Ok(())
 }
@@ -956,6 +1192,24 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+fn logical_request_keys(route: &RouteDescriptor, messages: &[Value]) -> (String, String, String) {
+    let encoded = serde_json::to_vec(&(route, messages)).unwrap_or_default();
+    let digest = hex::encode(Sha256::digest(encoded));
+    (
+        format!("request-{digest}"),
+        format!("completion-{digest}"),
+        format!("session-{digest}"),
+    )
+}
+
+fn epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
+}
+
 fn duration_millis(duration: Duration) -> u64 {
     duration.as_millis().min(u128::from(u64::MAX)) as u64
 }
@@ -968,9 +1222,12 @@ fn nonempty(value: &str) -> Option<String> {
 fn accumulate_tool_call_deltas(acc: &mut Vec<Value>, deltas: &[Value]) -> Result<(), String> {
     for delta in deltas {
         let raw_index = delta.get("index").and_then(Value::as_u64).unwrap_or(0);
-        let index = usize::try_from(raw_index).map_err(|_| "tool call index exceeds platform size")?;
+        let index =
+            usize::try_from(raw_index).map_err(|_| "tool call index exceeds platform size")?;
         if index >= MAX_TOOL_CALLS {
-            return Err(format!("tool call index {index} exceeds limit {MAX_TOOL_CALLS}"));
+            return Err(format!(
+                "tool call index {index} exceeds limit {MAX_TOOL_CALLS}"
+            ));
         }
         while acc.len() <= index {
             acc.push(json!({"function": {"name": "", "arguments": ""}}));
@@ -978,16 +1235,403 @@ fn accumulate_tool_call_deltas(acc: &mut Vec<Value>, deltas: &[Value]) -> Result
         let slot = &mut acc[index];
         if let Some(name) = delta.pointer("/function/name").and_then(Value::as_str) {
             if !name.is_empty() {
-                let current = slot.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
+                let current = slot
+                    .pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let updated = format!("{current}{name}");
                 slot["function"]["name"] = Value::String(updated);
             }
         }
         if let Some(arguments) = delta.pointer("/function/arguments").and_then(Value::as_str) {
-            let current = slot.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("");
+            let current = slot
+                .pointer("/function/arguments")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let updated = format!("{current}{arguments}");
             slot["function"]["arguments"] = Value::String(updated);
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod subscription_retry_tests {
+    use super::*;
+
+    #[test]
+    fn server_retry_after_is_a_floor_not_shortened_by_client_cap() {
+        let policy = RetryPolicy {
+            max_delay: Duration::from_secs(2),
+            jitter_ratio: 0.0,
+            ..RetryPolicy::default()
+        };
+        assert_eq!(
+            retry_delay(&policy, 1, Some(Duration::from_secs(37))),
+            Duration::from_secs(37)
+        );
+    }
+
+    #[test]
+    fn retry_after_accepts_delta_seconds_and_http_date() {
+        assert_eq!(parse_retry_after("19"), Some(Duration::from_secs(19)));
+        let future = parse_retry_after("Sun, 06 Nov 2094 08:49:37 GMT").expect("valid IMF-fixdate");
+        assert!(
+            future > Duration::from_secs(60 * 60 * 24 * 365),
+            "future HTTP-date must not be truncated"
+        );
+        assert_eq!(parse_retry_after("Sun, 06 Nov 2094 08:49:37 PST"), None);
+        assert_eq!(parse_retry_after("not-a-delay"), None);
+    }
+}
+
+#[cfg(test)]
+mod subscription_execution_tests {
+    use super::*;
+    use crate::routing::{
+        CooldownStore, RouteDecisionV2, SubscriptionPoolSnapshot, SubscriptionTarget,
+    };
+    use std::collections::BTreeSet;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::path::PathBuf;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    #[derive(Clone)]
+    struct TestResponse {
+        status: &'static str,
+        headers: &'static [(&'static str, &'static str)],
+        body: &'static str,
+    }
+
+    struct ScriptedServer {
+        endpoint: String,
+        requests: Arc<Mutex<Vec<Value>>>,
+        handle: Option<thread::JoinHandle<()>>,
+    }
+
+    impl ScriptedServer {
+        fn start(responses: Vec<TestResponse>) -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").expect("bind test router");
+            let endpoint = format!(
+                "http://{}",
+                listener.local_addr().expect("test router address")
+            );
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let captured = Arc::clone(&requests);
+            let handle = thread::spawn(move || {
+                let mut responses = responses.into_iter();
+                for incoming in listener.incoming() {
+                    let mut stream = incoming.expect("accept model request");
+                    let request = read_http_request(&mut stream);
+                    if request.starts_with("POST /__shutdown ") {
+                        break;
+                    }
+                    let body = request.split_once("\r\n\r\n").expect("HTTP request body").1;
+                    captured
+                        .lock()
+                        .expect("capture request")
+                        .push(serde_json::from_str(body).expect("JSON model request"));
+                    let response = responses.next().unwrap_or(TestResponse {
+                        status: "500 Unexpected Request",
+                        headers: &[],
+                        body: r#"{"error":"unexpected extra request"}"#,
+                    });
+                    write_http_response(&mut stream, &response);
+                }
+            });
+            Self {
+                endpoint,
+                requests,
+                handle: Some(handle),
+            }
+        }
+
+        fn stop(mut self) -> Vec<Value> {
+            let mut stream = TcpStream::connect(self.endpoint.trim_start_matches("http://"))
+                .expect("connect test router shutdown");
+            stream
+                .write_all(
+                    b"POST /__shutdown HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n",
+                )
+                .expect("stop test router");
+            self.handle
+                .take()
+                .expect("test router handle")
+                .join()
+                .expect("join test router");
+            Arc::try_unwrap(self.requests)
+                .expect("request capture still shared")
+                .into_inner()
+                .expect("captured requests")
+        }
+    }
+
+    fn read_http_request(stream: &mut TcpStream) -> String {
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 2048];
+        let (header_end, content_length) = loop {
+            let count = stream.read(&mut chunk).expect("read model request");
+            assert!(count > 0, "model request ended before headers");
+            bytes.extend_from_slice(&chunk[..count]);
+            if let Some(position) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                let header_end = position + 4;
+                let headers = String::from_utf8_lossy(&bytes[..header_end]);
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length").then(|| {
+                            value
+                                .trim()
+                                .parse::<usize>()
+                                .expect("numeric content length")
+                        })
+                    })
+                    .expect("model request content length");
+                break (header_end, content_length);
+            }
+        };
+        while bytes.len() < header_end + content_length {
+            let count = stream.read(&mut chunk).expect("read model request body");
+            assert!(count > 0, "model request body ended early");
+            bytes.extend_from_slice(&chunk[..count]);
+        }
+        String::from_utf8(bytes).expect("UTF-8 model request")
+    }
+
+    fn write_http_response(stream: &mut TcpStream, response: &TestResponse) {
+        let mut head = format!(
+            "HTTP/1.1 {}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            response.status,
+            response.body.len()
+        );
+        for (name, value) in response.headers {
+            head.push_str(&format!("{name}: {value}\r\n"));
+        }
+        head.push_str("\r\n");
+        stream
+            .write_all(head.as_bytes())
+            .expect("write response headers");
+        stream
+            .write_all(response.body.as_bytes())
+            .expect("write response body");
+    }
+
+    fn target(subscription_id: &str, priority: u32) -> SubscriptionTarget {
+        SubscriptionTarget {
+            provider_id: "provider-1".into(),
+            account_id: "account-1".into(),
+            subscription_id: subscription_id.into(),
+            quota_bucket: "chat".into(),
+            priority,
+            remaining: 10,
+            limit: 10,
+            capabilities: BTreeSet::from(["chat".into()]),
+            active: true,
+            valid_until_ms: u64::MAX,
+            policy_allowed: true,
+        }
+    }
+
+    fn config(
+        endpoint: String,
+        pool: SubscriptionPoolSnapshot,
+        cooldown_path: Option<PathBuf>,
+    ) -> ChatConfig {
+        ChatConfig {
+            url: endpoint,
+            agent_id: "integration-agent".into(),
+            secret: "integration-secret".into(),
+            model: "model-a".into(),
+            service_tier: String::new(),
+            retry: RetryPolicy {
+                max_attempts: 1,
+                base_delay: Duration::ZERO,
+                max_delay: Duration::ZERO,
+                first_event_timeout: Duration::from_secs(2),
+                idle_timeout: Duration::from_secs(2),
+                jitter_ratio: 0.0,
+            },
+            fallbacks: Vec::new(),
+            context_promotions: Vec::new(),
+            subscription_pool: Some(pool),
+            subscription_cooldown_path: cooldown_path,
+            config_error: None,
+        }
+    }
+
+    fn pool(
+        primary: SubscriptionTarget,
+        secondary: SubscriptionTarget,
+    ) -> SubscriptionPoolSnapshot {
+        SubscriptionPoolSnapshot {
+            revision: "snapshot-7".into(),
+            rendezvous_salt: "subscription-test-salt".into(),
+            targets: vec![secondary, primary],
+        }
+    }
+
+    struct CooldownFixture(PathBuf);
+
+    impl CooldownFixture {
+        fn new() -> Self {
+            static NEXT_PATH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let sequence = NEXT_PATH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            Self(std::env::temp_dir().join(format!(
+                "jeden-subscription-execution-{}-{sequence}.json",
+                std::process::id()
+            )))
+        }
+    }
+
+    impl Drop for CooldownFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+            let _ =
+                std::fs::remove_file(self.0.with_extension(format!("tmp-{}", std::process::id())));
+        }
+    }
+
+    #[test]
+    fn subscription_execution_serializes_billing_target_and_logical_request_identity() {
+        let selected = target("subscription-primary", 0);
+        let decision = RouteDecisionV2 {
+            decision_id: "decision-fixed".into(),
+            request_id: "request-fixed".into(),
+            idempotency_key: "idempotency-fixed".into(),
+            snapshot_revision: "snapshot-7".into(),
+            selected: selected.clone(),
+            targets: vec![selected.clone()],
+        };
+        let body = build_streaming_body(
+            &RouteDescriptor {
+                model: "model-a".into(),
+                service_tier: Some("priority".into()),
+            },
+            &[json!({"role": "user", "content": "hello"})],
+            Some(321),
+            &[],
+            Some(&selected),
+            Some(&decision),
+        )
+        .expect("build subscription request");
+
+        assert_eq!(
+            body["billingTarget"],
+            serde_json::to_value(&selected).unwrap()
+        );
+        assert_eq!(body["subscriptionDecisionId"], "decision-fixed");
+        assert_eq!(body["requestId"], "request-fixed");
+        assert_eq!(body["idempotencyKey"], "idempotency-fixed");
+    }
+
+    #[test]
+    fn subscription_execution_quota_exhaustion_switches_target_without_changing_request_identity() {
+        let server = ScriptedServer::start(vec![
+            TestResponse {
+                status: "429 Too Many Requests",
+                headers: &[("Content-Type", "application/json"), ("Retry-After", "30")],
+                body: r#"{"error":{"code":"subscription_quota_exhausted"}}"#,
+            },
+            TestResponse {
+                status: "200 OK",
+                headers: &[("Content-Type", "text/event-stream")],
+                body: "data: {\"choices\":[{\"delta\":{\"content\":\"secondary response\"}}]}\n\ndata: [DONE]\n\n",
+            },
+        ]);
+        let primary = target("subscription-primary", 0);
+        let secondary = target("subscription-secondary", 1);
+        let cooldown = CooldownFixture::new();
+        let mut deltas = Vec::new();
+        let result = chat_completion_streaming(
+            &config(
+                server.endpoint.clone(),
+                pool(primary.clone(), secondary.clone()),
+                Some(cooldown.0.clone()),
+            ),
+            vec![json!({"role": "user", "content": "stable operation"})],
+            None,
+            &[],
+            &mut |delta| {
+                deltas.push(delta.to_string());
+                true
+            },
+            &|| false,
+        )
+        .expect("quota failover completion");
+        let requests = server.stop();
+
+        assert_eq!(result.completion.content, "secondary response");
+        assert_eq!(result.subscription_target, Some(secondary.clone()));
+        assert!(matches!(
+            result.route_results.as_slice(),
+            [RouteResult::SubscriptionChanged { from, to, .. }]
+                if from == &primary && to == &secondary
+        ));
+        assert_eq!(requests.len(), 2);
+        assert_eq!(
+            requests[0]["billingTarget"]["subscriptionId"],
+            "subscription-primary"
+        );
+        assert_eq!(
+            requests[1]["billingTarget"]["subscriptionId"],
+            "subscription-secondary"
+        );
+        for key in ["subscriptionDecisionId", "requestId", "idempotencyKey"] {
+            assert_eq!(
+                requests[0][key], requests[1][key],
+                "{key} changed across failover"
+            );
+        }
+        assert!(CooldownStore::open(&cooldown.0)
+            .unwrap()
+            .is_cooling_down(&primary.identity(), epoch_millis())
+            .unwrap());
+    }
+
+    #[test]
+    fn subscription_execution_visible_output_prevents_target_failover() {
+        let server = ScriptedServer::start(vec![
+            TestResponse {
+                status: "200 OK",
+                headers: &[("Content-Type", "text/event-stream")],
+                body: "data: {\"choices\":[{\"delta\":{\"content\":\"visible\"}}]}\n\n",
+            },
+            TestResponse {
+                status: "200 OK",
+                headers: &[("Content-Type", "text/event-stream")],
+                body: "data: {\"choices\":[{\"delta\":{\"content\":\"must not appear\"}}]}\n\ndata: [DONE]\n\n",
+            },
+        ]);
+        let primary = target("subscription-primary", 0);
+        let secondary = target("subscription-secondary", 1);
+        let mut visible = Vec::new();
+        let failure = chat_completion_streaming(
+            &config(server.endpoint.clone(), pool(primary, secondary), None),
+            vec![json!({"role": "user", "content": "do not replay"})],
+            None,
+            &[],
+            &mut |delta| {
+                visible.push(delta.to_string());
+                true
+            },
+            &|| false,
+        )
+        .expect_err("partial output must not fail over");
+        let requests = server.stop();
+
+        assert_eq!(visible, vec!["visible"]);
+        assert!(failure.visible_output);
+        assert_eq!(
+            requests.len(),
+            1,
+            "visible output was replayed on another subscription"
+        );
+        assert!(failure
+            .route_results
+            .iter()
+            .all(|result| !matches!(result, RouteResult::SubscriptionChanged { .. })));
+    }
 }

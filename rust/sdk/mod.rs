@@ -1,6 +1,14 @@
+mod client;
+
+#[cfg(test)]
+mod async_client_tests;
+
+pub mod protocol;
+
 mod session;
 mod types;
 
+pub use client::{ClientError, EventStream, SessionClient, SessionTransport, TransportError};
 pub use session::{AgentSession, EventSubscription};
 pub use types::{
     ApprovalRequest, Capabilities, ElicitationRequest, InteractionHandler, PromptRequest,

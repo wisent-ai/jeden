@@ -77,7 +77,11 @@ impl SessionInner {
     }
 
     fn interaction_token(&self, prefix: &str) -> String {
-        format!("{}-{}", prefix, NEXT_INTERACTION_ID.fetch_add(1, Ordering::Relaxed))
+        format!(
+            "{}-{}",
+            prefix,
+            NEXT_INTERACTION_ID.fetch_add(1, Ordering::Relaxed)
+        )
     }
 }
 
@@ -169,7 +173,11 @@ impl AgentSession {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         {
-            let mut active = self.inner.active.lock().map_err(|_| "active request lock poisoned")?;
+            let mut active = self
+                .inner
+                .active
+                .lock()
+                .map_err(|_| "active request lock poisoned")?;
             if active.contains_key(&request.request_id) {
                 return Err(format!("request already active: {}", request.request_id));
             }
@@ -182,13 +190,19 @@ impl AgentSession {
         if let Err(message) = &result {
             let _ = self.inner.emit(SessionEvent {
                 request_id: request.request_id,
-                event: SessionEventKind::Error { message: message.clone() },
+                event: SessionEventKind::Error {
+                    message: message.clone(),
+                },
             });
         }
         result
     }
 
-    fn run_prompt(&self, request: &PromptRequest, cancel: Arc<AtomicBool>) -> Result<PromptResult, String> {
+    fn run_prompt(
+        &self,
+        request: &PromptRequest,
+        cancel: Arc<AtomicBool>,
+    ) -> Result<PromptResult, String> {
         let mut conversation_guard = self
             .inner
             .conversation
@@ -217,17 +231,25 @@ impl AgentSession {
             progress: Box::new(move |message| {
                 if let Err(error) = progress_inner.emit(SessionEvent {
                     request_id: progress_id.clone(),
-                    event: SessionEventKind::Status { message: message.to_string() },
+                    event: SessionEventKind::Status {
+                        message: message.to_string(),
+                    },
                 }) {
-                    if let Ok(mut slot) = progress_error.lock() { *slot = Some(error); }
+                    if let Ok(mut slot) = progress_error.lock() {
+                        *slot = Some(error);
+                    }
                 }
             }),
             stream: Box::new(move |text| {
                 if let Err(error) = stream_inner.emit(SessionEvent {
                     request_id: stream_id.clone(),
-                    event: SessionEventKind::TextDelta { text: text.to_string() },
+                    event: SessionEventKind::TextDelta {
+                        text: text.to_string(),
+                    },
                 }) {
-                    if let Ok(mut slot) = stream_error.lock() { *slot = Some(error); }
+                    if let Ok(mut slot) = stream_error.lock() {
+                        *slot = Some(error);
+                    }
                 }
             }),
             ask_user: Some(Box::new(move |question, options| {
@@ -240,43 +262,69 @@ impl AgentSession {
                         options: options.to_vec(),
                     },
                 })?;
-                let handler = ask_inner.interactions.read().map_err(|_| "interaction handler lock poisoned")?.clone();
-                handler.ok_or("elicitation requires an interaction handler")?.elicit(ElicitationRequest {
-                    token,
-                    request_id: ask_id.clone(),
-                    question: question.to_string(),
-                    options: options.to_vec(),
-                })
+                let handler = ask_inner
+                    .interactions
+                    .read()
+                    .map_err(|_| "interaction handler lock poisoned")?
+                    .clone();
+                handler
+                    .ok_or("elicitation requires an interaction handler")?
+                    .elicit(ElicitationRequest {
+                        token,
+                        request_id: ask_id.clone(),
+                        question: question.to_string(),
+                        options: options.to_vec(),
+                    })
             })),
             approve: Box::new(move |tool, detail| {
                 let token = approve_inner.interaction_token("approval");
                 if let Err(error) = approve_inner.emit(SessionEvent {
                     request_id: approve_id.clone(),
-                    event: SessionEventKind::Approval { token: token.clone(), tool: tool.to_string(), detail: detail.to_string() },
-                }) {
-                    if let Ok(mut slot) = approve_error.lock() { *slot = Some(error); }
-                    return false;
-                }
-                let result = approve_inner.interactions.read()
-                    .map_err(|_| "interaction handler lock poisoned".to_string())
-                    .and_then(|guard| guard.clone().ok_or_else(|| "approval requires an interaction handler".to_string()))
-                    .and_then(|handler| handler.approve(ApprovalRequest {
-                        token,
-                        request_id: approve_id.clone(),
+                    event: SessionEventKind::Approval {
+                        token: token.clone(),
                         tool: tool.to_string(),
                         detail: detail.to_string(),
-                    }));
+                    },
+                }) {
+                    if let Ok(mut slot) = approve_error.lock() {
+                        *slot = Some(error);
+                    }
+                    return false;
+                }
+                let result = approve_inner
+                    .interactions
+                    .read()
+                    .map_err(|_| "interaction handler lock poisoned".to_string())
+                    .and_then(|guard| {
+                        guard
+                            .clone()
+                            .ok_or_else(|| "approval requires an interaction handler".to_string())
+                    })
+                    .and_then(|handler| {
+                        handler.approve(ApprovalRequest {
+                            token,
+                            request_id: approve_id.clone(),
+                            tool: tool.to_string(),
+                            detail: detail.to_string(),
+                        })
+                    });
                 match result {
                     Ok(approved) => approved,
                     Err(error) => {
-                        if let Ok(mut slot) = approve_error.lock() { *slot = Some(error); }
+                        if let Ok(mut slot) = approve_error.lock() {
+                            *slot = Some(error);
+                        }
                         false
                     }
                 }
             }),
         };
         let text = conversation.run_turn(&args, &request.prompt, &mut hooks)?;
-        if let Some(error) = event_error.lock().map_err(|_| "event error lock poisoned")?.take() {
+        if let Some(error) = event_error
+            .lock()
+            .map_err(|_| "event error lock poisoned")?
+            .take()
+        {
             return Err(error);
         }
         let session_path = conversation.session_path();
@@ -284,11 +332,19 @@ impl AgentSession {
             request_id: request_id.clone(),
             event: SessionEventKind::Result { text: text.clone() },
         })?;
-        Ok(PromptResult { request_id, text, session_path })
+        Ok(PromptResult {
+            request_id,
+            text,
+            session_path,
+        })
     }
 
     pub fn abort(&self, request_id: &str) -> Result<bool, String> {
-        let active = self.inner.active.lock().map_err(|_| "active request lock poisoned")?;
+        let active = self
+            .inner
+            .active
+            .lock()
+            .map_err(|_| "active request lock poisoned")?;
         if let Some(cancel) = active.get(request_id) {
             cancel.store(true, Ordering::Release);
             Ok(true)
@@ -298,14 +354,22 @@ impl AgentSession {
     }
 
     pub fn status(&self) -> Result<Vec<String>, String> {
-        let active = self.inner.active.lock().map_err(|_| "active request lock poisoned")?;
+        let active = self
+            .inner
+            .active
+            .lock()
+            .map_err(|_| "active request lock poisoned")?;
         let mut request_ids = active.keys().cloned().collect::<Vec<_>>();
         request_ids.sort();
         Ok(request_ids)
     }
 
     pub fn session_path(&self) -> Result<PathBuf, String> {
-        let guard = self.inner.conversation.lock().map_err(|_| "conversation lock poisoned")?;
+        let guard = self
+            .inner
+            .conversation
+            .lock()
+            .map_err(|_| "conversation lock poisoned")?;
         Ok(guard.as_ref().ok_or("session disposed")?.session_path())
     }
 
@@ -313,12 +377,30 @@ impl AgentSession {
         if self.inner.disposed.swap(true, Ordering::AcqRel) {
             return Ok(());
         }
-        for cancel in self.inner.active.lock().map_err(|_| "active request lock poisoned")?.values() {
+        for cancel in self
+            .inner
+            .active
+            .lock()
+            .map_err(|_| "active request lock poisoned")?
+            .values()
+        {
             cancel.store(true, Ordering::Release);
         }
-        self.inner.subscribers.lock().map_err(|_| "event subscription lock poisoned")?.clear();
-        *self.inner.interactions.write().map_err(|_| "interaction handler lock poisoned")? = None;
-        *self.inner.conversation.lock().map_err(|_| "conversation lock poisoned")? = None;
+        self.inner
+            .subscribers
+            .lock()
+            .map_err(|_| "event subscription lock poisoned")?
+            .clear();
+        *self
+            .inner
+            .interactions
+            .write()
+            .map_err(|_| "interaction handler lock poisoned")? = None;
+        *self
+            .inner
+            .conversation
+            .lock()
+            .map_err(|_| "conversation lock poisoned")? = None;
         Ok(())
     }
 }

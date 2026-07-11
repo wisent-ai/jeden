@@ -1,0 +1,72 @@
+name: benchmark-release-certification
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ['Signed canary release']
+    types: [completed]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+
+jobs:
+  representative-benchmark:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    name: Immutable representative benchmark
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out certified revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Validate immutable benchmark JSON inputs
+        run: |
+          python3 -m json.tool benchmarks/manifests/reference-v1.json > /dev/null
+          python3 -m json.tool benchmarks/schema/run-outcome-v1.schema.json > /dev/null
+          python3 -m json.tool benchmarks/schema/eval-report-v1.schema.json > /dev/null
+      - name: Execute reference benchmark in independent roots
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo run --locked --bin jeden-reference-benchmark -- \
+            --output-root benchmarks/output/reference-v1 | tee benchmark-reference.log
+          cargo run --locked --bin jeden-reference-benchmark -- \
+            --output-root "${RUNNER_TEMP}/reference-v1-second" | tee benchmark-determinism.log
+          cmp benchmarks/output/reference-v1/report.json \
+            "${RUNNER_TEMP}/reference-v1-second/report.json"
+      - name: Exercise stale resume digest gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp -R benchmarks/output/reference-v1 "${RUNNER_TEMP}/reference-v1-tamper"
+          outcome="$(find "${RUNNER_TEMP}/reference-v1-tamper/runs" -name outcome.json -print -quit)"
+          python3 - "${outcome}" <<'PY'
+          import json
+          import pathlib
+          import sys
+          path = pathlib.Path(sys.argv[1])
+          outcome = json.loads(path.read_text())
+          outcome["datasetDigest"] = "0" * 64
+          path.write_text(json.dumps(outcome, separators=(",", ":")))
+          PY
+          if cargo run --locked --bin jeden-reference-benchmark -- \
+            --output-root "${RUNNER_TEMP}/reference-v1-tamper" > benchmark-negative.log 2>&1; then
+            echo "tampered resumable outcome was accepted" >&2
+            exit 1
+          fi
+      - name: Upload benchmark certification evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            benchmarks/output/reference-v1/**/*.json
+            benchmark-*.log
+          if-no-files-found: error
+          retention-days: 90

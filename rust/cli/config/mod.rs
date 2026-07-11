@@ -9,7 +9,85 @@ use std::path::{Path, PathBuf};
 use crate::cli::auth::AuthProviderConfig;
 use crate::{config_path, legacy_user_config_path, user_config_path};
 
+#[path = "../../migrations/mod.rs"]
+pub(crate) mod migrations;
 pub(crate) mod schema;
+
+pub(crate) const CONFIG_SCHEMA_VERSION: u32 = 3;
+
+fn config_v0_to_v1(value: &mut Value) -> Result<(), String> {
+    value
+        .as_object_mut()
+        .ok_or_else(|| "config root must be an object".to_string())?;
+    Ok(())
+}
+
+fn config_v1_to_v2(value: &mut Value) -> Result<(), String> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "config root must be an object".to_string())?;
+    if let Some(legacy) = object.remove("model_url") {
+        object.entry("modelRouterUrl").or_insert(legacy);
+    }
+    Ok(())
+}
+
+fn config_v2_to_v3(value: &mut Value) -> Result<(), String> {
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "config root must be an object".to_string())?;
+    object.entry("billing").or_insert_with(|| {
+        json!({
+            "autoPurchaseEnabled": false,
+            "autoRenewEnabled": false,
+            "preferredCurrency": null,
+            "maxSingleMicrounits": 0,
+            "maxPeriodMicrounits": 0
+        })
+    });
+    Ok(())
+}
+
+static CONFIG_MIGRATION_STEPS: [migrations::MigrationStep; 3] = [
+    migrations::MigrationStep {
+        name: "version-envelope",
+        from: 0,
+        to: 1,
+        apply: config_v0_to_v1,
+    },
+    migrations::MigrationStep {
+        name: "canonical-model-router-key",
+        from: 1,
+        to: 2,
+        apply: config_v1_to_v2,
+    },
+    migrations::MigrationStep {
+        name: "safe-billing-preferences",
+        from: 2,
+        to: 3,
+        apply: config_v2_to_v3,
+    },
+];
+
+pub(crate) fn config_migration_plan() -> migrations::MigrationPlan {
+    migrations::MigrationPlan {
+        store: "config",
+        from: 0,
+        to: CONFIG_SCHEMA_VERSION,
+        reversible: true,
+        preflight: migrations::object_preflight,
+        steps: &CONFIG_MIGRATION_STEPS,
+        compatibility_window: migrations::CompatibilityWindow {
+            oldest_readable: 0,
+            newest_readable: 3,
+            rollback_floor: 2,
+        },
+    }
+}
+
+pub(crate) fn migrate_config_file(path: &Path) -> Result<migrations::MigrationOutcome, String> {
+    migrations::migrate_json(path, &config_migration_plan())
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct Config {
@@ -31,6 +109,34 @@ pub(crate) struct Config {
     pub(crate) rules: RulesConfig,
     #[serde(default)]
     pub(crate) secrets: SecretsConfig,
+    #[serde(default)]
+    pub(crate) billing: BillingPreferencesConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub(crate) struct BillingPreferencesConfig {
+    #[serde(rename = "autoPurchaseEnabled", default)]
+    pub(crate) auto_purchase_enabled: bool,
+    #[serde(rename = "autoRenewEnabled", default)]
+    pub(crate) auto_renew_enabled: bool,
+    #[serde(rename = "preferredCurrency", default)]
+    pub(crate) preferred_currency: Option<String>,
+    #[serde(rename = "maxSingleMicrounits", default)]
+    pub(crate) max_single_microunits: u64,
+    #[serde(rename = "maxPeriodMicrounits", default)]
+    pub(crate) max_period_microunits: u64,
+}
+
+impl Default for BillingPreferencesConfig {
+    fn default() -> Self {
+        Self {
+            auto_purchase_enabled: false,
+            auto_renew_enabled: false,
+            preferred_currency: None,
+            max_single_microunits: 0,
+            max_period_microunits: 0,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -272,14 +378,15 @@ pub(crate) fn read_user_writable_config() -> Value {
 
 pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
     let path = user_config_path();
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    if path.exists() {
+        migrate_config_file(&path)?;
     }
-    fs::write(
-        &path,
-        serde_yaml::to_string(value).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    let mut versioned = value.clone();
+    let object = versioned
+        .as_object_mut()
+        .ok_or_else(|| "config root must be an object".to_string())?;
+    object.insert("schemaVersion".into(), json!(CONFIG_SCHEMA_VERSION));
+    migrations::write_json_atomic(&path, &versioned)?;
     Ok(path)
 }
 
@@ -304,5 +411,6 @@ pub(crate) fn load_config(cwd: &Path) -> Config {
         context: merged.context,
         rules: merged.rules,
         secrets: merged.secrets,
+        billing: merged.billing,
     }
 }
