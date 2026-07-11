@@ -1,33 +1,166 @@
 use super::*;
+use crate::model_router::{RetryPolicy, RouteDescriptor};
+
+const MAX_CONFIGURED_ROUTES: usize = 16;
+
+fn duration_setting(
+    value: &Value,
+    key: &str,
+    default_ms: u64,
+) -> Result<std::time::Duration, String> {
+    let millis = match value.get(key) {
+        None => default_ms,
+        Some(raw) => raw
+            .as_u64()
+            .filter(|millis| *millis > 0)
+            .ok_or_else(|| format!("modelRouting.retry.{key} must be a positive integer"))?,
+    };
+    Ok(std::time::Duration::from_millis(millis))
+}
+
+fn route_descriptors(value: Option<&Value>, key: &str) -> Result<Vec<RouteDescriptor>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let entries = value
+        .as_array()
+        .ok_or_else(|| format!("modelRouting.{key} must be an array"))?;
+    if entries.len() > MAX_CONFIGURED_ROUTES {
+        return Err(format!(
+            "modelRouting.{key} exceeds the {MAX_CONFIGURED_ROUTES}-route limit"
+        ));
+    }
+    let mut routes = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let object = entry
+            .as_object()
+            .ok_or_else(|| format!("modelRouting.{key}[{index}] must be an object"))?;
+        let model = object
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|model| !model.is_empty())
+            .ok_or_else(|| format!("modelRouting.{key}[{index}].model must be a non-empty string"))?;
+        let service_tier = match object.get("serviceTier") {
+            None | Some(Value::Null) => None,
+            Some(raw) => Some(
+                raw.as_str()
+                    .map(str::trim)
+                    .filter(|tier| !tier.is_empty())
+                    .ok_or_else(|| {
+                        format!("modelRouting.{key}[{index}].serviceTier must be a non-empty string")
+                    })?
+                    .to_string(),
+            ),
+        };
+        routes.push(RouteDescriptor {
+            model: model.to_string(),
+            service_tier,
+        });
+    }
+    Ok(routes)
+}
+
+fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
+    let defaults = RetryPolicy::default();
+    let retry = routing.get("retry").unwrap_or(&Value::Null);
+    if !retry.is_null() && !retry.is_object() {
+        return Err("modelRouting.retry must be an object".into());
+    }
+    let max_attempts = match retry.get("maxAttempts") {
+        None => defaults.max_attempts,
+        Some(raw) => raw
+            .as_u64()
+            .and_then(|value| usize::try_from(value).ok())
+            .filter(|value| (1..=8).contains(value))
+            .ok_or("modelRouting.retry.maxAttempts must be an integer from 1 through 8")?,
+    };
+    let jitter_ratio = match retry.get("jitterRatio") {
+        None => defaults.jitter_ratio,
+        Some(raw) => raw
+            .as_f64()
+            .filter(|value| (0.0..=1.0).contains(value))
+            .ok_or("modelRouting.retry.jitterRatio must be between 0 and 1")?,
+    };
+    Ok(RetryPolicy {
+        max_attempts,
+        base_delay: duration_setting(retry, "baseDelayMs", defaults.base_delay.as_millis() as u64)?,
+        max_delay: duration_setting(retry, "maxDelayMs", defaults.max_delay.as_millis() as u64)?,
+        first_event_timeout: duration_setting(
+            retry,
+            "firstEventTimeoutMs",
+            defaults.first_event_timeout.as_millis() as u64,
+        )?,
+        idle_timeout: duration_setting(
+            retry,
+            "idleTimeoutMs",
+            defaults.idle_timeout.as_millis() as u64,
+        )?,
+        jitter_ratio,
+    })
+}
+
 
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let mode_state = read_mode_state(&args.cwd);
-    let mode_service_tier = if mode_state.pointer("/fast/enabled").and_then(Value::as_bool).unwrap_or(false) {
-        mode_state.pointer("/fast/serviceTier").and_then(Value::as_str).filter(|value| !value.trim().is_empty()).map(str::to_string)
+    let mode_service_tier = if mode_state
+        .pointer("/fast/enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        mode_state
+            .pointer("/fast/serviceTier")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
     } else {
         None
     };
+    let merged = crate::cli::config::merged_config_value(&args.cwd);
+    let routing = merged.get("modelRouting").unwrap_or(&Value::Null);
+    let retry = retry_policy(routing);
+    let configured_fallbacks = route_descriptors(routing.get("fallbacks"), "fallbacks");
+    let configured_promotions = route_descriptors(routing.get("contextPromotions"), "contextPromotions");
+    let endpoint = env::var("BRAMA_URL").ok().or(config.model_router_url.clone()).filter(|value| !value.trim().is_empty());
+    let selected_model = args.model.clone().or(config.model.clone()).or_else(|| env::var("JEDEN_MODEL").ok()).filter(|value| !value.trim().is_empty());
+    let catalog_client = crate::control_plane::brama::BramaClient::configured(endpoint.clone(), env::var("BRAMA_TOKEN").ok());
+    let catalog = crate::control_plane::model_catalog(&args.cwd, &catalog_client, false);
+    let catalog_error = match (&selected_model, &catalog) {
+        (None, _) => Some("no model selected; choose a model advertised by Brama".to_string()),
+        (_, Err(error)) => Some(error.to_string()),
+        (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),
+    };
+    let validate_routes = |routes: &Result<Vec<RouteDescriptor>, String>| -> Option<String> {
+        let catalog = catalog.as_ref().ok()?;
+        routes.as_ref().ok()?.iter().find_map(|route| catalog.resolve(&route.model).err().map(|error| error.to_string()))
+    };
+    let config_error = retry.as_ref().err().cloned()
+        .or_else(|| configured_fallbacks.as_ref().err().cloned())
+        .or_else(|| configured_promotions.as_ref().err().cloned())
+        .or(catalog_error)
+        .or_else(|| validate_routes(&configured_fallbacks))
+        .or_else(|| validate_routes(&configured_promotions));
+    let catalog_routes = |fallback: bool| -> Vec<RouteDescriptor> {
+        let Some(model) = selected_model.as_deref() else { return Vec::new(); };
+        let Ok(catalog) = &catalog else { return Vec::new(); };
+        let Ok(entry) = catalog.resolve(model) else { return Vec::new(); };
+        let ids = if fallback { &entry.fallback } else { &entry.promotion };
+        ids.iter().filter(|id| catalog.resolve(id).is_ok()).map(|id| RouteDescriptor { model: id.clone(), service_tier: None }).collect()
+    };
+    let fallbacks = configured_fallbacks.unwrap_or_default();
+    let promotions = configured_promotions.unwrap_or_default();
+    let resolved_fallbacks = if fallbacks.is_empty() { catalog_routes(true) } else { fallbacks };
+    let resolved_promotions = if promotions.is_empty() { catalog_routes(false) } else { promotions };
     ChatConfig {
-        url: env::var("MODEL_ROUTER_URL")
-            .ok()
-            .or(config.model_router_url.clone())
-            .unwrap_or_else(|| "https://model-router-1080673333190.us-central1.run.app".into()),
-        agent_id: env::var("WISENT_APP_AGENT_ID")
-            .ok()
-            .or(config.agent_id.clone())
-            .unwrap_or_else(|| "wisent-app".into()),
+        url: endpoint.unwrap_or_default(),
+        agent_id: env::var("WISENT_APP_AGENT_ID").ok().or(config.agent_id.clone()).unwrap_or_else(|| "wisent-app".into()),
         secret: env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
-        model: args
-            .model
-            .clone()
-            .or(config.model.clone())
-            .or_else(|| env::var("JEDEN_MODEL").ok())
-            .unwrap_or_else(|| "claude-code-subscription".into()),
-        service_tier: env::var("JEDEN_SERVICE_TIER")
-            .ok()
-            .or_else(|| env::var("MODEL_SERVICE_TIER").ok())
-            .or(mode_service_tier)
-            .unwrap_or_default(),
+        model: selected_model.unwrap_or_default(),
+        service_tier: env::var("JEDEN_SERVICE_TIER").ok().or_else(|| env::var("MODEL_SERVICE_TIER").ok()).or(mode_service_tier).unwrap_or_default(),
+        retry: retry.unwrap_or_default(),
+        fallbacks: resolved_fallbacks,
+        context_promotions: resolved_promotions,
+        config_error,
     }
 }
 
@@ -38,20 +171,11 @@ pub(in crate::agent) fn env_usize(name: &str) -> Option<usize> {
         .filter(|value| *value > 0)
 }
 
-fn memory_summary_path(cwd: &Path) -> PathBuf {
-    env::var_os("JEDEN_MEMORY_SUMMARY_FILE").map(PathBuf::from).unwrap_or_else(|| cwd.join(".jeden/memory_summary.md"))
-}
-
 pub(in crate::agent) fn memory_guidance_for_prompt(cwd: &Path) -> Option<String> {
-    let raw = fs::read_to_string(memory_summary_path(cwd)).ok()?;
-    let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.is_empty() {
-        None
-    } else if compact.chars().count() > 20_000 {
-        Some(compact.chars().take(20_000).collect::<String>())
-    } else {
-        Some(compact)
-    }
+    let store = crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path()).ok()?;
+    let scope = crate::memory::MemoryScope { kind: "repo".into(), id: cwd.display().to_string() };
+    let context = store.pre_compaction_context(&scope, "", 12_000).ok()?;
+    (!context.is_empty()).then_some(context)
 }
 
 pub(in crate::agent) fn is_context_overflow_error(error: &str) -> bool {
@@ -67,19 +191,24 @@ pub(in crate::agent) fn is_incomplete_output_error(error: &str) -> bool {
     error.to_ascii_lowercase().contains("response incomplete")
 }
 
-
 fn usage_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/usage.json")
 }
 
-pub(in crate::agent) fn usage_cost(config: &Config, model: &str, usage: &CompletionUsage) -> Option<Value> {
-    let base = config.models.iter().find(|entry| entry.id == model).and_then(|entry| entry.cost.as_ref());
-    let override_cost = config.model_overrides.get(model).and_then(|entry| entry.cost.as_ref());
-    let cost = override_cost.or(base)?;
-    let input = usage.input_tokens * cost.input.unwrap_or(0.0) / 1_000_000.0;
-    let output = usage.output_tokens * cost.output.unwrap_or(0.0) / 1_000_000.0;
-    let cache_read = usage.cache_read_tokens * cost.cache_read.unwrap_or(0.0) / 1_000_000.0;
-    let cache_write = usage.cache_write_tokens * cost.cache_write.unwrap_or(0.0) / 1_000_000.0;
+pub(in crate::agent) fn usage_cost(
+    cwd: &Path,
+    config: &Config,
+    model: &str,
+    usage: &CompletionUsage,
+) -> Option<Value> {
+    let endpoint = env::var("BRAMA_URL").ok().or(config.model_router_url.clone());
+    let client = crate::control_plane::brama::BramaClient::configured(endpoint, env::var("BRAMA_TOKEN").ok());
+    let catalog = crate::control_plane::model_catalog(cwd, &client, false).ok()?;
+    let cost = catalog.price(model)?;
+    let input = usage.input_tokens * cost.input / 1_000_000.0;
+    let output = usage.output_tokens * cost.output / 1_000_000.0;
+    let cache_read = usage.cache_read_tokens * cost.cache_read / 1_000_000.0;
+    let cache_write = usage.cache_write_tokens * cost.cache_write / 1_000_000.0;
     Some(json!({
         "input": input,
         "output": output,
@@ -89,7 +218,12 @@ pub(in crate::agent) fn usage_cost(config: &Config, model: &str, usage: &Complet
     }))
 }
 
-pub(in crate::agent) fn append_usage_event(cwd: &Path, router: &ChatConfig, usage: &CompletionUsage, cost: Option<Value>) -> Result<(), String> {
+pub(in crate::agent) fn append_usage_event(
+    cwd: &Path,
+    router: &ChatConfig,
+    usage: &CompletionUsage,
+    cost: Option<Value>,
+) -> Result<(), String> {
     let path = usage_path(cwd);
     let mut document = fs::read_to_string(&path)
         .ok()
@@ -103,7 +237,9 @@ pub(in crate::agent) fn append_usage_event(cwd: &Path, router: &ChatConfig, usag
         .ok_or("usage document must be a JSON object")?
         .entry("events")
         .or_insert_with(|| json!([]));
-    let events = events.as_array_mut().ok_or("usage events must be an array")?;
+    let events = events
+        .as_array_mut()
+        .ok_or("usage events must be an array")?;
     let mut event = json!({
         "at": now_stamp(),
         "model": router.model.clone(),
@@ -122,5 +258,9 @@ pub(in crate::agent) fn append_usage_event(cwd: &Path, router: &ChatConfig, usag
         obj.insert("version".into(), json!(1));
         obj.insert("updatedAt".into(), json!(now_stamp()));
     }
-    fs::write(&path, serde_json::to_string_pretty(&document).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&document).map_err(|e| e.to_string())? + "\n",
+    )
+    .map_err(|e| e.to_string())
 }

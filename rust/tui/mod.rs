@@ -2,67 +2,82 @@ use std::io::{self, IsTerminal};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
+mod attachments;
+mod integration;
+mod queue;
+mod editor;
+mod theme;
+
 mod render;
 mod repl;
 mod text;
+mod view;
+mod view_render;
+
+#[allow(unused_imports)]
+pub use attachments::{
+    Attachment, AttachmentError, AttachmentId, AttachmentKind, AttachmentSource, AttachmentTray,
+    ClipboardContent,
+};
+#[allow(unused_imports)]
+pub use integration::{
+    FeatureAvailability, RegistryUiRuntime, RuntimeStatus, UiFeature, UiRuntimeAdapter,
+};
+#[allow(unused_imports)]
+pub use queue::{
+    DeliveryAction, DeliveryBinding, DeliveryKeyMap, FollowUpQueue, QueueError, QueuedMessage,
+};
+
+#[allow(unused_imports)]
+pub use editor::{ActionKeyMap, EditorAction, EditorLimitError, EditorState, KeyBinding, EDITOR_KEYMAP_NAMESPACE, EXTERNAL_EDITOR_ACTION_ID};
+#[allow(unused_imports)]
+pub use theme::{Emphasis, ResolvedStyle, SemanticColor, Theme, ThemeId};
+
+pub use view::{
+    CommandOutcome, ConfirmEvent, ConfirmState, PickerEvent, PickerItem, PickerSpec, PickerState,
+};
 
 pub use repl::loops::run_basic_loop;
 
+pub(crate) fn external_editor_capability_descriptor(cwd: &std::path::Path) -> crate::capability::CapabilityDescriptor {
+    use crate::capability::{CapabilityDescriptor, CapabilityHealth, CapabilityKind, FunctionTarget};
+
+    let health = repl::external_editor::external_editor_health(cwd);
+    let mut descriptor = CapabilityDescriptor::new(
+        "view/external-editor",
+        CapabilityKind::View,
+        "jeden-core",
+        "External editor",
+        "Edit the current prompt with VISUAL or EDITOR",
+        FunctionTarget::NativeView { command: "external-editor".into() },
+    )
+    .operation("external-editor")
+    .metadata(serde_json::json!({"keymapNamespace": EDITOR_KEYMAP_NAMESPACE}));
+    match health {
+        Ok(()) => descriptor = descriptor.executable(EXTERNAL_EDITOR_ACTION_ID),
+        Err(detail) => {
+            descriptor.ui.visible = false;
+            descriptor = descriptor.health(CapabilityHealth::unavailable(detail));
+        }
+    }
+    descriptor
+}
+
 #[allow(dead_code)]
 pub fn render_terminal_frame(options: &FrameOptions) -> String {
+    let _capabilities = crate::capability::for_cwd(std::path::Path::new(&options.status.cwd));
     render::render_terminal_frame(options)
 }
 
 pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
+    let _capabilities = crate::capability::for_cwd(std::path::Path::new(&options.status.cwd));
     render::render_to_stdout(options)
 }
 
-
-const PRODUCT: &str = "Wisent";
-const APP: &str = "Agent";
+const PRODUCT: &str = "jeden.";
 const VERSION: &str = "v0.1.0";
-const ASSISTANT_TITLE: &str = "wisent";
+const ASSISTANT_TITLE: &str = "jeden.";
 
-const WISENT_MARK: &[&str] = &[
-    "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",
-    "     ▄█▀▀             ▀▀▀█▄",
-    "  ▄██▀                    ▀██",
-    " ▄█▀▀▀█▄▄                   ▀█▄",
-    "▄█▀     ▀▀▀█▄▄▄              ▀█▄",
-    "██▄▄          ▀▀▀██▄▄▄        ██",
-    "██▀▀██               ▀▀▀▀██▄▄▄██",
-    "▀█▄ ██                       ▄█▀",
-    " ▀█▄ ██              ▄▄▄    ▄█▀",
-    "   ▀█▄██▄          ▄█▀▀▀▀▀███▀",
-    "     ▀████▄    ▄▄██▀  ▄▄▄█▀",
-    "        ▀▀▀██████▄▄██▀▀▀",
-];
-
-
-
-const SLASH_COMMAND_HINTS: &[(&str, &str)] = &[
-    ("login", "Automated OAuth login"), ("logout", "Logout provider"), ("model", "Switch model"),
-    ("help", "Show slash commands"), ("mcp", "Manage MCP servers"), ("settings", "Open settings menu"), ("setup", "Open provider setup"),
-    ("plan", "Toggle plan mode"), ("plan-review", "Review latest plan"), ("goal", "Toggle goal mode"),
-    ("loop", "Toggle loop mode"), ("fast", "Toggle priority service tier"), ("advisor", "Toggle advisor reviewer"),
-    ("export", "Export session"), ("dump", "Dump session"), ("share", "Share session"),
-    ("collab", "Collaborate via relay"), ("join", "Join shared session"), ("leave", "Leave collab"),
-    ("browser", "Configure browser runtime"), ("copy", "Copy conversation text"), ("todo", "Manage todos"),
-    ("session", "Session management"), ("jobs", "Show jobs"), ("usage", "Show provider usage"),
-    ("stats", "Launch stats dashboard"), ("changelog", "Show changelog"), ("hotkeys", "Show hotkeys"),
-    ("approval", "Configure tool approval policy"),
-    ("tools", "Show tools"), ("context", "Show context usage"), ("extensions", "Manage extensions"),
-    ("agents", "Agent controls"), ("branch", "Create branch"), ("fork", "Create fork"), ("tree", "Navigate tree"),
-    ("ssh", "Manage SSH hosts"), ("new", "Start new session"), ("fresh", "Reset provider stream state"),
-    ("drop", "Drop current session"), ("compact", "Compact session"), ("shake", "Shake session context"),
-    ("handoff", "Hand off session"), ("resume", "Resume session"), ("btw", "Side question"),
-    ("tan", "Background agent"), ("omfg", "Forge local rule"), ("retry", "Retry last failed turn"),
-    ("debug", "Open debug tools"), ("memory", "Memory maintenance"), ("rename", "Rename session"),
-    ("move", "Move session workspace"), ("marketplace", "Manage marketplace plugins"),
-    ("plugins", "Manage installed plugins"), ("reload-plugins", "Reload plugins"), ("hooks", "Show lifecycle hooks"),
-    ("update", "Run automated update"), ("force", "Force next tool"), ("exit", "Exit"), ("quit", "Quit"),
-    ("commands", "Show slash commands"),
-];
 
 #[derive(Debug, Clone)]
 pub struct Message {
@@ -72,7 +87,10 @@ pub struct Message {
 
 impl Message {
     pub fn new(role: impl Into<String>, text: impl Into<String>) -> Self {
-        Self { role: role.into(), text: text.into() }
+        Self {
+            role: role.into(),
+            text: text.into(),
+        }
     }
 }
 
@@ -90,7 +108,6 @@ pub struct PromptStatus {
     pub cost: Option<String>,
 }
 
-
 #[derive(Debug, Clone)]
 pub struct FrameOptions {
     pub status: PromptStatus,
@@ -104,11 +121,18 @@ pub struct FrameOptions {
 }
 
 pub fn default_columns() -> usize {
-    std::env::var("COLUMNS").ok().and_then(|value| value.parse().ok()).unwrap_or(100)
+    std::env::var("COLUMNS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(100)
 }
 
 pub fn default_rows() -> usize {
-    std::env::var("LINES").or_else(|_| std::env::var("ROWS")).ok().and_then(|value| value.parse().ok()).unwrap_or(30)
+    std::env::var("LINES")
+        .or_else(|_| std::env::var("ROWS"))
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(30)
 }
 
 pub fn stdout_supports_color() -> bool {
@@ -118,9 +142,8 @@ pub fn stdout_supports_color() -> bool {
 /// How a submitted line should run relative to the terminal.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TurnKind {
-    /// Runs inline on the main thread with raw mode suspended — for commands
-    /// that need the cooked terminal (interactive `omp auth-broker login`) or
-    /// that return instantly.
+    /// Runs inline on the main thread with raw mode suspended for commands
+    /// that need the cooked terminal or return instantly.
     Foreground,
     /// Runs on a worker thread while the TUI stays live (spinner + Esc-cancel).
     Background,
@@ -147,10 +170,17 @@ pub struct TurnCtx<'a> {
     pub cancel: Arc<AtomicBool>,
     /// False on a background turn: stdin-reading tools must refuse.
     pub interactive: bool,
+    /// True when a picker selection submitted this command; prevents reopening
+    /// the same empty-command view for parameterless actions.
+    pub from_view: bool,
+    /// Immutable typed attachments captured for this turn; bytes are shared handles.
+    pub attachments: &'a [Attachment],
     /// Live status sink rendered next to the spinner.
     pub progress: &'a dyn Fn(&str),
     /// Per-token streaming sink for live assistant text.
     pub stream: &'a dyn Fn(&str),
+    /// Ask a question while the terminal event loop owns stdin.
+    pub ask_user: Option<&'a dyn Fn(&str, &[String]) -> Result<String, String>>,
     /// Ask the user to approve a gated tool; returns true to allow.
     pub approve: &'a dyn Fn(&str, &str) -> bool,
 }

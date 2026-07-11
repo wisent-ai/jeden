@@ -1,11 +1,21 @@
 use serde_json::{json, Map, Value};
 
-use super::common::{is_plain_object, merged_config, now_text, project_config_path, read_json_value, split_args, write_json_value};
+use super::common::{
+    is_plain_object, merged_config, now_text, project_config_path, read_json_value, split_args,
+    write_json_value,
+};
 use super::SlashContext;
+use crate::tui::{PickerItem, PickerSpec};
 
 fn browser_record_from(config: &Value) -> Value {
-    let browser = config.get("browser").filter(|value| is_plain_object(value)).cloned().unwrap_or_else(|| json!({}));
-    let mode = browser.get("mode").and_then(Value::as_str)
+    let browser = config
+        .get("browser")
+        .filter(|value| is_plain_object(value))
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    let mode = browser
+        .get("mode")
+        .and_then(Value::as_str)
         .or_else(|| config.get("browserMode").and_then(Value::as_str))
         .filter(|mode| matches!(*mode, "headless" | "visible"))
         .unwrap_or("headless");
@@ -26,24 +36,42 @@ fn format_browser_settings(label: &str, value: &Value) -> String {
 }
 
 fn browser_option_value(key: &str, value: &str) -> Value {
-    if value == "true" { return json!(true); }
-    if value == "false" { return json!(false); }
+    if value == "true" {
+        return json!(true);
+    }
+    if value == "false" {
+        return json!(false);
+    }
     if matches!(key, "slowMo" | "timeout") {
-        if let Ok(number) = value.parse::<f64>() { return json!(number); }
+        if let Ok(number) = value.parse::<f64>() {
+            return json!(number);
+        }
     }
     if key == "args" {
-        return json!(value.split(',').map(str::trim).filter(|part| !part.is_empty()).collect::<Vec<_>>());
+        return json!(value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>());
     }
     json!(value)
 }
 
 fn insert_nested_object(target: &mut Value, path: &[&str], value: Value) {
-    if !target.is_object() { *target = json!({}); }
-    let Some((key, parents)) = path.split_last() else { return; };
+    if !target.is_object() {
+        *target = json!({});
+    }
+    let Some((key, parents)) = path.split_last() else {
+        return;
+    };
     let mut cursor = target.as_object_mut().expect("object");
     for part in parents {
-        let next = cursor.entry((*part).to_string()).or_insert_with(|| json!({}));
-        if !next.is_object() { *next = json!({}); }
+        let next = cursor
+            .entry((*part).to_string())
+            .or_insert_with(|| json!({}));
+        if !next.is_object() {
+            *next = json!({});
+        }
         cursor = next.as_object_mut().expect("nested object");
     }
     cursor.insert((*key).to_string(), value);
@@ -52,7 +80,10 @@ fn insert_nested_object(target: &mut Value, path: &[&str], value: Value) {
 fn valid_option_key_part(part: &str) -> bool {
     let mut chars = part.chars();
     match chars.next() {
-        Some(first) => first.is_ascii_alphabetic() && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'),
+        Some(first) => {
+            first.is_ascii_alphabetic()
+                && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+        }
         None => false,
     }
 }
@@ -64,32 +95,127 @@ fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value), String> {
         let Some((raw_key, raw_value)) = token.split_once('=') else {
             return Err(format!("Expected key=value option, got \"{token}\"."));
         };
-        let key_parts = raw_key.split('.').filter(|part| !part.is_empty()).collect::<Vec<_>>();
+        let key_parts = raw_key
+            .split('.')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
         let Some((scope, rest)) = key_parts.split_first() else {
             return Err(format!("Invalid browser option key \"{raw_key}\"."));
         };
         let scope = *scope;
-        if key_parts.iter().any(|part| matches!(*part, "__proto__" | "constructor" | "prototype") || !valid_option_key_part(part)) {
+        if key_parts.iter().any(|part| {
+            matches!(*part, "__proto__" | "constructor" | "prototype")
+                || !valid_option_key_part(part)
+        }) {
             return Err(format!("Invalid browser option key \"{raw_key}\"."));
         }
         if scope == "launch" && !rest.is_empty() {
-            insert_nested_object(&mut launch, rest, browser_option_value(rest.last().copied().unwrap_or(""), raw_value));
+            insert_nested_object(
+                &mut launch,
+                rest,
+                browser_option_value(rest.last().copied().unwrap_or(""), raw_value),
+            );
         } else if scope == "profile" && !rest.is_empty() {
-            insert_nested_object(&mut profile, rest, browser_option_value(rest.last().copied().unwrap_or(""), raw_value));
+            insert_nested_object(
+                &mut profile,
+                rest,
+                browser_option_value(rest.last().copied().unwrap_or(""), raw_value),
+            );
         } else if raw_key == "launch" {
-            insert_nested_object(&mut launch, &["executablePath"], browser_option_value("executablePath", raw_value));
+            insert_nested_object(
+                &mut launch,
+                &["executablePath"],
+                browser_option_value("executablePath", raw_value),
+            );
         } else if raw_key == "profile" {
-            insert_nested_object(&mut profile, &["name"], browser_option_value("name", raw_value));
-        } else if matches!(raw_key, "args" | "channel" | "devtools" | "executablePath" | "slowMo" | "timeout") {
-            insert_nested_object(&mut launch, &[raw_key], browser_option_value(raw_key, raw_value));
+            insert_nested_object(
+                &mut profile,
+                &["name"],
+                browser_option_value("name", raw_value),
+            );
+        } else if matches!(
+            raw_key,
+            "args" | "channel" | "devtools" | "executablePath" | "slowMo" | "timeout"
+        ) {
+            insert_nested_object(
+                &mut launch,
+                &[raw_key],
+                browser_option_value(raw_key, raw_value),
+            );
         } else if matches!(raw_key, "name" | "profileDir" | "profile" | "userDataDir") {
-            let normalized = if raw_key == "profileDir" { "userDataDir" } else { raw_key };
-            insert_nested_object(&mut profile, &[normalized], browser_option_value(normalized, raw_value));
+            let normalized = if raw_key == "profileDir" {
+                "userDataDir"
+            } else {
+                raw_key
+            };
+            insert_nested_object(
+                &mut profile,
+                &[normalized],
+                browser_option_value(normalized, raw_value),
+            );
         } else {
             return Err(format!("Unknown browser option \"{raw_key}\". Use launch.<key>=value or profile.<key>=value."));
         }
     }
     Ok((launch, profile))
+}
+
+pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let current = browser_record_from(&merged_config(context.cwd));
+    let mode = current
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("headless");
+    let setting_keys = |key: &str| {
+        let keys = current
+            .get(key)
+            .and_then(Value::as_object)
+            .map(|settings| settings.keys().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
+        if keys.is_empty() {
+            "none".to_string()
+        } else {
+            keys.join(", ")
+        }
+    };
+    let scope = format!("{mode} · project preference");
+    let mut items = vec![
+        PickerItem::action("Show browser runtime status", "/browser status")
+            .detail(format!(
+                "Launch keys: {}; profile keys: {}",
+                setting_keys("launch"),
+                setting_keys("profile")
+            ))
+            .badge(scope.clone()),
+        PickerItem::action("Use headless browser mode", "/browser headless")
+            .detail(format!(
+                "Persist preference in {}",
+                project_config_path(context.cwd).display()
+            ))
+            .badge(if mode == "headless" {
+                "current"
+            } else {
+                "available"
+            })
+            .disabled(mode == "headless"),
+        PickerItem::action("Use visible browser mode", "/browser visible")
+            .detail(format!(
+                "Persist preference in {}",
+                project_config_path(context.cwd).display()
+            ))
+            .badge(if mode == "visible" {
+                "current"
+            } else {
+                "available"
+            })
+            .disabled(mode == "visible"),
+    ];
+    let options = PickerItem::action("Configure launch or profile options", "/browser visible ")
+        .detail("Edit mode and launch.<key>=value or profile.<key>=value before submitting")
+        .badge("INPUT")
+        .prefill();
+    items.push(options);
+    PickerSpec::new("Browser runtime", items)
 }
 
 pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
@@ -100,16 +226,39 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
     let file = project_config_path(context.cwd);
     if verb.is_empty() || verb == "status" {
         return Ok([
-            format!("Browser runtime preference: {}", current.get("mode").and_then(Value::as_str).unwrap_or("headless")),
-            format!("Updated: {}", current.get("updatedAt").and_then(Value::as_str).unwrap_or("not set locally")),
+            format!(
+                "Browser runtime preference: {}",
+                current
+                    .get("mode")
+                    .and_then(Value::as_str)
+                    .unwrap_or("headless")
+            ),
+            format!(
+                "Updated: {}",
+                current
+                    .get("updatedAt")
+                    .and_then(Value::as_str)
+                    .unwrap_or("not set locally")
+            ),
             format!("Config: {}", file.display()),
-            format_browser_settings("Launch settings", current.get("launch").unwrap_or(&Value::Null)),
-            format_browser_settings("Profile settings", current.get("profile").unwrap_or(&Value::Null)),
-            "Scope: configures the browser tool/controller backend selected by local Jeden config.".into(),
-        ].join("\n"));
+            format_browser_settings(
+                "Launch settings",
+                current.get("launch").unwrap_or(&Value::Null),
+            ),
+            format_browser_settings(
+                "Profile settings",
+                current.get("profile").unwrap_or(&Value::Null),
+            ),
+            "Scope: configures the browser tool/controller backend selected by local Jeden config."
+                .into(),
+        ]
+        .join("\n"));
     }
     if !matches!(verb, "headless" | "visible") {
-        return Err("Usage: /browser [status|headless|visible] [launch.<key>=value] [profile.<key>=value]".into());
+        return Err(
+            "Usage: /browser [status|headless|visible] [launch.<key>=value] [profile.<key>=value]"
+                .into(),
+        );
     }
     let rest = argv.split_first().map(|(_, rest)| rest).unwrap_or(&[]);
     let (launch, profile) = parse_browser_options(rest)
@@ -117,25 +266,58 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
     let mut merged_launch = current.get("launch").cloned().unwrap_or_else(|| json!({}));
     let mut merged_profile = current.get("profile").cloned().unwrap_or_else(|| json!({}));
     if let (Some(target), Some(source)) = (merged_launch.as_object_mut(), launch.as_object()) {
-        for (key, value) in source { target.insert(key.clone(), value.clone()); }
+        for (key, value) in source {
+            target.insert(key.clone(), value.clone());
+        }
     }
     if let (Some(target), Some(source)) = (merged_profile.as_object_mut(), profile.as_object()) {
-        for (key, value) in source { target.insert(key.clone(), value.clone()); }
+        for (key, value) in source {
+            target.insert(key.clone(), value.clone());
+        }
     }
     let mut project = read_json_value(&file);
-    if !project.is_object() { project = json!({}); }
+    if !project.is_object() {
+        project = json!({});
+    }
     let object = project.as_object_mut().expect("project object");
     let mut browser = Map::new();
     browser.insert("mode".into(), json!(verb));
     browser.insert("updatedAt".into(), json!(now_text()));
-    if merged_launch.as_object().map(|map| !map.is_empty()).unwrap_or(false) { browser.insert("launch".into(), merged_launch.clone()); }
-    if merged_profile.as_object().map(|map| !map.is_empty()).unwrap_or(false) { browser.insert("profile".into(), merged_profile.clone()); }
+    if merged_launch
+        .as_object()
+        .map(|map| !map.is_empty())
+        .unwrap_or(false)
+    {
+        browser.insert("launch".into(), merged_launch.clone());
+    }
+    if merged_profile
+        .as_object()
+        .map(|map| !map.is_empty())
+        .unwrap_or(false)
+    {
+        browser.insert("profile".into(), merged_profile.clone());
+    }
     object.insert("browser".into(), Value::Object(browser));
     object.remove("browserMode");
     write_json_value(&file, &project)?;
-    let mut lines = vec![format!("Browser runtime preference set to {verb}."), format!("Config: {}", file.display())];
-    if merged_launch.as_object().map(|map| !map.is_empty()).unwrap_or(false) { lines.push(format_browser_settings("Launch settings", &merged_launch)); }
-    if merged_profile.as_object().map(|map| !map.is_empty()).unwrap_or(false) { lines.push(format_browser_settings("Profile settings", &merged_profile)); }
+    let mut lines = vec![
+        format!("Browser runtime preference set to {verb}."),
+        format!("Config: {}", file.display()),
+    ];
+    if merged_launch
+        .as_object()
+        .map(|map| !map.is_empty())
+        .unwrap_or(false)
+    {
+        lines.push(format_browser_settings("Launch settings", &merged_launch));
+    }
+    if merged_profile
+        .as_object()
+        .map(|map| !map.is_empty())
+        .unwrap_or(false)
+    {
+        lines.push(format_browser_settings("Profile settings", &merged_profile));
+    }
     lines.push("Honest scope: this configures Jeden browser-tool/controller preference only; browser availability still depends on installed local tools or MCP adapters.".into());
     Ok(lines.join("\n"))
 }

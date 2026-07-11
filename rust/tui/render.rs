@@ -1,29 +1,23 @@
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
+use std::path::Path;
 
-use super::{APP, ASSISTANT_TITLE, FrameOptions, Message, PRODUCT, PromptStatus, SLASH_COMMAND_HINTS, VERSION, WISENT_MARK};
-use super::text::{clamp_visible, compact_path, pad_visible, paint, take_visible, visible_len, wrap_line};
+use super::text::{
+    clamp_visible, compact_path, paint, sanitize_terminal_text, visible_len, wrap_line,
+};
+use super::{
+    AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, PromptStatus,
+    RegistryUiRuntime, UiRuntimeAdapter, ASSISTANT_TITLE, PRODUCT, VERSION,
+};
 
 pub(super) fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> Vec<String> {
-    let clean_title = format!(" {} ", title);
-    let inner = width.saturating_sub(4).max(clean_title.chars().count() + 2).max(8);
-    let mut normalized = Vec::new();
+    let width = width.max(1);
+    let mut out = vec![paint(&sanitize_terminal_text(title), "bold", color)];
     for row in rows {
-        for part in row.split('\n') {
-            normalized.extend(wrap_line(part, inner));
+        let safe = sanitize_terminal_text(row);
+        for part in safe.split('\n') {
+            out.extend(wrap_line(part, width));
         }
     }
-    let top = format!(
-        "{}{}{}{}",
-        paint("╭", "cyan", color),
-        paint(&clean_title, "bold", color),
-        paint(&"─".repeat((inner + 2).saturating_sub(clean_title.chars().count())), "cyan", color),
-        paint("╮", "cyan", color)
-    );
-    let mut out = vec![top];
-    for row in normalized {
-        out.push(format!("{} {} {}", paint("│", "cyan", color), pad_visible(&row, inner), paint("│", "cyan", color)));
-    }
-    out.push(format!("{}{}{}", paint("╰", "cyan", color), paint(&"─".repeat(inner + 2), "cyan", color), paint("╯", "cyan", color)));
     out
 }
 
@@ -37,56 +31,45 @@ fn role_color(role: &str) -> &'static str {
 }
 
 pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Vec<String> {
-    let title = if message.role == "assistant" { ASSISTANT_TITLE } else { message.role.as_str() };
-    boxed(title, &message.text.split('\n').map(str::to_string).collect::<Vec<_>>(), width, color)
+    let width = if io::stdout().is_terminal() {
+        crossterm::terminal::size()
+            .map(|(columns, _)| width.min(usize::from(columns)).max(1))
+            .unwrap_or(width.max(1))
+    } else {
+        width.max(1)
+    };
+    let title = sanitize_terminal_text(if message.role == "assistant" { ASSISTANT_TITLE } else { message.role.as_str() });
+    let safe = sanitize_terminal_text(&message.text);
+    let rows = safe.split('\n').map(|line| format!("  {line}")).collect::<Vec<_>>();
+    boxed(&title, &rows, width.max(1), color)
         .into_iter()
         .map(|line| paint(&line, role_color(&message.role), color))
         .collect()
 }
 
-pub(super) fn welcome_panel(width: usize, model: &str, cwd: &str, write_status: &str, command_status: &str, color: bool) -> Vec<String> {
-    let title = format!("{} {} {}", PRODUCT, APP, VERSION);
-    let inner = width.saturating_sub(4).max(48);
-    let left_width = (inner / 3).clamp(24, 34);
-    let right_width = inner.saturating_sub(left_width + 3).max(24);
-    let cwd_label = compact_path(cwd);
-    let mut left = vec![
+pub(super) fn welcome_panel(
+    width: usize,
+    model: &str,
+    cwd: &str,
+    write_status: &str,
+    command_status: &str,
+    color: bool,
+) -> Vec<String> {
+    let width = width.max(1);
+    let model = sanitize_terminal_text(if model.is_empty() { "default" } else { model });
+    let write_status = sanitize_terminal_text(write_status);
+    let command_status = sanitize_terminal_text(command_status);
+    let brand = paint(PRODUCT, "bold", color);
+    let version = paint(VERSION, "dim", color);
+    let workspace = sanitize_terminal_text(&compact_path(cwd));
+    vec![
+        clamp_visible(&format!("{brand}  {version}"), width),
+        clamp_visible(&format!("model {model} | workspace {workspace}"), width),
+        clamp_visible(&format!("permissions: write {write_status} | command {command_status}"), width),
+        paint("[Enter] send  [Alt+Enter] newline  [Ctrl+C] exit", "dim", color),
         String::new(),
-        "Welcome back!".to_string(),
-        String::new(),
-    ];
-    left.extend(WISENT_MARK.iter().map(|line| line.to_string()));
-    left.extend([
-        String::new(),
-        if model.is_empty() { "default".to_string() } else { model.to_string() },
-        "Jeden CLI".to_string(),
-    ]);
-    let right = [
-        "Tips".to_string(),
-        "Type a task and press Enter".to_string(),
-        "/help for commands".to_string(),
-        "/model to switch routes".to_string(),
-        "/update runs automated self-update".to_string(),
-        "! and $ shells are not wired yet".to_string(),
-        "────────────────────────".to_string(),
-        format!("Workspace: {}", cwd_label),
-        format!("Tool gates: write {} · command {}", write_status, command_status),
-        "CLI: jeden sessions".to_string(),
-        "CLI: jeden artifacts <id>".to_string(),
-    ];
-    let mut rows = Vec::new();
-    for index in 0..left.len().max(right.len()) {
-        let left_cell = clamp_visible(&left.get(index).cloned().unwrap_or_default(), left_width);
-        let right_cell = clamp_visible(&right.get(index).cloned().unwrap_or_default(), right_width);
-        rows.push(format!(
-            "{} │ {}",
-            pad_visible(&left_cell, left_width),
-            pad_visible(&right_cell, right_width)
-        ));
-    }
-    boxed(&title, &rows, width, color)
+    ]
 }
-
 
 fn slash_query(input_text: &str) -> Option<String> {
     let text = input_text.trim_start();
@@ -100,15 +83,17 @@ fn slash_query(input_text: &str) -> Option<String> {
     Some(query.to_ascii_lowercase())
 }
 
-pub(super) fn slash_matches(input_text: &str) -> Vec<(&'static str, &'static str)> {
+pub(super) fn slash_matches(input_text: &str) -> Vec<(String, String)> {
     let Some(prefix) = slash_query(input_text) else {
         return Vec::new();
     };
-    SLASH_COMMAND_HINTS
-        .iter()
-        .filter(|(name, _)| name.starts_with(&prefix))
+    crate::capability::snapshot()
+        .executable_kind(crate::capability::CapabilityKind::SlashCommand)
+        .filter_map(|descriptor| {
+            let action = descriptor.ui.action.as_deref()?.strip_prefix('/')?;
+            action.starts_with(&prefix).then(|| (action.to_string(), descriptor.ui.description.clone()))
+        })
         .take(6)
-        .copied()
         .collect()
 }
 
@@ -118,7 +103,12 @@ pub(super) fn complete_slash_input(input_text: &str, selected: usize) -> Option<
     Some(format!("/{name} "))
 }
 
-pub(super) fn slash_hint_panel(input_text: &str, width: usize, color: bool, selected: usize) -> Vec<String> {
+pub(super) fn slash_hint_panel(
+    input_text: &str,
+    width: usize,
+    color: bool,
+    selected: usize,
+) -> Vec<String> {
     let matches = slash_matches(input_text);
     if matches.is_empty() {
         return Vec::new();
@@ -128,72 +118,144 @@ pub(super) fn slash_hint_panel(input_text: &str, width: usize, color: bool, sele
         .iter()
         .enumerate()
         .map(|(index, (name, description))| {
-            let marker = if index == selected { "›" } else { " " };
-            format!("{marker} /{:<15} — {}", name, description)
+            let marker = if index == selected { ">" } else { " " };
+            format!("{marker} /{:<15}  {}", name, description)
         })
         .collect();
     boxed("slash suggestions", &rows, width, color)
 }
 
-pub(super) fn compact_prompt(width: usize, status: &PromptStatus, input_text: &str, _busy: bool, color: bool) -> Vec<String> {
-    let inner = width.saturating_sub(2).max(48);
-    let model = if status.model.is_empty() { "default" } else { status.model.as_str() };
-    let tier = if status.service_tier.is_empty() { "default" } else { status.service_tier.as_str() };
-    let branch = status
-        .branch
-        .as_ref()
-        .map(|branch| format!(" > ⑂ {}{}", branch, if status.dirty_count > 0 { format!(" ?{}", status.dirty_count) } else { String::new() }))
-        .unwrap_or_default();
-    let context = match (status.context_percent, status.context_limit.as_deref()) {
-        (Some(percent), Some(limit)) => format!(" > ◫ {:.1}%/{}", percent, limit),
-        (_, Some(limit)) => format!(" > ◫ {}", limit),
-        _ => String::new(),
-    };
-    let cost = status.cost.as_ref().map(|cost| format!(" > {}", cost)).unwrap_or_default();
-    let label = format!(
-        " jeden > ⬢ {} > ↯ {} > 📁 {}{}{}{} ▶ ",
-        model,
-        tier,
-        compact_path(&status.cwd),
-        branch,
-        context,
-        cost
-    );
-    let safe_label = if visible_len(&label) > inner.saturating_sub(4) {
-        format!("{}… ▶ ", take_visible(&label, inner.saturating_sub(7)))
-    } else {
-        label
-    };
-    let top = format!(
-        "{}{}{}{}",
-        paint("╭──", "cyan", color),
-        safe_label,
-        paint(&"─".repeat(inner.saturating_sub(visible_len(&safe_label) + 2)), "cyan", color),
-        paint("╮", "cyan", color)
-    );
-    // Render the (possibly multiline) input: first line after the ╰─ caret,
-    // continuation lines indented under it. Single-line input is unchanged.
-    let mut out = vec![top];
-    let input_lines: Vec<&str> = input_text.split('\n').collect();
-    for (index, line) in input_lines.iter().enumerate() {
-        if index == 0 {
-            out.push(format!("{} {}", paint("╰─", "cyan", color), line));
-        } else {
-            out.push(format!("   {}", line));
-        }
+pub(super) fn compact_prompt(
+    width: usize,
+    status: &PromptStatus,
+    input_text: &str,
+    _busy: bool,
+    color: bool,
+) -> Vec<String> {
+    let width = width.max(1);
+    let content_width = width.saturating_sub(2).max(1);
+    let model = sanitize_terminal_text(if status.model.is_empty() { "default" } else { status.model.as_str() });
+    let mut segments = vec![format!("jeden. {model}"), sanitize_terminal_text(&compact_path(&status.cwd))];
+    if !status.service_tier.is_empty() { segments.push(format!("route {}", sanitize_terminal_text(&status.service_tier))); }
+    if let Some(branch) = &status.branch {
+        segments.push(format!("{}{}", sanitize_terminal_text(branch), if status.dirty_count > 0 { " dirty" } else { "" }));
     }
+    match (status.context_percent, status.context_limit.as_deref()) {
+        (Some(percent), Some(limit)) => segments.push(format!("context {percent:.1}% {}", sanitize_terminal_text(limit))),
+        (_, Some(limit)) => segments.push(format!("context {}", sanitize_terminal_text(limit))),
+        (Some(percent), None) => segments.push(format!("context {percent:.1}%")),
+        _ => {}
+    }
+    if let Some(cost) = &status.cost { segments.push(format!("cost {}", sanitize_terminal_text(cost))); }
+    let runtime = RegistryUiRuntime.runtime_status(Path::new(&status.cwd));
+    if let Some(route_health) = runtime.route_health { segments.push(format!("route {route_health}")); }
+    if let Some(active_jobs) = runtime.active_jobs { segments.push(format!("jobs {active_jobs}")); }
+    if runtime.services_degraded > 0 || runtime.services_unavailable > 0 {
+        segments.push(format!("services {}/{}", runtime.services_degraded, runtime.services_unavailable));
+    }
+    if !status.write_status.is_empty() { segments.push(format!("write {}", sanitize_terminal_text(&status.write_status))); }
+    let status_line = clamp_visible(&segments.join(" | "), width);
+    let mut out = vec![paint(&status_line, "dim", color)];
+    let safe_input = sanitize_terminal_text(input_text);
+    let mut first = true;
+    for logical in safe_input.split('\n') {
+        let wrapped = wrap_line(logical, content_width);
+        for line in wrapped {
+            out.push(format!("{}{}", if first { "> " } else { "  " }, line));
+            first = false;
+        }
+        if logical.is_empty() && !first { continue; }
+    }
+    if first { out.push("> ".to_string()); }
     out
 }
 
+pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usize, width: usize) {
+    let rendered_input_rows = lines.len().saturating_sub(1);
+    let content_width = width.saturating_sub(2).max(1);
+    let safe_prefix = sanitize_terminal_text(&input[..cursor.min(input.len())]);
+    let mut cursor_row = 0usize;
+    let mut cursor_column = 0usize;
+    for logical in safe_prefix.split('\n') {
+        if cursor_row > 0 || cursor_column > 0 { cursor_row += 1; }
+        let logical_width = visible_len(logical);
+        if logical_width == 0 {
+            cursor_column = 0;
+        } else {
+            cursor_row += (logical_width - 1) / content_width;
+            cursor_column = ((logical_width - 1) % content_width) + 1;
+        }
+    }
+    let up = rendered_input_rows.saturating_sub(cursor_row + 1);
+    let Some(last) = lines.last_mut() else { return; };
+    if up > 0 { last.push_str(&format!("\x1b[{up}A")); }
+    last.push('\r');
+    let column = cursor_column + 2;
+    if column > 0 { last.push_str(&format!("\x1b[{column}C")); }
+}
+
+pub(super) fn attachment_lines(tray: &AttachmentTray, width: usize, color: bool) -> Vec<String> {
+    if tray.items().is_empty() { return Vec::new(); }
+    let mut lines = vec![paint(&format!("Attachments ({})", tray.items().len()), "bold", color)];
+    for attachment in tray.items() {
+        lines.push(clamp_visible(&format!("  {}", attachment.fallback_label()), width.max(1)));
+    }
+    lines
+}
+
+pub(super) fn busy_editor_lines(
+    editor: &EditorState,
+    queue: &FollowUpQueue,
+    width: usize,
+    color: bool,
+) -> Vec<String> {
+    let width = width.max(1);
+    let content_width = width.saturating_sub(2).max(1);
+    let label = if queue.is_empty() { "Follow-up".to_string() } else { format!("Follow-up ({} queued)", queue.len()) };
+    let mut lines = vec![paint("[Enter] queue  [Ctrl+Enter] steer  [Alt+Up] recall", "dim", color), paint(&label, "dim", color)];
+    let safe = sanitize_terminal_text(editor.text());
+    let mut first = true;
+    for logical in safe.split('\n') {
+        for part in wrap_line(logical, content_width) {
+            lines.push(format!("{}{}", if first { "> " } else { "  " }, part));
+            first = false;
+        }
+    }
+    if first { lines.push("> ".into()); }
+    lines
+}
+
 pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
-    let width = options.columns.min(120).max(50);
-    let prompt = compact_prompt(width, &options.status, &options.input_text, options.busy, options.color);
-    let slash_hints = slash_hint_panel(&options.input_text, width, options.color, options.slash_selection);
+    let width = options.columns.min(112).max(1);
+    let prompt = compact_prompt(
+        width,
+        &options.status,
+        &options.input_text,
+        options.busy,
+        options.color,
+    );
+    let slash_hints = slash_hint_panel(
+        &options.input_text,
+        width,
+        options.color,
+        options.slash_selection,
+    );
     let reserved = prompt.len() + slash_hints.len() + 1;
     let available_rows = options.rows.saturating_sub(reserved).max(4);
-    let message_lines: Vec<String> = options.messages.iter().flat_map(|message| format_message(message, width, options.color)).collect();
+    let message_lines: Vec<String> = options
+        .messages
+        .iter()
+        .flat_map(|message| format_message(message, width, options.color))
+        .collect();
     let mut main_lines = if message_lines.is_empty() {
-        welcome_panel(width, &options.status.model, &options.status.cwd, &options.status.write_status, &options.status.command_status, options.color)
+        welcome_panel(
+            width,
+            &options.status.model,
+            &options.status.cwd,
+            &options.status.write_status,
+            &options.status.command_status,
+            options.color,
+        )
     } else {
         message_lines
     };
@@ -213,14 +275,27 @@ pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
 }
 
 pub fn render_terminal_frame(options: &FrameOptions) -> String {
-    let mut lines = vec!["\x1b[2J\x1b[H".to_string()];
-    lines.extend(frame_lines(options));
-    lines.join("\n")
+    let lines = frame_lines(options);
+    if options.color {
+        format!("\x1b[2J\x1b[H{}", lines.join("\n"))
+    } else {
+        lines.into_iter().map(|line| sanitize_terminal_text(&line)).collect::<Vec<_>>().join("\n")
+    }
 }
 
 pub fn render_to_stdout(options: &FrameOptions) -> io::Result<()> {
     let mut stdout = io::stdout();
-    stdout.write_all(render_terminal_frame(options).as_bytes())?;
-    stdout.write_all(b"\x1b[?25h")?;
+    if stdout.is_terminal() {
+        stdout.write_all(render_terminal_frame(options).as_bytes())?;
+        stdout.write_all(b"\x1b[?25h")?;
+    } else {
+        let plain = frame_lines(options)
+            .into_iter()
+            .map(|line| sanitize_terminal_text(&line))
+            .collect::<Vec<_>>()
+            .join("\n");
+        stdout.write_all(plain.as_bytes())?;
+        stdout.write_all(b"\n")?;
+    }
     stdout.flush()
 }

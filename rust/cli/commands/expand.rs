@@ -89,7 +89,11 @@ fn replace_arg_slices(template: &str, positionals: &[String]) -> (String, bool) 
     (out, used)
 }
 
-fn render_prompt_variables(template: &str, raw_args: &str, positionals: &[String]) -> (String, bool) {
+fn render_prompt_variables(
+    template: &str,
+    raw_args: &str,
+    positionals: &[String],
+) -> (String, bool) {
     let mut out = String::new();
     let mut rest = template;
     let mut used = false;
@@ -105,10 +109,18 @@ fn render_prompt_variables(template: &str, raw_args: &str, positionals: &[String
             "ARGUMENTS" | "arguments" => Some(raw_args.to_string()),
             "args" => Some(positionals.join(" ")),
             _ => {
-                if let Some(index) = expr.strip_prefix("args.").and_then(|raw| raw.parse::<usize>().ok()) {
+                if let Some(index) = expr
+                    .strip_prefix("args.")
+                    .and_then(|raw| raw.parse::<usize>().ok())
+                {
                     Some(positionals.get(index).cloned().unwrap_or_default())
-                } else if let Some(raw) = expr.strip_prefix("args[").and_then(|raw| raw.strip_suffix(']')) {
-                    raw.parse::<usize>().ok().map(|index| positionals.get(index).cloned().unwrap_or_default())
+                } else if let Some(raw) = expr
+                    .strip_prefix("args[")
+                    .and_then(|raw| raw.strip_suffix(']'))
+                {
+                    raw.parse::<usize>()
+                        .ok()
+                        .map(|index| positionals.get(index).cloned().unwrap_or_default())
                 } else {
                     None
                 }
@@ -141,7 +153,10 @@ pub(crate) fn expand_file_command(template: &str, args: &str) -> String {
         || DOLLAR_POSITIONALS.iter().any(|token| out.contains(token));
     out = out.replace("$ARGUMENTS", args).replace("$@", args);
     for (index, token) in DOLLAR_POSITIONALS.iter().enumerate() {
-        out = out.replace(token, positionals.get(index).map(String::as_str).unwrap_or(""));
+        out = out.replace(
+            token,
+            positionals.get(index).map(String::as_str).unwrap_or(""),
+        );
     }
     let (rendered, used_prompt_variable) = render_prompt_variables(&out, args, &positionals);
     out = rendered;

@@ -20,7 +20,7 @@ impl Conversation {
         let mut recorder = SessionRecorder::new(cwd);
         recorder.ensure()?;
         Ok(Self {
-            messages: vec![json!({ "role": "system", "content": system_prompt(cwd) })],
+            messages: vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })],
             recorder,
         })
     }
@@ -32,13 +32,20 @@ impl Conversation {
     /// Rough token estimate (~4 chars/token) over the live message window, for
     /// the status line. Not billing-accurate; a live signal, not a guess.
     pub(crate) fn approx_tokens(&self) -> usize {
-        let chars: usize = self.messages.iter().map(|m| m.to_string().chars().count()).sum();
+        let chars: usize = self
+            .messages
+            .iter()
+            .map(|m| m.to_string().chars().count())
+            .sum();
         chars / 4
     }
 
     /// Number of non-system messages currently held.
     pub(crate) fn turn_len(&self) -> usize {
-        self.messages.iter().filter(|m| m.get("role").and_then(Value::as_str) != Some("system")).count()
+        self.messages
+            .iter()
+            .filter(|m| m.get("role").and_then(Value::as_str) != Some("system"))
+            .count()
     }
 
     pub(super) fn auto_compaction_threshold() -> Option<usize> {
@@ -46,9 +53,9 @@ impl Conversation {
             return Some(threshold);
         }
         let limit = env_usize("JEDEN_CONTEXT_LIMIT")?;
-        // OMP's default is contextWindow - max(15% of contextWindow, reserveTokens).
-        // Jeden only has an explicit limit when JEDEN_CONTEXT_LIMIT is set, so use
-        // that as the window and clamp tiny test/development windows to 85%.
+        // Compact before the context limit, reserving the larger of 15% of the
+        // window or the configured token reserve. Clamp tiny test and development
+        // windows to 85% when the reserve would consume the entire window.
         let reserve = env_usize("JEDEN_COMPACTION_RESERVE").unwrap_or(16_384);
         let fifteen_percent = ((limit as f64) * 0.15).ceil() as usize;
         let margin = std::cmp::max(fifteen_percent, reserve);
@@ -67,7 +74,10 @@ impl Conversation {
         Some(std::cmp::max(1, content.chars().count() / 4))
     }
 
-    pub(super) fn prune_tool_results_if_needed(&mut self, threshold: usize) -> Result<usize, String> {
+    pub(super) fn prune_tool_results_if_needed(
+        &mut self,
+        threshold: usize,
+    ) -> Result<usize, String> {
         if self.approx_tokens() < threshold {
             return Ok(0);
         }
@@ -78,8 +88,12 @@ impl Conversation {
         let mut protected_latest = false;
         let mut candidates = Vec::new();
         for (idx, message) in self.messages.iter().enumerate().rev() {
-            let Some(content) = message.get("content").and_then(Value::as_str) else { continue; };
-            let Some(tokens) = Self::tool_result_tokens(content) else { continue; };
+            let Some(content) = message.get("content").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(tokens) = Self::tool_result_tokens(content) else {
+                continue;
+            };
             if !protected_latest {
                 protected_latest = true;
                 protected_tokens = protected_tokens.saturating_add(tokens);
@@ -93,7 +107,10 @@ impl Conversation {
                 candidates.push((idx, tokens));
             }
         }
-        let needed_savings = self.approx_tokens().saturating_sub(threshold).saturating_add(1);
+        let needed_savings = self
+            .approx_tokens()
+            .saturating_sub(threshold)
+            .saturating_add(1);
         let target_savings = std::cmp::max(needed_savings, min_savings);
         let potential_savings: usize = candidates.iter().map(|(_, tokens)| *tokens).sum();
         if potential_savings < target_savings {
@@ -113,7 +130,10 @@ impl Conversation {
             let replacement = json!({"type": "tool_result", "result": format!("[Output truncated - {} tokens]", tokens)}).to_string();
             self.messages[*idx]["content"] = json!(replacement);
         }
-        self.recorder.record("tool_prune", json!({ "pruned": selected.len(), "savedTokensApprox": saved, "threshold": threshold }))?;
+        self.recorder.record(
+            "tool_prune",
+            json!({ "pruned": selected.len(), "savedTokensApprox": saved, "threshold": threshold }),
+        )?;
         Ok(saved)
     }
 }

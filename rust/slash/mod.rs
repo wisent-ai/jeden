@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::slash::common::{split_args, split_head};
 use crate::slash::state::{read_mode_state, write_mode_state};
 use crate::tools;
+use crate::tui::{PickerItem, PickerSpec};
 
 mod browser;
 mod commands;
@@ -46,7 +47,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/mcp" => Some(commands::mcp::handle_mcp(args, context)),
         "/ssh" => Some(commands::ssh::handle_ssh(args, context)),
         "/browser" => Some(browser::handle_browser(args, context)),
-        "/extensions" | "/status" => Some(plugins::handle_extensions(context)),
+        "/extensions" => Some(plugins::handle_extensions(context)),
+        "/status" => Some(Ok(crate::capability::status_text(context.cwd))),
         "/plugins" => Some(plugins::handle_plugins(args, context)),
         "/hooks" => Some(Ok(crate::hooks::describe_hooks(context.cwd))),
         "/reload-plugins" => Some(plugins::handle_reload_plugins(context)),
@@ -77,8 +79,112 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
     };
     if changed {
         if let Some(Ok(_)) = &result {
-            if let Err(error) = write_mode_state(context.cwd, &state) { return Some(Err(error)); }
+            if let Err(error) = write_mode_state(context.cwd, &state) {
+                return Some(Err(error));
+            }
         }
     }
     result
+}
+fn read_only_picker(title: &str, text: String) -> PickerSpec {
+    let mut items = text
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| PickerItem::action(line, "").disabled(true))
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        items.push(PickerItem::action("No information available", "").disabled(true));
+    }
+    PickerSpec::new(title, items)
+}
+
+fn tools_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let mut items = tools::list_tools(context.cwd)
+        .into_iter()
+        .map(|tool| {
+            PickerItem::action(tool.name, "")
+                .detail(tool.description)
+                .badge("TOOL")
+                .disabled(true)
+        })
+        .collect::<Vec<_>>();
+    if items.is_empty() {
+        items.push(PickerItem::action("No tools available", "").disabled(true));
+    }
+    PickerSpec::new("Available tools", items)
+}
+
+fn capability_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let mut items = crate::capability::management_items(context.cwd).into_iter().map(|(label, detail, badge, action, disabled)| {
+        let mut item = PickerItem::action(label, action.unwrap_or_default()).detail(detail).badge(badge);
+        if disabled { item = item.disabled(true); }
+        item
+    }).collect::<Vec<_>>();
+    if items.is_empty() {
+        items.push(PickerItem::action("No capabilities discovered", "").disabled(true));
+    }
+    PickerSpec::new("Capability status", items)
+}
+
+pub(crate) fn interactive_picker(
+    context: &SlashContext<'_>,
+    input: &str,
+) -> Option<Result<PickerSpec, String>> {
+    let (command, args) = split_head(input.trim());
+    if !args.trim().is_empty() {
+        return None;
+    }
+    let view = crate::capability::view_descriptor(context.cwd, command)?;
+    if !view.health.is_executable() || !view.ui.executable {
+        let detail = view.health.detail.unwrap_or_else(|| "Capability backend unavailable".into());
+        return Some(Ok(PickerSpec::new(
+            format!("{} unavailable", view.ui.label),
+            vec![PickerItem::action(view.ui.label, "").detail(detail).badge("UNAVAILABLE").disabled(true)],
+        )));
+    }
+    let state = read_mode_state(context.cwd);
+    let picker = match command.to_ascii_lowercase().as_str() {
+        "/plan" => Ok(modes::todo::plan_picker(&state)),
+        "/guided-goal" | "/goal" => Ok(modes::todo::goal_picker(&state)),
+        "/loop" => Ok(modes::todo::loop_picker(&state)),
+        "/fast" => Ok(modes::todo::fast_picker(&state)),
+        "/advisor" => Ok(modes::session::advisor_picker(&state, context)),
+        "/approval" => Ok(modes::session::approval_picker(&state)),
+        "/todo" => Ok(modes::todo::todo_picker(&state)),
+        "/session" => Ok(modes::session::session_picker(context)),
+        "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state)),
+        "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
+            Ok(modes::session::lifecycle_picker(&state, context))
+        }
+        "/mcp" => Ok(commands::mcp::mcp_picker(context)),
+        "/ssh" => Ok(commands::ssh::ssh_picker(context)),
+        "/memory" => commands::memory::memory_picker(context),
+        "/usage" => Ok(commands::usage::usage_picker(context)),
+        "/browser" => Ok(browser::browser_picker(context)),
+        "/stats" => Ok(commands::stats_picker(context)),
+        "/debug" => Ok(commands::debug_picker(context)),
+        "/tools" => Ok(tools_picker(context)),
+        "/extensions" => Ok(plugins::extensions_picker(context)),
+        "/status" => Ok(capability_picker(context)),
+        "/plugins" => Ok(plugins::plugins_picker(context)),
+        "/reload-plugins" => Ok(plugins::reload_plugins_picker(context)),
+        "/marketplace" => Ok(plugins::marketplace::marketplace_picker(context)),
+        "/jobs" => Ok(session::jobs_picker(context)),
+        "/collab" => Ok(session::collab_picker(context)),
+        "/join" => Ok(session::join_picker(context)),
+        "/leave" => Ok(session::leave_picker(context)),
+        "/share" => Ok(session::share_picker(context)),
+        "/export" => Ok(session::export_picker(context)),
+        "/dump" => Ok(session::dump_picker(context)),
+        "/copy" => Ok(session::copy_picker()),
+        "/tan" => Ok(session::tan_picker(context)),
+        "/omfg" => Ok(session::omfg_picker(context)),
+        "/agents" => Ok(session::jobs_picker(context)),
+        "/hooks" => Ok(read_only_picker("Lifecycle hooks", crate::hooks::describe_hooks(context.cwd))),
+        "/changelog" => commands::handle_changelog()
+            .map(|text| read_only_picker("Changelog", text)),
+        "/hotkeys" => Ok(read_only_picker("Keyboard shortcuts", "Enter submit\nAlt-Enter newline\nUp/Down navigate\nTab complete\nEsc close or cancel\nCtrl-C exit".into())),
+        _ => return None,
+    };
+    Some(picker)
 }

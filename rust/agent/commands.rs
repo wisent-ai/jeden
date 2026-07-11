@@ -2,7 +2,9 @@ use super::*;
 
 fn split_head(args: &str) -> (&str, &str) {
     let text = args.trim();
-    if text.is_empty() { return ("", ""); }
+    if text.is_empty() {
+        return ("", "");
+    }
     match text.find(char::is_whitespace) {
         Some(index) => (&text[..index], text[index..].trim()),
         None => (text, ""),
@@ -28,7 +30,9 @@ pub(crate) fn retry_task(args: &Args) -> Result<String, String> {
 /// Build the scoped prompt text for a `/btw` side question.
 pub(crate) fn btw_task(question: &str) -> Result<String, String> {
     let question = question.trim();
-    if question.is_empty() { return Err("Usage: /btw <side question>".into()); }
+    if question.is_empty() {
+        return Err("Usage: /btw <side question>".into());
+    }
     Ok(format!(
         "Answer this side question using the current session context.\nKeep it separate from the main task: do not change files unless the side question explicitly asks for file changes.\nQuestion: {}",
         question
@@ -51,9 +55,15 @@ pub(crate) fn retry_command_with(args: &Args, hooks: &mut RunHooks) -> Result<St
     run_command_with(&retry_args, hooks)
 }
 
-pub(crate) fn btw_command_with(args: &Args, question: &str, hooks: &mut RunHooks) -> Result<String, String> {
+pub(crate) fn btw_command_with(
+    args: &Args,
+    question: &str,
+    hooks: &mut RunHooks,
+) -> Result<String, String> {
     let question = question.trim();
-    if question.is_empty() { return Err("Usage: /btw <side question>".into()); }
+    if question.is_empty() {
+        return Err("Usage: /btw <side question>".into());
+    }
     let mut side_args = args.clone();
     side_args.command = "run".into();
     side_args.positionals = vec![format!(
@@ -70,14 +80,19 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
 /// Run a session-scoped slash (`/compact`, `/handoff`, `/context`) in the
 /// one-shot CLI by loading the last session's history into a Conversation and
 /// invoking the same real methods the interactive path uses — no divergent stub.
-fn run_session_command(args: &Args, command: &str, rest: &str, hooks: &mut RunHooks) -> Result<String, String> {
+fn run_session_command(
+    args: &Args,
+    command: &str,
+    rest: &str,
+    hooks: &mut RunHooks,
+) -> Result<String, String> {
     let last = read_mode_state(&args.cwd)
         .pointer("/lastSessionPath")
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .filter(|p| p.exists())
         .ok_or("No prior session found. Run a task first, then /compact, /handoff, or /context.")?;
-    let turns = crate::session_conversation_turns(&last);
+    let turns = crate::session_conversation_turns(&last)?;
     let mut conversation = Conversation::new(&args.cwd)?;
     conversation.load_history(&args.cwd, turns)?;
     match command {
@@ -97,13 +112,30 @@ fn run_session_command(args: &Args, command: &str, rest: &str, hooks: &mut RunHo
 /// the next turn's apply_mode_instructions injects (and clears) the force
 /// directive. Backs the combined `/force <tool> <prompt>` form.
 pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
-    let names: Vec<String> = crate::tools::list_tools(cwd).into_iter().map(|t| t.name).collect();
+    let names: Vec<String> = crate::tools::list_tools(cwd)
+        .into_iter()
+        .map(|t| t.name)
+        .collect();
     if !names.is_empty() && !names.iter().any(|n| n == tool) {
-        return Err(format!("Unknown or unavailable tool: {}. Visible tools: {}", tool, names.iter().take(20).cloned().collect::<Vec<_>>().join(", ")));
+        return Err(format!(
+            "Unknown or unavailable tool: {}. Visible tools: {}",
+            tool,
+            names
+                .iter()
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
     }
     let mut state = read_mode_state(cwd);
-    if !state.is_object() { state = json!({}); }
-    state.as_object_mut().expect("mode state object").insert("force".into(), json!({ "tool": tool, "prompt": "" }));
+    if !state.is_object() {
+        state = json!({});
+    }
+    state
+        .as_object_mut()
+        .expect("mode state object")
+        .insert("force".into(), json!({ "tool": tool, "prompt": "" }));
     write_mode_state(cwd, &state)
 }
 
@@ -112,14 +144,22 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     if task.trim_start().starts_with('/') {
         let (command, rest) = split_head(task.trim());
         let (command, rest) = (command.to_string(), rest.to_string());
-        if command == "/retry" { return retry_command_with(args, hooks); }
-        if command == "/btw" { return btw_command_with(args, &rest, hooks); }
+        if command == "/retry" {
+            return retry_command_with(args, hooks);
+        }
+        if command == "/btw" {
+            return btw_command_with(args, &rest, hooks);
+        }
         // /compact, /handoff, /context operate on the last session's history so
         // the one-shot CLI matches the interactive implementations (no divergent
         // flag-set / markdown-dump / tool-manifest stubs).
         if matches!(command.as_str(), "/compact" | "/handoff" | "/context") {
             let text = run_session_command(args, &command, &rest, hooks)?;
-            return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+            return Ok(if args.json {
+                json!({ "text": text }).to_string() + "\n"
+            } else {
+                text + "\n"
+            });
         }
         // /force <tool> <prompt>: arm the forced tool, then run the prompt now
         // (apply_mode_instructions injects the directive and clears it). The bare
@@ -132,13 +172,21 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
                 // fall through to run the turn below with force armed.
             } else {
                 let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
-                return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+                return Ok(if args.json {
+                    json!({ "text": text }).to_string() + "\n"
+                } else {
+                    text + "\n"
+                });
             }
         } else if crate::is_builtin_slash(&command) {
-            // Builtins handled locally; file-based custom commands expand to a
-            // prompt; anything else falls through to the model literally (OMP parity).
+            // Builtins are handled locally; file-based custom commands expand to a
+            // prompt; unknown slash input forwards to the model literally.
             let text = handle_slash(&args.cwd, task.trim(), args.model.as_deref())?;
-            return Ok(if args.json { json!({ "text": text }).to_string() + "\n" } else { text + "\n" });
+            return Ok(if args.json {
+                json!({ "text": text }).to_string() + "\n"
+            } else {
+                text + "\n"
+            });
         } else if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest) {
             task = expanded;
         }
@@ -155,16 +203,28 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     // Loop mode: auto-resubmit the loop prompt until exhausted (bounded).
     let mut iters = 0;
     while iters < MAX_LOOP_ITERS {
-        let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) else { break; };
-        if hooks.cancelled() { break; }
+        let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) else {
+            break;
+        };
+        if hooks.cancelled() {
+            break;
+        }
         match conversation.run_turn(args, &loop_prompt, hooks) {
-            Ok(more) => { text = format!("{}\n\n— loop resubmit —\n{}", text, more); }
-            Err(error) => { text = format!("{}\n\n— loop resubmit failed —\n{}", text, error); break; }
+            Ok(more) => {
+                text = format!("{}\n\n— loop resubmit —\n{}", text, more);
+            }
+            Err(error) => {
+                text = format!("{}\n\n— loop resubmit failed —\n{}", text, error);
+                break;
+            }
         }
         iters += 1;
     }
     let session_path = Some(conversation.session_path());
-    let result = RunResult { text, session_path: session_path.clone() };
+    let result = RunResult {
+        text,
+        session_path: session_path.clone(),
+    };
     if let Some(path) = &session_path {
         let _ = update_last_session_path(&args.cwd, path);
     }

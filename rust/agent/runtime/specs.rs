@@ -16,7 +16,7 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
         tool_spec("write_file", "Create or overwrite a UTF-8 file under cwd; overwrites require expectedSha256 and write-tier approval", json!({"path": {"type": "string"}, "content": {"type": "string"}, "expectedSha256": {"type": "string"}}), vec!["path", "content"]),
         tool_spec("apply_patch", "Apply exact one-occurrence string replacements to an existing UTF-8 file; requires expectedSha256 and write-tier approval", json!({"path": {"type": "string"}, "expectedSha256": {"type": "string"}, "replacements": {"type": "array"}}), vec!["path", "expectedSha256", "replacements"]),
         tool_spec("edit_file", "Apply line-based edits to a UTF-8 file under cwd; requires expectedSha256 and write-tier approval", json!({"path": {"type": "string"}, "expectedSha256": {"type": "string"}, "ops": {"type": "array"}}), vec!["path", "expectedSha256", "ops"]),
-        tool_spec("edit", "Apply an OMP-style anchored visual patch string with [path#TAG], SWAP/DEL/INS/REM/MV and safe block hunks; requires write-tier approval", json!({"patch": {"type": "string"}}), vec!["patch"]),
+        tool_spec("edit", "Apply a Jeden anchored visual patch string with [path#TAG], SWAP/DEL/INS/REM/MV and safe block hunks; requires write-tier approval", json!({"patch": {"type": "string"}}), vec!["patch"]),
         tool_spec("delete_file", "Delete one file under cwd; requires expectedSha256 and write-tier approval", json!({"path": {"type": "string"}, "expectedSha256": {"type": "string"}}), vec!["path", "expectedSha256"]),
         tool_spec("move_file", "Move or rename one file under cwd; requires expectedSha256 and write-tier approval", json!({"from": {"type": "string"}, "to": {"type": "string"}, "expectedSha256": {"type": "string"}, "overwrite": {"type": "boolean"}}), vec!["from", "to", "expectedSha256"]),
         tool_spec("run_command", "Run a shell command in cwd; requires exec-tier approval", json!({"command": {"type": "string"}, "timeoutMs": {"type": "number"}}), vec!["command"]),
@@ -48,7 +48,12 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
     ];
     let mut seen = specs
         .iter()
-        .filter_map(|spec| spec.get("function").and_then(|f| f.get("name")).and_then(Value::as_str).map(ToString::to_string))
+        .filter_map(|spec| {
+            spec.get("function")
+                .and_then(|f| f.get("name"))
+                .and_then(Value::as_str)
+                .map(ToString::to_string)
+        })
         .collect::<BTreeSet<_>>();
     for tool in crate::tools::list_tools(cwd) {
         if seen.contains(&tool.name) {
@@ -67,8 +72,17 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
                 "parameters": parameters,
             }
         }));
-        seen.insert(specs.last().and_then(|spec| spec.get("function")).and_then(|f| f.get("name")).and_then(Value::as_str).unwrap_or("").to_string());
+        seen.insert(
+            specs
+                .last()
+                .and_then(|spec| spec.get("function"))
+                .and_then(|f| f.get("name"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string(),
+        );
     }
+    specs.retain(|spec| spec.get("function").and_then(|function| function.get("name")).and_then(Value::as_str).is_none_or(crate::tool_runtime::tool_allowed_by_env));
     specs
 }
 
@@ -88,14 +102,32 @@ fn tool_spec(name: &str, description: &str, properties: Value, required: Vec<&st
     })
 }
 
-pub(in crate::agent) fn system_prompt(cwd: &Path) -> String {
+pub(in crate::agent) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
+    let config = crate::load_config(cwd);
+    let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
         .map(|tool| format!("- {}: {}", tool.name, tool.description))
         .collect::<Vec<_>>()
         .join("\n");
     let memory = memory_guidance_for_prompt(cwd)
-        .map(|summary| format!("\n\nMemory Guidance (heuristic; verify against current repo before acting):\n{}", summary))
+        .map(|summary| {
+            format!(
+                "\n\nMemory Guidance (heuristic; verify against current repo before acting):\n{}",
+                summary
+            )
+        })
         .unwrap_or_default();
-    format!("You are Jeden, Wisent's private agent harness.\n\nRules:\n- Answer with {{\"action\":\"final\",\"text\":\"your concise answer\"}} when done.\n- Use tool calls when the model-router supports native tool_calls, or answer with {{\"action\":\"tool\",\"tool\":\"tool_name\",\"input\":{{...}}}}.\n- Do not create tests unless the user explicitly asks.\n- Do not create docs unless the user explicitly asks.\n- Do not invent files, command outputs, or tool results.\n- Tool approval uses read/write/exec tiers. Write-tier tools mutate files or session state; exec-tier tools run code/processes or spawn agents. The active /approval policy, --allow-* flags, and --yolo decide whether a call runs or prompts.{}\n\nExecutable Rust tools:\n{}", memory, tools)
+    let prompt = format!("You are Jeden, Wisent's private agent harness.\n\nRules:\n- Answer with {{\"action\":\"final\",\"text\":\"your concise answer\"}} when done.\n- Use tool calls when the model-router supports native tool_calls, or answer with {{\"action\":\"tool\",\"tool\":\"tool_name\",\"input\":{{...}}}}.\n- Do not create tests unless the user explicitly asks.\n- Do not create docs unless the user explicitly asks.\n- Do not invent files, command outputs, or tool results.\n- Tool approval uses read/write/exec tiers. Write-tier tools mutate files or session state; exec-tier tools run code/processes or spawn agents. The active /approval policy, --allow-* flags, and --yolo decide whether a call runs or prompts.{}{}\n\nExecutable Rust tools:\n{}", memory, policy.system_injection(), tools);
+    Ok(policy.protect_model_text(&prompt))
 }
+
+
+pub(in crate::agent) fn prepare_outbound_messages(
+    cwd: &Path,
+    messages: &[Value],
+) -> Result<Vec<Value>, String> {
+    let config = crate::load_config(cwd);
+    crate::context::prepare_model_messages(cwd, &config, messages)
+}
+

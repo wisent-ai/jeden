@@ -92,10 +92,17 @@ pub(crate) struct FastState {
 }
 
 impl Default for FastState {
-    fn default() -> Self { Self { enabled: false, service_tier: default_service_tier() } }
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            service_tier: default_service_tier(),
+        }
+    }
 }
 
-pub(crate) fn default_service_tier() -> String { "priority".to_string() }
+pub(crate) fn default_service_tier() -> String {
+    "priority".to_string()
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct AdvisorState {
@@ -137,7 +144,9 @@ pub(crate) struct BranchState {
     pub(crate) path: String,
 }
 
-pub(crate) fn mode_state_path(cwd: &Path) -> PathBuf { cwd.join(".jeden/mode-state.json") }
+pub(crate) fn mode_state_path(cwd: &Path) -> PathBuf {
+    cwd.join(".jeden/mode-state.json")
+}
 
 pub(crate) fn read_mode_state(cwd: &Path) -> ModeState {
     fs::read_to_string(mode_state_path(cwd))
@@ -148,7 +157,9 @@ pub(crate) fn read_mode_state(cwd: &Path) -> ModeState {
 
 pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), String> {
     let path = mode_state_path(cwd);
-    if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    }
     let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())? + "\n";
     fs::write(path, text).map_err(|e| e.to_string())
 }

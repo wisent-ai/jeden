@@ -3,7 +3,7 @@ use super::*;
 impl Conversation {
     /// Drop all turns, keeping the system prompt — backs /clear and /new.
     pub(crate) fn reset(&mut self, cwd: &Path) -> Result<(), String> {
-        self.messages = vec![json!({ "role": "system", "content": system_prompt(cwd) })];
+        self.messages = vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
         self.recorder = SessionRecorder::new(cwd);
         self.recorder.ensure()
     }
@@ -13,7 +13,7 @@ impl Conversation {
     pub(crate) fn rebase(&mut self, cwd: &Path) -> Result<(), String> {
         if let Some(first) = self.messages.first_mut() {
             if first.get("role").and_then(Value::as_str) == Some("system") {
-                first["content"] = json!(system_prompt(cwd));
+                first["content"] = json!(system_prompt_checked(cwd)?);
             }
         }
         self.recorder.set_cwd(cwd)
@@ -21,22 +21,25 @@ impl Conversation {
 
     /// Replace the live history with prior user/assistant turns — backs /resume
     /// so a resumed session actually continues in-process.
-    pub(crate) fn load_history(&mut self, cwd: &Path, turns: Vec<Value>) -> Result<(), String> {
-        let mut messages = vec![json!({ "role": "system", "content": system_prompt(cwd) })];
-        // Also record the loaded turns into the live transcript so the resumed
-        // context is part of this session's export and any later /branch off it.
-        for turn in &turns {
-            let role = turn.get("role").and_then(Value::as_str).unwrap_or("");
-            let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
-            match role {
-                "user" => { self.recorder.record("user", json!({ "task": content }))?; }
-                "assistant" => { self.recorder.record("final", json!({ "text": content }))?; }
-                _ => {}
+    pub(crate) fn load_history(&mut self, cwd: &Path, mut turns: Vec<Value>) -> Result<(), String> {
+        let needs_base_system = turns.first().and_then(|message| message.get("_jedenNeedsBaseSystem"))
+            .and_then(Value::as_bool).unwrap_or(false);
+        if needs_base_system {
+            if let Some(first) = turns.first_mut().and_then(Value::as_object_mut) {
+                first.remove("_jedenNeedsBaseSystem");
             }
         }
-        messages.extend(turns);
+        let messages = if !needs_base_system
+            && turns.first().and_then(|message| message.get("role")).and_then(Value::as_str) == Some("system")
+        {
+            turns
+        } else {
+            let mut messages = vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
+            messages.extend(turns);
+            messages
+        };
         self.messages = messages;
-        Ok(())
+        self.recorder.record_context("resume_seed", &self.messages)
     }
 
     /// Fork: keep the current in-memory history but switch to a NEW session dir
@@ -44,32 +47,37 @@ impl Conversation {
     /// real session split, not a mode-state label. Returns the new session path.
     pub(crate) fn fork(&mut self, cwd: &Path) -> Result<PathBuf, String> {
         let parent = self.recorder.path();
-        self.recorder = SessionRecorder::new(cwd);
+        let parent_entry = self.recorder.active_leaf()?;
+        self.recorder = SessionRecorder::child(cwd, parent, parent_entry);
         self.recorder.ensure()?;
-        self.recorder.record("fork", json!({ "parent": parent }))?;
+        self.recorder.record_context("fork_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
 
-    /// Like [`fork`] but also replays the parent session's clean user/final
-    /// turns into the new session's transcript so the branch is fully resumable
-    /// with its prior context — backs a navigable `/branch`. Seeding from the
-    /// parent transcript (not `self.messages`) avoids recording intermediate
-    /// tool-action/tool-result messages as conversation turns.
+    /// Branch the exact live model window into a child ledger.
     pub(crate) fn branch(&mut self, cwd: &Path) -> Result<PathBuf, String> {
         let parent = self.recorder.path();
-        let prior = crate::session_conversation_turns(&parent);
-        self.recorder = SessionRecorder::new(cwd);
+        let parent_entry = self.recorder.active_leaf()?;
+        self.recorder = SessionRecorder::child(cwd, parent, parent_entry);
         self.recorder.ensure()?;
-        self.recorder.record("fork", json!({ "parent": parent }))?;
-        for turn in &prior {
-            let role = turn.get("role").and_then(Value::as_str).unwrap_or("");
-            let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
-            match role {
-                "user" => { self.recorder.record("user", json!({ "task": content }))?; }
-                "assistant" => { self.recorder.record("final", json!({ "text": content }))?; }
-                _ => {}
-            }
-        }
+        self.recorder.record_context("branch_seed", &self.messages)?;
+        Ok(self.recorder.path())
+    }
+
+    pub(crate) fn checkpoint(&mut self, label: &str) -> Result<String, String> {
+        self.recorder.checkpoint(label, &self.messages)
+    }
+
+    /// Rewind creates a child ledger rooted at the selected graph entry; the
+    /// original branch remains immutable and navigable.
+    pub(crate) fn rewind(&mut self, cwd: &Path, checkpoint_entry: &str) -> Result<PathBuf, String> {
+        let parent = self.recorder.path();
+        let messages = crate::cli::sessions::session_messages_at(&parent, checkpoint_entry)?;
+        self.recorder = SessionRecorder::child(cwd, parent, Some(checkpoint_entry.to_string()));
+        self.recorder.ensure()?;
+        self.recorder.record("rewind", json!({ "checkpointEntry": checkpoint_entry }))?;
+        self.messages = messages;
+        self.recorder.record_context("rewind_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
 }

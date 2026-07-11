@@ -1,11 +1,16 @@
 use serde_json::{json, Value};
+use std::ffi::OsString;
 use std::fs;
-use std::io::Write;
-use std::process::{Command, Stdio};
-use std::thread::sleep;
-use std::time::{Duration, Instant};
+use std::io::Read;
+use std::time::Duration;
 
-use super::shared::{jail_path, run_read_process, sha256_hex, string_input, u64_input, line_window};
+use super::runtime_ops::{
+    BoundedOutput, ManagedCommand, ManagedProcessResult, OperationProgress, OutputLimits,
+    ProcessManager, TerminationReason,
+    kernel::{self, KernelLanguage},
+    pty,
+};
+use super::shared::{bool_input, jail_path, line_window, run_read_process, string_input, u64_input};
 use super::ToolRuntime;
 
 mod search;
@@ -13,87 +18,239 @@ mod search;
 pub(crate) use search::{glob_paths, grep_regex, search_files, search_text};
 
 pub(crate) fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    if !runtime.allow_command { return Err("run_command requires --allow-command".into()); }
+    if !runtime.allow_command {
+        return Err("run_command requires --allow-command".into());
+    }
     let command = string_input(input, "command").ok_or("run_command requires command")?;
     let timeout_ms = u64_input(input, "timeoutMs", 30_000).min(120_000);
-    let deadline = Duration::from_millis(timeout_ms);
-    let mut child = Command::new("sh")
-        .arg("-c")
-        .arg(&command)
-        .current_dir(runtime.cwd)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    let started = Instant::now();
-    loop {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-            let output = child.wait_with_output().map_err(|e| e.to_string())?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Ok(json!({"ok": output.status.success(), "command": command, "timeoutMs": timeout_ms, "timedOut": false, "code": output.status.code(), "stdout": stdout, "stderr": stderr}));
-        }
-        if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let output = child.wait_with_output().map_err(|e| e.to_string())?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Ok(json!({"ok": false, "command": command, "timeoutMs": timeout_ms, "timedOut": true, "code": output.status.code(), "stdout": stdout, "stderr": stderr}));
-        }
-        sleep(Duration::from_millis(20));
-    }
+    let mut managed = ManagedCommand::new("sh", runtime.cwd);
+    managed.args = vec![OsString::from("-c"), OsString::from(&command)];
+    let result = ProcessManager.run(
+        &runtime.operation,
+        managed,
+        Duration::from_millis(timeout_ms),
+    )?;
+    Ok(process_result_json(
+        result,
+        json!({"command": command, "timeoutMs": timeout_ms}),
+    ))
 }
 
 pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    if !runtime.allow_command { return Err("run_process requires --allow-command".into()); }
+    if !runtime.allow_command {
+        return Err("run_process requires --allow-command".into());
+    }
     let command = string_input(input, "command").ok_or("run_process requires command")?;
-    let args = input.get("args").and_then(Value::as_array).map(|values| values.iter().map(|value| value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string())).collect::<Vec<_>>()).unwrap_or_default();
-    let stdin = string_input(input, "stdin");
+    let args = input
+        .get("args")
+        .and_then(Value::as_array)
+        .map(|values| {
+            values
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| value.to_string())
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
-    let deadline = Duration::from_millis(timeout_ms);
-    let mut command_builder = Command::new(&command);
-    command_builder
-        .args(&args)
-        .current_dir(runtime.cwd)
-        .stdin(if stdin.is_some() { Stdio::piped() } else { Stdio::null() })
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut managed = ManagedCommand::new(&command, runtime.cwd);
+    managed.args = args.iter().map(OsString::from).collect();
+    managed.stdin = string_input(input, "stdin").map(String::into_bytes);
     if let Some(env) = input.get("env").and_then(Value::as_object) {
+        managed.env.reserve(env.len());
         for (key, value) in env {
-            if value.is_null() {
-                command_builder.env_remove(key);
+            let value = if value.is_null() {
+                None
             } else {
-                command_builder.env(key, value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string()));
-            }
+                Some(OsString::from(
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| value.to_string()),
+                ))
+            };
+            managed.env.push((OsString::from(key), value));
         }
     }
-    let mut child = command_builder.spawn().map_err(|e| e.to_string())?;
-    if let Some(stdin) = stdin {
-        if let Some(mut pipe) = child.stdin.take() { pipe.write_all(stdin.as_bytes()).map_err(|e| e.to_string())?; }
-    }
-    let started = Instant::now();
-    loop {
-        if child.try_wait().map_err(|e| e.to_string())?.is_some() {
-            let output = child.wait_with_output().map_err(|e| e.to_string())?;
-            return Ok(json!({"ok": output.status.success(), "command": command, "args": args, "timeoutMs": timeout_ms, "timedOut": false, "code": output.status.code(), "stdout": String::from_utf8_lossy(&output.stdout), "stderr": String::from_utf8_lossy(&output.stderr)}));
-        }
-        if started.elapsed() >= deadline {
-            let _ = child.kill();
-            let output = child.wait_with_output().map_err(|e| e.to_string())?;
-            return Ok(json!({"ok": false, "command": command, "args": args, "timeoutMs": timeout_ms, "timedOut": true, "code": output.status.code(), "stdout": String::from_utf8_lossy(&output.stdout), "stderr": String::from_utf8_lossy(&output.stderr)}));
-        }
-        sleep(Duration::from_millis(20));
-    }
+    let result = ProcessManager.run(
+        &runtime.operation,
+        managed,
+        Duration::from_millis(timeout_ms),
+    )?;
+    Ok(process_result_json(
+        result,
+        json!({"command": command, "args": args, "timeoutMs": timeout_ms}),
+    ))
+}
+
+fn process_result_json(result: ManagedProcessResult, mut base: Value) -> Value {
+    let timed_out = result.reason == TerminationReason::TimedOut;
+    let cancelled = result.reason == TerminationReason::Cancelled;
+    let completed = result.reason == TerminationReason::Completed;
+    let object = base
+        .as_object_mut()
+        .expect("process result base must be an object");
+    object.insert("ok".into(), json!(completed && result.status.success()));
+    object.insert("timedOut".into(), json!(timed_out));
+    object.insert("cancelled".into(), json!(cancelled));
+    object.insert("code".into(), json!(result.status.code()));
+    object.insert("stdout".into(), json!(result.stdout.text));
+    object.insert("stderr".into(), json!(result.stderr.text));
+    object.insert("stdoutHead".into(), json!(result.stdout.head));
+    object.insert("stdoutTail".into(), json!(result.stdout.tail));
+    object.insert("stdoutBytes".into(), json!(result.stdout.total_bytes));
+    object.insert("stdoutTruncated".into(), json!(result.stdout.truncated));
+    object.insert(
+        "stdoutArtifact".into(),
+        result
+            .stdout
+            .artifact
+            .map(|path| json!(path.display().to_string()))
+            .unwrap_or(Value::Null),
+    );
+    object.insert("stdoutSha256".into(), json!(result.stdout.sha256));
+    object.insert("stderrHead".into(), json!(result.stderr.head));
+    object.insert("stderrTail".into(), json!(result.stderr.tail));
+    object.insert("stderrBytes".into(), json!(result.stderr.total_bytes));
+    object.insert("stderrTruncated".into(), json!(result.stderr.truncated));
+    object.insert(
+        "stderrArtifact".into(),
+        result
+            .stderr
+            .artifact
+            .map(|path| json!(path.display().to_string()))
+            .unwrap_or(Value::Null),
+    );
+    object.insert("stderrSha256".into(), json!(result.stderr.sha256));
+    base
 }
 
 pub(crate) fn node_eval(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let code = string_input(input, "code").ok_or("node_eval requires code")?;
-    run_process(runtime, &json!({"command": "node", "args": ["--input-type=module", "-"], "stdin": code, "timeoutMs": u64_input(input, "timeoutMs", 30_000)}))
+    eval_with_language(runtime, input, KernelLanguage::JavaScript, "node_eval")
 }
 
 pub(crate) fn python_eval(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let code = string_input(input, "code").ok_or("python_eval requires code")?;
-    run_process(runtime, &json!({"command": "python3", "args": ["-"], "stdin": code, "timeoutMs": u64_input(input, "timeoutMs", 30_000)}))
+    eval_with_language(runtime, input, KernelLanguage::Python, "python_eval")
+}
+
+pub(crate) fn eval_session(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let language = KernelLanguage::parse(
+        &string_input(input, "language").ok_or("eval_session requires language")?,
+    )?;
+    eval_with_language(runtime, input, language, "eval_session")
+}
+
+fn eval_with_language(
+    runtime: &ToolRuntime<'_>,
+    input: &Value,
+    language: KernelLanguage,
+    tool: &str,
+) -> Result<Value, String> {
+    if !runtime.allow_command {
+        return Err(format!("{tool} requires --allow-command"));
+    }
+    let code = string_input(input, "code").ok_or_else(|| format!("{tool} requires code"))?;
+    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
+    let reset = bool_input(input, "reset", false);
+    let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
+    let result = kernel::evaluate(
+        &runtime.operation,
+        scope,
+        runtime.cwd,
+        language,
+        &code,
+        reset,
+        Duration::from_millis(timeout_ms),
+    )?;
+    Ok(json!({
+        "ok": result.ok,
+        "timeoutMs": timeout_ms,
+        "timedOut": result.timed_out,
+        "cancelled": result.cancelled,
+        "code": Value::Null,
+        "stdout": result.stdout.text,
+        "stderr": result.stderr.text,
+        "stdoutHead": result.stdout.head,
+        "stdoutTail": result.stdout.tail,
+        "stdoutBytes": result.stdout.total_bytes,
+        "stdoutTruncated": result.stdout.truncated,
+        "stdoutArtifact": result.stdout.artifact.map(|path| path.display().to_string()),
+        "stderrHead": result.stderr.head,
+        "stderrTail": result.stderr.tail,
+        "stderrBytes": result.stderr.total_bytes,
+        "stderrTruncated": result.stderr.truncated,
+        "stderrArtifact": result.stderr.artifact.map(|path| path.display().to_string()),
+        "display": result.display.text,
+        "displayMime": result.display_mime,
+        "displayBytes": result.display.total_bytes,
+        "displayTruncated": result.display.truncated,
+        "displayArtifact": result.display.artifact.map(|path| path.display().to_string()),
+        "error": result.error,
+        "persistent": true,
+        "reset": result.reset
+    }))
+}
+
+pub(crate) fn pty_session(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_command {
+        return Err("pty_session requires --allow-command".into());
+    }
+    let command = string_input(input, "input")
+        .or_else(|| string_input(input, "command"))
+        .ok_or("pty_session requires input")?;
+    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
+    let reset = bool_input(input, "reset", false);
+    let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
+    let result = pty::execute(
+        &runtime.operation,
+        scope,
+        runtime.cwd,
+        &command,
+        reset,
+        Duration::from_millis(timeout_ms),
+    )?;
+    Ok(json!({
+        "ok": result.ok,
+        "command": command,
+        "timeoutMs": timeout_ms,
+        "timedOut": result.timed_out,
+        "cancelled": result.cancelled,
+        "code": result.code,
+        "stdout": result.output.text,
+        "stderr": "",
+        "stdoutHead": result.output.head,
+        "stdoutTail": result.output.tail,
+        "stdoutBytes": result.output.total_bytes,
+        "stdoutTruncated": result.output.truncated,
+        "stdoutArtifact": result.output.artifact.map(|path| path.display().to_string()),
+        "persistent": true,
+        "sessionId": result.session.session_id,
+        "cols": result.session.cols,
+        "rows": result.session.rows,
+        "reset": result.reset
+    }))
+}
+pub(crate) fn pty_resize(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    if !runtime.allow_command {
+        return Err("pty_resize requires --allow-command".into());
+    }
+    let session_id = string_input(input, "sessionId").ok_or("pty_resize requires sessionId")?;
+    let cols_value = input.get("cols").and_then(Value::as_u64).ok_or("pty_resize requires integer cols")?;
+    let rows_value = input.get("rows").and_then(Value::as_u64).ok_or("pty_resize requires integer rows")?;
+    let cols = u16::try_from(cols_value).unwrap_or(u16::MAX);
+    let rows = u16::try_from(rows_value).unwrap_or(u16::MAX);
+    let session = pty::resize(&runtime.operation, &session_id, cols, rows).map_err(|error| error.to_string())?;
+    Ok(json!({
+        "ok": true,
+        "sessionId": session.session_id,
+        "cols": session.cols,
+        "rows": session.rows,
+        "state": "live"
+    }))
 }
 
 pub(crate) fn list_package_scripts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
@@ -103,26 +260,38 @@ pub(crate) fn list_package_scripts(runtime: &ToolRuntime<'_>) -> Result<Value, S
     let mut scripts = serde_json::Map::new();
     if let Some(raw_scripts) = parsed.get("scripts").and_then(Value::as_object) {
         for (name, value) in raw_scripts {
-            if let Some(script) = value.as_str() { scripts.insert(name.clone(), json!(script)); }
+            if let Some(script) = value.as_str() {
+                scripts.insert(name.clone(), json!(script));
+            }
         }
     }
     Ok(Value::Object(scripts))
 }
 
-pub(crate) fn run_package_script(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    if !runtime.allow_command { return Err("run_package_script requires --allow-command".into()); }
+pub(crate) fn run_package_script(
+    runtime: &ToolRuntime<'_>,
+    input: &Value,
+) -> Result<Value, String> {
+    if !runtime.allow_command {
+        return Err("run_package_script requires --allow-command".into());
+    }
     let script = string_input(input, "script").ok_or("run_package_script requires script")?;
     let scripts = list_package_scripts(runtime)?;
     if scripts.get(&script).and_then(Value::as_str).is_none() {
         return Err(format!("unknown package script: {script}"));
     }
     let mut payload = json!({"command": "npm", "args": ["run", script], "timeoutMs": u64_input(input, "timeoutMs", 60_000).clamp(1_000, 180_000)});
-    if let Some(env) = input.get("env") { payload["env"] = env.clone(); }
+    if let Some(env) = input.get("env") {
+        payload["env"] = env.clone();
+    }
     run_process(runtime, &payload)
 }
 
 pub(crate) fn git_status(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
-    run_read_process(runtime, &json!({"command": "git", "args": ["status", "--short"], "timeoutMs": 30_000}))
+    run_read_process(
+        runtime,
+        &json!({"command": "git", "args": ["status", "--short"], "timeoutMs": 30_000}),
+    )
 }
 
 pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -131,60 +300,150 @@ pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+    run_read_process(
+        runtime,
+        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+    )
 }
 
 pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let limit = u64_input(input, "limit", 20).clamp(1, 100);
-    let mut args = vec!["log".to_string(), format!("-{limit}"), "--oneline".to_string(), "--decorate".to_string(), "--".to_string()];
+    let mut args = vec![
+        "log".to_string(),
+        format!("-{limit}"),
+        "--oneline".to_string(),
+        "--decorate".to_string(),
+        "--".to_string(),
+    ];
     if let Some(path) = string_input(input, "path") {
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+    run_read_process(
+        runtime,
+        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+    )
 }
 
 pub(crate) fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let reference = string_input(input, "ref").unwrap_or_else(|| "HEAD".into());
-    let mut args = vec!["show".to_string(), "--stat".to_string(), "--oneline".to_string(), "--decorate".to_string(), reference, "--".to_string()];
+    let mut args = vec![
+        "show".to_string(),
+        "--stat".to_string(),
+        "--oneline".to_string(),
+        "--decorate".to_string(),
+        reference,
+        "--".to_string(),
+    ];
     if let Some(path) = string_input(input, "path") {
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(runtime, &json!({"command": "git", "args": args, "timeoutMs": 30_000}))
+    run_read_process(
+        runtime,
+        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+    )
 }
 
-pub(crate) fn fetch_url(_runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let url = string_input(input, "url").ok_or("fetch_url requires url")?;
-    if !url.starts_with("http://") && !url.starts_with("https://") { return Err("fetch_url requires http(s) URL".into()); }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err("fetch_url requires http(s) URL".into());
+    }
     let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
     let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
-    let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(timeout_ms)).build().map_err(|e| e.to_string())?;
-    let response = client.get(&url).send().map_err(|e| e.to_string())?;
+    let request_deadline = runtime
+        .operation
+        .effective_deadline(Duration::from_millis(timeout_ms));
+    if runtime.operation.cancellation().is_cancelled() {
+        return Err("fetch_url cancelled".into());
+    }
+    if std::time::Instant::now() >= request_deadline {
+        return Err("fetch_url timed out".into());
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(request_deadline.saturating_duration_since(std::time::Instant::now()))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let mut response = client.get(&url).send().map_err(|e| e.to_string())?;
     let status = response.status().as_u16();
-    let content_type = response.headers().get(reqwest::header::CONTENT_TYPE).and_then(|value| value.to_str().ok()).map(ToString::to_string);
-    let bytes = response.bytes().map_err(|e| e.to_string())?;
-    let raw_text = String::from_utf8_lossy(&bytes).to_string();
-    let (selected_text, start_line, end_line, ranges) = if let Some(range) = string_input(input, "range") {
-        line_window(&raw_text, &range)?
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(ToString::to_string);
+    let mut capture = BoundedOutput::new(
+        "fetch",
+        OutputLimits {
+            head_bytes: max_bytes / 2,
+            tail_bytes: max_bytes - (max_bytes / 2),
+        },
+        runtime.operation.artifacts().clone(),
+    );
+    let mut buffer = [0u8; 8192];
+    let mut total = 0u64;
+    loop {
+        if runtime.operation.cancellation().is_cancelled() {
+            return Err("fetch_url cancelled".into());
+        }
+        if std::time::Instant::now() >= request_deadline {
+            return Err("fetch_url timed out".into());
+        }
+        let count = response.read(&mut buffer).map_err(|e| e.to_string())?;
+        if count == 0 {
+            break;
+        }
+        capture
+            .write_chunk(&buffer[..count])
+            .map_err(|e| format!("failed capturing fetch response: {e}"))?;
+        total = total.saturating_add(count as u64);
+        runtime.operation.progress(OperationProgress {
+            stream: "fetch",
+            bytes: count as u64,
+            total_bytes: total,
+        });
+    }
+    let captured = capture.finish().map_err(|e| e.to_string())?;
+    let artifact = captured
+        .artifact
+        .as_ref()
+        .map(|path| path.display().to_string());
+    if captured.truncated && input.get("range").is_some() {
+        return Err(format!(
+            "fetch_url cannot apply a line range beyond maxBytes; full response saved at {}",
+            artifact.as_deref().unwrap_or("artifact sink")
+        ));
+    }
+    let (text, start_line, end_line, ranges) = if let Some(range) = string_input(input, "range") {
+        line_window(&captured.text, &range)?
     } else {
-        (raw_text, 0, 0, Vec::new())
+        (captured.text, 0, 0, Vec::new())
     };
-    let output_bytes = selected_text.as_bytes();
-    let truncated = output_bytes.len() > max_bytes;
-    let slice = &output_bytes[..output_bytes.len().min(max_bytes)];
-    let text = String::from_utf8_lossy(slice).to_string();
-    Ok(json!({"ok": status >= 200 && status < 300, "url": url, "status": status, "contentType": content_type, "bytes": bytes.len(), "truncated": truncated, "sha256": sha256_hex(&bytes), "text": text, "startLine": if ranges.is_empty() { Value::Null } else { json!(start_line) }, "endLine": if ranges.is_empty() { Value::Null } else { json!(end_line) }, "ranges": if ranges.is_empty() { Value::Null } else { json!(ranges) }}))
+    Ok(json!({
+        "ok": status >= 200 && status < 300,
+        "url": url,
+        "status": status,
+        "contentType": content_type,
+        "bytes": captured.total_bytes,
+        "truncated": captured.truncated,
+        "sha256": captured.sha256,
+        "text": text,
+        "head": captured.head,
+        "tail": captured.tail,
+        "artifact": artifact,
+        "startLine": if ranges.is_empty() { Value::Null } else { json!(start_line) },
+        "endLine": if ranges.is_empty() { Value::Null } else { json!(end_line) },
+        "ranges": if ranges.is_empty() { Value::Null } else { json!(ranges) }
+    }))
 }
 
 pub(crate) fn delegate_task(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    if !runtime.allow_command { return Err("delegate_task requires --allow-command".into()); }
-    let task = string_input(input, "task").ok_or("delegate_task requires task")?;
-    let max_steps = u64_input(input, "maxSteps", 6).clamp(1, 16).to_string();
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let result = run_process(runtime, &json!({"command": exe.display().to_string(), "args": ["run", task, "--cwd", runtime.cwd.display().to_string(), "--max-steps", max_steps, "--json"], "timeoutMs": 300_000}))?;
-    let delegated = result.get("stdout").and_then(Value::as_str).and_then(|stdout| serde_json::from_str::<Value>(stdout).ok()).unwrap_or(Value::Null);
-    let mut out = result;
-    out["delegated"] = delegated;
-    Ok(out)
+    if !runtime.allow_command {
+        return Err("delegate_task requires --allow-command".into());
+    }
+    if runtime.operation.cancellation().is_cancelled() {
+        return Err("delegate_task cancelled before scheduling".into());
+    }
+    crate::task_runtime::execute_delegate(runtime.cwd, runtime.artifact_dir, input)
+        .map_err(|error| error.to_string())
 }

@@ -5,6 +5,7 @@ use std::process::Command;
 use crate::slash::modes::current_model_route;
 use crate::slash::SlashContext;
 use crate::tools;
+use crate::tui::{PickerItem, PickerSpec};
 
 pub(crate) mod mcp;
 pub(crate) mod memory;
@@ -41,6 +42,45 @@ pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String
     serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
 }
 
+fn diagnostics_picker(title: &str, context: &SlashContext<'_>) -> PickerSpec {
+    let tool_count = tools::list_tools(context.cwd).len();
+    let model = current_model_route(context);
+    let overview = PickerItem::action("Current runtime overview", "")
+        .detail(format!(
+            "Model {model}; {tool_count} tools; cwd {}",
+            context.cwd.display()
+        ))
+        .badge("runtime")
+        .disabled(true);
+    let items = vec![
+        PickerItem {
+            command: None,
+            ..overview
+        },
+        PickerItem::action("Inspect available tools", "/tools")
+            .detail(format!("{tool_count} tools loaded for this workspace"))
+            .badge("tools"),
+        PickerItem::action("Inspect memory diagnostics", "/memory stats")
+            .detail("Show backend path, record count, summary, and rebuild queue")
+            .badge("memory"),
+        PickerItem::action("Inspect provider usage", "/usage status")
+            .detail("Show local token and recorded cost accounting")
+            .badge("usage"),
+        PickerItem::action("Inspect extension status", "/extensions")
+            .detail("Show effective configured extension state")
+            .badge("extensions"),
+    ];
+    PickerSpec::new(title, items)
+}
+
+pub(crate) fn stats_picker(context: &SlashContext<'_>) -> PickerSpec {
+    diagnostics_picker("Runtime statistics", context)
+}
+
+pub(crate) fn debug_picker(context: &SlashContext<'_>) -> PickerSpec {
+    diagnostics_picker("Debug tools", context)
+}
+
 /// Render recent release notes from the source repo's git history — the real
 /// changelog for this package (no bundled CHANGELOG file exists).
 pub(crate) fn handle_changelog() -> Result<String, String> {
@@ -57,5 +97,9 @@ pub(crate) fn handle_changelog() -> Result<String, String> {
     if log.is_empty() {
         return Ok("No commits found for a changelog.".into());
     }
-    Ok(format!("Recent changes (git history, {}):\n{}", root.display(), log))
+    Ok(format!(
+        "Recent changes (git history, {}):\n{}",
+        root.display(),
+        log
+    ))
 }

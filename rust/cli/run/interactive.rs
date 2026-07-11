@@ -1,19 +1,20 @@
 //! Interactive REPL loop and shared run-turn bookkeeping.
 
-use serde_json::{json, Value};
-use std::sync::Arc;
 use parking_lot::Mutex;
+use serde_json::{json, Value};
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Arc;
 
+use super::run_turn_shared;
 use crate::cli::commands::expand::resolve_file_command;
 use crate::cli::config::load_config;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
+use crate::cli::run::slash_ui::interactive_view;
 use crate::cli::sessions::{session_conversation_turns, session_dir_for};
 use crate::{agent, hooks, read_json, tui, Args};
-use super::run_turn_shared;
 
 fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
     let branch = Command::new("git")
@@ -39,8 +40,16 @@ fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
 
 fn service_tier_prompt(cwd: &Path) -> String {
     let mode: Value = read_json(&cwd.join(".jeden/mode-state.json"));
-    if mode.pointer("/fast/enabled").and_then(Value::as_bool).unwrap_or(false) {
-        if let Some(tier) = mode.pointer("/fast/serviceTier").and_then(Value::as_str).filter(|value| !value.trim().is_empty()) {
+    if mode
+        .pointer("/fast/enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        if let Some(tier) = mode
+            .pointer("/fast/serviceTier")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+        {
             return tier.to_string();
         }
     }
@@ -61,18 +70,21 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("MODEL").ok())
         .unwrap_or_else(|| "default".into());
     let session_model = Arc::new(Mutex::new(Some(model)));
-    // One persistent conversation for the whole interactive session — real
-    // cross-turn memory, matching OMP's continuous session model.
+    // One persistent conversation provides native cross-turn memory for the
+    // entire interactive session.
     let conversation = Arc::new(Mutex::new(agent::Conversation::new(&args.cwd)?));
-    let context_limit = env::var("JEDEN_CONTEXT_LIMIT").ok().and_then(|v| v.trim().parse::<usize>().ok()).filter(|v| *v != usize::default());
+    let context_limit = env::var("JEDEN_CONTEXT_LIMIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v != usize::default());
     // SessionStart hooks fire once when the interactive session opens.
     let session_banner = hooks::session_start(&args.cwd, args.allow_command);
     if !session_banner.trim().is_empty() {
         println!("{}", session_banner.trim());
     }
 
-    // Shared working directory so /move can re-root subsequent turns, the status
-    // line, git prompt, and file-command resolution together (OMP applyCwdChange).
+    // Shared working directory keeps /move changes synchronized across subsequent
+    // turns, the status line, git prompt, and file-command resolution.
     let session_cwd = Arc::new(Mutex::new(args.cwd.clone()));
     let status_model = Arc::clone(&session_model);
     let status_conv = Arc::clone(&conversation);
@@ -90,9 +102,20 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         };
         tui::PromptStatus {
             cwd: cwd.display().to_string(),
-            write_status: if args.allow_write { "allow".into() } else { "ask".into() },
-            command_status: if args.allow_command { "allow".into() } else { "ask".into() },
-            model: status_model.lock().clone().unwrap_or_else(|| "default".into()),
+            write_status: if args.allow_write {
+                "allow".into()
+            } else {
+                "ask".into()
+            },
+            command_status: if args.allow_command {
+                "allow".into()
+            } else {
+                "ask".into()
+            },
+            model: status_model
+                .lock()
+                .clone()
+                .unwrap_or_else(|| "default".into()),
             service_tier: service_tier_prompt(&cwd),
             branch,
             dirty_count,
@@ -117,7 +140,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let handler_model = Arc::clone(&session_model);
     let handler_conv = Arc::clone(&conversation);
     let handler_cwd = Arc::clone(&session_cwd);
-    let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<String, String> {
+    let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<tui::CommandOutcome, String> {
         let mut run_args = args.clone();
         run_args.command = "run".into();
         run_args.model = handler_model.lock().clone();
@@ -128,18 +151,35 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             interactive: ctx.interactive,
             progress: Box::new(|message: &str| (ctx.progress)(message)),
             stream: Box::new(|piece: &str| (ctx.stream)(piece)),
+            ask_user: ctx.ask_user.map(|ask_user| {
+                Box::new(move |question: &str, options: &[String]| ask_user(question, options))
+                    as Box<dyn Fn(&str, &[String]) -> Result<String, String>>
+            }),
             approve: Box::new(|tool: &str, detail: &str| (ctx.approve)(tool, detail)),
         };
 
-        if input.trim_start().starts_with('/') {
+        if !ctx.from_view {
+            if let Some(view) =
+                interactive_view(&run_args.cwd, input, handler_model.lock().as_deref())
+            {
+                return view;
+            }
+        }
+        let result: Result<String, String> = if input.trim_start().starts_with('/') {
             let trimmed = input.trim();
-            let (command, rest) = trimmed.split_once(char::is_whitespace).unwrap_or((trimmed, ""));
+            let (command, rest) = trimmed
+                .split_once(char::is_whitespace)
+                .unwrap_or((trimmed, ""));
             match command {
                 "/model" | "/models" | "/switch" => {
                     let next = rest.trim();
                     if next.is_empty() {
-                        return Ok(format!("Current model route: {}.", handler_model.lock().as_deref().unwrap_or("default")));
+                        return Ok(tui::CommandOutcome::text(format!(
+                            "Current model route: {}.",
+                            handler_model.lock().as_deref().unwrap_or("default")
+                        )));
                     }
+                    super::slash::resolve_model_route(&run_args.cwd, next)?;
                     *handler_model.lock() = Some(next.to_string());
                     Ok(format!("Model route set to {}.", next))
                 }
@@ -159,7 +199,10 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 }
                 "/fork" => {
                     let path = handler_conv.lock().fork(&run_args.cwd)?;
-                    Ok(format!("Forked into a new session at {}; the current context continues there.", path.display()))
+                    Ok(format!(
+                        "Forked into a new session at {}; the current context continues there.",
+                        path.display()
+                    ))
                 }
                 "/branch" => {
                     let title = rest.trim();
@@ -182,30 +225,52 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 }
                 "/rename" => {
                     let name = rest.trim();
-                    if name.is_empty() { return Err("Usage: /rename <name>".into()); }
+                    if name.is_empty() {
+                        return Err("Usage: /rename <name>".into());
+                    }
                     let dir = handler_conv.lock().session_path();
                     let state_path = dir.join("state.json");
                     let mut state = read_json::<Value>(&state_path);
-                    if !state.is_object() { state = json!({}); }
-                    state.as_object_mut().expect("state object").insert("name".into(), json!(name));
-                    fs::write(&state_path, serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n").map_err(|e| e.to_string())?;
+                    if !state.is_object() {
+                        state = json!({});
+                    }
+                    state
+                        .as_object_mut()
+                        .expect("state object")
+                        .insert("name".into(), json!(name));
+                    fs::write(
+                        &state_path,
+                        serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n",
+                    )
+                    .map_err(|e| e.to_string())?;
                     Ok(format!("Session renamed to \"{}\".", name))
                 }
                 "/drop" => {
                     let dir = handler_conv.lock().session_path();
                     let _ = fs::remove_dir_all(&dir);
                     handler_conv.lock().reset(&run_args.cwd)?;
-                    Ok(format!("Dropped session {} and started a fresh conversation.", dir.display()))
+                    Ok(format!(
+                        "Dropped session {} and started a fresh conversation.",
+                        dir.display()
+                    ))
                 }
                 "/resume" => {
                     let target = rest.trim();
-                    if target.is_empty() { return Err("Usage: /resume <session-id-or-path>".into()); }
+                    if target.is_empty() {
+                        return Err("Usage: /resume <session-id-or-path>".into());
+                    }
                     let dir = session_dir_for(target);
-                    if !dir.exists() { return Err(format!("session not found: {}", dir.display())); }
-                    let turns = session_conversation_turns(&dir);
+                    if !dir.exists() {
+                        return Err(format!("session not found: {}", dir.display()));
+                    }
+                    let turns = session_conversation_turns(&dir)?;
                     let count = turns.len();
                     handler_conv.lock().load_history(&run_args.cwd, turns)?;
-                    Ok(format!("Resumed {} into this conversation ({} prior turns loaded).", dir.display(), count))
+                    Ok(format!(
+                        "Resumed {} into this conversation ({} prior turns loaded).",
+                        dir.display(),
+                        count
+                    ))
                 }
                 "/context" => {
                     let conv = handler_conv.lock();
@@ -214,18 +279,32 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         conv.turn_len(),
                         conv.approx_tokens(),
                         match context_limit {
-                            Some(limit) => format!(" Context limit: {} tokens (JEDEN_CONTEXT_LIMIT).", limit),
+                            Some(limit) =>
+                                format!(" Context limit: {} tokens (JEDEN_CONTEXT_LIMIT).", limit),
                             None => " No context limit set (JEDEN_CONTEXT_LIMIT unset).".into(),
                         }
                     ))
                 }
                 "/move" => {
                     let target = rest.trim();
-                    if target.is_empty() { return Err("Usage: /move <directory>".into()); }
+                    if target.is_empty() {
+                        return Err("Usage: /move <directory>".into());
+                    }
                     let base = handler_cwd.lock().clone();
-                    let candidate = { let p = std::path::Path::new(target); if p.is_absolute() { p.to_path_buf() } else { base.join(p) } };
-                    let resolved = candidate.canonicalize().map_err(|e| format!("cannot move to {}: {}", candidate.display(), e))?;
-                    if !resolved.is_dir() { return Err(format!("not a directory: {}", resolved.display())); }
+                    let candidate = {
+                        let p = std::path::Path::new(target);
+                        if p.is_absolute() {
+                            p.to_path_buf()
+                        } else {
+                            base.join(p)
+                        }
+                    };
+                    let resolved = candidate
+                        .canonicalize()
+                        .map_err(|e| format!("cannot move to {}: {}", candidate.display(), e))?;
+                    if !resolved.is_dir() {
+                        return Err(format!("not a directory: {}", resolved.display()));
+                    }
                     handler_conv.lock().rebase(&resolved)?;
                     *handler_cwd.lock() = resolved.clone();
                     Ok(format!("Working directory moved to {}. Tools, git status, and file commands now resolve there.", resolved.display()))
@@ -233,7 +312,9 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 _ => {
                     if is_builtin_slash(command) {
                         handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
-                    } else if let Some(expanded) = resolve_file_command(&run_args.cwd, command, rest) {
+                    } else if let Some(expanded) =
+                        resolve_file_command(&run_args.cwd, command, rest)
+                    {
                         run_turn_shared(&handler_conv, &run_args, &expanded, &mut hooks)
                     } else {
                         run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
@@ -242,7 +323,8 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             }
         } else {
             run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
-        }
+        };
+        result.map(tui::CommandOutcome::text)
     };
 
     tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;

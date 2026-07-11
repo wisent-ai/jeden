@@ -26,18 +26,41 @@ pub fn extract_json_object(text: &str) -> Result<&str, String> {
     if raw.starts_with('{') && raw.ends_with('}') {
         return Ok(raw);
     }
-    let start = raw.find('{').ok_or_else(|| format!("model returned non-json content: {}", raw.chars().take(200).collect::<String>()))?;
-    let end = raw.rfind('}').ok_or_else(|| format!("model returned non-json content: {}", raw.chars().take(200).collect::<String>()))?;
+    let start = raw.find('{').ok_or_else(|| {
+        format!(
+            "model returned non-json content: {}",
+            raw.chars().take(200).collect::<String>()
+        )
+    })?;
+    let end = raw.rfind('}').ok_or_else(|| {
+        format!(
+            "model returned non-json content: {}",
+            raw.chars().take(200).collect::<String>()
+        )
+    })?;
     if end <= start {
-        return Err(format!("model returned non-json content: {}", raw.chars().take(200).collect::<String>()));
+        return Err(format!(
+            "model returned non-json content: {}",
+            raw.chars().take(200).collect::<String>()
+        ));
     }
     Ok(&raw[start..=end])
 }
 
 fn parse_tool_action(value: &Value) -> Result<ToolAction, String> {
-    let tool = value.get("tool").and_then(Value::as_str).ok_or("tool action requires tool")?;
-    let input = value.get("input").filter(|v| v.is_object()).cloned().unwrap_or_else(|| json!({}));
-    Ok(ToolAction { tool: tool.to_string(), input })
+    let tool = value
+        .get("tool")
+        .and_then(Value::as_str)
+        .ok_or("tool action requires tool")?;
+    let input = value
+        .get("input")
+        .filter(|v| v.is_object())
+        .cloned()
+        .unwrap_or_else(|| json!({}));
+    Ok(ToolAction {
+        tool: tool.to_string(),
+        input,
+    })
 }
 
 pub fn parse_action(text: &str) -> Result<Action, String> {
@@ -48,15 +71,26 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
     }
     match value.get("action").and_then(Value::as_str).unwrap_or("") {
         "final" => {
-            let text = value.get("text").and_then(Value::as_str).ok_or("final action requires text")?;
-            Ok(Action::Final { text: text.to_string() })
+            let text = value
+                .get("text")
+                .and_then(Value::as_str)
+                .ok_or("final action requires text")?;
+            Ok(Action::Final {
+                text: text.to_string(),
+            })
         }
         "tool" => {
             let action = parse_tool_action(&value)?;
-            Ok(Action::Tool { tool: action.tool, input: action.input })
+            Ok(Action::Tool {
+                tool: action.tool,
+                input: action.input,
+            })
         }
         "tools" => {
-            let raw_tools = value.get("tools").and_then(Value::as_array).ok_or("tools action requires tools")?;
+            let raw_tools = value
+                .get("tools")
+                .and_then(Value::as_array)
+                .ok_or("tools action requires tools")?;
             if raw_tools.is_empty() {
                 return Err("tools action requires tools".into());
             }

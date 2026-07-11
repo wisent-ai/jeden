@@ -1,4 +1,7 @@
+use reqwest::blocking::Client as HttpClient;
+use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::{json, Value};
+use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -8,67 +11,66 @@ use std::time::Duration;
 
 use super::{resolve_server_cwd, string_field, MAX_STDERR_BYTES, MCP_PROTOCOL_VERSION};
 
+const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+const MCP_SESSION_ID: &str = "mcp-session-id";
+
 fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
-    let body = serde_json::to_vec(message).map_err(|e| e.to_string())?;
-    let mut out = format!("Content-Length: {}\r\n\r\n", body.len()).into_bytes();
-    out.extend(body);
-    Ok(out)
-}
-
-fn header_end(buffer: &[u8]) -> Option<usize> {
-    buffer.windows(4).position(|window| window == b"\r\n\r\n")
-}
-
-fn parse_messages(buffer: &mut Vec<u8>) -> Result<Vec<Value>, String> {
-    let mut messages = Vec::new();
-    loop {
-        let Some(end) = header_end(buffer) else { break };
-        let header = std::str::from_utf8(&buffer[..end]).map_err(|e| e.to_string())?;
-        let Some(line) = header.lines().find(|line| line.to_ascii_lowercase().starts_with("content-length:")) else {
-            return Err("MCP response missing Content-Length".into());
-        };
-        let length = line["Content-Length:".len()..]
-            .trim()
-            .parse::<usize>()
-            .map_err(|_| "invalid MCP Content-Length".to_string())?;
-        let body_start = end + 4;
-        let body_end = body_start + length;
-        if buffer.len() < body_end {
-            break;
-        }
-        let body = buffer[body_start..body_end].to_vec();
-        buffer.drain(..body_end);
-        messages.push(serde_json::from_slice(&body).map_err(|e| e.to_string())?);
+    let mut body = serde_json::to_vec(message).map_err(|e| e.to_string())?;
+    if body.len() > MAX_MESSAGE_BYTES {
+        return Err("MCP message exceeds 8 MiB limit".into());
     }
-    Ok(messages)
+    body.push(b'\n');
+    Ok(body)
+}
+
+fn parse_json_line(line: &[u8]) -> Result<Option<Value>, String> {
+    let line = line.strip_suffix(b"\n").unwrap_or(line);
+    let line = line.strip_suffix(b"\r").unwrap_or(line);
+    if line.iter().all(u8::is_ascii_whitespace) {
+        return Ok(None);
+    }
+    serde_json::from_slice(line)
+        .map(Some)
+        .map_err(|error| format!("invalid newline-delimited MCP JSON: {error}"))
 }
 
 fn read_messages(mut stdout: impl Read + Send + 'static) -> Receiver<Result<Value, String>> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut buffer = Vec::new();
+        let mut pending = Vec::new();
         let mut chunk = [0u8; 8192];
         loop {
             match stdout.read(&mut chunk) {
-                Ok(0) => break,
+                Ok(0) => {
+                    if !pending.iter().all(u8::is_ascii_whitespace) {
+                        let _ = tx.send(Err("MCP stdio closed with an unterminated JSON message".into()));
+                    }
+                    return;
+                }
                 Ok(count) => {
-                    buffer.extend_from_slice(&chunk[..count]);
-                    match parse_messages(&mut buffer) {
-                        Ok(messages) => {
-                            for message in messages {
+                    pending.extend_from_slice(&chunk[..count]);
+                    if pending.len() > MAX_MESSAGE_BYTES {
+                        let _ = tx.send(Err("MCP message exceeds 8 MiB limit".into()));
+                        return;
+                    }
+                    while let Some(end) = pending.iter().position(|byte| *byte == b'\n') {
+                        let line = pending.drain(..=end).collect::<Vec<_>>();
+                        match parse_json_line(&line) {
+                            Ok(Some(message)) => {
                                 if tx.send(Ok(message)).is_err() {
                                     return;
                                 }
                             }
-                        }
-                        Err(error) => {
-                            let _ = tx.send(Err(error));
-                            return;
+                            Ok(None) => {}
+                            Err(error) => {
+                                let _ = tx.send(Err(error));
+                                return;
+                            }
                         }
                     }
                 }
                 Err(error) => {
-                    let _ = tx.send(Err(error.to_string()));
+                    let _ = tx.send(Err(format!("MCP stdio read failed: {error}")));
                     return;
                 }
             }
@@ -80,46 +82,84 @@ fn read_messages(mut stdout: impl Read + Send + 'static) -> Receiver<Result<Valu
 fn drain_stderr(mut stderr: impl Read + Send + 'static) -> Receiver<String> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut buffer = String::new();
+        let mut buffer = Vec::new();
         let mut chunk = [0u8; 4096];
         loop {
             match stderr.read(&mut chunk) {
                 Ok(0) => break,
                 Ok(count) => {
-                    buffer.push_str(&String::from_utf8_lossy(&chunk[..count]));
+                    buffer.extend_from_slice(&chunk[..count]);
                     if buffer.len() > MAX_STDERR_BYTES {
-                        buffer = buffer.chars().rev().take(MAX_STDERR_BYTES).collect::<String>().chars().rev().collect();
+                        let excess = buffer.len() - MAX_STDERR_BYTES;
+                        buffer.drain(..excess);
                     }
                 }
                 Err(_) => break,
             }
         }
-        let _ = tx.send(buffer);
+        let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned());
     });
     rx
 }
 
-pub(super) struct McpClient {
+struct StdioTransport {
     child: Child,
     responses: Receiver<Result<Value, String>>,
     stderr: Receiver<String>,
+}
+
+struct HttpTransport {
+    client: HttpClient,
+    url: String,
+    session_id: Option<String>,
+}
+
+enum Transport {
+    Stdio(StdioTransport),
+    Http(HttpTransport),
+}
+
+pub(super) struct McpClient {
+    transport: Transport,
     next_id: u64,
+    notifications: VecDeque<Value>,
 }
 
 impl McpClient {
     pub(super) fn start(server: &Value, cwd: &Path) -> Result<Self, String> {
-        if !server.is_object() {
-            return Err("server config is required".into());
+        let object = server
+            .as_object()
+            .ok_or("MCP server config must be an object")?;
+        let transport_name = string_field(server, "type").unwrap_or_else(|| {
+            if object.contains_key("url") { "http" } else { "stdio" }
+        });
+        let transport = match transport_name {
+            "stdio" => Transport::Stdio(Self::start_stdio(server, cwd)?),
+            "http" | "streamable-http" => Transport::Http(Self::start_http(server)?),
+            other => return Err(format!("unsupported MCP transport '{other}'; expected stdio or streamable-http")),
+        };
+        Ok(Self {
+            transport,
+            next_id: 1,
+            notifications: VecDeque::new(),
+        })
+    }
+
+    fn start_stdio(server: &Value, cwd: &Path) -> Result<StdioTransport, String> {
+        if server.get("url").is_some() {
+            return Err("stdio MCP config must not contain url".into());
         }
-        if string_field(server, "type").unwrap_or("stdio") != "stdio" {
-            return Err("only stdio MCP servers are supported".into());
-        }
-        let command = string_field(server, "command").ok_or("server.command is required")?;
-        let args = server
-            .get("args")
-            .and_then(Value::as_array)
-            .map(|values| values.iter().map(|value| value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string())).collect::<Vec<_>>())
-            .unwrap_or_default();
+        let command = string_field(server, "command")
+            .filter(|command| !command.is_empty())
+            .ok_or("stdio MCP server.command must be a non-empty string")?;
+        let args = match server.get("args") {
+            None => Vec::new(),
+            Some(Value::Array(values)) => values
+                .iter()
+                .map(|value| value.as_str().map(ToOwned::to_owned).ok_or_else(|| "stdio MCP server.args entries must be strings".to_string()))
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(_) => return Err("stdio MCP server.args must be an array".into()),
+        };
         let mut builder = Command::new(command);
         builder
             .args(args)
@@ -127,76 +167,207 @@ impl McpClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        if let Some(env_values) = server.get("env").and_then(Value::as_object) {
-            for (key, value) in env_values {
-                if value.is_null() {
-                    builder.env_remove(key);
+        match server.get("env") {
+            None => {}
+            Some(Value::Object(values)) => {
+                for (key, value) in values {
+                    match value {
+                        Value::Null => { builder.env_remove(key); }
+                        Value::String(value) => { builder.env(key, value); }
+                        _ => return Err("stdio MCP server.env values must be strings or null".into()),
+                    }
+                }
+            }
+            Some(_) => return Err("stdio MCP server.env must be an object".into()),
+        }
+        let mut child = builder.spawn().map_err(|error| format!("failed to start MCP server: {error}"))?;
+        let stdout = child.stdout.take().ok_or("MCP server stdout unavailable")?;
+        let stderr = child.stderr.take().ok_or("MCP server stderr unavailable")?;
+        Ok(StdioTransport {
+            child,
+            responses: read_messages(stdout),
+            stderr: drain_stderr(stderr),
+        })
+    }
+
+    fn start_http(server: &Value) -> Result<HttpTransport, String> {
+        if server.get("command").is_some() || server.get("args").is_some() {
+            return Err("streamable HTTP MCP config must not contain command or args".into());
+        }
+        let url = string_field(server, "url")
+            .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
+            .ok_or("streamable HTTP MCP server.url must be an http(s) URL")?
+            .to_string();
+        let client = HttpClient::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()
+            .map_err(|error| format!("failed to create MCP HTTP client: {error}"))?;
+        Ok(HttpTransport { client, url, session_id: None })
+    }
+
+    fn send(&mut self, message: &Value, timeout_ms: u64) -> Result<Vec<Value>, String> {
+        match &mut self.transport {
+            Transport::Stdio(transport) => {
+                let encoded = encode_message(message)?;
+                let stdin = transport.child.stdin.as_mut().ok_or("MCP server stdin unavailable")?;
+                stdin.write_all(&encoded).map_err(|error| format!("MCP stdio write failed: {error}"))?;
+                stdin.flush().map_err(|error| format!("MCP stdio flush failed: {error}"))?;
+                let Some(expected_id) = message.get("id").and_then(Value::as_u64) else {
+                    return Ok(Vec::new());
+                };
+                let wait = Duration::from_millis(timeout_ms.clamp(1_000, 120_000));
+                let mut messages = Vec::new();
+                loop {
+                    let response = match transport.responses.recv_timeout(wait) {
+                        Ok(Ok(response)) => response,
+                        Ok(Err(error)) => return Err(error),
+                        Err(mpsc::RecvTimeoutError::Timeout) => return Err(format!("MCP request exceeded {timeout_ms}ms wait")),
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return Err("MCP stdio transport closed".into()),
+                    };
+                    let complete = response.get("id").and_then(Value::as_u64) == Some(expected_id);
+                    messages.push(response);
+                    if complete {
+                        return Ok(messages);
+                    }
+                }
+            }
+            Transport::Http(transport) => {
+                let mut request = transport.client
+                    .post(&transport.url)
+                    .timeout(Duration::from_millis(timeout_ms.clamp(1_000, 120_000)))
+                    .header(CONTENT_TYPE, "application/json")
+                    .header(ACCEPT, "application/json, text/event-stream")
+                    .json(message);
+                if let Some(session_id) = &transport.session_id {
+                    request = request.header(MCP_SESSION_ID, session_id);
+                }
+                let response = request.send().map_err(|error| format!("MCP HTTP transport failed: {error}"))?;
+                if !response.status().is_success() {
+                    return Err(format!("MCP HTTP transport returned {}", response.status()));
+                }
+                if let Some(value) = response.headers().get(MCP_SESSION_ID) {
+                    transport.session_id = Some(value.to_str().map_err(|_| "invalid MCP session id header")?.to_string());
+                }
+                if response.status().as_u16() == 202 || response.content_length() == Some(0) {
+                    return Ok(Vec::new());
+                }
+                let content_type = response.headers().get(CONTENT_TYPE).and_then(|value| value.to_str().ok()).unwrap_or("").to_string();
+                let mut body = Vec::new();
+                response.take((MAX_MESSAGE_BYTES + 1) as u64).read_to_end(&mut body).map_err(|error| format!("MCP HTTP read failed: {error}"))?;
+                if body.len() > MAX_MESSAGE_BYTES {
+                    return Err("MCP HTTP response exceeds 8 MiB limit".into());
+                }
+                if content_type.starts_with("text/event-stream") {
+                    let text = std::str::from_utf8(&body).map_err(|error| format!("invalid MCP event stream UTF-8: {error}"))?;
+                    let mut messages = Vec::new();
+                    for line in text.lines() {
+                        if let Some(data) = line.strip_prefix("data:") {
+                            messages.push(serde_json::from_str(data.trim()).map_err(|error| format!("invalid MCP event data: {error}"))?);
+                        }
+                    }
+                    Ok(messages)
+                } else if content_type.starts_with("application/json") || content_type.is_empty() {
+                    Ok(vec![serde_json::from_slice(&body).map_err(|error| format!("invalid MCP HTTP JSON: {error}"))?])
                 } else {
-                    builder.env(key, value.as_str().map(ToString::to_string).unwrap_or_else(|| value.to_string()));
+                    Err(format!("unsupported MCP HTTP content type: {content_type}"))
                 }
             }
         }
-        let mut child = builder.spawn().map_err(|e| e.to_string())?;
-        let stdout = child.stdout.take().ok_or("MCP server stdout unavailable")?;
-        let stderr = child.stderr.take().ok_or("MCP server stderr unavailable")?;
-        Ok(Self { child, responses: read_messages(stdout), stderr: drain_stderr(stderr), next_id: 1 })
     }
 
     pub(super) fn request(&mut self, method: &str, params: Value, timeout_ms: u64) -> Result<Value, String> {
         let id = self.next_id;
-        self.next_id += 1;
+        self.next_id = self.next_id.checked_add(1).ok_or("MCP request id exhausted")?;
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
-        let encoded = encode_message(&message)?;
-        let stdin = self.child.stdin.as_mut().ok_or("MCP server stdin unavailable")?;
-        stdin.write_all(&encoded).map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())?;
-
-        let wait = Duration::from_millis(timeout_ms.clamp(1_000, 120_000));
         loop {
-            let message = match self.responses.recv_timeout(wait) {
-                Ok(Ok(message)) => message,
-                Ok(Err(error)) => return Err(error),
-                Err(_) => return Err(format!("MCP request exceeded {timeout_ms}ms wait")),
-            };
-            if message.get("id").and_then(Value::as_u64) != Some(id) {
-                continue;
-            }
-            if let Some(error) = message.get("error") {
-                if let Some(text) = error.get("message").and_then(Value::as_str) {
-                    return Err(text.to_string());
+            let messages = self.send(&message, timeout_ms)?;
+            for response in messages {
+                if response.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+                    return Err("MCP response has invalid jsonrpc version".into());
                 }
-                return Err(error.to_string());
+                if response.get("method").is_some() && response.get("id").is_none() {
+                    self.notifications.push_back(response);
+                    continue;
+                }
+                if response.get("id").and_then(Value::as_u64) != Some(id) {
+                    continue;
+                }
+                if let Some(error) = response.get("error") {
+                    return Err(error.get("message").and_then(Value::as_str).map(ToOwned::to_owned).unwrap_or_else(|| error.to_string()));
+                }
+                return response.get("result").cloned().ok_or("MCP response is missing result".into());
             }
-            return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+            if matches!(self.transport, Transport::Http(_)) {
+                return Err("MCP HTTP response did not contain the matching request id".into());
+            }
         }
     }
 
-    fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
+    fn notify(&mut self, method: &str, params: Value, timeout_ms: u64) -> Result<(), String> {
         let message = json!({"jsonrpc": "2.0", "method": method, "params": params});
-        let encoded = encode_message(&message)?;
-        let stdin = self.child.stdin.as_mut().ok_or("MCP server stdin unavailable")?;
-        stdin.write_all(&encoded).map_err(|e| e.to_string())?;
-        stdin.flush().map_err(|e| e.to_string())
+        for response in self.send(&message, timeout_ms)? {
+            if response.get("method").is_some() && response.get("id").is_none() {
+                self.notifications.push_back(response);
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn initialize(&mut self, timeout_ms: u64) -> Result<Value, String> {
-        let init = self.request(
-            "initialize",
-            json!({
-                "protocolVersion": MCP_PROTOCOL_VERSION,
-                "capabilities": {},
-                "clientInfo": {"name": "jeden", "version": "0.1.0"},
-            }),
-            timeout_ms,
-        )?;
-        self.notify("notifications/initialized", json!({}))?;
+        let init = self.request("initialize", json!({
+            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "capabilities": {},
+            "clientInfo": {"name": "jeden", "version": "0.1.0"},
+        }), timeout_ms)?;
+        if !init.is_object() || init.get("protocolVersion").and_then(Value::as_str).is_none() || !init.get("capabilities").map(Value::is_object).unwrap_or(false) {
+            return Err("MCP initialize result has invalid schema".into());
+        }
+        self.notify("notifications/initialized", json!({}), timeout_ms)?;
         Ok(init)
     }
 
-    fn close(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
-        let _ = self.stderr.try_recv();
+    pub(super) fn take_notifications(&mut self) -> Vec<Value> {
+        self.notifications.drain(..).collect()
+    }
+
+    pub(super) fn poll_notifications(&mut self) -> Result<Vec<Value>, String> {
+        if let Transport::Stdio(transport) = &mut self.transport {
+            loop {
+                match transport.responses.try_recv() {
+                    Ok(Ok(message)) if message.get("method").is_some() && message.get("id").is_none() => self.notifications.push_back(message),
+                    Ok(Ok(_)) => return Err("MCP server sent an unexpected response without an active request".into()),
+                    Ok(Err(error)) => return Err(error),
+                    Err(mpsc::TryRecvError::Empty) => break,
+                    Err(mpsc::TryRecvError::Disconnected) => return Err("MCP stdio transport closed".into()),
+                }
+            }
+        }
+        Ok(self.notifications.drain(..).collect())
+    }
+
+    pub(super) fn is_alive(&mut self) -> bool {
+        match &mut self.transport {
+            Transport::Stdio(transport) => matches!(transport.child.try_wait(), Ok(None)),
+            Transport::Http(_) => true,
+        }
+    }
+
+    pub(super) fn close(&mut self) {
+        match &mut self.transport {
+            Transport::Stdio(transport) => {
+                drop(transport.child.stdin.take());
+                if matches!(transport.child.try_wait(), Ok(None)) {
+                    let _ = transport.child.kill();
+                }
+                let _ = transport.child.wait();
+                let _ = transport.stderr.try_recv();
+            }
+            Transport::Http(transport) => {
+                if let Some(session_id) = transport.session_id.take() {
+                    let _ = transport.client.delete(&transport.url).header(MCP_SESSION_ID, session_id).timeout(Duration::from_secs(2)).send();
+                }
+            }
+        }
     }
 }
 

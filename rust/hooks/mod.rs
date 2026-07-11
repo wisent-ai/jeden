@@ -1,7 +1,7 @@
 //! Lifecycle hook runtime: user- and project-defined shell commands that fire
-//! on agent events (OMP extension/hook parity). A `PreToolUse` hook can block a
-//! tool by exiting with code 2; `UserPromptSubmit` hooks inject their stdout as
-//! extra context; `PostToolUse`/`SessionStart`/`Stop` run best-effort.
+//! on agent events. A `PreToolUse` hook can block a tool by exiting with code 2;
+//! `UserPromptSubmit` hooks inject their stdout as extra context;
+//! `PostToolUse`/`SessionStart`/`Stop` run best-effort.
 //!
 //! Config lives in `.jeden/hooks.json` (project) and `~/.jeden/hooks.json`
 //! (user). Both are merged — user hooks run first, then project hooks. Schema:
@@ -20,9 +20,25 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 mod run;
+#[path = "../extensions/mod.rs"]
+mod extensions;
 
 
 pub use run::{posttool, pretool_block, session_start, session_stop, user_prompt_submit};
+pub(crate) use extensions::{
+    agent_dirs as extension_agent_dirs,
+    capability_descriptors as extension_capability_descriptors,
+    command_dirs as extension_command_dirs,
+    execute_tool as execute_extension_tool,
+    prompt_context as extension_prompt_context,
+    model_entries as extension_model_entries,
+    provider_entries as extension_provider_entries,
+    reload as reload_extensions,
+    skill_context as extension_skill_context,
+    status as extension_status,
+    tools as extension_tools,
+    PromptContribution as ExtensionPromptContribution,
+};
 
 /// One configured hook: an optional matcher (regex over the tool name; empty =
 /// match everything) and the shell command to run.
@@ -69,7 +85,11 @@ pub fn parse_event_hooks(config: &Value, event: &str) -> Vec<Hook> {
         .map(|arr| {
             arr.iter()
                 .filter_map(|entry| {
-                    let command = entry.get("command").and_then(Value::as_str)?.trim().to_string();
+                    let command = entry
+                        .get("command")
+                        .and_then(Value::as_str)?
+                        .trim()
+                        .to_string();
                     if command.is_empty() {
                         return None;
                     }
@@ -104,7 +124,13 @@ pub fn hook_matches(hook: &Hook, tool: &str) -> bool {
 /// operator's own machine) always run; project hooks (`.jeden/hooks.json`,
 /// potentially from a cloned repo) run only when `allow_project` is set (i.e.
 /// `--allow-command`). This keeps a cloned repo from silently executing shell.
-pub fn resolve_trusted_hooks(user: &Value, project: &Value, event: &str, tool: &str, allow_project: bool) -> Vec<Hook> {
+pub fn resolve_trusted_hooks(
+    user: &Value,
+    project: &Value,
+    event: &str,
+    tool: &str,
+    allow_project: bool,
+) -> Vec<Hook> {
     let mut hooks = parse_event_hooks(user, event);
     if allow_project {
         hooks.extend(parse_event_hooks(project, event));
@@ -112,7 +138,10 @@ pub fn resolve_trusted_hooks(user: &Value, project: &Value, event: &str, tool: &
     if tool.is_empty() {
         hooks
     } else {
-        hooks.into_iter().filter(|h| hook_matches(h, tool)).collect()
+        hooks
+            .into_iter()
+            .filter(|h| hook_matches(h, tool))
+            .collect()
     }
 }
 
@@ -122,7 +151,9 @@ fn parse_hook_json(stdout: &str) -> Option<Value> {
     if !trimmed.starts_with('{') {
         return None;
     }
-    serde_json::from_str::<Value>(trimmed).ok().filter(|v| v.is_object())
+    serde_json::from_str::<Value>(trimmed)
+        .ok()
+        .filter(|v| v.is_object())
 }
 
 /// A `PreToolUse` block decision: `Some(reason)` blocks the tool. A hook blocks
@@ -149,8 +180,16 @@ pub fn pretool_block_decision(outcomes: &[HookOutcome]) -> Option<String> {
             .filter(|s| !s.is_empty());
         let reason = json_reason
             .map(str::to_string)
-            .or_else(|| Some(o.stderr.trim()).filter(|s| !s.is_empty()).map(str::to_string))
-            .or_else(|| Some(o.stdout.trim()).filter(|s| !s.is_empty() && parse_hook_json(&o.stdout).is_none()).map(str::to_string))
+            .or_else(|| {
+                Some(o.stderr.trim())
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+            })
+            .or_else(|| {
+                Some(o.stdout.trim())
+                    .filter(|s| !s.is_empty() && parse_hook_json(&o.stdout).is_none())
+                    .map(str::to_string)
+            })
             .unwrap_or_else(|| "PreToolUse hook denied this tool".to_string());
         Some(reason)
     })
@@ -163,11 +202,24 @@ pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
         .iter()
         .filter_map(|o| {
             if let Some(json) = parse_hook_json(&o.stdout) {
-                let ctx = json.get("additionalContext").and_then(Value::as_str).unwrap_or("").trim().to_string();
-                if ctx.is_empty() { None } else { Some(ctx) }
+                let ctx = json
+                    .get("additionalContext")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if ctx.is_empty() {
+                    None
+                } else {
+                    Some(ctx)
+                }
             } else {
                 let s = o.stdout.trim();
-                if s.is_empty() { None } else { Some(s.to_string()) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s.to_string())
+                }
             }
         })
         .collect::<Vec<_>>()
@@ -178,15 +230,33 @@ pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
 /// Only lists the events the runtime actually fires.
 pub fn describe_hooks(cwd: &Path) -> String {
     let project = read_config(&project_hooks_path(cwd));
-    let user = user_hooks_path().map(|p| read_config(&p)).unwrap_or(Value::Null);
-    let events = ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"];
+    let user = user_hooks_path()
+        .map(|p| read_config(&p))
+        .unwrap_or(Value::Null);
+    let events = [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+    ];
     let mut lines = Vec::new();
-    for (label, config) in [("User (~/.jeden/hooks.json, always trusted)", &user), ("Project (.jeden/hooks.json, runs only with --allow-command)", &project)] {
+    for (label, config) in [
+        ("User (~/.jeden/hooks.json, always trusted)", &user),
+        (
+            "Project (.jeden/hooks.json, runs only with --allow-command)",
+            &project,
+        ),
+    ] {
         let mut section = Vec::new();
         for event in events {
             let hooks = parse_event_hooks(config, event);
             for hook in hooks {
-                let m = if hook.matcher.is_empty() { "*".to_string() } else { hook.matcher.clone() };
+                let m = if hook.matcher.is_empty() {
+                    "*".to_string()
+                } else {
+                    hook.matcher.clone()
+                };
                 section.push(format!("  {} [{}] {}", event, m, hook.command));
             }
         }

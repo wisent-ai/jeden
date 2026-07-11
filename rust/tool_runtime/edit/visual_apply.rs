@@ -2,22 +2,31 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
 
-use crate::tool_runtime::shared::{jail_path, sha256_hex, simple_diff, snapshot_name, snapshot_tag, split_edit_lines, string_input};
-use crate::tool_runtime::ToolRuntime;
 use super::lines::apply_line_edit_ops;
 use super::visual_parse::parse_visual_edit_patch;
 use super::VisualPatchOp;
+use crate::tool_runtime::shared::{
+    jail_path, sha256_hex, simple_diff, snapshot_name, snapshot_tag, split_edit_lines, string_input,
+};
+use crate::tool_runtime::ToolRuntime;
 
 fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize), String> {
     let (lines, _) = split_edit_lines(content);
-    if start_line < 1 || start_line > lines.len() { return Err("block start is past end of file".into()); }
+    if start_line < 1 || start_line > lines.len() {
+        return Err("block start is past end of file".into());
+    }
     let line = &lines[start_line - 1];
-    if let Some(heading) = regex::Regex::new(r"^(#{1,6})\s").ok().and_then(|re| re.captures(line)) {
+    if let Some(heading) = regex::Regex::new(r"^(#{1,6})\s")
+        .ok()
+        .and_then(|re| re.captures(line))
+    {
         let level = heading.get(1).map(|m| m.as_str().len()).unwrap_or(1);
         let heading_re = regex::Regex::new(r"^(#{1,6})\s").unwrap();
         for index in start_line..lines.len() {
             if let Some(next) = heading_re.captures(&lines[index]) {
-                if next.get(1).map(|m| m.as_str().len()).unwrap_or(7) <= level { return Ok((start_line, index)); }
+                if next.get(1).map(|m| m.as_str().len()).unwrap_or(7) <= level {
+                    return Ok((start_line, index));
+                }
             }
         }
         return Ok((start_line, lines.len()));
@@ -27,10 +36,17 @@ fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize)
         let mut opened = false;
         for (idx, text) in lines.iter().enumerate().skip(start_line - 1) {
             for ch in text.chars() {
-                if ch == '{' { balance += 1; opened = true; }
-                if ch == '}' { balance -= 1; }
+                if ch == '{' {
+                    balance += 1;
+                    opened = true;
+                }
+                if ch == '}' {
+                    balance -= 1;
+                }
             }
-            if opened && balance <= 0 { return Ok((start_line, idx + 1)); }
+            if opened && balance <= 0 {
+                return Ok((start_line, idx + 1));
+            }
         }
     }
     if line.trim_end().ends_with(':') {
@@ -42,10 +58,14 @@ fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize)
                 continue;
             }
             let indent = text.chars().take_while(|ch| ch.is_whitespace()).count();
-            if indent <= base_indent { break; }
+            if indent <= base_indent {
+                break;
+            }
             end_line = idx + 1;
         }
-        if end_line > start_line { return Ok((start_line, end_line)); }
+        if end_line > start_line {
+            return Ok((start_line, end_line));
+        }
     }
     Err(format!("unsupported block anchor at line {start_line}"))
 }
@@ -90,13 +110,17 @@ struct PreparedVisualEdit {
 }
 
 pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    if !runtime.allow_write { return Err("edit requires --allow-write".into()); }
+    if !runtime.allow_write {
+        return Err("edit requires --allow-write".into());
+    }
     let patch = string_input(input, "patch").ok_or("edit requires patch")?;
     let sections = parse_visual_edit_patch(&patch)?;
     let mut source_files = std::collections::HashSet::new();
     for section in &sections {
         let source = jail_path(runtime.cwd, &section.path)?;
-        if !source_files.insert(source) { return Err(format!("duplicate patch file section: {}", section.path)); }
+        if !source_files.insert(source) {
+            return Err(format!("duplicate patch file section: {}", section.path));
+        }
     }
     let mut destination_files = std::collections::HashSet::new();
     let mut prepared = Vec::new();
@@ -105,16 +129,50 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         let current_bytes = fs::read(&file).map_err(|e| e.to_string())?;
         let current_hash = sha256_hex(&current_bytes);
         let current_tag = snapshot_tag(&current_hash);
-        if current_tag != section.tag { return Err(format!("snapshot tag mismatch for {}: expected {}, got {}", section.path, current_tag, section.tag)); }
-        let to_file = section.move_to.as_ref().map(|dest| jail_path(runtime.cwd, dest)).transpose()?;
+        if current_tag != section.tag {
+            return Err(format!(
+                "snapshot tag mismatch for {}: expected {}, got {}",
+                section.path, current_tag, section.tag
+            ));
+        }
+        let to_file = section
+            .move_to
+            .as_ref()
+            .map(|dest| jail_path(runtime.cwd, dest))
+            .transpose()?;
         if let Some(to) = &to_file {
-            if !destination_files.insert(to.clone()) { return Err(format!("duplicate move destination: {}", section.move_to.as_deref().unwrap_or(""))); }
-            if source_files.contains(to) && to != &file { return Err(format!("move destination is another patched source: {}", section.move_to.as_deref().unwrap_or(""))); }
-            if to != &file && to.exists() { return Err(format!("destination exists: {}", section.move_to.as_deref().unwrap_or(""))); }
+            if !destination_files.insert(to.clone()) {
+                return Err(format!(
+                    "duplicate move destination: {}",
+                    section.move_to.as_deref().unwrap_or("")
+                ));
+            }
+            if source_files.contains(to) && to != &file {
+                return Err(format!(
+                    "move destination is another patched source: {}",
+                    section.move_to.as_deref().unwrap_or("")
+                ));
+            }
+            if to != &file && to.exists() {
+                return Err(format!(
+                    "destination exists: {}",
+                    section.move_to.as_deref().unwrap_or("")
+                ));
+            }
         }
         let before = String::from_utf8(current_bytes).map_err(|e| e.to_string())?;
-        let ops = if section.remove { Vec::new() } else { visual_ops_for_content(&before, &section.ops)? };
-        let after = if section.remove { String::new() } else if ops.is_empty() { before.clone() } else { apply_line_edit_ops(&before, &Value::Array(ops.clone()))? };
+        let ops = if section.remove {
+            Vec::new()
+        } else {
+            visual_ops_for_content(&before, &section.ops)?
+        };
+        let after = if section.remove {
+            String::new()
+        } else if ops.is_empty() {
+            before.clone()
+        } else {
+            apply_line_edit_ops(&before, &Value::Array(ops.clone()))?
+        };
         prepared.push(PreparedVisualEdit {
             file,
             to_path: section.move_to.clone(),
@@ -130,9 +188,13 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         if item.remove {
             fs::remove_file(&item.file).map_err(|e| e.to_string())?;
         } else {
-            if !item.ops.is_empty() { fs::write(&item.file, item.after.as_bytes()).map_err(|e| e.to_string())?; }
+            if !item.ops.is_empty() {
+                fs::write(&item.file, item.after.as_bytes()).map_err(|e| e.to_string())?;
+            }
             if let Some(to_file) = &item.to_file {
-                if let Some(parent) = to_file.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+                if let Some(parent) = to_file.parent() {
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
                 fs::rename(&item.file, to_file).map_err(|e| e.to_string())?;
             }
         }
