@@ -1,5 +1,7 @@
 use super::security::{ExecutionGrant, GrantError};
+#[cfg(unix)]
 use std::fs::File;
+#[cfg(unix)]
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 pub fn validate_relative(root: &Path, relative: &str) -> Result<PathBuf, GrantError> {

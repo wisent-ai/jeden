@@ -1,14 +1,10 @@
 use super::manifest::{self, ReleaseManifestV2, TrustRoot, PAYLOAD_TYPE};
-use super::transaction::{self, InstallPaths};
 use base64::Engine;
 use ed25519_dalek::{Signer, SigningKey};
 use semver::Version;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 const NOW: u64 = 1_800_000_000;
 const TARGET: &str = "aarch64-apple-darwin";
@@ -242,9 +238,12 @@ fn artifact_verification_rejects_size_and_checksum_mismatches() {
 
 #[cfg(unix)]
 mod unix_transactions {
-    use super::*;
+    use super::super::transaction::{self, InstallPaths};
+    use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Barrier};
     use std::thread;
 

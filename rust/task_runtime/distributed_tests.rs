@@ -1,4 +1,6 @@
-use super::cas::{build_snapshot, materialize_snapshot, CasError, Digest, LocalCas, UploadStatus};
+use super::cas::{build_snapshot, CasError, Digest, LocalCas, UploadStatus};
+#[cfg(unix)]
+use super::cas::materialize_snapshot;
 use super::coordinator::Coordinator;
 use super::protocol::{
     negotiate_version, AttemptPhase, CommitRequest, Job, JobPhase, PlacementConstraints,

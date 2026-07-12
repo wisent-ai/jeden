@@ -10,7 +10,9 @@ mod test_backend {
     use super::{SandboxHealth, SandboxState};
     use std::cell::Cell;
     use std::path::{Path, PathBuf};
-    use std::process::{Command, Stdio};
+    use std::process::Command;
+    #[cfg(target_os = "macos")]
+    use std::process::Stdio;
 
     thread_local! {
         static ACTIVE: Cell<bool> = const { Cell::new(false) };

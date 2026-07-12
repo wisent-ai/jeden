@@ -75,6 +75,7 @@ fn health_controls_registry_availability() {
     };
 }
 
+#[cfg(unix)]
 #[test]
 fn browser_fixture_reuses_session_preserves_screenshot_and_handles_error_cancel() {
     let _guard = ENV.lock().unwrap();
@@ -112,6 +113,7 @@ fn browser_fixture_reuses_session_preserves_screenshot_and_handles_error_cancel(
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn debugger_fixture_reuses_adapter_and_propagates_failure_cancel() {
     let _guard = ENV.lock().unwrap();
@@ -228,6 +230,7 @@ fn ssh_uri_validation_and_unavailable_backend_are_typed() {
     ));
 }
 
+#[cfg(unix)]
 #[test]
 fn github_fixture_covers_success_error_and_cancel() {
     let _guard = ENV.lock().unwrap();
@@ -312,6 +315,7 @@ fn web_without_provider_is_unavailable_and_cancel_is_typed() {
     );
 }
 
+#[cfg(unix)]
 #[test]
 fn ssh_fixture_reuses_control_connection_and_supports_success() {
     let _guard = ENV.lock().unwrap();

@@ -1,5 +1,4 @@
 use std::path::Path;
-use std::sync::Arc;
 
 use crate::capability::{self, CapabilityKind, HealthState};
 
@@ -55,6 +54,7 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
         };
         let snapshot = capability::for_cwd(cwd);
         let mut reasons = Vec::new();
+        #[cfg(target_os = "macos")]
         let mut described = false;
         for descriptor in snapshot.descriptors.iter().filter(|descriptor| {
             descriptor
@@ -62,7 +62,10 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                 .iter()
                 .any(|candidate| candidate == operation)
         }) {
-            described = true;
+            #[cfg(target_os = "macos")]
+            {
+                described = true;
+            }
             if descriptor.ui.executable && descriptor.health.is_executable() {
                 return FeatureAvailability {
                     available: true,
@@ -120,10 +123,10 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                             .map_err(|error| format!("Clipboard image read failed: {error}"));
                         let _ = std::fs::remove_file(&path);
                         return bytes.map(|bytes| {
-                            Some(ClipboardContent::Bytes {
-                                name: "clipboard.png".into(),
-                                bytes: Arc::from(bytes),
-                            })
+                            Some(ClipboardContent::from((
+                                "clipboard.png".into(),
+                                bytes,
+                            )))
                         });
                     }
                     Ok(output) => {
@@ -145,7 +148,7 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     return Ok(None);
                 }
                 return String::from_utf8(output.stdout)
-                    .map(|value| Some(ClipboardContent::Text(value)))
+                    .map(|value| Some(ClipboardContent::from(value)))
                     .map_err(|error| format!("Clipboard text is not UTF-8: {error}"));
             }
             return Err(image_error

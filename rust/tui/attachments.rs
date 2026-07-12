@@ -60,6 +60,21 @@ pub enum ClipboardContent {
     Bytes { name: String, bytes: Arc<[u8]> },
 }
 
+impl From<String> for ClipboardContent {
+    fn from(text: String) -> Self {
+        Self::Text(text)
+    }
+}
+
+impl From<(String, Vec<u8>)> for ClipboardContent {
+    fn from((name, bytes): (String, Vec<u8>)) -> Self {
+        Self::Bytes {
+            name,
+            bytes: Arc::from(bytes),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachmentError {
     CountLimit {
