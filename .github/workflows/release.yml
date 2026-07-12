@@ -1,47 +1,26 @@
-name: Signed canary release
+name: Canary build evidence
 
 on:
   workflow_run:
     workflows: ['contractual-ci']
     types: [completed]
     branches: [main]
-  push:
-    tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+*'
-  workflow_dispatch:
-    inputs:
-      version:
-        description: SemVer to release (required when not running from a tag)
-        required: false
-        type: string
-      minimum_version:
-        description: Oldest client version allowed to install this release
-        required: true
-        default: '0.1.0'
-        type: string
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
-  group: signed-canary-${{ github.event.workflow_run.head_sha || github.ref }}
+  group: canary-build-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: false
 
-env:
-  DSSE_PAYLOAD_TYPE: application/vnd.jeden.release-manifest.v2+json
-  MANIFEST_SCHEMA_VERSION: '2'
-
 jobs:
-  build-sign-publish:
+  build-evidence:
     if: >-
-      github.event_name != 'workflow_run' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.head_repository.full_name == github.repository)
-    name: Build once, sign and publish (${{ matrix.target }})
-    environment: release-canary
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    name: Build unsigned evidence (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
@@ -58,63 +37,29 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
-      SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-      RELEASE_STORE_BASE_URL: ${{ secrets.RELEASE_STORE_BASE_URL }}
-      RELEASE_OIDC_EXCHANGE_URL: ${{ secrets.RELEASE_OIDC_EXCHANGE_URL }}
-      RELEASE_OIDC_AUDIENCE: ${{ secrets.RELEASE_OIDC_AUDIENCE }}
-      CANARY_KMS_SIGN_URL: ${{ secrets.CANARY_KMS_SIGN_URL }}
-      CANARY_KMS_KEY_ID: ${{ secrets.CANARY_KMS_KEY_ID }}
-      CANARY_PUBLIC_KEY_PEM: ${{ secrets.CANARY_PUBLIC_KEY_PEM }}
-      JEDEN_CANARY_RELEASE_KEY_ID: ${{ secrets.CANARY_KMS_KEY_ID }}
-      JEDEN_CANARY_RELEASE_PUBLIC_KEY: ${{ secrets.CANARY_PUBLIC_KEY_BASE64 }}
-      JEDEN_STABLE_RELEASE_KEY_ID: ${{ secrets.STABLE_KMS_KEY_ID }}
-      JEDEN_STABLE_RELEASE_PUBLIC_KEY: ${{ secrets.STABLE_PUBLIC_KEY_BASE64 }}
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha }}
+      TARGET_TRIPLE: ${{ matrix.target }}
+      CONTRACTUAL_CI_RUN_ID: ${{ github.event.workflow_run.id }}
+      CONTRACTUAL_CI_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
     steps:
-      - name: Check out the exact source revision
+      - name: Check out the exact contractual CI revision
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
-      - name: Fail closed unless canary authorities are configured
-        shell: bash
-        run: |
-          set -euo pipefail
-          for name in RELEASE_STORE_BASE_URL RELEASE_OIDC_EXCHANGE_URL RELEASE_OIDC_AUDIENCE CANARY_KMS_SIGN_URL CANARY_KMS_KEY_ID CANARY_PUBLIC_KEY_PEM JEDEN_CANARY_RELEASE_PUBLIC_KEY JEDEN_STABLE_RELEASE_KEY_ID JEDEN_STABLE_RELEASE_PUBLIC_KEY; do
-            if [ -z "${!name:-}" ]; then
-              echo "::error::Missing required external release prerequisite: $name"
-              exit 1
-            fi
-          done
-          case "$RELEASE_STORE_BASE_URL $RELEASE_OIDC_EXCHANGE_URL $CANARY_KMS_SIGN_URL" in
-            *http://*) echo '::error::Release endpoints must use HTTPS'; exit 1 ;;
-          esac
-
-      - name: Resolve and validate release version
+      - name: Resolve automatic canary version
         id: version
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          INPUT_VERSION: ${{ inputs.version }}
-          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
-          version="$INPUT_VERSION"
-          if [ "$EVENT_NAME" = workflow_run ]; then
-            base="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
-            if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-              echo '::error::Cargo package version must be a stable SemVer for automatic canary versioning'
-              exit 1
-            fi
-            next_patch=$((10#${BASH_REMATCH[3]} + 1))
-            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${next_patch}-canary.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.sha${SOURCE_SHA:0:12}"
-          elif [ -z "$version" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            version="${GITHUB_REF_NAME#v}"
-          fi
-          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
-            echo '::error::A valid explicit SemVer or v-prefixed SemVer tag is required'
+          base="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo '::error::Cargo package version must be a stable SemVer for automatic canary versioning'
             exit 1
           fi
+          next_patch=$((10#${BASH_REMATCH[3]} + 1))
+          version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${next_patch}-canary.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.sha${SOURCE_SHA:0:12}"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust toolchain for target
@@ -122,7 +67,6 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
-      # This is the only build invocation. All later release, signing and promotion steps consume its bytes.
       - name: Build target exactly once
         shell: bash
         run: cargo build --locked --release --target '${{ matrix.target }}' --bin jeden
@@ -136,15 +80,13 @@ jobs:
           cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" 'dist/${{ matrix.executable }}'
           archive="jeden-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"
           tar -C dist -czf "dist/$archive" '${{ matrix.executable }}'
-          python3 - "$archive" "${{ matrix.target }}" <<'PY' >> "$GITHUB_OUTPUT"
-          import hashlib, os, pathlib, sys
-          name, target = sys.argv[1:]
-          p = pathlib.Path('dist') / name
-          digest = hashlib.sha256(p.read_bytes()).hexdigest()
+          python3 - "$archive" <<'PY' >> "$GITHUB_OUTPUT"
+          import hashlib, pathlib, sys
+          name = sys.argv[1]
+          path = pathlib.Path('dist') / name
           print(f'name={name}')
-          print(f'sha256={digest}')
-          print(f'size={p.stat().st_size}')
-          print(f'artifact_url={os.environ["RELEASE_STORE_BASE_URL"].rstrip("/")}/artifacts/sha256/{digest}/{name}')
+          print(f'sha256={hashlib.sha256(path.read_bytes()).hexdigest()}')
+          print(f'size={path.stat().st_size}')
           PY
 
       - name: Generate SPDX SBOM
@@ -155,215 +97,105 @@ jobs:
           output-file: dist/sbom.spdx.json
           upload-artifact: false
 
-      - name: Bind SBOM to immutable release artifact
-        shell: bash
+      - name: Bind SBOM to immutable build artifact
         env:
           ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
+        shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
           import json, os, pathlib
           path = pathlib.Path('dist/sbom.spdx.json')
           document = json.loads(path.read_text(encoding='utf-8'))
-          document['documentComment'] = f'Jeden immutable release artifact sha256:{os.environ["ARTIFACT_SHA256"]}'
+          document['documentComment'] = f'Jeden immutable build artifact sha256:{os.environ["ARTIFACT_SHA256"]}'
           path.write_text(json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
           PY
 
-      - name: Generate provenance statement hook
-        shell: bash
+      - name: Generate provenance statement
         env:
           ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
           ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
           ARTIFACT_SIZE: ${{ steps.artifact.outputs.size }}
-          TARGET_TRIPLE: ${{ matrix.target }}
+        shell: bash
         run: |
           set -euo pipefail
           python3 <<'PY'
-          import json, os
+          import json, os, pathlib
           statement = {
             '_type': 'https://in-toto.io/Statement/v1',
             'subject': [{'name': os.environ['ARTIFACT_NAME'], 'digest': {'sha256': os.environ['ARTIFACT_SHA256']}}],
             'predicateType': 'https://slsa.dev/provenance/v1',
             'predicate': {
               'buildDefinition': {
-                'buildType': 'https://github.com/jeden/release/.github/workflows/release.yml@v2',
+                'buildType': 'https://github.com/jeden/release/.github/workflows/release.yml@v3',
                 'externalParameters': {'targetTriple': os.environ['TARGET_TRIPLE']},
                 'internalParameters': {'lockedDependencies': True},
-                'resolvedDependencies': [{'uri': f'git+{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}@{os.environ["SOURCE_SHA"]}'}]
+                'resolvedDependencies': [{'uri': f'git+{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}@{os.environ["SOURCE_SHA"]}'}],
               },
               'runDetails': {
                 'builder': {'id': f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'},
-                'metadata': {'invocationId': f'{os.environ["GITHUB_RUN_ID"]}-{os.environ["GITHUB_RUN_ATTEMPT"]}' }
-              }
-            }
+                'metadata': {'invocationId': f'{os.environ["GITHUB_RUN_ID"]}-{os.environ["GITHUB_RUN_ATTEMPT"]}'},
+              },
+            },
           }
-          with open('dist/provenance.intoto.json', 'w', encoding='utf-8', newline='\n') as f:
-            json.dump(statement, f, sort_keys=True, separators=(',', ':'))
-            f.write('\n')
+          pathlib.Path('dist/provenance.intoto.json').write_text(
+              json.dumps(statement, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8'
+          )
           PY
 
-      - name: Obtain short-lived publisher identity through GitHub OIDC
-        shell: bash
-        run: |
-          set -euo pipefail
-          oidc_json="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$(python3 -c 'import os,urllib.parse;print(urllib.parse.quote(os.environ["RELEASE_OIDC_AUDIENCE"],safe=""))')")"
-          oidc_token="$(printf '%s' "$oidc_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("value", ""))')"
-          [ -n "$oidc_token" ] || { echo '::error::GitHub OIDC issued no token'; exit 1; }
-          exchange_json="$(curl --fail-with-body --silent --show-error \
-            -H 'Content-Type: application/json' \
-            --data "$(OIDC_TOKEN="$oidc_token" python3 -c 'import json,os;print(json.dumps({"subject_token":os.environ["OIDC_TOKEN"],"audience":os.environ["RELEASE_OIDC_AUDIENCE"]},separators=(",",":")))')" \
-            "$RELEASE_OIDC_EXCHANGE_URL")"
-          access_token="$(printf '%s' "$exchange_json" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token", ""))')"
-          [ -n "$access_token" ] || { echo '::error::OIDC exchange issued no publisher token'; exit 1; }
-          echo "::add-mask::$access_token"
-          printf 'RELEASE_ACCESS_TOKEN=%s\n' "$access_token" >> "$GITHUB_ENV"
-
-      - name: Upload immutable artifact, SBOM and provenance
-        id: evidence
-        shell: bash
+      - name: Create publisher build handoff
         env:
+          BUILD_VERSION: ${{ steps.version.outputs.version }}
+          MINIMUM_VERSION: '0.1.0'
           ARTIFACT_NAME: ${{ steps.artifact.outputs.name }}
           ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
-        run: |
-          set -euo pipefail
-          python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import hashlib, os, pathlib
-          base = os.environ['RELEASE_STORE_BASE_URL'].rstrip('/')
-          for key, filename in [('sbom', 'sbom.spdx.json'), ('provenance', 'provenance.intoto.json')]:
-              digest = hashlib.sha256((pathlib.Path('dist') / filename).read_bytes()).hexdigest()
-              print(f'{key}_sha256={digest}')
-              print(f'{key}_url={base}/evidence/sha256/{digest}/{filename}')
-          PY
-          put_immutable() {
-            local file="$1" url="$2"
-            curl --fail-with-body --silent --show-error --request PUT \
-              -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" \
-              -H 'If-None-Match: *' -H 'Cache-Control: public, max-age=31536000, immutable' \
-              --upload-file "$file" "$url"
-          }
-          put_immutable "dist/$ARTIFACT_NAME" "${RELEASE_STORE_BASE_URL%/}/artifacts/sha256/$ARTIFACT_SHA256/$ARTIFACT_NAME"
-          put_immutable dist/sbom.spdx.json "$(grep '^sbom_url=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
-          put_immutable dist/provenance.intoto.json "$(grep '^provenance_url=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
-
-      - name: Create canonical ReleaseManifestV2 payload and DSSE PAE
-        id: manifest
-        shell: bash
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-          MINIMUM_VERSION: ${{ inputs.minimum_version || '0.1.0' }}
-          TARGET_TRIPLE: ${{ matrix.target }}
-          ARTIFACT_URL: ${{ steps.artifact.outputs.artifact_url }}
-          ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
           ARTIFACT_SIZE: ${{ steps.artifact.outputs.size }}
-          SBOM_REF: ${{ format('{0}#sha256={1}', steps.evidence.outputs.sbom_url, steps.evidence.outputs.sbom_sha256) }}
-          PROVENANCE_REF: ${{ format('{0}#sha256={1}', steps.evidence.outputs.provenance_url, steps.evidence.outputs.provenance_sha256) }}
+        shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import base64, datetime, hashlib, json, os, pathlib
-          now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
-          payload = {
-            'schemaVersion': 2,
-            'version': os.environ['VERSION'],
-            'channel': 'canary',
-            'targetTriple': os.environ['TARGET_TRIPLE'],
-            'artifactUrl': os.environ['ARTIFACT_URL'],
-            'sha256': os.environ['ARTIFACT_SHA256'],
-            'size': int(os.environ['ARTIFACT_SIZE']),
-            'publishedAt': now.isoformat().replace('+00:00', 'Z'),
-            'expiresAt': (now + datetime.timedelta(days=7)).isoformat().replace('+00:00', 'Z'),
+          python3 <<'PY'
+          import datetime, hashlib, json, os, pathlib
+          dist = pathlib.Path('dist')
+          handoff = {
+            'schema': 'jeden.release-build-handoff/v1',
+            'repository': os.environ['GITHUB_REPOSITORY'],
+            'headSha': os.environ['SOURCE_SHA'],
+            'version': os.environ['BUILD_VERSION'],
             'minimumVersion': os.environ['MINIMUM_VERSION'],
-            'keyId': os.environ['CANARY_KMS_KEY_ID'],
-            'provenanceRef': os.environ['PROVENANCE_REF'],
-            'sbomRef': os.environ['SBOM_REF'],
+            'createdAt': datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
+            'contractualCiRunId': os.environ['CONTRACTUAL_CI_RUN_ID'],
+            'contractualCiRunAttempt': int(os.environ['CONTRACTUAL_CI_RUN_ATTEMPT']),
+            'buildRunId': os.environ['GITHUB_RUN_ID'],
+            'buildRunAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
+            'targetTriple': os.environ['TARGET_TRIPLE'],
+            'artifact': {
+              'name': os.environ['ARTIFACT_NAME'],
+              'sha256': os.environ['ARTIFACT_SHA256'],
+              'size': int(os.environ['ARTIFACT_SIZE']),
+            },
+            'sbom': {
+              'name': 'sbom.spdx.json',
+              'sha256': hashlib.sha256((dist / 'sbom.spdx.json').read_bytes()).hexdigest(),
+            },
+            'provenance': {
+              'name': 'provenance.intoto.json',
+              'sha256': hashlib.sha256((dist / 'provenance.intoto.json').read_bytes()).hexdigest(),
+            },
           }
-          raw = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()
-          pathlib.Path('dist/manifest.payload.json').write_bytes(raw)
-          typ = os.environ['DSSE_PAYLOAD_TYPE'].encode()
-          pae = b'DSSEv1 ' + str(len(typ)).encode() + b' ' + typ + b' ' + str(len(raw)).encode() + b' ' + raw
-          pathlib.Path('dist/manifest.pae').write_bytes(pae)
-          print('payload_base64=' + base64.b64encode(raw).decode())
-          print('pae_base64=' + base64.b64encode(pae).decode())
-          print('payload_sha256=' + hashlib.sha256(raw).hexdigest())
+          (dist / 'build-handoff.json').write_text(
+              json.dumps(handoff, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8'
+          )
           PY
 
-      - name: Sign canary manifest with external KMS authority
-        id: signature
-        shell: bash
-        env:
-          PAYLOAD_BASE64: ${{ steps.manifest.outputs.payload_base64 }}
-          PAE_BASE64: ${{ steps.manifest.outputs.pae_base64 }}
-        run: |
-          set -euo pipefail
-          request="$(python3 -c 'import json,os;print(json.dumps({"keyId":os.environ["CANARY_KMS_KEY_ID"],"algorithm":"Ed25519","messageBase64":os.environ["PAE_BASE64"]},separators=(",",":")))')"
-          response="$(curl --fail-with-body --silent --show-error \
-            -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" -H 'Content-Type: application/json' \
-            --data "$request" "$CANARY_KMS_SIGN_URL")"
-          signature="$(printf '%s' "$response" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("signature", ""))')"
-          [ -n "$signature" ] || { echo '::error::Canary KMS returned no DSSE signature'; exit 1; }
-          SIGNATURE="$signature" PAYLOAD_BASE64="$PAYLOAD_BASE64" python3 <<'PY'
-          import base64, json, os, pathlib
-          base64.b64decode(os.environ['SIGNATURE'], validate=True)
-          envelope = {
-            'payloadType': os.environ['DSSE_PAYLOAD_TYPE'],
-            'payload': os.environ['PAYLOAD_BASE64'],
-            'signatures': [{'keyid': os.environ['CANARY_KMS_KEY_ID'], 'sig': os.environ['SIGNATURE']}]
-          }
-          pathlib.Path('dist/manifest.dsse.json').write_text(json.dumps(envelope, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
-          pathlib.Path('dist/canary-public.pem').write_text(os.environ['CANARY_PUBLIC_KEY_PEM'], encoding='utf-8')
-          PY
-          python3 -c 'import base64,json,pathlib; pathlib.Path("dist/manifest.sig").write_bytes(base64.b64decode(json.load(open("dist/manifest.dsse.json"))["signatures"][0]["sig"],validate=True))'
-          openssl pkeyutl -verify -pubin -inkey dist/canary-public.pem -rawin -in dist/manifest.pae -sigfile dist/manifest.sig
-
-      - name: Publish immutable DSSE envelope and gate digest record
-        id: publish
-        shell: bash
-        env:
-          ARTIFACT_SHA256: ${{ steps.artifact.outputs.sha256 }}
-          SBOM_SHA256: ${{ steps.evidence.outputs.sbom_sha256 }}
-          PROVENANCE_SHA256: ${{ steps.evidence.outputs.provenance_sha256 }}
-          PAYLOAD_SHA256: ${{ steps.manifest.outputs.payload_sha256 }}
-        run: |
-          set -euo pipefail
-          python3 <<'PY' >> "$GITHUB_OUTPUT"
-          import hashlib, json, os, pathlib
-          envp = pathlib.Path('dist/manifest.dsse.json')
-          envelope_digest = hashlib.sha256(envp.read_bytes()).hexdigest()
-          envelope_url = f'{os.environ["RELEASE_STORE_BASE_URL"].rstrip("/")}/manifests/canary/sha256/{envelope_digest}/manifest.dsse.json'
-          gates = {
-            'schemaVersion': 1, 'sourceSha': os.environ['SOURCE_SHA'], 'targetTriple': '${{ matrix.target }}',
-            'artifactSha256': os.environ['ARTIFACT_SHA256'], 'manifestPayloadSha256': os.environ['PAYLOAD_SHA256'],
-            'manifestEnvelopeSha256': envelope_digest, 'sbomSha256': os.environ['SBOM_SHA256'],
-            'provenanceSha256': os.environ['PROVENANCE_SHA256'], 'workflowRun': os.environ['GITHUB_RUN_ID']
-          }
-          gate_path = pathlib.Path('dist/release-gate-digests.json')
-          gate_path.write_text(json.dumps(gates, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
-          gate_digest = hashlib.sha256(gate_path.read_bytes()).hexdigest()
-          print(f'envelope_sha256={envelope_digest}')
-          print(f'envelope_url={envelope_url}')
-          print(f'gate_sha256={gate_digest}')
-          print(f'gate_url={os.environ["RELEASE_STORE_BASE_URL"].rstrip("/")}/gates/sha256/{gate_digest}/release-gate-digests.json')
-          PY
-          put_immutable() {
-            curl --fail-with-body --silent --show-error --request PUT \
-              -H "Authorization: Bearer $RELEASE_ACCESS_TOKEN" -H 'If-None-Match: *' \
-              -H 'Cache-Control: public, max-age=31536000, immutable' --upload-file "$1" "$2"
-          }
-          put_immutable dist/manifest.dsse.json "$(grep '^envelope_url=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
-          put_immutable dist/release-gate-digests.json "$(grep '^gate_url=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
-
-      - name: Retain immutable release evidence in Actions
+      - name: Upload unsigned build evidence for the publisher
         uses: actions/upload-artifact@v4
         with:
-          name: canary-${{ matrix.target }}-${{ steps.artifact.outputs.sha256 }}
+          name: canary-build-${{ matrix.target }}-${{ github.event.workflow_run.head_sha }}
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 1
           compression-level: 0
           path: |
             dist/${{ steps.artifact.outputs.name }}
-            dist/manifest.dsse.json
-            dist/release-gate-digests.json
+            dist/build-handoff.json
             dist/sbom.spdx.json
             dist/provenance.intoto.json

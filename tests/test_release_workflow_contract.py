@@ -1,20 +1,19 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import datetime
+import hashlib
 import json
 import os
-import stat
 import subprocess
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_WORKFLOW = ROOT / ".github/workflows/release.yml"
-PROMOTE_WORKFLOW = ROOT / ".github/workflows/promote.yml"
-SOURCE_SHA_EXPRESSION = "${{ github.event.workflow_run.head_sha || github.sha }}"
+HEAD_SHA = "${{ github.event.workflow_run.head_sha }}"
 RUBY_YAML_TO_JSON = """
 require 'json'
 require 'yaml'
@@ -51,118 +50,212 @@ def execute_step(step: dict[str, Any], cwd: Path, environment: dict[str, str]) -
     )
 
 
-class ReleaseWorkflowContractTests(unittest.TestCase):
-    def test_automatic_canary_is_bound_to_the_successful_contractual_ci_revision(self) -> None:
-        release = load_workflow(RELEASE_WORKFLOW)
-        promotion = load_workflow(PROMOTE_WORKFLOW)
-        entrypoints = release["on"]
-        jobs = release["jobs"]
-        job = jobs["build-sign-publish"]
+def scalar_strings(value: Any) -> Iterator[str]:
+    if isinstance(value, dict):
+        for key, child in value.items():
+            yield str(key)
+            yield from scalar_strings(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from scalar_strings(child)
+    elif isinstance(value, str):
+        yield value
 
-        self.assertEqual({"build-sign-publish"}, set(jobs))
-        self.assertEqual({"workflow_run", "push", "workflow_dispatch"}, set(entrypoints))
+
+class ReleaseWorkflowContractTests(unittest.TestCase):
+    def test_github_only_builds_unsigned_handoffs_from_contractual_ci(self) -> None:
+        release = load_workflow(RELEASE_WORKFLOW)
+
         self.assertEqual(
-            {"workflows": ["contractual-ci"], "types": ["completed"], "branches": ["main"]},
-            entrypoints["workflow_run"],
+            {
+                "workflow_run": {
+                    "workflows": ["contractual-ci"],
+                    "types": ["completed"],
+                    "branches": ["main"],
+                }
+            },
+            release["on"],
         )
-        self.assertEqual({"tags": ["v[0-9]+.[0-9]+.[0-9]+*"]}, entrypoints["push"])
+        self.assertEqual({"contents": "read"}, release["permissions"])
+        self.assertEqual({"build-evidence"}, set(release["jobs"]))
+
+        job = release["jobs"]["build-evidence"]
         self.assertEqual(
-            "github.event_name != 'workflow_run' || "
-            "(github.event.workflow_run.conclusion == 'success' && "
+            "github.event.workflow_run.conclusion == 'success' && "
             "github.event.workflow_run.event == 'push' && "
             "github.event.workflow_run.head_branch == 'main' && "
-            "github.event.workflow_run.head_repository.full_name == github.repository)",
+            "github.event.workflow_run.head_repository.full_name == github.repository",
             " ".join(job["if"].split()),
         )
-        self.assertEqual(SOURCE_SHA_EXPRESSION, job["env"]["SOURCE_SHA"])
-        checkout = step_named(job, "Check out the exact source revision")
-        self.assertEqual(SOURCE_SHA_EXPRESSION, checkout["with"]["ref"])
+        self.assertEqual(HEAD_SHA, job["env"]["SOURCE_SHA"])
+        checkout = step_named(job, "Check out the exact contractual CI revision")
+        self.assertEqual(HEAD_SHA, checkout["with"]["ref"])
+        self.assertIs(checkout["with"]["persist-credentials"], False)
 
-        version = step_named(job, "Resolve and validate release version")
-        crate_version = tomllib.loads((ROOT / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
-        major, minor, patch = (int(part) for part in crate_version.split("."))
-        source_sha = "abcdef0123456789abcdef0123456789abcdef01"
-        cases = (
-            (
-                {"EVENT_NAME": "workflow_run", "INPUT_VERSION": "", "GITHUB_REF": "", "GITHUB_REF_NAME": ""},
-                f"{major}.{minor}.{patch + 1}-canary.42.3.sha{source_sha[:12]}",
-            ),
-            (
-                {"EVENT_NAME": "workflow_dispatch", "INPUT_VERSION": "2.3.4", "GITHUB_REF": "", "GITHUB_REF_NAME": ""},
-                "2.3.4",
-            ),
-            (
-                {"EVENT_NAME": "push", "INPUT_VERSION": "", "GITHUB_REF": "refs/tags/v3.2.1", "GITHUB_REF_NAME": "v3.2.1"},
-                "3.2.1",
-            ),
+        self.assertEqual(
+            [
+                {
+                    "target": "x86_64-unknown-linux-gnu",
+                    "runner": "ubuntu-24.04",
+                    "executable": "jeden",
+                },
+                {
+                    "target": "aarch64-apple-darwin",
+                    "runner": "macos-14",
+                    "executable": "jeden",
+                },
+                {
+                    "target": "x86_64-pc-windows-msvc",
+                    "runner": "windows-2022",
+                    "executable": "jeden.exe",
+                },
+            ],
+            job["strategy"]["matrix"]["include"],
         )
-        for environment, expected_version in cases:
-            with self.subTest(event=environment["EVENT_NAME"]), tempfile.TemporaryDirectory() as temporary:
-                output = Path(temporary) / "github-output"
-                execute_step(
-                    version,
-                    ROOT,
-                    environment
-                    | {
-                        "SOURCE_SHA": source_sha,
-                        "GITHUB_RUN_NUMBER": "42",
-                        "GITHUB_RUN_ATTEMPT": "3",
-                        "GITHUB_OUTPUT": str(output),
-                    },
-                )
-                self.assertEqual(f"version={expected_version}\n", output.read_text(encoding="utf-8"))
+
+        self.assertNotIn("environment", job)
+        self.assertEqual(
+            {
+                "actions/checkout@v4",
+                "dtolnay/rust-toolchain@stable",
+                "anchore/sbom-action@v0.20.6",
+                "actions/upload-artifact@v4",
+            },
+            {step["uses"] for step in job["steps"] if "uses" in step},
+        )
+
+        upload = step_named(job, "Upload unsigned build evidence for the publisher")
+        self.assertEqual("actions/upload-artifact@v4", upload["uses"])
+        self.assertEqual(
+            (
+                "dist/${{ steps.artifact.outputs.name }}",
+                "dist/build-handoff.json",
+                "dist/sbom.spdx.json",
+                "dist/provenance.intoto.json",
+            ),
+            tuple(upload["with"]["path"].splitlines()),
+        )
+        self.assertEqual("error", upload["with"]["if-no-files-found"])
+        retention_days = upload["with"]["retention-days"]
+        self.assertIsInstance(retention_days, int)
+        self.assertGreaterEqual(retention_days, 1)
+        self.assertLessEqual(retention_days, 7)
+
+        policy_text = "\n".join(scalar_strings(release)).lower()
+        for forbidden_capability in (
+            "${{ secrets.",
+            "id-token",
+            "oidc",
+            "kms",
+            "signature",
+            "signing",
+            "dsse",
+            "release_store",
+            "release-store",
+            "release store",
+            "channel",
+            "gh release",
+            "actions/create-release",
+            "softprops/action-gh-release",
+        ):
+            with self.subTest(forbidden_capability=forbidden_capability):
+                self.assertNotIn(forbidden_capability, policy_text)
+
+    def test_handoff_is_canonical_strict_and_binds_all_unsigned_evidence(self) -> None:
+        release = load_workflow(RELEASE_WORKFLOW)
+        handoff_step = step_named(release["jobs"]["build-evidence"], "Create publisher build handoff")
+        source_sha = "abcdef0123456789abcdef0123456789abcdef01"
+        artifact_name = "jeden-0.2.0-canary.42.3.shaabcdef012345-test-target.tar.gz"
+        artifact_bytes = b"immutable executable archive"
+        sbom_bytes = b'{"spdxVersion":"SPDX-2.3"}\n'
+        provenance_bytes = b'{"_type":"https://in-toto.io/Statement/v1"}\n'
 
         with tempfile.TemporaryDirectory() as temporary:
             work = Path(temporary)
-            (work / "dist").mkdir()
-            provenance = step_named(job, "Generate provenance statement hook")
+            dist = work / "dist"
+            dist.mkdir()
+            (dist / artifact_name).write_bytes(artifact_bytes)
+            (dist / "sbom.spdx.json").write_bytes(sbom_bytes)
+            (dist / "provenance.intoto.json").write_bytes(provenance_bytes)
             execute_step(
-                provenance,
+                handoff_step,
                 work,
                 {
-                    "ARTIFACT_NAME": "jeden.tar.gz",
-                    "ARTIFACT_SHA256": "1" * 64,
-                    "ARTIFACT_SIZE": "1",
-                    "TARGET_TRIPLE": "test-target",
-                    "SOURCE_SHA": source_sha,
-                    "GITHUB_SERVER_URL": "https://github.example",
                     "GITHUB_REPOSITORY": "owner/repository",
-                    "GITHUB_RUN_ID": "42",
-                    "GITHUB_RUN_ATTEMPT": "3",
-                },
-            )
-            statement = json.loads((work / "dist/provenance.intoto.json").read_text(encoding="utf-8"))
-            dependencies = statement["predicate"]["buildDefinition"]["resolvedDependencies"]
-            self.assertEqual([{"uri": f"git+https://github.example/owner/repository@{source_sha}"}], dependencies)
-
-            (work / "dist/manifest.dsse.json").write_text("{}\n", encoding="utf-8")
-            binary_directory = work / "bin"
-            binary_directory.mkdir()
-            curl = binary_directory / "curl"
-            curl.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            curl.chmod(curl.stat().st_mode | stat.S_IXUSR)
-            gate_output = work / "gate-output"
-            gate = step_named(job, "Publish immutable DSSE envelope and gate digest record")
-            execute_step(
-                gate,
-                work,
-                {
-                    "PATH": f"{binary_directory}:{os.environ['PATH']}",
                     "SOURCE_SHA": source_sha,
-                    "ARTIFACT_SHA256": "1" * 64,
-                    "SBOM_SHA256": "2" * 64,
-                    "PROVENANCE_SHA256": "3" * 64,
-                    "PAYLOAD_SHA256": "4" * 64,
-                    "RELEASE_STORE_BASE_URL": "https://release.example",
-                    "RELEASE_ACCESS_TOKEN": "test-token",
-                    "GITHUB_RUN_ID": "42",
-                    "GITHUB_OUTPUT": str(gate_output),
+                    "BUILD_VERSION": "0.2.0-canary.42.3.shaabcdef012345",
+                    "MINIMUM_VERSION": "0.1.0",
+                    "CONTRACTUAL_CI_RUN_ID": "1001",
+                    "CONTRACTUAL_CI_RUN_ATTEMPT": "2",
+                    "GITHUB_RUN_ID": "2002",
+                    "GITHUB_RUN_ATTEMPT": "3",
+                    "TARGET_TRIPLE": "test-target",
+                    "ARTIFACT_NAME": artifact_name,
+                    "ARTIFACT_SHA256": hashlib.sha256(artifact_bytes).hexdigest(),
+                    "ARTIFACT_SIZE": str(len(artifact_bytes)),
                 },
             )
-            gate_record = json.loads((work / "dist/release-gate-digests.json").read_text(encoding="utf-8"))
-            self.assertEqual(source_sha, gate_record["sourceSha"])
 
-        self.assertEqual({"workflow_dispatch"}, set(promotion["on"]))
+            encoded = (dist / "build-handoff.json").read_text(encoding="utf-8")
+            handoff = json.loads(encoded)
+            self.assertEqual(
+                {
+                    "schema",
+                    "repository",
+                    "headSha",
+                    "version",
+                    "minimumVersion",
+                    "createdAt",
+                    "contractualCiRunId",
+                    "contractualCiRunAttempt",
+                    "buildRunId",
+                    "buildRunAttempt",
+                    "targetTriple",
+                    "artifact",
+                    "sbom",
+                    "provenance",
+                },
+                set(handoff),
+            )
+            self.assertEqual({"name", "sha256", "size"}, set(handoff["artifact"]))
+            self.assertEqual({"name", "sha256"}, set(handoff["sbom"]))
+            self.assertEqual({"name", "sha256"}, set(handoff["provenance"]))
+            self.assertEqual("jeden.release-build-handoff/v1", handoff["schema"])
+            self.assertEqual("owner/repository", handoff["repository"])
+            self.assertEqual(source_sha, handoff["headSha"])
+            self.assertEqual("0.2.0-canary.42.3.shaabcdef012345", handoff["version"])
+            self.assertEqual("0.1.0", handoff["minimumVersion"])
+            self.assertEqual("1001", handoff["contractualCiRunId"])
+            self.assertEqual(2, handoff["contractualCiRunAttempt"])
+            self.assertEqual("2002", handoff["buildRunId"])
+            self.assertEqual(3, handoff["buildRunAttempt"])
+            self.assertEqual("test-target", handoff["targetTriple"])
+            self.assertEqual(
+                {
+                    "name": artifact_name,
+                    "sha256": hashlib.sha256(artifact_bytes).hexdigest(),
+                    "size": len(artifact_bytes),
+                },
+                handoff["artifact"],
+            )
+            self.assertEqual(
+                {"name": "sbom.spdx.json", "sha256": hashlib.sha256(sbom_bytes).hexdigest()},
+                handoff["sbom"],
+            )
+            self.assertEqual(
+                {
+                    "name": "provenance.intoto.json",
+                    "sha256": hashlib.sha256(provenance_bytes).hexdigest(),
+                },
+                handoff["provenance"],
+            )
+            self.assertRegex(handoff["createdAt"], r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+            created_at = datetime.datetime.fromisoformat(handoff["createdAt"].replace("Z", "+00:00"))
+            self.assertEqual(datetime.timezone.utc, created_at.tzinfo)
+            self.assertEqual(
+                json.dumps(handoff, sort_keys=True, separators=(",", ":")) + "\n",
+                encoded,
+            )
 
 
 if __name__ == "__main__":
