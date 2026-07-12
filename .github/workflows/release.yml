@@ -1,6 +1,10 @@
 name: Signed canary release
 
 on:
+  workflow_run:
+    workflows: ['contractual-ci']
+    types: [completed]
+    branches: [main]
   push:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
@@ -21,7 +25,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: signed-canary-${{ github.ref }}
+  group: signed-canary-${{ github.event.workflow_run.head_sha || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -30,6 +34,12 @@ env:
 
 jobs:
   build-sign-publish:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     name: Build once, sign and publish (${{ matrix.target }})
     environment: release-canary
     strategy:
@@ -48,6 +58,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     env:
+      SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
       RELEASE_STORE_BASE_URL: ${{ secrets.RELEASE_STORE_BASE_URL }}
       RELEASE_OIDC_EXCHANGE_URL: ${{ secrets.RELEASE_OIDC_EXCHANGE_URL }}
       RELEASE_OIDC_AUDIENCE: ${{ secrets.RELEASE_OIDC_AUDIENCE }}
@@ -62,6 +73,7 @@ jobs:
       - name: Check out the exact source revision
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           persist-credentials: false
 
       - name: Fail closed unless canary authorities are configured
@@ -82,11 +94,23 @@ jobs:
         id: version
         shell: bash
         env:
+          EVENT_NAME: ${{ github.event_name }}
           INPUT_VERSION: ${{ inputs.version }}
+          SOURCE_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
           set -euo pipefail
           version="$INPUT_VERSION"
-          if [ -z "$version" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then version="${GITHUB_REF_NAME#v}"; fi
+          if [ "$EVENT_NAME" = workflow_run ]; then
+            base="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+            if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              echo '::error::Cargo package version must be a stable SemVer for automatic canary versioning'
+              exit 1
+            fi
+            next_patch=$((10#${BASH_REMATCH[3]} + 1))
+            version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${next_patch}-canary.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.sha${SOURCE_SHA:0:12}"
+          elif [ -z "$version" ] && [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          fi
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]; then
             echo '::error::A valid explicit SemVer or v-prefixed SemVer tag is required'
             exit 1
@@ -165,7 +189,7 @@ jobs:
                 'buildType': 'https://github.com/jeden/release/.github/workflows/release.yml@v2',
                 'externalParameters': {'targetTriple': os.environ['TARGET_TRIPLE']},
                 'internalParameters': {'lockedDependencies': True},
-                'resolvedDependencies': [{'uri': f'git+{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}@{os.environ["GITHUB_SHA"]}'}]
+                'resolvedDependencies': [{'uri': f'git+{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}@{os.environ["SOURCE_SHA"]}'}]
               },
               'runDetails': {
                 'builder': {'id': f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'},
@@ -309,7 +333,7 @@ jobs:
           envelope_digest = hashlib.sha256(envp.read_bytes()).hexdigest()
           envelope_url = f'{os.environ["RELEASE_STORE_BASE_URL"].rstrip("/")}/manifests/canary/sha256/{envelope_digest}/manifest.dsse.json'
           gates = {
-            'schemaVersion': 1, 'sourceSha': os.environ['GITHUB_SHA'], 'targetTriple': '${{ matrix.target }}',
+            'schemaVersion': 1, 'sourceSha': os.environ['SOURCE_SHA'], 'targetTriple': '${{ matrix.target }}',
             'artifactSha256': os.environ['ARTIFACT_SHA256'], 'manifestPayloadSha256': os.environ['PAYLOAD_SHA256'],
             'manifestEnvelopeSha256': envelope_digest, 'sbomSha256': os.environ['SBOM_SHA256'],
             'provenanceSha256': os.environ['PROVENANCE_SHA256'], 'workflowRun': os.environ['GITHUB_RUN_ID']

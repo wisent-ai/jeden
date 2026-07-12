@@ -102,6 +102,12 @@ The interactive slash surface provides:
 
 For model calls, Jeden discovers active Weles subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
 
+## Release automation
+
+Every successful `contractual-ci` run caused by a push to this repository's `main` branch automatically launches the signed canary workflow for the exact CI-tested commit. The generated version advances the crate's patch component and adds a unique prerelease identity: `X.Y.(Z+1)-canary.<run>.<attempt>.sha<commit>`. Tag-triggered and manually dispatched canaries remain supported. Stable promotion remains manual and requires immutable evidence digests.
+
+Automatic canary publication fails closed unless the release authority is configured through `RELEASE_STORE_BASE_URL`, the release OIDC exchange settings, canary KMS signing settings and public keys, and stable updater trust-root identifiers. The workflow never falls back to unsigned publication.
+
 ## Configuration and context
 
 User config loads from `~/.jeden/config.json` and `~/.jeden/config.yml`. Project config loads from `<cwd>/.jeden/config.json` and overrides user config. Environment variables still win over file config.
