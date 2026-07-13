@@ -254,6 +254,52 @@ fn registry_probe(
     }
 }
 
+fn keymap_probe(cwd: &Path) -> HealthProbe {
+    let started = Instant::now();
+    let snapshot = capability::for_cwd(cwd);
+    let Some(descriptor) = snapshot.get("service/tui-keymap") else {
+        return HealthProbe::degraded(
+            "tui-keymap",
+            started,
+            "TUI keymap capability was not discovered",
+            None,
+        );
+    };
+    let evidence = Some(json!({
+        "descriptor": descriptor.id,
+        "bindings": descriptor.metadata.get("bindings"),
+        "conflicts": descriptor.metadata.get("conflicts"),
+        "contextsMutuallyExclusive": descriptor.metadata.get("contextsMutuallyExclusive"),
+    }));
+    match descriptor.health.state {
+        HealthState::Healthy => HealthProbe::healthy(
+            "tui-keymap",
+            started,
+            "namespaced key bindings have no active-context conflicts",
+            evidence,
+        ),
+        HealthState::Degraded => HealthProbe::degraded(
+            "tui-keymap",
+            started,
+            descriptor
+                .health
+                .detail
+                .as_deref()
+                .unwrap_or("TUI keymap conflicts detected"),
+            evidence,
+        ),
+        HealthState::Unavailable | HealthState::Disabled => HealthProbe::unavailable(
+            "tui-keymap",
+            started,
+            descriptor
+                .health
+                .detail
+                .as_deref()
+                .unwrap_or("TUI keymap diagnostics unavailable"),
+        ),
+    }
+}
+
 fn task_probe(cwd: &Path) -> HealthProbe {
     let started = Instant::now();
     let store = std::env::var_os("JEDEN_TASK_STORE")
@@ -336,10 +382,11 @@ pub fn doctor(cwd: &Path) -> DoctorReport {
     let collab = registry_probe(cwd, "collab", |d| {
         d.id.contains("collab") || d.operations.iter().any(|op| op.contains("collab"))
     });
+    let keymap = keymap_probe(cwd);
     let task = task_probe(cwd);
     let memory = memory_probe();
     let probes = vec![
-        brama, weles, storage, process, mcp, extensions, lsp, browser, task, memory, collab,
+        brama, weles, storage, process, mcp, extensions, lsp, browser, task, memory, collab, keymap,
     ];
     let healthy = probes.iter().all(HealthProbe::available);
     DoctorReport {

@@ -34,6 +34,50 @@ impl SessionRecorder {
         recorder
     }
 
+    pub(in crate::agent) fn open(cwd: &Path, dir: &Path) -> Result<Self, String> {
+        let state_path = dir.join("state.json");
+        let state: Value = serde_json::from_slice(
+            &fs::read(&state_path)
+                .map_err(|error| format!("cannot read {}: {}", state_path.display(), error))?,
+        )
+        .map_err(|error| format!("invalid {}: {}", state_path.display(), error))?;
+        let id = state
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+            .or_else(|| {
+                dir.file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+            })
+            .ok_or_else(|| format!("{} has no session id", state_path.display()))?;
+        let lineage = state
+            .get("lineage")
+            .and_then(Value::as_object)
+            .map(|lineage| {
+                let parent_session = lineage
+                    .get("parentSession")
+                    .and_then(Value::as_str)
+                    .map(PathBuf::from)
+                    .ok_or_else(|| format!("{} has invalid parentSession", state_path.display()))?;
+                let parent_entry = lineage
+                    .get("parentEntry")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                Ok::<_, String>((parent_session, parent_entry))
+            })
+            .transpose()?;
+        let active_leaf = crate::cli::sessions::session_active_leaf(dir)?;
+        Ok(Self {
+            id,
+            dir: dir.to_path_buf(),
+            cwd: cwd.to_path_buf(),
+            ready: true,
+            active_leaf,
+            lineage,
+            pending_tool_results: None,
+        })
+    }
+
     pub(in crate::agent) fn ensure(&mut self) -> Result<(), String> {
         if self.ready {
             return Ok(());
@@ -77,11 +121,15 @@ impl SessionRecorder {
         .map_err(|e| e.to_string())
     }
 
-    pub(in crate::agent) fn record(
+    pub(in crate::agent) fn record(&mut self, event_type: &str, data: Value) -> Result<(), String> {
+        self.record_entry(event_type, data).map(|_| ())
+    }
+
+    fn record_entry(
         &mut self,
         event_type: &str,
         mut data: Value,
-    ) -> Result<(), String> {
+    ) -> Result<crate::cli::sessions::LedgerEntry, String> {
         self.ensure()?;
         if event_type == "action" {
             let count = data
@@ -116,8 +164,8 @@ impl SessionRecorder {
         }
         let entry =
             crate::cli::sessions::append_ledger_entry(&self.dir, now_stamp(), event_type, data)?;
-        self.active_leaf = Some(entry.id);
-        Ok(())
+        self.active_leaf = Some(entry.id.clone());
+        Ok(entry)
     }
 
     pub(in crate::agent) fn record_context(
@@ -129,6 +177,30 @@ impl SessionRecorder {
             "context_snapshot",
             json!({ "reason": reason, "messages": messages }),
         )
+    }
+
+    pub(in crate::agent) fn record_checkpoint(
+        &mut self,
+        label: Option<String>,
+        messages: &[Value],
+    ) -> Result<String, String> {
+        self.ensure()?;
+        let entry =
+            crate::cli::sessions::append_checkpoint_entry(&self.dir, now_stamp(), label, messages)?;
+        self.active_leaf = Some(entry.id.clone());
+        Ok(entry.id)
+    }
+
+    pub(in crate::agent) fn rewind(
+        &mut self,
+        checkpoint_id: &str,
+    ) -> Result<(String, Vec<Value>), String> {
+        self.ensure()?;
+        let (entry, messages) =
+            crate::cli::sessions::append_rewind_entry(&self.dir, now_stamp(), checkpoint_id)?;
+        self.active_leaf = Some(entry.id.clone());
+        self.pending_tool_results = None;
+        Ok((entry.id, messages))
     }
 
     pub(in crate::agent) fn active_leaf(&self) -> Result<Option<String>, String> {
@@ -177,7 +249,7 @@ fn stamp() -> String {
     format!("{}-{}", secs, suffix)
 }
 
-pub(in crate::agent) fn now_stamp() -> String {
+pub(crate) fn now_stamp() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

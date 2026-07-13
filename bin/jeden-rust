@@ -10,8 +10,26 @@ while [ -L "$PRG" ]; do
   esac
 done
 ROOT="$(CDPATH= cd -- "$(dirname -- "$PRG")/.." && pwd)"
+MANIFEST="$ROOT/Cargo.toml"
 BIN="$ROOT/target/release/jeden"
-if [ -x "$BIN" ]; then
+
+release_is_current() {
+  # A packaged launcher has no source tree to compare against; its bundled
+  # executable is therefore authoritative.
+  [ ! -f "$MANIFEST" ] && return 0
+  [ "$MANIFEST" -nt "$BIN" ] && return 1
+  [ -f "$ROOT/Cargo.lock" ] && [ "$ROOT/Cargo.lock" -nt "$BIN" ] && return 1
+  if [ -d "$ROOT/rust" ] && [ -n "$(find "$ROOT/rust" -newer "$BIN" -print)" ]; then
+    return 1
+  fi
+  return 0
+}
+
+if [ -x "$BIN" ] && release_is_current; then
   exec "$BIN" "$@"
 fi
-exec cargo run --quiet --manifest-path "$ROOT/Cargo.toml" -- "$@"
+if [ ! -f "$MANIFEST" ]; then
+  printf '%s\n' "jeden: packaged executable not found: $BIN" >&2
+  exit 127
+fi
+exec cargo run --quiet --manifest-path "$MANIFEST" --bin jeden -- "$@"

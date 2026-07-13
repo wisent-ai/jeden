@@ -1,16 +1,22 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::Rng;
 use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
+use std::sync::{
+    mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
+    Arc,
+};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
 const MAX_ROUTES: usize = 16;
 const MAX_RETRY_ATTEMPTS: usize = 8;
+pub(crate) const MAX_TEXT_ATTACHMENT_BYTES: usize = 256 * 1024;
 const MAX_TOOL_CALLS: usize = 128;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -137,6 +143,96 @@ impl StreamingCompletion {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) enum ModelAttachment {
+    Image { mime: String, bytes: Arc<[u8]> },
+    Text { bytes: Arc<[u8]> },
+}
+
+impl ModelAttachment {
+    pub(crate) fn image(mime: impl Into<String>, bytes: Arc<[u8]>) -> Result<Self, String> {
+        let mime = mime.into();
+        if !matches!(
+            mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        ) {
+            return Err(format!("unsupported image attachment MIME type `{mime}`"));
+        }
+        if bytes.is_empty() {
+            return Err("image attachment is empty".into());
+        }
+        Ok(Self::Image { mime, bytes })
+    }
+
+    pub(crate) fn text(bytes: Arc<[u8]>) -> Result<Self, String> {
+        if bytes.is_empty() {
+            return Err("text attachment is empty".into());
+        }
+        if bytes.len() > MAX_TEXT_ATTACHMENT_BYTES {
+            return Err(format!(
+                "text attachment is {} bytes; limit is {MAX_TEXT_ATTACHMENT_BYTES}",
+                bytes.len()
+            ));
+        }
+        std::str::from_utf8(bytes.as_ref())
+            .map_err(|_| "text attachment is not valid UTF-8".to_string())?;
+        Ok(Self::Text { bytes })
+    }
+}
+
+/// Build OpenAI-compatible content parts only in the ephemeral provider copy.
+/// The conversation's durable messages remain string-valued.
+pub(crate) fn with_attachments(
+    mut messages: Vec<Value>,
+    attachments: &[ModelAttachment],
+) -> Result<Vec<Value>, String> {
+    if attachments.is_empty() {
+        return Ok(messages);
+    }
+    let message = messages
+        .iter_mut()
+        .rev()
+        .find(|message| message.get("role").and_then(Value::as_str) == Some("user"))
+        .ok_or("cannot attach content: outbound messages contain no user message")?;
+    let content = message
+        .get_mut("content")
+        .ok_or("cannot attach content: latest user message has no content")?;
+    let text = match std::mem::take(content) {
+        Value::String(text) => text,
+        other => {
+            *content = other;
+            return Err("cannot attach content: latest user message content is not text".into());
+        }
+    };
+    let mut parts = Vec::with_capacity(attachments.len().saturating_add(1));
+    parts.push(json!({"type": "text", "text": text}));
+    for attachment in attachments {
+        match attachment {
+            ModelAttachment::Image { mime, bytes } => {
+                let encoded_len = (bytes.len().saturating_add(2) / 3).saturating_mul(4);
+                let mut url = String::with_capacity(
+                    "data:;base64,"
+                        .len()
+                        .saturating_add(mime.len())
+                        .saturating_add(encoded_len),
+                );
+                url.push_str("data:");
+                url.push_str(mime);
+                url.push_str(";base64,");
+                BASE64.encode_string(bytes.as_ref(), &mut url);
+                parts.push(json!({"type": "image_url", "image_url": {"url": url}}));
+            }
+            ModelAttachment::Text { bytes } => {
+                let text = std::str::from_utf8(bytes.as_ref())
+                    .map_err(|_| "text attachment is not valid UTF-8")?;
+                parts.push(json!({"type": "text", "text": text}));
+            }
+        }
+    }
+    message["content"] = Value::Array(parts);
+    Ok(messages)
+}
+
+#[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub url: String,
     pub agent_id: String,
@@ -146,6 +242,8 @@ pub struct ChatConfig {
     pub retry: RetryPolicy,
     pub fallbacks: Vec<RouteDescriptor>,
     pub context_promotions: Vec<RouteDescriptor>,
+    /// Models advertised by Brama as accepting image input.
+    pub image_capable_models: BTreeSet<String>,
     pub subscription_pool: Option<crate::routing::SubscriptionPoolSnapshot>,
     pub subscription_cooldown_path: Option<PathBuf>,
     pub config_error: Option<String>,
@@ -226,6 +324,7 @@ pub fn chat_completion(
     if let Some(message) = &config.config_error {
         return Err(message.clone());
     }
+    ensure_image_capability(config, &config.model, &messages)?;
     let mut body = json!({
         "model": config.model,
         "messages": messages,
@@ -437,6 +536,17 @@ pub fn chat_completion_streaming(
     let mut last_error: Option<AttemptError> = None;
     let mut exhausted_targets = std::collections::BTreeSet::new();
     for (route_index, route) in routes.iter().enumerate() {
+        if let Err(message) = ensure_image_capability(config, &route.model, &messages) {
+            if let Some(next) = routes.get(route_index + 1) {
+                route_results.push(RouteResult::RouteChanged {
+                    from: route.clone(),
+                    to: next.clone(),
+                    reason: message.clone(),
+                });
+            }
+            last_error = Some(AttemptError::permanent(message));
+            continue;
+        }
         for target_index in 0..target_count {
             let target = subscription_decision
                 .as_ref()
@@ -597,6 +707,32 @@ fn stream_failure(
         route_results,
         visible_output,
     }
+}
+
+fn messages_use_image_input(messages: &[Value]) -> bool {
+    messages.iter().any(|message| {
+        message
+            .get("content")
+            .and_then(Value::as_array)
+            .is_some_and(|parts| {
+                parts
+                    .iter()
+                    .any(|part| part.get("type").and_then(Value::as_str) == Some("image_url"))
+            })
+    })
+}
+
+fn ensure_image_capability(
+    config: &ChatConfig,
+    model: &str,
+    messages: &[Value],
+) -> Result<(), String> {
+    if messages_use_image_input(messages) && !config.image_capable_models.contains(model) {
+        return Err(format!(
+            "model `{model}` does not advertise image input support; choose an image-capable model"
+        ));
+    }
+    Ok(())
 }
 
 enum WireMessage {
@@ -1192,9 +1328,25 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
+struct DigestSink<'a>(&'a mut Sha256);
+
+impl std::io::Write for DigestSink<'_> {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn logical_request_keys(route: &RouteDescriptor, messages: &[Value]) -> (String, String, String) {
-    let encoded = serde_json::to_vec(&(route, messages)).unwrap_or_default();
-    let digest = hex::encode(Sha256::digest(encoded));
+    let mut hasher = Sha256::new();
+    if serde_json::to_writer(DigestSink(&mut hasher), &(route, messages)).is_err() {
+        hasher = Sha256::new();
+    }
+    let digest = hex::encode(hasher.finalize());
     (
         format!("request-{digest}"),
         format!("completion-{digest}"),
@@ -1456,6 +1608,7 @@ mod subscription_execution_tests {
             },
             fallbacks: Vec::new(),
             context_promotions: Vec::new(),
+            image_capable_models: BTreeSet::new(),
             subscription_pool: Some(pool),
             subscription_cooldown_path: cooldown_path,
             config_error: None,

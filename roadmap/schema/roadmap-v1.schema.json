@@ -1,0 +1,110 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://wisent.ai/schemas/jeden/roadmap-v1.schema.json",
+  "title": "Jeden Roadmap v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "revision", "items"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "revision": { "type": "integer", "minimum": 0 },
+    "context": { "type": "string" },
+    "items": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/item" }
+    }
+  },
+  "$defs": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "backlog",
+        "planned",
+        "in_progress",
+        "implemented",
+        "not_run",
+        "failed",
+        "external_blocked",
+        "passed",
+        "dropped"
+      ]
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "text"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "text": { "type": "string", "minLength": 1 }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["uri", "addedAt", "addedBy"],
+      "properties": {
+        "uri": { "type": "string", "minLength": 1 },
+        "acceptanceId": { "type": "string", "minLength": 1 },
+        "addedAt": { "type": "string", "minLength": 1 },
+        "addedBy": { "type": "string", "minLength": 1 }
+      }
+    },
+    "item": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "title",
+        "area",
+        "priority",
+        "status",
+        "summary",
+        "acceptance",
+        "dependsOn",
+        "capabilities",
+        "externalPrerequisites",
+        "evidence",
+        "createdAt",
+        "createdBy"
+      ],
+      "properties": {
+        "id": { "type": "string", "pattern": "^JED-[0-9]{3,}$" },
+        "title": { "type": "string", "minLength": 1 },
+        "area": { "type": "string", "minLength": 1 },
+        "priority": { "type": "string", "enum": ["P0", "P1", "P2", "P3"] },
+        "status": { "$ref": "#/$defs/status" },
+        "summary": { "type": "string", "minLength": 1 },
+        "implementation": { "type": "string" },
+        "rationale": { "type": "string" },
+        "implementationOrder": { "type": "string" },
+        "acceptance": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/acceptance" }
+        },
+        "dependsOn": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^JED-[0-9]{3,}$" }
+        },
+        "capabilities": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "externalPrerequisites": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/evidence" }
+        },
+        "reason": { "type": "string", "minLength": 1 },
+        "createdAt": { "type": "string", "minLength": 1 },
+        "createdBy": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

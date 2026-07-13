@@ -10,7 +10,7 @@ mod read;
 #[path = "../runtime_ops/mod.rs"]
 pub mod runtime_ops;
 mod session;
-mod shared;
+pub(crate) mod shared;
 #[cfg(test)]
 mod tests;
 

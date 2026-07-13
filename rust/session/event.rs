@@ -2,6 +2,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CheckpointPayloadV2 {
+    pub(crate) label: Option<String>,
+    pub(crate) messages: Vec<Value>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RewindPayloadV2 {
+    pub(crate) checkpoint_id: String,
+    pub(crate) from_leaf_id: String,
+}
+
 pub(crate) const SESSION_EVENT_SCHEMA_VERSION: u32 = 2;
 
 /// Closed session vocabulary. A variant is added here before a producer can
@@ -31,6 +45,13 @@ pub(crate) enum SessionPayloadV2 {
     Checkpoint(Value),
     Rewind(Value),
     MemoryMutation(Value),
+    RoadmapItemCreated(Value),
+    RoadmapItemUpdated(Value),
+    RoadmapItemStarted(Value),
+    RoadmapItemBlocked(Value),
+    RoadmapEvidenceAttached(Value),
+    RoadmapItemPassed(Value),
+    RoadmapItemDropped(Value),
     MemoryRecall(Value),
     ModelAttempt(Value),
     ModelRoute(Value),
@@ -84,6 +105,13 @@ impl SessionPayloadV2 {
             "rewind" => Self::Rewind(data),
             "memory_mutation" => Self::MemoryMutation(data),
             "memory_recall" => Self::MemoryRecall(data),
+            "roadmap_item_created" => Self::RoadmapItemCreated(data),
+            "roadmap_item_updated" | "roadmap_acceptance_updated" => Self::RoadmapItemUpdated(data),
+            "roadmap_item_started" => Self::RoadmapItemStarted(data),
+            "roadmap_item_blocked" => Self::RoadmapItemBlocked(data),
+            "roadmap_evidence_attached" => Self::RoadmapEvidenceAttached(data),
+            "roadmap_item_passed" => Self::RoadmapItemPassed(data),
+            "roadmap_item_dropped" => Self::RoadmapItemDropped(data),
             "model_attempt" => Self::ModelAttempt(data),
             "model_route" => Self::ModelRoute(data),
             "model_route_result" => Self::ModelRouteResult(data),
@@ -112,6 +140,32 @@ impl SessionPayloadV2 {
         })
     }
 
+    pub(crate) fn checkpoint(payload: CheckpointPayloadV2) -> Result<Self, String> {
+        serde_json::to_value(payload)
+            .map(Self::Checkpoint)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn rewind(payload: RewindPayloadV2) -> Result<Self, String> {
+        serde_json::to_value(payload)
+            .map(Self::Rewind)
+            .map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn checkpoint_data(&self) -> Result<CheckpointPayloadV2, String> {
+        let Self::Checkpoint(value) = self else {
+            return Err("session event is not a checkpoint".into());
+        };
+        serde_json::from_value(value.clone()).map_err(|error| error.to_string())
+    }
+
+    pub(crate) fn rewind_data(&self) -> Result<RewindPayloadV2, String> {
+        let Self::Rewind(value) = self else {
+            return Err("session event is not a rewind".into());
+        };
+        serde_json::from_value(value.clone()).map_err(|error| error.to_string())
+    }
+
     pub(crate) fn kind(&self) -> &'static str {
         match self {
             Self::Message(_) => "message",
@@ -136,6 +190,13 @@ impl SessionPayloadV2 {
             Self::Checkpoint(_) => "checkpoint",
             Self::Rewind(_) => "rewind",
             Self::MemoryMutation(_) => "memory_mutation",
+            Self::RoadmapItemCreated(_) => "roadmap_item_created",
+            Self::RoadmapItemUpdated(_) => "roadmap_item_updated",
+            Self::RoadmapItemStarted(_) => "roadmap_item_started",
+            Self::RoadmapItemBlocked(_) => "roadmap_item_blocked",
+            Self::RoadmapEvidenceAttached(_) => "roadmap_evidence_attached",
+            Self::RoadmapItemPassed(_) => "roadmap_item_passed",
+            Self::RoadmapItemDropped(_) => "roadmap_item_dropped",
             Self::MemoryRecall(_) => "memory_recall",
             Self::ModelAttempt(_) => "model_attempt",
             Self::ModelRoute(_) => "model_route",
@@ -188,6 +249,13 @@ impl SessionPayloadV2 {
             | Self::Checkpoint(v)
             | Self::Rewind(v)
             | Self::MemoryMutation(v)
+            | Self::RoadmapItemCreated(v)
+            | Self::RoadmapItemUpdated(v)
+            | Self::RoadmapItemStarted(v)
+            | Self::RoadmapItemBlocked(v)
+            | Self::RoadmapEvidenceAttached(v)
+            | Self::RoadmapItemPassed(v)
+            | Self::RoadmapItemDropped(v)
             | Self::MemoryRecall(v)
             | Self::ModelAttempt(v)
             | Self::ModelRoute(v)

@@ -18,9 +18,9 @@ use super::super::render::{
 use super::super::text::sanitize_terminal_text;
 use super::super::view_render::{confirm_panel, picker_panel};
 use super::super::{
-    stdout_supports_color, AttachmentTray, ClipboardContent, CommandOutcome, ConfirmEvent,
-    ConfirmState, EditorAction, EditorState, FollowUpQueue, Message, PickerEvent, PickerState,
-    PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind, UiFeature, UiRuntimeAdapter,
+    stdout_supports_color, AttachmentSource, AttachmentTray, ClipboardContent, CommandOutcome,
+    ConfirmEvent, ConfirmState, EditorAction, EditorState, FollowUpQueue, Message, PickerEvent,
+    PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind, UiFeature, UiRuntimeAdapter,
 };
 use super::background::run_background_turn;
 use super::external_editor::{external_editor, external_editor_health};
@@ -53,6 +53,7 @@ where
             cancel: Arc::new(AtomicBool::new(false)),
             interactive: false,
             from_view: false,
+            attachments: &[],
             progress: &|_| {},
             stream: &|_| {},
             ask_user: None,
@@ -72,6 +73,74 @@ fn terminal_dimensions() -> (usize, usize) {
     terminal::size()
         .map(|(columns, rows)| (usize::from(columns).max(1), usize::from(rows).max(1)))
         .unwrap_or((100, 30))
+}
+fn attachment_command(
+    input: &str,
+    cwd: &Path,
+    tray: &mut AttachmentTray,
+) -> Option<Result<String, String>> {
+    let trimmed = input.trim();
+    let (command, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .unwrap_or((trimmed, ""));
+    let rest = rest.trim();
+    match command {
+        "/attach" => Some(
+            tray.add_file(cwd, rest)
+                .map_err(|error| error.to_string())
+                .map(|id| {
+                    let item = tray
+                        .items()
+                        .iter()
+                        .find(|item| item.id == id)
+                        .expect("new attachment remains in tray");
+                    format!("Attached #{} {}", id.0, item.fallback_label())
+                }),
+        ),
+        "/attachments" => Some(if rest.is_empty() {
+            if tray.items().is_empty() {
+                Ok("No pending attachments.".into())
+            } else {
+                Ok(tray
+                    .items()
+                    .iter()
+                    .map(|item| {
+                        let provenance = match &item.source {
+                            AttachmentSource::Clipboard => "clipboard".to_string(),
+                            AttachmentSource::File { basename } => format!("file:{basename}"),
+                        };
+                        format!("#{} {} · {provenance}", item.id.0, item.fallback_label())
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"))
+            }
+        } else {
+            Err("Usage: /attachments".into())
+        }),
+        "/detach" => Some(if rest == "all" {
+            let count = tray.take_all().len();
+            Ok(format!("Detached {count} attachment(s)."))
+        } else {
+            let id = if rest.is_empty() {
+                tray.items()
+                    .last()
+                    .map(|item| item.id)
+                    .ok_or_else(|| "No pending attachments to detach.".to_string())
+            } else {
+                rest.strip_prefix('#')
+                    .unwrap_or(rest)
+                    .parse::<u64>()
+                    .map(super::super::AttachmentId)
+                    .map_err(|_| "Usage: /detach [id|all]".to_string())
+            };
+            id.and_then(|id| {
+                tray.remove(id)
+                    .map(|item| format!("Detached #{} {}", id.0, item.fallback_label()))
+                    .ok_or_else(|| format!("Attachment #{} is not in the tray.", id.0))
+            })
+        }),
+        _ => None,
+    }
 }
 
 fn editor_live_lines(
@@ -412,8 +481,25 @@ where
                 if editor.text().trim().is_empty() {
                     continue;
                 }
-                let mut active_prompt = editor.take();
-                attachments.clear();
+                let submitted = editor.take();
+                if let Some(result) = attachment_command(
+                    &submitted,
+                    Path::new(&status_provider().cwd),
+                    &mut attachments,
+                ) {
+                    submission_from_view = false;
+                    slash_selection = 0;
+                    editor.push_history(submitted.clone());
+                    messages.push(Message::new("user", submitted));
+                    match result {
+                        Ok(text) => messages.push(Message::new("system", text)),
+                        Err(error) => messages.push(Message::new("error", error)),
+                    }
+                    needs_render = true;
+                    continue;
+                }
+                let mut active_prompt = submitted;
+                let mut active_attachments = attachments.take_all();
                 let mut active_from_view = submission_from_view;
                 submission_from_view = false;
                 slash_selection = 0;
@@ -444,6 +530,7 @@ where
                                 cancel: Arc::new(AtomicBool::new(false)),
                                 interactive: true,
                                 from_view: active_from_view,
+                                attachments: &active_attachments,
                                 progress: &|_| {},
                                 stream: &|_| {},
                                 ask_user: None,
@@ -467,6 +554,7 @@ where
                                 &handler,
                                 &active_prompt,
                                 active_from_view,
+                                &active_attachments,
                                 &mut editor,
                                 &mut follow_ups,
                                 steering_available,
@@ -485,6 +573,7 @@ where
                         break;
                     };
                     active_prompt = queued.text;
+                    active_attachments = Vec::new();
                     active_from_view = false;
                     editor.push_history(active_prompt.clone());
                     messages.push(Message::new("user", active_prompt.clone()));

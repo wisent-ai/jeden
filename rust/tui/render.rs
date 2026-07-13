@@ -6,18 +6,87 @@ use super::text::{
 };
 use super::{
     AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, PromptStatus,
-    RegistryUiRuntime, UiRuntimeAdapter, ASSISTANT_TITLE, PRODUCT, VERSION,
+    RegistryUiRuntime, UiRuntimeAdapter, APP, ASSISTANT_TITLE, PRODUCT, VERSION,
 };
+
+const WISENT_MARK: &[&str] = &[
+    "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",
+    "     ▄█▀▀             ▀▀▀█▄",
+    "  ▄██▀                    ▀██",
+    " ▄█▀▀▀█▄▄                   ▀█▄",
+    "▄█▀     ▀▀▀█▄▄▄              ▀█▄",
+    "██▄▄          ▀▀▀██▄▄▄        ██",
+    "██▀▀██               ▀▀▀▀██▄▄▄██",
+    "▀█▄ ██                       ▄█▀",
+    " ▀█▄ ██              ▄▄▄    ▄█▀",
+    "   ▀█▄██▄          ▄█▀▀▀▀▀███▀",
+    "     ▀████▄    ▄▄██▀  ▄▄▄█▀",
+    "        ▀▀▀██████▄▄██▀▀▀",
+];
+
+const TWO_COLUMN_WELCOME_MIN_WIDTH: usize = 76;
+
+fn pad_visible(value: &str, width: usize) -> String {
+    let mut padded = clamp_visible(value, width);
+    padded.extend(std::iter::repeat(' ').take(width.saturating_sub(visible_len(&padded))));
+    padded
+}
+
+fn framed_header(label: &str, width: usize, color: bool) -> String {
+    let middle_width = width.saturating_sub(2);
+    let label = clamp_visible(
+        &format!(" {} ", sanitize_terminal_text(label)),
+        middle_width,
+    );
+    let rule_width = middle_width.saturating_sub(visible_len(&label));
+    format!(
+        "{}{}{}{}",
+        paint("╭", "cyan", color),
+        paint(&label, "bold", color),
+        paint(&"─".repeat(rule_width), "cyan", color),
+        paint("╮", "cyan", color),
+    )
+}
+
+fn input_prefix_width(width: usize) -> usize {
+    width.saturating_sub(1).min(2)
+}
 
 pub(super) fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> Vec<String> {
     let width = width.max(1);
-    let mut out = vec![paint(&sanitize_terminal_text(title), "bold", color)];
+    let title = sanitize_terminal_text(title);
+    if width < 6 {
+        let mut out = vec![paint(&clamp_visible(&title, width), "bold", color)];
+        for row in rows {
+            let safe = sanitize_terminal_text(row);
+            for logical in safe.split('\n') {
+                out.extend(wrap_line(logical, width));
+            }
+        }
+        return out;
+    }
+
+    let inner_width = width - 4;
+    let mut out = vec![framed_header(&title, width, color)];
     for row in rows {
         let safe = sanitize_terminal_text(row);
-        for part in safe.split('\n') {
-            out.extend(wrap_line(part, width));
+        for logical in safe.split('\n') {
+            for part in wrap_line(logical, inner_width) {
+                out.push(format!(
+                    "{} {} {}",
+                    paint("│", "cyan", color),
+                    pad_visible(&part, inner_width),
+                    paint("│", "cyan", color),
+                ));
+            }
         }
     }
+    out.push(format!(
+        "{}{}{}",
+        paint("╰", "cyan", color),
+        paint(&"─".repeat(width - 2), "cyan", color),
+        paint("╯", "cyan", color),
+    ));
     out
 }
 
@@ -44,10 +113,7 @@ pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Ve
         message.role.as_str()
     });
     let safe = sanitize_terminal_text(&message.text);
-    let rows = safe
-        .split('\n')
-        .map(|line| format!("  {line}"))
-        .collect::<Vec<_>>();
+    let rows = safe.split('\n').map(str::to_string).collect::<Vec<_>>();
     boxed(&title, &rows, width.max(1), color)
         .into_iter()
         .map(|line| paint(&line, role_color(&message.role), color))
@@ -63,26 +129,63 @@ pub(super) fn welcome_panel(
     color: bool,
 ) -> Vec<String> {
     let width = width.max(1);
+    let title = format!("{PRODUCT} {APP} {VERSION}");
     let model = sanitize_terminal_text(if model.is_empty() { "default" } else { model });
+    let workspace = sanitize_terminal_text(&compact_path(cwd));
     let write_status = sanitize_terminal_text(write_status);
     let command_status = sanitize_terminal_text(command_status);
-    let brand = paint(PRODUCT, "bold", color);
-    let version = paint(VERSION, "dim", color);
-    let workspace = sanitize_terminal_text(&compact_path(cwd));
-    vec![
-        clamp_visible(&format!("{brand}  {version}"), width),
-        clamp_visible(&format!("model {model} | workspace {workspace}"), width),
-        clamp_visible(
-            &format!("permissions: write {write_status} | command {command_status}"),
-            width,
-        ),
-        paint(
-            "[Enter] send  [Alt+Enter] newline  [Ctrl+C] exit",
-            "dim",
-            color,
-        ),
-        String::new(),
-    ]
+
+    if width < TWO_COLUMN_WELCOME_MIN_WIDTH {
+        let rows = vec![
+            "Welcome back!".to_string(),
+            format!("Model: {model}"),
+            format!("Workspace: {workspace}"),
+            format!("Permissions: write {write_status} · command {command_status}"),
+            String::new(),
+            "Tips".to_string(),
+            "Type a task and press Enter".to_string(),
+            "/help commands · /model routes".to_string(),
+            "Enter send · Alt+Enter newline · Ctrl+C exit".to_string(),
+        ];
+        return boxed(&title, &rows, width, color);
+    }
+
+    let inner_width = width - 4;
+    let left_width = 34;
+    let right_width = inner_width.saturating_sub(left_width + 3);
+    let mut left = vec![String::new(), "Welcome back!".to_string(), String::new()];
+    left.extend(WISENT_MARK.iter().map(|line| (*line).to_string()));
+    left.extend([String::new(), model.clone(), "Jeden CLI".to_string()]);
+    let right = [
+        "Tips".to_string(),
+        "Type a task and press Enter".to_string(),
+        "/help for commands".to_string(),
+        "/model to switch routes".to_string(),
+        "/update runs automated self-update".to_string(),
+        "Ctrl+V pastes text or adds an attachment".to_string(),
+        "Alt+Backspace removes the last attachment".to_string(),
+        "────────────────────────".to_string(),
+        format!("Workspace: {workspace}"),
+        format!("Permissions: write {write_status}"),
+        format!("             command {command_status}"),
+        "────────────────────────".to_string(),
+        "Enter send · Alt+Enter newline".to_string(),
+        "Tab complete · ↑↓ history/select".to_string(),
+        "Esc clear · Ctrl+C exit".to_string(),
+        "CLI: jeden sessions".to_string(),
+        "CLI: jeden artifacts <id>".to_string(),
+    ];
+    let mut rows = Vec::with_capacity(left.len().max(right.len()));
+    for index in 0..left.len().max(right.len()) {
+        let left_cell = left.get(index).map(String::as_str).unwrap_or_default();
+        let right_cell = right.get(index).map(String::as_str).unwrap_or_default();
+        rows.push(format!(
+            "{} │ {}",
+            pad_visible(left_cell, left_width),
+            clamp_visible(right_cell, right_width),
+        ));
+    }
+    boxed(&title, &rows, width, color)
 }
 
 fn slash_query(input_text: &str) -> Option<String> {
@@ -145,20 +248,25 @@ pub(super) fn compact_prompt(
     width: usize,
     status: &PromptStatus,
     input_text: &str,
-    _busy: bool,
+    busy: bool,
     color: bool,
 ) -> Vec<String> {
     let width = width.max(1);
-    let content_width = width.saturating_sub(2).max(1);
+    let prefix_width = input_prefix_width(width);
+    let content_width = width.saturating_sub(prefix_width).max(1);
     let model = sanitize_terminal_text(if status.model.is_empty() {
         "default"
     } else {
         status.model.as_str()
     });
     let mut segments = vec![
-        format!("jeden. {model}"),
+        format!("{PRODUCT} {APP} {VERSION}"),
+        format!("model {model}"),
         sanitize_terminal_text(&compact_path(&status.cwd)),
     ];
+    if busy {
+        segments.push("busy".to_string());
+    }
     if !status.service_tier.is_empty() {
         segments.push(format!(
             "route {}",
@@ -203,14 +311,33 @@ pub(super) fn compact_prompt(
             sanitize_terminal_text(&status.write_status)
         ));
     }
-    let status_line = clamp_visible(&segments.join(" | "), width);
-    let mut out = vec![paint(&status_line, "dim", color)];
+    let status_line = segments.join(" | ");
+    let mut out = if width >= 6 {
+        vec![framed_header(&status_line, width, color)]
+    } else {
+        vec![paint(&clamp_visible(&status_line, width), "dim", color)]
+    };
     let safe_input = sanitize_terminal_text(input_text);
     let mut first = true;
     for logical in safe_input.split('\n') {
         let wrapped = wrap_line(logical, content_width);
         for line in wrapped {
-            out.push(format!("{}{}", if first { "> " } else { "  " }, line));
+            let prefix = if first && width >= 6 {
+                "╰─"
+            } else if first && prefix_width == 2 {
+                "> "
+            } else if first && prefix_width == 1 {
+                ">"
+            } else if first {
+                ""
+            } else if prefix_width == 2 {
+                "  "
+            } else if prefix_width == 1 {
+                " "
+            } else {
+                ""
+            };
+            out.push(format!("{prefix}{line}"));
             first = false;
         }
         if logical.is_empty() && !first {
@@ -218,14 +345,23 @@ pub(super) fn compact_prompt(
         }
     }
     if first {
-        out.push("> ".to_string());
+        out.push(if width >= 6 {
+            "╰─".to_string()
+        } else if prefix_width == 2 {
+            "> ".to_string()
+        } else if prefix_width == 1 {
+            ">".to_string()
+        } else {
+            String::new()
+        });
     }
     out
 }
 
 pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usize, width: usize) {
     let rendered_input_rows = lines.len().saturating_sub(1);
-    let content_width = width.saturating_sub(2).max(1);
+    let prefix_width = input_prefix_width(width.max(1));
+    let content_width = width.saturating_sub(prefix_width).max(1);
     let safe_prefix = sanitize_terminal_text(&input[..cursor.min(input.len())]);
     let mut cursor_row = 0usize;
     let mut cursor_column = 0usize;
@@ -249,7 +385,7 @@ pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usi
         last.push_str(&format!("\x1b[{up}A"));
     }
     last.push('\r');
-    let column = cursor_column + 2;
+    let column = cursor_column + prefix_width;
     if column > 0 {
         last.push_str(&format!("\x1b[{column}C"));
     }
@@ -259,14 +395,14 @@ pub(super) fn attachment_lines(tray: &AttachmentTray, width: usize, color: bool)
     if tray.items().is_empty() {
         return Vec::new();
     }
-    let mut lines = vec![paint(
+    let heading = clamp_visible(
         &format!("Attachments ({})", tray.items().len()),
-        "bold",
-        color,
-    )];
+        width.max(1),
+    );
+    let mut lines = vec![paint(&heading, "bold", color)];
     for attachment in tray.items() {
         lines.push(clamp_visible(
-            &format!("  {}", attachment.fallback_label()),
+            &format!("  {}", sanitize_terminal_text(&attachment.fallback_label())),
             width.max(1),
         ));
     }
@@ -280,30 +416,48 @@ pub(super) fn busy_editor_lines(
     color: bool,
 ) -> Vec<String> {
     let width = width.max(1);
-    let content_width = width.saturating_sub(2).max(1);
+    let prefix_width = input_prefix_width(width);
+    let content_width = width.saturating_sub(prefix_width).max(1);
     let label = if queue.is_empty() {
         "Follow-up".to_string()
     } else {
         format!("Follow-up ({} queued)", queue.len())
     };
+    let hotkeys = clamp_visible("[Enter] queue  [Ctrl+Enter] steer  [Alt+Up] recall", width);
+    let lines_label = clamp_visible(&label, width);
     let mut lines = vec![
-        paint(
-            "[Enter] queue  [Ctrl+Enter] steer  [Alt+Up] recall",
-            "dim",
-            color,
-        ),
-        paint(&label, "dim", color),
+        paint(&hotkeys, "dim", color),
+        paint(&lines_label, "dim", color),
     ];
     let safe = sanitize_terminal_text(editor.text());
     let mut first = true;
     for logical in safe.split('\n') {
         for part in wrap_line(logical, content_width) {
-            lines.push(format!("{}{}", if first { "> " } else { "  " }, part));
+            let prefix = if first && prefix_width == 2 {
+                "> "
+            } else if first && prefix_width == 1 {
+                ">"
+            } else if first {
+                ""
+            } else if prefix_width == 2 {
+                "  "
+            } else if prefix_width == 1 {
+                " "
+            } else {
+                ""
+            };
+            lines.push(format!("{prefix}{part}"));
             first = false;
         }
     }
     if first {
-        lines.push("> ".into());
+        lines.push(if prefix_width == 2 {
+            "> ".into()
+        } else if prefix_width == 1 {
+            ">".into()
+        } else {
+            String::new()
+        });
     }
     lines
 }

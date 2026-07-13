@@ -78,11 +78,18 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
     },
     AreaProbe {
         area: "trwale-compaction-handoff-checkpoint-i-rewind",
-        sources: &[source!(
-            "durable-session-transitions",
-            "rust/agent/runtime/recorder.rs",
-            ["compaction_restart", "handoff_child_restart", "checkpoint"]
-        )],
+        sources: &[
+            source!(
+                "durable-checkpoint-rewind",
+                "rust/agent/runtime/recorder.rs",
+                ["record_checkpoint", "fn rewind", "pending_tool_results"]
+            ),
+            source!(
+                "active-session-lineage",
+                "rust/session/store.rs",
+                ["active_lineage", "append_with_parent", "Rewind"]
+            ),
+        ],
     },
     AreaProbe {
         area: "operation-context-i-propagowana-cancellation",
@@ -252,7 +259,12 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
             source!(
                 "graph-rewind",
                 "rust/agent/conversation/history.rs",
-                ["checkpoint", "rewind", "parent"]
+                ["checkpoint", "rewind", "list_checkpoints"]
+            ),
+            source!(
+                "lineage-safe-pending-actions",
+                "rust/cli/sessions.rs",
+                ["append_rewind_entry", "active_entries", "pending_terminal"]
             ),
         ],
     },
@@ -309,7 +321,7 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
             source!(
                 "workspace-isolation",
                 "rust/task_runtime/workspace.rs",
-                ["isolation", "merge", "capture"]
+                ["isolate", "IsolatedWorkspace", "capture", "merge"]
             ),
         ],
     },
@@ -325,8 +337,8 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
         area: "autonomiczna-pamiec",
         sources: &[source!(
             "memory-worker",
-            "rust/memory/mod.rs",
-            ["lease", "heartbeat", "consolidat", "provenance"]
+            "rust/memory/worker.rs",
+            ["claim", "heartbeat", "process_one", "complete", "retry"]
         )],
     },
     AreaProbe {
@@ -359,8 +371,13 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
             ),
             source!(
                 "acp-adapter",
-                "rust/rpc/acp.rs",
-                ["AcpBridge", "requestId", "cancel_all"]
+                "rust/rpc/acp/agent.rs",
+                [
+                    "build_agent",
+                    "request_id",
+                    "cancel_session",
+                    "Drop for AcpState"
+                ]
             ),
         ],
     },
@@ -483,15 +500,14 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
                 ["DoctorReport", "HealthProbe", "control_plane_probe"]
             ),
             source!(
-                "verified-rollback-update",
-                "rust/cli/run/slash.rs",
-                [
-                    "verify_manifest",
-                    "checksum mismatch",
-                    "previous binary restored",
-                    "update_command_rejects_bad_checksum",
-                    "update_command_restores_existing_target"
-                ]
+                "verified-update-manifest",
+                "rust/update/manifest.rs",
+                ["verify_envelope", "verify_artifact", "checksum mismatch"]
+            ),
+            source!(
+                "transactional-update-rollback",
+                "rust/update/transaction.rs",
+                ["install", "recover", "previous binary restored"]
             ),
         ],
     },
@@ -509,9 +525,9 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
             "ui-honesty-gate",
             "rust/conformance/mod.rs",
             [
-                "descriptor-handler-health-surface",
+                "audit_ui_honesty_paths",
                 "executable-without-health",
-                "audit_ui_honesty_paths"
+                "behavior_complete"
             ]
         )],
     },

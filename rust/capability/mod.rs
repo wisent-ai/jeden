@@ -73,7 +73,7 @@ impl CapabilityProvenance {
             artifact_digest: format!(
                 "builtin:{}:{}",
                 env!("CARGO_PKG_NAME"),
-                env!("CARGO_PKG_VERSION")
+                crate::JEDEN_VERSION
             ),
         }
     }
@@ -244,7 +244,7 @@ impl CapabilityDescriptorV2 {
             kind,
             provenance: CapabilityProvenance::builtin(&source),
             source,
-            version: env!("CARGO_PKG_VERSION").into(),
+            version: crate::JEDEN_VERSION.into(),
             operations: Vec::new(),
             dependencies: Vec::new(),
             health: CapabilityHealth::healthy(),
@@ -484,6 +484,18 @@ pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
         &mut candidates,
         [crate::tui::external_editor_capability_descriptor(&cwd)],
     );
+    extend_bounded(
+        &mut candidates,
+        crate::tui::attachment_capability_descriptors(&cwd),
+    );
+    extend_bounded(
+        &mut candidates,
+        [crate::tui::keymap_capability_descriptor()],
+    );
+    extend_bounded(
+        &mut candidates,
+        crate::roadmap::capability_descriptors(&cwd),
+    );
     extend_bounded(&mut candidates, file_slash_descriptors(&cwd));
     match crate::hooks::extension_capability_descriptors(&cwd) {
         Ok(descriptors) => extend_bounded(&mut candidates, descriptors),
@@ -671,6 +683,10 @@ pub fn status_text(cwd: &Path) -> String {
         lines.push(format!("- conflict: {}", diagnostic.message));
     }
     lines.join("\n")
+}
+
+pub fn status_json(cwd: &Path) -> Result<String, String> {
+    serde_json::to_string_pretty(for_cwd(cwd).as_ref()).map_err(|error| error.to_string())
 }
 
 pub fn management_items(cwd: &Path) -> Vec<(String, String, String, Option<String>, bool)> {
@@ -953,6 +969,16 @@ fn builtin_slash_specs() -> &'static [SlashSpec] {
             aliases: &[],
         },
         SlashSpec {
+            name: "checkpoint",
+            description: "Create or list durable session checkpoints",
+            aliases: &[],
+        },
+        SlashSpec {
+            name: "rewind",
+            description: "Rewind the active session lineage to a checkpoint",
+            aliases: &[],
+        },
+        SlashSpec {
             name: "resume",
             description: "Resume session",
             aliases: &[],
@@ -979,7 +1005,7 @@ fn builtin_slash_specs() -> &'static [SlashSpec] {
         },
         SlashSpec {
             name: "memory",
-            description: "Memory maintenance",
+            description: "Inspect memory, control its durable queue, and rebuild SQLite FTS5",
             aliases: &[],
         },
         SlashSpec {
@@ -1000,6 +1026,11 @@ fn builtin_slash_specs() -> &'static [SlashSpec] {
         SlashSpec {
             name: "plugins",
             description: "Manage installed plugins",
+            aliases: &[],
+        },
+        SlashSpec {
+            name: "roadmap",
+            description: "Manage the repository roadmap",
             aliases: &[],
         },
         SlashSpec {
@@ -1088,6 +1119,7 @@ fn native_view_commands() -> &'static [&'static str] {
         "plugins",
         "reload-plugins",
         "marketplace",
+        "roadmap",
         "jobs",
         "collab",
         "join",

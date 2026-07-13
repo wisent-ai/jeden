@@ -60,6 +60,46 @@ fn service_tier_prompt(cwd: &Path) -> String {
         .unwrap_or_else(|| "default".into())
 }
 
+fn input_accepts_attachments(input: &str) -> bool {
+    let trimmed = input.trim();
+    if !trimmed.starts_with('/') {
+        return true;
+    }
+    let (command, rest) = trimmed
+        .split_once(char::is_whitespace)
+        .unwrap_or((trimmed, ""));
+    match command {
+        "/retry" | "/btw" => true,
+        "/force" => {
+            let mut fields = rest.split_whitespace();
+            fields.next().is_some() && fields.next().is_some()
+        }
+        _ => !is_builtin_slash(command),
+    }
+}
+
+fn model_attachments(
+    items: &[tui::Attachment],
+) -> Result<Vec<crate::model_router::ModelAttachment>, String> {
+    items
+        .iter()
+        .map(|item| match &item.kind {
+            tui::AttachmentKind::Image { mime, .. } => {
+                crate::model_router::ModelAttachment::image(mime.clone(), item.bytes())
+                    .map_err(|error| format!("attachment `{}`: {error}", item.name))
+            }
+            tui::AttachmentKind::Text { .. } => {
+                crate::model_router::ModelAttachment::text(item.bytes())
+                    .map_err(|error| format!("attachment `{}`: {error}", item.name))
+            }
+            tui::AttachmentKind::Binary { mime } => Err(format!(
+                "attachment `{}` from {:?} has unsupported binary type `{mime}`",
+                item.name, item.source
+            )),
+        })
+        .collect()
+}
+
 pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let config = load_config(&args.cwd);
     let model = args
@@ -158,6 +198,14 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             approve: Box::new(|tool: &str, detail: &str| (ctx.approve)(tool, detail)),
         };
 
+        if !ctx.attachments.is_empty() && !input_accepts_attachments(input) {
+            let command = input.split_whitespace().next().unwrap_or(input);
+            return Err(format!(
+                "attachments cannot be used with local command `{command}`; submit them with a model prompt"
+            ));
+        }
+        let attachments = model_attachments(ctx.attachments)?;
+
         if !ctx.from_view {
             if let Some(view) =
                 interactive_view(&run_args.cwd, input, handler_model.lock().as_deref())
@@ -185,14 +233,22 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 }
                 "/retry" => {
                     let task = agent::retry_task(&run_args)?;
-                    run_turn_shared(&handler_conv, &run_args, &task, &mut hooks)
+                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, &mut hooks)
                 }
                 "/btw" => {
                     let task = agent::btw_task(rest)?;
-                    run_turn_shared(&handler_conv, &run_args, &task, &mut hooks)
+                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, &mut hooks)
                 }
                 "/compact" => handler_conv.lock().compact(&run_args, rest, &mut hooks),
                 "/handoff" => handler_conv.lock().handoff(&run_args, rest, &mut hooks),
+                "/checkpoint" => {
+                    if rest.trim() == "list" {
+                        handler_conv.lock().list_checkpoints()
+                    } else {
+                        handler_conv.lock().checkpoint(rest)
+                    }
+                }
+                "/rewind" => handler_conv.lock().rewind(rest),
                 "/clear" | "/new" | "/fresh" => {
                     handler_conv.lock().reset(&run_args.cwd)?;
                     Ok("Started a fresh conversation; prior turns cleared.".into())
@@ -218,7 +274,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     };
                     if !tool.is_empty() && !prompt.is_empty() {
                         agent::arm_force_tool(&run_args.cwd, &tool)?;
-                        run_turn_shared(&handler_conv, &run_args, &prompt, &mut hooks)
+                        run_turn_shared(&handler_conv, &run_args, &prompt, &attachments, &mut hooks)
                     } else {
                         handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
                     }
@@ -315,14 +371,20 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     } else if let Some(expanded) =
                         resolve_file_command(&run_args.cwd, command, rest)
                     {
-                        run_turn_shared(&handler_conv, &run_args, &expanded, &mut hooks)
+                        run_turn_shared(
+                            &handler_conv,
+                            &run_args,
+                            &expanded,
+                            &attachments,
+                            &mut hooks,
+                        )
                     } else {
-                        run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
+                        run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
                     }
                 }
             }
         } else {
-            run_turn_shared(&handler_conv, &run_args, input, &mut hooks)
+            run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
         };
         result.map(tui::CommandOutcome::text)
     };

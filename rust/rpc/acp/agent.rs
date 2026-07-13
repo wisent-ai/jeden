@@ -117,7 +117,7 @@ impl AcpState {
             _ => ProtocolVersion::V1,
         })
         .agent_capabilities(agent_capabilities())
-        .agent_info(Implementation::new("jeden", env!("CARGO_PKG_VERSION"))))
+        .agent_info(Implementation::new("jeden", crate::JEDEN_VERSION)))
     }
 
     fn require_initialized(&self) -> agent_client_protocol::Result<()> {

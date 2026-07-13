@@ -134,6 +134,36 @@ pub struct LeasedJob {
     pub lease_until: i64,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryQueueJob {
+    pub id: String,
+    pub kind: String,
+    pub state: String,
+    pub attempts: i64,
+    pub available_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_until: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryQueueStatus {
+    pub total: i64,
+    pub pending: i64,
+    pub queued: i64,
+    pub leased: i64,
+    pub done: i64,
+    pub failed: i64,
+    pub jobs: Vec<MemoryQueueJob>,
+}
+
 pub fn scope_from_value(value: Option<&Value>, cwd: &Path) -> MemoryScope {
     match value {
         Some(Value::Object(m)) => {

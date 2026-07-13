@@ -23,8 +23,24 @@ fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
 
 pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String> {
     let all = tool_values(context);
+    let memory_health = crate::memory::MemoryStore::open(memory_file_path())
+        .and_then(|store| store.health())
+        .unwrap_or_else(|error| {
+            json!({
+                "service": "memory",
+                "healthy": false,
+                "backend": "sqlite-wal-fts5",
+                "path": memory_file_path(),
+                "error": error,
+            })
+        });
+    let ok = context.cwd.is_dir()
+        && memory_health
+            .get("healthy")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
     let report = json!({
-        "ok": true,
+        "ok": ok,
         "cwd": context.cwd,
         "model": current_model_route(context),
         "checks": [
@@ -34,10 +50,7 @@ pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String
         "tools": {
             "total": all.len(),
         },
-        "memory": {
-            "backend": "local-jsonl",
-            "path": memory_file_path(),
-        },
+        "memory": memory_health,
     });
     serde_json::to_string_pretty(&report).map_err(|e| e.to_string())
 }
@@ -61,7 +74,7 @@ fn diagnostics_picker(title: &str, context: &SlashContext<'_>) -> PickerSpec {
             .detail(format!("{tool_count} tools loaded for this workspace"))
             .badge("tools"),
         PickerItem::action("Inspect memory diagnostics", "/memory stats")
-            .detail("Show backend path, record count, summary, and rebuild queue")
+            .detail("Show SQLite/FTS5 integrity, record counts, and durable queue state")
             .badge("memory"),
         PickerItem::action("Inspect provider usage", "/usage status")
             .detail("Show local token and recorded cost accounting")

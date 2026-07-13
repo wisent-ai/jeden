@@ -21,6 +21,7 @@ pub mod memory;
 pub mod model_router;
 pub mod protocol;
 pub mod report;
+pub mod roadmap;
 pub mod routing;
 pub mod rpc;
 pub mod sdk;
@@ -44,7 +45,7 @@ pub(crate) use cli::sessions::{
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
 
-const JEDEN_VERSION: &str = match option_env!("JEDEN_BUILD_VERSION") {
+pub(crate) const JEDEN_VERSION: &str = match option_env!("JEDEN_BUILD_VERSION") {
     Some(version) => version,
     None => env!("CARGO_PKG_VERSION"),
 };
@@ -84,7 +85,8 @@ fn usage() -> String {
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
-        "  jeden capabilities [--cwd path]\n\n",
+        "  jeden capabilities [--json] [--cwd path]\n\n",
+        "  jeden roadmap <list|show|add|drop|start|block|pass|depends|undepends|graph|acceptance|check|render|work> [args] [--json] [--cwd path]\n\n",
         "Slash commands:\n",
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
         "  /logout [provider]     show Weles-managed logout ownership\n",
@@ -101,6 +103,7 @@ fn usage() -> String {
         "  /goal [set|done|drop]  control goal mode\n",
         "  /loop [on|off|status]  control continuation loop\n",
         "  /todo [list|add|done]  manage todos\n",
+        "  /roadmap              open the native roadmap picker\n",
         "  /memory [stats|view|enqueue|rebuild|clear]\n",
         "  /copy <text>           copy text to clipboard if pbcopy exists\n",
         "  /collab [status|start|share|sync|stop]\n",
@@ -197,7 +200,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--json" => args.json = true,
             other
                 if other.starts_with("--")
-                    && (matches!(args.command.as_str(), "export")
+                    && (matches!(args.command.as_str(), "export" | "roadmap")
                         || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
@@ -387,7 +390,15 @@ pub fn main() -> ExitCode {
         "recall_conversation" | "recall-conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),
-        "capabilities" => Ok(capability::status_text(&args.cwd) + "\n"),
+        "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
+            .map_err(|error| error.to_string()),
+        "capabilities" => {
+            if args.json {
+                capability::status_json(&args.cwd).map(|json| json + "\n")
+            } else {
+                Ok(capability::status_text(&args.cwd) + "\n")
+            }
+        }
         other => Err(format!("unknown command: {}", other)),
     };
     match result {

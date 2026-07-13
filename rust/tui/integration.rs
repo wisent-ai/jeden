@@ -123,10 +123,7 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                             .map_err(|error| format!("Clipboard image read failed: {error}"));
                         let _ = std::fs::remove_file(&path);
                         return bytes.map(|bytes| {
-                            Some(ClipboardContent::from((
-                                "clipboard.png".into(),
-                                bytes,
-                            )))
+                            Some(ClipboardContent::from(("clipboard.png".into(), bytes)))
                         });
                     }
                     Ok(output) => {

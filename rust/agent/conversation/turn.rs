@@ -5,6 +5,7 @@ impl Conversation {
         &mut self,
         args: &Args,
         task: &str,
+        attachments: &[crate::model_router::ModelAttachment],
         hooks: &mut RunHooks,
     ) -> Result<String, String> {
         let config = load_config(&args.cwd);
@@ -78,7 +79,8 @@ impl Conversation {
             if step > u32::from(true) {
                 let _ = self.maybe_auto_compact(args, hooks, "threshold", true)?;
             }
-            let outbound_messages = prepare_outbound_messages(&args.cwd, &self.messages)?;
+            let outbound_messages =
+                prepare_outbound_messages(&args.cwd, &self.messages, attachments)?;
             // Stream deltas, but suppress anything that looks like a raw JSON
             // action/tool blob so its syntax never leaks to the UI. Buffer until
             // the first non-whitespace character decides plain-text vs JSON.

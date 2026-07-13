@@ -25,6 +25,13 @@ impl Conversation {
         })
     }
 
+    pub(crate) fn open(cwd: &Path, session_dir: &Path) -> Result<Self, String> {
+        let turns = crate::cli::sessions::session_conversation_turns(session_dir)?;
+        let messages = history::normalized_history(cwd, turns)?;
+        let recorder = SessionRecorder::open(cwd, session_dir)?;
+        Ok(Self { messages, recorder })
+    }
+
     pub(crate) fn session_path(&self) -> PathBuf {
         self.recorder.path()
     }

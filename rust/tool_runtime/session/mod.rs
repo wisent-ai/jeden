@@ -11,6 +11,33 @@ mod todo;
 pub(crate) use memory::memory_tool;
 pub(crate) use todo::todo_tool;
 
+fn active_roadmap_item(cwd: &std::path::Path) -> Option<String> {
+    fs::read_to_string(cwd.join(".jeden/mode-state.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|state| {
+            state
+                .get("activeRoadmapItem")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+fn session_roadmap_item(dir: &std::path::Path) -> Option<String> {
+    fs::read_to_string(dir.parent()?.join("roadmap-item.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|metadata| {
+            metadata
+                .get("itemId")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+}
+
+fn artifact_roadmap_item(runtime: &ToolRuntime<'_>, dir: &std::path::Path) -> Option<String> {
+    session_roadmap_item(dir).or_else(|| active_roadmap_item(runtime.cwd))
+}
 pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let Some(dir) = runtime.artifact_dir else {
         return Err("save_artifact requires an active session artifact directory".into());
@@ -23,9 +50,13 @@ pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let path = dir.join(&name);
     fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(
-        json!({"ok": true, "name": name, "path": path.display().to_string(), "bytes": content.len()}),
-    )
+    Ok(json!({
+        "ok": true,
+        "name": name,
+        "path": path.display().to_string(),
+        "bytes": content.len(),
+        "roadmapItem": artifact_roadmap_item(runtime, dir)
+    }))
 }
 
 pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
@@ -43,7 +74,11 @@ pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String>
             }
         }
     }
-    Ok(json!({"ok": true, "artifacts": artifacts}))
+    Ok(json!({
+        "ok": true,
+        "roadmapItem": artifact_roadmap_item(runtime, dir),
+        "artifacts": artifacts
+    }))
 }
 
 pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -59,9 +94,15 @@ pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let bytes = fs::read(&path).map_err(|e| e.to_string())?;
     let truncated = bytes.len() > max_bytes;
     let slice = &bytes[..bytes.len().min(max_bytes)];
-    Ok(
-        json!({"ok": true, "name": name, "bytes": bytes.len(), "truncated": truncated, "content": String::from_utf8_lossy(slice), "sha256": sha256_hex(&bytes)}),
-    )
+    Ok(json!({
+        "ok": true,
+        "name": name,
+        "bytes": bytes.len(),
+        "truncated": truncated,
+        "content": String::from_utf8_lossy(slice),
+        "sha256": sha256_hex(&bytes),
+        "roadmapItem": artifact_roadmap_item(runtime, dir)
+    }))
 }
 
 pub(crate) fn recall_conversation(

@@ -1,7 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ModeState {
@@ -31,6 +35,10 @@ pub(crate) struct ModeState {
     pub(crate) todos: Vec<TodoState>,
     #[serde(default)]
     pub(crate) branches: Vec<BranchState>,
+    #[serde(rename = "activeRoadmapItem", default)]
+    pub(crate) active_roadmap_item: Option<String>,
+    #[serde(rename = "lastSessionPath", default)]
+    pub(crate) last_session_path: Option<PathBuf>,
     #[serde(default)]
     pub(crate) tools: ToolsState,
 }
@@ -142,10 +150,59 @@ pub(crate) struct BranchState {
     pub(crate) created_at: String,
     #[serde(default)]
     pub(crate) path: String,
+    #[serde(rename = "roadmapItem", default)]
+    pub(crate) roadmap_item: Option<String>,
 }
 
 pub(crate) fn mode_state_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/mode-state.json")
+}
+
+struct ModeStateLock {
+    path: PathBuf,
+    _file: File,
+}
+
+impl Drop for ModeStateLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+impl ModeStateLock {
+    fn acquire(cwd: &Path) -> Result<Self, String> {
+        let path = cwd.join(".jeden/.mode-state.lock");
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        for _ in 0..500 {
+            match OpenOptions::new().write(true).create_new(true).open(&path) {
+                Ok(mut file) => {
+                    writeln!(file, "{}", std::process::id()).map_err(|error| error.to_string())?;
+                    file.sync_all().map_err(|error| error.to_string())?;
+                    return Ok(Self { path, _file: file });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(error) => return Err(error.to_string()),
+            }
+        }
+        Err(format!(
+            "timed out waiting for mode-state lock {}",
+            path.display()
+        ))
+    }
+}
+
+pub(crate) fn mutate_mode_state(
+    cwd: &Path,
+    change: impl FnOnce(&mut ModeState) -> Result<(), String>,
+) -> Result<(), String> {
+    let _guard = ModeStateLock::acquire(cwd)?;
+    let mut state = read_mode_state(cwd);
+    change(&mut state)?;
+    write_mode_state(cwd, &state)
 }
 
 pub(crate) fn read_mode_state(cwd: &Path) -> ModeState {
@@ -157,9 +214,37 @@ pub(crate) fn read_mode_state(cwd: &Path) -> ModeState {
 
 pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), String> {
     let path = mode_state_path(cwd);
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "mode-state path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let nonce = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let temp = parent.join(format!(
+        ".mode-state.json.tmp-{}-{nonce}",
+        std::process::id()
+    ));
+    let text = serde_json::to_string_pretty(state).map_err(|error| error.to_string())? + "\n";
+    let result = (|| -> Result<(), String> {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temp)
+            .map_err(|error| error.to_string())?;
+        file.write_all(text.as_bytes())
+            .map_err(|error| error.to_string())?;
+        file.flush().map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        fs::rename(&temp, &path).map_err(|error| error.to_string())?;
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
     }
-    let text = serde_json::to_string_pretty(state).map_err(|e| e.to_string())? + "\n";
-    fs::write(path, text).map_err(|e| e.to_string())
+    result
 }

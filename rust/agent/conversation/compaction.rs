@@ -82,7 +82,7 @@ impl Conversation {
             json!({ "role": "system", "content": "You compress a coding-agent conversation into a durable brief. Reply with plain text only." }),
             json!({ "role": "user", "content": format!("Summarize the conversation below so work can continue with full context but far fewer tokens. Preserve decisions, file paths, open tasks, and constraints.{}\n\n---\n{}", extra, transcript) }),
         ];
-        let ask = prepare_outbound_messages(&args.cwd, &ask)?;
+        let ask = prepare_outbound_messages(&args.cwd, &ask, &[])?;
         let summary_completion =
             chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[])?;
         if let Some(usage) = &summary_completion.usage {
@@ -159,7 +159,7 @@ impl Conversation {
             json!({ "role": "system", "content": "You write a handoff brief so a fresh agent session can continue this work with no prior context. Reply with a concise plain-text brief: goal, decisions, files touched, open tasks, next steps." }),
             json!({ "role": "user", "content": format!("Write the handoff brief for the conversation below.{}\n\n---\n{}", extra, transcript) }),
         ];
-        let ask = prepare_outbound_messages(&args.cwd, &ask)?;
+        let ask = prepare_outbound_messages(&args.cwd, &ask, &[])?;
         let brief_completion =
             chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[])?;
         if let Some(usage) = &brief_completion.usage {
@@ -239,7 +239,7 @@ impl Conversation {
             json!({ "role": "system", "content": "You are a second-pass reviewer. Critique the assistant's answer for correctness, gaps, and risks in 2-4 concise bullet points. If it is sound, say so briefly. Reply with plain text only." }),
             json!({ "role": "user", "content": format!("Assistant answer to review:\n\n{}", answer) }),
         ];
-        let ask = prepare_outbound_messages(&args.cwd, &ask)?;
+        let ask = prepare_outbound_messages(&args.cwd, &ask, &[])?;
         match chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[]) {
             Ok(review_completion) => {
                 if let Some(usage) = &review_completion.usage {

@@ -130,7 +130,18 @@ pub(in crate::agent) fn system_prompt_checked(cwd: &Path) -> Result<String, Stri
 pub(in crate::agent) fn prepare_outbound_messages(
     cwd: &Path,
     messages: &[Value],
+    attachments: &[crate::model_router::ModelAttachment],
 ) -> Result<Vec<Value>, String> {
+    if let Some((index, _)) = messages
+        .iter()
+        .enumerate()
+        .find(|(_, message)| !message.get("content").is_some_and(Value::is_string))
+    {
+        return Err(format!(
+            "durable conversation message {index} has non-text content; multimodal parts must remain provider-bound"
+        ));
+    }
     let config = crate::load_config(cwd);
-    crate::context::prepare_model_messages(cwd, &config, messages)
+    let outbound = crate::context::prepare_model_messages(cwd, &config, messages)?;
+    crate::model_router::with_attachments(outbound, attachments)
 }

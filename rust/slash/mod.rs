@@ -44,6 +44,16 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
 
         "/session" => Some(modes::session::handle_session(args, context)),
         "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(modes::todo::handle_todo(args, &mut state, context)) },
+        "/roadmap" => Some(
+            crate::roadmap::split_command_line(args)
+                .map_err(|error| error.to_string())
+                .and_then(|mut command_args| {
+                    let json = command_args.iter().any(|argument| argument == "--json");
+                    command_args.retain(|argument| argument != "--json");
+                    crate::roadmap::execute(context.cwd, &command_args, json)
+                        .map_err(|error| error.to_string())
+                }),
+        ),
         "/mcp" => Some(commands::mcp::handle_mcp(args, context)),
         "/ssh" => Some(commands::ssh::handle_ssh(args, context)),
         "/browser" => Some(browser::handle_browser(args, context)),
@@ -62,6 +72,10 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/share" => Some(session::handle_share(args, context)),
         "/omfg" => Some(session::handle_omfg(args, context)),
         "/force" | "/force:" => { changed = true; Some(modes::handle_force(args, &mut state, context)) },
+        "/checkpoint" | "/rewind" => Some(Err(format!(
+            "{} must be executed through the agent runner so it can mutate the live durable conversation.",
+            command
+        ))),
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(commands::memory::handle_memory(args, context)),
@@ -85,6 +99,39 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         }
     }
     result
+}
+
+pub(crate) fn activate_roadmap_work(
+    cwd: &Path,
+    item_id: &str,
+    objective: &str,
+    plan: &str,
+    todos: &[(String, String)],
+) -> Result<(), String> {
+    state::mutate_mode_state(cwd, |state| {
+        state.goal.enabled = true;
+        state.goal.paused = false;
+        state.goal.objective = objective.to_string();
+        state.plan.enabled = true;
+        state.plan.latest_plan = plan.to_string();
+        state.todos = todos
+            .iter()
+            .map(|(text, status)| state::TodoState {
+                text: text.clone(),
+                status: status.clone(),
+                created_at: crate::agent::now_stamp(),
+            })
+            .collect();
+        state.active_roadmap_item = Some(item_id.to_string());
+        Ok(())
+    })
+}
+
+pub(crate) fn update_session_pointer(cwd: &Path, path: &Path) -> Result<(), String> {
+    state::mutate_mode_state(cwd, |state| {
+        state.last_session_path = Some(path.to_path_buf());
+        Ok(())
+    })
 }
 fn read_only_picker(title: &str, text: String) -> PickerSpec {
     let mut items = text
@@ -164,6 +211,7 @@ pub(crate) fn interactive_picker(
         "/advisor" => Ok(modes::session::advisor_picker(&state, context)),
         "/approval" => Ok(modes::session::approval_picker(&state)),
         "/todo" => Ok(modes::todo::todo_picker(&state)),
+        "/roadmap" => crate::roadmap::picker(context.cwd).map_err(|error| error.to_string()),
         "/session" => Ok(modes::session::session_picker(context)),
         "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state)),
         "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {

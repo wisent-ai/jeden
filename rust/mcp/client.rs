@@ -441,7 +441,7 @@ impl McpClient {
             json!({
                 "protocolVersion": MCP_PROTOCOL_VERSION,
                 "capabilities": {},
-                "clientInfo": {"name": "jeden", "version": "0.1.0"},
+                "clientInfo": {"name": "jeden", "version": crate::JEDEN_VERSION},
             }),
             timeout_ms,
         )?;

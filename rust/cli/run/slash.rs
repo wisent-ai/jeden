@@ -48,7 +48,7 @@ pub(crate) fn update_command() -> Result<String, String> {
         target_triple,
         target,
         roots: super::update::embedded_trust_roots()?,
-        current_version: semver::Version::parse(env!("CARGO_PKG_VERSION"))
+        current_version: semver::Version::parse(crate::JEDEN_VERSION)
             .map_err(|error| error.to_string())?,
         now: None,
         failpoint: None,

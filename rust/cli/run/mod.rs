@@ -16,10 +16,11 @@ pub(crate) fn run_turn_shared(
     conversation: &Arc<Mutex<agent::Conversation>>,
     args: &Args,
     task: &str,
+    attachments: &[crate::model_router::ModelAttachment],
     hooks: &mut agent::RunHooks,
 ) -> Result<String, String> {
     let mut conv = conversation.lock();
-    let result = conv.run_turn(args, task, hooks);
+    let result = conv.run_turn(args, task, attachments, hooks);
     match &result {
         Ok(_) => {
             let _ = agent::update_task_outcome(&args.cwd, task, true);
@@ -37,7 +38,7 @@ pub(crate) fn run_turn_shared(
         let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task) else {
             break;
         };
-        match conv.run_turn(args, &loop_prompt, hooks) {
+        match conv.run_turn(args, &loop_prompt, &[], hooks) {
             Ok(more) => {
                 let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
                 text = format!("{}\n\n— loop resubmit —\n{}", text, more.trim());

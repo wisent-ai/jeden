@@ -4,7 +4,8 @@ mod recorder;
 mod routing;
 mod specs;
 
-pub(in crate::agent) use recorder::{now_stamp, SessionRecorder};
+pub(crate) use recorder::now_stamp;
+pub(in crate::agent) use recorder::SessionRecorder;
 pub(crate) use routing::model_router_config;
 pub(in crate::agent) use routing::{
     append_usage_event, env_usize, is_context_overflow_error, is_incomplete_output_error,

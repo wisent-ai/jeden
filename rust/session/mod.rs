@@ -4,7 +4,10 @@ pub(crate) mod store;
 
 use std::path::Path;
 
-pub(crate) use event::{SessionEventV2, SessionPayloadV2, SESSION_EVENT_SCHEMA_VERSION};
+pub(crate) use event::{
+    CheckpointPayloadV2, RewindPayloadV2, SessionEventV2, SessionPayloadV2,
+    SESSION_EVENT_SCHEMA_VERSION,
+};
 pub(crate) use outbox::OutboxConsumer;
 
 #[allow(dead_code)]

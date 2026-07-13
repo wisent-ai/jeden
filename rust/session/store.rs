@@ -3,6 +3,7 @@ use super::outbox::{OutboxConsumer, OutboxItem};
 use rand::{distributions::Alphanumeric, Rng};
 use serde::Deserialize;
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
@@ -33,6 +34,15 @@ pub(crate) fn append(
     timestamp: String,
     payload: SessionPayloadV2,
 ) -> Result<SessionEventV2, String> {
+    append_with_parent(dir, timestamp, payload, None)
+}
+
+pub(crate) fn append_with_parent(
+    dir: &Path,
+    timestamp: String,
+    payload: SessionPayloadV2,
+    explicit_parent: Option<String>,
+) -> Result<SessionEventV2, String> {
     let mut ledger = read_events(dir)?;
     if ledger.recovered_truncated_tail {
         return Err(format!("cannot append {}: transcript has a recovered truncated tail; resume into a child session", dir.display()));
@@ -42,7 +52,8 @@ pub(crate) fn append(
         ledger.contained_legacy = false;
     }
     let session_id = read_session_id(dir)?;
-    let parent_id = ledger.events.last().map(|event| event.event_id.clone());
+    let parent_id =
+        explicit_parent.or_else(|| ledger.events.last().map(|event| event.event_id.clone()));
     let sequence = ledger.events.len() as u64 + 1;
     let event_id = fresh_event_id(&timestamp);
     let correlation_id = ledger
@@ -67,7 +78,20 @@ pub(crate) fn append(
         checksum: String::new(),
     };
     event.seal()?;
+    validate_next(
+        &dir.join(TRANSCRIPT_FILE),
+        ledger.events.len() + 1,
+        &ledger.events,
+        &event,
+        &event.session_id,
+    )?;
     append_event_line(dir, &event)?;
+    if let Err(error) = mirror_active_leaf(dir, Some(&event.event_id)) {
+        return Err(format!(
+            "event {} committed, but active leaf mirror update failed: {}",
+            event.event_id, error
+        ));
+    }
     Ok(event)
 }
 
@@ -208,6 +232,32 @@ fn migrate_legacy_value(
     Ok(event)
 }
 
+pub(crate) fn active_lineage<'a>(
+    events: &'a [SessionEventV2],
+    leaf_id: Option<&str>,
+) -> Result<Vec<&'a SessionEventV2>, String> {
+    let by_id = events
+        .iter()
+        .map(|event| (event.event_id.as_str(), event))
+        .collect::<HashMap<_, _>>();
+    let mut lineage = Vec::new();
+    let mut seen = HashSet::new();
+    let mut cursor = leaf_id;
+    while let Some(id) = cursor {
+        if !seen.insert(id.to_owned()) {
+            return Err(format!("session lineage contains a cycle at {id}"));
+        }
+        let event = by_id
+            .get(id)
+            .copied()
+            .ok_or_else(|| format!("session lineage references missing event {id}"))?;
+        lineage.push(event);
+        cursor = event.parent_id.as_deref();
+    }
+    lineage.reverse();
+    Ok(lineage)
+}
+
 fn validate_next(
     path: &Path,
     line: usize,
@@ -216,7 +266,7 @@ fn validate_next(
     session_id: &str,
 ) -> Result<(), String> {
     let expected_sequence = prior.len() as u64 + 1;
-    let expected_parent = prior.last().map(|entry| entry.event_id.clone());
+    let active_leaf = prior.last().map(|entry| entry.event_id.as_str());
     if event.sequence != expected_sequence {
         return Err(format!(
             "{}:{} breaks ledger sequence: {}, expected {}",
@@ -226,13 +276,80 @@ fn validate_next(
             expected_sequence
         ));
     }
-    if event.parent_id != expected_parent {
+    if prior.iter().any(|entry| entry.event_id == event.event_id) {
+        return Err(format!(
+            "{}:{} duplicates event id {}",
+            path.display(),
+            line,
+            event.event_id
+        ));
+    }
+    if matches!(event.payload, SessionPayloadV2::Rewind(_)) {
+        let rewind = event.payload.rewind_data().map_err(|error| {
+            format!(
+                "{}:{} has invalid rewind payload: {}",
+                path.display(),
+                line,
+                error
+            )
+        })?;
+        if Some(rewind.from_leaf_id.as_str()) != active_leaf {
+            return Err(format!(
+                "{}:{} rewind source {} is not active leaf {:?}",
+                path.display(),
+                line,
+                rewind.from_leaf_id,
+                active_leaf
+            ));
+        }
+        if event.parent_id.as_deref() != Some(rewind.checkpoint_id.as_str()) {
+            return Err(format!(
+                "{}:{} rewind parent {:?} does not match checkpoint {}",
+                path.display(),
+                line,
+                event.parent_id,
+                rewind.checkpoint_id
+            ));
+        }
+        let target = prior
+            .iter()
+            .find(|entry| entry.event_id == rewind.checkpoint_id)
+            .ok_or_else(|| {
+                format!(
+                    "{}:{} checkpoint not found: {}",
+                    path.display(),
+                    line,
+                    rewind.checkpoint_id
+                )
+            })?;
+        if !matches!(target.payload, SessionPayloadV2::Checkpoint(_)) {
+            return Err(format!(
+                "{}:{} event {} is not a checkpoint",
+                path.display(),
+                line,
+                rewind.checkpoint_id
+            ));
+        }
+        let ancestry = active_lineage(prior, active_leaf)?;
+        if !ancestry
+            .iter()
+            .any(|entry| entry.event_id == rewind.checkpoint_id)
+        {
+            return Err(format!(
+                "{}:{} checkpoint {} is not an ancestor of active leaf {:?}",
+                path.display(),
+                line,
+                rewind.checkpoint_id,
+                active_leaf
+            ));
+        }
+    } else if event.parent_id.as_deref() != active_leaf {
         return Err(format!(
             "{}:{} breaks ledger lineage: parent {:?}, active leaf {:?}",
             path.display(),
             line,
             event.parent_id,
-            expected_parent
+            active_leaf
         ));
     }
     if event.session_id != session_id {
@@ -314,6 +431,51 @@ fn read_session_id(dir: &Path) -> Result<String, String> {
                 .map(|name| name.to_string_lossy().into_owned())
         })
         .ok_or_else(|| format!("{} has no session id", path.display()))
+}
+
+pub(crate) fn reconcile_active_leaf(dir: &Path) -> Result<Option<String>, String> {
+    let ledger = read_events(dir)?;
+    let active_leaf = ledger.events.last().map(|event| event.event_id.clone());
+    mirror_active_leaf(dir, active_leaf.as_deref())?;
+    Ok(active_leaf)
+}
+
+fn mirror_active_leaf(dir: &Path, active_leaf: Option<&str>) -> Result<(), String> {
+    let path = dir.join("state.json");
+    let mut state: Value = serde_json::from_slice(
+        &fs::read(&path).map_err(|error| format!("cannot read {}: {}", path.display(), error))?,
+    )
+    .map_err(|error| format!("invalid {}: {}", path.display(), error))?;
+    if state.get("activeLeaf").and_then(Value::as_str) == active_leaf
+        && (active_leaf.is_some() || state.get("activeLeaf") == Some(&Value::Null))
+    {
+        return Ok(());
+    }
+    let object = state
+        .as_object_mut()
+        .ok_or_else(|| format!("invalid {}: expected object", path.display()))?;
+    object.insert(
+        "activeLeaf".into(),
+        active_leaf.map_or(Value::Null, |id| Value::String(id.to_owned())),
+    );
+    let suffix: String = rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(12)
+        .map(char::from)
+        .collect();
+    let temp = dir.join(format!(".state.json.active-leaf-{suffix}"));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)
+        .map_err(|error| error.to_string())?;
+    let mut encoded = serde_json::to_vec_pretty(&state).map_err(|error| error.to_string())?;
+    encoded.push(b'\n');
+    file.write_all(&encoded)
+        .map_err(|error| error.to_string())?;
+    file.sync_all().map_err(|error| error.to_string())?;
+    fs::rename(&temp, &path).map_err(|error| error.to_string())?;
+    sync_directory(dir)
 }
 
 fn fresh_event_id(timestamp: &str) -> String {

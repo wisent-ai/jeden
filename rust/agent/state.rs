@@ -227,6 +227,10 @@ pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<Stri
         state = json!({});
     }
     let map = state.as_object_mut().expect("mode state object");
+    let roadmap_item = map
+        .get("activeRoadmapItem")
+        .and_then(Value::as_str)
+        .map(str::to_string);
     let branches = map.entry("branches").or_insert_with(|| json!([]));
     let arr = branches.as_array_mut().ok_or("branches is not an array")?;
     let id = format!("branch-{}", arr.len() + 1);
@@ -235,7 +239,13 @@ pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<Stri
     } else {
         title.trim().to_string()
     };
-    arr.push(json!({ "id": id, "title": title, "createdAt": now_stamp(), "path": path.to_string_lossy() }));
+    arr.push(json!({
+        "id": id,
+        "title": title,
+        "createdAt": now_stamp(),
+        "path": path.to_string_lossy(),
+        "roadmapItem": roadmap_item
+    }));
     write_mode_state(cwd, &state)?;
     Ok(id)
 }

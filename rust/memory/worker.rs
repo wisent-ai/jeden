@@ -1,4 +1,7 @@
-use super::{bounded_redacted, LeasedJob, MemoryScope, MemorySource, MemoryStore};
+use super::{
+    bounded_redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
+    MemoryStore,
+};
 use rusqlite::{params, OptionalExtension, TransactionBehavior};
 use serde_json::Value;
 
@@ -25,6 +28,56 @@ impl MemoryStore {
         let now = super::now_ms();
         conn.execute("INSERT INTO jobs(id,kind,payload_json,state,available_at,created_at,updated_at) VALUES(?1,?2,?3,'queued',?4,?4,?4)", params![id,kind,serde_json::to_string(payload).map_err(|e|e.to_string())?,now]).map_err(|e|e.to_string())?;
         Ok(id)
+    }
+
+    pub fn queue_status(&self, limit: usize) -> Result<MemoryQueueStatus, String> {
+        let conn = self.connect()?;
+        let mut counts = conn
+            .prepare("SELECT state,count(*) FROM jobs GROUP BY state")
+            .map_err(|e| e.to_string())?;
+        let state_counts = counts
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
+            .map_err(|e| e.to_string())?;
+        let queued = state_counts.get("queued").copied().unwrap_or_default();
+        let leased = state_counts.get("leased").copied().unwrap_or_default();
+        let done = state_counts.get("done").copied().unwrap_or_default();
+        let failed = state_counts.get("failed").copied().unwrap_or_default();
+        let total = state_counts.values().sum();
+
+        let mut statement = conn
+            .prepare("SELECT id,kind,state,attempts,available_at,lease_owner,lease_until,last_error,created_at,updated_at FROM jobs ORDER BY CASE state WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,updated_at DESC,id LIMIT ?1")
+            .map_err(|e| e.to_string())?;
+        let jobs = statement
+            .query_map([limit.min(200) as i64], |row| {
+                Ok(MemoryQueueJob {
+                    id: row.get(0)?,
+                    kind: row.get(1)?,
+                    state: row.get(2)?,
+                    attempts: row.get(3)?,
+                    available_at: row.get(4)?,
+                    lease_owner: row.get(5)?,
+                    lease_until: row.get(6)?,
+                    last_error: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
+                })
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+        Ok(MemoryQueueStatus {
+            total,
+            pending: queued + leased,
+            queued,
+            leased,
+            done,
+            failed,
+            jobs,
+        })
     }
 
     pub fn claim(&self, worker: &str, lease_ms: Option<i64>) -> Result<Option<LeasedJob>, String> {
@@ -91,38 +144,41 @@ impl MemoryStore {
         if !self.heartbeat(&job.id, worker, DEFAULT_LEASE_MS)? {
             return Err("memory job lease was lost before processing".into());
         }
-        let outcome = match job.kind.as_str() {
-            "extract" => {
-                let scope: MemoryScope = serde_json::from_value(
-                    job.payload
-                        .get("scope")
-                        .cloned()
-                        .ok_or("extract job missing scope")?,
-                )
-                .map_err(|e| e.to_string())?;
-                let text = job
-                    .payload
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .ok_or("extract job missing text")?;
-                let source = MemorySource {
-                    origin: "session_extraction".into(),
-                    session_id: job
+        let outcome = (|| -> Result<(), String> {
+            match job.kind.as_str() {
+                "extract" => {
+                    let scope: MemoryScope = serde_json::from_value(
+                        job.payload
+                            .get("scope")
+                            .cloned()
+                            .ok_or("extract job missing scope")?,
+                    )
+                    .map_err(|e| e.to_string())?;
+                    let text = job
                         .payload
-                        .get("sessionId")
+                        .get("text")
                         .and_then(Value::as_str)
-                        .map(str::to_string),
-                    entry_id: job
-                        .payload
-                        .get("entryId")
-                        .and_then(Value::as_str)
-                        .map(str::to_string),
-                };
-                self.remember("session", &scope, text, &["automatic".into()], &source, 0.6)
-                    .map(|_| ())
+                        .ok_or("extract job missing text")?;
+                    let source = MemorySource {
+                        origin: "session_extraction".into(),
+                        session_id: job
+                            .payload
+                            .get("sessionId")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                        entry_id: job
+                            .payload
+                            .get("entryId")
+                            .and_then(Value::as_str)
+                            .map(str::to_string),
+                    };
+                    self.remember("session", &scope, text, &["automatic".into()], &source, 0.6)
+                        .map(|_| ())
+                }
+                "reindex" | "rebuild" => self.rebuild_fts().map(|_| ()),
+                other => Err(format!("unsupported memory job kind: {other}")),
             }
-            other => Err(format!("unsupported memory job kind: {other}")),
-        };
+        })();
         match outcome {
             Ok(()) => {
                 if !self.complete(&job.id, worker)? {

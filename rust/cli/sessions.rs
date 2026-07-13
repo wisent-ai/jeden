@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 #[path = "../session/mod.rs"]
 pub(crate) mod ledger_v2;
-use ledger_v2::{SessionEventV2, SessionPayloadV2};
+use ledger_v2::{CheckpointPayloadV2, RewindPayloadV2, SessionEventV2, SessionPayloadV2};
 
 static LEDGER_APPEND_LOCK: Mutex<()> = Mutex::new(());
 static NEXT_ENTRY_ID: AtomicU64 = AtomicU64::new(1);
@@ -51,15 +51,90 @@ pub(crate) fn append_ledger_entry(
     let _guard = LEDGER_APPEND_LOCK
         .lock()
         .map_err(|_| "session ledger append lock poisoned")?;
+    append_ledger_entry_unlocked(dir, ts, kind, data)
+}
+
+fn append_ledger_entry_unlocked(
+    dir: &Path,
+    ts: String,
+    kind: &str,
+    data: Value,
+) -> Result<LedgerEntry, String> {
     let payload = SessionPayloadV2::from_legacy(kind, data)?;
     ledger_v2::store::append(dir, ts, payload).map(|event| LedgerEntry::from_event(&event))
 }
 
-pub(crate) fn session_active_leaf(dir: &Path) -> Result<Option<String>, String> {
-    Ok(ledger_v2::store::read_events(dir)?
+pub(crate) fn append_checkpoint_entry(
+    dir: &Path,
+    ts: String,
+    label: Option<String>,
+    messages: &[Value],
+) -> Result<LedgerEntry, String> {
+    let _guard = LEDGER_APPEND_LOCK
+        .lock()
+        .map_err(|_| "session ledger append lock poisoned")?;
+    let payload = SessionPayloadV2::checkpoint(CheckpointPayloadV2 {
+        label,
+        messages: messages.to_vec(),
+    })?;
+    ledger_v2::store::append(dir, ts, payload).map(|event| LedgerEntry::from_event(&event))
+}
+
+pub(crate) fn append_rewind_entry(
+    dir: &Path,
+    ts: String,
+    checkpoint_id: &str,
+) -> Result<(LedgerEntry, Vec<Value>), String> {
+    let _guard = LEDGER_APPEND_LOCK
+        .lock()
+        .map_err(|_| "session ledger append lock poisoned")?;
+    let ledger = parse_transcript(dir)?;
+    if unresolved_pending_claim(&ledger.active_entries).is_some() {
+        return Err("cannot rewind while a pending action claim is unresolved".into());
+    }
+    let global = ledger
         .events
-        .last()
-        .map(|event| event.event_id.clone()))
+        .iter()
+        .find(|event| event.event_id == checkpoint_id);
+    if !ledger
+        .active_entries
+        .iter()
+        .any(|entry| entry.id == checkpoint_id)
+    {
+        return match global {
+            Some(event) if !matches!(event.payload, SessionPayloadV2::Checkpoint(_)) => {
+                Err(format!("event {checkpoint_id} is not a checkpoint"))
+            }
+            Some(_) => Err(format!(
+                "checkpoint {checkpoint_id} is not an ancestor of active leaf {:?}",
+                ledger.active_leaf
+            )),
+            None => Err(format!("checkpoint not found: {checkpoint_id}")),
+        };
+    }
+    let checkpoint = global.ok_or_else(|| format!("checkpoint not found: {checkpoint_id}"))?;
+    if !matches!(checkpoint.payload, SessionPayloadV2::Checkpoint(_)) {
+        return Err(format!("event {checkpoint_id} is not a checkpoint"));
+    }
+    let checkpoint_data = checkpoint
+        .payload
+        .checkpoint_data()
+        .map_err(|error| format!("checkpoint {checkpoint_id} has invalid payload: {error}"))?;
+    let from_leaf_id = ledger
+        .active_leaf
+        .clone()
+        .ok_or("cannot rewind an empty session ledger")?;
+    let payload = SessionPayloadV2::rewind(RewindPayloadV2 {
+        checkpoint_id: checkpoint_id.to_owned(),
+        from_leaf_id,
+    })?;
+    let event =
+        ledger_v2::store::append_with_parent(dir, ts, payload, Some(checkpoint_id.to_owned()))?;
+    Ok((LedgerEntry::from_event(&event), checkpoint_data.messages))
+}
+
+pub(crate) fn session_active_leaf(dir: &Path) -> Result<Option<String>, String> {
+    ledger_v2::store::reconcile_active_leaf(dir)
 }
 
 fn export_event(event: &SessionEventV2) -> Value {
@@ -163,6 +238,25 @@ fn pending_terminal(entries: &[LedgerEntry], id: &str) -> bool {
     })
 }
 
+fn pending_resolved(entries: &[LedgerEntry], id: &str) -> bool {
+    entries.iter().any(|entry| {
+        matches!(
+            entry.kind.as_str(),
+            "pending_apply" | "pending_discard" | "pending_expire"
+        ) && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
+    })
+}
+
+fn unresolved_pending_claim(entries: &[LedgerEntry]) -> Option<&str> {
+    entries.iter().rev().find_map(|entry| {
+        if entry.kind != "pending_claim" {
+            return None;
+        }
+        let id = entry.data.get("pendingId").and_then(Value::as_str)?;
+        (!pending_resolved(entries, id)).then_some(id)
+    })
+}
+
 pub(crate) fn claim_pending_action(
     artifact_dir: &Path,
     operation: &crate::tool_runtime::runtime_ops::OperationContext<'_>,
@@ -170,41 +264,55 @@ pub(crate) fn claim_pending_action(
 ) -> Result<PendingActionClaim, String> {
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
+    let _guard = LEDGER_APPEND_LOCK
+        .lock()
+        .map_err(|_| "session ledger append lock poisoned")?;
     let ledger = parse_transcript(session_dir)?;
     if pending_terminal(&ledger.entries, id) {
-        return Err(format!("pending action is already resolved: {}", id));
+        return Err(format!("pending action is already resolved: {id}"));
     }
     let entry = ledger
-        .entries
+        .active_entries
         .iter()
         .rev()
         .find(|entry| {
             entry.kind == "pending_preview"
                 && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
         })
-        .ok_or_else(|| format!("pending action not found: {}", id))?;
+        .cloned();
+    let Some(entry) = entry else {
+        if ledger.entries.iter().any(|entry| {
+            entry.kind == "pending_preview"
+                && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
+        }) {
+            return Err(format!(
+                "pending action is not on the active session lineage: {id}"
+            ));
+        }
+        return Err(format!("pending action not found: {id}"));
+    };
     let expires_at = entry
         .data
         .get("expiresAt")
         .and_then(Value::as_u64)
-        .ok_or_else(|| format!("pending action {} has invalid expiry", id))?;
+        .ok_or_else(|| format!("pending action {id} has invalid expiry"))?;
     let now = now_epoch_seconds();
     if now >= expires_at {
-        append_ledger_entry(
+        append_ledger_entry_unlocked(
             session_dir,
             now.to_string(),
             "pending_expire",
             json!({ "pendingId": id }),
         )?;
-        return Err(format!("pending action expired: {}", id));
+        return Err(format!("pending action expired: {id}"));
     }
     let payload_path = artifact_dir
         .join("pending-actions")
-        .join(format!("{}.payload", id));
+        .join(format!("{id}.payload"));
     let payload = fs::read(&payload_path)
-        .map_err(|e| format!("cannot read pending action {} payload: {}", id, e))?;
+        .map_err(|error| format!("cannot read pending action {id} payload: {error}"))?;
     operation_ready(operation)?;
-    append_ledger_entry(
+    append_ledger_entry_unlocked(
         session_dir,
         now.to_string(),
         "pending_claim",
@@ -214,29 +322,44 @@ pub(crate) fn claim_pending_action(
         .data
         .get("kind")
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("pending action {} has invalid kind", id))?;
+        .ok_or_else(|| format!("pending action {id} has invalid kind"))?;
     let target = entry
         .data
         .get("target")
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("pending action {} has invalid target", id))?;
+        .ok_or_else(|| format!("pending action {id} has invalid target"))?;
     let expected_sha256 = entry
         .data
         .get("expectedSha256")
         .and_then(Value::as_str)
-        .ok_or_else(|| format!("pending action {} has invalid revision", id))?;
+        .ok_or_else(|| format!("pending action {id} has invalid revision"))?;
     Ok(PendingActionClaim {
-        id: id.to_string(),
-        kind: kind.to_string(),
-        target: target.to_string(),
-        expected_sha256: expected_sha256.to_string(),
+        id: id.to_owned(),
+        kind: kind.to_owned(),
+        target: target.to_owned(),
+        expected_sha256: expected_sha256.to_owned(),
         payload,
     })
 }
 
 pub(crate) fn complete_pending_action(artifact_dir: &Path, id: &str) -> Result<(), String> {
     let session_dir = pending_session_dir(artifact_dir)?;
-    append_ledger_entry(
+    let _guard = LEDGER_APPEND_LOCK
+        .lock()
+        .map_err(|_| "session ledger append lock poisoned")?;
+    let ledger = parse_transcript(session_dir)?;
+    if pending_resolved(&ledger.entries, id) {
+        return Err(format!("pending action is already resolved: {id}"));
+    }
+    if !ledger.active_entries.iter().any(|entry| {
+        entry.kind == "pending_claim"
+            && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
+    }) {
+        return Err(format!(
+            "pending action claim is not on the active session lineage: {id}"
+        ));
+    }
+    append_ledger_entry_unlocked(
         session_dir,
         now_epoch_seconds().to_string(),
         "pending_apply",
@@ -252,17 +375,28 @@ pub(crate) fn discard_pending_action(
 ) -> Result<(), String> {
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
+    let _guard = LEDGER_APPEND_LOCK
+        .lock()
+        .map_err(|_| "session ledger append lock poisoned")?;
     let ledger = parse_transcript(session_dir)?;
     if pending_terminal(&ledger.entries, id) {
-        return Err(format!("pending action is already resolved: {}", id));
+        return Err(format!("pending action is already resolved: {id}"));
     }
-    if !ledger.entries.iter().any(|entry| {
+    if !ledger.active_entries.iter().any(|entry| {
         entry.kind == "pending_preview"
             && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
     }) {
-        return Err(format!("pending action not found: {}", id));
+        if ledger.entries.iter().any(|entry| {
+            entry.kind == "pending_preview"
+                && entry.data.get("pendingId").and_then(Value::as_str) == Some(id)
+        }) {
+            return Err(format!(
+                "pending action is not on the active session lineage: {id}"
+            ));
+        }
+        return Err(format!("pending action not found: {id}"));
     }
-    append_ledger_entry(
+    append_ledger_entry_unlocked(
         session_dir,
         now_epoch_seconds().to_string(),
         "pending_discard",
@@ -294,6 +428,7 @@ fn now_epoch_seconds() -> u64 {
 struct SessionLedger {
     entries: Vec<LedgerEntry>,
     events: Vec<SessionEventV2>,
+    active_entries: Vec<LedgerEntry>,
     active_leaf: Option<String>,
     recovered_truncated_tail: bool,
 }
@@ -429,7 +564,7 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     run_args.allow_command = allow_command;
     run_args.yolo = yolo;
     let mut hooks = agent::RunHooks::inert();
-    let text = conversation.run_turn(&run_args, &task, &mut hooks)?;
+    let text = conversation.run_turn(&run_args, &task, &[], &mut hooks)?;
     let _ = agent::update_last_session_path(&args.cwd, &conversation.session_path());
     Ok(format!(
         "[resumed {} prior turn(s) from {}]\n{}\n",
@@ -482,9 +617,14 @@ pub(crate) fn recall_conversation_text(id_or_path: &str) -> Result<String, Strin
 fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
     let ledger = ledger_v2::store::read_events(dir)?;
     let active_leaf = ledger.events.last().map(|event| event.event_id.clone());
+    let active_entries = ledger_v2::store::active_lineage(&ledger.events, active_leaf.as_deref())?
+        .into_iter()
+        .map(LedgerEntry::from_event)
+        .collect();
     let entries = ledger.events.iter().map(LedgerEntry::from_event).collect();
     Ok(SessionLedger {
         entries,
+        active_entries,
         active_leaf,
         recovered_truncated_tail: ledger.recovered_truncated_tail,
         events: ledger.events,
@@ -494,7 +634,34 @@ fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
 /// Faithfully rebuild the model-visible message window. Snapshot entries are
 /// durable cut points; older legacy events are replayed through adapters.
 pub(crate) fn session_conversation_turns(dir: &Path) -> Result<Vec<Value>, String> {
-    replay_entries(parse_transcript(dir)?.entries)
+    replay_entries(parse_transcript(dir)?.active_entries)
+}
+
+pub(crate) fn list_checkpoint_entries(dir: &Path) -> Result<String, String> {
+    let ledger = parse_transcript(dir)?;
+    let mut rows = Vec::new();
+    for entry in ledger
+        .active_entries
+        .iter()
+        .filter(|entry| entry.kind == "checkpoint")
+    {
+        let checkpoint: CheckpointPayloadV2 =
+            serde_json::from_value(entry.data.clone()).map_err(|error| {
+                format!(
+                    "ledger entry {} has invalid checkpoint: {}",
+                    entry.id, error
+                )
+            })?;
+        rows.push(match checkpoint.label {
+            Some(label) => format!("{}\t{}", entry.id, label),
+            None => entry.id.clone(),
+        });
+    }
+    Ok(if rows.is_empty() {
+        "No checkpoints on the active session lineage.".into()
+    } else {
+        rows.join("\n")
+    })
 }
 
 fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, String> {
@@ -510,6 +677,16 @@ fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, String> {
                     .ok_or_else(|| {
                         format!("ledger entry {} has invalid context snapshot", entry.id)
                     })?;
+            }
+            "checkpoint" => {
+                let checkpoint: CheckpointPayloadV2 =
+                    serde_json::from_value(data).map_err(|error| {
+                        format!(
+                            "ledger entry {} has invalid checkpoint: {}",
+                            entry.id, error
+                        )
+                    })?;
+                messages = checkpoint.messages;
             }
             "user" => {
                 if let Some(task) = data.get("task").and_then(Value::as_str) {

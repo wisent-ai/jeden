@@ -245,6 +245,23 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         (_, Err(error)) => Some(error.to_string()),
         (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),
     };
+    let image_capable_models = catalog
+        .as_ref()
+        .map(|catalog| {
+            catalog
+                .models
+                .iter()
+                .filter(|entry| {
+                    entry.available
+                        && entry
+                            .input_modalities
+                            .iter()
+                            .any(|modality| modality.eq_ignore_ascii_case("image"))
+                })
+                .map(|entry| entry.id.clone())
+                .collect()
+        })
+        .unwrap_or_default();
     let validate_routes = |routes: &Result<Vec<RouteDescriptor>, String>| -> Option<String> {
         let catalog = catalog.as_ref().ok()?;
         routes.as_ref().ok()?.iter().find_map(|route| {
@@ -318,6 +335,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         retry: retry.unwrap_or_default(),
         fallbacks: resolved_fallbacks,
         context_promotions: resolved_promotions,
+        image_capable_models,
         subscription_pool,
         subscription_cooldown_path,
         config_error,

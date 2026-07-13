@@ -54,6 +54,35 @@ pub enum EditorAction {
     ExternalEditor,
 }
 
+impl EditorAction {
+    pub(super) const fn action_id(self) -> &'static str {
+        match self {
+            Self::MoveLeft => "editor.move-left",
+            Self::MoveRight => "editor.move-right",
+            Self::MoveWordLeft => "editor.move-word-left",
+            Self::MoveWordRight => "editor.move-word-right",
+            Self::MoveLineStart => "editor.move-line-start",
+            Self::MoveLineEnd => "editor.move-line-end",
+            Self::MoveBufferStart => "editor.move-buffer-start",
+            Self::MoveBufferEnd => "editor.move-buffer-end",
+            Self::MoveUp => "editor.move-up",
+            Self::MoveDown => "editor.move-down",
+            Self::SelectLeft => "editor.select-left",
+            Self::SelectRight => "editor.select-right",
+            Self::SelectWordLeft => "editor.select-word-left",
+            Self::SelectWordRight => "editor.select-word-right",
+            Self::DeleteBackward => "editor.delete-backward",
+            Self::DeleteForward => "editor.delete-forward",
+            Self::Undo => "editor.undo",
+            Self::Redo => "editor.redo",
+            Self::InsertNewline => "editor.insert-newline",
+            Self::HistoryPrevious => "editor.history-previous",
+            Self::HistoryNext => "editor.history-next",
+            Self::ExternalEditor => EXTERNAL_EDITOR_ACTION_ID,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyBinding {
     pub code: KeyCode,
@@ -118,6 +147,10 @@ fn bind(code: KeyCode, modifiers: KeyModifiers, action: EditorAction) -> KeyBind
 }
 
 impl ActionKeyMap {
+    pub(super) fn bindings(&self) -> &[KeyBinding] {
+        &self.bindings
+    }
+
     #[cfg(test)]
     pub fn namespace(&self) -> &'static str {
         EDITOR_KEYMAP_NAMESPACE

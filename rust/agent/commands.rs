@@ -77,9 +77,8 @@ pub(crate) fn run_command(args: &Args) -> Result<String, String> {
     run_command_with(args, &mut RunHooks::inert())
 }
 
-/// Run a session-scoped slash (`/compact`, `/handoff`, `/context`) in the
-/// one-shot CLI by loading the last session's history into a Conversation and
-/// invoking the same real methods the interactive path uses — no divergent stub.
+/// Run a session-scoped slash in the one-shot CLI by opening the last durable
+/// conversation in place and invoking the same methods as the interactive path.
 fn run_session_command(
     args: &Args,
     command: &str,
@@ -91,13 +90,14 @@ fn run_session_command(
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .filter(|p| p.exists())
-        .ok_or("No prior session found. Run a task first, then /compact, /handoff, or /context.")?;
-    let turns = crate::session_conversation_turns(&last)?;
-    let mut conversation = Conversation::new(&args.cwd)?;
-    conversation.load_history(&args.cwd, turns)?;
+        .ok_or("No prior session found. Run a task first, then use a session command.")?;
+    let mut conversation = Conversation::open(&args.cwd, &last)?;
     match command {
         "/compact" => conversation.compact(args, rest, hooks),
         "/handoff" => conversation.handoff(args, rest, hooks),
+        "/checkpoint" if rest.trim() == "list" => conversation.list_checkpoints(),
+        "/checkpoint" => conversation.checkpoint(rest),
+        "/rewind" => conversation.rewind(rest),
         "/context" => Ok(format!(
             "Loaded conversation: {} message(s), ~{} tokens (from {}).",
             conversation.turn_len(),
@@ -150,10 +150,11 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         if command == "/btw" {
             return btw_command_with(args, &rest, hooks);
         }
-        // /compact, /handoff, /context operate on the last session's history so
-        // the one-shot CLI matches the interactive implementations (no divergent
-        // flag-set / markdown-dump / tool-manifest stubs).
-        if matches!(command.as_str(), "/compact" | "/handoff" | "/context") {
+        // Session-scoped commands mutate or inspect the last durable conversation.
+        if matches!(
+            command.as_str(),
+            "/compact" | "/handoff" | "/context" | "/checkpoint" | "/rewind"
+        ) {
             let text = run_session_command(args, &command, &rest, hooks)?;
             return Ok(if args.json {
                 json!({ "text": text }).to_string() + "\n"
@@ -193,7 +194,7 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     }
 
     let mut conversation = Conversation::new(&args.cwd)?;
-    let result = conversation.run_turn(args, &task, hooks);
+    let result = conversation.run_turn(args, &task, &[], hooks);
     if let Err(error) = &result {
         let _ = update_task_outcome(&args.cwd, &task, false);
         return Err(error.clone());
@@ -209,7 +210,7 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         if hooks.cancelled() {
             break;
         }
-        match conversation.run_turn(args, &loop_prompt, hooks) {
+        match conversation.run_turn(args, &loop_prompt, &[], hooks) {
             Ok(more) => {
                 text = format!("{}\n\n— loop resubmit —\n{}", text, more);
             }

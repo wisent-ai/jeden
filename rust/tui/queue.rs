@@ -4,10 +4,21 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 const MAX_QUEUED_MESSAGES: usize = 64;
 
+pub(super) const DELIVERY_KEYMAP_NAMESPACE: &str = "delivery";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeliveryAction {
     FollowUp,
     Steer,
+}
+
+impl DeliveryAction {
+    pub(super) const fn action_id(self) -> &'static str {
+        match self {
+            Self::FollowUp => "delivery.follow-up",
+            Self::Steer => "delivery.steer",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +53,10 @@ impl Default for DeliveryKeyMap {
 }
 
 impl DeliveryKeyMap {
+    pub(super) fn bindings(&self) -> &[DeliveryBinding] {
+        &self.bindings
+    }
+
     pub fn action_for(&self, key: KeyEvent) -> Option<DeliveryAction> {
         let modifiers = key.modifiers
             & (KeyModifiers::SHIFT

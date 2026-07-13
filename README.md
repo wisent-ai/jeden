@@ -58,7 +58,8 @@ jeden recall_conversation --list
 jeden tools --cwd ../content-platform
 jeden config --cwd .
 jeden doctor --cwd .
-jeden capabilities --cwd .
+jeden capabilities --json --cwd .
+jeden roadmap list --status planned --priority P1 --json --cwd .
 ```
 
 ## Interactive terminal views
@@ -77,6 +78,29 @@ Picker controls:
 Destructive rows open a confirmation view with **Cancel** selected by default. Move to **Confirm** and press `Enter` to execute. Agent `ask_user` calls use the same terminal-owned event loop: option questions open a picker and open questions accept free text without allowing a worker thread to read terminal input directly.
 
 When stdin is not a terminal, interactive views render as deterministic text lists and direct slash arguments remain available for scripts.
+
+## Roadmap Registry
+
+`roadmap/roadmap.yaml` is the canonical, versioned team roadmap. `roadmap/schema/roadmap-v1.schema.json` defines the machine contract; `docs/JEDEN_NEXT_PHASES_PLAN.md` and `roadmap/views/JEDEN_NEXT_PHASES_PLAN.md` are deterministic generated views. Every mutating operation is serialized through a stable sibling lock, validates an `expectedRevision`, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML, and fsyncs the parent directory. Pass `--revision <n>` in automation; an omitted revision uses the snapshot read by that invocation and still fails if another writer commits first.
+
+Statuses are explicit: `backlog`, `planned`, `in_progress`, `implemented`, `not_run`, `failed`, `external_blocked`, `passed`, and `dropped`. `passed` requires evidence; `external_blocked` requires an external prerequisite. Dependencies must resolve and remain acyclic, and capability IDs must exist in the capability registry.
+
+```sh
+jeden roadmap list --status planned --priority P1 --json --cwd .
+jeden roadmap show JED-024 --json --cwd .
+jeden roadmap graph --json --cwd .
+jeden roadmap add "<title>" --area agent-quality --priority P1 \
+  --summary "<summary>" --acceptance "<observable criterion>" \
+  --revision "$REVISION" --cwd .
+jeden roadmap depends "$ITEM_ID" "$DEPENDENCY_ID" --revision "$REVISION" --cwd .
+jeden roadmap acceptance evidence "$ITEM_ID" "$ACCEPTANCE_ID" \
+  "artifact://$ARTIFACT_NAME" --revision "$REVISION" --cwd .
+jeden roadmap work JED-024 --cwd .
+jeden roadmap check --json --cwd .
+jeden roadmap render --cwd .
+```
+
+The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command. `roadmap work <id>` sets the active goal and plan, creates todos from the item’s acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
 
 Required environment for real model calls:
 
@@ -129,7 +153,9 @@ File-based custom commands load from project and user `.jeden/commands/` directo
 
 `jeden export`, `show`, `artifacts`, `artifact`, `search-sessions`, `resume`, and `recall_conversation` inspect or reuse recorded work. Resumed work starts a fresh session seeded with the selected history.
 
-Durable memory uses `~/.jeden/memory.jsonl` by default. `JEDEN_MEMORY_FILE` may override the location for isolated runs.
+`/checkpoint [label]` records the exact model-visible context, `/checkpoint list` prints durable checkpoint event IDs, and `/rewind <checkpoint-event-id>` appends a new active lineage without deleting abandoned history. In the interactive attachment tray, `/attach <relative-path>`, `/attachments`, and `/detach <id|all>` manage bounded workspace-jailed text and PNG, JPEG, GIF, or WebP inputs consumed by the next submitted turn.
+
+Durable memory uses SQLite/FTS at `~/.jeden/memory.sqlite3` by default. `JEDEN_MEMORY_DB` selects another database; legacy `JEDEN_MEMORY_FILE` remains an input-path override. `/memory enqueue`, `/memory queue`, `/memory queue run`, `/memory queue drain`, and `/memory rebuild` expose durable worker and index maintenance.
 
 ## MCP and hooks
 

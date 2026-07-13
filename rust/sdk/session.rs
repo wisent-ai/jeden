@@ -319,7 +319,7 @@ impl AgentSession {
                 }
             }),
         };
-        let text = conversation.run_turn(&args, &request.prompt, &mut hooks)?;
+        let text = conversation.run_turn(&args, &request.prompt, &[], &mut hooks)?;
         if let Some(error) = event_error
             .lock()
             .map_err(|_| "event error lock poisoned")?
