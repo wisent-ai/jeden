@@ -69,6 +69,8 @@ jobs:
 
       - name: Build target exactly once
         shell: bash
+        env:
+          JEDEN_BUILD_VERSION: ${{ steps.version.outputs.version }}
         run: cargo build --locked --release --target '${{ matrix.target }}' --bin jeden
 
       - name: Package immutable executable bytes

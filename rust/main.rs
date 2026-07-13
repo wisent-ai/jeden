@@ -44,6 +44,15 @@ pub(crate) use cli::sessions::{
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
 
+const JEDEN_VERSION: &str = match option_env!("JEDEN_BUILD_VERSION") {
+    Some(version) => version,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+fn version_text() -> String {
+    format!("jeden {JEDEN_VERSION}")
+}
+
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Args {
     pub(crate) command: String,
@@ -62,6 +71,7 @@ fn usage() -> String {
     concat!(
         "Usage:\n",
         "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden --version | -V\n",
         "  jeden run \"task\" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
@@ -120,6 +130,13 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let mut rest = argv.into_iter();
     let first = rest.next();
     let mut command = first.unwrap_or_else(|| "interactive".to_string());
+    if command == "--version" || command == "-V" {
+        return Ok(Args {
+            command: "version".into(),
+            cwd: env::current_dir().unwrap_or_default(),
+            ..Default::default()
+        });
+    }
     if command == "--help" || command == "-h" {
         return Ok(Args {
             command: "help".into(),
@@ -286,6 +303,10 @@ pub fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if args.command == "version" {
+        println!("{}", version_text());
+        return ExitCode::SUCCESS;
+    }
     if let Err(error) = load_env_files(&args.cwd) {
         eprintln!("Error: failed to load environment files: {}", error);
         return ExitCode::FAILURE;

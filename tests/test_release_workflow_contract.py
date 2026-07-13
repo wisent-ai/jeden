@@ -162,6 +162,26 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             with self.subTest(forbidden_capability=forbidden_capability):
                 self.assertNotIn(forbidden_capability, policy_text)
 
+    def test_resolved_version_labels_binary_archive_and_handoff(self) -> None:
+        release = load_workflow(RELEASE_WORKFLOW)
+        job = release["jobs"]["build-evidence"]
+        version_output = "${{ steps.version.outputs.version }}"
+
+        build_step = step_named(job, "Build target exactly once")
+        self.assertEqual(version_output, build_step["env"]["JEDEN_BUILD_VERSION"])
+        self.assertEqual(1, build_step["run"].count("cargo build"))
+
+        package_step = step_named(job, "Package immutable executable bytes")
+        self.assertIn(
+            'archive="jeden-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"',
+            package_step["run"],
+        )
+        self.assertEqual(1, package_step["run"].count(version_output))
+
+        handoff_step = step_named(job, "Create publisher build handoff")
+        self.assertEqual(version_output, handoff_step["env"]["BUILD_VERSION"])
+        self.assertIn("'version': os.environ['BUILD_VERSION']", handoff_step["run"])
+
     def test_json_evidence_uses_platform_independent_canonical_bytes(self) -> None:
         release = load_workflow(RELEASE_WORKFLOW)
         job = release["jobs"]["build-evidence"]
