@@ -8,9 +8,13 @@ use std::collections::BTreeMap;
 
 const NOW: u64 = 1_800_000_000;
 const TARGET: &str = "aarch64-apple-darwin";
+const CANARY_RELEASE_KEY_ID: &str = "jeden-canary-2026-07-13";
+const CANARY_RELEASE_PUBLIC_KEY: &str = "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=";
+const STABLE_RELEASE_KEY_ID: &str = "jeden-stable-2026-07-13";
+const STABLE_RELEASE_PUBLIC_KEY: &str = "78wFp2XYBVMWv/MfkvTlQ3TqWjyHMgJWKA9KK4e9wsA=";
 
-fn signing_key() -> SigningKey {
-    SigningKey::generate(&mut rand::rngs::OsRng)
+fn signing_key(seed: u8) -> SigningKey {
+    SigningKey::from_bytes(&[seed; 32])
 }
 
 fn trust_root(key: &SigningKey, channel: &str, key_id: &str) -> TrustRoot {
@@ -88,8 +92,8 @@ fn verify(value: &ReleaseManifestV2, key: &SigningKey) -> Result<ReleaseManifest
 }
 
 #[test]
-fn accepts_canonical_dsse_ed25519_manifest_from_public_test_root() {
-    let key = signing_key();
+fn accepts_canonical_dsse_ed25519_manifest_from_deterministic_test_root() {
+    let key = signing_key(1);
     let expected = manifest();
 
     let verified = verify(&expected, &key).unwrap();
@@ -98,8 +102,81 @@ fn accepts_canonical_dsse_ed25519_manifest_from_public_test_root() {
 }
 
 #[test]
+fn embedded_trust_roots_exactly_match_release_authority() {
+    let roots = super::embedded_trust_roots().unwrap();
+    let actual: Vec<_> = roots
+        .iter()
+        .map(|root| {
+            (
+                root.channel.as_str(),
+                root.key_id.as_str(),
+                base64::engine::general_purpose::STANDARD.encode(root.key.to_bytes()),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        actual,
+        vec![
+            (
+                "canary",
+                CANARY_RELEASE_KEY_ID,
+                CANARY_RELEASE_PUBLIC_KEY.to_owned(),
+            ),
+            (
+                "stable",
+                STABLE_RELEASE_KEY_ID,
+                STABLE_RELEASE_PUBLIC_KEY.to_owned(),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn dsse_verification_requires_matching_root_channel_and_key_id() {
+    let key = signing_key(2);
+    let mut value = manifest();
+    value.channel = "canary".into();
+    value.key_id = "deterministic-canary-test-root".into();
+    let envelope = signed_envelope(&value, &key);
+
+    let verified = manifest::verify_envelope(
+        &envelope,
+        &[trust_root(&key, "canary", &value.key_id)],
+        "canary",
+        TARGET,
+        &Version::parse("1.0.0").unwrap(),
+        Some(NOW),
+    )
+    .unwrap();
+    assert_eq!(verified, value);
+
+    for (name, root) in [
+        (
+            "channel",
+            trust_root(&key, "stable", "deterministic-canary-test-root"),
+        ),
+        (
+            "key ID",
+            trust_root(&key, "canary", "different-deterministic-test-root"),
+        ),
+    ] {
+        let error = manifest::verify_envelope(
+            &envelope,
+            &[root],
+            "canary",
+            TARGET,
+            &Version::parse("1.0.0").unwrap(),
+            Some(NOW),
+        )
+        .unwrap_err();
+        assert!(error.contains("untrusted release key"), "{name}: {error}");
+    }
+}
+
+#[test]
 fn rejects_payload_tampering_after_signature() {
-    let key = signing_key();
+    let key = signing_key(3);
     let value = manifest();
     let mut envelope: Value = serde_json::from_slice(&signed_envelope(&value, &key)).unwrap();
     let payload = base64::engine::general_purpose::STANDARD
@@ -129,8 +206,8 @@ fn rejects_payload_tampering_after_signature() {
 
 #[test]
 fn rejects_signature_from_wrong_key() {
-    let signer = signing_key();
-    let trusted = signing_key();
+    let signer = signing_key(4);
+    let trusted = signing_key(5);
     let value = manifest();
 
     let error = manifest::verify_envelope(
@@ -148,7 +225,7 @@ fn rejects_signature_from_wrong_key() {
 
 #[test]
 fn rejects_release_for_another_channel_or_target() {
-    let key = signing_key();
+    let key = signing_key(6);
     let value = manifest();
     for (name, channel, target, expected) in [
         ("channel", "canary", TARGET, "release channel mismatch"),
@@ -174,7 +251,7 @@ fn rejects_release_for_another_channel_or_target() {
 
 #[test]
 fn rejects_expired_and_unreasonably_future_manifests() {
-    let key = signing_key();
+    let key = signing_key(7);
     for (name, published_at, expires_at, expected) in [
         (
             "expired",
@@ -199,7 +276,7 @@ fn rejects_expired_and_unreasonably_future_manifests() {
 
 #[test]
 fn rejects_downgrade_and_replay_versions() {
-    let key = signing_key();
+    let key = signing_key(8);
     for (name, candidate) in [("replay", "1.5.0"), ("downgrade", "1.4.9")] {
         let mut value = manifest();
         value.version = candidate.into();

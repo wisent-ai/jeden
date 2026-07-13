@@ -18,6 +18,11 @@ use transaction::{read_installed_state, InstallPaths};
 
 const MAX_DOWNLOAD_BYTES: usize = 256 * 1024 * 1024;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+const CANARY_RELEASE_KEY_ID: &str = "jeden-canary-2026-07-13";
+const CANARY_RELEASE_PUBLIC_KEY: &str = "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=";
+const STABLE_RELEASE_KEY_ID: &str = "jeden-stable-2026-07-13";
+const STABLE_RELEASE_PUBLIC_KEY: &str = "78wFp2XYBVMWv/MfkvTlQ3TqWjyHMgJWKA9KK4e9wsA=";
+
 
 pub struct UpdateRequest {
     pub manifest_location: String,
@@ -31,18 +36,8 @@ pub struct UpdateRequest {
 }
 
 pub fn embedded_trust_roots() -> Result<Vec<TrustRoot>, String> {
-    let canary = (
-        option_env!("JEDEN_CANARY_RELEASE_KEY_ID")
-            .ok_or("binary was built without a canary release key ID")?,
-        option_env!("JEDEN_CANARY_RELEASE_PUBLIC_KEY")
-            .ok_or("binary was built without a canary public trust root")?,
-    );
-    let stable = (
-        option_env!("JEDEN_STABLE_RELEASE_KEY_ID")
-            .ok_or("binary was built without a stable release key ID")?,
-        option_env!("JEDEN_STABLE_RELEASE_PUBLIC_KEY")
-            .ok_or("binary was built without a stable public trust root")?,
-    );
+    let canary = (CANARY_RELEASE_KEY_ID, CANARY_RELEASE_PUBLIC_KEY);
+    let stable = (STABLE_RELEASE_KEY_ID, STABLE_RELEASE_PUBLIC_KEY);
     [("canary", canary), ("stable", stable)]
         .into_iter()
         .map(|(channel, (key_id, encoded))| {
