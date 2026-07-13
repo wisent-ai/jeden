@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+import tarfile
 import unittest
 from pathlib import Path
 from typing import Any, Iterator
@@ -160,6 +161,49 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
         ):
             with self.subTest(forbidden_capability=forbidden_capability):
                 self.assertNotIn(forbidden_capability, policy_text)
+
+    def test_sbom_scans_only_the_packaged_matrix_executable_directory(self) -> None:
+        release = load_workflow(RELEASE_WORKFLOW)
+        job = release["jobs"]["build-evidence"]
+        package_step = dict(step_named(job, "Package immutable executable bytes"))
+        sbom_step = step_named(job, "Generate SPDX SBOM")
+
+        self.assertEqual("anchore/sbom-action@v0.20.6", sbom_step["uses"])
+        self.assertEqual("dist/sbom-input", sbom_step["with"]["path"])
+
+        target = "x86_64-pc-windows-msvc"
+        executable = "jeden.exe"
+        version = "0.2.0-canary.42.3.shaabcdef012345"
+        package_step["run"] = (
+            package_step["run"]
+            .replace("${{ matrix.target }}", target)
+            .replace("${{ matrix.executable }}", executable)
+            .replace("${{ steps.version.outputs.version }}", version)
+        )
+        executable_bytes = b"exact matrix executable bytes"
+
+        with tempfile.TemporaryDirectory() as temporary:
+            work = Path(temporary)
+            release_dir = work / "target" / target / "release"
+            release_dir.mkdir(parents=True)
+            (release_dir / executable).write_bytes(executable_bytes)
+            (release_dir / "jeden").write_bytes(b"wrong executable without matrix suffix")
+            github_output = work / "github-output"
+
+            execute_step(package_step, work, {"GITHUB_OUTPUT": str(github_output)})
+
+            self.assertEqual(executable_bytes, (work / "dist" / executable).read_bytes())
+            sbom_input = work / "dist" / "sbom-input"
+            self.assertEqual([executable], [entry.name for entry in sbom_input.iterdir()])
+            self.assertEqual(executable_bytes, (sbom_input / executable).read_bytes())
+
+            archive_name = f"jeden-{version}-{target}.tar.gz"
+            with tarfile.open(work / "dist" / archive_name, "r:gz") as archive:
+                self.assertEqual([executable], archive.getnames())
+                archived_executable = archive.extractfile(executable)
+                self.assertIsNotNone(archived_executable)
+                assert archived_executable is not None
+                self.assertEqual(executable_bytes, archived_executable.read())
 
     def test_handoff_is_canonical_strict_and_binds_all_unsigned_evidence(self) -> None:
         release = load_workflow(RELEASE_WORKFLOW)

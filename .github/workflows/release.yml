@@ -76,8 +76,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p dist
+          mkdir -p dist/sbom-input
           cp "target/${{ matrix.target }}/release/${{ matrix.executable }}" 'dist/${{ matrix.executable }}'
+          cp 'dist/${{ matrix.executable }}' 'dist/sbom-input/${{ matrix.executable }}'
           archive="jeden-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"
           tar -C dist -czf "dist/$archive" '${{ matrix.executable }}'
           python3 - "$archive" <<'PY' >> "$GITHUB_OUTPUT"
@@ -92,7 +93,7 @@ jobs:
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0.20.6
         with:
-          path: dist/${{ matrix.executable }}
+          path: dist/sbom-input
           format: spdx-json
           output-file: dist/sbom.spdx.json
           upload-artifact: false
