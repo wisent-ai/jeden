@@ -109,7 +109,7 @@ jobs:
           path = pathlib.Path('dist/sbom.spdx.json')
           document = json.loads(path.read_text(encoding='utf-8'))
           document['documentComment'] = f'Jeden immutable build artifact sha256:{os.environ["ARTIFACT_SHA256"]}'
-          path.write_text(json.dumps(document, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8')
+          path.write_bytes(json.dumps(document, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n')
           PY
 
       - name: Generate provenance statement
@@ -139,8 +139,8 @@ jobs:
               },
             },
           }
-          pathlib.Path('dist/provenance.intoto.json').write_text(
-              json.dumps(statement, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8'
+          pathlib.Path('dist/provenance.intoto.json').write_bytes(
+              json.dumps(statement, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n'
           )
           PY
 
@@ -183,8 +183,8 @@ jobs:
               'sha256': hashlib.sha256((dist / 'provenance.intoto.json').read_bytes()).hexdigest(),
             },
           }
-          (dist / 'build-handoff.json').write_text(
-              json.dumps(handoff, sort_keys=True, separators=(',', ':')) + '\n', encoding='utf-8'
+          (dist / 'build-handoff.json').write_bytes(
+              json.dumps(handoff, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n'
           )
           PY
 

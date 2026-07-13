@@ -162,6 +162,41 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             with self.subTest(forbidden_capability=forbidden_capability):
                 self.assertNotIn(forbidden_capability, policy_text)
 
+    def test_json_evidence_uses_platform_independent_canonical_bytes(self) -> None:
+        release = load_workflow(RELEASE_WORKFLOW)
+        job = release["jobs"]["build-evidence"]
+        evidence_writes = (
+            (
+                step_named(job, "Bind SBOM to immutable build artifact")["run"],
+                "dist/sbom.spdx.json",
+                "path.write_bytes("
+                "json.dumps(document, sort_keys=True, separators=(',', ':'))"
+                ".encode('utf-8') + b'\\n')",
+            ),
+            (
+                step_named(job, "Generate provenance statement")["run"],
+                "dist/provenance.intoto.json",
+                "pathlib.Path('dist/provenance.intoto.json').write_bytes(\n"
+                "    json.dumps(statement, sort_keys=True, separators=(',', ':'))"
+                ".encode('utf-8') + b'\\n'\n"
+                ")",
+            ),
+            (
+                step_named(job, "Create publisher build handoff")["run"],
+                "dist/build-handoff.json",
+                "(dist / 'build-handoff.json').write_bytes(\n"
+                "    json.dumps(handoff, sort_keys=True, separators=(',', ':'))"
+                ".encode('utf-8') + b'\\n'\n"
+                ")",
+            ),
+        )
+
+        for script, destination, canonical_write in evidence_writes:
+            with self.subTest(destination=destination):
+                self.assertNotIn(".write_text(", script)
+                self.assertIn(canonical_write, script)
+                self.assertEqual(1, script.count(".encode('utf-8') + b'\\n'"))
+
     def test_sbom_scans_only_the_packaged_matrix_executable_directory(self) -> None:
         release = load_workflow(RELEASE_WORKFLOW)
         job = release["jobs"]["build-evidence"]
