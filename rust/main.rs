@@ -64,6 +64,7 @@ pub(crate) struct Args {
     pub(crate) allow_write: bool,
     pub(crate) allow_command: bool,
     pub(crate) yolo: bool,
+    pub(crate) model_only: bool,
     pub(crate) json: bool,
     pub(crate) positionals: Vec<String>,
 }
@@ -73,7 +74,7 @@ fn usage() -> String {
         "Usage:\n",
         "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden --version | -V\n",
-        "  jeden run \"task\" [--json] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
@@ -86,7 +87,7 @@ fn usage() -> String {
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
         "  jeden capabilities [--json] [--cwd path]\n\n",
-        "  jeden roadmap <list|show|add|drop|start|block|pass|depends|undepends|graph|acceptance|check|render|work> [args] [--json] [--cwd path]\n\n",
+        "  jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|render|work> [args] [--json] [--cwd path]\n\n",
         "Slash commands:\n",
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
         "  /logout [provider]     show Weles-managed logout ownership\n",
@@ -197,6 +198,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                 args.allow_write = true;
                 args.allow_command = true;
             }
+            "--model-only" => args.model_only = true,
             "--json" => args.json = true,
             other
                 if other.starts_with("--")
@@ -247,31 +249,36 @@ fn parse_env_value(raw: &str) -> String {
     value.replace("\\n", "\n")
 }
 
+fn load_env_path(path: &Path, loaded: &mut Vec<String>) -> Result<(), String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, raw_value)) = trimmed.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() || env::var_os(key).is_some() {
+            continue;
+        }
+        env::set_var(key, parse_env_value(raw_value));
+        loaded.push(key.to_string());
+    }
+    Ok(())
+}
+
 fn load_env_files(cwd: &Path) -> Result<Vec<String>, String> {
     let mut loaded = Vec::new();
     for name in [".env", ".env.local", ".env.production", ".env.vercel"] {
-        let path = cwd.join(name);
-        let text = match fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error.to_string()),
-        };
-        for line in text.lines() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() || trimmed.starts_with('#') {
-                continue;
-            }
-            let Some((key, raw_value)) = trimmed.split_once('=') else {
-                continue;
-            };
-            let key = key.trim();
-            if key.is_empty() || env::var_os(key).is_some() {
-                continue;
-            }
-            env::set_var(key, parse_env_value(raw_value));
-            loaded.push(key.to_string());
-        }
+        load_env_path(&cwd.join(name), &mut loaded)?;
     }
+    load_env_path(&dirs_home().join(".jeden/.env"), &mut loaded)?;
     loaded.sort();
     loaded.dedup();
     Ok(loaded)

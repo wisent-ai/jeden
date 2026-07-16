@@ -10,39 +10,46 @@ impl Conversation {
     ) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let mut router = model_router_config(&config, args);
-        let mut effective_task = apply_mode_instructions(&args.cwd, task)?;
-        let hook_context = crate::hooks::user_prompt_submit(&args.cwd, task, args.allow_command);
-        if !hook_context.trim().is_empty() {
-            effective_task = format!(
-                "{}\n\n[Hook context]\n{}",
-                effective_task,
-                hook_context.trim()
-            );
-        }
-        let extension_context = crate::hooks::extension_prompt_context(&args.cwd, task)?;
-        if !extension_context.is_empty() {
-            let mut sections = Vec::with_capacity(extension_context.len());
-            for contribution in extension_context {
-                let mut section = format!(
-                    "[{}:{}; precedence={}; source={}]\n{}",
-                    contribution.kind,
-                    contribution.id,
-                    contribution.precedence,
-                    contribution.source.display(),
-                    contribution.content,
+        let mut effective_task = if args.model_only {
+            task.to_string()
+        } else {
+            apply_mode_instructions(&args.cwd, task)?
+        };
+        if !args.model_only {
+            let hook_context =
+                crate::hooks::user_prompt_submit(&args.cwd, task, args.allow_command);
+            if !hook_context.trim().is_empty() {
+                effective_task = format!(
+                    "{}\n\n[Hook context]\n{}",
+                    effective_task,
+                    hook_context.trim()
                 );
-                if !contribution.assets.is_empty() {
-                    section.push_str("\nValidated assets:\n");
-                    for asset in contribution.assets {
-                        section.push_str("- ");
-                        section.push_str(&asset.display().to_string());
-                        section.push('\n');
-                    }
-                }
-                sections.push(section);
             }
-            effective_task.push_str("\n\n[Active extension rules and skills]\n");
-            effective_task.push_str(&sections.join("\n\n"));
+            let extension_context = crate::hooks::extension_prompt_context(&args.cwd, task)?;
+            if !extension_context.is_empty() {
+                let mut sections = Vec::with_capacity(extension_context.len());
+                for contribution in extension_context {
+                    let mut section = format!(
+                        "[{}:{}; precedence={}; source={}]\n{}",
+                        contribution.kind,
+                        contribution.id,
+                        contribution.precedence,
+                        contribution.source.display(),
+                        contribution.content,
+                    );
+                    if !contribution.assets.is_empty() {
+                        section.push_str("\nValidated assets:\n");
+                        for asset in contribution.assets {
+                            section.push_str("- ");
+                            section.push_str(&asset.display().to_string());
+                            section.push('\n');
+                        }
+                    }
+                    sections.push(section);
+                }
+                effective_task.push_str("\n\n[Active extension rules and skills]\n");
+                effective_task.push_str(&sections.join("\n\n"));
+            }
         }
         self.recorder.record(
             "user",
@@ -53,10 +60,15 @@ impl Conversation {
                 "allowCommand": args.allow_command,
                 "maxSteps": args.max_steps,
                 "maxTokens": args.max_tokens,
+                "modelOnly": args.model_only,
             }),
         )?;
 
-        let tool_specs = rust_tool_specs(&args.cwd);
+        let tool_specs = if args.model_only {
+            Vec::new()
+        } else {
+            rust_tool_specs(&args.cwd)
+        };
         self.messages
             .push(json!({ "role": "user", "content": effective_task }));
 
@@ -162,6 +174,13 @@ impl Conversation {
                         "assistant_raw",
                         json!({ "step": step, "content": content.clone() }),
                     )?;
+                    if args.model_only {
+                        self.messages
+                            .push(json!({ "role": "assistant", "content": content.clone() }));
+                        self.recorder
+                            .record("final", json!({ "step": step, "text": content.clone() }))?;
+                        return Ok(content);
+                    }
                     let action = action_or_text(&content)?;
                     self.recorder.record(
                         "action",

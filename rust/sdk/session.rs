@@ -431,6 +431,7 @@ fn args_from_options(options: &SessionOptions, prompt: String) -> Args {
         allow_write: options.allow_write || options.auto_approve,
         allow_command: options.allow_command || options.auto_approve,
         yolo: options.auto_approve,
+        model_only: false,
         json: false,
         positionals: vec![prompt],
     }
