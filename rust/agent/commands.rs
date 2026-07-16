@@ -200,7 +200,16 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     };
     let result = conversation.run_turn(args, &task, &[], hooks);
     if args.model_only {
-        return result;
+        let text = result?;
+        if args.json {
+            return serde_json::to_string(&json!({
+                "ok": true,
+                "text": text,
+            }))
+            .map(|encoded| encoded + "\n")
+            .map_err(|error| error.to_string());
+        }
+        return Ok(text);
     }
     if let Err(error) = &result {
         let _ = update_task_outcome(&args.cwd, &task, false);
