@@ -25,6 +25,18 @@ impl Conversation {
         })
     }
 
+    pub(crate) fn new_model_only(cwd: &Path) -> Result<Self, String> {
+        let mut recorder = SessionRecorder::new(cwd);
+        recorder.ensure()?;
+        Ok(Self {
+            messages: vec![json!({
+                "role": "system",
+                "content": "You are Jeden in model-only mode. Follow the user request directly and do not call tools."
+            })],
+            recorder,
+        })
+    }
+
     pub(crate) fn open(cwd: &Path, session_dir: &Path) -> Result<Self, String> {
         let turns = crate::cli::sessions::session_conversation_turns(session_dir)?;
         let messages = history::normalized_history(cwd, turns)?;

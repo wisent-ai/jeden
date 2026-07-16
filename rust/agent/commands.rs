@@ -193,8 +193,15 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         }
     }
 
-    let mut conversation = Conversation::new(&args.cwd)?;
+    let mut conversation = if args.model_only {
+        Conversation::new_model_only(&args.cwd)?
+    } else {
+        Conversation::new(&args.cwd)?
+    };
     let result = conversation.run_turn(args, &task, &[], hooks);
+    if args.model_only {
+        return result;
+    }
     if let Err(error) = &result {
         let _ = update_task_outcome(&args.cwd, &task, false);
         return Err(error.clone());
