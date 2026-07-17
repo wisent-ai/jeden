@@ -41,8 +41,8 @@ impl ReplRenderer {
 }
 
 /// Pure ANSI generator for the sticky-prompt renderer. Erases the previous live
-/// region, prints committed lines into scrollback, then bottom-aligns the new
-/// live region. Relative moves remain valid when the terminal scrolls.
+/// region, prints committed lines contiguously into scrollback, then repaints
+/// live content immediately after new output or bottom-aligns an in-place update.
 pub(super) fn compose_repl(prev_height: usize, committed: &[String], live: &[String]) -> String {
     let mut out = String::new();
     out.push_str("\x1b[?25l\x1b[?7l"); // hide cursor, autowrap off
@@ -58,28 +58,32 @@ pub(super) fn compose_repl(prev_height: usize, committed: &[String], live: &[Str
         out.push_str("\r\n");
     }
 
-    // Expanding the live region needs scrollback space. Account for scrolling
-    // already caused by committed CRLFs, then create only the missing rows.
-    let previous_capacity = prev_height.max(1);
-    let automatic_scroll = committed
-        .len()
-        .saturating_sub(previous_capacity.saturating_sub(1));
-    let required_scroll = live
-        .len()
-        .saturating_add(committed.len())
-        .saturating_sub(previous_capacity);
-    let additional_scroll = required_scroll.saturating_sub(automatic_scroll);
-    if additional_scroll > 0 {
-        out.push_str("\x1b[999B\r");
-        for _ in 0..additional_scroll {
-            out.push_str("\r\n");
+    let append_live_to_committed = !committed.is_empty();
+    if !append_live_to_committed {
+        // Expanding an in-place live update needs scrollback space. Account for
+        // scrolling already caused by committed CRLFs, then create only the
+        // missing rows.
+        let previous_capacity = prev_height.max(1);
+        let automatic_scroll = committed
+            .len()
+            .saturating_sub(previous_capacity.saturating_sub(1));
+        let required_scroll = live
+            .len()
+            .saturating_add(committed.len())
+            .saturating_sub(previous_capacity);
+        let additional_scroll = required_scroll.saturating_sub(automatic_scroll);
+        if additional_scroll > 0 {
+            out.push_str("\x1b[999B\r");
+            for _ in 0..additional_scroll {
+                out.push_str("\r\n");
+            }
         }
-    }
 
-    if !live.is_empty() {
-        out.push_str("\x1b[999B\r");
-        if live.len() > 1 {
-            out.push_str(&format!("\x1b[{}A", live.len() - 1));
+        if !live.is_empty() {
+            out.push_str("\x1b[999B\r");
+            if live.len() > 1 {
+                out.push_str(&format!("\x1b[{}A", live.len() - 1));
+            }
         }
     }
     for (index, line) in live.iter().enumerate() {
@@ -155,5 +159,24 @@ pub(super) fn apply_turn_result(
             messages.push(Message::new("error", error));
             false
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::compose_repl;
+
+    #[test]
+    fn committed_output_is_contiguous_with_the_next_live_region() {
+        let output = compose_repl(
+            8,
+            &["user line".to_string(), "result line".to_string()],
+            &["prompt line".to_string()],
+        );
+        let (_, after_result) = output
+            .split_once("result line\r\n")
+            .expect("committed result");
+
+        assert!(after_result.starts_with("\x1b[2Kprompt line"));
     }
 }
