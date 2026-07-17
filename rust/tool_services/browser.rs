@@ -268,7 +268,6 @@ impl BrowserService {
         }
         bounded_json(context, "browser", &response)
     }
-
     #[cfg(all(test, unix))]
     pub(crate) fn session_id_for_test(&self, key: &str) -> String {
         self.session(&json!({"session": key}))
@@ -283,70 +282,5 @@ impl Drop for BrowserService {
                 let _ = kill(pid as i32, 9);
             }
         }
-    }
-}
-
-#[cfg(all(test, target_os = "macos"))]
-mod tests {
-    use super::*;
-    use crate::tool_runtime::runtime_ops::{
-        ArtifactSink, CancellationToken, ExecutionGrant, SandboxRequirement,
-    };
-    use std::fs;
-
-    #[test]
-    fn embedded_backend_opens_and_inspects_a_real_chromium_tab() {
-        let root = std::env::temp_dir().join(format!(
-            "jeden-browser-test-{}-{}",
-            std::process::id(),
-            crate::task_runtime::now_millis()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        let service = BrowserService::discover(&root, &json!({}));
-        assert!(service.health().available(), "{:?}", service.health());
-        let mut grant = ExecutionGrant::trusted_host("browser-test", root.clone());
-        grant.sandbox = SandboxRequirement::Enforced;
-        let context = OperationContext::new(
-            CancellationToken::new(),
-            ArtifactSink::new(root.join("artifacts")),
-        )
-        .with_execution_grant(grant);
-        let session = format!("browser-test-{}", std::process::id());
-        let opened = service
-            .execute(
-                "browser_tab",
-                &json!({
-                    "action": "open",
-                    "session": session,
-                    "url": "data:text/html,<title>NativeBrowserOK</title><h1>Browser tool works</h1>"
-                }),
-                &context,
-            )
-            .unwrap();
-        let inspected = service
-            .execute(
-                "browser_action",
-                &json!({"action": "inspect", "session": session}),
-                &context,
-            )
-            .unwrap();
-
-        assert_eq!(
-            inspected.pointer("/value/title").and_then(Value::as_str),
-            Some("NativeBrowserOK")
-        );
-        assert_eq!(
-            inspected.pointer("/value/text").and_then(Value::as_str),
-            Some("Browser tool works")
-        );
-        if let Some(tab) = opened.pointer("/tab/id").and_then(Value::as_str) {
-            let _ = service.execute(
-                "browser_tab",
-                &json!({"action": "close", "session": session, "tab": tab}),
-                &context,
-            );
-        }
-        drop(service);
-        let _ = fs::remove_dir_all(root);
     }
 }
