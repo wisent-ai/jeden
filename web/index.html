@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2f1ed" />
+    <meta name="description" content="Jeden is Wisent’s private coding-agent harness: local policy, controlled tools, durable sessions, and model freedom." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://jeden.wisent.com/" />
+    <meta property="og:title" content="Jeden — Your agent. Your machine. Your rules." />
+    <meta property="og:description" content="A private coding-agent harness built by Wisent." />
+    <meta property="og:image" content="https://jeden.wisent.com/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://jeden.wisent.com/" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/script.js" defer></script>
+    <title>Jeden — Private coding agent harness by Wisent</title>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="site-header" data-header>
+      <a class="brand" href="#top" aria-label="Jeden home">
+        <svg class="brand-mark" viewBox="0 0 32 31" aria-hidden="true">
+          <path d="M32 13.665v3.229c-.1.506-.18 1.017-.302 1.519-1.372 5.667-4.884 9.514-10.539 11.472-1.118.387-2.326.527-3.492.781h-3.112c-.142-.032-.283-.074-.427-.094C7.612 29.664 3.193 26.207.903 20.253.44 19.048.293 17.73 0 16.463v-2.367c.103-.595.178-1.198.316-1.785C1.739 6.214 5.601 2.319 11.744.518 12.584.271 13.469.169 14.333 0h3.334c.124.031.246.075.373.09 6.709.808 12.213 5.667 13.653 12.057.114.504.206 1.012.307 1.518ZM3.707 8.538c-.076.091-.131.141-.167.202-.844 1.452-1.366 3.01-1.592 4.658-.02.146.15.388.3.475.965.562 1.932 1.127 2.936 1.621.467.229.593.496.596.982.036 5.005 2.274 8.863 6.521 11.672.372.246.702.289 1.129.137 3.093-1.104 5.506-3.013 7.314-5.674.635-.933.517-.774 1.508-.556 1.64.36 3.279.723 4.912 1.105.323.075.527.025.674-.269.585-1.171 1.186-2.336 1.759-3.512.12-.246.151-.535.233-.835-9.237-2.129-17.956-5.347-26.123-10.006Zm26.412 8.26c.789-6.027-3.017-12.398-9.859-14.473-6.04-1.831-12.377.443-15.526 4.749 7.928 4.519 16.408 7.663 25.385 9.724Z" />
+        </svg>
+        <span>JEDEN</span>
+      </a>
+      <nav class="nav" aria-label="Primary navigation" data-nav>
+        <a href="#principles">Principles</a>
+        <a href="#capabilities">Capabilities</a>
+        <a href="#security">Security</a>
+        <a href="/docs/">Docs</a>
+      </nav>
+      <a class="header-cta" href="mailto:contact@wisent.ai?subject=Jeden%20private%20preview">Request access <span aria-hidden="true">↗</span></a>
+      <button class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" data-menu>
+        <span></span><span></span>
+      </button>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="hero-copy reveal">
+          <div class="eyebrow"><span class="status-dot"></span> Private preview</div>
+          <h1>Your agent.<br />Your machine.<br /><em>Your rules.</em></h1>
+          <p class="hero-lede">Jeden is a private coding-agent harness built for teams that need more than a chat window. Local policy, controlled tools, durable sessions, and model freedom—without giving up the terminal.</p>
+          <div class="hero-actions">
+            <a class="button button-dark" href="mailto:contact@wisent.ai?subject=Jeden%20private%20preview">Request private access <span>↗</span></a>
+            <a class="text-link" href="#principles">Explore the system <span>↓</span></a>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal" style="--delay: 120ms">
+          <div class="orbit orbit-one" aria-hidden="true"></div>
+          <div class="orbit orbit-two" aria-hidden="true"></div>
+          <div class="terminal" aria-label="Jeden terminal example">
+            <div class="terminal-bar">
+              <div class="terminal-dots"><i></i><i></i><i></i></div>
+              <span>jeden · content-platform</span>
+              <span class="terminal-live"><b></b> local</span>
+            </div>
+            <div class="terminal-body">
+              <p><span class="prompt">❯</span> <span data-typewriter>jeden "trace the billing regression"</span><span class="cursor">▋</span></p>
+              <div class="terminal-output">
+                <p class="muted">Reading project context and active policy…</p>
+                <p><span class="step done">01</span> Located 4 affected callsites</p>
+                <p><span class="step done">02</span> Reproduced stale entitlement state</p>
+                <p><span class="step active">03</span> Applying guarded patch</p>
+                <div class="diff">
+                  <div><span>−</span> cache.get(accountId)</div>
+                  <div><span>+</span> await cache.refresh(accountId)</div>
+                </div>
+                <p class="approval"><span>WRITE</span> Approve changes to 2 files? <b>[y/N]</b></p>
+              </div>
+            </div>
+            <div class="terminal-footer"><span>model · routed</span><span>tools · 14 enabled</span><span>session · saved</span></div>
+          </div>
+          <div class="visual-label label-a"><span>01</span> Observe</div>
+          <div class="visual-label label-b"><span>02</span> Decide</div>
+          <div class="visual-label label-c"><span>03</span> Act</div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Jeden characteristics">
+        <div><span>LOCAL-FIRST</span><span>EXPLICIT POLICY</span><span>MODEL AGNOSTIC</span><span>DURABLE SESSIONS</span><span>GUARDED MUTATIONS</span></div>
+      </section>
+
+      <section class="intro section" id="principles">
+        <div class="section-label reveal"><span>01</span> Design contract</div>
+        <div class="intro-grid">
+          <h2 class="reveal">Powerful agents need<br /><em>hard boundaries.</em></h2>
+          <div class="intro-copy reveal" style="--delay: 100ms">
+            <p>Jeden separates inference, policy, tools, and the run loop. Each part stays visible, inspectable, and under your control.</p>
+            <p class="muted-copy">The model can reason freely. The harness decides what may actually happen.</p>
+          </div>
+        </div>
+
+        <div class="principles-grid">
+          <article class="principle reveal">
+            <div class="principle-top"><span>01</span><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="14"/><circle cx="20" cy="20" r="5"/><path d="M20 1v7M20 32v7M1 20h7M32 20h7"/></svg></div>
+            <h3>Inference, routed</h3>
+            <p>Choose the right model per task. Route through infrastructure you control instead of hard-wiring your workflow to one provider.</p>
+          </article>
+          <article class="principle reveal" style="--delay: 80ms">
+            <div class="principle-top"><span>02</span><svg viewBox="0 0 40 40" aria-hidden="true"><rect x="7" y="7" width="26" height="26"/><path d="M13 20h14M20 13v14"/></svg></div>
+            <h3>Policy, explicit</h3>
+            <p>Approvals, path jails, hooks, and tool permissions are local contracts—not hidden behavior inside a hosted agent.</p>
+          </article>
+          <article class="principle reveal" style="--delay: 160ms">
+            <div class="principle-top"><span>03</span><svg viewBox="0 0 40 40" aria-hidden="true"><path d="M8 31 20 7l12 24H8Z"/><path d="m14 23 6 8 6-8"/></svg></div>
+            <h3>Execution, accountable</h3>
+            <p>Every read, command, edit, artifact, and approval remains attached to a durable session you can inspect and resume.</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="system section" id="capabilities">
+        <div class="section-label reveal"><span>02</span> Built for real repositories</div>
+        <div class="system-heading">
+          <h2 class="reveal">One harness.<br /><em>The whole loop.</em></h2>
+          <p class="reveal" style="--delay: 100ms">From the first file read to the final verification, Jeden keeps the work inside one controlled, resumable system.</p>
+        </div>
+
+        <div class="capability-list">
+          <article class="capability reveal">
+            <span class="cap-number">01</span>
+            <div class="cap-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M7 11h34v26H7z"/><path d="m13 20 6 5-6 5M24 30h11"/></svg></div>
+            <div><h3>Terminal-native</h3><p>Interactive and one-shot modes, searchable views, native diffs, and approvals that stay where engineers already work.</p></div>
+            <span class="cap-meta">CLI / TUI</span>
+          </article>
+          <article class="capability reveal">
+            <span class="cap-number">02</span>
+            <div class="cap-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M24 5 40 14v20l-16 9-16-9V14l16-9Z"/><path d="M8 14l16 10 16-10M24 24v19"/></svg></div>
+            <div><h3>Controlled tools</h3><p>Jailed filesystem access, guarded writes, process control, search, browser, MCP, delegation, and custom JavaScript tools.</p></div>
+            <span class="cap-meta">ALLOWLISTED</span>
+          </article>
+          <article class="capability reveal">
+            <span class="cap-number">03</span>
+            <div class="cap-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M9 9h30v30H9z"/><path d="M9 19h30M19 19v20M25 27h8M25 33h5"/></svg></div>
+            <div><h3>Durable context</h3><p>Transcripts, artifacts, memory, todos, modes, and project context survive beyond a single prompt or terminal window.</p></div>
+            <span class="cap-meta">RESUMABLE</span>
+          </article>
+          <article class="capability reveal">
+            <span class="cap-number">04</span>
+            <div class="cap-icon"><svg viewBox="0 0 48 48" aria-hidden="true"><path d="M6 24h36M24 6v36"/><circle cx="24" cy="24" r="12"/></svg></div>
+            <div><h3>Open by design</h3><p>Lifecycle hooks, extensions, plugins, commands, MCP servers, and project-local configuration make the harness yours.</p></div>
+            <span class="cap-meta">EXTENSIBLE</span>
+          </article>
+        </div>
+      </section>
+
+      <section class="workflow section">
+        <div class="workflow-copy">
+          <div class="section-label section-label-light reveal"><span>03</span> A session, not a prompt</div>
+          <h2 class="reveal">Leave. Return.<br /><em>Keep going.</em></h2>
+          <p class="reveal">Jeden records the work behind the answer—tool results, artifacts, decisions, and state—so a serious task can outlive a single interaction.</p>
+          <div class="command-stack reveal">
+            <div><span>❯</span> jeden sessions</div>
+            <div><span>❯</span> jeden show <i>ses_7fa2</i></div>
+            <div><span>❯</span> jeden resume <i>ses_7fa2</i> "continue"</div>
+          </div>
+        </div>
+        <div class="session-map reveal" style="--delay: 120ms" aria-label="Durable session diagram">
+          <div class="map-node root"><b>SESSION</b><span>ses_7fa2 · active</span></div>
+          <div class="map-line line-one"></div>
+          <div class="map-line line-two"></div>
+          <div class="map-line line-three"></div>
+          <div class="map-node node-one"><b>TRANSCRIPT</b><span>42 events</span></div>
+          <div class="map-node node-two"><b>ARTIFACTS</b><span>5 persisted</span></div>
+          <div class="map-node node-three"><b>MEMORY</b><span>project scoped</span></div>
+          <div class="map-pulse pulse-one"></div><div class="map-pulse pulse-two"></div><div class="map-pulse pulse-three"></div>
+        </div>
+      </section>
+
+      <section class="security section" id="security">
+        <div class="section-label reveal"><span>04</span> Security model</div>
+        <div class="security-grid">
+          <div class="security-heading reveal">
+            <h2>Trust is not<br />a toggle.</h2>
+            <p>Jeden makes authority narrow, visible, and revocable.</p>
+          </div>
+          <div class="security-points">
+            <article class="reveal"><span>01</span><div><h3>Approve the effect</h3><p>Writes and commands require explicit approval unless policy grants them.</p></div></article>
+            <article class="reveal"><span>02</span><div><h3>Constrain the surface</h3><p>Path jails and allowlisted tools bound what the agent can reach.</p></div></article>
+            <article class="reveal"><span>03</span><div><h3>Guard every mutation</h3><p>Snapshot-tagged edits reject stale state instead of overwriting it.</p></div></article>
+            <article class="reveal"><span>04</span><div><h3>Retain the evidence</h3><p>Session ledgers preserve the chain from request to verified result.</p></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing section">
+        <div class="closing-mark" aria-hidden="true">1</div>
+        <div class="closing-content reveal">
+          <div class="eyebrow eyebrow-dark"><span class="status-dot"></span> Private preview</div>
+          <h2>Build with an agent<br />you can <em>actually own.</em></h2>
+          <p>Jeden is being developed with a small group of engineering teams. Tell us what you want your agent to do—and what it must never do.</p>
+          <a class="button button-light" href="mailto:contact@wisent.ai?subject=Jeden%20private%20preview">Request private access <span>↗</span></a>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <a class="brand footer-brand" href="#top">
+        <svg class="brand-mark" viewBox="0 0 32 31" aria-hidden="true"><path d="M32 13.665v3.229c-.1.506-.18 1.017-.302 1.519-1.372 5.667-4.884 9.514-10.539 11.472-1.118.387-2.326.527-3.492.781h-3.112c-.142-.032-.283-.074-.427-.094C7.612 29.664 3.193 26.207.903 20.253.44 19.048.293 17.73 0 16.463v-2.367c.103-.595.178-1.198.316-1.785C1.739 6.214 5.601 2.319 11.744.518 12.584.271 13.469.169 14.333 0h3.334c.124.031.246.075.373.09 6.709.808 12.213 5.667 13.653 12.057.114.504.206 1.012.307 1.518ZM3.707 8.538c-.076.091-.131.141-.167.202-.844 1.452-1.366 3.01-1.592 4.658-.02.146.15.388.3.475.965.562 1.932 1.127 2.936 1.621.467.229.593.496.596.982.036 5.005 2.274 8.863 6.521 11.672.372.246.702.289 1.129.137 3.093-1.104 5.506-3.013 7.314-5.674.635-.933.517-.774 1.508-.556 1.64.36 3.279.723 4.912 1.105.323.075.527.025.674-.269.585-1.171 1.186-2.336 1.759-3.512.12-.246.151-.535.233-.835-9.237-2.129-17.956-5.347-26.123-10.006Z"/></svg>
+        <span>JEDEN</span>
+      </a>
+      <div class="footer-meta"><span>A WISENT SYSTEM</span><span>© <span data-year></span> WISENT AI, INC.</span></div>
+      <div class="footer-links"><a href="https://www.wisent.ai" target="_blank" rel="noreferrer">Wisent ↗</a><a href="mailto:contact@wisent.ai">Contact ↗</a></div>
+    </footer>
+  </body>
+</html>

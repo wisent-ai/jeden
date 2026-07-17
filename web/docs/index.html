@@ -1,0 +1,384 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="theme-color" content="#f5f4f0" />
+  <meta name="description" content="Complete documentation for the Jeden private coding-agent harness." />
+  <meta name="robots" content="index,follow,max-image-preview:large" />
+  <meta property="og:title" content="Jeden documentation" />
+  <meta property="og:description" content="Install, configure, secure, extend, and operate Jeden." />
+  <meta property="og:image" content="https://jeden.wisent.com/og-image.png" />
+  <link rel="canonical" href="https://jeden.wisent.com/docs/" />
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/docs.css" />
+  <script src="/docs.js" defer></script>
+  <title>Overview — Jeden docs</title>
+</head>
+<body>
+  <header class="docs-top">
+    <a class="docs-brand" href="/" aria-label="Jeden home">
+      <svg viewBox="0 0 32 31" aria-hidden="true"><path d="M32 13.665v3.229c-.1.506-.18 1.017-.302 1.519-1.372 5.667-4.884 9.514-10.539 11.472-1.118.387-2.326.527-3.492.781h-3.112c-.142-.032-.283-.074-.427-.094C7.612 29.664 3.193 26.207.903 20.253.44 19.048.293 17.73 0 16.463v-2.367c.103-.595.178-1.198.316-1.785C1.739 6.214 5.601 2.319 11.744.518 12.584.271 13.469.169 14.333 0h3.334c.124.031.246.075.373.09 6.709.808 12.213 5.667 13.653 12.057.114.504.206 1.012.307 1.518ZM3.707 8.538c-.076.091-.131.141-.167.202-.844 1.452-1.366 3.01-1.592 4.658-.02.146.15.388.3.475.965.562 1.932 1.127 2.936 1.621.467.229.593.496.596.982.036 5.005 2.274 8.863 6.521 11.672.372.246.702.289 1.129.137 3.093-1.104 5.506-3.013 7.314-5.674.635-.933.517-.774 1.508-.556 1.64.36 3.279.723 4.912 1.105.323.075.527.025.674-.269.585-1.171 1.186-2.336 1.759-3.512.12-.246.151-.535.233-.835-9.237-2.129-17.956-5.347-26.123-10.006Z"/></svg>
+      JEDEN <em>/ docs</em>
+    </a>
+    <button class="docs-search" type="button" data-search-open aria-label="Search documentation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg>
+      <span>Search documentation…</span><kbd>⌘ K</kbd>
+    </button>
+    <div class="top-links"><a href="/">Product</a><a href="mailto:contact@wisent.ai?subject=Jeden%20private%20preview">Access ↗</a></div>
+    <button class="mobile-menu" type="button" data-docs-menu aria-label="Toggle documentation menu" aria-expanded="false"><span></span><span></span></button>
+  </header>
+
+  <div class="docs-shell">
+    <aside class="sidebar" data-sidebar aria-label="Documentation navigation">
+      <nav>
+        <div class="nav-group"><span>Start</span>
+          <a href="/docs/" data-route="overview">Overview</a>
+          <a href="/docs/getting-started/" data-route="getting-started">Getting started</a>
+          <a href="/docs/installation/" data-route="installation">Installation & updates</a>
+          <a href="/docs/using/" data-route="using">Using Jeden</a>
+          <a href="/docs/terminal/" data-route="terminal">Interactive terminal</a>
+        </div>
+        <div class="nav-group"><span>Operate</span>
+          <a href="/docs/cli/" data-route="cli">CLI reference</a>
+          <a href="/docs/one-shot/" data-route="one-shot">One-shot runs</a>
+          <a href="/docs/run-modes/" data-route="run-modes">Run modes</a>
+          <a href="/docs/slash-commands/" data-route="slash-commands">Slash commands</a>
+          <a href="/docs/hotkeys/" data-route="hotkeys">Hotkeys & pickers</a>
+          <a href="/docs/approvals/" data-route="approvals">Approvals</a>
+        </div>
+        <div class="nav-group"><span>Models & policy</span>
+          <a href="/docs/models/" data-route="models">Models & routing</a>
+          <a href="/docs/auth/" data-route="auth">Authentication</a>
+          <a href="/docs/billing-usage/" data-route="billing-usage">Billing & usage</a>
+          <a href="/docs/configuration/" data-route="configuration">Configuration</a>
+          <a href="/docs/environment/" data-route="environment">Environment variables</a>
+          <a href="/docs/context/" data-route="context">Context & rules</a>
+          <a href="/docs/secrets/" data-route="secrets">Secrets</a>
+        </div>
+        <div class="nav-group"><span>Tools</span>
+          <a href="/docs/capabilities/" data-route="capabilities">Capability registry</a>
+          <a href="/docs/tools/" data-route="tools">Tools index</a>
+          <a href="/docs/files/" data-route="files">Files & structured data</a>
+          <a href="/docs/processes/" data-route="processes">Processes & evaluation</a>
+          <a href="/docs/git-github/" data-route="git-github">Git & GitHub</a>
+          <a href="/docs/code-intelligence/" data-route="code-intelligence">Code intelligence</a>
+          <a href="/docs/browser-web/" data-route="browser-web">Browser & web</a>
+          <a href="/docs/media/" data-route="media">Images, audio & documents</a>
+          <a href="/docs/delegation/" data-route="delegation">Tasks & delegation</a>
+          <a href="/docs/ssh/" data-route="ssh">SSH & remote work</a>
+        </div>
+        <div class="nav-group"><span>State</span>
+          <a href="/docs/sessions/" data-route="sessions">Sessions</a>
+          <a href="/docs/session-tree/" data-route="session-tree">Session tree</a>
+          <a href="/docs/checkpoints/" data-route="checkpoints">Checkpoints & rewind</a>
+          <a href="/docs/compaction-handoff/" data-route="compaction-handoff">Compaction & handoff</a>
+          <a href="/docs/artifacts/" data-route="artifacts">Artifacts & attachments</a>
+          <a href="/docs/memory/" data-route="memory">Memory</a>
+          <a href="/docs/roadmap/" data-route="roadmap">Roadmap registry</a>
+          <a href="/docs/collaboration-jobs/" data-route="collaboration-jobs">Collaboration & jobs</a>
+        </div>
+        <div class="nav-group"><span>Extend</span>
+          <a href="/docs/mcp/" data-route="mcp">MCP</a>
+          <a href="/docs/commands/" data-route="commands">Custom commands</a>
+          <a href="/docs/hooks/" data-route="hooks">Hooks</a>
+          <a href="/docs/custom-tools/" data-route="custom-tools">Custom tools</a>
+          <a href="/docs/plugins-marketplaces/" data-route="plugins-marketplaces">Plugins & marketplaces</a>
+        </div>
+        <div class="nav-group"><span>Reference</span>
+          <a href="/docs/security/" data-route="security">Security model</a>
+          <a href="/docs/protocol/" data-route="protocol">Action protocol</a>
+          <a href="/docs/interfaces/" data-route="interfaces">RPC & ACP</a>
+          <a href="/docs/headless/" data-route="headless">Headless mTLS</a>
+          <a href="/docs/diagnostics/" data-route="diagnostics">Diagnostics</a>
+        </div>
+      </nav>
+    </aside>
+
+    <main class="docs-main" id="main">
+      <article class="doc-page" data-doc="overview" data-title="Overview" data-description="Understand Jeden’s architecture, guarantees, and documentation map.">
+        <div class="doc-kicker">Documentation</div>
+        <h1>The coding agent you can operate.</h1>
+        <p class="doc-lede">Jeden is Wisent’s private coding-agent harness. It owns the model loop, policy, tools, terminal interaction, sessions, memory, extensions, and integrations around the model.</p>
+        <div class="callout"><strong>Private preview</strong><p>Jeden packages and managed model routes are distributed to approved teams. The public documentation describes the runtime contract without exposing private credentials or infrastructure.</p></div>
+        <h2 id="overview-contract">The four-part contract</h2>
+        <div class="card-grid">
+          <a class="doc-card" href="/docs/models/" data-route="models"><span>01 / INFERENCE</span><h3>Route the model</h3><p>Choose a model per task while keeping provider and subscription decisions outside the agent.</p></a>
+          <a class="doc-card" href="/docs/security/" data-route="security"><span>02 / POLICY</span><h3>Bound authority</h3><p>Make approvals, path jails, secret handling, and lifecycle decisions explicit.</p></a>
+          <a class="doc-card" href="/docs/tools/" data-route="tools"><span>03 / TOOLS</span><h3>Control effects</h3><p>Expose a typed registry of local, browser, process, memory, MCP, and collaboration tools.</p></a>
+          <a class="doc-card" href="/docs/sessions/" data-route="sessions"><span>04 / RUN LOOP</span><h3>Retain the work</h3><p>Persist messages, calls, approvals, artifacts, usage, checkpoints, and resumable state.</p></a>
+        </div>
+        <h2 id="overview-modes">Ways to run Jeden</h2>
+        <table class="reference-table"><thead><tr><th>Mode</th><th>Use it for</th></tr></thead><tbody>
+          <tr><td>jeden</td><td>Interactive terminal work with searchable native views and approval prompts.</td></tr>
+          <tr><td>jeden run</td><td>One-shot tasks in scripts, CI, or a shell pipeline. Add <code>--json</code> for machine-readable output.</td></tr>
+          <tr><td>jeden rpc</td><td>Newline-delimited JSON RPC over standard input and output.</td></tr>
+          <tr><td>jeden acp</td><td>Agent Client Protocol over standard input and output.</td></tr>
+          <tr><td>jeden headless</td><td>Mutual-TLS headless service with an explicit identity map and optional revoked serial list.</td></tr>
+        </tbody></table>
+        <h2 id="overview-next">Where to begin</h2>
+        <p>Start with <a href="/docs/getting-started/" data-route="getting-started"><strong>Getting started</strong></a>. Then read <a href="/docs/security/" data-route="security"><strong>Security model</strong></a> before enabling writes or commands for unattended work.</p>
+        <div class="page-nav"><span></span><a href="/docs/getting-started/" data-route="getting-started"><small>Next</small>Getting started →</a></div>
+        <div class="docs-footer">JEDEN DOCS · UPDATED 2026 · © <span data-year></span> WISENT AI, INC.</div>
+      </article>
+
+      <article class="doc-page" data-doc="getting-started" data-title="Getting started" data-description="Validate a private preview installation and run your first controlled session.">
+        <div class="doc-kicker">Start</div><h1>Getting started</h1>
+        <p class="doc-lede">Validate your private preview package, point Jeden at a repository, and complete a first read-only task before granting additional authority.</p>
+        <h2 id="start-prerequisites">Prerequisites</h2>
+        <ul><li>A signed Jeden release supplied through the private preview channel.</li><li>An approved Wisent model entitlement or an operator-provided route through Brama.</li><li>A project directory the current user can read.</li></ul>
+        <div class="callout tip"><strong>Safe default</strong><p>Jeden starts with <code>always-ask</code> approval policy. Begin read-only. Grant writes or commands only when the task requires them.</p></div>
+        <h2 id="start-validate">Validate the runtime</h2>
+        <div class="step-list">
+          <div class="step"><div><h3>Confirm the binary</h3><p>Print the installed release identity.</p><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden --version</code></pre></div></div>
+          <div class="step"><div><h3>Check the environment</h3><p>Run diagnostics for the current workspace. JSON mode is suitable for automation.</p><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden doctor --cwd .
+<span class="prompt">$</span> jeden doctor --json --cwd .</code></pre></div></div>
+          <div class="step"><div><h3>Inspect the capability registry</h3><p>Confirm which tools, commands, views, services, plugins, and MCP servers are healthy.</p><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden capabilities --json --cwd .</code></pre></div></div>
+        </div>
+        <h2 id="start-model">Configure a managed route</h2>
+        <p>Operator-managed installations provide these values without putting them in project files. A direct deployment requires the following runtime environment:</p>
+        <div class="code-block"><div class="code-title">Environment</div><pre><code>BRAMA_URL=&lt;brama-url&gt;
+WISENT_APP_AGENT_ID=wisent-app
+WISENT_APP_AGENT_AUTH_SECRET=&lt;signing-credential&gt;</code></pre></div>
+        <p><code>ENTITLEMENTS_ROUTER_BIN</code> optionally overrides the executable used by authentication status and reauthorization commands.</p>
+        <h2 id="start-first-task">Run the first task</h2>
+        <div class="code-block"><div class="code-title">Interactive</div><pre><code><span class="prompt">$</span> jeden --cwd ../content-platform</code></pre></div>
+        <div class="code-block"><div class="code-title">One shot</div><pre><code><span class="prompt">$</span> jeden run "summarize package.json" --cwd .
+<span class="prompt">$</span> jeden run "create notes.txt" --cwd . --allow-write</code></pre></div>
+        <p>The second command exposes write-capable tools but does not bypass the configured approval mode. Use <code>--yolo</code> or <code>--auto-approve</code> only in an already isolated environment.</p>
+        <h2 id="start-context">Add project context</h2>
+        <p>Create a <code>JEDEN.md</code> or <code>AGENTS.md</code> in the repository. Jeden discovers context from the project ancestor down to <code>--cwd</code>. Keep requirements concrete: commands, boundaries, architecture, and verification rules.</p>
+        <div class="page-nav"><a href="/docs/" data-route="overview"><small>Previous</small>← Overview</a><a href="/docs/cli/" data-route="cli"><small>Next</small>CLI reference →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="cli" data-title="CLI reference" data-description="Commands, flags, slash commands, and interactive terminal behavior.">
+        <div class="doc-kicker">Core</div><h1>CLI reference</h1><p class="doc-lede">The same runtime serves interactive terminal sessions, one-shot automation, RPC, ACP, and mutually authenticated headless clients.</p>
+        <h2 id="cli-global">Global invocation</h2>
+        <div class="code-block"><div class="code-title">Usage</div><pre><code>jeden [--cwd path] [--model name] [--max-tokens n]
+      [--allow-write] [--allow-command]
+      [--yolo|--auto-approve] [--max-steps n]</code></pre></div>
+        <table class="reference-table"><thead><tr><th>Flag</th><th>Meaning</th></tr></thead><tbody>
+          <tr><td>--cwd path</td><td>Set the workspace root and filesystem jail for the run.</td></tr><tr><td>--model name</td><td>Select the model route for this invocation.</td></tr><tr><td>--max-tokens n</td><td>Bound model output tokens for each request.</td></tr><tr><td>--max-steps n</td><td>Bound the number of model/tool loop iterations.</td></tr><tr><td>--allow-write</td><td>Expose write-capable tools to the model.</td></tr><tr><td>--allow-command</td><td>Expose command and process execution tools.</td></tr><tr><td>--yolo, --auto-approve</td><td>Approve allowed effects without interactive confirmation. Use only inside a trusted isolation boundary.</td></tr>
+        </tbody></table>
+        <h2 id="cli-management">Session and runtime commands</h2>
+        <table class="reference-table"><thead><tr><th>Command</th><th>Purpose</th></tr></thead><tbody>
+          <tr><td>jeden sessions [limit]</td><td>List recent durable sessions.</td></tr><tr><td>jeden show &lt;session&gt;</td><td>Inspect a session by ID or path.</td></tr><tr><td>jeden export &lt;session&gt; [output]</td><td>Export a complete session document.</td></tr><tr><td>jeden artifacts &lt;session&gt;</td><td>List artifacts retained by a session.</td></tr><tr><td>jeden artifact &lt;session&gt; &lt;name&gt; [output]</td><td>Recover one artifact.</td></tr><tr><td>jeden config …</td><td>List, locate, read, set, or reset native configuration.</td></tr><tr><td>jeden doctor [--json]</td><td>Diagnose the current environment.</td></tr><tr><td>jeden conformance [--json]</td><td>Evaluate runtime conformance contracts.</td></tr><tr><td>jeden capabilities [--json]</td><td>Read the versioned capability and health registry.</td></tr>
+        </tbody></table>
+        <h2 id="cli-slash">Interactive slash commands</h2>
+        <p>Entering a management command without arguments opens a native searchable view where one exists. Direct arguments remain available for automation.</p>
+        <div class="badges"><span class="badge">/model</span><span class="badge">/tools</span><span class="badge">/approval</span><span class="badge">/mcp</span><span class="badge">/plugins</span><span class="badge">/marketplace</span><span class="badge">/browser</span><span class="badge">/plan</span><span class="badge">/goal</span><span class="badge">/loop</span><span class="badge">/todo</span><span class="badge">/roadmap</span><span class="badge">/memory</span><span class="badge">/jobs</span><span class="badge">/collab</span><span class="badge">/export</span><span class="badge">/compact</span><span class="badge">/handoff</span><span class="badge">/resume</span></div>
+        <h3>Picker controls</h3><table class="reference-table"><tbody><tr><td>Type</td><td>Filter labels, details, and status badges.</td></tr><tr><td>↑ / ↓</td><td>Move the active row.</td></tr><tr><td>Home / End / Page Up / Page Down</td><td>Jump through results.</td></tr><tr><td>Ctrl-U</td><td>Clear the filter.</td></tr><tr><td>Enter</td><td>Execute the selected action.</td></tr><tr><td>Esc</td><td>Close the current view.</td></tr></tbody></table>
+        <p>Destructive rows open a confirmation view with <strong>Cancel</strong> selected by default. When standard input is not a terminal, interactive views render deterministic text lists.</p>
+        <div class="page-nav"><a href="/docs/getting-started/" data-route="getting-started"><small>Previous</small>← Getting started</a><a href="/docs/models/" data-route="models"><small>Next</small>Models & routing →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="models" data-title="Models & routing" data-description="Select models, understand Brama requests, usage, billing targets, and failover.">
+        <div class="doc-kicker">Core</div><h1>Models & routing</h1><p class="doc-lede">Model selection is separate from policy and execution. Jeden signs OpenAI-compatible requests to Brama and records the route, usage, and billing decision in the session.</p>
+        <h2 id="models-select">Selection precedence</h2><ol><li>The invocation’s <code>--model</code> value.</li><li>The <code>JEDEN_MODEL</code> environment variable.</li><li>The model selected through native configuration or <code>/model</code>.</li><li>The operator-provided default route.</li></ol>
+        <div class="code-block"><div class="code-title">Examples</div><pre><code><span class="prompt">$</span> jeden --model claude-code-subscription
+<span class="prompt">$</span> jeden run "review this diff" --model &lt;route&gt;
+
+/model
+/model &lt;route&gt;</code></pre></div>
+        <h2 id="models-auth">Authentication ownership</h2><p><code>/login [provider]</code> and <code>/logout [provider]</code> inspect or delegate to the entitlement owner. Jeden does not reimplement provider login inside the model loop. <code>/settings</code> shows provider and entitlement state without returning credentials.</p>
+        <h2 id="models-billing">Subscription routing</h2><p>Weles owns subscription state and payment policy. Jeden discovers active subscriptions and quota snapshots, freezes a deterministic order for each logical request, and sends the selected billing target to Brama.</p>
+        <ul><li>Request, idempotency, and decision identities remain stable across attempts.</li><li>Typed quota exhaustion places a target into a durable <code>Retry-After</code>-bounded cooldown.</li><li>Failover never occurs after model output becomes visible.</li><li>Served account, subscription, quota bucket, and decision ID are retained in usage and audit events.</li></ul>
+        <div class="callout"><strong>Payment boundary</strong><p>Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or billing addresses. Payment setup opens a Weles-hosted HTTPS flow.</p></div>
+        <h2 id="models-usage">Usage controls</h2><div class="code-block"><div class="code-title">Interactive</div><pre><code>/usage
+/usage show
+/usage reset
+/subscriptions list
+/subscriptions status</code></pre></div>
+        <div class="page-nav"><a href="/docs/cli/" data-route="cli"><small>Previous</small>← CLI reference</a><a href="/docs/configuration/" data-route="configuration"><small>Next</small>Configuration →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="configuration" data-title="Configuration" data-description="Configuration files, precedence, project context, and supported native settings.">
+        <div class="doc-kicker">Core</div><h1>Configuration</h1><p class="doc-lede">Jeden combines operator environment, user preferences, project settings, and discovered instructions without blurring their precedence.</p>
+        <h2 id="config-precedence">Precedence</h2><ol><li><strong>Environment variables</strong> win over file configuration.</li><li><strong>Project config</strong> at <code>&lt;cwd&gt;/.jeden/config.json</code> overrides user config.</li><li><strong>User config</strong> loads from <code>~/.jeden/config.json</code> and <code>~/.jeden/config.yml</code>.</li><li><strong>Built-in defaults</strong> apply when no value is supplied.</li></ol>
+        <div class="code-block"><div class="code-title">Configuration commands</div><pre><code><span class="prompt">$</span> jeden config list --json --cwd .
+<span class="prompt">$</span> jeden config path --cwd .
+<span class="prompt">$</span> jeden config get tools.approvalMode
+<span class="prompt">$</span> jeden config set tools.approvalMode write
+<span class="prompt">$</span> jeden config reset tools.approvalMode</code></pre></div>
+        <h2 id="config-reference">Native settings</h2><table class="reference-table"><thead><tr><th>Key</th><th>Default and purpose</th></tr></thead><tbody>
+          <tr><td>tools.approvalMode</td><td><code>always-ask</code>. Allowed values: <code>always-ask</code>, <code>write</code>, <code>yolo</code>.</td></tr>
+          <tr><td>commands.enableClaudeUser</td><td><code>true</code>. Load commands from <code>~/.claude/commands</code>.</td></tr><tr><td>commands.enableClaudeProject</td><td><code>true</code>. Load commands from <code>.claude/commands</code>.</td></tr>
+          <tr><td>commands.enableOpencodeUser</td><td><code>true</code>. Load commands from <code>~/.config/opencode/commands</code>.</td></tr><tr><td>commands.enableOpencodeProject</td><td><code>true</code>. Load commands from <code>.opencode/commands</code>.</td></tr>
+          <tr><td>startup.showSplash</td><td><code>false</code>. Show the startup animation.</td></tr><tr><td>startup.quiet</td><td><code>false</code>. Suppress startup chrome.</td></tr>
+          <tr><td>context.maxBytes</td><td><code>131072</code>. Maximum UTF-8 bytes loaded from discovered context.</td></tr><tr><td>context.maxTokens</td><td><code>32768</code>. Approximate context token budget.</td></tr>
+          <tr><td>rules.alwaysApply</td><td><code>[]</code>. Sticky typed rules injected whenever the system prompt is rebuilt.</td></tr>
+          <tr><td>secrets.mode</td><td><code>redact</code>. Choose <code>redact</code> or <code>obfuscate</code> for known model-bound secrets.</td></tr><tr><td>secrets.minLength</td><td><code>8</code>. Minimum automatically discovered environment-secret length.</td></tr><tr><td>secrets.discoverEnvironment</td><td><code>true</code>. Protect secret-named environment values.</td></tr>
+        </tbody></table>
+        <h2 id="config-context">Discovered context</h2><p>User context loads from <code>~/.jeden/instructions.md</code> and <code>~/.jeden/context.md</code>. Project discovery walks ancestors down to <code>--cwd</code> and reads:</p>
+        <div class="badges"><span class="badge">JEDEN.md</span><span class="badge">AGENTS.md</span><span class="badge">CLAUDE.md</span><span class="badge">RULES.md</span><span class="badge">.jeden/instructions.md</span><span class="badge">.jeden/context.md</span></div>
+        <p>A context line such as <code>@./extra.md</code> imports another file under the same context root. Imports remain within that root; oversized files are skipped.</p>
+        <div class="page-nav"><a href="/docs/models/" data-route="models"><small>Previous</small>← Models & routing</a><a href="/docs/tools/" data-route="tools"><small>Next</small>Tools →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="tools" data-title="Tools" data-description="Built-in tool families, capability discovery, approvals, and guarded mutations.">
+        <div class="doc-kicker">Core</div><h1>Tools</h1><p class="doc-lede">Jeden exposes typed tools through one capability registry. Every tool has a source, version, health state, policy classification, input schema, output schema, and handler identity.</p>
+        <h2 id="tools-discover">Discover active tools</h2><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden capabilities --json --cwd .
+<span class="prompt">$</span> jeden tools --cwd .
+
+/tools</code></pre></div>
+        <p>The registry distinguishes executable healthy capabilities from planned or unavailable descriptors. Do not infer availability from a name alone; inspect <code>health.state</code> and <code>ui.executable</code>.</p>
+        <h2 id="tools-families">Built-in families</h2><table class="reference-table"><thead><tr><th>Family</th><th>Examples</th></tr></thead><tbody>
+          <tr><td>Read</td><td>Directories, bounded text, binary files, images, documents, archives, notebooks, SQLite, URLs, and artifacts.</td></tr><tr><td>Search</td><td>Literal search, regex grep, globs, AST search, Git history, GitHub issues, and pull requests.</td></tr><tr><td>Write</td><td>Revision-guarded files, patches, anchored edits, archive entries, notebooks, SQLite rows, moves, and deletes.</td></tr><tr><td>Process</td><td>Package scripts, bounded commands, background processes, PTY sessions, Node evaluation, and Python evaluation.</td></tr><tr><td>Browser</td><td>Tabs, actions, extraction, screenshots, and browser state.</td></tr><tr><td>Agent state</td><td>Todos, memory, artifacts, conversation recall, user questions, and delegation.</td></tr><tr><td>Integrations</td><td>MCP tools/resources/prompts, language intelligence, debugging, SSH, collaboration, and custom project tools.</td></tr>
+        </tbody></table>
+        <h2 id="tools-read">Bounded reads and selectors</h2><p>Prefer narrow selectors to unbounded output. Text reads support line ranges, comma-separated ranges, raw content, and unresolved conflict views.</p>
+        <div class="code-block"><div class="code-title">Selector examples</div><pre><code>src/server.ts:80-140
+src/server.ts:10-20,90-110
+src/server.ts:raw
+src/server.ts:conflicts
+artifact://tool-output:1-120
+database.sqlite:users:42</code></pre></div>
+        <h2 id="tools-write">Guarded mutations</h2><p>Existing text files return a digest and snapshot tag when read. A mutation must identify the state it intends to replace. If another actor changes the file first, the write fails instead of overwriting newer work.</p>
+        <ul><li><code>write_file</code> and <code>apply_patch</code> require the expected SHA-256 for existing files.</li><li>The unified writer uses revision guards for files, archives, notebooks, and SQLite.</li><li>Anchored edits use a snapshot <code>path#TAG</code> plus exact visible line anchors.</li><li>Mutations return native diffs and previews.</li></ul>
+        <div class="callout"><strong>Two gates</strong><p><code>--allow-write</code> or <code>--allow-command</code> makes a tool available. Approval policy still decides whether each proposed effect may execute.</p></div>
+        <div class="page-nav"><a href="/docs/configuration/" data-route="configuration"><small>Previous</small>← Configuration</a><a href="/docs/sessions/" data-route="sessions"><small>Next</small>Sessions & artifacts →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="sessions" data-title="Sessions & artifacts" data-description="Inspect, resume, branch, checkpoint, rewind, export, and recover session artifacts.">
+        <div class="doc-kicker">State</div><h1>Sessions & artifacts</h1><p class="doc-lede">A session is the durable record behind an answer: messages, tool calls, results, approvals, usage, artifacts, checkpoints, attachments, and lineage.</p>
+        <h2 id="sessions-location">Storage</h2><p>Session transcripts and artifacts live under <code>~/.jeden/sessions/</code>. Oversized tool results are persisted as artifacts and replaced in the model loop with compact references.</p>
+        <h2 id="sessions-inspect">Inspect and recover</h2><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden sessions 20
+<span class="prompt">$</span> jeden show &lt;session&gt;
+<span class="prompt">$</span> jeden export &lt;session&gt; output.json
+<span class="prompt">$</span> jeden artifacts &lt;session&gt;
+<span class="prompt">$</span> jeden artifact &lt;session&gt; &lt;name&gt; output.bin
+<span class="prompt">$</span> jeden resume &lt;session&gt; "continue"</code></pre></div>
+        <p>Resuming starts a fresh session seeded with selected history; it does not append destructively to the original record.</p>
+        <h2 id="sessions-lineage">Interactive lineage</h2><div class="badges"><span class="badge">/resume &lt;session&gt;</span><span class="badge">/fork</span><span class="badge">/branch &lt;title&gt;</span><span class="badge">/tree</span><span class="badge">/rename</span><span class="badge">/drop</span><span class="badge">/move &lt;dir&gt;</span></div>
+        <h2 id="sessions-checkpoints">Checkpoints and rewind</h2><div class="code-block"><div class="code-title">Interactive</div><pre><code>/checkpoint before-refactor
+/checkpoint list
+/rewind &lt;checkpoint-event-id&gt;</code></pre></div><p>A checkpoint records the exact model-visible context. Rewind appends a new active lineage without deleting the abandoned history.</p>
+        <h2 id="sessions-attachments">Attachments</h2><div class="code-block"><div class="code-title">Interactive</div><pre><code>/attach path/to/context.txt
+/attachments
+/detach &lt;id|all&gt;</code></pre></div><p>The attachment tray accepts bounded workspace-jailed text and PNG, JPEG, GIF, or WebP inputs for the next submitted turn.</p>
+        <div class="page-nav"><a href="/docs/tools/" data-route="tools"><small>Previous</small>← Tools</a><a href="/docs/memory/" data-route="memory"><small>Next</small>Memory →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="memory" data-title="Memory" data-description="Durable SQLite/FTS memory, queues, retrieval, rebuilding, and operational boundaries.">
+        <div class="doc-kicker">State</div><h1>Memory</h1><p class="doc-lede">Jeden’s durable memory is a local SQLite/FTS index with explicit retrieval and maintenance operations. It is separate from the immutable session transcript.</p>
+        <h2 id="memory-storage">Storage and overrides</h2><p>The default database is <code>~/.jeden/memory.sqlite3</code>. Set <code>JEDEN_MEMORY_DB</code> to select another database. The legacy <code>JEDEN_MEMORY_FILE</code> remains an input-path override.</p>
+        <h2 id="memory-operations">Operations</h2><div class="code-block"><div class="code-title">Interactive</div><pre><code>/memory stats
+/memory view
+/memory enqueue
+/memory queue
+/memory queue run
+/memory queue drain
+/memory rebuild
+/memory clear</code></pre></div>
+        <table class="reference-table"><tbody><tr><td>enqueue</td><td>Add a durable maintenance or ingestion item.</td></tr><tr><td>queue</td><td>Inspect queued memory work.</td></tr><tr><td>queue run</td><td>Process one bounded queue step.</td></tr><tr><td>queue drain</td><td>Process the durable queue until empty.</td></tr><tr><td>rebuild</td><td>Rebuild the SQLite FTS index from durable records.</td></tr><tr><td>clear</td><td>Destructive reset; requires confirmation.</td></tr></tbody></table>
+        <h2 id="memory-contract">What memory is not</h2><ul><li>It is not a substitute for project instructions or source-controlled context.</li><li>It does not erase or rewrite the session ledger.</li><li>Retrieved content remains subject to the current prompt budget and policy.</li><li>Maintenance commands do not silently grant tool authority.</li></ul>
+        <div class="page-nav"><a href="/docs/sessions/" data-route="sessions"><small>Previous</small>← Sessions & artifacts</a><a href="/docs/roadmap/" data-route="roadmap"><small>Next</small>Roadmap registry →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="roadmap" data-title="Roadmap registry" data-description="Versioned, revision-guarded project roadmaps with dependencies and evidence.">
+        <div class="doc-kicker">State</div><h1>Roadmap registry</h1><p class="doc-lede">A repository can carry a typed, versioned roadmap that the agent and team mutate through the same atomic contract.</p>
+        <h2 id="roadmap-files">Canonical files</h2><p><code>roadmap/roadmap.yaml</code> is canonical. <code>roadmap/schema/roadmap-v1.schema.json</code> defines the machine contract. Human views are deterministic generated outputs.</p>
+        <h2 id="roadmap-safety">Mutation guarantees</h2><ul><li>Every operation uses a stable sibling lock.</li><li><code>expectedRevision</code> detects concurrent updates.</li><li>Writes use a same-directory temporary file, flush, fsync, atomic rename, and parent-directory fsync.</li><li>Dependencies must resolve and remain acyclic.</li><li><code>passed</code> requires evidence; <code>external_blocked</code> requires an external prerequisite.</li></ul>
+        <h2 id="roadmap-commands">Core commands</h2><div class="code-block"><div class="code-title">Terminal</div><pre><code><span class="prompt">$</span> jeden roadmap list --status planned --priority P1 --json
+<span class="prompt">$</span> jeden roadmap show JED-024 --json
+<span class="prompt">$</span> jeden roadmap graph --json
+<span class="prompt">$</span> jeden roadmap check --json
+<span class="prompt">$</span> jeden roadmap render
+<span class="prompt">$</span> jeden roadmap work JED-024 --cwd .</code></pre></div>
+        <h3>State transitions</h3><div class="badges"><span class="badge">backlog</span><span class="badge">planned</span><span class="badge">in_progress</span><span class="badge">implemented</span><span class="badge">not_run</span><span class="badge">failed</span><span class="badge">external_blocked</span><span class="badge">passed</span><span class="badge">dropped</span></div>
+        <p><code>roadmap work</code> sets the active goal and plan, creates todos from acceptance criteria, records a start event in the current session, and pins subsequent artifacts and branches to the roadmap item.</p>
+        <div class="page-nav"><a href="/docs/memory/" data-route="memory"><small>Previous</small>← Memory</a><a href="/docs/mcp/" data-route="mcp"><small>Next</small>MCP →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="mcp" data-title="MCP" data-description="Configure persistent Model Context Protocol servers, tools, resources, and prompts.">
+        <div class="doc-kicker">Integrate</div><h1>Model Context Protocol</h1><p class="doc-lede">Jeden maintains bounded persistent MCP connections and exposes server tools, resources, prompts, notifications, and health through native commands.</p>
+        <h2 id="mcp-config">Configuration</h2><p>User servers load from <code>~/.jeden/mcp.json</code>. Project servers load from <code>&lt;cwd&gt;/.jeden/mcp.json</code>. Both use the standard <code>mcpServers</code> shape.</p>
+        <div class="code-block"><div class="code-title">.jeden/mcp.json</div><pre><code>{
+  "mcpServers": {
+    "example": {
+      "command": "/absolute/path/to/server",
+      "args": ["--stdio"]
+    }
+  }
+}</code></pre></div>
+        <h2 id="mcp-commands">Operate servers</h2><div class="code-block"><div class="code-title">Interactive</div><pre><code>/mcp
+/mcp list
+/mcp tools
+/mcp resources
+/mcp prompts
+/mcp notifications
+/mcp test
+/mcp reload
+/mcp reconnect</code></pre></div>
+        <h2 id="mcp-tools">Tool naming</h2><p>Generic MCP tools can list and call every configured server. Eligible tools may also be projected into the native registry as <code>mcp__&lt;server&gt;__&lt;tool&gt;</code>. Names remain unique and capability health reflects the current server connection.</p>
+        <div class="callout"><strong>Same policy</strong><p>MCP does not bypass Jeden policy. A server tool is still subject to the active approval mode, hooks, capability health, and workspace contract.</p></div>
+        <div class="page-nav"><a href="/docs/roadmap/" data-route="roadmap"><small>Previous</small>← Roadmap registry</a><a href="/docs/customization/" data-route="customization"><small>Next</small>Commands, hooks & plugins →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="customization" data-title="Commands, hooks & plugins" data-description="Project commands, lifecycle hooks, JavaScript tools, extensions, plugins, and marketplaces.">
+        <div class="doc-kicker">Integrate</div><h1>Commands, hooks & plugins</h1><p class="doc-lede">Extend Jeden at the project or user boundary without forking the runtime. Every extension remains inside the same capability, approval, and path-jail contracts.</p>
+        <h2 id="custom-commands">File-based commands</h2><p>Load project commands from <code>&lt;cwd&gt;/.jeden/commands/</code> and user commands from <code>~/.jeden/commands/</code>. Compatibility loaders can also read Claude and OpenCode command directories when enabled in native config.</p>
+        <h2 id="custom-hooks">Lifecycle hooks</h2><p>Shared hooks receive typed events at these boundaries:</p><div class="badges"><span class="badge">user-prompt</span><span class="badge">pre-tool</span><span class="badge">post-tool</span><span class="badge">session-start</span><span class="badge">stop</span></div>
+        <p>A hook may add context, replace supported input fields, or block an action through the decision contract. Hooks should return deterministic bounded output and must not depend on terminal input.</p>
+        <h2 id="custom-tools">Custom JavaScript tools</h2><p>Modules under <code>~/.jeden/tools/</code> or <code>&lt;cwd&gt;/.jeden/tools/</code> export a default factory. The factory receives workspace helpers and returns one tool or a list of tools.</p>
+        <ul><li>Tool names must be unique.</li><li>Custom names cannot collide with built-ins.</li><li>Execution remains workspace-jailed.</li><li>Approval and hook policy applies exactly as it does to native tools.</li></ul>
+        <h2 id="custom-plugins">Extensions and plugins</h2><p>Native extensions load from project and user <code>.jeden/extensions/</code> directories. Plugin and marketplace state lives under <code>~/.jeden/plugins/</code>.</p>
+        <div class="code-block"><div class="code-title">Interactive</div><pre><code>/extensions
+/plugins list
+/plugins enable &lt;name&gt;
+/plugins disable &lt;name&gt;
+/marketplace discover
+/marketplace installed
+/reload-plugins</code></pre></div>
+        <div class="page-nav"><a href="/docs/mcp/" data-route="mcp"><small>Previous</small>← MCP</a><a href="/docs/security/" data-route="security"><small>Next</small>Security model →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="security" data-title="Security model" data-description="Authority gates, path jails, secret handling, approvals, stale-state protection, and audit evidence.">
+        <div class="doc-kicker">Reference</div><h1>Security model</h1><p class="doc-lede">Jeden treats model output as a proposal. Authority comes from the local runtime, its operator policy, and the exact state observed before an effect.</p>
+        <h2 id="security-layers">Defense layers</h2><div class="step-list">
+          <div class="step"><div><h3>Capability exposure</h3><p>Read tools are available by default. Write and command families require explicit invocation flags or configuration.</p></div></div>
+          <div class="step"><div><h3>Workspace jail</h3><p>Filesystem tools resolve paths beneath <code>--cwd</code>. Context imports remain within their context root.</p></div></div>
+          <div class="step"><div><h3>Approval policy</h3><p><code>always-ask</code>, <code>write</code>, or <code>yolo</code> determines which allowed effects still require confirmation.</p></div></div>
+          <div class="step"><div><h3>Lifecycle hooks</h3><p>Pre-tool hooks can inspect, narrow, replace supported inputs, or block the call.</p></div></div>
+          <div class="step"><div><h3>Revision guards</h3><p>Digests and snapshot tags reject stale writes rather than overwriting concurrent changes.</p></div></div>
+          <div class="step"><div><h3>Durable evidence</h3><p>Requests, tool calls, decisions, results, usage, and artifacts remain attached to the session.</p></div></div>
+        </div>
+        <h2 id="security-approval">Approval modes</h2><table class="reference-table"><tbody><tr><td>always-ask</td><td>Prompt before any effect classified as approval-required.</td></tr><tr><td>write</td><td>Grant configured write behavior while retaining stronger boundaries for command execution.</td></tr><tr><td>yolo</td><td>Automatically approve exposed tools. Only safe inside an independently trusted sandbox.</td></tr></tbody></table>
+        <h2 id="security-secrets">Model-bound secrets</h2><p>Known secrets are protected before text reaches the model. <code>secrets.mode</code> selects redaction or obfuscation. Environment discovery protects secret-named variables at or above <code>secrets.minLength</code>.</p>
+        <div class="callout"><strong>Do not confuse masking with storage</strong><p>Secret protection reduces accidental model exposure. Credentials should still come from the operator’s secret store and must not be committed to project configuration, context files, or transcripts.</p></div>
+        <h2 id="security-remote">Remote runtimes</h2><p><code>jeden headless</code> requires a server certificate, server private key, client CA, explicit identity map, and optional revoked-serial list. Mutual TLS authenticates the transport; the local tool policy still governs effects.</p>
+        <div class="page-nav"><a href="/docs/customization/" data-route="customization"><small>Previous</small>← Commands, hooks & plugins</a><a href="/docs/protocol/" data-route="protocol"><small>Next</small>Action protocol →</a></div>
+      </article>
+
+      <article class="doc-page" data-doc="protocol" data-title="Action protocol" data-description="Native tool calls, strict JSON actions, selectors, and anchored mutation contracts.">
+        <div class="doc-kicker">Reference</div><h1>Action protocol</h1><p class="doc-lede">Native provider tool calls and strict JSON actions enter the same validated local execution loop. Tool schemas are derived from each input contract and sent with the model request.</p>
+        <h2 id="protocol-loop">Execution loop</h2><ol><li>The model returns a native tool call or a strict JSON action.</li><li>Jeden resolves the action against the current capability registry.</li><li>Input schema, path jail, exposure flags, approval mode, and hooks are evaluated.</li><li>The handler executes and returns a typed result.</li><li>The result is appended to the session and returned to the model.</li><li>The loop continues until a final answer or configured step limit.</li></ol>
+        <h2 id="protocol-actions">Action shapes</h2><p>Actions are explicit objects; prose that resembles a command does not execute. A strict action identifies the action name and its typed arguments. Selectors and mutation guards are carried as data, not inferred from surrounding text.</p>
+        <div class="code-block"><div class="code-title">Conceptual action</div><pre><code>{
+  "action": "read_file",
+  "args": {
+    "path": "src/server.ts:80-140"
+  }
+}</code></pre></div>
+        <h2 id="protocol-selectors">Selectors</h2><table class="reference-table"><tbody><tr><td>:50</td><td>Read from line 50.</td></tr><tr><td>:50-90</td><td>Read an inclusive range.</td></tr><tr><td>:5-16,90-110</td><td>Read several visible ranges.</td></tr><tr><td>:raw</td><td>Return verbatim content.</td></tr><tr><td>:conflicts</td><td>Return unresolved merge-conflict blocks.</td></tr><tr><td>archive.zip:path/file</td><td>Address an archive member.</td></tr><tr><td>db.sqlite:table:key</td><td>Address one SQLite row by primary key.</td></tr><tr><td>artifact://name</td><td>Address a persisted session artifact.</td></tr></tbody></table>
+        <h2 id="protocol-edits">Anchored edits</h2><p>An anchored edit names the snapshot tag returned by the latest read, then applies tight line or block operations only to visible anchors. Every successful mutation produces a fresh snapshot; subsequent edits must re-read or use the new tag.</p>
+        <ul><li><strong>SWAP</strong> replaces an exact visible line range.</li><li><strong>INS.PRE / INS.POST</strong> inserts without restating unchanged lines.</li><li><strong>DEL</strong> deletes an exact line range.</li><li><strong>Block operations</strong> target a complete syntax block at its opener.</li><li><strong>MV / REM</strong> move or remove a file under the same guarded contract.</li></ul>
+        <div class="callout tip"><strong>Invariant</strong><p>The edit body is final content, not a diff. Ranges describe original lines. Stale tags and unseen anchors are rejected.</p></div>
+        <h2 id="protocol-results">Oversized results</h2><p>Large tool output is persisted under the session artifact store. The model receives a compact <code>artifact://</code> reference and may issue bounded follow-up reads instead of carrying the full payload in context.</p>
+        <div class="page-nav"><a href="/docs/security/" data-route="security"><small>Previous</small>← Security model</a><a href="/docs/" data-route="overview"><small>Next</small>Overview →</a></div>
+      </article>
+    </main>
+
+    <aside class="toc" data-toc aria-label="On this page"></aside>
+  </div>
+
+  <div class="search-overlay" data-search-overlay aria-hidden="true" role="dialog" aria-modal="true" aria-label="Search documentation">
+    <div class="search-dialog">
+      <div class="search-input-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/></svg><input class="search-input" data-search-input type="search" placeholder="Search Jeden docs" autocomplete="off" /><button class="search-close" data-search-close type="button" aria-label="Close search">×</button></div>
+      <div class="search-results" data-search-results></div>
+    </div>
+  </div>
+</body>
+</html>
