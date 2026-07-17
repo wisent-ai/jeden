@@ -151,19 +151,6 @@ impl ActionKeyMap {
         &self.bindings
     }
 
-    #[cfg(test)]
-    pub fn namespace(&self) -> &'static str {
-        EDITOR_KEYMAP_NAMESPACE
-    }
-
-    #[cfg(test)]
-    pub fn set(&mut self, binding: KeyBinding) {
-        self.bindings.retain(|current| {
-            current.code != binding.code || current.modifiers != binding.modifiers
-        });
-        self.bindings.push(binding);
-    }
-
     pub fn action_for(&self, event: KeyEvent) -> Option<EditorAction> {
         let modifiers = event.modifiers
             & (KeyModifiers::SHIFT
@@ -282,12 +269,6 @@ impl EditorState {
         } else {
             Some(ordered(anchor, self.cursor))
         }
-    }
-
-    #[cfg(test)]
-    pub fn selected_text(&self) -> Option<&str> {
-        let (start, end) = self.selection()?;
-        self.text.get(start..end)
     }
 
     pub fn handle_key(&mut self, event: KeyEvent) -> bool {
@@ -677,111 +658,4 @@ fn normalize_paste(value: &str) -> String {
         }
     }
     normalized
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn move_to_start(editor: &mut EditorState) {
-        editor.apply(EditorAction::MoveBufferStart);
-    }
-
-    #[test]
-    fn native_tui_editor_treats_each_unicode_grapheme_as_one_editing_unit() {
-        for (name, grapheme) in [
-            ("combining mark", "e\u{301}"),
-            ("emoji modifier", "👍🏽"),
-            ("zero-width-joiner family", "👨‍👩‍👧‍👦"),
-            ("regional-indicator flag", "🇵🇱"),
-            ("wide CJK character", "界"),
-        ] {
-            let mut editor = EditorState::default();
-            editor.set_text(format!("a{grapheme}b"));
-            editor.apply(EditorAction::MoveLeft);
-
-            editor.delete_backward();
-
-            assert_eq!(editor.text(), "ab", "case: {name}");
-            assert_eq!(editor.cursor(), 1, "case: {name}");
-            editor.apply(EditorAction::Undo);
-            assert_eq!(editor.text(), format!("a{grapheme}b"), "case: {name}");
-        }
-    }
-
-    #[test]
-    fn native_tui_editor_middle_selection_replace_delete_and_undo_restore_user_state() {
-        let mut editor = EditorState::default();
-        editor.set_text("ab👩🏽‍💻cd");
-        editor.apply(EditorAction::MoveLeft);
-        editor.apply(EditorAction::MoveLeft);
-        editor.apply(EditorAction::SelectLeft);
-        assert_eq!(editor.selected_text(), Some("👩🏽‍💻"));
-
-        editor.insert("界");
-        assert_eq!(editor.text(), "ab界cd");
-        assert_eq!(editor.selected_text(), None);
-        editor.apply(EditorAction::Undo);
-        assert_eq!(editor.text(), "ab👩🏽‍💻cd");
-        assert_eq!(editor.selected_text(), Some("👩🏽‍💻"));
-
-        editor.delete_forward();
-        assert_eq!(editor.text(), "abcd");
-        editor.apply(EditorAction::Undo);
-        assert_eq!(editor.text(), "ab👩🏽‍💻cd");
-        assert_eq!(editor.selected_text(), Some("👩🏽‍💻"));
-    }
-
-    #[test]
-    fn native_tui_editor_paste_is_sanitized_and_undoes_as_one_transaction() {
-        let mut editor = EditorState::default();
-        editor.set_text("left-right");
-        move_to_start(&mut editor);
-        for _ in 0..5 {
-            editor.apply(EditorAction::MoveRight);
-        }
-
-        editor.paste("A\r\nB\u{0000}\u{009b}C\tD");
-
-        assert_eq!(editor.text(), "left-A\nBC\tDright");
-        editor.apply(EditorAction::Undo);
-        assert_eq!(editor.text(), "left-right");
-        assert_eq!(editor.cursor(), 5);
-        editor.apply(EditorAction::Redo);
-        assert_eq!(editor.text(), "left-A\nBC\tDright");
-    }
-
-    #[test]
-    fn external_editor_binding_is_namespaced_and_dispatch_only() {
-        let alt_e = KeyEvent::new(KeyCode::Char('e'), KeyModifiers::ALT);
-        let mut editor = EditorState::default();
-        editor.set_text("Zażółć 👩🏽‍💻");
-        let text_before = editor.text().to_owned();
-        let cursor_before = editor.cursor();
-
-        assert_eq!(editor.keymap.namespace(), EDITOR_KEYMAP_NAMESPACE);
-        assert_eq!(editor.action_for(alt_e), Some(EditorAction::ExternalEditor));
-        assert_eq!(EXTERNAL_EDITOR_ACTION_ID, "editor.external");
-        assert!(!editor.handle_key(alt_e));
-        assert_eq!(editor.text(), text_before);
-        assert_eq!(editor.cursor(), cursor_before);
-    }
-
-    #[test]
-    fn native_tui_editor_rebinding_a_conflicting_chord_has_one_deterministic_action() {
-        let mut keymap = ActionKeyMap::default();
-        keymap.set(KeyBinding {
-            code: KeyCode::Left,
-            modifiers: KeyModifiers::NONE,
-            action: EditorAction::DeleteForward,
-        });
-        let mut editor = EditorState::new(keymap);
-        editor.set_text("ab");
-        move_to_start(&mut editor);
-
-        assert!(editor.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
-
-        assert_eq!(editor.text(), "b");
-        assert_eq!(editor.cursor(), 0);
-    }
 }

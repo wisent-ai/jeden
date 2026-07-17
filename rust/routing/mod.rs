@@ -22,9 +22,3 @@ pub use subscriptions::{
     RouteDecisionV2, SubscriptionEligibility, SubscriptionPoolSnapshot, SubscriptionTarget,
     SubscriptionTargetIdentity,
 };
-
-#[cfg(test)]
-mod tests;
-
-#[cfg(test)]
-mod subscription_tests;

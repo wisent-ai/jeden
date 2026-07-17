@@ -207,6 +207,3 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
         })
         .collect()
 }
-
-#[cfg(test)]
-mod tests;

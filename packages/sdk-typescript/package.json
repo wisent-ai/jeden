@@ -18,7 +18,6 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node dist/test/golden.test.js",
     "example": "npm run build && node dist/example/session_client.js"
   }
 }

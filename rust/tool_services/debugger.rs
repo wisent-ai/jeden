@@ -190,10 +190,6 @@ impl DebuggerService {
         let response = wait_response(&session.responses, context, seq)?;
         bounded_json(context, "debugger", &response)
     }
-    #[cfg(all(test, unix))]
-    pub(crate) fn session_count(&self) -> usize {
-        self.sessions.lock().len()
-    }
 }
 
 fn dap_request(seq: u64, command: &str, arguments: Value) -> Value {

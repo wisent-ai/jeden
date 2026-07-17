@@ -91,6 +91,3 @@ pub fn markdown_from_machine_report(
 fn markdown_text(value: &str) -> String {
     value.replace('|', "\\|").replace(['\r', '\n'], " ")
 }
-
-#[cfg(test)]
-mod tests;

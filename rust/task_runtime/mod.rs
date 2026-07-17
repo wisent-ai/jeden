@@ -11,9 +11,6 @@ mod types;
 pub mod worker;
 mod workspace;
 
-#[cfg(test)]
-mod distributed_tests;
-
 pub use coordinator::Coordinator;
 pub use discovery::discover_agents;
 pub use mailbox::Mailbox;

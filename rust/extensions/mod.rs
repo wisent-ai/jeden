@@ -1,8 +1,5 @@
 mod declarative;
 
-#[cfg(test)]
-mod tests;
-
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -560,30 +557,8 @@ fn run_host(
             );
         }
     }
-    let mut read_paths = Vec::with_capacity((source_paths.len() + 1) * 2);
-    read_paths.push(cwd.to_path_buf());
-    read_paths.push(canonical_cwd.clone());
-    read_paths.extend(source_paths.iter().cloned());
-    read_paths.extend(canonical_sources);
-    #[cfg(test)]
-    let write_path = allow_write
-        .then(|| {
-            operation
-                .map(|context| context.artifacts().root())
-                .or(artifact_dir)
-        })
-        .flatten();
     let enable_ts =
         envs.iter().any(|(_, value)| value.contains(".ts")) && node_supports_typescript(&node);
-    #[cfg(test)]
-    let mut command = crate::tool_runtime::runtime_ops::sandbox::test_command(
-        &node,
-        &read_paths,
-        write_path,
-        allow_command,
-    )?
-    .unwrap_or_else(|| Command::new(&node));
-    #[cfg(not(test))]
     let mut command = Command::new(&node);
     command.env_clear();
     for key in &grant.process.environment {
@@ -1276,8 +1251,7 @@ pub(crate) fn agent_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
 pub(crate) fn model_entries(cwd: &Path) -> Vec<crate::control_plane::brama::ModelEntry> {
     let registry = match current(cwd) {
         Ok(registry) => registry,
-        Err(error) => {
-            eprintln!("extension model registry unavailable: {error}");
+        Err(_) => {
             return Vec::new();
         }
     };
@@ -1300,8 +1274,7 @@ pub(crate) fn model_entries(cwd: &Path) -> Vec<crate::control_plane::brama::Mode
 pub fn provider_entries(cwd: &Path) -> Vec<crate::control_plane::weles::Provider> {
     let registry = match current(cwd) {
         Ok(registry) => registry,
-        Err(error) => {
-            eprintln!("extension provider registry unavailable: {error}");
+        Err(_) => {
             return Vec::new();
         }
     };

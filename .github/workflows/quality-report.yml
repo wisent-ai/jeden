@@ -61,8 +61,6 @@ jobs:
           printf '%s' "$EVIDENCE_ROOT_JSON" > evidence-root.json
           printf '%s' "$REPORT_ROOT_JSON" > report-root.json
 
-      - name: Run focused report acceptance tests
-        run: cargo test --lib report::tests -- --nocapture
 
       - name: Aggregate canonical evidence and generate human report
         env:

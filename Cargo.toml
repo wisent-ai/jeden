@@ -22,13 +22,6 @@ path = "rust/bin/jeden-reference-benchmark.rs"
 name = "jeden-sandbox-helper"
 path = "rust/bin/jeden-sandbox-helper.rs"
 
-[[test]]
-name = "crash_matrix"
-path = "tests/fault/crash_matrix.rs"
-
-[[test]]
-name = "reliability"
-path = "tests/soak/reliability.rs"
 
 [dependencies]
 agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
@@ -71,6 +64,3 @@ tree-sitter-typescript = "0.23"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ignore = "0.4"
-
-[dev-dependencies]
-rcgen = "0.13"

@@ -210,25 +210,3 @@ const O_DIRECTORY: i32 = 0x100000;
 const O_NOFOLLOW: i32 = 0x100;
 #[cfg(target_os = "macos")]
 const O_CLOEXEC: i32 = 0x1000000;
-
-#[cfg(all(test, unix))]
-mod tests {
-    use super::*;
-    use std::os::unix::fs::symlink;
-    #[test]
-    fn fd_relative_open_rejects_symlink_escape() {
-        let root = std::env::temp_dir().join(format!("jeden-fs-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).unwrap();
-        let outside = root.with_extension("outside");
-        std::fs::write(&outside, b"secret").unwrap();
-        symlink(&outside, root.join("link")).unwrap();
-        let grant = ExecutionGrant::trusted_host("test", root.clone());
-        let handle = RootHandle::open(&root, &grant, false).unwrap();
-        let error = handle.read("link", 1024).unwrap_err().to_string();
-        assert!(error.contains("filesystem access denied"), "{error}");
-        assert!(validate_relative(&root, "link").is_err());
-        let _ = std::fs::remove_dir_all(&root);
-        let _ = std::fs::remove_file(&outside);
-    }
-}

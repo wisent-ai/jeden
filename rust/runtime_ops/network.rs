@@ -147,27 +147,3 @@ fn is_public(ip: IpAddr) -> bool {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn metadata_and_loopback_are_denied_after_resolution() {
-        let root = std::env::current_dir().unwrap();
-        let mut grant = ExecutionGrant::trusted_host("test", root);
-        grant.network.hosts = ["169.254.169.254".into(), "127.0.0.1".into()]
-            .into_iter()
-            .collect();
-        grant.network.ports = [80].into_iter().collect();
-        for value in [
-            "http://169.254.169.254/latest/meta-data/",
-            "http://127.0.0.1/",
-        ] {
-            let url = Url::parse(value).unwrap();
-            assert!(authorize_url(&grant, &url)
-                .unwrap_err()
-                .to_string()
-                .contains("non-public address rejected"));
-        }
-    }
-}

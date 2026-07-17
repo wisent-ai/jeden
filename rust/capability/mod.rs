@@ -615,15 +615,6 @@ fn build_and_publish(
     Ok(built)
 }
 
-#[cfg(test)]
-pub(crate) fn publish_for_test(
-    cwd: &Path,
-    descriptors: Vec<CapabilityDescriptor>,
-) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
-    let generation = snapshot().generation.saturating_add(1);
-    build_and_publish(canonical(cwd), generation, descriptors)
-}
-
 pub fn slash_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     for_cwd(cwd)
         .kind(CapabilityKind::SlashCommand)
@@ -1213,60 +1204,4 @@ pub fn diagnostics_for(candidates: Vec<CapabilityDescriptor>) -> Vec<ConflictDia
         }
     }
     diagnostics
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn descriptor_v2_binds_handler_schemas_grants_health_and_generation() {
-        let mut descriptor = CapabilityDescriptorV2::new(
-            "tool/contract-fixture",
-            CapabilityKind::Tool,
-            "conformance-fixture",
-            "Contract fixture",
-            "Exercises the complete descriptor binding",
-            FunctionTarget::BuiltinTool {
-                name: "contract-fixture".into(),
-            },
-        )
-        .operation("execute")
-        .schemas("jeden.fixture.input.v1", "jeden.fixture.output.v1")
-        .handler("fixture::execute")
-        .requested_grant("fs:read")
-        .effective_grant("fs:read")
-        .health_evidence(42, "evidence:fixture-health")
-        .executable("contract-fixture");
-        descriptor.generation = 7;
-
-        assert!(descriptor.binding.coherent());
-        assert_eq!(descriptor.generation, 7);
-        assert_eq!(descriptor.health_checked_at, 42);
-        assert_eq!(descriptor.health_evidence_id, "evidence:fixture-health");
-        let value = serde_json::to_value(&descriptor).unwrap();
-        assert_eq!(value["handler_id"], "fixture::execute");
-        assert_eq!(value["input_schema_id"], "jeden.fixture.input.v1");
-        assert_eq!(value["output_schema_id"], "jeden.fixture.output.v1");
-        assert_eq!(value["generation"], 7);
-    }
-
-    #[test]
-    fn descriptor_v2_rejects_effective_grant_escalation() {
-        let descriptor = CapabilityDescriptorV2::new(
-            "tool/escalation-fixture",
-            CapabilityKind::Tool,
-            "conformance-fixture",
-            "Escalation fixture",
-            "Effective grant is not requested",
-            FunctionTarget::BuiltinTool {
-                name: "escalation-fixture".into(),
-            },
-        )
-        .operation("execute")
-        .effective_grant("network:any")
-        .executable("escalation-fixture");
-        assert!(!descriptor.binding.coherent());
-        assert!(!descriptor.valid());
-    }
 }

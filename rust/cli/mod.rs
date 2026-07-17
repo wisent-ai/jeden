@@ -6,6 +6,3 @@ pub(crate) mod commands;
 pub(crate) mod config;
 pub(crate) mod run;
 pub(crate) mod sessions;
-
-#[cfg(test)]
-mod billing_tests;

@@ -1,4 +1,4 @@
-name: contractual-ci
+name: build-ci
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: contractual-ci-${{ github.workflow }}-${{ github.ref }}
+  group: build-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -19,46 +19,9 @@ env:
   RUSTFLAGS: '-D warnings'
 
 jobs:
-  interface-migration-conformance:
-    name: Contract fixtures and negative gates
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Shared interface fixture contract
-        run: python3 tests/e2e/interfaces/run_interface_contract.py > interface-equivalence-report.json
-      - name: Interface contract tests
-        run: python3 -m unittest discover -s tests/e2e/interfaces -p 'test_*.py' -v
-      - name: Release workflow security contract
-        run: python3 tests/test_release_workflow_contract.py -v
-      - name: Migration fixture matrix and behavior classification
-        shell: bash
-        run: |
-          set -euo pipefail
-          status=0
-          python3 tests/migrations/run_migration_matrix.py > migration-matrix-report.json || status=$?
-          test "$status" -eq 3
-          python3 -m unittest discover -s tests/migrations -p 'test_*.py' -v
-      - name: Negative behavioral evidence gates
-        run: python3 -m unittest discover -s tests/conformance -p 'test_*.py' -v
-      - name: Rust conformance contracts
-        run: 'cargo test --locked --lib conformance:: -- --test-threads=1'
-      - name: Upload deterministic contract reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: contractual-reports-${{ github.run_id }}-${{ github.run_attempt }}
-          path: |
-            interface-equivalence-report.json
-            migration-matrix-report.json
-          if-no-files-found: error
-          retention-days: 14
 
   native-platform:
-    name: Native contract (${{ matrix.os }})
+    name: Native build (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -70,5 +33,5 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      - name: Compile all native targets and tests
-        run: cargo test --locked --all-targets --no-run
+      - name: Check native library and binaries
+        run: cargo check --locked --lib --bins

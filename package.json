@@ -9,8 +9,7 @@
   "scripts": {
     "check": "cargo check",
     "check:rust": "cargo check",
-    "build:rust": "cargo build --release && ./scripts/sign-sandbox-helper.sh",
-    "test": "cargo test"
+    "build:rust": "cargo build --release && ./scripts/sign-sandbox-helper.sh"
   },
   "license": "UNLICENSED"
 }

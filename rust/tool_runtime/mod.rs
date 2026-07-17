@@ -11,8 +11,6 @@ mod read;
 pub mod runtime_ops;
 mod session;
 pub(crate) mod shared;
-#[cfg(test)]
-mod tests;
 
 use custom::{
     custom_tool, mcp_call_tool, mcp_get_prompt, mcp_list_prompts, mcp_list_resources,

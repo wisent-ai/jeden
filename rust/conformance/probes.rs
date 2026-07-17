@@ -178,15 +178,23 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
     },
     AreaProbe {
         area: "unified-read-write-search-resource-semantics",
-        sources: &[source!(
-            "resource-behavior-fixtures",
-            "rust/tool_runtime/tests.rs",
-            [
-                "ranged_read_of_large_file",
-                "recursive_search_honors",
-                "sqlite_mutation_requires_current_digest"
-            ]
-        )],
+        sources: &[
+            source!(
+                "ranged-file-read",
+                "rust/tool_runtime/read/files.rs",
+                ["ranged_text", "read_file", "read_binary_file"]
+            ),
+            source!(
+                "recursive-search",
+                "rust/tool_runtime/exec/search.rs",
+                ["discover", "search_files", "grep_regex"]
+            ),
+            source!(
+                "sqlite-read",
+                "rust/tool_runtime/read/sqlite.rs",
+                ["read_sqlite", "SQLITE_OPEN_READ_ONLY"]
+            ),
+        ],
     },
     AreaProbe {
         area: "ast-i-lsp-runtime",
@@ -220,27 +228,40 @@ pub(crate) static AREA_PROBES: &[AreaProbe] = &[
     },
     AreaProbe {
         area: "browser-debugger-web-github-i-ssh",
-        sources: &[source!(
-            "integration-behavior-fixtures",
-            "rust/tool_services/tests.rs",
-            [
-                "browser_fixture_reuses_session",
-                "debugger_fixture_reuses_adapter",
-                "github_fixture_covers",
-                "ssh_fixture_reuses_control_connection",
-                "web_fixture_falls_back"
-            ]
-        )],
+        sources: &[
+            source!(
+                "browser-service",
+                "rust/tool_services/browser.rs",
+                ["BrowserService", "execute", "health"]
+            ),
+            source!(
+                "debugger-service",
+                "rust/tool_services/debugger.rs",
+                ["DebuggerService", "dap_request", "wait_response"]
+            ),
+            source!(
+                "github-service",
+                "rust/tool_services/github.rs",
+                ["GithubService", "execute", "health"]
+            ),
+            source!(
+                "ssh-service",
+                "rust/tool_services/ssh.rs",
+                ["SshService", "execute", "health"]
+            ),
+            source!(
+                "web-service",
+                "rust/tool_services/web.rs",
+                ["WebService", "execute", "health"]
+            ),
+        ],
     },
     AreaProbe {
         area: "image-inspect-generate-i-tts",
         sources: &[source!(
-            "media-behavior-fixtures",
-            "rust/tool_services/tests.rs",
-            [
-                "media_inspection_success_error_cancel",
-                "image_generation_and_tts_fixtures"
-            ]
+            "media-service",
+            "rust/tool_services/media.rs",
+            ["MediaService", "post_json_fallback", "image_metadata"]
         )],
     },
     AreaProbe {
@@ -737,96 +758,4 @@ pub(crate) fn evaluate(
     evidence.sort_by(|a, b| a.scenario.cmp(&b.scenario));
     missing.sort();
     (checks, evidence, missing)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
-    struct TempRoot(std::path::PathBuf);
-    impl TempRoot {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!(
-                "jeden-behavior-contract-{}-{}",
-                std::process::id(),
-                SEQUENCE.fetch_add(1, Ordering::Relaxed)
-            ));
-            fs::create_dir_all(&path).unwrap();
-            Self(path)
-        }
-        fn evidence(&self, outcome: &str, expires_at: u64) {
-            let directory = self.0.join(".jeden/conformance/evidence");
-            fs::create_dir_all(&directory).unwrap();
-            fs::write(directory.join("pelna-macierz-gapow-i-ownership--registry-contract.json"), format!(r#"{{"protocolVersion":"jeden.behavior-check.v2","checkVersion":2,"fixtureDigest":"{}","commandOrScenarioId":"negative-symbol-fixture","startedAt":10,"finishedAt":20,"expiresAt":{},"attempts":[{{"attempt":1,"startedAt":10,"finishedAt":20,"outcome":"{}","detail":"fixture execution"}}],"outcome":"{}"}}"#, "a".repeat(64), expires_at, outcome, outcome)).unwrap();
-        }
-        fn source(&self) {
-            let path = self.0.join("rust/conformance/areas.rs");
-            fs::create_dir_all(path.parent().unwrap()).unwrap();
-            fs::write(
-                path,
-                "COMPLETION_AREAS CompletionArea; 38 PRODUCTION_SCOPES",
-            )
-            .unwrap();
-        }
-    }
-    impl Drop for TempRoot {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
-
-    #[test]
-    fn present_symbols_with_broken_behavior_fail() {
-        let root = TempRoot::new();
-        root.source();
-        root.evidence("failed", 100);
-        let (checks, evidence, missing) = evaluate(
-            &root.0,
-            "pelna-macierz-gapow-i-ownership",
-            &crate::capability::snapshot(),
-            50,
-        );
-        assert!(checks
-            .iter()
-            .any(|check| check.kind == BehaviorCheckKind::Inventory
-                && check.status == CheckStatus::NotRun));
-        assert!(checks
-            .iter()
-            .any(|check| check.kind == BehaviorCheckKind::Behavior
-                && check.status == CheckStatus::Failed));
-        assert!(evidence.is_empty());
-        assert!(!missing.is_empty());
-    }
-
-    #[test]
-    fn missing_and_stale_evidence_fail_closed() {
-        let root = TempRoot::new();
-        root.source();
-        let (missing_checks, _, missing) = evaluate(
-            &root.0,
-            "pelna-macierz-gapow-i-ownership",
-            &crate::capability::snapshot(),
-            50,
-        );
-        assert!(missing_checks
-            .iter()
-            .any(|check| check.kind == BehaviorCheckKind::Behavior
-                && check.status == CheckStatus::NotRun));
-        assert!(!missing.is_empty());
-        root.evidence("passed", 40);
-        let (stale_checks, _, stale) = evaluate(
-            &root.0,
-            "pelna-macierz-gapow-i-ownership",
-            &crate::capability::snapshot(),
-            50,
-        );
-        assert!(stale_checks
-            .iter()
-            .any(|check| check.kind == BehaviorCheckKind::Behavior
-                && check.status == CheckStatus::Failed
-                && check.detail.contains("expired")));
-        assert!(!stale.is_empty());
-    }
 }

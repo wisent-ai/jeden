@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "store": "plugin-lock",
-  "fixture": "n-1",
-  "payload": {
-    "preserved": true
-  }
-}

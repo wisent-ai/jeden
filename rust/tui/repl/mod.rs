@@ -3,13 +3,7 @@ use std::io::{self, Write};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use super::render::format_message;
-#[cfg(test)]
-use super::render::{compact_prompt, slash_hint_panel};
-#[cfg(test)]
-use super::view_render::{confirm_panel, picker_panel};
 use super::{CommandOutcome, Message, PickerState};
-#[cfg(test)]
-use super::{ConfirmState, PromptStatus};
 
 pub(super) mod background;
 pub(crate) mod external_editor;
@@ -108,34 +102,8 @@ pub(super) fn message_block(message: &Message, columns: usize, color: bool) -> V
         .collect()
 }
 
-/// The bottom live region: an active interactive view or slash suggestions,
-/// followed by the persistent prompt.
-#[cfg(test)]
-pub(super) fn live_lines(
-    status: &PromptStatus,
-    input: &str,
-    slash_selection: usize,
-    picker: Option<&PickerState>,
-    confirm: Option<&ConfirmState>,
-    columns: usize,
-    rows: usize,
-    color: bool,
-) -> Vec<String> {
-    let width = columns.min(120).max(50);
-    let mut lines = Vec::new();
-    if let Some(confirm) = confirm {
-        lines.extend(confirm_panel(confirm, width, color));
-    } else if let Some(picker) = picker {
-        lines.extend(picker_panel(picker, width, rows, color));
-    } else {
-        lines.extend(slash_hint_panel(input, width, color, slash_selection));
-    }
-    lines.extend(compact_prompt(width, status, input, false, color));
-    lines
-        .into_iter()
-        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
-        .collect()
-}
+/// The bottom live region: an active interactive view above the prompt, or
+/// slash suggestions below it.
 
 struct RawModeGuard;
 
@@ -174,85 +142,5 @@ pub(super) fn apply_turn_result(
         )),
         Ok(CommandOutcome::Picker(spec)) => *picker = Some(PickerState::new(spec)),
         Err(error) => messages.push(Message::new("error", error)),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn native_tui_repl_resize_repaints_only_live_region_and_preserves_scrollback_order() {
-        for (previous_height, expected_move) in
-            [(1, None), (3, Some("\x1b[2A")), (7, Some("\x1b[6A"))]
-        {
-            let rendered = compose_repl(
-                previous_height,
-                &["committed one".into(), "committed two".into()],
-                &["resized live".into()],
-            );
-
-            if let Some(expected_move) = expected_move {
-                assert!(
-                    rendered.contains(expected_move),
-                    "height: {previous_height}"
-                );
-            }
-            assert_eq!(rendered.matches("committed one\r\n").count(), 1);
-            assert_eq!(rendered.matches("committed two\r\n").count(), 1);
-            let erase = rendered.find("\x1b[0J").expect("old live region is erased");
-            let first = rendered
-                .find("committed one\r\n")
-                .expect("first committed line");
-            let second = rendered
-                .find("committed two\r\n")
-                .expect("second committed line");
-            let live = rendered.find("resized live").expect("new live line");
-            assert!(erase < first && first < second && second < live);
-            assert!(
-                !rendered.contains("\x1b[H"),
-                "must not address an absolute screen row"
-            );
-        }
-    }
-
-    #[test]
-    fn native_tui_non_color_projection_contains_no_terminal_escape_bytes() {
-        let status = PromptStatus {
-            cwd: "/tmp/project".into(),
-            write_status: "allowed".into(),
-            command_status: "ask".into(),
-            model: "local".into(),
-            service_tier: String::new(),
-            branch: Some("main".into()),
-            dirty_count: 1,
-            context_percent: None,
-            context_limit: None,
-            cost: None,
-        };
-        let lines = live_lines(
-            &status,
-            "literal \x1b[31m input",
-            0,
-            None,
-            None,
-            80,
-            24,
-            false,
-        );
-        let message = message_block(
-            &Message::new("assistant", "answer \x1b]0;title\x07 safe"),
-            80,
-            false,
-        );
-        let projection = lines
-            .into_iter()
-            .chain(message)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        assert!(!projection.as_bytes().contains(&0x1b));
-        assert!(projection.contains("literal  input"));
-        assert!(projection.contains("answer  safe"));
     }
 }

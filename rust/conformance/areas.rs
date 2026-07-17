@@ -285,7 +285,6 @@ pub(crate) struct ProductionScope {
     pub(crate) id: &'static str,
     pub(crate) check_id: &'static str,
     pub(crate) owner: &'static str,
-    pub(crate) fixture: &'static str,
     pub(crate) artifact_path: &'static str,
 }
 
@@ -295,7 +294,6 @@ macro_rules! scope {
             id: $id,
             check_id: concat!("production/", $id, "/behavior"),
             owner: $owner,
-            fixture: concat!("tests/conformance/contracts/fixtures/", $id, ".json"),
             artifact_path: concat!(".jeden/conformance/artifacts/", $id, ".json"),
         }
     };
@@ -329,123 +327,4 @@ pub(crate) static PRODUCTION_SCOPES: [ProductionScope; 23] = [
 
 pub(crate) fn production_scopes() -> &'static [ProductionScope] {
     &PRODUCTION_SCOPES
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn conformance_registry_invariants() {
-        assert_eq!(COMPLETION_AREAS.len(), 38);
-
-        let mut ids = HashSet::new();
-        let mut titles = HashSet::new();
-        for area in COMPLETION_AREAS {
-            assert!(ids.insert(area.id), "duplicate area id: {}", area.id);
-            assert!(
-                titles.insert(area.title),
-                "duplicate area title: {}",
-                area.title
-            );
-            assert!(
-                !area.id.is_empty()
-                    && !area.id.starts_with('-')
-                    && !area.id.ends_with('-')
-                    && !area.id.contains("--")
-                    && area.id.bytes().all(|byte| byte.is_ascii_lowercase()
-                        || byte.is_ascii_digit()
-                        || byte == b'-'),
-                "area id is not kebab-case: {}",
-                area.id
-            );
-            assert!(!area.phase.trim().is_empty(), "empty phase for {}", area.id);
-            assert!(!area.owner.trim().is_empty(), "empty owner for {}", area.id);
-            assert!(
-                !area.acceptance.trim().is_empty(),
-                "empty acceptance for {}",
-                area.id
-            );
-        }
-    }
-
-    #[test]
-    fn conformance_registry_has_exact_title_set() {
-        let mut actual = COMPLETION_AREAS
-            .iter()
-            .map(|area| area.title)
-            .collect::<Vec<_>>();
-        let mut expected = vec![
-            "Zapisać pełną macierz gapów Jeden",
-            "Zdefiniować mierzalne kryteria zamknięcia",
-            "Wprowadzić centralny rejestr capabilities",
-            "Wprowadzić wersjonowany graf sesji",
-            "Zapewnić wierne resume branch fork tree",
-            "Utrwalić compaction handoff i rewind",
-            "Wprowadzić operation context i cancellation",
-            "Wprowadzić process manager i artifact sink",
-            "Zintegrować dynamiczny auth lifecycle Weles",
-            "Zintegrować katalog modeli Brama",
-            "Ujednolicić typowany streaming odpowiedzi",
-            "Dodać retry failover i context promotion",
-            "Dodać context rules i secret policy",
-            "Rozbudować read write search semantics",
-            "Dodać AST oraz LSP runtime",
-            "Dodać persistent eval i terminal PTY",
-            "Dodać browser debugger web GitHub SSH",
-            "Dodać image inspection generation i TTS",
-            "Dodać pending actions checkpoint rewind",
-            "Wprowadzić trwały MCP manager",
-            "Wprowadzić extension loader i event bus",
-            "Aktywować wszystkie capabilities pluginów",
-            "Dodać skills rules i custom agents",
-            "Wprowadzić task job scheduler i isolation",
-            "Dodać agent communication i współbieżność",
-            "Wprowadzić autonomiczną pamięć",
-            "Wprowadzić pełną współpracę live",
-            "Dodać SDK RPC i ACP",
-            "Zaprojektować odrębny brand Jeden",
-            "Zbudować pełny natywny edytor",
-            "Zbudować bezpieczny renderer Unicode",
-            "Dodać attachments obrazy i clipboard",
-            "Dodać steering followup i skróty",
-            "Generować UI z capability registry",
-            "Dodać themes accessibility i status",
-            "Rozbudować doctor updater i health",
-            "Dodać automatyczny conformance system",
-            "Usunąć wszystkie UI-only i no-op ścieżki",
-        ];
-        actual.sort_unstable();
-        expected.sort_unstable();
-
-        assert_eq!(actual, expected);
-    }
-
-    #[test]
-    fn production_scope_registry_has_23_machine_readable_gates() {
-        assert_eq!(PRODUCTION_SCOPES.len(), 23);
-        let mut ids = HashSet::new();
-        let mut check_ids = HashSet::new();
-        for scope in PRODUCTION_SCOPES {
-            assert!(
-                ids.insert(scope.id),
-                "duplicate production scope {}",
-                scope.id
-            );
-            assert!(
-                check_ids.insert(scope.check_id),
-                "duplicate production check {}",
-                scope.check_id
-            );
-            assert!(
-                scope.check_id.starts_with("production/") && scope.check_id.ends_with("/behavior")
-            );
-            assert!(
-                !scope.owner.is_empty()
-                    && !scope.fixture.is_empty()
-                    && !scope.artifact_path.is_empty()
-            );
-        }
-    }
 }

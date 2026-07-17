@@ -268,10 +268,6 @@ impl BrowserService {
         }
         bounded_json(context, "browser", &response)
     }
-    #[cfg(all(test, unix))]
-    pub(crate) fn session_id_for_test(&self, key: &str) -> String {
-        self.session(&json!({"session": key}))
-    }
 }
 
 impl Drop for BrowserService {

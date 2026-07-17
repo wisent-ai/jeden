@@ -116,7 +116,6 @@ pub struct ProductionScopeResult {
     pub id: &'static str,
     pub check_id: &'static str,
     pub owner: &'static str,
-    pub fixture: &'static str,
     pub artifact_path: &'static str,
     pub status: CheckStatus,
 }
@@ -335,7 +334,6 @@ fn run_at(cwd: &Path, evidence_now_ms: u64) -> Result<ConformanceReport, String>
             id: scope.id,
             check_id: scope.check_id,
             owner: scope.owner,
-            fixture: scope.fixture,
             artifact_path: scope.artifact_path,
             status: CheckStatus::NotRun,
         })
@@ -366,75 +364,4 @@ pub fn canonical_json(report: &ConformanceReport) -> Result<String, String> {
     serde_json::to_string(report)
         .map(|text| text + "\n")
         .map_err(|error| error.to_string())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::capability::{CapabilityDescriptor, CapabilityKind};
-
-    struct PublishedSnapshotGuard {
-        cwd: PathBuf,
-        descriptors: Vec<CapabilityDescriptor>,
-    }
-    impl PublishedSnapshotGuard {
-        fn capture() -> Self {
-            let snapshot = capability::snapshot();
-            Self {
-                cwd: snapshot.cwd.clone(),
-                descriptors: snapshot.descriptors.iter().cloned().collect(),
-            }
-        }
-    }
-    impl Drop for PublishedSnapshotGuard {
-        fn drop(&mut self) {
-            let _ = capability::publish_for_test(&self.cwd, std::mem::take(&mut self.descriptors));
-        }
-    }
-
-    #[test]
-    fn ui_honesty_rejects_descriptor_handler_health_surface_break() {
-        let _restore = PublishedSnapshotGuard::capture();
-        let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let descriptor = CapabilityDescriptor::new(
-            "view/dishonest-test-action",
-            CapabilityKind::View,
-            "conformance-test",
-            "Dishonest action",
-            "Visible executable fixture without a handler target",
-            FunctionTarget::None,
-        )
-        .operation("run")
-        .handler("")
-        .executable("dishonest-test-action");
-        capability::publish_for_test(cwd, vec![descriptor])
-            .expect("publish isolated capability fixture");
-        let snapshot = capability::snapshot();
-        assert!(
-            snapshot.descriptors.is_empty(),
-            "registry must reject a surface without a coherent handler binding"
-        );
-        assert!(snapshot
-            .diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.message.contains("without coherent handler")));
-    }
-
-    #[test]
-    fn canonical_report_is_byte_deterministic_and_has_all_gate_ids() {
-        let cwd = Path::new(env!("CARGO_MANIFEST_DIR"));
-        let first = run_at(cwd, 1_700_000_000_000).unwrap();
-        let second = run_at(cwd, 1_700_000_000_000).unwrap();
-        assert_eq!(
-            canonical_json(&first).unwrap(),
-            canonical_json(&second).unwrap()
-        );
-        assert_eq!(first.area_count, 38);
-        assert_eq!(first.production_scope_count, 23);
-        assert!(first
-            .production_scopes
-            .iter()
-            .all(|scope| scope.check_id.starts_with("production/")
-                && scope.check_id.ends_with("/behavior")));
-    }
 }

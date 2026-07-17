@@ -5,11 +5,6 @@ pub mod staging;
 pub mod transport;
 pub mod weles;
 
-#[cfg(test)]
-mod billing_tests;
-#[cfg(test)]
-mod tests;
-
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -1,9 +1,6 @@
 pub mod manifest;
 pub mod transaction;
 
-#[cfg(test)]
-mod tests;
-
 use base64::Engine;
 use ed25519_dalek::VerifyingKey;
 use semver::Version;

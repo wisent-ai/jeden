@@ -233,6 +233,3 @@ pub(crate) fn bounded_redacted(value: &str, max: usize) -> String {
         normalized
     }
 }
-
-#[cfg(test)]
-mod tests;

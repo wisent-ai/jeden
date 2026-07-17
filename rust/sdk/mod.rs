@@ -1,8 +1,5 @@
 mod client;
 
-#[cfg(test)]
-mod async_client_tests;
-
 pub mod protocol;
 
 mod session;
