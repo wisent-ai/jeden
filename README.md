@@ -89,8 +89,13 @@ Statuses are explicit: `backlog`, `planned`, `in_progress`, `implemented`, `not_
 jeden roadmap list --status planned --priority P1 --json --cwd .
 jeden roadmap show JED-024 --json --cwd .
 jeden roadmap graph --json --cwd .
-jeden roadmap add "<title>" --area agent-quality --priority P1 \
+jeden roadmap add --title "<title>" --area agent-quality --priority P1 \
   --summary "<summary>" --acceptance "<observable criterion>" \
+  --revision "$REVISION" --cwd .
+jeden roadmap implemented "$ITEM_ID" --revision "$REVISION" --cwd .
+jeden roadmap block "$ITEM_ID" "Waiting for an external prerequisite" \
+  --revision "$REVISION" --cwd .
+jeden roadmap pass "$ITEM_ID" --evidence "artifact://$ARTIFACT_NAME" \
   --revision "$REVISION" --cwd .
 jeden roadmap depends "$ITEM_ID" "$DEPENDENCY_ID" --revision "$REVISION" --cwd .
 jeden roadmap acceptance evidence "$ITEM_ID" "$ACCEPTANCE_ID" \
@@ -100,7 +105,7 @@ jeden roadmap check --json --cwd .
 jeden roadmap render --cwd .
 ```
 
-The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command. `roadmap work <id>` sets the active goal and plan, creates todos from the item’s acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
+The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command containing the required title, area, priority, summary, and acceptance fields. Optional dependencies and external prerequisites use repeated `--depends-on` and `--external-prerequisite` flags. `roadmap work <id>` sets the active goal and plan, creates todos from the item’s acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
 
 Required environment for real model calls:
 

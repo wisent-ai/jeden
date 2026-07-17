@@ -860,10 +860,20 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             }
         }
         "add" => {
-            let title = options.positionals.join(" ");
+            let positional_title = options.positionals.join(" ");
+            if options.one("title").is_some() && !positional_title.trim().is_empty() {
+                return Err(RoadmapError::Usage(
+                    "roadmap add accepts the title either positionally or through --title, not both"
+                        .into(),
+                ));
+            }
+            let title = options
+                .one("title")
+                .map(str::to_string)
+                .unwrap_or(positional_title);
             if title.trim().is_empty() {
                 return Err(RoadmapError::Usage(
-                    "Usage: roadmap add <title> --area <area> --priority <P0|P1|P2|P3> --summary <text> --acceptance <text> [--revision <n>]".into(),
+                    "Usage: roadmap add <title> | --title <title> --area <area> --priority <P0|P1|P2|P3> --summary <text> --acceptance <text> [--revision <n>]".into(),
                 ));
             }
             let revision = expected_revision(&store, &options)?;
@@ -958,6 +968,13 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             false,
             json_output,
         ),
+        "implemented" => mutate_status(
+            &store,
+            &options,
+            RoadmapStatus::Implemented,
+            false,
+            json_output,
+        ),
         "block" => mutate_status(
             &store,
             &options,
@@ -982,7 +999,7 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 .get(1)
                 .ok_or_else(|| RoadmapError::Usage("Usage: roadmap status <id> <status>".into()))?
                 .parse()?;
-            mutate_status_explicit(&store, &options, id, status, false, json_output)
+            mutate_status_explicit(&store, &options, id, status, false, 2, json_output)
         }
         "depends" | "undepends" => {
             let id = options.positionals.first().ok_or_else(|| {
@@ -1067,7 +1084,7 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
         }
         "work" => work_command(&store, &options, json_output),
         other => Err(RoadmapError::Usage(format!(
-            "unknown roadmap command: {other}; expected list|show|add|drop|start|block|pass|status|depends|undepends|graph|acceptance|check|render|work"
+            "unknown roadmap command: {other}; expected list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|render|work"
         ))),
     }
 }
@@ -1083,7 +1100,15 @@ fn mutate_status(
         .positionals
         .first()
         .ok_or_else(|| RoadmapError::Usage(format!("Usage: roadmap {} <id>", status.as_str())))?;
-    mutate_status_explicit(store, options, id, status, reject_dependents, json_output)
+    mutate_status_explicit(
+        store,
+        options,
+        id,
+        status,
+        reject_dependents,
+        1,
+        json_output,
+    )
 }
 
 fn mutate_status_explicit(
@@ -1092,10 +1117,32 @@ fn mutate_status_explicit(
     id: &str,
     status: RoadmapStatus,
     reject_dependents: bool,
+    reason_start: usize,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
     let revision = expected_revision(store, options)?;
-    let reason = options.one("reason").map(str::to_string);
+    let positional_reason = options
+        .positionals
+        .get(reason_start..)
+        .unwrap_or_default()
+        .join(" ");
+    let reason = options.one("reason").map(str::to_string).or_else(|| {
+        (!positional_reason.trim().is_empty()).then(|| positional_reason.trim().to_string())
+    });
+    let mut prerequisites = options.many("external-prerequisite");
+    if status == RoadmapStatus::ExternalBlocked && prerequisites.is_empty() {
+        if let Some(reason) = reason.as_ref() {
+            prerequisites.push(reason.clone());
+        }
+    }
+    if status == RoadmapStatus::ExternalBlocked && prerequisites.is_empty() {
+        return Err(RoadmapError::Usage(
+            "roadmap block requires a reason or --external-prerequisite".into(),
+        ));
+    }
+    let evidence_uris = options.many("evidence");
+    let evidence_added_at = now();
+    let evidence_added_by = actor();
     let event_type = if status == RoadmapStatus::Passed {
         "roadmap_item_passed"
     } else if status == RoadmapStatus::ExternalBlocked {
@@ -1108,7 +1155,13 @@ fn mutate_status_explicit(
     let roadmap = store.mutate(
         revision,
         event_type,
-        json!({"itemId": id, "status": status, "reason": reason}),
+        json!({
+            "itemId": id,
+            "status": status.as_str(),
+            "reason": reason.clone(),
+            "externalPrerequisites": prerequisites.clone(),
+            "evidence": evidence_uris.clone()
+        }),
         |roadmap| {
             if reject_dependents {
                 let dependents = roadmap
@@ -1131,6 +1184,19 @@ fn mutate_status_explicit(
             let item = find_item_mut(roadmap, id)?;
             item.status = status;
             item.reason = reason;
+            for prerequisite in prerequisites {
+                if !item.external_prerequisites.contains(&prerequisite) {
+                    item.external_prerequisites.push(prerequisite);
+                }
+            }
+            for uri in evidence_uris {
+                item.evidence.push(EvidenceLink {
+                    uri,
+                    acceptance_id: None,
+                    added_at: evidence_added_at.clone(),
+                    added_by: evidence_added_by.clone(),
+                });
+            }
             Ok(())
         },
     )?;
@@ -1435,10 +1501,13 @@ pub fn split_command_line(input: &str) -> Result<Vec<String>, RoadmapError> {
 
 pub fn picker(cwd: &Path) -> Result<PickerSpec, RoadmapError> {
     let roadmap = RoadmapStore::new(cwd).load()?;
-    let mut items = vec![PickerItem::action("Add roadmap item", "/roadmap add ")
-        .detail("Prefill an editable roadmap add command")
-        .badge("ADD")
-        .prefill()];
+    let mut items = vec![PickerItem::action(
+        "Add roadmap item",
+        "/roadmap add --title \"\" --area general --priority P2 --summary \"\" --acceptance \"\"",
+    )
+    .detail("Prefill the required title, area, priority, summary, and acceptance fields")
+    .badge("ADD")
+    .prefill()];
     items.extend(roadmap.items.into_iter().map(|item| {
         PickerItem::action(
             format!("{}  {}", item.id, item.title),
