@@ -1,3 +1,4 @@
+use crate::control_plane::billing::QuotaState;
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -14,8 +15,9 @@ pub struct SubscriptionTarget {
     pub subscription_id: String,
     pub quota_bucket: String,
     pub priority: u32,
-    pub remaining: u64,
-    pub limit: u64,
+    pub quota_state: QuotaState,
+    pub remaining: Option<u64>,
+    pub limit: Option<u64>,
     #[serde(default)]
     pub capabilities: BTreeSet<String>,
     pub active: bool,
@@ -38,11 +40,19 @@ impl SubscriptionTarget {
             quota_bucket: self.quota_bucket.clone(),
         }
     }
-    fn remaining_ratio(&self) -> f64 {
-        if self.limit == 0 {
-            0.0
-        } else {
-            self.remaining as f64 / self.limit as f64
+    fn quota_rank(&self) -> u8 {
+        match self.quota_state {
+            QuotaState::Exhausted => 0,
+            QuotaState::Unknown => 1,
+            QuotaState::Available => 2,
+            QuotaState::Unmetered => 3,
+        }
+    }
+
+    fn remaining_ratio(&self) -> Option<f64> {
+        match (self.remaining, self.limit) {
+            (Some(remaining), Some(limit)) if limit > 0 => Some(remaining as f64 / limit as f64),
+            _ => None,
         }
     }
 }
@@ -113,7 +123,12 @@ impl SubscriptionPoolSnapshot {
             SubscriptionEligibility::PolicyExcluded
         } else if !target.capabilities.is_superset(required) {
             SubscriptionEligibility::CapabilityExcluded
-        } else if target.limit == 0 || target.remaining == 0 {
+        } else if target.quota_state == QuotaState::Exhausted
+            || matches!(
+                (target.remaining, target.limit),
+                (Some(0), _) | (_, Some(0))
+            )
+        {
             SubscriptionEligibility::QuotaExhausted
         } else if cooling_down {
             SubscriptionEligibility::CoolingDown
@@ -148,6 +163,7 @@ impl SubscriptionPoolSnapshot {
         targets.sort_by(|left, right| {
             left.priority
                 .cmp(&right.priority)
+                .then_with(|| right.quota_rank().cmp(&left.quota_rank()))
                 .then_with(|| {
                     right
                         .remaining_ratio()

@@ -2,6 +2,9 @@ use std::env;
 use std::io::{self, Write};
 use std::path::Path;
 
+use crate::control_plane::billing::{QuotaBucket, QuotaState};
+use crate::control_plane::contract::{RequestMeta, WelesApiV2};
+
 use crate::control_plane::weles::{InteractionBridge, OperationEvent, WelesClient};
 use crate::load_config;
 use crate::tui::{PickerItem, PickerSpec};
@@ -64,18 +67,75 @@ pub(crate) fn format_auth_status(cwd: &Path) -> String {
         match client.accounts(None) {
             Ok(accounts) if accounts.is_empty() => lines.push("Accounts: none".into()),
             Ok(accounts) => {
-                lines.push("Accounts:".into());
-                lines.extend(accounts.into_iter().map(|account| {
-                    format!(
+                lines.push("Accounts and subscriptions:".into());
+                for (account_index, account) in accounts.into_iter().enumerate() {
+                    lines.push(format!(
                         "  {} ({}) — {}",
                         account.display_name, account.provider, account.status
-                    )
-                }));
+                    ));
+                    let correlation = format!("auth-status-{account_index}");
+                    match client.subscriptions(
+                        &account.id,
+                        &RequestMeta::read_v2(format!("{correlation}-subscriptions")),
+                    ) {
+                        Ok(subscriptions) if subscriptions.is_empty() => {
+                            lines.push("    subscriptions: none".into());
+                        }
+                        Ok(subscriptions) => {
+                            for (subscription_index, subscription) in
+                                subscriptions.into_iter().enumerate()
+                            {
+                                lines.push(format!(
+                                    "    {} — {}",
+                                    subscription.product_id,
+                                    format!("{:?}", subscription.status).to_ascii_lowercase()
+                                ));
+                                match client.quota(
+                                    &subscription.id,
+                                    &RequestMeta::read_v2(format!(
+                                        "{correlation}-quota-{subscription_index}"
+                                    )),
+                                ) {
+                                    Ok(quota) if quota.buckets.is_empty() => {
+                                        lines.push("      quota: not reported".into());
+                                    }
+                                    Ok(quota) => lines.extend(
+                                        quota
+                                            .buckets
+                                            .iter()
+                                            .map(|bucket| format!("      {}", quota_line(bucket))),
+                                    ),
+                                    Err(error) => {
+                                        lines.push(format!("      quota unavailable: {error}"));
+                                    }
+                                }
+                            }
+                        }
+                        Err(error) => {
+                            lines.push(format!("    subscription discovery failed: {error}"));
+                        }
+                    }
+                }
             }
             Err(error) => lines.push(format!("Account discovery failed: {error}")),
         }
     }
     lines.join("\n")
+}
+
+fn quota_line(bucket: &QuotaBucket) -> String {
+    let amount = match (bucket.remaining, bucket.limit) {
+        (Some(remaining), Some(limit)) => format!("{remaining}/{limit} remaining"),
+        (Some(remaining), None) => format!("{remaining} remaining"),
+        (None, Some(limit)) => format!("limit {limit}"),
+        (None, None) if bucket.state == QuotaState::Unmetered => "unmetered".into(),
+        (None, None) => "amount not reported".into(),
+    };
+    format!(
+        "{}: {} ({amount})",
+        bucket.bucket_id,
+        format!("{:?}", bucket.state).to_ascii_lowercase()
+    )
 }
 
 pub(crate) fn provider_picker(cwd: &Path) -> Result<PickerSpec, String> {

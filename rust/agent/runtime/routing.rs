@@ -154,18 +154,31 @@ fn subscription_pool_from_weles() -> Result<Option<SubscriptionPoolSnapshot>, St
             ) else {
                 continue;
             };
-            let limiting_bucket =
-                quota
-                    .buckets
-                    .into_iter()
-                    .min_by(|left, right| match (left.limit, right.limit) {
-                        (0, 0) => left.bucket_id.cmp(&right.bucket_id),
-                        (0, _) => std::cmp::Ordering::Less,
-                        (_, 0) => std::cmp::Ordering::Greater,
-                        _ => (u128::from(left.remaining) * u128::from(right.limit))
-                            .cmp(&(u128::from(right.remaining) * u128::from(left.limit)))
-                            .then_with(|| left.bucket_id.cmp(&right.bucket_id)),
-                    });
+            let limiting_bucket = quota.buckets.into_iter().min_by(|left, right| {
+                let rank = |bucket: &crate::control_plane::billing::QuotaBucket| {
+                    use crate::control_plane::billing::QuotaState;
+                    match bucket.state {
+                        QuotaState::Exhausted => 0_u8,
+                        QuotaState::Unknown => 1,
+                        QuotaState::Available => 2,
+                        QuotaState::Unmetered => 3,
+                    }
+                };
+                rank(left).cmp(&rank(right)).then_with(|| {
+                    match (
+                        left.remaining.zip(left.limit),
+                        right.remaining.zip(right.limit),
+                    ) {
+                        (
+                            Some((left_remaining, left_limit)),
+                            Some((right_remaining, right_limit)),
+                        ) if left_limit > 0 && right_limit > 0 => (u128::from(left_remaining)
+                            * u128::from(right_limit))
+                        .cmp(&(u128::from(right_remaining) * u128::from(left_limit))),
+                        _ => left.bucket_id.cmp(&right.bucket_id),
+                    }
+                })
+            });
             let Some(bucket) = limiting_bucket else {
                 continue;
             };
@@ -176,6 +189,7 @@ fn subscription_pool_from_weles() -> Result<Option<SubscriptionPoolSnapshot>, St
                 subscription_id: subscription.id,
                 quota_bucket: bucket.bucket_id,
                 priority: 0,
+                quota_state: bucket.state,
                 remaining: bucket.remaining,
                 limit: bucket.limit,
                 capabilities: ["chat".to_string()].into_iter().collect(),

@@ -199,8 +199,9 @@ impl SubscriptionSummary {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QuotaSummary {
     pub(crate) bucket_id: String,
-    pub(crate) limit: u64,
-    pub(crate) remaining: u64,
+    pub(crate) state: crate::control_plane::billing::QuotaState,
+    pub(crate) limit: Option<u64>,
+    pub(crate) remaining: Option<u64>,
     pub(crate) resets_at_ms: Option<u64>,
 }
 
@@ -646,7 +647,10 @@ pub(crate) fn execute_billing_command(
             if json_output {
                 json(&status)
             } else {
-                Ok(format!("Subscription {} · account={} · provider={} · product={} · status={} · quota-revision={}\n{}", status.subscription.id, status.subscription.account_id, status.subscription.provider_id, status.subscription.product_id, status.subscription.status, status.quota_revision, status.quota.into_iter().map(|bucket| format!("  {}: {}/{} remaining\n", bucket.bucket_id, bucket.remaining, bucket.limit)).collect::<String>()))
+                Ok(format!("Subscription {} · account={} · provider={} · product={} · status={} · quota-revision={}\n{}", status.subscription.id, status.subscription.account_id, status.subscription.provider_id, status.subscription.product_id, status.subscription.status, status.quota_revision, status.quota.into_iter().map(|bucket| match (bucket.remaining, bucket.limit) {
+                    (Some(remaining), Some(limit)) => format!("  {}: {remaining}/{limit} remaining ({:?})\n", bucket.bucket_id, bucket.state),
+                    _ => format!("  {}: {:?}\n", bucket.bucket_id, bucket.state),
+                }).collect::<String>()))
             }
         }
         BillingCommand::SubscriptionDisable {
@@ -909,6 +913,7 @@ impl BillingBackend for WelesBillingBackend {
                 .into_iter()
                 .map(|bucket| QuotaSummary {
                     bucket_id: bucket.bucket_id,
+                    state: bucket.state,
                     limit: bucket.limit,
                     remaining: bucket.remaining,
                     resets_at_ms: bucket.resets_at_ms,

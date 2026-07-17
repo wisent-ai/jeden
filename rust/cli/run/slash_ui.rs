@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use crate::cli::auth::provider_picker;
+use crate::cli::auth::{format_auth_status, provider_picker};
 use crate::cli::config::{load_config, schema::settings_picker};
 use crate::slash::{self, SlashContext};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
@@ -97,8 +97,11 @@ pub(crate) fn interactive_view(
         }
     }
     match command {
-        "/login" | "/setup" | "/providers" => {
-            return Some(provider_picker(cwd).map(CommandOutcome::Picker))
+        "/login" => {
+            return Some(Ok(CommandOutcome::Text(format_auth_status(cwd))));
+        }
+        "/setup" | "/providers" => {
+            return Some(provider_picker(cwd).map(CommandOutcome::Picker));
         }
         "/logout" => return Some(logout_picker().map(CommandOutcome::Picker)),
         "/model" | "/models" | "/switch" => {

@@ -145,12 +145,26 @@ pub struct SubscriptionV2 {
     pub payment_method_reference: Option<PaymentMethodReference>,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum QuotaState {
+    Available,
+    Exhausted,
+    #[default]
+    Unknown,
+    Unmetered,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct QuotaBucket {
     pub bucket_id: String,
-    pub limit: u64,
-    pub remaining: u64,
+    #[serde(default)]
+    pub state: QuotaState,
+    #[serde(default)]
+    pub limit: Option<u64>,
+    #[serde(default)]
+    pub remaining: Option<u64>,
     #[serde(default)]
     pub resets_at_ms: Option<u64>,
 }

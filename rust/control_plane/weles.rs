@@ -1076,10 +1076,12 @@ impl super::contract::WelesApiV2 for WelesClient {
         )?;
         if quota.subscription_id != subscription_id
             || quota.buckets.len() > super::billing::MAX_BILLING_ITEMS
-            || quota
-                .buckets
-                .iter()
-                .any(|bucket| bucket.remaining > bucket.limit)
+            || quota.buckets.iter().any(|bucket| {
+                matches!(
+                    (bucket.remaining, bucket.limit),
+                    (Some(remaining), Some(limit)) if remaining > limit
+                )
+            })
         {
             return Err(WelesError::InvalidResponse(
                 "quota identity, count, or remaining amount is invalid".into(),

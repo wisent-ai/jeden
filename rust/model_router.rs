@@ -451,6 +451,31 @@ fn parse_completion_response(text: &str) -> Result<Completion, String> {
     })
 }
 
+fn subscription_provider_for_model(model: &str) -> Option<&'static str> {
+    match model.trim().to_ascii_lowercase().as_str() {
+        "claude-code-subscription" | "claude-opus-4-7" => Some("claude_code"),
+        "codex-subscription" => Some("codex"),
+        "kimi-subscription" => Some("kimi"),
+        "opencode-subscription" => Some("opencode"),
+        _ => None,
+    }
+}
+
+fn subscription_targets_for_route<'a>(
+    decision: Option<&'a crate::routing::RouteDecisionV2>,
+    model: &str,
+) -> Vec<Option<&'a crate::routing::SubscriptionTarget>> {
+    match (decision, subscription_provider_for_model(model)) {
+        (Some(decision), Some(provider)) => decision
+            .targets
+            .iter()
+            .filter(|target| target.provider_id == provider)
+            .map(Some)
+            .collect(),
+        _ => vec![None],
+    }
+}
+
 /// Streaming chat completion. Requests SSE (`stream: true`); for each content
 /// delta it calls `on_delta`. Falls back to whole-body parsing if the endpoint
 /// ignores `stream` and returns a normal JSON completion. Tool-call responses
@@ -524,13 +549,13 @@ pub fn chat_completion_streaming(
         }
         _ => None,
     };
-    let target_count = subscription_decision
+    let max_target_count = subscription_decision
         .as_ref()
         .map_or(1, |decision| decision.targets.len());
     let mut route_results = Vec::with_capacity(
         routes
             .len()
-            .saturating_mul(target_count)
+            .saturating_mul(max_target_count)
             .saturating_mul(attempts),
     );
     let mut last_error: Option<AttemptError> = None;
@@ -547,10 +572,22 @@ pub fn chat_completion_streaming(
             last_error = Some(AttemptError::permanent(message));
             continue;
         }
-        for target_index in 0..target_count {
-            let target = subscription_decision
-                .as_ref()
-                .and_then(|decision| decision.targets.get(target_index));
+        let route_targets =
+            subscription_targets_for_route(subscription_decision.as_ref(), &route.model);
+        if route_targets.is_empty() {
+            last_error = Some(AttemptError {
+                class: StreamErrorClass::QuotaExhausted,
+                message: format!(
+                    "no eligible subscription target for model '{}'",
+                    route.model
+                ),
+                retry_after: None,
+                visible_output: false,
+            });
+            continue;
+        }
+        for target_index in 0..route_targets.len() {
+            let target = route_targets[target_index];
             if target.is_some_and(|target| exhausted_targets.contains(&target.identity())) {
                 continue;
             }
@@ -570,7 +607,7 @@ pub fn chat_completion_streaming(
                     max_tokens,
                     tools,
                     target,
-                    subscription_decision.as_ref(),
+                    target.and(subscription_decision.as_ref()),
                     on_delta,
                     cancelled,
                 ) {
@@ -580,9 +617,11 @@ pub fn chat_completion_streaming(
                             route: route.clone(),
                             route_results,
                             subscription_target: target.cloned(),
-                            subscription_decision_id: subscription_decision
-                                .as_ref()
-                                .map(|decision| decision.decision_id.clone()),
+                            subscription_decision_id: target.and(
+                                subscription_decision
+                                    .as_ref()
+                                    .map(|decision| decision.decision_id.clone()),
+                            ),
                         });
                     }
                     Err(error) => {
@@ -639,17 +678,15 @@ pub fn chat_completion_streaming(
                     }
                 }
             }
-            if let Some(decision) = subscription_decision.as_ref() {
-                if let (Some(from), Some(to)) = (
-                    decision.targets.get(target_index),
-                    decision.targets.get(target_index + 1),
-                ) {
-                    route_results.push(RouteResult::SubscriptionChanged {
-                        from: from.clone(),
-                        to: to.clone(),
-                        reason: "subscription quota or transient attempts exhausted".into(),
-                    });
-                }
+            if let (Some(from), Some(to)) = (
+                route_targets.get(target_index).copied().flatten(),
+                route_targets.get(target_index + 1).copied().flatten(),
+            ) {
+                route_results.push(RouteResult::SubscriptionChanged {
+                    from: from.clone(),
+                    to: to.clone(),
+                    reason: "subscription quota or transient attempts exhausted".into(),
+                });
             }
         }
         if let Some(next) = routes.get(route_index + 1) {
