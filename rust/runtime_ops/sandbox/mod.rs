@@ -139,7 +139,10 @@ pub(crate) fn test_command(
     test_backend::command(node, read_paths, write_path, allow_command)
 }
 
+
 use crate::tool_runtime::runtime_ops::security::{ExecutionGrant, GrantError, SandboxRequirement};
+use std::ffi::OsStr;
+use std::process::Command;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SandboxState {
@@ -194,4 +197,15 @@ pub fn require_enforced(grant: &ExecutionGrant) -> Result<SandboxHealth, GrantEr
         )));
     }
     Ok(health)
+}
+
+pub fn command(program: &OsStr, grant: &ExecutionGrant) -> Result<Command, GrantError> {
+    if grant.sandbox == SandboxRequirement::Enforced {
+        require_enforced(grant)?;
+        #[cfg(target_os = "macos")]
+        {
+            return macos::command(program, grant).map_err(GrantError::SandboxUnavailable);
+        }
+    }
+    Ok(Command::new(program))
 }

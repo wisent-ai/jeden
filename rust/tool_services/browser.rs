@@ -8,10 +8,71 @@ use crate::tool_runtime::runtime_ops::OperationContext;
 use base64::Engine;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
+}
+
+const EMBEDDED_BRIDGE: &str = include_str!("../../scripts/browser-bridge.mjs");
+
+fn default_chromium(config: &Value) -> Option<String> {
+    config::string(
+        config,
+        &["toolServices", "browser", "chrome"],
+        "JEDEN_CHROME_EXECUTABLE",
+    )
+    .or_else(|| {
+        config::string(
+            config,
+            &["browser", "launch", "executablePath"],
+            "JEDEN_CHROME_EXECUTABLE",
+        )
+    })
+    .or_else(|| {
+        [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            "/Applications/Chromium.app/Contents/MacOS/Chromium",
+            "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+            "google-chrome",
+            "chromium",
+            "chromium-browser",
+        ]
+        .into_iter()
+        .find(|candidate| command_exists(candidate))
+        .map(str::to_owned)
+    })
+}
+
+fn browser_mode(config: &Value) -> String {
+    config::string(config, &["browser", "mode"], "JEDEN_BROWSER_MODE")
+        .filter(|mode| matches!(mode.as_str(), "headless" | "visible"))
+        .unwrap_or_else(|| "headless".into())
+}
+
+fn browser_profile(config: &Value) -> Option<String> {
+    config::string(
+        config,
+        &["browser", "profile", "path"],
+        "JEDEN_BROWSER_PROFILE",
+    )
+}
+
+fn embedded_backend_health(chrome: Option<&str>) -> Result<&str, String> {
+    if !command_exists("node") {
+        return Err("Node.js is required by the embedded Chromium/CDP bridge".into());
+    }
+    chrome
+        .filter(|candidate| command_exists(candidate))
+        .ok_or_else(|| {
+            "no Chromium executable found; set JEDEN_CHROME_EXECUTABLE or browser.launch.executablePath"
+                .into()
+        })
+}
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -30,8 +91,12 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
 
 pub(crate) struct BrowserService {
     bridge: Option<String>,
+    chrome: Option<String>,
+    mode: String,
+    profile: Option<String>,
     cwd: PathBuf,
     sessions: Mutex<BTreeMap<String, String>>,
+    browser_pids: Mutex<BTreeSet<u32>>,
     next_session: AtomicU64,
 }
 
@@ -43,16 +108,32 @@ impl BrowserService {
                 &["toolServices", "browser", "bridge"],
                 "JEDEN_BROWSER_BRIDGE",
             ),
+            chrome: default_chromium(value),
+            mode: browser_mode(value),
+            profile: browser_profile(value),
             cwd: cwd.to_path_buf(),
             sessions: Mutex::new(BTreeMap::new()),
+            browser_pids: Mutex::new(BTreeSet::new()),
             next_session: AtomicU64::new(1),
         }
     }
     pub(crate) fn health(&self) -> HealthDescriptor {
-        match self.bridge.as_deref() {
-            Some(bridge) if command_exists(bridge) => HealthDescriptor::healthy("browser", bridge),
-            Some(bridge) => HealthDescriptor::unavailable("browser", format!("configured bridge {bridge} is not executable")),
-            None => HealthDescriptor::unavailable("browser", "set JEDEN_BROWSER_BRIDGE or toolServices.browser.bridge to a Chromium/CDP JSON bridge"),
+        if let Some(bridge) = self.bridge.as_deref() {
+            return if command_exists(bridge) {
+                HealthDescriptor::healthy("browser", bridge)
+            } else {
+                HealthDescriptor::unavailable(
+                    "browser",
+                    format!("configured bridge {bridge} is not executable"),
+                )
+            };
+        }
+        match embedded_backend_health(self.chrome.as_deref()) {
+            Ok(chrome) => HealthDescriptor::healthy(
+                "browser",
+                format!("embedded-node-cdp ({chrome}, {})", self.mode),
+            ),
+            Err(error) => HealthDescriptor::unavailable("browser", error),
         }
     }
     fn session(&self, input: &Value) -> String {
@@ -86,7 +167,6 @@ impl BrowserService {
                 detail: health.detail,
             });
         }
-        let bridge = self.bridge.as_deref().expect("available browser bridge");
         let action = match tool {
             "browser_tab" => nonempty(input.get("action"), "action")?,
             "browser_action" => nonempty(input.get("action"), "action")?,
@@ -98,13 +178,42 @@ impl BrowserService {
             }
         };
         let session = self.session(input);
-        let request = json!({ "session": session, "action": action, "input": input });
+        let request = json!({ "session": session, "tool": tool, "action": action, "input": input });
+        let mut args = vec!["--session".into(), session.clone()];
+        let program = if let Some(bridge) = self.bridge.as_deref() {
+            bridge
+        } else {
+            args.splice(
+                0..0,
+                [
+                    "--input-type=module".into(),
+                    "--eval".into(),
+                    EMBEDDED_BRIDGE.into(),
+                    "--".into(),
+                ],
+            );
+            args.push("--chrome".into());
+            args.push(
+                self.chrome
+                    .as_ref()
+                    .expect("healthy embedded browser backend")
+                    .clone(),
+            );
+            if self.mode == "visible" {
+                args.push("--visible".into());
+            }
+            if let Some(profile) = &self.profile {
+                args.push("--user-data-dir".into());
+                args.push(profile.clone());
+            }
+            "node"
+        };
         let response = process::run_json(
             "browser",
             context,
             &self.cwd,
-            bridge,
-            &["--session".into(), session.clone()],
+            program,
+            &args,
             Some(
                 serde_json::to_vec(&request).map_err(|e| ServiceError::Protocol {
                     service: "browser",
@@ -113,6 +222,13 @@ impl BrowserService {
             ),
             Duration::from_secs(60),
         )?;
+        if self.bridge.is_none() {
+            if let Some(pid) = response.get("browserPid").and_then(Value::as_u64) {
+                if let Ok(pid) = u32::try_from(pid) {
+                    self.browser_pids.lock().insert(pid);
+                }
+            }
+        }
         if response.get("ok").and_then(Value::as_bool) == Some(false) {
             return Err(ServiceError::Backend {
                 service: "browser",
@@ -156,5 +272,81 @@ impl BrowserService {
     #[cfg(all(test, unix))]
     pub(crate) fn session_id_for_test(&self, key: &str) -> String {
         self.session(&json!({"session": key}))
+    }
+}
+
+impl Drop for BrowserService {
+    fn drop(&mut self) {
+        #[cfg(unix)]
+        for pid in self.browser_pids.get_mut().iter().copied() {
+            unsafe {
+                let _ = kill(pid as i32, 9);
+            }
+        }
+    }
+}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use crate::tool_runtime::runtime_ops::{
+        ArtifactSink, CancellationToken, ExecutionGrant, SandboxRequirement,
+    };
+    use std::fs;
+
+    #[test]
+    fn embedded_backend_opens_and_inspects_a_real_chromium_tab() {
+        let root = std::env::temp_dir().join(format!(
+            "jeden-browser-test-{}-{}",
+            std::process::id(),
+            crate::task_runtime::now_millis()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let service = BrowserService::discover(&root, &json!({}));
+        assert!(service.health().available(), "{:?}", service.health());
+        let mut grant = ExecutionGrant::trusted_host("browser-test", root.clone());
+        grant.sandbox = SandboxRequirement::Enforced;
+        let context = OperationContext::new(
+            CancellationToken::new(),
+            ArtifactSink::new(root.join("artifacts")),
+        )
+        .with_execution_grant(grant);
+        let session = format!("browser-test-{}", std::process::id());
+        let opened = service
+            .execute(
+                "browser_tab",
+                &json!({
+                    "action": "open",
+                    "session": session,
+                    "url": "data:text/html,<title>NativeBrowserOK</title><h1>Browser tool works</h1>"
+                }),
+                &context,
+            )
+            .unwrap();
+        let inspected = service
+            .execute(
+                "browser_action",
+                &json!({"action": "inspect", "session": session}),
+                &context,
+            )
+            .unwrap();
+
+        assert_eq!(
+            inspected.pointer("/value/title").and_then(Value::as_str),
+            Some("NativeBrowserOK")
+        );
+        assert_eq!(
+            inspected.pointer("/value/text").and_then(Value::as_str),
+            Some("Browser tool works")
+        );
+        if let Some(tab) = opened.pointer("/tab/id").and_then(Value::as_str) {
+            let _ = service.execute(
+                "browser_tab",
+                &json!({"action": "close", "session": session, "tab": tab}),
+                &context,
+            );
+        }
+        drop(service);
+        let _ = fs::remove_dir_all(root);
     }
 }

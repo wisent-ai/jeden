@@ -20,6 +20,7 @@ pub(crate) fn run(
     let mut command = ManagedCommand::new(program, cwd);
     command.args = args.iter().map(OsString::from).collect();
     command.stdin = stdin;
+    command.preserve_descendants = service == "browser";
     let result = ProcessManager
         .run(context, command, timeout)
         .map_err(|detail| ServiceError::Backend { service, detail })?;

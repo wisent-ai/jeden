@@ -19,7 +19,9 @@ fn roots(cwd: &Path) -> Result<Vec<PathBuf>, TaskError> {
         user.join("agents"),
         cwd.join(".jeden/agents"),
     ];
-    roots.extend(crate::hooks::extension_agent_dirs(cwd).map_err(TaskError::Invalid)?);
+    if let Ok(extension_roots) = crate::hooks::extension_agent_dirs(cwd) {
+        roots.extend(extension_roots);
+    }
     roots.sort();
     roots.dedup();
     Ok(roots)

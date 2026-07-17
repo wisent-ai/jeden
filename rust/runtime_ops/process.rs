@@ -26,6 +26,7 @@ pub struct ManagedCommand {
     pub cwd: PathBuf,
     pub env: Vec<(OsString, Option<OsString>)>,
     pub stdin: Option<Vec<u8>>,
+    pub preserve_descendants: bool,
     stdio: ManagedStdio,
 }
 
@@ -37,6 +38,7 @@ impl ManagedCommand {
             cwd: cwd.into(),
             env: Vec::new(),
             stdin: None,
+            preserve_descendants: false,
             stdio: ManagedStdio::Captured,
         }
     }
@@ -100,7 +102,8 @@ impl ProcessManager {
         if command.stdio == ManagedStdio::InheritedForeground && !grant.process.inherit_stdio {
             return Err("process inherited stdio denied by execution grant".into());
         }
-        let mut builder = Command::new(&command.program);
+        let mut builder =
+            super::sandbox::command(&command.program, grant).map_err(|error| error.to_string())?;
         builder.env_clear();
         for key in &grant.process.environment {
             if let Some(value) = std::env::var_os(key) {
@@ -159,6 +162,7 @@ impl ProcessManager {
                 return Err(error.to_string());
             }
         };
+        let preserve_descendants = command.preserve_descendants;
         if command.stdio == ManagedStdio::InheritedForeground {
             let deadline = context.effective_deadline(timeout);
             let (_progress_tx, progress_rx) = mpsc::channel();
@@ -168,6 +172,7 @@ impl ProcessManager {
                 deadline,
                 context,
                 &progress_rx,
+                preserve_descendants,
             )?;
             return Ok(ManagedProcessResult {
                 status,
@@ -213,6 +218,7 @@ impl ProcessManager {
                 deadline,
                 context,
                 &progress_rx,
+                preserve_descendants,
             )?;
             let stdin_result = stdin_writer
                 .join()
@@ -281,6 +287,7 @@ fn wait_owned_process(
     deadline: Instant,
     context: &OperationContext<'_>,
     progress: &Receiver<OperationProgress>,
+    preserve_descendants: bool,
 ) -> Result<(ExitStatus, TerminationReason), String> {
     if context.cancellation().is_cancelled() {
         return terminate(child, process_tree, TerminationReason::Cancelled);
@@ -288,7 +295,9 @@ fn wait_owned_process(
     loop {
         drain_progress(context, progress);
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            cleanup_descendants(process_tree);
+            if !preserve_descendants {
+                cleanup_descendants(process_tree);
+            }
             return Ok((status, TerminationReason::Completed));
         }
         if context.cancellation().is_cancelled() {
@@ -448,6 +457,7 @@ const RLIMIT_NOFILE: i32 = 7;
 const RLIMIT_AS: i32 = 9;
 #[cfg(target_os = "macos")]
 const RLIMIT_NOFILE: i32 = 8;
+
 
 #[cfg(all(test, unix))]
 mod tests {

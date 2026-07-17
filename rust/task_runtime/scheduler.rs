@@ -272,15 +272,6 @@ impl TaskScheduler {
         Ok(())
     }
     pub fn spawn(&self, request: SpawnRequest) -> Result<JobRecord, TaskError> {
-        let sandbox = crate::tool_runtime::runtime_ops::SecureRuntime::detect()
-            .health()
-            .clone();
-        if !sandbox.enforced() {
-            return Err(TaskError::Process(format!(
-                "enforced sandbox unavailable: {}: {}",
-                sandbox.backend, sandbox.detail
-            )));
-        }
         if request.task.trim().is_empty() {
             return Err(TaskError::Invalid("task text is required".into()));
         }
@@ -307,7 +298,21 @@ impl TaskScheduler {
         let capture = self.store.join("jobs").join(format!("{id}.patch"));
         let session_path = self.store.join("sessions").join(&id);
         fs::create_dir_all(&session_path)?;
-        let mut command = Command::new(&self.exe);
+        let mut command = super::sandbox::command(
+            &self.exe,
+            &[
+                self.cwd.clone(),
+                isolated.path.clone(),
+                session_path.clone(),
+                self.store.clone(),
+            ],
+            &[
+                isolated.path.clone(),
+                session_path.clone(),
+                self.store.clone(),
+            ],
+        )
+        .map_err(TaskError::Process)?;
         command
             .arg("run")
             .arg(&child_task)
@@ -811,3 +816,55 @@ fn configure_group(command: &mut Command) {
 }
 #[cfg(not(unix))]
 fn configure_group(_command: &mut Command) {}
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn spawned_task_is_confined_to_its_write_roots() {
+        let root = std::env::temp_dir().join(format!(
+            "jeden-task-sandbox-test-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        let cwd = root.join("workspace");
+        let store = root.join("store");
+        fs::create_dir_all(&cwd).unwrap();
+        let denied = root.join("outside-write");
+        let allowed = store.join("inside-write");
+        let executable = cwd.join("fake-jeden");
+        fs::write(
+            &executable,
+            format!(
+                "#!/bin/sh\nif printf escaped > '{}'; then exit 91; fi\nprintf confined > '{}'\nprintf TASK_OK\n",
+                denied.display(),
+                allowed.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut scheduler = TaskScheduler::open(&cwd, &store, TaskLimits::default()).unwrap();
+        scheduler.exe = executable;
+        let spawned = scheduler
+            .spawn(SpawnRequest {
+                task: "sandbox smoke".into(),
+                agent: "default".into(),
+                model: None,
+                max_steps: 1,
+                parent_job: None,
+                isolate: None,
+            })
+            .unwrap();
+        let completed = scheduler
+            .poll(&spawned.id, Duration::from_secs(10))
+            .unwrap();
+
+        assert_eq!(completed.status, JobStatus::Succeeded, "{completed:?}");
+        assert!(!denied.exists(), "sandbox allowed an out-of-root write");
+        assert_eq!(fs::read_to_string(allowed).unwrap(), "confined");
+        fs::remove_dir_all(root).unwrap();
+    }
+}

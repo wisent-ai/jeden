@@ -18,6 +18,10 @@ path = "rust/report/main.rs"
 name = "jeden-reference-benchmark"
 path = "rust/bin/jeden-reference-benchmark.rs"
 
+[[bin]]
+name = "jeden-sandbox-helper"
+path = "rust/bin/jeden-sandbox-helper.rs"
+
 [[test]]
 name = "crash_matrix"
 path = "tests/fault/crash_matrix.rs"

@@ -4,6 +4,7 @@ mod discovery;
 mod mailbox;
 pub mod placement;
 pub mod protocol;
+pub(crate) mod sandbox;
 mod scheduler;
 pub mod store;
 mod types;
@@ -89,12 +90,10 @@ pub fn registered_task_tools() -> Vec<TaskToolDescriptor> {
 }
 
 fn dynamic_descriptors() -> Vec<crate::tool_runtime::DynamicToolDescriptor> {
-    let sandbox = crate::tool_runtime::runtime_ops::SecureRuntime::detect()
-        .health()
-        .clone();
-    if !sandbox.enforced() {
+    let sandbox = sandbox::health();
+    if !sandbox.enforced {
         let detail = format!(
-            "sandbox {} is not enforced: {}",
+            "enforced sandbox unavailable: {}: {}",
             sandbox.backend, sandbox.detail
         );
         return registered_task_tools()
@@ -163,11 +162,12 @@ fn dynamic_execute(
         return Some(Err("task requires --allow-command".into()));
     }
     if tool == "task" {
-        if let Err(error) = crate::tool_runtime::runtime_ops::untrusted_child(
-            &runtime.operation,
-            format!("{}:task", runtime.operation.operation_id()),
-        ) {
-            return Some(Err(error.to_string()));
+        let sandbox = sandbox::health();
+        if !sandbox.enforced {
+            return Some(Err(format!(
+                "enforced sandbox unavailable: {}: {}",
+                sandbox.backend, sandbox.detail
+            )));
         }
     }
     Some(

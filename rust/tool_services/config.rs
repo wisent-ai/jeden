@@ -6,6 +6,9 @@ use std::path::Path;
 
 const SERVICE_ENVS: &[&str] = &[
     "JEDEN_BROWSER_BRIDGE",
+    "JEDEN_BROWSER_MODE",
+    "JEDEN_BROWSER_PROFILE",
+    "JEDEN_CHROME_EXECUTABLE",
     "JEDEN_DAP_ADAPTER",
     "TAVILY_API_KEY",
     "BRAVE_SEARCH_API_KEY",
