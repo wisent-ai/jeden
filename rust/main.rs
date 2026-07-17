@@ -66,6 +66,7 @@ pub(crate) struct Args {
     pub(crate) yolo: bool,
     pub(crate) model_only: bool,
     pub(crate) json: bool,
+    pub(crate) resume_session: Option<PathBuf>,
     pub(crate) positionals: Vec<String>,
 }
 
@@ -119,6 +120,7 @@ fn usage() -> String {
         "  /changelog\n",
         "  /extensions\n",
         "  /reload-plugins\n",
+        "  /rebuild              rebuild Jeden and resume this session\n",
         "  /retry\n",
         "  /btw <question>\n",
         "  /compact [focus]\n",
@@ -193,6 +195,11 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             }
             "--allow-write" => args.allow_write = true,
             "--allow-command" => args.allow_command = true,
+            "--resume-session" => {
+                args.resume_session = Some(PathBuf::from(
+                    rest.next().ok_or("--resume-session requires a path")?,
+                ))
+            }
             "--yolo" | "--auto-approve" => {
                 args.yolo = true;
                 args.allow_write = true;

@@ -1035,6 +1035,11 @@ fn builtin_slash_specs() -> &'static [SlashSpec] {
             aliases: &[],
         },
         SlashSpec {
+            name: "rebuild",
+            description: "Rebuild Jeden and resume this session",
+            aliases: &["self-rebuild"],
+        },
+        SlashSpec {
             name: "update",
             description: "Run automated update",
             aliases: &[],

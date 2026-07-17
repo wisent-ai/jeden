@@ -433,6 +433,7 @@ fn args_from_options(options: &SessionOptions, prompt: String) -> Args {
         yolo: options.auto_approve,
         model_only: false,
         json: false,
+        resume_session: None,
         positionals: vec![prompt],
     }
 }

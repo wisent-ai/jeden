@@ -59,12 +59,16 @@ where
             ask_user: None,
             approve: &|_, _| false,
         };
-        let text = match handler(prompt, &ctx) {
-            Ok(outcome) => outcome.into_text(),
-            Err(error) => format!("BŁĄD\t{error}"),
+        let (text, exit) = match handler(prompt, &ctx) {
+            Ok(CommandOutcome::Exit(text)) => (text, true),
+            Ok(outcome) => (outcome.into_text(), false),
+            Err(error) => (format!("BŁĄD\t{error}"), false),
         };
         stdout.write_all(sanitize_terminal_text(&text).as_bytes())?;
         stdout.write_all(b"\n")?;
+        if exit {
+            break;
+        }
     }
     stdout.flush()
 }
@@ -270,7 +274,7 @@ where
         renderer.flush(&welcome, &live)?;
     }
 
-    loop {
+    'repl: loop {
         if needs_render {
             let status = status_provider();
             let (columns, rows) = terminal_dimensions();
@@ -551,7 +555,10 @@ where
                             enable_raw_mode()?;
                             crossterm::execute!(io::stdout(), EnableBracketedPaste)?;
                             renderer.reset();
-                            apply_turn_result(&mut messages, &active_prompt, result, &mut picker);
+                            if apply_turn_result(&mut messages, &active_prompt, result, &mut picker)
+                            {
+                                break 'repl;
+                            }
                         }
                         TurnKind::Background => {
                             let steering_available = runtime
@@ -576,7 +583,10 @@ where
                                     format!("tools: {}", tools_used.join(", ")),
                                 ));
                             }
-                            apply_turn_result(&mut messages, &active_prompt, result, &mut picker);
+                            if apply_turn_result(&mut messages, &active_prompt, result, &mut picker)
+                            {
+                                break 'repl;
+                            }
                         }
                     }
 
@@ -604,8 +614,14 @@ where
         }
     }
 
+    let (columns, _) = terminal_dimensions();
+    let color = stdout_supports_color();
+    let mut final_blocks = Vec::new();
+    for message in &messages[committed..] {
+        final_blocks.extend(message_block(message, columns.min(112), color));
+    }
     park_at_live_end()?;
-    renderer.flush(&[], &[])?;
+    renderer.flush(&final_blocks, &[])?;
     let mut stdout = io::stdout();
     stdout.write_all(b"\r\n")?;
     stdout.flush()

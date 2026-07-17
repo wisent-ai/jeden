@@ -76,6 +76,10 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
             "{} must be executed through the agent runner so it can mutate the live durable conversation.",
             command
         ))),
+        "/rebuild" | "/self-rebuild" => Some(Err(
+            "/rebuild is available only in an interactive session so it can preserve the live conversation."
+                .into(),
+        )),
         "/retry" => Some(Err("/retry must be executed through the agent runner so it can replay lastFailedTask.".into())),
         "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(commands::memory::handle_memory(args, context)),

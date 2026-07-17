@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::{agent, Args};
 
 pub(crate) mod interactive;
+pub(crate) mod self_rebuild;
 pub(crate) mod slash;
 pub(crate) mod slash_ui;
 pub(crate) use crate::update;

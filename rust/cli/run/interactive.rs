@@ -8,7 +8,7 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use super::run_turn_shared;
+use super::{run_turn_shared, self_rebuild};
 use crate::cli::commands::expand::resolve_file_command;
 use crate::cli::config::load_config;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
@@ -111,8 +111,36 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         .unwrap_or_else(|| "default".into());
     let session_model = Arc::new(Mutex::new(Some(model)));
     // One persistent conversation provides native cross-turn memory for the
-    // entire interactive session.
-    let conversation = Arc::new(Mutex::new(agent::Conversation::new(&args.cwd)?));
+    // entire interactive session. A self-rebuild seeds a fresh recorder with
+    // the prior durable turns while regenerating the system prompt from the
+    // rebuilt executable.
+    let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
+    if let Some(session_path) = &args.resume_session {
+        if !session_path.exists() {
+            return Err(format!(
+                "resume session not found after rebuild: {}",
+                session_path.display()
+            ));
+        }
+        let mut turns = session_conversation_turns(session_path)?;
+        if turns
+            .first()
+            .and_then(|turn| turn.get("role"))
+            .and_then(Value::as_str)
+            == Some("system")
+        {
+            turns.remove(0);
+        }
+        let count = turns.len();
+        initial_conversation.load_history(&args.cwd, turns)?;
+        println!(
+            "Resumed {} prior turn(s) from {} after rebuilding Jeden.",
+            count,
+            session_path.display()
+        );
+    }
+    let conversation = Arc::new(Mutex::new(initial_conversation));
+    let pending_relaunch = Arc::new(Mutex::new(None));
     let context_limit = env::var("JEDEN_CONTEXT_LIMIT")
         .ok()
         .and_then(|v| v.trim().parse::<usize>().ok())
@@ -180,6 +208,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let handler_model = Arc::clone(&session_model);
     let handler_conv = Arc::clone(&conversation);
     let handler_cwd = Arc::clone(&session_cwd);
+    let handler_relaunch = Arc::clone(&pending_relaunch);
     let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<tui::CommandOutcome, String> {
         let mut run_args = args.clone();
         run_args.command = "run".into();
@@ -230,6 +259,18 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     super::slash::resolve_model_route(&run_args.cwd, next)?;
                     *handler_model.lock() = Some(next.to_string());
                     Ok(format!("Model route set to {}.", next))
+                }
+                "/rebuild" | "/self-rebuild" => {
+                    if !rest.trim().is_empty() {
+                        return Err("Usage: /rebuild".into());
+                    }
+                    let session_path = handler_conv.lock().session_path();
+                    let plan = self_rebuild::prepare(&run_args, &session_path)?;
+                    *handler_relaunch.lock() = Some(plan);
+                    return Ok(tui::CommandOutcome::Exit(
+                        "Rebuilt and health-checked Jeden; resuming this session in the new executable."
+                            .into(),
+                    ));
                 }
                 "/retry" => {
                     let task = agent::retry_task(&run_args)?;
@@ -391,5 +432,8 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
 
     tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
     hooks::session_stop(&session_cwd.lock().clone(), args.allow_command);
+    if let Some(plan) = pending_relaunch.lock().take() {
+        self_rebuild::execute(plan)?;
+    }
     Ok(String::new())
 }

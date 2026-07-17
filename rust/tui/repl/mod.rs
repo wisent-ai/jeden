@@ -130,17 +130,30 @@ pub(super) fn apply_turn_result(
     prompt: &str,
     result: Result<CommandOutcome, String>,
     picker: &mut Option<PickerState>,
-) {
+) -> bool {
     match result {
-        Ok(CommandOutcome::Text(text)) => messages.push(Message::new(
-            if prompt.starts_with('/') {
-                "system"
-            } else {
-                "assistant"
-            },
-            text.trim().to_string(),
-        )),
-        Ok(CommandOutcome::Picker(spec)) => *picker = Some(PickerState::new(spec)),
-        Err(error) => messages.push(Message::new("error", error)),
+        Ok(CommandOutcome::Text(text)) => {
+            messages.push(Message::new(
+                if prompt.starts_with('/') {
+                    "system"
+                } else {
+                    "assistant"
+                },
+                text.trim().to_string(),
+            ));
+            false
+        }
+        Ok(CommandOutcome::Exit(text)) => {
+            messages.push(Message::new("system", text.trim().to_string()));
+            true
+        }
+        Ok(CommandOutcome::Picker(spec)) => {
+            *picker = Some(PickerState::new(spec));
+            false
+        }
+        Err(error) => {
+            messages.push(Message::new("error", error));
+            false
+        }
     }
 }

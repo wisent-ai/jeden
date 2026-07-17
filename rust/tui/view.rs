@@ -72,6 +72,7 @@ impl PickerSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandOutcome {
     Text(String),
+    Exit(String),
     Picker(PickerSpec),
 }
 
@@ -83,6 +84,7 @@ impl CommandOutcome {
     pub fn into_text(self) -> String {
         match self {
             Self::Text(text) => text,
+            Self::Exit(text) => text,
             Self::Picker(spec) => {
                 let mut lines = vec![spec.title];
                 for item in spec.items {
