@@ -28,6 +28,10 @@ impl ReplRenderer {
         self.live_height = 0;
     }
 
+    pub(super) fn has_live_region(&self) -> bool {
+        self.live_height > 0
+    }
+
     /// Erase the current live region, print `committed` lines into scrollback,
     /// then repaint `live` at the bottom. One atomic write.
     pub(super) fn flush(&mut self, committed: &[String], live: &[String]) -> io::Result<()> {

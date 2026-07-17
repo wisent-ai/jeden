@@ -305,7 +305,9 @@ where
                 rows,
                 color,
             );
-            park_at_live_end()?;
+            if renderer.has_live_region() {
+                park_at_live_end()?;
+            }
             renderer.flush(&new_blocks, &live)?;
             needs_render = false;
         }
