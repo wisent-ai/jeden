@@ -180,10 +180,20 @@ fn editor_live_lines(
     let prompt_height = prompt.len();
     lines.extend(prompt);
     if !has_interactive_view {
-        lines.extend(
+        let slash_hints: Vec<String> =
             slash_hint_panel(editor.text(), width, color, slash_selection)
                 .into_iter()
-                .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>()),
+                .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+                .collect();
+        let reserved_hint_rows = if slash_hints.is_empty() {
+            0
+        } else {
+            slash_hint_panel("/", width, color, 0).len()
+        };
+        let hint_rows = slash_hints.len();
+        lines.extend(slash_hints);
+        lines.extend(
+            std::iter::repeat(String::new()).take(reserved_hint_rows.saturating_sub(hint_rows)),
         );
         let trailing_rows = lines.len().saturating_sub(prompt_start + prompt_height);
         place_editor_cursor(
@@ -625,4 +635,69 @@ where
     let mut stdout = io::stdout();
     stdout.write_all(b"\r\n")?;
     stdout.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status() -> PromptStatus {
+        PromptStatus {
+            cwd: env!("CARGO_MANIFEST_DIR").to_string(),
+            write_status: String::new(),
+            command_status: String::new(),
+            model: "test-model".into(),
+            service_tier: String::new(),
+            branch: None,
+            dirty_count: 0,
+            context_percent: None,
+            context_limit: None,
+            cost: None,
+        }
+    }
+
+    fn slash_live_lines(input: &str) -> Vec<String> {
+        let mut editor = EditorState::default();
+        editor.set_text(input);
+        editor_live_lines(
+            &status(),
+            &editor,
+            &AttachmentTray::default(),
+            0,
+            None,
+            None,
+            100,
+            30,
+            false,
+        )
+    }
+
+    #[test]
+    fn slash_suggestions_shrink_below_fixed_prompt() {
+        let all_matches = slash_live_lines("/");
+        let narrowed_matches = slash_live_lines("/login");
+        let all_prompt_row = all_matches
+            .iter()
+            .position(|line| line.starts_with("╰─/"))
+            .expect("prompt row for all suggestions");
+        let narrowed_prompt_row = narrowed_matches
+            .iter()
+            .position(|line| line.starts_with("╰─/login"))
+            .expect("prompt row for narrowed suggestions");
+
+        assert_eq!(narrowed_prompt_row, all_prompt_row);
+        assert_eq!(narrowed_matches.len(), all_matches.len());
+        assert!(all_matches
+            .iter()
+            .position(|line| line.contains("slash suggestions"))
+            .is_some_and(|row| row > all_prompt_row));
+        assert!(narrowed_matches
+            .iter()
+            .position(|line| line.contains("slash suggestions"))
+            .is_some_and(|row| row > narrowed_prompt_row));
+        assert!(
+            slash_hint_panel("/login", 100, false, 0).len()
+                < slash_hint_panel("/", 100, false, 0).len()
+        );
+    }
 }

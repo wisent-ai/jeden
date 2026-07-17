@@ -102,8 +102,8 @@ pub(super) fn message_block(message: &Message, columns: usize, color: bool) -> V
         .collect()
 }
 
-/// The bottom live region: an active interactive view above the prompt, or
-/// slash suggestions below it.
+/// The bottom live region: an active interactive view above the prompt, or a
+/// fixed prompt followed by a shrinking slash-suggestion panel.
 
 struct RawModeGuard;
 
