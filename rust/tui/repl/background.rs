@@ -241,7 +241,13 @@ where
             let mut live = build_live(&streamed, &note, frame, cancelling);
             let mut composer = busy_editor_lines(editor, queue, columns, color);
             if composer.len() > 1 {
-                place_editor_cursor(&mut composer[1..], editor.text(), editor.cursor(), columns);
+                place_editor_cursor(
+                    &mut composer[1..],
+                    editor.text(),
+                    editor.cursor(),
+                    columns,
+                    0,
+                );
             }
             live.extend(composer);
             park_at_live_end()?;

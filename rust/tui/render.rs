@@ -358,8 +358,14 @@ pub(super) fn compact_prompt(
     out
 }
 
-pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usize, width: usize) {
-    let rendered_input_rows = lines.len().saturating_sub(1);
+pub(super) fn place_editor_cursor(
+    lines: &mut [String],
+    input: &str,
+    cursor: usize,
+    width: usize,
+    trailing_rows: usize,
+) {
+    let rendered_input_rows = lines.len().saturating_sub(trailing_rows + 1);
     let prefix_width = input_prefix_width(width.max(1));
     let content_width = width.saturating_sub(prefix_width).max(1);
     let safe_prefix = sanitize_terminal_text(&input[..cursor.min(input.len())]);
@@ -377,7 +383,7 @@ pub(super) fn place_editor_cursor(lines: &mut [String], input: &str, cursor: usi
             cursor_column = ((logical_width - 1) % content_width) + 1;
         }
     }
-    let up = rendered_input_rows.saturating_sub(cursor_row + 1);
+    let up = trailing_rows + rendered_input_rows.saturating_sub(cursor_row + 1);
     let Some(last) = lines.last_mut() else {
         return;
     };

@@ -156,28 +156,38 @@ fn editor_live_lines(
 ) -> Vec<String> {
     let _capabilities = crate::capability::for_cwd(std::path::Path::new(&status.cwd));
     let width = columns.min(112).max(1);
+    let has_interactive_view = picker.is_some() || confirm.is_some();
     let mut lines = if let Some(confirm) = confirm {
         confirm_panel(confirm, width, color)
     } else if let Some(picker) = picker {
         picker_panel(picker, width, rows, color)
     } else {
-        slash_hint_panel(editor.text(), width, color, slash_selection)
+        attachment_lines(attachments, width, color)
     };
-    if picker.is_none() && confirm.is_none() {
-        lines.extend(attachment_lines(attachments, width, color));
-    }
-    let prompt_start = lines.len();
-    lines.extend(compact_prompt(width, status, editor.text(), false, color));
     lines = lines
         .into_iter()
         .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
         .collect();
-    if picker.is_none() && confirm.is_none() {
+    let prompt_start = lines.len();
+    let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
+        .into_iter()
+        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+        .collect();
+    let prompt_height = prompt.len();
+    lines.extend(prompt);
+    if !has_interactive_view {
+        lines.extend(
+            slash_hint_panel(editor.text(), width, color, slash_selection)
+                .into_iter()
+                .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>()),
+        );
+        let trailing_rows = lines.len().saturating_sub(prompt_start + prompt_height);
         place_editor_cursor(
             &mut lines[prompt_start..],
             editor.text(),
             editor.cursor(),
             width,
+            trailing_rows,
         );
     }
     lines
@@ -256,6 +266,7 @@ where
             rows,
             color,
         );
+        park_at_live_end()?;
         renderer.flush(&welcome, &live)?;
     }
 

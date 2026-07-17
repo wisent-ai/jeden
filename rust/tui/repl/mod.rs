@@ -47,12 +47,11 @@ impl ReplRenderer {
 }
 
 /// Pure ANSI generator for the sticky-prompt renderer. Erases the previous live
-/// region (relative moves), prints committed lines (each `\r\n`, scrolling into
-/// history), then draws the new live region and parks the cursor after it.
+/// region, prints committed lines into scrollback, then bottom-aligns the new
+/// live region. Relative moves remain valid when the terminal scrolls.
 pub(super) fn compose_repl(prev_height: usize, committed: &[String], live: &[String]) -> String {
     let mut out = String::new();
     out.push_str("\x1b[?25l\x1b[?7l"); // hide cursor, autowrap off
-                                       // Move to the top of the current live region and erase it downward.
     if prev_height > 0 {
         if prev_height > 1 {
             out.push_str(&format!("\x1b[{}A", prev_height - 1));
@@ -60,12 +59,35 @@ pub(super) fn compose_repl(prev_height: usize, committed: &[String], live: &[Str
         out.push('\r');
         out.push_str("\x1b[0J");
     }
-    // Committed lines flow into scrollback; CRLF scrolls the terminal as needed.
     for line in committed {
         out.push_str(line);
         out.push_str("\r\n");
     }
-    // Live region: drawn in place, no trailing newline after the last line.
+
+    // Expanding the live region needs scrollback space. Account for scrolling
+    // already caused by committed CRLFs, then create only the missing rows.
+    let previous_capacity = prev_height.max(1);
+    let automatic_scroll = committed
+        .len()
+        .saturating_sub(previous_capacity.saturating_sub(1));
+    let required_scroll = live
+        .len()
+        .saturating_add(committed.len())
+        .saturating_sub(previous_capacity);
+    let additional_scroll = required_scroll.saturating_sub(automatic_scroll);
+    if additional_scroll > 0 {
+        out.push_str("\x1b[999B\r");
+        for _ in 0..additional_scroll {
+            out.push_str("\r\n");
+        }
+    }
+
+    if !live.is_empty() {
+        out.push_str("\x1b[999B\r");
+        if live.len() > 1 {
+            out.push_str(&format!("\x1b[{}A", live.len() - 1));
+        }
+    }
     for (index, line) in live.iter().enumerate() {
         if index > 0 {
             out.push_str("\r\n");
