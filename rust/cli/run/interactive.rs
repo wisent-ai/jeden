@@ -4,6 +4,7 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
+use std::io::IsTerminal;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
@@ -12,7 +13,7 @@ use super::{run_turn_shared, self_rebuild};
 use crate::cli::commands::expand::resolve_file_command;
 use crate::cli::config::load_config;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
-use crate::cli::run::slash_ui::interactive_view;
+use crate::cli::run::slash_ui::{interactive_view, model_picker};
 use crate::cli::sessions::{session_conversation_turns, session_dir_for};
 use crate::{agent, hooks, read_json, tui, Args};
 
@@ -108,8 +109,13 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         .or(config.model)
         .or_else(|| env::var("JEDEN_MODEL").ok())
         .or_else(|| env::var("MODEL").ok())
-        .unwrap_or_else(|| "default".into());
-    let session_model = Arc::new(Mutex::new(Some(model)));
+        .filter(|model| !model.trim().is_empty());
+    let initial_model_picker = if model.is_none() {
+        Some(model_picker(&args.cwd, None, false)?)
+    } else {
+        None
+    };
+    let session_model = Arc::new(Mutex::new(model));
     // One persistent conversation provides native cross-turn memory for the
     // entire interactive session. A self-rebuild seeds a fresh recorder with
     // the prior durable turns while regenerating the system prompt from the
@@ -183,7 +189,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             model: status_model
                 .lock()
                 .clone()
-                .unwrap_or_else(|| "default".into()),
+                .unwrap_or_else(|| "not selected".into()),
             service_tier: service_tier_prompt(&cwd),
             branch,
             dirty_count,
@@ -209,6 +215,9 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let handler_conv = Arc::clone(&conversation);
     let handler_cwd = Arc::clone(&session_cwd);
     let handler_relaunch = Arc::clone(&pending_relaunch);
+    // `! <shell>` / `$ <python>` escapes are a TTY-only affordance; piped stdin
+    // (script mode) keeps forwarding such lines to the model unchanged.
+    let local_escape_enabled = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
     let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<tui::CommandOutcome, String> {
         let mut run_args = args.clone();
         run_args.command = "run".into();
@@ -226,6 +235,29 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             }),
             approve: Box::new(|tool: &str, detail: &str| (ctx.approve)(tool, detail)),
         };
+
+        if local_escape_enabled {
+            let trimmed = input.trim_start();
+            let escape = trimmed
+                .strip_prefix('!')
+                .map(|code| ("run_command", code))
+                .or_else(|| trimmed.strip_prefix('$').map(|code| ("python_eval", code)));
+            if let Some((tool, code)) = escape {
+                let code = code.trim();
+                if code.is_empty() {
+                    let hint = if tool == "run_command" {
+                        "Usage: ! <command> — run a shell command in cwd; output stays local (no model turn)."
+                    } else {
+                        "Usage: $ <code> — run Python via python3 in cwd; output stays local (no model turn)."
+                    };
+                    return Ok(tui::CommandOutcome::text(hint));
+                }
+                let text = handler_conv
+                    .lock()
+                    .local_tool_exec(&run_args, &hooks, tool, code)?;
+                return Ok(tui::CommandOutcome::text(text));
+            }
+        }
 
         if !ctx.attachments.is_empty() && !input_accepts_attachments(input) {
             let command = input.split_whitespace().next().unwrap_or(input);
@@ -250,15 +282,53 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             match command {
                 "/model" | "/models" | "/switch" => {
                     let next = rest.trim();
+                    if matches!(next, "--all" | "-a") {
+                        return model_picker(&run_args.cwd, handler_model.lock().as_deref(), true)
+                            .map(tui::CommandOutcome::Picker);
+                    }
                     if next.is_empty() {
+                        // Picker rows dispatch bare `/model` to reopen the curated list.
+                        if ctx.from_view {
+                            return model_picker(
+                                &run_args.cwd,
+                                handler_model.lock().as_deref(),
+                                false,
+                            )
+                            .map(tui::CommandOutcome::Picker);
+                        }
                         return Ok(tui::CommandOutcome::text(format!(
                             "Current model route: {}.",
-                            handler_model.lock().as_deref().unwrap_or("default")
+                            handler_model.lock().as_deref().unwrap_or("not selected")
                         )));
                     }
-                    super::slash::resolve_model_route(&run_args.cwd, next)?;
+                    let message = super::slash::set_model_route(&run_args.cwd, next)?;
                     *handler_model.lock() = Some(next.to_string());
-                    Ok(format!("Model route set to {}.", next))
+                    Ok(message)
+                }
+                "/roles" | "/role" => {
+                    // Roles hub rows dispatch `/roles <role>`; the hub has no
+                    // backend of its own, so forward to the role's existing
+                    // view even when a picker submitted the command.
+                    let target = rest.trim();
+                    let view_input = if target.is_empty() {
+                        "/roles".to_string()
+                    } else {
+                        format!("/{target}")
+                    };
+                    return match interactive_view(
+                        &run_args.cwd,
+                        &view_input,
+                        handler_model.lock().as_deref(),
+                    ) {
+                        Some(view) => view,
+                        None if target.is_empty() => {
+                            handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
+                                .map(tui::CommandOutcome::text)
+                        }
+                        None => Err(format!(
+                            "Unknown role: {target}. Usage: /roles [model|fast|advisor]"
+                        )),
+                    };
                 }
                 "/rebuild" | "/self-rebuild" => {
                     if !rest.trim().is_empty() {
@@ -430,7 +500,8 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         result.map(tui::CommandOutcome::text)
     };
 
-    tui::run_basic_loop(status, classify, handler).map_err(|e| e.to_string())?;
+    tui::run_basic_loop(status, classify, handler, initial_model_picker)
+        .map_err(|e| e.to_string())?;
     hooks::session_stop(&session_cwd.lock().clone(), args.allow_command);
     if let Some(plan) = pending_relaunch.lock().take() {
         self_rebuild::execute(plan)?;

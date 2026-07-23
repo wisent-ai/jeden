@@ -16,6 +16,12 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 type HmacSha256 = Hmac<Sha256>;
 const MAX_ROUTES: usize = 16;
 const MAX_RETRY_ATTEMPTS: usize = 8;
+pub(crate) const AUTOMATIC_MODEL_ROUTE: &str = "any";
+pub(crate) const VISION_MODEL_ROUTE: &str = "any-vision-capable";
+
+pub(crate) fn is_virtual_model_route(model: &str) -> bool {
+    matches!(model, AUTOMATIC_MODEL_ROUTE | VISION_MODEL_ROUTE)
+}
 pub(crate) const MAX_TEXT_ATTACHMENT_BYTES: usize = 256 * 1024;
 const MAX_TOOL_CALLS: usize = 128;
 
@@ -498,7 +504,11 @@ pub fn chat_completion_streaming(
         ));
     }
     let primary = RouteDescriptor {
-        model: config.model.clone(),
+        model: if config.model == AUTOMATIC_MODEL_ROUTE && messages_use_image_input(&messages) {
+            VISION_MODEL_ROUTE.to_string()
+        } else {
+            config.model.clone()
+        },
         service_tier: nonempty(&config.service_tier),
     };
     let mut routes = Vec::with_capacity((config.fallbacks.len() + 1).min(MAX_ROUTES));
@@ -764,7 +774,10 @@ fn ensure_image_capability(
     model: &str,
     messages: &[Value],
 ) -> Result<(), String> {
-    if messages_use_image_input(messages) && !config.image_capable_models.contains(model) {
+    if messages_use_image_input(messages)
+        && model != VISION_MODEL_ROUTE
+        && !config.image_capable_models.contains(model)
+    {
         return Err(format!(
             "model `{model}` does not advertise image input support; choose an image-capable model"
         ));

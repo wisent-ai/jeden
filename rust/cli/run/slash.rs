@@ -60,6 +60,9 @@ pub(crate) fn update_command() -> Result<String, String> {
 }
 
 pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<(), String> {
+    if crate::model_router::is_virtual_model_route(model) {
+        return Ok(());
+    }
     let runtime_config = load_config(cwd);
     let endpoint = env::var("BRAMA_URL")
         .ok()
@@ -73,12 +76,38 @@ pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<(), String>
         .map_err(|error| error.to_string())
 }
 
+pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String> {
+    resolve_model_route(cwd, model)?;
+    let path = config_path(cwd);
+    let mut config = read_json::<Value>(&path);
+    if !config.is_object() {
+        config = json!({});
+    }
+    config
+        .as_object_mut()
+        .expect("object")
+        .insert("model".into(), Value::String(model.to_string()));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&config).map_err(|error| error.to_string())? + "\n",
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(format!("Model route set to {}.", model))
+}
+
 fn handle_model_slash(
     cwd: &Path,
     current_model: Option<&str>,
     args: &str,
 ) -> Result<String, String> {
     let next = args.trim();
+    if matches!(next, "--all" | "-a") {
+        return super::slash_ui::model_picker(cwd, current_model, true)
+            .map(|spec| crate::tui::CommandOutcome::Picker(spec).into_text());
+    }
     if next.is_empty() {
         let configured = current_model
             .map(str::to_string)
@@ -88,25 +117,7 @@ fn handle_model_slash(
             .map(|model| format!("Current model route: {model}."))
             .unwrap_or_else(|| "No model route selected; choose one advertised by Brama.".into()));
     }
-    resolve_model_route(cwd, next)?;
-    let path = config_path(cwd);
-    let mut config = read_json::<Value>(&path);
-    if !config.is_object() {
-        config = json!({});
-    }
-    config
-        .as_object_mut()
-        .expect("object")
-        .insert("model".into(), Value::String(next.to_string()));
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&config).map_err(|error| error.to_string())? + "\n",
-    )
-    .map_err(|error| error.to_string())?;
-    Ok(format!("Model route set to {}.", next))
+    set_model_route(cwd, next)
 }
 
 fn handle_settings_slash(cwd: &Path, args: &str) -> Result<String, String> {

@@ -3,6 +3,7 @@ use super::*;
 mod action;
 mod compaction;
 mod history;
+mod local_exec;
 mod turn;
 
 pub(super) use action::{action_or_text, action_to_value, run_tool_action};

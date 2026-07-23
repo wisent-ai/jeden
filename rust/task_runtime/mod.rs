@@ -22,6 +22,7 @@ pub use protocol::{
     WORKER_PROTOCOL_MINOR,
 };
 pub use scheduler::{BatchTask, SpawnRequest, TaskScheduler};
+pub(crate) use scheduler::workspace_root_for;
 pub use store::{CoordinatorStore, JobState};
 pub use types::{
     AgentDefinition, CapabilityHealth, JobRecord, JobStatus, MailMessage, SpawnPolicy, TaskError,

@@ -1,5 +1,7 @@
 use std::io::{self, IsTerminal};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use super::text::{
     clamp_visible, compact_path, paint, sanitize_terminal_text, visible_len, wrap_line,
@@ -244,6 +246,179 @@ pub(super) fn slash_hint_panel(
     boxed("slash suggestions", &rows, width, color)
 }
 
+/// Live status-line extras read from project state files (`.jeden/usage.json`
+/// counters and `.jeden/mode-state.json`). Reads are cached for a few seconds
+/// so per-keystroke renders stay cheap.
+#[derive(Clone)]
+struct StatusExtras {
+    tokens: f64,
+    cost: f64,
+    plan: bool,
+    goal: bool,
+    loop_mode: bool,
+    advisor: bool,
+}
+
+struct ExtrasCache {
+    cwd: PathBuf,
+    fetched_at: Instant,
+    extras: StatusExtras,
+}
+
+static EXTRAS_CACHE: Mutex<Option<ExtrasCache>> = Mutex::new(None);
+const EXTRAS_TTL: Duration = Duration::from_secs(3);
+
+/// Total tokens and recorded cost across all events, summed exactly like the
+/// `/usage` report does over the same `.jeden/usage.json` file.
+fn usage_totals(cwd: &Path) -> (f64, f64) {
+    let usage: serde_json::Value = std::fs::read_to_string(cwd.join(".jeden/usage.json"))
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or(serde_json::Value::Null);
+    let events = usage
+        .get("events")
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    let mut tokens = 0.0;
+    let mut cost = 0.0;
+    for event in events {
+        let number = |key: &str| event.get(key).and_then(serde_json::Value::as_f64);
+        tokens += event
+            .get("totalTokens")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_else(|| {
+                let direct = ["inputTokens", "outputTokens"]
+                    .iter()
+                    .filter_map(|key| number(key))
+                    .sum::<f64>();
+                let cache_read = number("cacheReadTokens")
+                    .or_else(|| number("cacheRead"))
+                    .unwrap_or_default();
+                let cache_write = number("cacheWriteTokens")
+                    .or_else(|| number("cacheWrite"))
+                    .unwrap_or_default();
+                direct + cache_read + cache_write
+            });
+        cost += event
+            .pointer("/cost/total")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_else(|| {
+                ["input", "output", "cacheRead", "cacheWrite"]
+                    .iter()
+                    .map(|key| {
+                        event
+                            .pointer(&format!("/cost/{key}"))
+                            .and_then(serde_json::Value::as_f64)
+                            .unwrap_or_default()
+                    })
+                    .sum::<f64>()
+            });
+    }
+    (tokens, cost)
+}
+
+fn status_extras(cwd: &Path) -> Option<StatusExtras> {
+    let mut guard = EXTRAS_CACHE.lock().ok()?;
+    let fresh = guard
+        .as_ref()
+        .is_some_and(|cache| cache.cwd == cwd && cache.fetched_at.elapsed() < EXTRAS_TTL);
+    if !fresh {
+        let (tokens, cost) = usage_totals(cwd);
+        let state = crate::slash::read_mode_state(cwd);
+        *guard = Some(ExtrasCache {
+            cwd: cwd.to_path_buf(),
+            fetched_at: Instant::now(),
+            extras: StatusExtras {
+                tokens,
+                cost,
+                plan: state.plan.enabled,
+                goal: state.goal.enabled || state.guided_goal.active,
+                loop_mode: state.loop_mode.enabled,
+                advisor: state.advisor.enabled,
+            },
+        });
+    }
+    guard.as_ref().map(|cache| cache.extras.clone())
+}
+
+/// Live session spend: recorded cost when nonzero, otherwise the token form
+/// (`~N tok`); nothing when no usage has been recorded yet.
+fn cost_segment(status: &PromptStatus, extras: &StatusExtras) -> Option<String> {
+    if let Some(cost) = &status.cost {
+        return Some(format!("cost {}", sanitize_terminal_text(cost)));
+    }
+    if extras.cost > 0.0 {
+        Some(format!("${:.2}", extras.cost))
+    } else if extras.tokens > 0.0 {
+        Some(format!("~{} tok", extras.tokens.round() as u64))
+    } else {
+        None
+    }
+}
+
+/// Compact badges for the active modes, ordered after the route segment.
+fn mode_badges(extras: &StatusExtras) -> Vec<String> {
+    let mut badges = Vec::new();
+    if extras.plan {
+        badges.push("plan".to_string());
+    }
+    if extras.goal {
+        badges.push("goal".to_string());
+    }
+    if extras.loop_mode {
+        badges.push("loop".to_string());
+    }
+    if extras.advisor {
+        badges.push("adv".to_string());
+    }
+    badges
+}
+
+struct QuotaCache {
+    fetched_at: Instant,
+    percent_free: Option<u64>,
+    refreshing: bool,
+}
+
+static QUOTA_CACHE: Mutex<Option<QuotaCache>> = Mutex::new(None);
+const QUOTA_TTL: Duration = Duration::from_secs(60);
+
+/// Most-constrained Weles subscription quota (percent free), refreshed on a
+/// detached thread so renders never block on the network. `None` until the
+/// first refresh lands and whenever Weles is unconfigured or unreachable, so
+/// the status line just skips the segment.
+fn quota_percent_free_cached() -> Option<u64> {
+    let mut guard = QUOTA_CACHE.lock().ok()?;
+    let refresh = match guard.as_ref() {
+        Some(cache) => cache.fetched_at.elapsed() >= QUOTA_TTL && !cache.refreshing,
+        None => true,
+    };
+    if refresh {
+        if let Some(cache) = guard.as_mut() {
+            cache.refreshing = true;
+        } else {
+            *guard = Some(QuotaCache {
+                fetched_at: Instant::now(),
+                percent_free: None,
+                refreshing: true,
+            });
+        }
+        std::thread::spawn(|| {
+            let percent_free =
+                crate::control_plane::quota::fetch_subscription_quotas().min_percent_free();
+            if let Ok(mut guard) = QUOTA_CACHE.lock() {
+                *guard = Some(QuotaCache {
+                    fetched_at: Instant::now(),
+                    percent_free,
+                    refreshing: false,
+                });
+            }
+        });
+    }
+    guard.as_ref().and_then(|cache| cache.percent_free)
+}
+
 pub(super) fn compact_prompt(
     width: usize,
     status: &PromptStatus,
@@ -259,59 +434,93 @@ pub(super) fn compact_prompt(
     } else {
         status.model.as_str()
     });
-    let mut segments = vec![
+    let mut head = vec![
         format!("{PRODUCT} {APP} {VERSION}"),
         format!("model {model}"),
         sanitize_terminal_text(&compact_path(&status.cwd)),
     ];
     if busy {
-        segments.push("busy".to_string());
+        head.push("busy".to_string());
     }
     if !status.service_tier.is_empty() {
-        segments.push(format!(
+        head.push(format!(
             "route {}",
             sanitize_terminal_text(&status.service_tier)
         ));
     }
+    // Live segments: mode badges slot in after the route segment; the cost
+    // and quota segments follow the context segment.
+    let extras = status_extras(Path::new(&status.cwd));
+    let badges = extras.as_ref().map(mode_badges).unwrap_or_default();
+    let cost_text = extras
+        .as_ref()
+        .and_then(|extras| cost_segment(status, extras));
+    let quota_text = quota_percent_free_cached().map(|percent| format!("quota {percent}%"));
+    let mut mid = Vec::new();
     if let Some(branch) = &status.branch {
-        segments.push(format!(
+        mid.push(format!(
             "{}{}",
             sanitize_terminal_text(branch),
             if status.dirty_count > 0 { " dirty" } else { "" }
         ));
     }
     match (status.context_percent, status.context_limit.as_deref()) {
-        (Some(percent), Some(limit)) => segments.push(format!(
+        (Some(percent), Some(limit)) => mid.push(format!(
             "context {percent:.1}% {}",
             sanitize_terminal_text(limit)
         )),
-        (_, Some(limit)) => segments.push(format!("context {}", sanitize_terminal_text(limit))),
-        (Some(percent), None) => segments.push(format!("context {percent:.1}%")),
+        (_, Some(limit)) => mid.push(format!("context {}", sanitize_terminal_text(limit))),
+        (Some(percent), None) => mid.push(format!("context {percent:.1}%")),
         _ => {}
     }
-    if let Some(cost) = &status.cost {
-        segments.push(format!("cost {}", sanitize_terminal_text(cost)));
-    }
+    let mut tail = Vec::new();
     let runtime = RegistryUiRuntime.runtime_status(Path::new(&status.cwd));
     if let Some(route_health) = runtime.route_health {
-        segments.push(format!("route {route_health}"));
+        tail.push(format!("route {route_health}"));
     }
     if let Some(active_jobs) = runtime.active_jobs {
-        segments.push(format!("jobs {active_jobs}"));
+        tail.push(format!("jobs {active_jobs}"));
     }
     if runtime.services_degraded > 0 || runtime.services_unavailable > 0 {
-        segments.push(format!(
+        tail.push(format!(
             "services {}/{}",
             runtime.services_degraded, runtime.services_unavailable
         ));
     }
     if !status.write_status.is_empty() {
-        segments.push(format!(
+        tail.push(format!(
             "write {}",
             sanitize_terminal_text(&status.write_status)
         ));
     }
-    let status_line = segments.join(" | ");
+    let compose = |with_badges: bool, with_cost: bool, with_quota: bool| {
+        let mut segments = head.clone();
+        if with_badges {
+            segments.extend(badges.iter().cloned());
+        }
+        segments.extend(mid.iter().cloned());
+        if with_cost {
+            segments.extend(cost_text.iter().cloned());
+        }
+        if with_quota {
+            segments.extend(quota_text.iter().cloned());
+        }
+        segments.extend(tail.iter().cloned());
+        segments.join(" | ")
+    };
+    let mut status_line = compose(true, true, true);
+    // Narrow terminals shed the live segments first — quota, then cost, then
+    // the mode badges; framed_header still clamps whatever remains.
+    let overflows = |line: &str| width >= 6 && visible_len(line) + 4 > width;
+    if overflows(&status_line) {
+        status_line = compose(true, true, false);
+    }
+    if overflows(&status_line) {
+        status_line = compose(true, false, false);
+    }
+    if overflows(&status_line) {
+        status_line = compose(false, false, false);
+    }
     let mut out = if width >= 6 {
         vec![framed_header(&status_line, width, color)]
     } else {
@@ -364,7 +573,7 @@ pub(super) fn place_editor_cursor(
     cursor: usize,
     width: usize,
     trailing_rows: usize,
-) {
+) -> usize {
     let rendered_input_rows = lines.len().saturating_sub(trailing_rows + 1);
     let prefix_width = input_prefix_width(width.max(1));
     let content_width = width.saturating_sub(prefix_width).max(1);
@@ -385,7 +594,7 @@ pub(super) fn place_editor_cursor(
     }
     let up = trailing_rows + rendered_input_rows.saturating_sub(cursor_row + 1);
     let Some(last) = lines.last_mut() else {
-        return;
+        return 0;
     };
     if up > 0 {
         last.push_str(&format!("\x1b[{up}A"));
@@ -395,6 +604,7 @@ pub(super) fn place_editor_cursor(
     if column > 0 {
         last.push_str(&format!("\x1b[{column}C"));
     }
+    up
 }
 
 pub(super) fn attachment_lines(tray: &AttachmentTray, width: usize, color: bool) -> Vec<String> {

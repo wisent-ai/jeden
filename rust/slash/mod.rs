@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use crate::slash::common::{split_args, split_head};
-use crate::slash::state::{read_mode_state, write_mode_state};
+pub(crate) use crate::slash::state::read_mode_state;
+use crate::slash::state::write_mode_state;
 use crate::tools;
 use crate::tui::{PickerItem, PickerSpec};
 
@@ -42,7 +43,8 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/stats" | "/debug" => Some(commands::handle_doctor(context)),
         "/usage" => Some(commands::usage::handle_usage(args, context)),
 
-        "/session" => Some(modes::session::handle_session(args, context)),
+        "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),
+        "/roles" | "/role" => Some(modes::session::handle_roles(context)),
         "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(modes::todo::handle_todo(args, &mut state, context)) },
         "/roadmap" => Some(
             crate::roadmap::split_command_line(args)
@@ -88,7 +90,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
             changed = command == "/shake";
             modes::session::handle_lifecycle(command.as_str(), args, &mut state, context)
         },
-        "/agents" => Some(Ok("Agent controls:\n- /tan <work> starts a detached local agent job tracked in session artifacts.\n- /advisor manages second-pass reviewer mode.\n- /jobs shows locally tracked background jobs.".into())),
+        "/agents" => Some(commands::agents::handle_agents(args, context)),
         "/jobs" => Some(session::handle_jobs(context)),
         "/changelog" => Some(commands::handle_changelog()),
         "/hotkeys" => Some(Ok("Jeden input:\nType a prompt on the `jeden >` line and press Enter.\nSlash commands such as /help and /update run from the same line.\nCtrl-C exits.".into())),
@@ -216,7 +218,8 @@ pub(crate) fn interactive_picker(
         "/approval" => Ok(modes::session::approval_picker(&state)),
         "/todo" => Ok(modes::todo::todo_picker(&state)),
         "/roadmap" => crate::roadmap::picker(context.cwd).map_err(|error| error.to_string()),
-        "/session" => Ok(modes::session::session_picker(context)),
+        "/session" | "/sessions" => Ok(modes::session::session_picker(context)),
+        "/roles" | "/role" => Ok(modes::session::roles_picker(&state, context)),
         "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state)),
         "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             Ok(modes::session::lifecycle_picker(&state, context))
@@ -244,7 +247,7 @@ pub(crate) fn interactive_picker(
         "/copy" => Ok(session::copy_picker()),
         "/tan" => Ok(session::tan_picker(context)),
         "/omfg" => Ok(session::omfg_picker(context)),
-        "/agents" => Ok(session::jobs_picker(context)),
+        "/agents" => Ok(commands::agents::agents_picker(context)),
         "/hooks" => Ok(read_only_picker("Lifecycle hooks", crate::hooks::describe_hooks(context.cwd))),
         "/changelog" => commands::handle_changelog()
             .map(|text| read_only_picker("Changelog", text)),

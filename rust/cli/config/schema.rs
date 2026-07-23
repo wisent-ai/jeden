@@ -236,8 +236,42 @@ fn config_list_text(cwd: &Path) -> String {
     lines.join("\n") + "\n"
 }
 
+/// Non-action group header; the picker skips disabled, command-less rows.
+/// Same pattern as the models picker `group_header` in cli/run/slash_ui.rs.
+fn section_header(prefix: &str, count: usize) -> PickerItem {
+    let mut header = PickerItem::action(format!("── {prefix} ({count}) ──"), "");
+    header.command = None;
+    header.disabled = true;
+    header
+}
+
+/// Group rows by top-level key prefix: known prefixes in first-seen order,
+/// anything else under `other` after them. Row order within a group is kept.
+fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
+    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "secrets"];
+    let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
+    for (prefix, item) in rows {
+        let label = if KNOWN_PREFIXES.contains(&prefix) {
+            prefix
+        } else {
+            "other"
+        };
+        match groups.iter_mut().find(|(name, _)| *name == label) {
+            Some((_, items)) => items.push(item),
+            None => groups.push((label, vec![item])),
+        }
+    }
+    groups.sort_by_key(|(name, _)| usize::from(*name == "other"));
+    let mut items = Vec::new();
+    for (name, group_rows) in groups {
+        items.push(section_header(name, group_rows.len()));
+        items.extend(group_rows);
+    }
+    items
+}
+
 pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
-    let (config, mut items) = (merged_config_value(cwd), Vec::new());
+    let (config, mut rows) = (merged_config_value(cwd), Vec::new());
     for spec in SETTINGS_SCHEMA {
         let (current, default) = (
             effective_setting_value(&config, spec),
@@ -248,17 +282,19 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
             .map(str::to_string)
             .unwrap_or_else(|| current.to_string());
         let detail = format!("{} Current: {current_text}.", spec.description);
+        let prefix = spec.key.split('.').next().unwrap_or("other");
         match spec.typ {
             "boolean" => {
                 let next = !current.as_bool().unwrap_or(false);
-                items.push(
+                rows.push((
+                    prefix,
                     PickerItem::action(
                         format!("{}: set {next}", spec.key),
                         format!("/settings set {} {next}", spec.key),
                     )
                     .detail(&detail)
                     .badge(current_text.to_ascii_uppercase()),
-                );
+                ));
             }
             "enum" => {
                 for value in spec.enum_values {
@@ -269,13 +305,14 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
                     )
                     .detail(&detail)
                     .disabled(active);
-                    items.push(if active { item.badge("ACTIVE") } else { item });
+                    rows.push((prefix, if active { item.badge("ACTIVE") } else { item }));
                 }
             }
             _ => {}
         }
         if current != default {
-            items.push(
+            rows.push((
+                prefix,
                 PickerItem::action(
                     format!("{}: reset to default", spec.key),
                     format!("/settings reset {}", spec.key),
@@ -285,10 +322,10 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
                     spec.description
                 ))
                 .badge("RESET"),
-            );
+            ));
         }
     }
-    PickerSpec::new("Jeden settings", items)
+    PickerSpec::new("Jeden settings", grouped_setting_rows(rows))
 }
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {
     let (verb, rest) = args

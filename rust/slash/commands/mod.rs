@@ -7,6 +7,7 @@ use crate::slash::SlashContext;
 use crate::tools;
 use crate::tui::{PickerItem, PickerSpec};
 
+pub(crate) mod agents;
 pub(crate) mod mcp;
 pub(crate) mod memory;
 pub(crate) mod ssh;

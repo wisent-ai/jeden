@@ -711,13 +711,13 @@ pub fn management_items(cwd: &Path) -> Vec<(String, String, String, Option<Strin
         .collect()
 }
 
-struct SlashSpec {
-    name: &'static str,
-    description: &'static str,
-    aliases: &'static [&'static str],
+pub(crate) struct SlashSpec {
+    pub(crate) name: &'static str,
+    pub(crate) description: &'static str,
+    pub(crate) aliases: &'static [&'static str],
 }
 
-fn builtin_slash_specs() -> &'static [SlashSpec] {
+pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
     &[
         SlashSpec {
             name: "login",
@@ -852,7 +852,12 @@ fn builtin_slash_specs() -> &'static [SlashSpec] {
         SlashSpec {
             name: "session",
             description: "Session management",
-            aliases: &[],
+            aliases: &["sessions"],
+        },
+        SlashSpec {
+            name: "roles",
+            description: "Show model roles",
+            aliases: &["role"],
         },
         SlashSpec {
             name: "jobs",
@@ -1092,6 +1097,9 @@ fn native_view_commands() -> &'static [&'static str] {
         "approval",
         "todo",
         "session",
+        "sessions",
+        "roles",
+        "role",
         "tree",
         "branch",
         "fork",

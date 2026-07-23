@@ -2,8 +2,17 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
-  "rewrites": [
-    { "source": "/docs/:path*", "destination": "/docs" }
+  "redirects": [
+    {
+      "source": "/docs",
+      "destination": "https://www.wisent.ai/documentation/jeden",
+      "permanent": true
+    },
+    {
+      "source": "/docs/:path*",
+      "destination": "https://www.wisent.ai/documentation/jeden/:path*",
+      "permanent": true
+    }
   ],
   "headers": [
     {

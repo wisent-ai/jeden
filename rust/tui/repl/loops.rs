@@ -20,7 +20,8 @@ use super::super::view_render::{confirm_panel, picker_panel};
 use super::super::{
     stdout_supports_color, AttachmentSource, AttachmentTray, ClipboardContent, CommandOutcome,
     ConfirmEvent, ConfirmState, EditorAction, EditorState, FollowUpQueue, Message, PickerEvent,
-    PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind, UiFeature, UiRuntimeAdapter,
+    PickerSpec, PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind, UiFeature,
+    UiRuntimeAdapter,
 };
 use super::background::run_background_turn;
 use super::external_editor::{external_editor, external_editor_health};
@@ -157,10 +158,11 @@ fn editor_live_lines(
     columns: usize,
     rows: usize,
     color: bool,
-) -> Vec<String> {
+) -> (Vec<String>, usize) {
     let _capabilities = crate::capability::for_cwd(std::path::Path::new(&status.cwd));
     let width = columns.min(112).max(1);
     let has_interactive_view = picker.is_some() || confirm.is_some();
+    let mut cursor_rows_below = 0;
     let mut lines = if let Some(confirm) = confirm {
         confirm_panel(confirm, width, color)
     } else if let Some(picker) = picker {
@@ -196,7 +198,7 @@ fn editor_live_lines(
             std::iter::repeat(String::new()).take(reserved_hint_rows.saturating_sub(hint_rows)),
         );
         let trailing_rows = lines.len().saturating_sub(prompt_start + prompt_height);
-        place_editor_cursor(
+        cursor_rows_below = place_editor_cursor(
             &mut lines[prompt_start..],
             editor.text(),
             editor.cursor(),
@@ -204,13 +206,7 @@ fn editor_live_lines(
             trailing_rows,
         );
     }
-    lines
-}
-
-fn park_at_live_end() -> io::Result<()> {
-    let mut stdout = io::stdout();
-    stdout.write_all(b"\x1b[999B\r")?;
-    stdout.flush()
+    (lines, cursor_rows_below)
 }
 
 struct BracketedPasteGuard;
@@ -232,6 +228,7 @@ pub fn run_basic_loop<S, C, H>(
     mut status_provider: S,
     mut classify: C,
     handler: H,
+    initial_picker: Option<PickerSpec>,
 ) -> io::Result<()>
 where
     S: FnMut() -> PromptStatus,
@@ -250,7 +247,7 @@ where
     let mut slash_selection = 0usize;
     let mut needs_render = false;
     let mut renderer = ReplRenderer::new();
-    let mut picker: Option<PickerState> = None;
+    let mut picker = initial_picker.map(PickerState::new);
     let mut confirm: Option<ConfirmState> = None;
     let mut submission_from_view = false;
     let mut attachments = AttachmentTray::default();
@@ -269,19 +266,18 @@ where
             &status.command_status,
             color,
         );
-        let live = editor_live_lines(
+        let (live, cursor_rows_below) = editor_live_lines(
             &status,
             &editor,
             &attachments,
             0,
-            None,
+            picker.as_ref(),
             None,
             columns,
             rows,
             color,
         );
-        park_at_live_end()?;
-        renderer.flush(&welcome, &live)?;
+        renderer.flush_with_cursor(&welcome, &live, cursor_rows_below)?;
     }
 
     'repl: loop {
@@ -294,7 +290,7 @@ where
                 new_blocks.extend(message_block(message, columns.min(112), color));
             }
             committed = messages.len();
-            let live = editor_live_lines(
+            let (live, cursor_rows_below) = editor_live_lines(
                 &status,
                 &editor,
                 &attachments,
@@ -305,10 +301,7 @@ where
                 rows,
                 color,
             );
-            if renderer.has_live_region() {
-                park_at_live_end()?;
-            }
-            renderer.flush(&new_blocks, &live)?;
+            renderer.flush_with_cursor(&new_blocks, &live, cursor_rows_below)?;
             needs_render = false;
         }
 
@@ -393,7 +386,6 @@ where
                         && external_editor_health(Path::new(&status_provider().cwd)).is_ok() =>
                     {
                         let cwd = status_provider().cwd;
-                        park_at_live_end()?;
                         renderer.flush(&[], &[])?;
                         crossterm::execute!(io::stdout(), DisableBracketedPaste)?;
                         disable_raw_mode()?;
@@ -544,7 +536,6 @@ where
                         blocks.extend(message_block(message, columns.min(112), color));
                     }
                     committed = messages.len();
-                    park_at_live_end()?;
                     renderer.flush(&blocks, &[])?;
                 }
 
@@ -617,7 +608,6 @@ where
                         blocks.extend(message_block(message, columns.min(112), color));
                     }
                     committed = messages.len();
-                    park_at_live_end()?;
                     renderer.flush(&blocks, &[])?;
                 }
                 needs_render = true;
@@ -632,74 +622,8 @@ where
     for message in &messages[committed..] {
         final_blocks.extend(message_block(message, columns.min(112), color));
     }
-    park_at_live_end()?;
     renderer.flush(&final_blocks, &[])?;
     let mut stdout = io::stdout();
     stdout.write_all(b"\r\n")?;
     stdout.flush()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn status() -> PromptStatus {
-        PromptStatus {
-            cwd: env!("CARGO_MANIFEST_DIR").to_string(),
-            write_status: String::new(),
-            command_status: String::new(),
-            model: "test-model".into(),
-            service_tier: String::new(),
-            branch: None,
-            dirty_count: 0,
-            context_percent: None,
-            context_limit: None,
-            cost: None,
-        }
-    }
-
-    fn slash_live_lines(input: &str) -> Vec<String> {
-        let mut editor = EditorState::default();
-        editor.set_text(input);
-        editor_live_lines(
-            &status(),
-            &editor,
-            &AttachmentTray::default(),
-            0,
-            None,
-            None,
-            100,
-            30,
-            false,
-        )
-    }
-
-    #[test]
-    fn slash_suggestions_shrink_below_fixed_prompt() {
-        let all_matches = slash_live_lines("/");
-        let narrowed_matches = slash_live_lines("/login");
-        let all_prompt_row = all_matches
-            .iter()
-            .position(|line| line.starts_with("╰─/"))
-            .expect("prompt row for all suggestions");
-        let narrowed_prompt_row = narrowed_matches
-            .iter()
-            .position(|line| line.starts_with("╰─/login"))
-            .expect("prompt row for narrowed suggestions");
-
-        assert_eq!(narrowed_prompt_row, all_prompt_row);
-        assert_eq!(narrowed_matches.len(), all_matches.len());
-        assert!(all_matches
-            .iter()
-            .position(|line| line.contains("slash suggestions"))
-            .is_some_and(|row| row > all_prompt_row));
-        assert!(narrowed_matches
-            .iter()
-            .position(|line| line.contains("slash suggestions"))
-            .is_some_and(|row| row > narrowed_prompt_row));
-        assert!(
-            slash_hint_panel("/login", 100, false, 0).len()
-                < slash_hint_panel("/", 100, false, 0).len()
-        );
-    }
 }

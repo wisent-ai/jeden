@@ -1,4 +1,4 @@
-use std::io::{self, Write};
+use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -131,11 +131,6 @@ where
         ));
         lines
     };
-    let park_at_live_end = || -> io::Result<()> {
-        let mut stdout = io::stdout();
-        stdout.write_all(b"\x1b[999B\r")?;
-        stdout.flush()
-    };
 
     let outcome = thread::scope(|scope| -> io::Result<Result<CommandOutcome, String>> {
         let worker_cancel = cancel.clone();
@@ -240,18 +235,19 @@ where
             let cancelling = cancel.load(Ordering::Relaxed);
             let mut live = build_live(&streamed, &note, frame, cancelling);
             let mut composer = busy_editor_lines(editor, queue, columns, color);
-            if composer.len() > 1 {
+            let cursor_rows_below = if composer.len() > 1 {
                 place_editor_cursor(
                     &mut composer[1..],
                     editor.text(),
                     editor.cursor(),
                     columns,
                     0,
-                );
-            }
+                )
+            } else {
+                0
+            };
             live.extend(composer);
-            park_at_live_end()?;
-            renderer.flush(&[], &live)?;
+            renderer.flush_with_cursor(&[], &live, cursor_rows_below)?;
             frame = frame.wrapping_add(1);
 
             if worker.is_finished() {

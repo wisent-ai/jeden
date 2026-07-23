@@ -103,17 +103,7 @@ impl TaskScheduler {
         Mailbox::new(&self.store, self.limits.max_children.saturating_mul(64))
     }
     fn workspace_root(&self) -> PathBuf {
-        let store = fs::canonicalize(&self.store).unwrap_or_else(|_| self.store.clone());
-        let cwd = fs::canonicalize(&self.cwd).unwrap_or_else(|_| self.cwd.clone());
-        if store.starts_with(&cwd) {
-            let mut hash = DefaultHasher::new();
-            cwd.hash(&mut hash);
-            std::env::temp_dir()
-                .join("jeden-task-workspaces")
-                .join(format!("{:016x}", hash.finish()))
-        } else {
-            self.store.join("workspaces")
-        }
+        workspace_root_for(&self.store, &self.cwd)
     }
     fn job_path(&self, id: &str) -> PathBuf {
         self.store.join("jobs").join(format!("{id}.json"))
@@ -643,6 +633,24 @@ impl TaskScheduler {
             }
         }
         self.clean_slots()
+    }
+}
+
+/// Root directory that holds the isolated workspaces for jobs of a scheduler
+/// with the given store and cwd. Mirrors `TaskScheduler::workspace_root` so
+/// read-only tooling (e.g. `jeden worktree`) can locate managed workspaces
+/// without opening (and thereby mutating) a scheduler store.
+pub(crate) fn workspace_root_for(store: &Path, cwd: &Path) -> PathBuf {
+    let store = fs::canonicalize(store).unwrap_or_else(|_| store.to_path_buf());
+    let cwd = fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    if store.starts_with(&cwd) {
+        let mut hash = DefaultHasher::new();
+        cwd.hash(&mut hash);
+        std::env::temp_dir()
+            .join("jeden-task-workspaces")
+            .join(format!("{:016x}", hash.finish()))
+    } else {
+        store.join("workspaces")
     }
 }
 

@@ -1,6 +1,7 @@
 pub mod billing;
 pub mod brama;
 pub mod contract;
+pub mod quota;
 pub mod staging;
 pub mod transport;
 pub mod weles;

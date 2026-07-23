@@ -257,6 +257,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let catalog_error = match (&selected_model, &catalog) {
         (None, _) => Some("no model selected; choose a model advertised by Brama".to_string()),
         (_, Err(error)) => Some(error.to_string()),
+        (Some(model), Ok(_)) if crate::model_router::is_virtual_model_route(model) => None,
         (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),
     };
     let image_capable_models = catalog
@@ -279,10 +280,14 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let validate_routes = |routes: &Result<Vec<RouteDescriptor>, String>| -> Option<String> {
         let catalog = catalog.as_ref().ok()?;
         routes.as_ref().ok()?.iter().find_map(|route| {
-            catalog
-                .resolve(&route.model)
-                .err()
-                .map(|error| error.to_string())
+            if crate::model_router::is_virtual_model_route(&route.model) {
+                None
+            } else {
+                catalog
+                    .resolve(&route.model)
+                    .err()
+                    .map(|error| error.to_string())
+            }
         })
     };
     let config_error = retry
