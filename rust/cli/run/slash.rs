@@ -59,9 +59,12 @@ pub(crate) fn update_command() -> Result<String, String> {
     ))
 }
 
-pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<(), String> {
+/// Resolve a model route against the Brama catalog, returning the canonical
+/// route id. A bare (provider-less) id resolves to the unique catalog route
+/// whose id ends with `/<model>`; an ambiguous id errors naming every match.
+pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<String, String> {
     if crate::model_router::is_virtual_model_route(model) {
-        return Ok(());
+        return Ok(model.to_string());
     }
     let runtime_config = load_config(cwd);
     let endpoint = env::var("BRAMA_URL")
@@ -71,13 +74,24 @@ pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<(), String>
         endpoint,
         env::var("BRAMA_TOKEN").ok(),
     );
-    crate::control_plane::model_catalog(cwd, &client, false)
-        .and_then(|catalog| catalog.resolve(model).map(|_| ()))
-        .map_err(|error| error.to_string())
+    let catalog = crate::control_plane::model_catalog(cwd, &client, false)
+        .map_err(|error| error.to_string())?;
+    match catalog.resolve(model) {
+        Ok(entry) => Ok(entry.id.clone()),
+        Err(error) => {
+            if model.contains('/') {
+                return Err(error.to_string());
+            }
+            match catalog.resolve_bare(model)? {
+                Some(entry) => Ok(entry.id.clone()),
+                None => Err(error.to_string()),
+            }
+        }
+    }
 }
 
 pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String> {
-    resolve_model_route(cwd, model)?;
+    let resolved = resolve_model_route(cwd, model)?;
     let path = config_path(cwd);
     let mut config = read_json::<Value>(&path);
     if !config.is_object() {
@@ -86,7 +100,7 @@ pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String>
     config
         .as_object_mut()
         .expect("object")
-        .insert("model".into(), Value::String(model.to_string()));
+        .insert("model".into(), Value::String(resolved.clone()));
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
@@ -95,7 +109,7 @@ pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String>
         serde_json::to_string_pretty(&config).map_err(|error| error.to_string())? + "\n",
     )
     .map_err(|error| error.to_string())?;
-    Ok(format!("Model route set to {}.", model))
+    Ok(format!("Model route set to {}.", resolved))
 }
 
 fn handle_model_slash(

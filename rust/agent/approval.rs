@@ -202,6 +202,19 @@ pub(super) fn resolve_tool_approval(
     let mode = approval_mode(args, &state);
     let safety = safety_override_reason(tool, input);
 
+    // Plan mode is read-only by design: write- and exec-tier tools are denied
+    // outright, with a hint on how to allow modifications again.
+    if tier != ToolTier::Read
+        && state
+            .pointer("/plan/enabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return ToolDecision::Deny(format!(
+            "tool {tool} is blocked (plan mode is on; /plan off to allow modifications)"
+        ));
+    }
+
     if mode == ApprovalMode::Yolo {
         return match policy {
             Some(ToolPolicy::Deny) => {

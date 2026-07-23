@@ -113,6 +113,31 @@ impl ModelCatalog {
             .find(|model| model.id == id && model.available)
             .map(|model| &model.price)
     }
+
+    /// Resolve a bare (provider-less) model id to a catalog entry whose id
+    /// ends with `/<model>`. Returns the entry on a unique match, `None` when
+    /// nothing matches, or an error naming every matching route id when the
+    /// bare id is ambiguous.
+    pub fn resolve_bare(&self, model: &str) -> Result<Option<&ModelEntry>, String> {
+        let suffix = format!("/{model}");
+        let matches = self
+            .models
+            .iter()
+            .filter(|entry| entry.id.ends_with(suffix.as_str()))
+            .collect::<Vec<_>>();
+        match matches.len() {
+            0 => Ok(None),
+            1 => Ok(matches.into_iter().next()),
+            _ => Err(format!(
+                "model `{model}` is ambiguous; it matches multiple Brama routes: {}; use the full route id",
+                matches
+                    .iter()
+                    .map(|entry| entry.id.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

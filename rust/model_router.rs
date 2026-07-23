@@ -47,7 +47,7 @@ impl Default for RetryPolicy {
     fn default() -> Self {
         Self {
             max_attempts: 3,
-            base_delay: Duration::from_millis(250),
+            base_delay: Duration::from_secs(2),
             max_delay: Duration::from_secs(8),
             first_event_timeout: Duration::from_secs(30),
             idle_timeout: Duration::from_secs(45),
@@ -88,6 +88,7 @@ pub enum StreamErrorClass {
     QuotaExhausted,
     MalformedEvent,
     Incomplete,
+    EmptyResponse,
     Permanent,
 }
 
@@ -421,6 +422,11 @@ fn usage_from_value(data: &Value) -> Option<CompletionUsage> {
     }
 }
 
+/// Terminal messages for a successful-but-empty router response; both are
+/// transient — a retry can legitimately produce content.
+const NO_MESSAGE: &str = "model router returned no message";
+const NO_MESSAGE_CONTENT: &str = "model router returned no message content";
+
 /// Parse a full (non-streamed) completion body into an action string / content.
 fn parse_completion_response(text: &str) -> Result<Completion, String> {
     let data: Value =
@@ -428,7 +434,7 @@ fn parse_completion_response(text: &str) -> Result<Completion, String> {
     let usage = usage_from_value(&data);
     let message = data
         .pointer("/choices/0/message")
-        .ok_or("model router returned no message")?;
+        .ok_or(NO_MESSAGE)?;
     let finish_reason = data
         .pointer("/choices/0/finish_reason")
         .and_then(Value::as_str)
@@ -449,7 +455,7 @@ fn parse_completion_response(text: &str) -> Result<Completion, String> {
     }
     let content = message.get("content").and_then(Value::as_str).unwrap_or("");
     if content.trim().is_empty() {
-        return Err("model router returned no message content".into());
+        return Err(NO_MESSAGE_CONTENT.into());
     }
     Ok(Completion {
         content: content.to_string(),
@@ -669,6 +675,11 @@ pub fn chat_completion_streaming(
                         }
                         if attempt < attempts {
                             let delay = retry_delay(&config.retry, attempt, error.retry_after);
+                            eprintln!(
+                                "retry {attempt}/{} after {}",
+                                attempts.saturating_sub(1),
+                                error.message
+                            );
                             route_results.push(RouteResult::RetryScheduled {
                                 route: route.clone(),
                                 attempt: attempt + 1,
@@ -737,7 +748,10 @@ impl AttemptError {
     fn is_transient(&self) -> bool {
         matches!(
             self.class,
-            StreamErrorClass::Timeout | StreamErrorClass::TransientHttp | StreamErrorClass::Network
+            StreamErrorClass::Timeout
+                | StreamErrorClass::TransientHttp
+                | StreamErrorClass::Network
+                | StreamErrorClass::EmptyResponse
         )
     }
 }
@@ -905,8 +919,13 @@ fn streaming_attempt(
                         false,
                     ));
                 }
-                return parse_completion_response(&text)
-                    .map_err(|message| malformed(message, false));
+                return parse_completion_response(&text).map_err(|message| {
+                    if message == NO_MESSAGE || message == NO_MESSAGE_CONTENT {
+                        empty_response(message, false)
+                    } else {
+                        malformed(message, false)
+                    }
+                });
             }
             WireMessage::Line(result) => {
                 let line = result.map_err(|message| AttemptError {
@@ -1137,9 +1156,7 @@ impl OpenAiStreamState {
             });
         }
         if self.content.trim().is_empty() {
-            return Err(AttemptError::permanent(
-                "model router returned no message content",
-            ));
+            return Err(empty_response(NO_MESSAGE_CONTENT, self.visible_output));
         }
         Ok(Completion {
             content: std::mem::take(&mut self.content),
@@ -1233,11 +1250,28 @@ fn malformed(message: impl Into<String>, visible_output: bool) -> AttemptError {
     }
 }
 
+/// A successful-but-empty router response is transient: retrying the same
+/// request can legitimately return content.
+fn empty_response(message: impl Into<String>, visible_output: bool) -> AttemptError {
+    AttemptError {
+        class: StreamErrorClass::EmptyResponse,
+        message: message.into(),
+        retry_after: None,
+        visible_output,
+    }
+}
+
 fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> AttemptError {
     let normalized = body.to_ascii_lowercase();
+    // A 429 `subscription_unavailable` fires while a reauth is still in
+    // progress; it clears on its own, so treat it as transient rather than
+    // quota exhaustion.
+    let subscription_transient = status == 429 && normalized.contains("subscription_unavailable");
     let quota_exhausted = status == 402
         || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
-    let class = if quota_exhausted {
+    let class = if subscription_transient {
+        StreamErrorClass::TransientHttp
+    } else if quota_exhausted {
         StreamErrorClass::QuotaExhausted
     } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
@@ -1294,7 +1328,9 @@ fn retry_delay(policy: &RetryPolicy, attempt: usize, retry_after: Option<Duratio
     if let Some(delay) = retry_after {
         return delay;
     }
-    let exponent = (attempt.saturating_sub(1)).min(20) as u32;
+    // With the default 2s base this backs off ~2s then ~8s (capped), giving a
+    // recovering router real time instead of hammering it.
+    let exponent = attempt.saturating_sub(1).saturating_mul(2).min(20) as u32;
     let base_ms = policy
         .base_delay
         .as_millis()

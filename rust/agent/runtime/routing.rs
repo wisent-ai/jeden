@@ -217,6 +217,39 @@ fn subscription_pool_from_weles() -> Result<Option<SubscriptionPoolSnapshot>, St
     }))
 }
 
+/// Fetch the Brama catalog with bounded retries (max 2 extra attempts, ~2s
+/// then ~8s) on transient failures only — transport errors and HTTP 429/5xx —
+/// so a momentary outage does not hard-fail the run before the first chat
+/// call. Validation and schema errors surface immediately.
+fn model_catalog_with_retry(
+    cwd: &Path,
+    client: &crate::control_plane::brama::BramaClient,
+) -> Result<crate::control_plane::brama::ModelCatalog, crate::control_plane::brama::BramaError> {
+    use crate::control_plane::brama::BramaError;
+    const DELAYS: [std::time::Duration; 2] = [
+        std::time::Duration::from_secs(2),
+        std::time::Duration::from_secs(8),
+    ];
+    for attempt in 0..=DELAYS.len() {
+        match crate::control_plane::model_catalog(cwd, client, false) {
+            Ok(catalog) => return Ok(catalog),
+            Err(error) => {
+                let transient = match &error {
+                    BramaError::Transport(_) | BramaError::RateLimited { .. } => true,
+                    BramaError::Http { status, .. } => *status == 429 || (500..600).contains(status),
+                    _ => false,
+                };
+                if !transient || attempt == DELAYS.len() {
+                    return Err(error);
+                }
+                eprintln!("retry {}/{} after {}", attempt + 1, DELAYS.len(), error);
+                std::thread::sleep(DELAYS[attempt]);
+            }
+        }
+    }
+    unreachable!("catalog retry loop returns on the final attempt")
+}
+
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let mode_state = read_mode_state(&args.cwd);
     let mode_service_tier = if mode_state
@@ -252,14 +285,34 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         endpoint.clone(),
         env::var("BRAMA_TOKEN").ok(),
     );
-    let catalog = crate::control_plane::model_catalog(&args.cwd, &catalog_client, false);
+    let catalog = model_catalog_with_retry(&args.cwd, &catalog_client);
+    // Bare (provider-less) model ids resolve to the unique catalog route whose
+    // id ends with `/<model>`; an ambiguous id names every matching route.
+    let mut bare_model_error = None;
+    let selected_model = match (selected_model, &catalog) {
+        (Some(model), Ok(catalog))
+            if !model.contains('/')
+                && !crate::model_router::is_virtual_model_route(&model)
+                && !catalog.models.iter().any(|entry| entry.id == model) =>
+        {
+            match catalog.resolve_bare(&model) {
+                Ok(Some(entry)) => Some(entry.id.clone()),
+                Ok(None) => Some(model),
+                Err(error) => {
+                    bare_model_error = Some(error);
+                    Some(model)
+                }
+            }
+        }
+        (model, _) => model,
+    };
     let subscription_pool = subscription_pool_from_weles();
-    let catalog_error = match (&selected_model, &catalog) {
+    let catalog_error = bare_model_error.or(match (&selected_model, &catalog) {
         (None, _) => Some("no model selected; choose a model advertised by Brama".to_string()),
         (_, Err(error)) => Some(error.to_string()),
         (Some(model), Ok(_)) if crate::model_router::is_virtual_model_route(model) => None,
         (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),
-    };
+    });
     let image_capable_models = catalog
         .as_ref()
         .map(|catalog| {
