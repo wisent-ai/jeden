@@ -27,6 +27,17 @@ pub struct ModelPrice {
     pub cache_write: f64,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPerf {
+    #[serde(default)]
+    pub count: u64,
+    #[serde(default)]
+    pub latency_ms: f64,
+    #[serde(default)]
+    pub tps: f64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelEntry {
@@ -53,6 +64,8 @@ pub struct ModelEntry {
     pub promotion: Vec<String>,
     #[serde(default)]
     pub unavailable_reason: Option<String>,
+    #[serde(default)]
+    pub perf: Option<ModelPerf>,
 }
 
 fn default_true() -> bool {

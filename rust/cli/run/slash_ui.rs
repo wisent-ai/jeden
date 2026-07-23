@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::cli::auth::{format_auth_status, provider_picker};
 use crate::cli::config::{load_config, schema::settings_picker};
-use crate::control_plane::brama::{ModelEntry, ModelPrice};
+use crate::control_plane::brama::{ModelEntry, ModelPerf, ModelPrice};
 use crate::slash::{self, SlashContext};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
@@ -29,6 +29,17 @@ fn price_detail(price: &ModelPrice) -> String {
         )
     } else {
         " · free".into()
+    }
+}
+
+/// Observed performance: latency in seconds (1 decimal) and tokens/sec
+/// (rounded), appended only when the router has stats for the route.
+fn perf_detail(perf: Option<&ModelPerf>) -> String {
+    match perf {
+        Some(perf) if perf.count > 0 => {
+            format!(" · {:.1}s {:.0}t/s", perf.latency_ms / 1000.0, perf.tps)
+        }
+        _ => String::new(),
     }
 }
 
@@ -70,7 +81,12 @@ fn model_row(model: &ModelEntry, active: Option<&str>) -> PickerItem {
     );
     let detail = model.unavailable_reason.clone().unwrap_or(detail);
     PickerItem::action(&model.id, format!("/model {}", model.id))
-        .detail(format!("{}{}", detail, price_detail(&model.price)))
+        .detail(format!(
+            "{}{}{}",
+            detail,
+            price_detail(&model.price),
+            perf_detail(model.perf.as_ref())
+        ))
         .badge(if !model.available {
             "UNAVAILABLE"
         } else if selected {
