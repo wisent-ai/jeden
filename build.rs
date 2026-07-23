@@ -1,3 +1,6 @@
+//! Build version identity is `<base>+dev.<commits>.<short-sha>[.dirty]`.
+//! A non-empty `JEDEN_BUILD_VERSION` takes precedence over the generated identity.
+
 use std::env;
 use std::process::Command;
 
