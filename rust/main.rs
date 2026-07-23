@@ -47,10 +47,7 @@ pub(crate) use cli::sessions::{
 };
 pub(crate) use cli::worktree::worktree_command;
 
-pub(crate) const JEDEN_VERSION: &str = match option_env!("JEDEN_BUILD_VERSION") {
-    Some(version) => version,
-    None => env!("CARGO_PKG_VERSION"),
-};
+pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 
 fn version_text() -> String {
     format!("jeden {JEDEN_VERSION}")
