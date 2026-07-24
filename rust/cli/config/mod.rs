@@ -271,6 +271,22 @@ impl UiLanguage {
 pub(crate) struct UiConfig {
     #[serde(default)]
     pub(crate) language: UiLanguage,
+    #[serde(default = "default_ui_theme")]
+    pub(crate) theme: String,
+}
+
+fn default_ui_theme() -> String {
+    "auto".into()
+}
+
+/// The configured `ui.theme` value ("auto" when unset).
+pub(crate) fn ui_theme() -> String {
+    crate::cli::config::merged_config_value(&std::env::current_dir().unwrap_or_default())
+        .get("ui")
+        .and_then(|ui| ui.get("theme"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("auto")
+        .to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

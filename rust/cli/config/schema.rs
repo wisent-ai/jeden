@@ -125,6 +125,23 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
             "sr", "sv", "tg", "th", "tk", "tr", "uk", "uz", "vi", "zh",
         ],
     },
+    SettingSpec {
+        key: "ui.theme",
+        typ: "enum",
+        description: "Color theme: a named preset, 'custom' to load .jeden/theme.json, or 'auto' (graphite-dark).",
+        default_json: "\"auto\"",
+        enum_values: &[
+            "auto",
+            "graphite-dark",
+            "paper-light",
+            "titanium",
+            "nord",
+            "color-blind",
+            "mono",
+            "high-contrast",
+            "custom",
+        ],
+    },
 ];
 
 fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
