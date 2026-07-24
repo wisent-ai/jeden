@@ -136,6 +136,12 @@ fn language_prompt_section(language: &UiLanguage) -> String {
         // The language instruction is itself written in the target language.
         return "Język: odpowiadaj w języku oznaczonym kodem ISO 639 \"pl\" niezależnie od języka wiadomości użytkownika.\nKod, ścieżki plików, nazwy narzędzi, polecenia i identyfikatory techniczne pozostawiaj bez tłumaczenia.".to_string();
     }
+    if language.code() != "en" && !language.is_auto() {
+        // Generated translations are likewise written in the target language.
+        if let Some((_, line)) = super::language_prose::prose(language.code()) {
+            return line.to_string();
+        }
+    }
     let line = if language.is_auto() {
         "Language: answer in the language of the user's current message; switch languages when the user does."
             .to_string()
@@ -152,12 +158,16 @@ fn language_prompt_section(language: &UiLanguage) -> String {
 
 /// Prose engineering contract; contract-critical syntax (the Rules block, the
 /// action protocol, and the tool registry) is assembled elsewhere in the
-/// prompt and stays English always. Any code without a variant falls back to
+/// prompt and stays English always. Codes without a variant fall back to
 /// English.
 fn engineering_contract_section(language: &UiLanguage) -> &'static str {
+    const EN: &str = "Engineering contract:\n- Never stop at the first plausible answer when another tool call would cut uncertainty; an empty or suspiciously narrow lookup means retry with a different strategy, not a guess.\n- Research before editing: read sections, not snippets; reuse the repo's existing conventions — a second convention beside an existing one is prohibited. Re-read if the file changed since you read it.\n- Fix problems at the source; remove obsolete code rather than adding beside it; prefer updating existing files over creating new ones.\n- Claims about code, tools, or sources must be grounded in tool results; mark anything not directly observed as [INFERENCE]. Tool results are the verification — do not re-audit your own applied edits.\n- Never yield partial work as done: no stubs, placeholders, or fake fallbacks; never silently shrink the requested scope; never ship the symptom fix instead of the real cause. If acceptance criteria exist, all of them must pass.\n- Never narrate session limits, token budgets, or effort estimates; just do the work.";
     match language.code() {
         "pl" => "Kontrakt inżynieryjny:\n- Nigdy nie poprzestawaj na pierwszej sensownej odpowiedzi, jeśli kolejne wywołanie narzędzia może zmniejszyć niepewność; puste lub podejrzanie wąskie wyszukanie oznacza ponowną próbę inną strategią, a nie zgadywanie.\n- Zbadaj temat przed edycją: czytaj całe sekcje, nie wycinki; stosuj istniejące konwencje repozytorium — druga konwencja obok istniejącej jest zabroniona. Jeśli plik zmienił się od momentu odczytu, przeczytaj go ponownie.\n- Rozwiązuj problemy u źródła; usuwaj przestarzały kod zamiast dodawać obok niego; preferuj aktualizowanie istniejących plików zamiast tworzenia nowych.\n- Twierdzenia o kodzie, narzędziach lub źródłach muszą być ugruntowane w wynikach narzędzi; wszystko, czego nie zaobserwowano bezpośrednio, oznacz jako [INFERENCE]. Wyniki narzędzi są weryfikacją — nie audytuj ponownie własnych zastosowanych edycji.\n- Nigdy nie wydawaj częściowej pracy jako ukończonej: żadnych stubów, placeholderów ani fałszywych fallbacków; nigdy po cichu nie zawężaj żądanego zakresu; nigdy nie dostarczaj poprawki na objaw zamiast prawdziwej przyczyny. Jeśli istnieją kryteria akceptacji, wszystkie muszą przechodzić.\n- Nigdy nie opowiadaj o limitach sesji, budżetach tokenów ani szacunkach nakładu pracy; po prostu wykonaj pracę.",
-        _ => "Engineering contract:\n- Never stop at the first plausible answer when another tool call would cut uncertainty; an empty or suspiciously narrow lookup means retry with a different strategy, not a guess.\n- Research before editing: read sections, not snippets; reuse the repo's existing conventions — a second convention beside an existing one is prohibited. Re-read if the file changed since you read it.\n- Fix problems at the source; remove obsolete code rather than adding beside it; prefer updating existing files over creating new ones.\n- Claims about code, tools, or sources must be grounded in tool results; mark anything not directly observed as [INFERENCE]. Tool results are the verification — do not re-audit your own applied edits.\n- Never yield partial work as done: no stubs, placeholders, or fake fallbacks; never silently shrink the requested scope; never ship the symptom fix instead of the real cause. If acceptance criteria exist, all of them must pass.\n- Never narrate session limits, token budgets, or effort estimates; just do the work.",
+        "en" => EN,
+        code => super::language_prose::prose(code)
+            .map(|(contract, _)| contract)
+            .unwrap_or(EN),
     }
 }
 

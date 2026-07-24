@@ -54,13 +54,19 @@ static STRINGS: &[(&str, &str, &str)] = &[
     ("pl", "badge.custom", "WŁASNY"),
 ];
 
-/// Look up `key` for `lang`. Unknown languages (including `auto`) and missing
-/// translations fall back to English; a key missing even from English yields
-/// the key itself. This never panics.
+/// Look up `key` for `lang`: hand-written rows first, then the generated
+/// overlay in `i18n_translations`, then the English row; a key missing even
+/// from English yields the key itself. Unknown languages (including `auto`)
+/// fall back to English. This never panics.
 pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
     STRINGS
         .iter()
         .find(|(row_lang, row_key, _)| *row_lang == lang && *row_key == key)
+        .or_else(|| {
+            super::i18n_translations::GENERATED_TRANSLATIONS
+                .iter()
+                .find(|(row_lang, row_key, _)| *row_lang == lang && *row_key == key)
+        })
         .or_else(|| {
             STRINGS
                 .iter()
