@@ -111,6 +111,8 @@ pub(crate) struct Config {
     pub(crate) secrets: SecretsConfig,
     #[serde(default)]
     pub(crate) billing: BillingPreferencesConfig,
+    #[serde(default)]
+    pub(crate) ui: UiConfig,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -227,6 +229,32 @@ fn default_secret_min_length() -> usize {
 
 fn default_true() -> bool {
     true
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum UiLanguage {
+    #[default]
+    Auto,
+    En,
+    Pl,
+}
+
+impl UiLanguage {
+    fn parse(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "auto" => Some(Self::Auto),
+            "en" => Some(Self::En),
+            "pl" => Some(Self::Pl),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub(crate) struct UiConfig {
+    #[serde(default)]
+    pub(crate) language: UiLanguage,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -412,5 +440,15 @@ pub(crate) fn load_config(cwd: &Path) -> Config {
         rules: merged.rules,
         secrets: merged.secrets,
         billing: merged.billing,
+        ui: merged.ui,
     }
+}
+
+/// Resolve the conversation language: JEDEN_LANGUAGE wins over merged config,
+/// which already layers project over user. Invalid env values fall through.
+pub(crate) fn ui_language(config: &Config) -> UiLanguage {
+    std::env::var("JEDEN_LANGUAGE")
+        .ok()
+        .and_then(|value| UiLanguage::parse(&value))
+        .unwrap_or(config.ui.language)
 }

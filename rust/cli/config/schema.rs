@@ -112,6 +112,13 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         default_json: "true",
         enum_values: &[],
     },
+    SettingSpec {
+        key: "ui.language",
+        typ: "enum",
+        description: "Conversation language: auto follows the user's messages; en/pl pin the answer language.",
+        default_json: "\"auto\"",
+        enum_values: &["auto", "en", "pl"],
+    },
 ];
 
 fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
@@ -248,7 +255,7 @@ fn section_header(prefix: &str, count: usize) -> PickerItem {
 /// Group rows by top-level key prefix: known prefixes in first-seen order,
 /// anything else under `other` after them. Row order within a group is kept.
 fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
-    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "secrets"];
+    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "secrets", "ui"];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
         let label = if KNOWN_PREFIXES.contains(&prefix) {
