@@ -137,6 +137,8 @@ The version in `Cargo.toml` is the SemVer floor. Local and development builds id
 
 Every successful `contractual-ci` run caused by a push to this repository's `main` branch automatically launches the signed canary workflow for the exact CI-tested commit. The generated version advances the crate's patch component and adds a unique prerelease identity: `X.Y.(Z+1)-canary.<run>.<attempt>.sha<commit>`. Tag-triggered and manually dispatched canaries remain supported. Stable promotion remains manual and requires immutable evidence digests.
 
+After the canary evidence matrix passes, the same workflow also advances the stable SemVer automatically: it commits a `[skip ci]` bump of the `Cargo.toml` floor to `X.Y.(Z+1)` on `main` and tags that commit `vX.Y.(Z+1)`. The tag step is idempotent (an existing tag ends the job quietly) and `[skip ci]` keeps the bump commit from retriggering the pipeline. As a result every green `main` run yields one canary artifact and moves both the in-repo version floor and the stable tag forward by one patch — no manual versioning steps.
+
 Automatic canary publication fails closed unless the release authority is configured through `RELEASE_STORE_BASE_URL`, the release OIDC exchange settings, canary KMS signing settings and public keys, and stable updater trust-root identifiers. The workflow never falls back to unsigned publication.
 
 ## Configuration and context
