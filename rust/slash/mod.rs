@@ -45,6 +45,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
 
         "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),
         "/roles" | "/role" => Some(modes::session::handle_roles(context)),
+        "/prompt" => Some(crate::agent::system_prompt_checked(context.cwd)),
         "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(modes::todo::handle_todo(args, &mut state, context)) },
         "/roadmap" => Some(
             crate::roadmap::split_command_line(args)

@@ -23,6 +23,7 @@ pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;
 pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult};
 pub(crate) use runtime::model_router_config;
+pub(crate) use runtime::specs::system_prompt_checked;
 pub(crate) use runtime::now_stamp;
 pub(crate) use state::{
     loop_next_prompt, record_branch, update_last_session_path, update_task_outcome, MAX_LOOP_ITERS,
@@ -31,7 +32,7 @@ pub(crate) use state::{
 use approval::{resolve_tool_approval, ToolDecision};
 use runtime::{
     append_usage_event, env_usize, is_context_overflow_error, is_incomplete_output_error,
-    prepare_outbound_messages, rust_tool_specs, system_prompt_checked, usage_cost, SessionRecorder,
+    prepare_outbound_messages, rust_tool_specs, usage_cost, SessionRecorder,
 };
 use state::{apply_mode_instructions, capture_plan_if_enabled, read_mode_state, write_mode_state};
 

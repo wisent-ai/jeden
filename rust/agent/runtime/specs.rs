@@ -107,7 +107,7 @@ fn tool_spec(name: &str, description: &str, properties: Value, required: Vec<&st
     })
 }
 
-pub(in crate::agent) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
+pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     let config = crate::load_config(cwd);
     let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)

@@ -2,7 +2,7 @@ use super::*;
 
 mod recorder;
 mod routing;
-mod specs;
+pub(crate) mod specs;
 
 pub(crate) use recorder::now_stamp;
 pub(in crate::agent) use recorder::SessionRecorder;
@@ -11,6 +11,4 @@ pub(in crate::agent) use routing::{
     append_usage_event, env_usize, is_context_overflow_error, is_incomplete_output_error,
     memory_guidance_for_prompt, usage_cost,
 };
-pub(in crate::agent) use specs::{
-    prepare_outbound_messages, rust_tool_specs, system_prompt_checked,
-};
+pub(in crate::agent) use specs::{prepare_outbound_messages, rust_tool_specs};

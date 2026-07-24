@@ -740,6 +740,11 @@ pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
             aliases: &["models", "switch"],
         },
         SlashSpec {
+            name: "prompt",
+            description: "Show the effective system prompt",
+            aliases: &[],
+        },
+        SlashSpec {
             name: "help",
             description: "Show slash commands",
             aliases: &["commands"],
@@ -1087,6 +1092,7 @@ fn native_view_commands() -> &'static [&'static str] {
         "login",
         "logout",
         "model",
+        "prompt",
         "settings",
         "plan",
         "goal",
