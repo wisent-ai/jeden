@@ -231,23 +231,39 @@ fn default_true() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, Default)]
-#[serde(rename_all = "lowercase")]
-pub(crate) enum UiLanguage {
-    #[default]
-    Auto,
-    En,
-    Pl,
+/// Languages offered by wisent-app (src/locales) — the same set is pinnable here.
+pub(crate) const UI_LANGUAGE_CODES: &[&str] = &[
+    "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "dv", "dz", "el", "en", "es",
+    "et", "fa", "fi", "fo", "fr", "he", "hr", "hu", "hy", "id", "is", "it", "ja", "ka", "kk", "kl",
+    "km", "ko", "ky", "lo", "lt", "lv", "mk", "mn", "ms", "my", "ne", "nl", "no", "pl", "ps", "pt",
+    "ro", "ru", "si", "sk", "sl", "so", "sq", "sr", "sv", "tg", "th", "tk", "tr", "uk", "uz", "vi",
+    "zh",
+];
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub(crate) struct UiLanguage(String);
+
+impl Default for UiLanguage {
+    fn default() -> Self {
+        Self("auto".into())
+    }
 }
 
 impl UiLanguage {
     fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "en" => Some(Self::En),
-            "pl" => Some(Self::Pl),
-            _ => None,
+        let value = value.trim().to_ascii_lowercase();
+        if value == "auto" || UI_LANGUAGE_CODES.contains(&value.as_str()) {
+            Some(Self(value))
+        } else {
+            None
         }
+    }
+    pub(crate) fn code(&self) -> &str {
+        &self.0
+    }
+    pub(crate) fn is_auto(&self) -> bool {
+        self.0 == "auto"
     }
 }
 
@@ -450,5 +466,5 @@ pub(crate) fn ui_language(config: &Config) -> UiLanguage {
     std::env::var("JEDEN_LANGUAGE")
         .ok()
         .and_then(|value| UiLanguage::parse(&value))
-        .unwrap_or(config.ui.language)
+        .unwrap_or_else(|| config.ui.language.clone())
 }

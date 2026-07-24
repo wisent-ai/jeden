@@ -115,9 +115,15 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
     SettingSpec {
         key: "ui.language",
         typ: "enum",
-        description: "Conversation language: auto follows the user's messages; en/pl pin the answer language.",
+        description: "Conversation language: auto follows the user's messages; an ISO 639 code pins the answer language (65 languages as in wisent-app).",
         default_json: "\"auto\"",
-        enum_values: &["auto", "en", "pl"],
+        enum_values: &[
+            "auto", "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "dv", "dz",
+            "el", "en", "es", "et", "fa", "fi", "fo", "fr", "he", "hr", "hu", "hy", "id", "is",
+            "it", "ja", "ka", "kk", "kl", "km", "ko", "ky", "lo", "lt", "lv", "mk", "mn", "ms",
+            "my", "ne", "nl", "no", "pl", "ps", "pt", "ro", "ru", "si", "sk", "sl", "so", "sq",
+            "sr", "sv", "tg", "th", "tk", "tr", "uk", "uz", "vi", "zh",
+        ],
     },
 ];
 

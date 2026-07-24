@@ -130,16 +130,14 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
 }
 
 fn language_prompt_section(language: UiLanguage) -> String {
-    let line = match language {
-        UiLanguage::Auto => {
-            "Language: answer in the language of the user's current message; switch languages when the user does."
-        }
-        UiLanguage::En => {
-            "Language: answer in English regardless of the user's message language."
-        }
-        UiLanguage::Pl => {
-            "Language: answer in Polish (po polsku) regardless of the user's message language."
-        }
+    let line = if language.is_auto() {
+        "Language: answer in the language of the user's current message; switch languages when the user does."
+            .to_string()
+    } else {
+        format!(
+            "Language: answer in the language identified by ISO 639 code \"{}\" regardless of the user's message language.",
+            language.code()
+        )
     };
     format!(
         "{line}\nKeep code, file paths, tool names, commands, and technical identifiers untranslated."
