@@ -56,6 +56,7 @@ fn marketplace_source_type(source: &str) -> &'static str {
 }
 
 pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let scoped_registries = [
         ("project", plugin_registry(context.cwd)),
         ("user", plugin_registry(&super::plugins_home())),
@@ -137,7 +138,7 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
                             .detail(format!(
                                 "{description} · {available_version} · {source_scope} source · not installed"
                             ))
-                            .badge("AVAILABLE"),
+                            .badge(crate::cli::i18n::tr(&lang, "badge.available")),
                         );
                     }
                     continue;

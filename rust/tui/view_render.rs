@@ -1,6 +1,7 @@
 use super::render::boxed;
 use super::text::paint;
 use super::{ConfirmState, PickerState};
+use crate::cli::i18n::tr;
 
 pub(super) fn picker_panel(
     state: &PickerState,
@@ -8,7 +9,7 @@ pub(super) fn picker_panel(
     height: usize,
     color: bool,
 ) -> Vec<String> {
-    let mut rows = vec![format!("{}: {}", state.spec.prompt, state.query)];
+    let mut rows = vec![format!("{} {}", state.spec.prompt, state.query)];
     let indices = state.filtered_indices();
     let chrome_rows = ["query", "footer", "top", "bottom", "prompt"].len();
     let visible_items = height.saturating_sub(chrome_rows).max(usize::from(true));
@@ -50,11 +51,7 @@ pub(super) fn picker_panel(
             });
         }
     }
-    rows.push(paint(
-        "↑↓ select  Home/End jump  Enter confirm  Ctrl-U clear  Esc close",
-        "dim",
-        color,
-    ));
+    rows.push(paint(tr(&state.spec.lang, "picker.footer"), "dim", color));
     boxed(&state.spec.title, &rows, width, color)
 }
 
@@ -80,5 +77,5 @@ pub(super) fn confirm_panel(state: &ConfirmState, width: usize, color: bool) -> 
         color,
     ));
     rows.push(paint("←→ choose  Enter confirm  Esc cancel", "dim", color));
-    boxed("Confirm destructive action", &rows, width, color)
+    boxed(tr(&state.lang, "view.confirm.title"), &rows, width, color)
 }

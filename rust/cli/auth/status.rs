@@ -139,6 +139,7 @@ fn quota_line(bucket: &QuotaBucket) -> String {
 }
 
 pub(crate) fn provider_picker(cwd: &Path) -> Result<PickerSpec, String> {
+    let lang = crate::cli::i18n::lang_code(cwd);
     let client = WelesClient::from_env();
     if !client.health().available {
         return Err(client.health().detail);
@@ -163,9 +164,9 @@ pub(crate) fn provider_picker(cwd: &Path) -> Result<PickerSpec, String> {
                         .unwrap_or_else(|| "Unavailable".into())
                 })
                 .badge(if provider.available {
-                    "AVAILABLE"
+                    crate::cli::i18n::tr(&lang, "badge.available")
                 } else {
-                    "UNAVAILABLE"
+                    crate::cli::i18n::tr(&lang, "badge.unavailable")
                 })
                 .disabled(!provider.available)
         })

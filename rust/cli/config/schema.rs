@@ -225,8 +225,9 @@ fn config_list_json(cwd: &Path) -> Value {
 
 fn config_list_text(cwd: &Path) -> String {
     let list = config_list_json(cwd);
+    let lang = crate::cli::i18n::lang_code(cwd);
     let mut lines = vec![
-        "Jeden settings".to_string(),
+        crate::cli::i18n::tr(&lang, "view.settings.title").to_string(),
         format!("Config: {}", user_config_path().display()),
     ];
     let mut current_group = "";
@@ -285,6 +286,7 @@ fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
 
 pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
     let (config, mut rows) = (merged_config_value(cwd), Vec::new());
+    let lang = crate::cli::i18n::lang_code(cwd);
     for spec in SETTINGS_SCHEMA {
         let (current, default) = (
             effective_setting_value(&config, spec),
@@ -318,7 +320,14 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
                     )
                     .detail(&detail)
                     .disabled(active);
-                    rows.push((prefix, if active { item.badge("ACTIVE") } else { item }));
+                    rows.push((
+                        prefix,
+                        if active {
+                            item.badge(crate::cli::i18n::tr(&lang, "badge.active"))
+                        } else {
+                            item
+                        },
+                    ));
                 }
             }
             _ => {}
@@ -338,7 +347,11 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
             ));
         }
     }
-    PickerSpec::new("Jeden settings", grouped_setting_rows(rows))
+    PickerSpec::new(
+        crate::cli::i18n::tr(&lang, "view.settings.title"),
+        grouped_setting_rows(rows),
+    )
+    .localized(&lang)
 }
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {
     let (verb, rest) = args

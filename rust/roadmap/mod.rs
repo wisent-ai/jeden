@@ -1520,7 +1520,7 @@ pub fn picker(cwd: &Path) -> Result<PickerSpec, RoadmapError> {
         .badge(item.priority)
     }));
     let mut picker = PickerSpec::new("Roadmap", items);
-    picker.prompt = "Search roadmap items".into();
+    picker.prompt = "Search roadmap items:".into();
     picker.empty_message = "No roadmap items match".into();
     Ok(picker)
 }

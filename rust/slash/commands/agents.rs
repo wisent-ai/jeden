@@ -13,16 +13,18 @@ fn tools_label(definition: &AgentDefinition) -> String {
 }
 
 pub(crate) fn agents_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let definitions = match crate::task_runtime::discover_agents(context.cwd) {
         Ok(definitions) => definitions,
         Err(error) => {
             return PickerSpec::new(
-                "Agents",
+                crate::cli::i18n::tr(&lang, "view.agents.title"),
                 vec![PickerItem::action("Agent discovery failed", "")
                     .detail(error.to_string())
                     .badge("error")
                     .disabled(true)],
-            );
+            )
+            .localized(&lang);
         }
     };
     let mut items: Vec<PickerItem> = definitions
@@ -43,9 +45,9 @@ pub(crate) fn agents_picker(context: &SlashContext<'_>) -> PickerSpec {
                 description
             ))
             .badge(if definition.id == "default" {
-                "DEFAULT"
+                crate::cli::i18n::tr(&lang, "badge.default")
             } else {
-                "CUSTOM"
+                crate::cli::i18n::tr(&lang, "badge.custom")
             })
         })
         .collect();
@@ -54,7 +56,7 @@ pub(crate) fn agents_picker(context: &SlashContext<'_>) -> PickerSpec {
             .detail("Open the background jobs view for locally tracked agent jobs")
             .badge("view"),
     );
-    PickerSpec::new("Agents", items)
+    PickerSpec::new(crate::cli::i18n::tr(&lang, "view.agents.title"), items).localized(&lang)
 }
 
 pub(crate) fn handle_agents(args: &str, context: &SlashContext<'_>) -> Result<String, String> {

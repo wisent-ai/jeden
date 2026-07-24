@@ -1,7 +1,8 @@
 use std::path::Path;
 
 use crate::cli::auth::{format_auth_status, provider_picker};
-use crate::cli::config::{load_config, schema::settings_picker};
+use crate::cli::config::{load_config, schema::settings_picker, ui_language};
+use crate::cli::i18n::{lang_code, tr};
 use crate::control_plane::brama::{ModelEntry, ModelPerf, ModelPrice};
 use crate::slash::{self, SlashContext};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
@@ -70,7 +71,7 @@ fn model_rank(model: &ModelEntry, active: Option<&str>) -> u8 {
     }
 }
 
-fn model_row(model: &ModelEntry, active: Option<&str>) -> PickerItem {
+fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str) -> PickerItem {
     let selected = active == Some(model.id.as_str());
     let detail = format!(
         "context {} · output {} · {}{}",
@@ -88,11 +89,11 @@ fn model_row(model: &ModelEntry, active: Option<&str>) -> PickerItem {
             perf_detail(model.perf.as_ref())
         ))
         .badge(if !model.available {
-            "UNAVAILABLE"
+            tr(lang, "badge.unavailable")
         } else if selected {
-            "ACTIVE"
+            tr(lang, "badge.active")
         } else {
-            "AVAILABLE"
+            tr(lang, "badge.available")
         })
         .disabled(selected || !model.available)
 }
@@ -111,6 +112,7 @@ pub(crate) fn model_picker(
     show_all: bool,
 ) -> Result<PickerSpec, String> {
     let config = load_config(cwd);
+    let lang = ui_language(&config).code().to_string();
     let endpoint = std::env::var("BRAMA_URL")
         .ok()
         .or(config.model_router_url.clone());
@@ -145,7 +147,11 @@ pub(crate) fn model_picker(
         items.push(
             PickerItem::action(route, format!("/model {route}"))
                 .detail(detail)
-                .badge(if selected { "ACTIVE" } else { "AUTO" })
+                .badge(if selected {
+                    tr(&lang, "badge.active")
+                } else {
+                    tr(&lang, "badge.auto")
+                })
                 .disabled(selected),
         );
     }
@@ -171,9 +177,11 @@ pub(crate) fn model_picker(
                 items.push(group_header(provider, count));
                 current_group = Some(provider);
             }
-            items.push(model_row(model, active));
+            items.push(model_row(model, active, &lang));
         }
-        items.push(PickerItem::action("Show configured only", "/model").badge("MORE"));
+        items.push(
+            PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
+        );
     } else {
         models.retain(|model| model.available || active == Some(model.id.as_str()));
         models.sort_by(|left, right| {
@@ -181,12 +189,13 @@ pub(crate) fn model_picker(
                 .cmp(&model_rank(right, active))
                 .then_with(|| left.id.cmp(&right.id))
         });
-        items.extend(models.iter().map(|model| model_row(model, active)));
+        items.extend(models.iter().map(|model| model_row(model, active, &lang)));
         items.push(
-            PickerItem::action(format!("Show all {total} models"), "/model --all").badge("MORE"),
+            PickerItem::action(format!("Show all {total} models"), "/model --all")
+                .badge(tr(&lang, "badge.more")),
         );
     }
-    Ok(PickerSpec::new("Select model route", items))
+    Ok(PickerSpec::new(tr(&lang, "view.model.title"), items).localized(&lang))
 }
 
 fn logout_picker() -> Result<PickerSpec, String> {
@@ -230,11 +239,12 @@ pub(crate) fn interactive_view(
                 .health
                 .detail
                 .unwrap_or_else(|| "Capability backend unavailable".into());
+            let lang = lang_code(cwd);
             return Some(Ok(CommandOutcome::Picker(PickerSpec::new(
                 format!("{} unavailable", view.ui.label),
                 vec![PickerItem::action(view.ui.label, "")
                     .detail(detail)
-                    .badge("UNAVAILABLE")
+                    .badge(tr(&lang, "badge.unavailable"))
                     .disabled(true)],
             ))));
         }

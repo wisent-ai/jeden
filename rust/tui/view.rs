@@ -1,5 +1,7 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+use crate::cli::i18n::tr;
+
 const INITIAL_SELECTION: usize = usize::MIN;
 const SELECTION_STEP: usize = true as usize;
 
@@ -56,16 +58,30 @@ pub struct PickerSpec {
     pub prompt: String,
     pub empty_message: String,
     pub items: Vec<PickerItem>,
+    /// Resolved `ui.language` code; render-only chrome (footer, confirm title,
+    /// text export) follows it. Defaults to English for pickers built without
+    /// config in scope.
+    pub lang: String,
 }
 
 impl PickerSpec {
     pub fn new(title: impl Into<String>, items: Vec<PickerItem>) -> Self {
         Self {
             title: title.into(),
-            prompt: "Type to search".into(),
+            prompt: tr("en", "picker.search_placeholder").into(),
             empty_message: "No matching items".into(),
             items,
+            lang: "en".into(),
         }
+    }
+
+    /// Record the resolved chrome language and localize the spec-carried
+    /// search placeholder, so interactive and text rendering follow
+    /// `ui.language`.
+    pub fn localized(mut self, lang: &str) -> Self {
+        self.prompt = tr(lang, "picker.search_placeholder").into();
+        self.lang = lang.to_string();
+        self
     }
 }
 
@@ -86,7 +102,7 @@ impl CommandOutcome {
             Self::Text(text) => text,
             Self::Exit(text) => text,
             Self::Picker(spec) => {
-                let mut lines = vec![spec.title];
+                let mut lines = vec![spec.title, spec.prompt];
                 for item in spec.items {
                     let badge = item
                         .badge
@@ -100,6 +116,7 @@ impl CommandOutcome {
                     };
                     lines.push(format!("- {}{}{}", item.label, badge, detail));
                 }
+                lines.push(tr(&spec.lang, "picker.footer").to_string());
                 lines.join("\n")
             }
         }
@@ -249,6 +266,8 @@ pub struct ConfirmState {
     pub detail: String,
     pub command: String,
     pub confirmed: bool,
+    /// Chrome language inherited from the picker that raised the confirmation.
+    pub lang: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,12 +278,13 @@ pub enum ConfirmEvent {
 }
 
 impl ConfirmState {
-    pub fn new(label: String, detail: String, command: String) -> Self {
+    pub fn new(label: String, detail: String, command: String, lang: String) -> Self {
         Self {
             label,
             detail,
             command,
             confirmed: false,
+            lang,
         }
     }
 

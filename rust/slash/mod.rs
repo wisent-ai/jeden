@@ -195,6 +195,7 @@ pub(crate) fn interactive_picker(
     if !args.trim().is_empty() {
         return None;
     }
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let view = crate::capability::view_descriptor(context.cwd, command)?;
     if !view.health.is_executable() || !view.ui.executable {
         let detail = view
@@ -205,23 +206,23 @@ pub(crate) fn interactive_picker(
             format!("{} unavailable", view.ui.label),
             vec![PickerItem::action(view.ui.label, "")
                 .detail(detail)
-                .badge("UNAVAILABLE")
+                .badge(crate::cli::i18n::tr(&lang, "badge.unavailable"))
                 .disabled(true)],
         )));
     }
     let state = read_mode_state(context.cwd);
     let picker = match command.to_ascii_lowercase().as_str() {
-        "/plan" => Ok(modes::todo::plan_picker(&state)),
-        "/guided-goal" | "/goal" => Ok(modes::todo::goal_picker(&state)),
+        "/plan" => Ok(modes::todo::plan_picker(&state, &lang)),
+        "/guided-goal" | "/goal" => Ok(modes::todo::goal_picker(&state, &lang)),
         "/loop" => Ok(modes::todo::loop_picker(&state)),
         "/fast" => Ok(modes::todo::fast_picker(&state)),
         "/advisor" => Ok(modes::session::advisor_picker(&state, context)),
-        "/approval" => Ok(modes::session::approval_picker(&state)),
-        "/todo" => Ok(modes::todo::todo_picker(&state)),
+        "/approval" => Ok(modes::session::approval_picker(&state, &lang)),
+        "/todo" => Ok(modes::todo::todo_picker(&state, &lang)),
         "/roadmap" => crate::roadmap::picker(context.cwd).map_err(|error| error.to_string()),
         "/session" | "/sessions" => Ok(modes::session::session_picker(context)),
         "/roles" | "/role" => Ok(modes::session::roles_picker(&state, context)),
-        "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state)),
+        "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state, &lang)),
         "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             Ok(modes::session::lifecycle_picker(&state, context))
         }

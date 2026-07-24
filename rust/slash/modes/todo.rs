@@ -4,7 +4,7 @@ use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use std::fs;
 
-pub(crate) fn plan_picker(state: &ModeState) -> PickerSpec {
+pub(crate) fn plan_picker(state: &ModeState, lang: &str) -> PickerSpec {
     let mut items = vec![PickerItem::action(
         if state.plan.enabled {
             "Disable plan mode"
@@ -31,13 +31,13 @@ pub(crate) fn plan_picker(state: &ModeState) -> PickerSpec {
         items.push(
             PickerItem::action("Review latest plan", "/plan-review")
                 .detail("Open the latest agent plan")
-                .badge("AVAILABLE"),
+                .badge(crate::cli::i18n::tr(lang, "badge.available")),
         );
     }
     PickerSpec::new("Plan workflow", items)
 }
 
-pub(crate) fn goal_picker(state: &ModeState) -> PickerSpec {
+pub(crate) fn goal_picker(state: &ModeState, lang: &str) -> PickerSpec {
     let goal = &state.goal;
     let badge = if goal.objective.trim().is_empty() {
         "NO GOAL"
@@ -46,7 +46,7 @@ pub(crate) fn goal_picker(state: &ModeState) -> PickerSpec {
     } else if goal.paused {
         "PAUSED"
     } else {
-        "ACTIVE"
+        crate::cli::i18n::tr(lang, "badge.active")
     };
     let detail = if goal.objective.trim().is_empty() {
         "No objective is configured".to_string()
@@ -159,7 +159,7 @@ fn quoted_arg(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('\"', "\\\""))
 }
 
-pub(crate) fn todo_picker(state: &ModeState) -> PickerSpec {
+pub(crate) fn todo_picker(state: &ModeState, lang: &str) -> PickerSpec {
     let mut items = vec![PickerItem::action("Show todo list", "/todo list")
         .detail(if state.todos.is_empty() {
             "The todo list is empty"
@@ -169,7 +169,7 @@ pub(crate) fn todo_picker(state: &ModeState) -> PickerSpec {
         .badge(if state.todos.is_empty() {
             "EMPTY"
         } else {
-            "CURRENT"
+            crate::cli::i18n::tr(lang, "badge.current")
         })];
     items.push(
         PickerItem::action("Add todo", "/todo add ")

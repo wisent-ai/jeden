@@ -213,6 +213,7 @@ fn quota_rows() -> Vec<PickerItem> {
 }
 
 pub(crate) fn usage_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let path = usage_path(context.cwd);
     let usage = read_json_value(&path);
     let events = usage
@@ -283,7 +284,7 @@ pub(crate) fn usage_picker(context: &SlashContext<'_>) -> PickerSpec {
             .badge("destructive")
             .disabled(events.is_empty()),
     ]);
-    PickerSpec::new("Provider usage", items)
+    PickerSpec::new(crate::cli::i18n::tr(&lang, "view.usage.title"), items).localized(&lang)
 }
 
 pub(crate) fn handle_usage(args: &str, context: &SlashContext<'_>) -> Result<String, String> {

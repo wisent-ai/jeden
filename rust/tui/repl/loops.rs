@@ -374,7 +374,12 @@ where
                             detail,
                             command,
                         } => {
-                            confirm = Some(ConfirmState::new(label, detail, command));
+                            confirm = Some(ConfirmState::new(
+                                label,
+                                detail,
+                                command,
+                                active_picker.spec.lang.clone(),
+                            ));
                             continue;
                         }
                     }

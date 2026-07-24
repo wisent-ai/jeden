@@ -10,6 +10,7 @@ use crate::tui::{PickerItem, PickerSpec};
 /// Roles hub: one row per model role, each opening the existing view that
 /// owns the role (`/model`, `/fast`, `/advisor`). Details report live state.
 pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let model = context
         .model
         .map(str::to_string)
@@ -40,7 +41,7 @@ pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> Pic
         "Disabled · /advisor to configure".to_string()
     };
     PickerSpec::new(
-        "Model roles",
+        crate::cli::i18n::tr(&lang, "view.roles.title"),
         vec![
             PickerItem::action("default model", "/roles model")
                 .detail(model_detail)
@@ -53,6 +54,7 @@ pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> Pic
                 .badge(if advisor.enabled { "ON" } else { "OFF" }),
         ],
     )
+    .localized(&lang)
 }
 
 /// Non-interactive `/roles`: the same hub rows rendered as text.
@@ -62,6 +64,7 @@ pub(crate) fn handle_roles(context: &SlashContext<'_>) -> Result<String, String>
 }
 
 pub(crate) fn advisor_picker(state: &ModeState, context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let advisor = &state.advisor;
     let route = super::advisor_model_label(advisor, context);
     let mut items = vec![
@@ -86,7 +89,7 @@ pub(crate) fn advisor_picker(state: &ModeState, context: &SlashContext<'_>) -> P
         items.push(
             PickerItem::action("Show advisor notes", "/advisor dump")
                 .detail("Display the latest reviewer notes")
-                .badge("AVAILABLE"),
+                .badge(crate::cli::i18n::tr(&lang, "badge.available")),
         );
         items.push(
             PickerItem::action("Show raw advisor notes", "/advisor dump raw")
@@ -96,7 +99,7 @@ pub(crate) fn advisor_picker(state: &ModeState, context: &SlashContext<'_>) -> P
     PickerSpec::new("Advisor workflow", items)
 }
 
-pub(crate) fn approval_picker(state: &ModeState) -> PickerSpec {
+pub(crate) fn approval_picker(state: &ModeState, lang: &str) -> PickerSpec {
     let current = if state.tools.approval_mode.trim().is_empty() {
         "default"
     } else {
@@ -114,7 +117,11 @@ pub(crate) fn approval_picker(state: &ModeState) -> PickerSpec {
                 format!("/approval mode {}", mode),
             )
             .detail("Set the global approval mode")
-            .badge(if mode == current { "CURRENT" } else { "MODE" })
+            .badge(if mode == current {
+                crate::cli::i18n::tr(lang, "badge.current")
+            } else {
+                "MODE"
+            })
             .disabled(mode == current),
         );
     }
@@ -126,7 +133,11 @@ pub(crate) fn approval_picker(state: &ModeState) -> PickerSpec {
                     format!("/approval {} {}", tool, policy),
                 )
                 .detail(format!("Current {} policy: {}", tool, active))
-                .badge(if policy == active { "CURRENT" } else { "TOOL" })
+                .badge(if policy == active {
+                    crate::cli::i18n::tr(lang, "badge.current")
+                } else {
+                    "TOOL"
+                })
                 .disabled(policy == active),
             );
         }
@@ -139,7 +150,7 @@ pub(crate) fn approval_picker(state: &ModeState) -> PickerSpec {
     PickerSpec::new("Approval workflow", items)
 }
 
-pub(crate) fn tree_picker(state: &ModeState) -> PickerSpec {
+pub(crate) fn tree_picker(state: &ModeState, lang: &str) -> PickerSpec {
     let mut items = vec![PickerItem::action("Show branch tree", "/tree show")
         .detail(if state.branches.is_empty() {
             "No recorded branches"
@@ -149,7 +160,7 @@ pub(crate) fn tree_picker(state: &ModeState) -> PickerSpec {
         .badge(if state.branches.is_empty() {
             "EMPTY"
         } else {
-            "AVAILABLE"
+            crate::cli::i18n::tr(lang, "badge.available")
         })];
     for branch in &state.branches {
         items.push(
@@ -359,16 +370,18 @@ fn session_items(session_root: &Path) -> Vec<PickerItem> {
 }
 
 pub(crate) fn session_picker(context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let mut items = vec![
         PickerItem::action("Show current session info", "/session info")
             .detail(format!("Workspace: {}", context.cwd.display()))
-            .badge("CURRENT"),
+            .badge(crate::cli::i18n::tr(&lang, "badge.current")),
     ];
     items.extend(session_items(context.session_root));
-    PickerSpec::new("Session workflow", items)
+    PickerSpec::new(crate::cli::i18n::tr(&lang, "view.session.title"), items).localized(&lang)
 }
 
 pub(crate) fn lifecycle_picker(state: &ModeState, context: &SlashContext<'_>) -> PickerSpec {
+    let lang = crate::cli::i18n::lang_code(context.cwd);
     let mut items = vec![
         PickerItem::action("Start a fresh conversation", "/new now")
             .detail("Clear prior turns and start a new session"),
@@ -381,7 +394,7 @@ pub(crate) fn lifecycle_picker(state: &ModeState, context: &SlashContext<'_>) ->
             .badge(if state.shake.trim().is_empty() {
                 "OFF"
             } else {
-                "ACTIVE"
+                crate::cli::i18n::tr(&lang, "badge.active")
             }),
     ];
     items.push(
