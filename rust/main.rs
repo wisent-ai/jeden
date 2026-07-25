@@ -94,6 +94,7 @@ fn usage() -> String {
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
         "  /logout [provider]     show Weles-managed logout ownership\n",
         "  /settings              show auth and provider status\n",
+        "  /setup                 guided first-run configuration\n",
         "  /model [name]          show or set model route\n",
         "  /mcp [list|tools|resources|prompts|notifications|test|reload|reconnect]\n",
         "  /marketplace [list|discover|installed|add|remove|install|uninstall|upgrade]\n",
@@ -329,6 +330,7 @@ pub fn main() -> ExitCode {
         eprintln!("Error: failed to load environment files: {}", error);
         return ExitCode::FAILURE;
     }
+    tui::theme::init(&args.cwd);
     if args.command == "doctor" {
         let report = conformance::health::doctor(&args.cwd);
         match serde_json::to_string(&report) {

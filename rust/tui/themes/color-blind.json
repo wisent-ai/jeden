@@ -1,0 +1,17 @@
+{
+  "name": "color-blind",
+  "vars": {
+    "accent": 214,
+    "muted": 245,
+    "info": 39,
+    "danger": 201
+  },
+  "colors": {
+    "accent": "accent",
+    "muted": "muted",
+    "info": "info",
+    "success": "info",
+    "warning": "accent",
+    "danger": "danger"
+  }
+}

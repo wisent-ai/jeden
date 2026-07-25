@@ -776,8 +776,13 @@ pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
         },
         SlashSpec {
             name: "setup",
+            description: "Guided first-run configuration",
+            aliases: &["onboarding"],
+        },
+        SlashSpec {
+            name: "providers",
             description: "Open provider setup",
-            aliases: &["providers"],
+            aliases: &[],
         },
         SlashSpec {
             name: "plan",
@@ -1094,6 +1099,8 @@ fn native_view_commands() -> &'static [&'static str] {
         "model",
         "prompt",
         "settings",
+        "setup",
+        "onboarding",
         "plan",
         "goal",
         "guided-goal",

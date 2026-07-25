@@ -308,7 +308,10 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     };
     let subscription_pool = subscription_pool_from_weles();
     let catalog_error = bare_model_error.or(match (&selected_model, &catalog) {
-        (None, _) => Some("no model selected; choose a model advertised by Brama".to_string()),
+        (None, _) => Some(
+            "no model selected; choose a model advertised by Brama; run /setup to configure"
+                .to_string(),
+        ),
         (_, Err(error)) => Some(error.to_string()),
         (Some(model), Ok(_)) if crate::model_router::is_virtual_model_route(model) => None,
         (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),

@@ -1,0 +1,18 @@
+{
+  "name": "nord",
+  "vars": {
+    "nord8": "#88c0d0",
+    "nord3": "#4c566a",
+    "nord14": "#a3be8c",
+    "nord13": "#ebcb8b",
+    "nord11": "#bf616a"
+  },
+  "colors": {
+    "accent": "nord8",
+    "muted": "nord3",
+    "info": "nord8",
+    "success": "nord14",
+    "warning": "nord13",
+    "danger": "nord11"
+  }
+}

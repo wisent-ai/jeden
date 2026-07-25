@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cli::auth::{format_auth_status, provider_picker};
@@ -253,7 +254,20 @@ pub(crate) fn interactive_view(
         "/login" => {
             return Some(Ok(CommandOutcome::Text(format_auth_status(cwd))));
         }
-        "/setup" | "/providers" => {
+        "/setup" | "/onboarding"
+            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() =>
+        {
+            // Piped stdin/stdout: print the manual checklist instead of a view.
+            let session_root = crate::session_root();
+            let context = SlashContext {
+                cwd,
+                model,
+                session_root: &session_root,
+            };
+            return Some(crate::slash::setup::handle_text("", &context)
+                .map(CommandOutcome::Text));
+        }
+        "/providers" => {
             return Some(provider_picker(cwd).map(CommandOutcome::Picker));
         }
         "/logout" => return Some(logout_picker().map(CommandOutcome::Picker)),

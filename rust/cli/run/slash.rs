@@ -204,7 +204,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
             Ok(help)
         }
         "/settings" => handle_settings_slash(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
-        "/setup" | "/providers" => Ok(format_auth_status(cwd)),
+        "/providers" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/refresh" => refresh(parts.collect::<Vec<_>>().join(" ").as_str()),

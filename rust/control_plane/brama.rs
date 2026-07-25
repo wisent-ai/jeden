@@ -155,7 +155,7 @@ pub enum BramaError {
 impl std::fmt::Display for BramaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unconfigured => f.write_str("Brama service endpoint is not configured"),
+            Self::Unconfigured => f.write_str("Brama service endpoint is not configured; run /setup to configure"),
             Self::Transport(e) => write!(f, "Brama transport error: {e}"),
             Self::Http { status, message } => write!(f, "Brama returned HTTP {status}: {message}"),
             Self::RateLimited { retry_after_ms } => write!(
@@ -257,7 +257,7 @@ impl BramaClient {
             detail: if available {
                 "configured; catalog is resolved on demand".into()
             } else {
-                "BRAMA_URL is not configured".into()
+                "BRAMA_URL is not configured; run /setup to configure".into()
             },
             checked_at_ms: now_ms(),
         }

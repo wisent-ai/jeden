@@ -12,6 +12,7 @@ mod common;
 mod modes;
 mod plugins;
 mod session;
+pub(crate) mod setup;
 mod state;
 mod validate;
 
@@ -41,6 +42,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/approval" => { changed = !matches!(split_head(args).0, "" | "status"); Some(modes::handle_approval(args, &mut state)) },
         "/tools" => Some(Ok(if split_args(args).iter().any(|arg| arg == "--json") { tools::tools_json(context.cwd) } else { tools::tools_slash_text(context.cwd) })),
         "/stats" | "/debug" => Some(commands::handle_doctor(context)),
+        "/setup" | "/onboarding" => Some(setup::handle_text(args, context)),
         "/usage" => Some(commands::usage::handle_usage(args, context)),
 
         "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),
@@ -233,6 +235,7 @@ pub(crate) fn interactive_picker(
         "/browser" => Ok(browser::browser_picker(context)),
         "/stats" => Ok(commands::stats_picker(context)),
         "/debug" => Ok(commands::debug_picker(context)),
+        "/setup" | "/onboarding" => setup::setup_picker(context),
         "/tools" => Ok(tools_picker(context)),
         "/extensions" => Ok(plugins::extensions_picker(context)),
         "/status" => Ok(capability_picker(context)),

@@ -1,0 +1,18 @@
+{
+  "name": "titanium",
+  "vars": {
+    "electricBlue": "#00b4ff",
+    "dimAluminum": "#9ca3b0",
+    "readoutGreen": "#00ff88",
+    "warningAmber": "#ffb347",
+    "alertRed": "#ff4757"
+  },
+  "colors": {
+    "accent": "electricBlue",
+    "muted": "dimAluminum",
+    "info": "electricBlue",
+    "success": "readoutGreen",
+    "warning": "warningAmber",
+    "danger": "alertRed"
+  }
+}

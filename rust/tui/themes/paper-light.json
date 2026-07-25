@@ -1,0 +1,18 @@
+{
+  "name": "paper-light",
+  "vars": {
+    "accent": 130,
+    "muted": 59,
+    "info": 30,
+    "success": 28,
+    "danger": 124
+  },
+  "colors": {
+    "accent": "accent",
+    "muted": "muted",
+    "info": "info",
+    "success": "success",
+    "warning": "accent",
+    "danger": "danger"
+  }
+}

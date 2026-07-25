@@ -1,0 +1,18 @@
+{
+  "name": "graphite-dark",
+  "vars": {
+    "accent": 215,
+    "muted": 245,
+    "info": 109,
+    "success": 108,
+    "danger": 174
+  },
+  "colors": {
+    "accent": "accent",
+    "muted": "muted",
+    "info": "info",
+    "success": "success",
+    "warning": "accent",
+    "danger": "danger"
+  }
+}

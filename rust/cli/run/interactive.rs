@@ -111,7 +111,20 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         .or_else(|| env::var("MODEL").ok())
         .filter(|model| !model.trim().is_empty());
     let initial_model_picker = if model.is_none() {
-        Some(model_picker(&args.cwd, None, false)?)
+        // Brama unconfigured: skip the startup picker so the REPL still opens;
+        // the welcome tip points at /setup to connect a router.
+        let endpoint = env::var("BRAMA_URL")
+            .ok()
+            .or(config.model_router_url.clone());
+        let brama = crate::control_plane::brama::BramaClient::configured(
+            endpoint,
+            env::var("BRAMA_TOKEN").ok(),
+        );
+        if brama.health().available {
+            Some(model_picker(&args.cwd, None, false)?)
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -304,6 +317,14 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     let message = super::slash::set_model_route(&run_args.cwd, next)?;
                     *handler_model.lock() = Some(next.to_string());
                     Ok(message)
+                }
+                "/setup" | "/onboarding" => {
+                    return crate::slash::setup::run_interactive(
+                        &run_args.cwd,
+                        rest,
+                        handler_model.lock().as_deref(),
+                        ctx.interactive,
+                    );
                 }
                 "/roles" | "/role" => {
                     // Roles hub rows dispatch `/roles <role>`; the hub has no

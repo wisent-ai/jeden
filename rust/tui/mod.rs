@@ -6,7 +6,7 @@ mod attachments;
 mod editor;
 mod integration;
 mod queue;
-mod theme;
+pub(crate) mod theme;
 
 mod render;
 mod repl;

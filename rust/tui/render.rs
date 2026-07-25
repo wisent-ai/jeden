@@ -136,9 +136,11 @@ pub(super) fn welcome_panel(
     let workspace = sanitize_terminal_text(&compact_path(cwd));
     let write_status = sanitize_terminal_text(write_status);
     let command_status = sanitize_terminal_text(command_status);
+    // First-run hint, shown only while no Brama router is configured.
+    let setup_tip = !crate::slash::setup::brama_router_configured(Path::new(cwd));
 
     if width < TWO_COLUMN_WELCOME_MIN_WIDTH {
-        let rows = vec![
+        let mut rows = vec![
             "Welcome back!".to_string(),
             format!("Model: {model}"),
             format!("Workspace: {workspace}"),
@@ -147,8 +149,11 @@ pub(super) fn welcome_panel(
             "Tips".to_string(),
             "Type a task and press Enter".to_string(),
             "/help commands · /model routes".to_string(),
-            "Enter send · Alt+Enter newline · Ctrl+C exit".to_string(),
         ];
+        if setup_tip {
+            rows.push("run /setup to connect a model router".to_string());
+        }
+        rows.push("Enter send · Alt+Enter newline · Ctrl+C exit".to_string());
         return boxed(&title, &rows, width, color);
     }
 
@@ -158,11 +163,16 @@ pub(super) fn welcome_panel(
     let mut left = vec![String::new(), "Welcome back!".to_string(), String::new()];
     left.extend(WISENT_MARK.iter().map(|line| (*line).to_string()));
     left.extend([String::new(), model.clone(), "Jeden CLI".to_string()]);
-    let right = [
+    let mut right = vec![
         "Tips".to_string(),
         "Type a task and press Enter".to_string(),
         "/help for commands".to_string(),
         "/model to switch routes".to_string(),
+    ];
+    if setup_tip {
+        right.push("run /setup to connect a model router".to_string());
+    }
+    right.extend([
         "/update runs automated self-update".to_string(),
         "Ctrl+V pastes text or adds an attachment".to_string(),
         "Alt+Backspace removes the last attachment".to_string(),
@@ -176,7 +186,7 @@ pub(super) fn welcome_panel(
         "Esc clear · Ctrl+C exit".to_string(),
         "CLI: jeden sessions".to_string(),
         "CLI: jeden artifacts <id>".to_string(),
-    ];
+    ]);
     let mut rows = Vec::with_capacity(left.len().max(right.len()));
     for index in 0..left.len().max(right.len()) {
         let left_cell = left.get(index).map(String::as_str).unwrap_or_default();
