@@ -735,6 +735,11 @@ pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
             aliases: &[],
         },
         SlashSpec {
+            name: "token",
+            description: "Show the agent Brama token (always redacted in the transcript)",
+            aliases: &[],
+        },
+        SlashSpec {
             name: "model",
             description: "Switch model",
             aliases: &["models", "switch"],

@@ -92,7 +92,7 @@ pub(super) fn compose_repl(
 }
 
 /// One finalized message rendered as scrollback lines (boxed, newline-split).
-pub(super) fn message_block(message: &Message, columns: usize, color: bool) -> Vec<String> {
+pub(crate) fn message_block(message: &Message, columns: usize, color: bool) -> Vec<String> {
     let width = columns.min(120).max(50);
     format_message(message, width, color)
         .into_iter()

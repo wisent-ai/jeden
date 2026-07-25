@@ -98,6 +98,10 @@ static STRINGS: &[(&str, &str, &str)] = &[
     ("pl", "badge.default", "DOMYŚLNY"),
     ("en", "badge.custom", "CUSTOM"),
     ("pl", "badge.custom", "WŁASNY"),
+    ("en", "picker.footer.tabs", "Tab category"),
+    ("pl", "picker.footer.tabs", "Tab kategoria"),
+    ("en", "picker.tab.all", "All"),
+    ("pl", "picker.tab.all", "Wszystkie"),
 ];
 
 /// Look up `key` for `lang`: hand-written rows first, then the generated

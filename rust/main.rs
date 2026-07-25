@@ -42,10 +42,14 @@ pub(crate) use cli::config::{load_config, Config};
 pub(crate) use cli::run::interactive::interactive;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
 pub(crate) use cli::sessions::{
+
     artifact_command, export_session_command, list_artifacts_command, list_sessions,
     read_session_value, recall_conversation_command, recall_conversation_text,
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
+pub(crate) use cli::token::token_command;
+pub(crate) use cli::gallery::gallery_command;
+pub(crate) use cli::stats::stats_command;
 pub(crate) use cli::worktree::worktree_command;
 
 pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
@@ -89,7 +93,10 @@ fn usage() -> String {
         "  jeden conformance [--json] [--cwd path]\n",
         "  jeden capabilities [--json] [--cwd path]\n",
         "  jeden completions <bash|zsh|fish>\n",
-        "  jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]\n\n",
+        "  jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]\n",
+        "  jeden token [--list] [--reveal] [--json] — print the agent Brama credential (redacted by default)\n",
+        "  jeden stats [--json|--summary|--serve [--port N]] — usage/quota snapshot or local web dashboard\n",
+        "  jeden gallery [--theme NAME|--all] [--color] — render TUI components across themes (dev tool)\n\n",
         "  jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|render|work> [args] [--json] [--cwd path]\n\n",
         "Slash commands:\n",
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
@@ -212,8 +219,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--json" => args.json = true,
             other
                 if other.starts_with("--")
-                    && (matches!(args.command.as_str(), "export" | "roadmap" | "worktree")
-                        || (args.command == "run" && !args.positionals.is_empty())) =>
+                    && (matches!(
+                        args.command.as_str(),
+                        "export" | "roadmap" | "worktree" | "token" | "stats" | "gallery"
+                    ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
             }
@@ -419,6 +428,9 @@ pub fn main() -> ExitCode {
         }
         "completions" => completions_command(&args),
         "worktree" => worktree_command(&args),
+        "token" => token_command(&args),
+        "stats" => stats_command(&args),
+        "gallery" => gallery_command(&args),
         other => Err(format!("unknown command: {}", other)),
     };
     match result {

@@ -29,6 +29,11 @@ pub use view::{
 
 pub use repl::loops::run_basic_loop;
 
+// Gallery-facing component renderers (`jeden gallery` dev tool).
+pub(crate) use render::{compact_prompt, welcome_panel};
+pub(crate) use repl::message_block;
+pub(crate) use view_render::{confirm_panel, picker_panel};
+
 pub(crate) fn external_editor_capability_descriptor(
     cwd: &std::path::Path,
 ) -> crate::capability::CapabilityDescriptor {
@@ -324,8 +329,10 @@ pub enum TurnKind {
 }
 
 /// Default policy: agent turns (plain prompts, `/retry`, `/btw`) run in the
-/// background so the TUI stays live; every other slash command runs inline
-/// (some need the cooked terminal, most return instantly).
+/// background so the TUI stays live; `/login <provider>` joins them because the
+/// device-code poll blocks for minutes and needs Esc-cancel plus the live
+/// region for the code/QR. Every other slash command runs inline (some need
+/// the cooked terminal, most return instantly).
 pub fn default_turn_kind(input: &str) -> TurnKind {
     let trimmed = input.trim();
     if !trimmed.starts_with('/') {
@@ -334,6 +341,7 @@ pub fn default_turn_kind(input: &str) -> TurnKind {
     let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
     match command {
         "/retry" | "/btw" => TurnKind::Background,
+        "/login" if trimmed.split_whitespace().nth(1).is_some() => TurnKind::Background,
         _ => TurnKind::Foreground,
     }
 }
@@ -358,4 +366,27 @@ pub struct TurnCtx<'a> {
     pub ask_user: Option<&'a dyn Fn(&str, &[String]) -> Result<String, String>>,
     /// Ask the user to approve a gated tool; returns true to allow.
     pub approve: &'a dyn Fn(&str, &str) -> bool,
+}
+
+
+#[cfg(test)]
+mod turn_kind_tests {
+    use super::{default_turn_kind, TurnKind};
+
+    #[test]
+    fn login_with_provider_runs_in_background() {
+        assert_eq!(default_turn_kind("/login claude-code"), TurnKind::Background);
+    }
+
+    #[test]
+    fn bare_login_stays_foreground() {
+        assert_eq!(default_turn_kind("/login"), TurnKind::Foreground);
+        assert_eq!(default_turn_kind("/settings"), TurnKind::Foreground);
+    }
+
+    #[test]
+    fn agent_turns_run_in_background() {
+        assert_eq!(default_turn_kind("fix the bug"), TurnKind::Background);
+        assert_eq!(default_turn_kind("/retry"), TurnKind::Background);
+    }
 }

@@ -371,6 +371,25 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     let task = agent::btw_task(rest)?;
                     run_turn_shared(&handler_conv, &run_args, &task, &attachments, &mut hooks)
                 }
+                "/login" => {
+                    let target = rest.trim();
+                    if target.is_empty() {
+                        return Ok(tui::CommandOutcome::text(crate::cli::auth::format_auth_status(
+                            &run_args.cwd,
+                        )));
+                    }
+                    // Device-code flow: stream the code+QR into the live region,
+                    // status goes to the spinner, Esc cancels the Weles poll.
+                    let bridge = crate::cli::auth::TurnBridge {
+                        progress: ctx.progress,
+                        stream: ctx.stream,
+                        ask_user: ctx.ask_user,
+                    };
+                    let cancel = ctx.cancel.clone();
+                    crate::cli::auth::start_login_with_bridge(&run_args.cwd, target, &bridge, &move || {
+                        cancel.load(std::sync::atomic::Ordering::Relaxed)
+                    })
+                }
                 "/compact" => handler_conv.lock().compact(&run_args, rest, &mut hooks),
                 "/handoff" => handler_conv.lock().handoff(&run_args, rest, &mut hooks),
                 "/checkpoint" => {

@@ -274,18 +274,14 @@ fn config_list_text(cwd: &Path) -> String {
     lines.join("\n") + "\n"
 }
 
-/// Non-action group header; the picker skips disabled, command-less rows.
-/// Same pattern as the models picker `group_header` in cli/run/slash_ui.rs.
-fn section_header(prefix: &str, count: usize) -> PickerItem {
-    let mut header = PickerItem::action(format!("── {prefix} ({count}) ──"), "");
-    header.command = None;
-    header.disabled = true;
-    header
-}
-
-/// Group rows by top-level key prefix: known prefixes in first-seen order,
-/// anything else under `other` after them. Row order within a group is kept.
-fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
+/// Group rows by top-level key prefix into picker tabs: known prefixes in
+/// first-seen order, anything else under `other` after them. Row order within
+/// a group is kept. Returns the tab bar (index 0 = the catch-all "All" view)
+/// and the rows tagged with their 1-based tab index.
+fn grouped_setting_rows(
+    rows: Vec<(&str, PickerItem)>,
+    lang: &str,
+) -> (Vec<String>, Vec<PickerItem>) {
     const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "hooks", "secrets", "ui"];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
@@ -300,12 +296,14 @@ fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
         }
     }
     groups.sort_by_key(|(name, _)| usize::from(*name == "other"));
+    let mut tabs = vec![crate::cli::i18n::tr(&lang, "picker.tab.all").to_string()];
     let mut items = Vec::new();
     for (name, group_rows) in groups {
-        items.push(section_header(name, group_rows.len()));
-        items.extend(group_rows);
+        tabs.push(name.to_string());
+        let tab = tabs.len() - 1;
+        items.extend(group_rows.into_iter().map(|item| item.tab(tab)));
     }
-    items
+    (tabs, items)
 }
 
 pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
@@ -385,11 +383,10 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
             ));
         }
     }
-    PickerSpec::new(
-        crate::cli::i18n::tr(&lang, "view.settings.title"),
-        grouped_setting_rows(rows),
-    )
-    .localized(&lang)
+    let (tabs, items) = grouped_setting_rows(rows, &lang);
+    PickerSpec::new(crate::cli::i18n::tr(&lang, "view.settings.title"), items)
+        .with_tabs(tabs)
+        .localized(&lang)
 }
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {
     let (verb, rest) = args

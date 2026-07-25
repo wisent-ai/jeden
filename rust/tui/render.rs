@@ -54,7 +54,7 @@ fn input_prefix_width(width: usize) -> usize {
     width.saturating_sub(1).min(2)
 }
 
-pub(super) fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> Vec<String> {
+pub(crate) fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> Vec<String> {
     let width = width.max(1);
     let title = sanitize_terminal_text(title);
     if width < 6 {
@@ -122,7 +122,7 @@ pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Ve
         .collect()
 }
 
-pub(super) fn welcome_panel(
+pub(crate) fn welcome_panel(
     width: usize,
     model: &str,
     cwd: &str,
@@ -429,7 +429,7 @@ fn quota_percent_free_cached() -> Option<u64> {
     guard.as_ref().and_then(|cache| cache.percent_free)
 }
 
-pub(super) fn compact_prompt(
+pub(crate) fn compact_prompt(
     width: usize,
     status: &PromptStatus,
     input_text: &str,

@@ -212,6 +212,45 @@ impl InteractionBridge for ConsoleBridge {
     }
 }
 
+/// Bridge for TUI background turns: status updates go to the spinner note,
+/// the device-code block (with QR) streams into the live text region, and
+/// questions use the live prompt — so `/login <provider>` stays cancellable
+/// with Esc and never touches stderr. Falls back to an error when the turn
+/// cannot ask questions (non-interactive contexts).
+pub(crate) struct TurnBridge<'a> {
+    pub progress: &'a dyn Fn(&str),
+    pub stream: &'a dyn Fn(&str),
+    pub ask_user: Option<&'a dyn Fn(&str, &[String]) -> Result<String, String>>,
+}
+
+impl InteractionBridge for TurnBridge<'_> {
+    fn elicit(&self, prompt: &str, options: &[String], _secret: bool) -> Result<String, String> {
+        match self.ask_user {
+            Some(ask) => ask(prompt, options),
+            None => Err("interactive input is unavailable during this turn".into()),
+        }
+    }
+    fn event(&self, event: &OperationEvent) {
+        match event {
+            OperationEvent::Status { message } => (self.progress)(message),
+            OperationEvent::DeviceCode {
+                verification_uri,
+                user_code,
+                ..
+            } => {
+                (self.progress)(&format!("enter code {user_code} at {verification_uri}"));
+                let qr = crate::qr::render(verification_uri)
+                    .map(|qr| format!("\n{qr}"))
+                    .unwrap_or_default();
+                (self.stream)(&format!(
+                    "Open {verification_uri} and enter code {user_code}.{qr}\n"
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) fn start_login_with_bridge(
     cwd: &Path,
     args: &str,

@@ -3,15 +3,33 @@ use super::text::paint;
 use super::{ConfirmState, PickerState};
 use crate::cli::i18n::tr;
 
-pub(super) fn picker_panel(
+pub(crate) fn picker_panel(
     state: &PickerState,
     width: usize,
     height: usize,
     color: bool,
 ) -> Vec<String> {
     let mut rows = vec![format!("{} {}", state.spec.prompt, state.query)];
+    let has_tabs = !state.spec.tabs.is_empty();
+    if has_tabs {
+        let bar = state
+            .spec
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                if index == state.active_tab {
+                    format!("[{name}]")
+                } else {
+                    format!(" {name} ")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+        rows.push(paint(&bar, "magenta", color));
+    }
     let indices = state.filtered_indices();
-    let chrome_rows = ["query", "footer", "top", "bottom", "prompt"].len();
+    let chrome_rows = ["query", "footer", "top", "bottom", "prompt"].len() + usize::from(has_tabs);
     let visible_items = height.saturating_sub(chrome_rows).max(usize::from(true));
     let start = state
         .selected
@@ -51,11 +69,20 @@ pub(super) fn picker_panel(
             });
         }
     }
-    rows.push(paint(tr(&state.spec.lang, "picker.footer"), "dim", color));
+    let footer = if has_tabs {
+        format!(
+            "{}  {}",
+            tr(&state.spec.lang, "picker.footer"),
+            tr(&state.spec.lang, "picker.footer.tabs")
+        )
+    } else {
+        tr(&state.spec.lang, "picker.footer").to_string()
+    };
+    rows.push(paint(&footer, "dim", color));
     boxed(&state.spec.title, &rows, width, color)
 }
 
-pub(super) fn confirm_panel(state: &ConfirmState, width: usize, color: bool) -> Vec<String> {
+pub(crate) fn confirm_panel(state: &ConfirmState, width: usize, color: bool) -> Vec<String> {
     let cancel_marker = if state.confirmed { " " } else { "›" };
     let confirm_marker = if state.confirmed { "›" } else { " " };
     let mut rows = vec![

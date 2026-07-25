@@ -103,14 +103,6 @@ fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str) -> PickerItem
         .disabled(selected || !model.available)
 }
 
-/// Non-action group header; the picker skips disabled, command-less rows.
-fn group_header(provider: &str, count: usize) -> PickerItem {
-    let mut header = PickerItem::action(format!("── {provider} ({count}) ──"), "");
-    header.command = None;
-    header.disabled = true;
-    header
-}
-
 /// Disabled, command-less summary row (● subscription / ○ catalog); like a
 /// group header, the picker skips it.
 fn summary_row(label: String, detail: String, badge: &str) -> PickerItem {
@@ -231,25 +223,38 @@ pub(crate) fn model_picker(
                 .then_with(|| model_rank(left, active).cmp(&model_rank(right, active)))
                 .then_with(|| left.id.cmp(&right.id))
         });
-        let mut group_counts = std::collections::HashMap::new();
-        for model in &models {
-            *group_counts
-                .entry(provider_group(&model.id))
-                .or_insert(0_usize) += 1;
-        }
-        let mut current_group: Option<&str> = None;
-        for model in &models {
-            let provider = provider_group(&model.id);
-            if current_group != Some(provider) {
-                let count = group_counts.get(provider).copied().unwrap_or_default();
-                items.push(group_header(provider, count));
-                current_group = Some(provider);
+        // Category bar: one tab per subscription provider present in the
+        // catalog, plus a single aggregate "catalog" tab for everything else.
+        // Text export re-renders these as `── tab (n) ──` sections.
+        let mut tabs = vec![tr(&lang, "picker.tab.all").to_string()];
+        for provider in SUBSCRIPTION_PROVIDERS {
+            if models
+                .iter()
+                .any(|model| provider_group(&model.id) == *provider)
+            {
+                tabs.push((*provider).to_string());
             }
-            items.push(model_row(model, active, &lang));
         }
+        tabs.push("catalog".to_string());
+        let catalog_tab = tabs.len() - 1;
+        let tab_index = |id: &str| -> usize {
+            let group = provider_group(id);
+            tabs
+                .iter()
+                .position(|name| name.as_str() == group)
+                .unwrap_or(catalog_tab)
+        };
+        items.extend(
+            models
+                .iter()
+                .map(|model| model_row(model, active, &lang).tab(tab_index(&model.id))),
+        );
         items.push(
             PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
         );
+        return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
+            .with_tabs(tabs)
+            .localized(&lang));
     } else {
         items.extend(summary);
         models.retain(|model| model.available || active == Some(model.id.as_str()));

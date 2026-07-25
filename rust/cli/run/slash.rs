@@ -206,6 +206,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/settings" => handle_settings_slash(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/providers" => Ok(format_auth_status(cwd)),
         "/login" => start_login(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
+        "/token" => crate::cli::token::token_slash(),
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/refresh" => refresh(parts.collect::<Vec<_>>().join(" ").as_str()),
         "/model" | "/models" | "/switch" => {
