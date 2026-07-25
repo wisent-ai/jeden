@@ -80,101 +80,31 @@ pub struct Theme {
 }
 
 // ---------------------------------------------------------------------------
-// Embedded presets (oh-my-pi compatible palettes)
+// Embedded presets as oh-my-pi style JSON documents (vars + colors mapping).
 
-struct Preset {
-    name: &'static str,
-    vars: &'static [(&'static str, &'static str)],
-    colors: &'static [(&'static str, &'static str)],
-}
-
-const PRESETS: &[Preset] = &[
-    Preset {
-        name: "graphite-dark",
-        vars: &[
-            ("accent", "38;5;215"),
-            ("muted", "38;5;245"),
-            ("info", "38;5;109"),
-            ("success", "38;5;108"),
-            ("warning", "38;5;215"),
-            ("danger", "38;5;174"),
-        ],
-        colors: &[],
-    },
-    Preset {
-        name: "paper-light",
-        vars: &[
-            ("accent", "38;5;130"),
-            ("muted", "38;5;59"),
-            ("info", "38;5;30"),
-            ("success", "38;5;28"),
-            ("warning", "38;5;130"),
-            ("danger", "38;5;124"),
-        ],
-        colors: &[],
-    },
-    Preset {
-        name: "titanium",
-        vars: &[
-            ("accent", "#00b4ff"),
-            ("muted", "#9ca3b0"),
-            ("info", "#0082b3"),
-            ("success", "#00ff88"),
-            ("warning", "#ffb347"),
-            ("danger", "#ff4757"),
-        ],
-        colors: &[],
-    },
-    Preset {
-        name: "nord",
-        vars: &[
-            ("accent", "#88c0d0"),
-            ("muted", "#4c566a"),
-            ("info", "#81a1c1"),
-            ("success", "#a3be8c"),
-            ("warning", "#ebcb8b"),
-            ("danger", "#bf616a"),
-        ],
-        colors: &[],
-    },
-    Preset {
-        name: "color-blind",
-        vars: &[
-            ("accent", "38;5;214"),
-            ("muted", "38;5;245"),
-            ("info", "38;5;39"),
-            ("success", "38;5;39"),
-            ("warning", "38;5;214"),
-            ("danger", "38;5;201"),
-        ],
-        colors: &[],
-    },
+const PRESET_JSON: &[(&str, &str)] = &[
+    (
+        "graphite-dark",
+        include_str!("themes/graphite-dark.json"),
+    ),
+    (
+        "paper-light",
+        include_str!("themes/paper-light.json"),
+    ),
+    ("titanium", include_str!("themes/titanium.json")),
+    ("nord", include_str!("themes/nord.json")),
+    (
+        "color-blind",
+        include_str!("themes/color-blind.json"),
+    ),
 ];
 
-impl Preset {
-    fn named(name: &str) -> Option<&'static Preset> {
-        let name = name.trim().to_ascii_lowercase();
-        PRESETS
-            .iter()
-            .find(|preset| preset.name == name.replace('_', "-"))
-    }
-    fn palette(&self) -> Palette {
-        let mut roles: [Option<String>; 6] = Default::default();
-        for (index, (role, _)) in ROLE_NAMES.iter().enumerate() {
-            let var_name = self
-                .colors
-                .iter()
-                .find(|(color_role, _)| *color_role == *role)
-                .map(|(_, target)| *target)
-                .unwrap_or(*role);
-            roles[index] = self
-                .vars
-                .iter()
-                .find(|(name, _)| *name == var_name)
-                .and_then(|(_, value)| color_escape(value));
-        }
-        Palette::Colors(roles)
-    }
+fn preset_palette(name: &str) -> Option<Palette> {
+    let name = name.trim().to_ascii_lowercase().replace('_', "-");
+    PRESET_JSON
+        .iter()
+        .find(|(preset, _)| *preset == name)
+        .and_then(|(_, text)| parse_theme_json(text).ok())
 }
 
 // ---------------------------------------------------------------------------
@@ -207,9 +137,8 @@ fn home_theme_file() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| Path::new(&home).join(".jeden/theme.json"))
 }
 
-fn read_theme_json(path: &Path) -> Result<Palette, String> {
-    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let doc: serde_json::Value = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+fn parse_theme_json(text: &str) -> Result<Palette, String> {
+    let doc: serde_json::Value = serde_json::from_str(text).map_err(|error| error.to_string())?;
     let vars = doc.get("vars").and_then(serde_json::Value::as_object);
     let colors = doc.get("colors").and_then(serde_json::Value::as_object);
     let mut roles: [Option<String>; 6] = Default::default();
@@ -225,6 +154,11 @@ fn read_theme_json(path: &Path) -> Result<Palette, String> {
         });
     }
     Ok(Palette::Colors(roles))
+}
+
+fn read_theme_json(path: &Path) -> Result<Palette, String> {
+    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    parse_theme_json(&text)
 }
 
 // ---------------------------------------------------------------------------
@@ -297,8 +231,8 @@ impl Theme {
                 high_contrast: true,
             }),
             "custom" => None,
-            name => Preset::named(name).map(|preset| Self {
-                palette: preset.palette(),
+            name => preset_palette(name).map(|palette| Self {
+                palette,
                 color,
                 high_contrast: false,
             }),
@@ -306,9 +240,9 @@ impl Theme {
     }
 
     fn preset(name: &str, color: bool) -> Self {
-        Preset::named(name)
-            .map(|preset| Self {
-                palette: preset.palette(),
+        preset_palette(name)
+            .map(|palette| Self {
+                palette,
                 color,
                 high_contrast: false,
             })
