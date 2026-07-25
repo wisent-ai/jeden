@@ -32,11 +32,41 @@ static STRINGS: &[(&str, &str, &str)] = &[
         "picker.summary.subscription",
         "{} modeli · Twoja subskrypcja",
     ),
+    (
+        "en",
+        "picker.summary.subscription.one",
+        "{} model · your subscription",
+    ),
+    (
+        "pl",
+        "picker.summary.subscription.one",
+        "{} model · Twoja subskrypcja",
+    ),
+    (
+        "pl",
+        "picker.summary.subscription.few",
+        "{} modele · Twoja subskrypcja",
+    ),
     ("en", "picker.summary.catalog", "{} models · no credentials"),
     (
         "pl",
         "picker.summary.catalog",
         "{} modeli · bez danych logowania",
+    ),
+    (
+        "en",
+        "picker.summary.catalog.one",
+        "{} model · no credentials",
+    ),
+    (
+        "pl",
+        "picker.summary.catalog.one",
+        "{} model · bez danych logowania",
+    ),
+    (
+        "pl",
+        "picker.summary.catalog.few",
+        "{} modele · bez danych logowania",
     ),
     ("en", "view.model.title", "Select model route"),
     ("pl", "view.model.title", "Wybierz trasę modelu"),

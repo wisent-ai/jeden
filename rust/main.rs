@@ -20,6 +20,7 @@ pub mod mcp;
 pub mod memory;
 pub mod model_router;
 pub mod protocol;
+pub mod qr;
 pub mod report;
 pub mod roadmap;
 pub mod routing;

@@ -354,7 +354,21 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
                     ));
                 }
             }
-            _ => {}
+            _ => {
+                // Number/string/array/record keys have no enumerable values:
+                // offer a prefill row that drops `/settings set <key> ` into
+                // the prompt so every schema key is editable from the picker.
+                rows.push((
+                    prefix,
+                    PickerItem::action(
+                        format!("{}: set value", spec.key),
+                        format!("/settings set {} ", spec.key),
+                    )
+                    .detail(&detail)
+                    .badge("INPUT")
+                    .prefill(),
+                ));
+            }
         }
         if current != default {
             rows.push((

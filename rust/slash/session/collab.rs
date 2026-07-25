@@ -339,9 +339,18 @@ pub(crate) fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<St
                 "{}/room/{}#key={}&write={}&role=full",
                 parsed.base, room, key_text, write_token
             );
+            let qr_block = |url: &str| {
+                crate::qr::render(url)
+                    .map(|qr| format!("\n{qr}"))
+                    .unwrap_or_default()
+            };
             return Ok(format!(
-                "Collab started on durable E2EE relay {}.\nView URL: {}\nFull write URL: {}\nThe encryption key and separately revocable write token stay in URL fragments and are never sent by browser navigation.",
-                parsed.base, view_url, full_url
+                "Collab started on durable E2EE relay {}.\nView URL: {}{}\nFull write URL: {}{}\nThe encryption key and separately revocable write token stay in URL fragments and are never sent by browser navigation.",
+                parsed.base,
+                view_url,
+                qr_block(&view_url),
+                full_url,
+                qr_block(&full_url)
             ));
         }
         let relay = collab_path(context.cwd, rest)?;

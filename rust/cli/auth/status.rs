@@ -201,7 +201,12 @@ impl InteractionBridge for ConsoleBridge {
                 verification_uri,
                 user_code,
                 ..
-            } => eprintln!("Open {verification_uri} and enter code {user_code}"),
+            } => {
+                eprintln!("Open {verification_uri} and enter code {user_code}");
+                if let Some(qr) = crate::qr::render(verification_uri) {
+                    eprintln!("{qr}");
+                }
+            }
             _ => {}
         }
     }

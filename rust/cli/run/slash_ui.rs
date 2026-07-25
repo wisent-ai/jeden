@@ -120,6 +120,31 @@ fn summary_row(label: String, detail: String, badge: &str) -> PickerItem {
     row
 }
 
+/// Pick the plural-form i18n key for a `N models` summary row. English and
+/// the generated overlays only distinguish one/many; Polish hand rows also
+/// carry the 2–4 "few" form (`model`/`modele`/`modeli`).
+fn summary_key(base: &'static str, lang: &str, count: usize) -> &'static str {
+    if count == 1 {
+        match base {
+            "picker.summary.subscription" => return "picker.summary.subscription.one",
+            "picker.summary.catalog" => return "picker.summary.catalog.one",
+            _ => return base,
+        }
+    }
+    let few = lang == "pl"
+        && (2..=4).contains(&(count % 10))
+        && !(12..=14).contains(&(count % 100));
+    if few {
+        match base {
+            "picker.summary.subscription" => "picker.summary.subscription.few",
+            "picker.summary.catalog" => "picker.summary.catalog.few",
+            _ => base,
+        }
+    } else {
+        base
+    }
+}
+
 pub(crate) fn model_picker(
     cwd: &Path,
     current_model: Option<&str>,
@@ -184,7 +209,8 @@ pub(crate) fn model_picker(
             covered += count;
             summary.push(summary_row(
                 format!("● {provider}"),
-                tr(&lang, "picker.summary.subscription").replace("{}", &count.to_string()),
+                tr(&lang, summary_key("picker.summary.subscription", &lang, count))
+                    .replace("{}", &count.to_string()),
                 "●",
             ));
         }
@@ -192,7 +218,8 @@ pub(crate) fn model_picker(
     let remainder = total.saturating_sub(covered);
     let catalog_row = summary_row(
         "○ catalog".to_string(),
-        tr(&lang, "picker.summary.catalog").replace("{}", &remainder.to_string()),
+        tr(&lang, summary_key("picker.summary.catalog", &lang, remainder))
+            .replace("{}", &remainder.to_string()),
         "○",
     );
     if show_all {
@@ -326,4 +353,78 @@ pub(crate) fn interactive_view(
         session_root: &session_root,
     };
     slash::interactive_picker(&context, input).map(|picker| picker.map(CommandOutcome::Picker))
+}
+
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn summary_key_picks_english_singular_and_plural() {
+        assert_eq!(
+            super::summary_key("picker.summary.subscription", "en", 1),
+            "picker.summary.subscription.one"
+        );
+        assert_eq!(
+            super::summary_key("picker.summary.subscription", "en", 2),
+            "picker.summary.subscription"
+        );
+        assert_eq!(
+            super::summary_key("picker.summary.catalog", "en", 1),
+            "picker.summary.catalog.one"
+        );
+    }
+
+    #[test]
+    fn summary_key_picks_polish_few_form() {
+        // Polish: 1 model, 2–4 modele, 5+ modeli; 12–14 stay modeli.
+        assert_eq!(
+            super::summary_key("picker.summary.subscription", "pl", 1),
+            "picker.summary.subscription.one"
+        );
+        for n in [2_usize, 3, 4, 22, 33] {
+            assert_eq!(
+                super::summary_key("picker.summary.subscription", "pl", n),
+                "picker.summary.subscription.few",
+                "count {n}"
+            );
+        }
+        for n in [5_usize, 11, 12, 14, 25] {
+            assert_eq!(
+                super::summary_key("picker.summary.subscription", "pl", n),
+                "picker.summary.subscription",
+                "count {n}"
+            );
+        }
+    }
+
+    #[test]
+    fn summary_key_ignores_few_for_non_polish() {
+        assert_eq!(
+            super::summary_key("picker.summary.catalog", "de", 3),
+            "picker.summary.catalog"
+        );
+    }
+
+    #[test]
+    fn summary_keys_resolve_to_translated_text() {
+        // Every key the helper can return must resolve for the language that
+        // can select it (`.few` is Polish-only; `.one`/base fall back to en).
+        let cases: &[(&str, &[&str])] = &[
+            ("picker.summary.subscription", &["en", "pl"]),
+            ("picker.summary.subscription.one", &["en", "pl"]),
+            ("picker.summary.subscription.few", &["pl"]),
+            ("picker.summary.catalog", &["en", "pl"]),
+            ("picker.summary.catalog.one", &["en", "pl"]),
+            ("picker.summary.catalog.few", &["pl"]),
+        ];
+        for (key, langs) in cases {
+            for lang in *langs {
+                let text = crate::cli::i18n::tr(lang, key);
+                assert!(
+                    text.contains("{}") && !text.starts_with("picker."),
+                    "{lang}/{key} unresolved: {text}"
+                );
+            }
+        }
+    }
 }
