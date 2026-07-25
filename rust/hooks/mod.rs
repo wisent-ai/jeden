@@ -12,6 +12,10 @@
 //!     "UserPromptSubmit": [ { "command": "..." } ]
 //! } }
 //! ```
+//!
+//! A Tama hook registry (claude-style shared catalog; see `tama.rs`) is
+//! additionally loaded when configured/discovered, and its hooks fire after
+//! jeden's own user/project/plugin hooks.
 
 use regex::Regex;
 use serde_json::Value;
@@ -22,6 +26,7 @@ use std::time::Duration;
 #[path = "../extensions/mod.rs"]
 mod extensions;
 mod run;
+pub mod tama;
 
 pub(crate) use extensions::{
     agent_dirs as extension_agent_dirs, capability_descriptors as extension_capability_descriptors,
@@ -33,7 +38,9 @@ pub use extensions::{
     provider_entries as extension_provider_entries, reload as reload_extensions,
     status as extension_status, ReloadReport,
 };
-pub use run::{posttool, pretool_block, session_start, session_stop, user_prompt_submit};
+pub use run::{
+    fire_event, posttool, pretool_block, session_start, session_stop, user_prompt_submit,
+};
 
 /// One configured hook: an optional matcher (regex over the tool name; empty =
 /// match everything) and the shell command to run.
@@ -141,7 +148,7 @@ pub fn resolve_trusted_hooks(
 }
 
 /// Parse a hook's stdout as a JSON object, if it is one.
-fn parse_hook_json(stdout: &str) -> Option<Value> {
+pub(crate) fn parse_hook_json(stdout: &str) -> Option<Value> {
     let trimmed = stdout.trim();
     if !trimmed.starts_with('{') {
         return None;
@@ -221,7 +228,8 @@ pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
         .join("\n")
 }
 
-/// Human summary of configured hooks (for `/hooks`), split by trust origin.
+/// Human summary of configured hooks (for `/hooks`), split by trust origin,
+/// plus the resolved Tama registry source when one is active.
 /// Only lists the events the runtime actually fires.
 pub fn describe_hooks(cwd: &Path) -> String {
     let project = read_config(&project_hooks_path(cwd));
@@ -259,6 +267,11 @@ pub fn describe_hooks(cwd: &Path) -> String {
             lines.push(label.to_string());
             lines.extend(section);
         }
+    }
+    // Tama registry section (claude-style shared catalog); absent entirely
+    // when no registry is configured or it holds nothing runnable.
+    if let Some(source) = tama::describe_source(cwd) {
+        lines.push(source);
     }
     if lines.is_empty() {
         format!(

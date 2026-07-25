@@ -92,6 +92,13 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         enum_values: &[],
     },
     SettingSpec {
+        key: "hooks.tamaRegistry",
+        typ: "string",
+        description: "Path to the Tama hook registry (shared-hooks registry.json). Empty disables Tama hooks; unset auto-discovers known locations.",
+        default_json: "\"\"",
+        enum_values: &[],
+    },
+    SettingSpec {
         key: "secrets.mode",
         typ: "enum",
         description: "Protect known secrets in model-bound text by redaction or obfuscation.",
@@ -279,7 +286,7 @@ fn section_header(prefix: &str, count: usize) -> PickerItem {
 /// Group rows by top-level key prefix: known prefixes in first-seen order,
 /// anything else under `other` after them. Row order within a group is kept.
 fn grouped_setting_rows(rows: Vec<(&str, PickerItem)>) -> Vec<PickerItem> {
-    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "secrets", "ui"];
+    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "hooks", "secrets", "ui"];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
         let label = if KNOWN_PREFIXES.contains(&prefix) {

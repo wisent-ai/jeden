@@ -13,6 +13,17 @@ use super::{
 /// `HOOK_TIMEOUT`. A spawn/timeout failure surfaces as a non-zero outcome
 /// rather than aborting the turn.
 pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
+    run_hook_with_timeout(cwd, hook, payload, HOOK_TIMEOUT)
+}
+
+/// `run_hook` with an explicit timeout (Tama registry entries carry their own
+/// per-hook `timeout` seconds).
+pub fn run_hook_with_timeout(
+    cwd: &Path,
+    hook: &Hook,
+    payload: &Value,
+    timeout: Duration,
+) -> HookOutcome {
     let child = Command::new("sh")
         .arg("-c")
         .arg(&hook.command)
@@ -47,7 +58,7 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {
-                if started.elapsed() > HOOK_TIMEOUT {
+                if started.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
                     return HookOutcome {
@@ -112,6 +123,17 @@ pub fn fire_event(
         .iter()
         .map(|hook| run_hook(cwd, hook, payload))
         .collect::<Vec<_>>();
+    // Tama registry hooks (claude-style shared catalog) run after jeden's own
+    // hooks. The registry lives with the operator's other user-level config,
+    // so it is trusted like user hooks and not gated on `allow_project`.
+    for tama in super::tama::load_event_hooks(cwd, event, tool) {
+        let outcome = run_hook_with_timeout(cwd, &tama.hook, payload, tama.timeout);
+        outcomes.push(super::tama::normalize_outcome(
+            event,
+            tama.blocking,
+            outcome,
+        ));
+    }
     match super::extensions::fire_hooks(cwd, event, tool, payload, allow_project) {
         Ok(values) => outcomes.extend(values.into_iter().map(|value| HookOutcome {
             exit_code: 0,
