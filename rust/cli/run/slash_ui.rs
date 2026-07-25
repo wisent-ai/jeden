@@ -22,15 +22,17 @@ fn format_price(value: f64) -> String {
     }
 }
 
+/// Price suffix in the oh-my-pi convention: priced models end with a `█` bar
+/// ($5/30█, $0.25/1.25█), free models with `free│`.
 fn price_detail(price: &ModelPrice) -> String {
     if price.input > 0.0 || price.output > 0.0 {
         format!(
-            " · ${}/{}",
+            " · ${}/{}█",
             format_price(price.input),
             format_price(price.output)
         )
     } else {
-        " · free".into()
+        " · free│".into()
     }
 }
 
@@ -51,13 +53,15 @@ fn provider_group(id: &str) -> &str {
     id.split_once('/').map(|(head, _)| head).unwrap_or(id)
 }
 
+/// Subscription providers summarized at the top of the picker, in fixed
+/// order; everything else belongs to the public catalog.
+const SUBSCRIPTION_PROVIDERS: &[&str] = &["claude-code", "codex", "kimi"];
+
 /// Subscription providers first in a fixed order, everything else alphabetical.
 fn provider_rank(provider: &str) -> (u8, &str) {
-    match provider {
-        "claude-code" => (0, ""),
-        "codex" => (1, ""),
-        "kimi" => (2, ""),
-        other => (3, other),
+    match SUBSCRIPTION_PROVIDERS.iter().position(|known| *known == provider) {
+        Some(index) => (index as u8, ""),
+        None => (SUBSCRIPTION_PROVIDERS.len() as u8, provider),
     }
 }
 
@@ -105,6 +109,15 @@ fn group_header(provider: &str, count: usize) -> PickerItem {
     header.command = None;
     header.disabled = true;
     header
+}
+
+/// Disabled, command-less summary row (● subscription / ○ catalog); like a
+/// group header, the picker skips it.
+fn summary_row(label: String, detail: String, badge: &str) -> PickerItem {
+    let mut row = PickerItem::action(label, "").detail(detail).badge(badge);
+    row.command = None;
+    row.disabled = true;
+    row
 }
 
 pub(crate) fn model_picker(
@@ -157,7 +170,34 @@ pub(crate) fn model_picker(
         );
     }
     let mut models = catalog.models;
+    // Summary block: one row per subscription provider with ≥1 available
+    // model (●), plus the public-catalog remainder (○). Disabled and
+    // command-less, so the picker skips them like group headers.
+    let mut summary = Vec::new();
+    let mut covered = 0_usize;
+    for provider in SUBSCRIPTION_PROVIDERS {
+        let count = models
+            .iter()
+            .filter(|model| model.available && provider_group(&model.id) == *provider)
+            .count();
+        if count > 0 {
+            covered += count;
+            summary.push(summary_row(
+                format!("● {provider}"),
+                tr(&lang, "picker.summary.subscription").replace("{}", &count.to_string()),
+                "●",
+            ));
+        }
+    }
+    let remainder = total.saturating_sub(covered);
+    let catalog_row = summary_row(
+        "○ catalog".to_string(),
+        tr(&lang, "picker.summary.catalog").replace("{}", &remainder.to_string()),
+        "○",
+    );
     if show_all {
+        items.extend(summary);
+        items.push(catalog_row);
         models.sort_by(|left, right| {
             provider_rank(provider_group(&left.id))
                 .cmp(&provider_rank(provider_group(&right.id)))
@@ -184,6 +224,7 @@ pub(crate) fn model_picker(
             PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
         );
     } else {
+        items.extend(summary);
         models.retain(|model| model.available || active == Some(model.id.as_str()));
         models.sort_by(|left, right| {
             model_rank(left, active)
@@ -191,6 +232,7 @@ pub(crate) fn model_picker(
                 .then_with(|| left.id.cmp(&right.id))
         });
         items.extend(models.iter().map(|model| model_row(model, active, &lang)));
+        items.push(catalog_row);
         items.push(
             PickerItem::action(format!("Show all {total} models"), "/model --all")
                 .badge(tr(&lang, "badge.more")),

@@ -22,6 +22,22 @@ static STRINGS: &[(&str, &str, &str)] = &[
         "picker.footer",
         "↑↓ wybierz  Home/End skocz  Enter zatwierdź  Ctrl-U wyczyść  Esc zamknij",
     ),
+    (
+        "en",
+        "picker.summary.subscription",
+        "{} models · your subscription",
+    ),
+    (
+        "pl",
+        "picker.summary.subscription",
+        "{} modeli · Twoja subskrypcja",
+    ),
+    ("en", "picker.summary.catalog", "{} models · no credentials"),
+    (
+        "pl",
+        "picker.summary.catalog",
+        "{} modeli · bez danych logowania",
+    ),
     ("en", "view.model.title", "Select model route"),
     ("pl", "view.model.title", "Wybierz trasę modelu"),
     ("en", "view.settings.title", "Jeden settings"),
