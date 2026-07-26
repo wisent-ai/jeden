@@ -329,10 +329,10 @@ pub enum TurnKind {
 }
 
 /// Default policy: agent turns (plain prompts, `/retry`, `/btw`) run in the
-/// background so the TUI stays live; `/login <provider>` joins them because the
-/// device-code poll blocks for minutes and needs Esc-cancel plus the live
-/// region for the code/QR. Every other slash command runs inline (some need
-/// the cooked terminal, most return instantly).
+/// background so the TUI stays live; view commands that fetch from Brama/Weles
+/// before rendering join them so the spinner acts as their loading state
+/// instead of freezing the UI (`/login` also needs Esc-cancel for the device
+/// poll). Local, instant commands run inline in the cooked terminal.
 pub fn default_turn_kind(input: &str) -> TurnKind {
     let trimmed = input.trim();
     if !trimmed.starts_with('/') {
@@ -340,8 +340,8 @@ pub fn default_turn_kind(input: &str) -> TurnKind {
     }
     let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
     match command {
-        "/retry" | "/btw" => TurnKind::Background,
-        "/login" if trimmed.split_whitespace().nth(1).is_some() => TurnKind::Background,
+        "/retry" | "/btw" | "/login" | "/logout" | "/model" | "/models" | "/switch" | "/usage"
+        | "/providers" => TurnKind::Background,
         _ => TurnKind::Foreground,
     }
 }
@@ -376,12 +376,21 @@ mod turn_kind_tests {
     #[test]
     fn login_with_provider_runs_in_background() {
         assert_eq!(default_turn_kind("/login claude-code"), TurnKind::Background);
+        assert_eq!(default_turn_kind("/login"), TurnKind::Background);
     }
 
     #[test]
-    fn bare_login_stays_foreground() {
-        assert_eq!(default_turn_kind("/login"), TurnKind::Foreground);
+    fn network_views_run_in_background() {
+        for input in ["/model", "/model --all", "/models", "/usage", "/providers", "/logout kimi"]
+        {
+            assert_eq!(default_turn_kind(input), TurnKind::Background, "{input}");
+        }
+    }
+
+    #[test]
+    fn local_commands_stay_foreground() {
         assert_eq!(default_turn_kind("/settings"), TurnKind::Foreground);
+        assert_eq!(default_turn_kind("/help"), TurnKind::Foreground);
     }
 
     #[test]
