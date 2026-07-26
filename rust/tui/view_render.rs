@@ -1,5 +1,5 @@
 use super::render::boxed;
-use super::text::paint;
+use super::text::{clamp_visible, paint};
 use super::{ConfirmState, PickerState};
 use crate::cli::i18n::tr;
 
@@ -59,7 +59,13 @@ pub(crate) fn picker_panel(
             } else {
                 format!(" — {}", item.detail)
             };
-            let row = format!("{marker} {}{badge}{detail}", item.label);
+            // One visible line per item, always: the scroll math above counts
+            // items, so wrapped rows would push the box past the viewport and
+            // hide the title/prompt/tab bar. Overflow gets an ellipsis.
+            let row = clamp_visible(
+                &format!("{marker} {}{badge}{detail}", item.label),
+                width.saturating_sub(4),
+            );
             rows.push(if item.disabled {
                 paint(&row, "dim", color)
             } else if position == state.selected {

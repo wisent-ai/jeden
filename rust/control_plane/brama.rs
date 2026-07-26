@@ -192,6 +192,52 @@ struct CachedCatalog {
 static CACHE: LazyLock<Mutex<HashMap<String, CachedCatalog>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// On-disk catalog cache shared across processes: `~/.jeden/cache/`
+/// `brama-models-<sha256(endpoint)[:16]>.json`. The in-memory CACHE above only
+/// lives for one process, so every cold `jeden` start used to re-download the
+/// full catalog (~12 s on a cold relay); the disk entry makes warm starts
+/// free and seeds ETag revalidation after the TTL expires.
+fn disk_cache_path(key: &str) -> std::path::PathBuf {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(key.as_bytes());
+    crate::dirs_home().join(format!(
+        ".jeden/cache/brama-models-{}.json",
+        hex::encode(digest)[..16].to_string()
+    ))
+}
+
+fn read_disk_cache(key: &str) -> Option<(ModelCatalog, Option<String>, u64)> {
+    let text = std::fs::read_to_string(disk_cache_path(key)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let fetched_ms = value.get("fetchedAtMs")?.as_u64()?;
+    let etag = value
+        .get("etag")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string);
+    let catalog: ModelCatalog = serde_json::from_value(value.get("catalog")?.clone()).ok()?;
+    Some((catalog, etag, fetched_ms))
+}
+
+fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&str>) {
+    let path = disk_cache_path(key);
+    let Some(parent) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(parent).is_err() {
+        return;
+    }
+    let payload = serde_json::json!({
+        "fetchedAtMs": now_ms(),
+        "etag": etag,
+        "catalog": catalog,
+    });
+    // tmp + rename keeps the entry atomic for concurrent jeden processes.
+    let tmp = path.with_extension("json.tmp");
+    if std::fs::write(&tmp, payload.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 impl BramaClient {
     pub fn from_env() -> Self {
         Self::with_secret_ref(
@@ -290,7 +336,33 @@ impl BramaClient {
                     return Ok(cached.catalog.clone());
                 }
             }
+            // Cold process: hydrate from the on-disk catalog when it is still
+            // inside the TTL, so a fresh `jeden` start skips the network
+            // entirely (the in-memory cache above only covers one process).
+            if let Some((catalog, etag, fetched_ms)) = read_disk_cache(&key) {
+                if now_ms().saturating_sub(fetched_ms) < self.ttl.as_millis() as u64 {
+                    CACHE
+                        .lock()
+                        .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+                        .insert(
+                            key.clone(),
+                            CachedCatalog {
+                                catalog: catalog.clone(),
+                                etag,
+                                fetched: Instant::now(),
+                            },
+                        );
+                    return Ok(catalog);
+                }
+            }
         }
+        // A stale disk entry still seeds the conditional request: on 304 we
+        // rehydrate from disk instead of downloading the full catalog.
+        let disk_prior = if prior.is_none() {
+            read_disk_cache(&key)
+        } else {
+            None
+        };
         let mut headers = BTreeMap::new();
         headers.insert("x-jeden-schema-min".into(), "1".into());
         headers.insert("x-jeden-schema-max".into(), "1".into());
@@ -305,7 +377,11 @@ impl BramaClient {
         if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
-        if let Some(etag) = prior.as_ref().and_then(|entry| entry.etag.as_ref()) {
+        if let Some(etag) = prior
+            .as_ref()
+            .and_then(|entry| entry.etag.as_ref())
+            .or(disk_prior.as_ref().and_then(|entry| entry.1.as_ref()))
+        {
             headers.insert("if-none-match".into(), etag.clone());
         }
         let response = match self.transport.execute(TransportRequest {
@@ -321,6 +397,10 @@ impl BramaClient {
                     cached.degraded = true;
                     return Ok(cached);
                 }
+                if let Some((mut catalog, _, _)) = disk_prior {
+                    catalog.degraded = true;
+                    return Ok(catalog);
+                }
                 return Err(BramaError::Transport(error));
             }
         };
@@ -328,10 +408,19 @@ impl BramaClient {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         if response.status == StatusCode::NOT_MODIFIED.as_u16() {
-            let mut cached = prior
+            let mut cached = prior.or_else(|| {
+                disk_prior.map(|(catalog, etag, _)| CachedCatalog {
+                    catalog,
+                    etag,
+                    fetched: Instant::now(),
+                })
+            });
+            let mut cached = cached
+                .take()
                 .ok_or_else(|| BramaError::InvalidCatalog("304 without a cached catalog".into()))?;
             cached.fetched = Instant::now();
             let catalog = cached.catalog.clone();
+            write_disk_cache(&key, &cached.catalog, cached.etag.as_deref());
             CACHE
                 .lock()
                 .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
@@ -359,6 +448,7 @@ impl BramaClient {
                 .unwrap_or_else(|| catalog.version.clone());
         }
         validate_catalog(&catalog)?;
+        write_disk_cache(&key, &catalog, etag.as_deref());
         let mut cache = CACHE
             .lock()
             .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;

@@ -104,9 +104,10 @@ fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str) -> PickerItem
 }
 
 /// Disabled, command-less summary row (● subscription / ○ catalog); like a
-/// group header, the picker skips it.
-fn summary_row(label: String, detail: String, badge: &str) -> PickerItem {
-    let mut row = PickerItem::action(label, "").detail(detail).badge(badge);
+/// group header, the picker skips it. The label carries the state dot — no
+/// badge, so the dot never renders twice.
+fn summary_row(label: String, detail: String) -> PickerItem {
+    let mut row = PickerItem::action(label, "").detail(detail);
     row.command = None;
     row.disabled = true;
     row
@@ -203,7 +204,6 @@ pub(crate) fn model_picker(
                 format!("● {provider}"),
                 tr(&lang, summary_key("picker.summary.subscription", &lang, count))
                     .replace("{}", &count.to_string()),
-                "●",
             ));
         }
     }
@@ -212,7 +212,6 @@ pub(crate) fn model_picker(
         "○ catalog".to_string(),
         tr(&lang, summary_key("picker.summary.catalog", &lang, remainder))
             .replace("{}", &remainder.to_string()),
-        "○",
     );
     if show_all {
         items.extend(summary);

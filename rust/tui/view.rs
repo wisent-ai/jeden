@@ -194,12 +194,14 @@ pub enum PickerEvent {
 }
 impl PickerState {
     pub fn new(spec: PickerSpec) -> Self {
-        Self {
+        let mut state = Self {
             spec,
             query: String::new(),
             selected: INITIAL_SELECTION,
             active_tab: 0,
-        }
+        };
+        state.select_first_enabled();
+        state
     }
 
     pub fn filtered_indices(&self) -> Vec<usize> {
@@ -234,6 +236,35 @@ impl PickerState {
         self.selected = self.selected.min(count.saturating_sub(SELECTION_STEP));
     }
 
+    /// Move `position` in `direction` until it lands on an enabled item
+    /// (summary rows and section headers are disabled dead-ends; navigation
+    /// should skip them, not park on them). Falls back to the clamped input
+    /// when every row is disabled.
+    fn skip_disabled(&self, position: usize, direction: isize) -> usize {
+        let indices = self.filtered_indices();
+        if indices.is_empty() {
+            return usize::MIN;
+        }
+        if indices
+            .iter()
+            .all(|index| self.spec.items[*index].disabled)
+        {
+            return position.min(indices.len() - SELECTION_STEP);
+        }
+        let mut current = position.min(indices.len() - SELECTION_STEP);
+        for _ in usize::MIN..indices.len() {
+            if !self.spec.items[indices[current]].disabled {
+                return current;
+            }
+            current = (current as isize + direction).rem_euclid(indices.len() as isize) as usize;
+        }
+        current
+    }
+
+    fn select_first_enabled(&mut self) {
+        self.selected = self.skip_disabled(INITIAL_SELECTION, SELECTION_STEP as isize);
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> PickerEvent {
         match key.code {
             KeyCode::Esc => PickerEvent::Cancelled,
@@ -244,43 +275,46 @@ impl PickerState {
             }
             KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
                 self.query.clear();
-                self.selected = INITIAL_SELECTION;
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             KeyCode::Tab if !self.spec.tabs.is_empty() => {
                 self.active_tab = (self.active_tab + SELECTION_STEP) % self.spec.tabs.len();
-                self.selected = INITIAL_SELECTION;
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             KeyCode::BackTab if !self.spec.tabs.is_empty() => {
                 self.active_tab = (self.active_tab + self.spec.tabs.len() - SELECTION_STEP)
                     % self.spec.tabs.len();
-                self.selected = INITIAL_SELECTION;
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             KeyCode::Home | KeyCode::PageUp => {
-                self.selected = INITIAL_SELECTION;
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             KeyCode::End | KeyCode::PageDown => {
-                self.selected = self.filtered_indices().len().saturating_sub(SELECTION_STEP);
+                let last = self.filtered_indices().len().saturating_sub(SELECTION_STEP);
+                self.selected = self.skip_disabled(last, -(SELECTION_STEP as isize));
                 PickerEvent::Pending
             }
             KeyCode::Up => {
                 let count = self.filtered_indices().len();
                 if count > usize::MIN {
-                    self.selected = if self.selected == INITIAL_SELECTION {
+                    let previous = if self.selected == INITIAL_SELECTION {
                         count - SELECTION_STEP
                     } else {
                         self.selected - SELECTION_STEP
                     };
+                    self.selected = self.skip_disabled(previous, -(SELECTION_STEP as isize));
                 }
                 PickerEvent::Pending
             }
             KeyCode::Down => {
                 let count = self.filtered_indices().len();
                 if count > usize::MIN {
-                    self.selected = (self.selected + SELECTION_STEP) % count;
+                    let next = (self.selected + SELECTION_STEP) % count;
+                    self.selected = self.skip_disabled(next, SELECTION_STEP as isize);
                 }
                 PickerEvent::Pending
             }
@@ -313,7 +347,7 @@ impl PickerState {
                 ) =>
             {
                 self.query.push(ch);
-                self.selected = INITIAL_SELECTION;
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             _ => PickerEvent::Pending,
@@ -451,5 +485,36 @@ mod tests {
         let alpha = text.find("── alpha (2) ──").expect("alpha section");
         let beta = text.find("── beta (1) ──").expect("beta section");
         assert!(shared < alpha && alpha < beta, "ordering: {text}");
+    }
+
+    fn disabled_heavy_state() -> PickerState {
+        PickerState::new(PickerSpec::new(
+            "test",
+            vec![
+                PickerItem::action("header", "").disabled(true),
+                PickerItem::action("first", "/first"),
+                PickerItem::action("middle", "").disabled(true),
+                PickerItem::action("last", "/last"),
+            ],
+        ))
+    }
+
+    #[test]
+    fn initial_selection_skips_disabled_rows() {
+        let state = disabled_heavy_state();
+        assert_eq!(state.selected, 1, "first enabled row should be selected");
+    }
+
+    #[test]
+    fn navigation_skips_disabled_rows() {
+        let mut state = disabled_heavy_state();
+        state.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE));
+        assert_eq!(state.selected, 3, "down from 1 skips the disabled row at 2");
+        state.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE));
+        assert_eq!(state.selected, 1);
+        state.handle_key(KeyEvent::new(KeyCode::Home, KeyModifiers::NONE));
+        assert_eq!(state.selected, 1);
+        state.handle_key(KeyEvent::new(KeyCode::End, KeyModifiers::NONE));
+        assert_eq!(state.selected, 3);
     }
 }

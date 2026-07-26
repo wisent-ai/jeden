@@ -163,10 +163,19 @@ fn editor_live_lines(
     let width = columns.min(112).max(1);
     let has_interactive_view = picker.is_some() || confirm.is_some();
     let mut cursor_rows_below = 0;
+    let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
+        .into_iter()
+        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
+        .collect();
+    let prompt_height = prompt.len();
+    // The live region must fit the terminal: the interactive view only gets
+    // the rows left after the prompt block (plus a one-line margin), so its
+    // title, search line, tab bar and footer never scroll off the top.
+    let view_rows = rows.saturating_sub(prompt_height + 1);
     let mut lines = if let Some(confirm) = confirm {
         confirm_panel(confirm, width, color)
     } else if let Some(picker) = picker {
-        picker_panel(picker, width, rows, color)
+        picker_panel(picker, width, view_rows, color)
     } else {
         attachment_lines(attachments, width, color)
     };
@@ -175,11 +184,6 @@ fn editor_live_lines(
         .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
         .collect();
     let prompt_start = lines.len();
-    let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
-        .into_iter()
-        .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
-        .collect();
-    let prompt_height = prompt.len();
     lines.extend(prompt);
     if !has_interactive_view {
         let slash_hints: Vec<String> =
