@@ -128,22 +128,28 @@ pub(super) fn apply_turn_result(
     prompt: &str,
     result: Result<CommandOutcome, String>,
     picker: &mut Option<PickerState>,
+    view: &mut Option<Message>,
 ) -> bool {
+    // A slash command is not conversation: its output belongs in the live
+    // region, where the next command replaces it, not in the scrollback.
+    let is_command = prompt.trim_start().starts_with('/');
     match result {
         Ok(CommandOutcome::Text(text)) => {
             let trimmed = prompt.trim_start();
-            messages.push(Message::new(
-                if trimmed.starts_with('!') || trimmed.starts_with('$') {
-                    // Local `!`/`$` escapes render as tool-style result blocks;
-                    // they never produce a model turn.
-                    "tool"
-                } else if prompt.starts_with('/') {
-                    "system"
-                } else {
-                    "assistant"
-                },
-                text.trim().to_string(),
-            ));
+            let role = if trimmed.starts_with('!') || trimmed.starts_with('$') {
+                // Local `!`/`$` escapes render as tool-style result blocks;
+                // they never produce a model turn.
+                "tool"
+            } else if is_command {
+                "system"
+            } else {
+                "assistant"
+            };
+            if is_command {
+                *view = Some(Message::view(role, text.trim().to_string()));
+            } else {
+                messages.push(Message::new(role, text.trim().to_string()));
+            }
             false
         }
         Ok(CommandOutcome::Exit(text)) => {
@@ -151,11 +157,16 @@ pub(super) fn apply_turn_result(
             true
         }
         Ok(CommandOutcome::Picker(spec)) => {
+            *view = None;
             *picker = Some(PickerState::new(spec));
             false
         }
         Err(error) => {
-            messages.push(Message::new("error", error));
+            if is_command {
+                *view = Some(Message::view("error", error));
+            } else {
+                messages.push(Message::new("error", error));
+            }
             false
         }
     }

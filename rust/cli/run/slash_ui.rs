@@ -214,8 +214,9 @@ pub(crate) fn model_picker(
             .replace("{}", &remainder.to_string()),
     );
     if show_all {
-        items.extend(summary);
-        items.push(catalog_row);
+        // No summary rows here: with a category bar the picker renders as two
+        // panes and the left one already lists every provider with its count.
+        // Repeating them among the models would be the same data twice.
         models.sort_by(|left, right| {
             provider_rank(provider_group(&left.id))
                 .cmp(&provider_rank(provider_group(&right.id)))

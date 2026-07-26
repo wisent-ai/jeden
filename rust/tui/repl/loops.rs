@@ -155,13 +155,14 @@ fn editor_live_lines(
     slash_selection: usize,
     picker: Option<&PickerState>,
     confirm: Option<&ConfirmState>,
+    view: Option<&Message>,
     columns: usize,
     rows: usize,
     color: bool,
 ) -> (Vec<String>, usize) {
     let _capabilities = crate::capability::for_cwd(std::path::Path::new(&status.cwd));
     let width = columns.min(112).max(1);
-    let has_interactive_view = picker.is_some() || confirm.is_some();
+    let has_interactive_view = picker.is_some() || confirm.is_some() || view.is_some();
     let mut cursor_rows_below = 0;
     let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
         .into_iter()
@@ -176,6 +177,11 @@ fn editor_live_lines(
         confirm_panel(confirm, width, color)
     } else if let Some(picker) = picker {
         picker_panel(picker, width, view_rows, color)
+    } else if let Some(view) = view {
+        // Command output lives here, not in the scrollback: the next command
+        // overwrites this block instead of stacking another frame under it.
+        let block = message_block(view, width, color);
+        block.into_iter().take(view_rows).collect()
     } else {
         attachment_lines(attachments, width, color)
     };
@@ -253,6 +259,9 @@ where
     let mut renderer = ReplRenderer::new();
     let mut picker = initial_picker.map(PickerState::new);
     let mut confirm: Option<ConfirmState> = None;
+    // Output of the last slash command. It lives here rather than in the
+    // transcript so the next command replaces it instead of stacking.
+    let mut view: Option<Message> = None;
     let mut submission_from_view = false;
     let mut attachments = AttachmentTray::default();
     let mut follow_ups = FollowUpQueue::default();
@@ -276,6 +285,7 @@ where
             &attachments,
             0,
             picker.as_ref(),
+            None,
             None,
             columns,
             rows,
@@ -301,6 +311,7 @@ where
                 slash_selection,
                 picker.as_ref(),
                 confirm.as_ref(),
+                view.as_ref(),
                 columns,
                 rows,
                 color,
@@ -387,6 +398,13 @@ where
                             continue;
                         }
                     }
+                }
+
+                // Esc closes the open command view first — the same key that
+                // dismisses a picker, so both kinds of view behave alike.
+                if key.code == KeyCode::Esc && view.is_some() {
+                    view = None;
+                    continue;
                 }
 
                 let mut submit = false;
@@ -535,7 +553,14 @@ where
                     break;
                 }
                 editor.push_history(active_prompt.clone());
-                messages.push(Message::new("user", active_prompt.clone()));
+                // A command replaces the open view; only conversation is
+                // echoed into the scrollback, so running ten commands leaves
+                // one panel on screen instead of twenty stale frames.
+                let is_command = active_prompt.trim_start().starts_with('/');
+                view = None;
+                if !is_command {
+                    messages.push(Message::new("user", active_prompt.clone()));
+                }
 
                 {
                     let (columns, _) = terminal_dimensions();
@@ -567,8 +592,13 @@ where
                             enable_raw_mode()?;
                             crossterm::execute!(io::stdout(), EnableBracketedPaste)?;
                             renderer.reset();
-                            if apply_turn_result(&mut messages, &active_prompt, result, &mut picker)
-                            {
+                            if apply_turn_result(
+                                &mut messages,
+                                &active_prompt,
+                                result,
+                                &mut picker,
+                                &mut view,
+                            ) {
                                 break 'repl;
                             }
                         }
@@ -595,8 +625,13 @@ where
                                     format!("tools: {}", tools_used.join(", ")),
                                 ));
                             }
-                            if apply_turn_result(&mut messages, &active_prompt, result, &mut picker)
-                            {
+                            if apply_turn_result(
+                                &mut messages,
+                                &active_prompt,
+                                result,
+                                &mut picker,
+                                &mut view,
+                            ) {
                                 break 'repl;
                             }
                         }

@@ -171,6 +171,22 @@ fn handle_settings_slash(cwd: &Path, args: &str) -> Result<String, String> {
     })
 }
 
+/// Usage text for a bare (or unrecognised) billing-family command, derived from
+/// the routing table so it cannot drift from what actually dispatches.
+fn billing_slash_usage(command: &str) -> String {
+    let mut usage = format!("Usage: {command} <subcommand>");
+    for (prefix, _) in crate::cli::billing::billing_slash_handlers() {
+        if prefix
+            .strip_prefix(command)
+            .is_some_and(|rest| rest.starts_with(' '))
+        {
+            usage.push('\n');
+            usage.push_str(prefix);
+        }
+    }
+    usage
+}
+
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
     let mut parts = trimmed.split_whitespace();
@@ -213,6 +229,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
             handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str())
         }
         "/exit" | "/quit" => Ok("Exit is handled by the interactive input loop.".into()),
+        "/billing" | "/subscriptions" | "/payment-method" => Ok(billing_slash_usage(command)),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }
 }

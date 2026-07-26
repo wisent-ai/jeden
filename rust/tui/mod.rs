@@ -262,6 +262,11 @@ const ASSISTANT_TITLE: &str = "wisent";
 pub struct Message {
     pub role: String,
     pub text: String,
+    /// Output of a slash command rather than conversation. Views REPLACE
+    /// each other in the live region instead of being committed to the
+    /// scrollback: every command used to leave another frame behind, so a
+    /// session drifted into a wall of stale panels no one reads.
+    pub view: bool,
 }
 
 impl Message {
@@ -269,6 +274,14 @@ impl Message {
         Self {
             role: role.into(),
             text: text.into(),
+            view: false,
+        }
+    }
+
+    pub fn view(role: impl Into<String>, text: impl Into<String>) -> Self {
+        Self {
+            view: true,
+            ..Self::new(role, text)
         }
     }
 }
