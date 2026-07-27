@@ -24,7 +24,8 @@ pub(super) use editor::{
 };
 
 pub use view::{
-    CommandOutcome, ConfirmEvent, ConfirmState, PickerEvent, PickerItem, PickerSpec, PickerState,
+    CommandOutcome, ConfirmEvent, ConfirmState, PickerEvent, PickerFocus, PickerItem, PickerSpec,
+    PickerState,
 };
 
 pub use repl::loops::run_basic_loop;

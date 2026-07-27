@@ -100,6 +100,16 @@ static STRINGS: &[(&str, &str, &str)] = &[
     ("pl", "badge.custom", "WŁASNY"),
     ("en", "picker.footer.tabs", "Tab category"),
     ("pl", "picker.footer.tabs", "Tab kategoria"),
+    (
+        "en",
+        "picker.footer.panes",
+        "↑↓ groups  → items  ← back  Enter confirm  type to search  Esc close",
+    ),
+    (
+        "pl",
+        "picker.footer.panes",
+        "↑↓ grupy  → pozycje  ← wróć  Enter zatwierdź  pisz aby szukać  Esc zamknij",
+    ),
     ("en", "picker.tab.all", "All"),
     ("pl", "picker.tab.all", "Wszystkie"),
 ];

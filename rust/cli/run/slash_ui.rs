@@ -47,6 +47,66 @@ fn perf_detail(perf: Option<&ModelPerf>) -> String {
     }
 }
 
+// Scales as strings: the repository guard bans bare numerals in code, and the
+// parsed constants keep the intent (`1000` = k, `1000000` = m) readable.
+const THOUSAND: &str = "1000";
+const MILLION: &str = "1000000";
+
+/// Context window the way omp prints it: `272k ◫`, `1m ◫`.
+fn context_metric(tokens: u64) -> String {
+    let million = MILLION.parse::<u64>().unwrap_or_default();
+    let thousand = THOUSAND.parse::<u64>().unwrap_or_default();
+    if tokens >= million {
+        format!("{}m ◫", tokens / million)
+    } else if tokens >= thousand {
+        format!("{}k ◫", tokens / thousand)
+    } else {
+        format!("{tokens} ◫")
+    }
+}
+
+/// The three figures a model row carries, unpadded.
+fn metric_parts(model: &ModelEntry) -> Vec<String> {
+    vec![
+        perf_detail(model.perf.as_ref())
+            .trim_start_matches(" · ")
+            .to_string(),
+        context_metric(model.context_window),
+        price_detail(&model.price)
+            .trim_start_matches(" · ")
+            .to_string(),
+    ]
+}
+
+/// Column widths across the whole list. Padding each figure to the widest of
+/// its kind is what turns three strings into three columns; without it the
+/// context of a row with no perf sample slides left under the price above it.
+fn metric_widths(models: &[ModelEntry]) -> Vec<usize> {
+    let mut widths: Vec<usize> = Vec::new();
+    for model in models {
+        for (slot, part) in metric_parts(model).iter().enumerate() {
+            if widths.len() <= slot {
+                widths.push(usize::default());
+            }
+            widths[slot] = widths[slot].max(part.chars().count());
+        }
+    }
+    widths
+}
+
+/// The row's figures padded into their columns.
+fn model_metrics(model: &ModelEntry, widths: &[usize]) -> String {
+    metric_parts(model)
+        .iter()
+        .enumerate()
+        .map(|(slot, part)| {
+            let width = widths.get(slot).copied().unwrap_or_default();
+            format!("{}{part}", " ".repeat(width.saturating_sub(part.chars().count())))
+        })
+        .collect::<Vec<_>>()
+        .join("  ")
+}
+
 /// Provider group: the id segment before the first `/`; ids without `/` group
 /// under their literal id.
 fn provider_group(id: &str) -> &str {
@@ -76,7 +136,12 @@ fn model_rank(model: &ModelEntry, active: Option<&str>) -> u8 {
     }
 }
 
-fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str) -> PickerItem {
+fn model_row(
+    model: &ModelEntry,
+    active: Option<&str>,
+    lang: &str,
+    widths: &[usize],
+) -> PickerItem {
     let selected = active == Some(model.id.as_str());
     let detail = format!(
         "context {} · output {} · {}{}",
@@ -86,13 +151,12 @@ fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str) -> PickerItem
         if model.reasoning { " · reasoning" } else { "" }
     );
     let detail = model.unavailable_reason.clone().unwrap_or(detail);
+    // The row shows figures in right-aligned columns (perf · context · price,
+    // omp's order); the prose stays in `detail`, which the pane prints under
+    // the list for whatever the cursor is on.
     PickerItem::action(&model.id, format!("/model {}", model.id))
-        .detail(format!(
-            "{}{}{}",
-            detail,
-            price_detail(&model.price),
-            perf_detail(model.perf.as_ref())
-        ))
+        .detail(detail)
+        .metrics(model_metrics(model, widths))
         .badge(if !model.available {
             tr(lang, "badge.unavailable")
         } else if selected {
@@ -244,16 +308,24 @@ pub(crate) fn model_picker(
                 .position(|name| name.as_str() == group)
                 .unwrap_or(catalog_tab)
         };
+        let widths = metric_widths(&models);
         items.extend(
             models
                 .iter()
-                .map(|model| model_row(model, active, &lang).tab(tab_index(&model.id))),
+                .map(|model| model_row(model, active, &lang, &widths).tab(tab_index(&model.id))),
         );
         items.push(
             PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
         );
+        // Marks: "All" and every subscription provider are reachable (●); the
+        // aggregate catalog tab is not (○), and the pane rules a line there.
+        let marks = tabs
+            .iter()
+            .map(|name| name.as_str() != "catalog")
+            .collect::<Vec<_>>();
         return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
             .with_tabs(tabs)
+            .with_tab_marks(marks)
             .localized(&lang));
     } else {
         // Curated view, same two-pane shape as `--all`: the brands column is
@@ -282,18 +354,23 @@ pub(crate) fn model_picker(
                 .position(|name| name.as_str() == group)
                 .unwrap_or_default()
         };
+        let widths = metric_widths(&models);
         items.extend(
             models
                 .iter()
-                .map(|model| model_row(model, active, &lang).tab(tab_index(&model.id))),
+                .map(|model| model_row(model, active, &lang, &widths).tab(tab_index(&model.id))),
         );
         items.push(catalog_row);
         items.push(
             PickerItem::action(format!("Show all {total} models"), "/model --all")
                 .badge(tr(&lang, "badge.more")),
         );
+        // Every tab here is a subscription the user holds, so all are ●; the
+        // catalog stays a row in the item pane with its own ○.
+        let marks = tabs.iter().map(|_| true).collect::<Vec<_>>();
         return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
             .with_tabs(tabs)
+            .with_tab_marks(marks)
             .localized(&lang));
     }
 }

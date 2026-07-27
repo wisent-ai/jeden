@@ -14,6 +14,10 @@ pub struct PickerItem {
     pub disabled: bool,
     pub destructive: bool,
     pub prefill: bool,
+    /// Compact figures rendered right-aligned at the end of the row (perf,
+    /// context, price). Kept apart from `detail` so the columns line up
+    /// instead of drifting with the description length.
+    pub metrics: String,
     /// Index into `PickerSpec::tabs`; 0 = shown in every tab view (the "All"
     /// tab and non-tab pickers). Only meaningful when the spec has tabs.
     pub tab: usize,
@@ -29,6 +33,7 @@ impl PickerItem {
             disabled: false,
             destructive: false,
             prefill: false,
+            metrics: String::new(),
             tab: 0,
         }
     }
@@ -54,6 +59,10 @@ impl PickerItem {
         self.disabled = false;
         self
     }
+    pub fn metrics(mut self, metrics: impl Into<String>) -> Self {
+        self.metrics = metrics.into();
+        self
+    }
     pub fn tab(mut self, tab: usize) -> Self {
         self.tab = tab;
         self
@@ -70,6 +79,11 @@ pub struct PickerSpec {
     /// items with `tab == 0` belong to it, others to their 1-based category.
     /// Empty = no tab bar (the common case).
     pub tabs: Vec<String>,
+    /// Per-tab reachability, parallel to `tabs`. A marked category is one the
+    /// user can actually use right now (a subscription they hold); unmarked
+    /// ones are visible but out of reach (the public catalog). The brands
+    /// pane draws them as ● and ○ and rules a line between the two groups.
+    pub tab_marks: Vec<bool>,
     /// Resolved `ui.language` code; render-only chrome (footer, confirm title,
     /// text export) follows it. Defaults to English for pickers built without
     /// config in scope.
@@ -84,6 +98,7 @@ impl PickerSpec {
             empty_message: "No matching items".into(),
             items,
             tabs: Vec::new(),
+            tab_marks: Vec::new(),
             lang: "en".into(),
         }
     }
@@ -92,6 +107,12 @@ impl PickerSpec {
     /// ("All"); categories with no items are skipped in text export.
     pub fn with_tabs(mut self, tabs: Vec<String>) -> Self {
         self.tabs = tabs;
+        self
+    }
+
+    /// Mark which categories are reachable; see `PickerSpec::tab_marks`.
+    pub fn with_tab_marks(mut self, marks: Vec<bool>) -> Self {
+        self.tab_marks = marks;
         self
     }
 
@@ -171,6 +192,15 @@ impl From<String> for CommandOutcome {
     }
 }
 
+/// Which pane the arrow keys drive in a two-pane picker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PickerFocus {
+    /// Left pane: ↑↓ walk the brands, → steps into their items.
+    Categories,
+    /// Right pane: ↑↓ walk the items, ← steps back to the brands.
+    Items,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerState {
     pub spec: PickerSpec,
@@ -178,6 +208,8 @@ pub struct PickerState {
     pub selected: usize,
     /// Active category when the spec has tabs; 0 = the catch-all "All" view.
     pub active_tab: usize,
+    /// Focused pane. A picker without categories is always on its items.
+    pub focus: PickerFocus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,11 +226,19 @@ pub enum PickerEvent {
 }
 impl PickerState {
     pub fn new(spec: PickerSpec) -> Self {
+        let focus = if spec.tabs.is_empty() {
+            PickerFocus::Items
+        } else {
+            // Two-pane pickers open on the brands column, the way omp does:
+            // you pick the provider first, then step right into its models.
+            PickerFocus::Categories
+        };
         let mut state = Self {
             spec,
             query: String::new(),
             selected: INITIAL_SELECTION,
             active_tab: 0,
+            focus,
         };
         state.select_first_enabled();
         state
@@ -289,6 +329,16 @@ impl PickerState {
                 self.select_first_enabled();
                 PickerEvent::Pending
             }
+            // →/← cross between the panes; a picker with no brands column
+            // ignores them, exactly as it ignores Tab.
+            KeyCode::Right if !self.spec.tabs.is_empty() => {
+                self.focus = PickerFocus::Items;
+                PickerEvent::Pending
+            }
+            KeyCode::Left if !self.spec.tabs.is_empty() => {
+                self.focus = PickerFocus::Categories;
+                PickerEvent::Pending
+            }
             KeyCode::Home | KeyCode::PageUp => {
                 self.select_first_enabled();
                 PickerEvent::Pending
@@ -296,6 +346,19 @@ impl PickerState {
             KeyCode::End | KeyCode::PageDown => {
                 let last = self.filtered_indices().len().saturating_sub(SELECTION_STEP);
                 self.selected = self.skip_disabled(last, -(SELECTION_STEP as isize));
+                PickerEvent::Pending
+            }
+            // On the brands pane the arrows walk categories; on the items
+            // pane they walk items. The footer promises exactly this.
+            KeyCode::Up if self.focus == PickerFocus::Categories => {
+                self.active_tab = (self.active_tab + self.spec.tabs.len() - SELECTION_STEP)
+                    % self.spec.tabs.len();
+                self.select_first_enabled();
+                PickerEvent::Pending
+            }
+            KeyCode::Down if self.focus == PickerFocus::Categories => {
+                self.active_tab = (self.active_tab + SELECTION_STEP) % self.spec.tabs.len();
+                self.select_first_enabled();
                 PickerEvent::Pending
             }
             KeyCode::Up => {
@@ -319,6 +382,12 @@ impl PickerState {
                 PickerEvent::Pending
             }
             KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => {
+                // On the brands pane Enter steps right, like →: there is
+                // nothing to submit in a category, only models behind it.
+                if self.focus == PickerFocus::Categories {
+                    self.focus = PickerFocus::Items;
+                    return PickerEvent::Pending;
+                }
                 let Some(index) = self.filtered_indices().get(self.selected).copied() else {
                     return PickerEvent::Pending;
                 };
@@ -347,6 +416,9 @@ impl PickerState {
                 ) =>
             {
                 self.query.push(ch);
+                // Searching is an item operation: a query spans every
+                // category, so the arrows must land on results, not brands.
+                self.focus = PickerFocus::Items;
                 self.select_first_enabled();
                 PickerEvent::Pending
             }
