@@ -256,21 +256,46 @@ pub(crate) fn model_picker(
             .with_tabs(tabs)
             .localized(&lang));
     } else {
-        items.extend(summary);
+        // Curated view, same two-pane shape as `--all`: the brands column is
+        // the picker's left pane, so the provider rows are not repeated among
+        // the models. `/model` is what people type; it must not be the one
+        // view that stayed a flat list.
         models.retain(|model| model.available || active == Some(model.id.as_str()));
         models.sort_by(|left, right| {
-            model_rank(left, active)
-                .cmp(&model_rank(right, active))
+            provider_rank(provider_group(&left.id))
+                .cmp(&provider_rank(provider_group(&right.id)))
+                .then_with(|| model_rank(left, active).cmp(&model_rank(right, active)))
                 .then_with(|| left.id.cmp(&right.id))
         });
-        items.extend(models.iter().map(|model| model_row(model, active, &lang)));
+        let mut tabs = vec![tr(&lang, "picker.tab.all").to_string()];
+        for provider in SUBSCRIPTION_PROVIDERS {
+            if models
+                .iter()
+                .any(|model| provider_group(&model.id) == *provider)
+            {
+                tabs.push((*provider).to_string());
+            }
+        }
+        let tab_index = |id: &str| -> usize {
+            let group = provider_group(id);
+            tabs.iter()
+                .position(|name| name.as_str() == group)
+                .unwrap_or_default()
+        };
+        items.extend(
+            models
+                .iter()
+                .map(|model| model_row(model, active, &lang).tab(tab_index(&model.id))),
+        );
         items.push(catalog_row);
         items.push(
             PickerItem::action(format!("Show all {total} models"), "/model --all")
                 .badge(tr(&lang, "badge.more")),
         );
+        return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
+            .with_tabs(tabs)
+            .localized(&lang));
     }
-    Ok(PickerSpec::new(tr(&lang, "view.model.title"), items).localized(&lang))
 }
 
 fn logout_picker() -> Result<PickerSpec, String> {
