@@ -209,6 +209,22 @@ jobs:
           # marker is regenerated here: the committed surface stays the only
           # surface any decision sees, because recomputing both sides at check time
           # is the one shape that structurally cannot refuse.
+          #
+          # `--marker` and no other flag, and that is why this workflow needs no tag
+          # fetch after checkout. `actions/checkout@v4` takes one commit and no tags, so
+          # any step that resolved a tag or ran `git archive` would be blind here -- but
+          # every fact this job consults arrives over HTTP or from a static read of the
+          # checked-out tree: the floor from `awk` on Cargo.toml, the surface from
+          # scripts/surface.py, the tier from the releases API. `--marker` exists
+          # precisely so the generator answers without reproducing a source revision a
+          # shallow checkout does not have. Measured: this whole job runs green inside
+          # `git clone --depth=one --no-tags`, which is the shape a runner checks out.
+          #
+          # What revokes that, so nobody has to remember it: the moment a step here
+          # invokes this generator WITHOUT `--marker`, resolves a tag, or runs
+          # `git archive`, the fetch step becomes mandatory --
+          #   run: git fetch --force --tags --unshallow || git fetch --force --tags
+          # because a shallow clone lacks both the tag and its tree.
           best="$(python3 scripts/baseline.py --marker)"
           if [ "$best" != "$marker" ]; then
             echo "::error::the baseline was recovered from $marker, but $best is" \
