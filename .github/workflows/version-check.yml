@@ -1,0 +1,143 @@
+name: Version check
+
+# Refuse a change whose declared version disagrees with what it did to the public
+# contract. Jeden's contract is its command vocabulary — the `jeden <command>`
+# subcommands scripts and the ACP/VS Code clients invoke, and the `/command` names
+# an interactive user types — so adding one is a capability and removing one
+# breaks whoever scripted it yesterday.
+#
+# The rule itself lives in one place for the whole fleet and is not copied here:
+# https://github.com/lbartoszcze/AutoVersion. This workflow supplies only the
+# three things this repository alone knows: its surface, the version it declares,
+# and the published artifact its baseline was recovered from.
+#
+# Note on this repository's version scheme: Cargo.toml holds the SemVer *floor*,
+# and the canary pipeline publishes floor-plus-one-patch as a prerelease. So the
+# version compared here is the floor, which is also what the published artifact's
+# signed manifest records as `minimumVersion`. The shared rule refuses anything
+# that is not a major.minor.patch triple, and the floor is the only stable triple
+# the published evidence names.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version-check:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install the shared rule
+        run: pip install --quiet "git+https://github.com/lbartoszcze/AutoVersion@v0.1.0"
+
+      - name: Read the public surface
+        # No build: the surface is read out of rust/main.rs and rust/capability/mod.rs
+        # statically, so this cannot be broken by a Rust toolchain or a crate index
+        # being unavailable, and it stays cheap. A file that does not parse, or a
+        # declaration site that has moved, fails the step rather than silently
+        # shrinking the surface — a half-read surface would look like a clean
+        # removal and mislabel the release.
+        run: python3 scripts/surface.py > "$RUNNER_TEMP/candidate.json"
+
+      - name: Compare against the released contract
+        run: |
+          set -euo pipefail
+          baseline="$(jq -r .version released-surface.json)"
+          floor="$(jq -r .minimumVersion released-surface.json)"
+          declared="$(awk -F'"' '/^version *=/{print $2; exit}' Cargo.toml)"
+          echo "published: $baseline (floor $floor)"
+          echo "declared:  $declared"
+
+          verdict="$(autoversion decide \
+            --current "$floor" \
+            --published-surface released-surface.json \
+            --candidate-surface "$RUNNER_TEMP/candidate.json" \
+            --json)"
+          echo "$verdict"
+
+          change="$(printf '%s' "$verdict" | jq -r .change)"
+          required="$(printf '%s' "$verdict" | jq -r .next)"
+
+          if [ "$declared" = "$floor" ]; then
+            # The floor has not moved since the published artifact was built, so
+            # the next publication would reuse the version that artifact already
+            # carries. That is only honest if the contract is unchanged.
+            if [ "$change" != "internal" ]; then
+              echo "::error::The public contract changed ($change) but Cargo.toml still" \
+                "declares the floor $floor that published artifact $baseline was built" \
+                "from, so the next canary would republish that version with a different" \
+                "surface. The floor must be raised to $required."
+              false
+            fi
+            echo "Floor unmoved since $baseline and the contract is unchanged."
+          elif [ "$declared" != "$required" ]; then
+            echo "::error::Cargo.toml declares $declared, but a $change change to" \
+              "$floor requires $required."
+            false
+          else
+            echo "Declared floor matches the $change change."
+          fi
+
+      - name: Refuse a baseline that misstates where it came from
+        if: github.ref == 'refs/heads/main'
+        run: |
+          set -euo pipefail
+          # released-surface.json must describe an artifact a user can actually
+          # obtain. The marker is the first whitespace-delimited token of "source"
+          # and is written by scripts/baseline.py, so the two files agree by a
+          # constant rather than by prose.
+          marker="$(jq -r '.source | split(" ") | first' released-surface.json)"
+          baseline="$(jq -r .version released-surface.json)"
+          tier="${marker%%:*}"
+
+          case "$tier" in
+            gh-release)
+              tag="${marker#gh-release:}"
+              # Forward assertion: this repository publishes to GitHub Releases, so
+              # the named release must really serve the named version. Asserting
+              # against crates.io instead would be worse than useless -- the `jeden`
+              # name there is an unrelated third party's `cargo new` stub, so both
+              # directions would be false.
+              served="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json assets \
+                | jq -r --arg version "$baseline" \
+                    'any(.assets[].name; startswith("jeden-" + $version + "-"))')"
+              if [ "$served" != "true" ]; then
+                echo "::error::released-surface.json names $baseline, but release $tag" \
+                  "serves no jeden-$baseline-<target>.tar.gz. The baseline was" \
+                  "hand-edited and every later comparison is measured against" \
+                  "something nobody can install. Run scripts/baseline.py."
+                false
+              fi
+              echo "Baseline $baseline is served by $tag."
+              ;;
+            *)
+              # scripts/baseline.py only ever emits gh-release:, and raises if this
+              # repository publishes nothing. Any other tier means the file was
+              # hand-edited or the release channel disappeared; either way a human
+              # decides, rather than this gate quietly accepting a weaker baseline.
+              echo "::error::unknown baseline marker: $marker"
+              false
+              ;;
+          esac
+
+          # Being honest about the tier is not the same as being on the best one.
+          # A newer release supersedes this baseline without making its marker a
+          # lie, and the gate would go on measuring a superseded artifact. Only the
+          # marker is regenerated here: the committed surface stays the only
+          # surface any decision sees, because recomputing both sides at check time
+          # is the one shape that structurally cannot refuse.
+          best="$(python3 scripts/baseline.py --marker)"
+          if [ "$best" != "$marker" ]; then
+            echo "::error::the baseline was recovered from $marker, but $best is" \
+              "published now. Run scripts/baseline.py."
+            false
+          fi
+          echo "Tier '$tier' at $tag is still the newest published artifact."
