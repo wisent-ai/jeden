@@ -221,10 +221,13 @@ jobs:
           # `git clone --depth=one --no-tags`, which is the shape a runner checks out.
           #
           # What revokes that, so nobody has to remember it: the moment a step here
-          # invokes this generator WITHOUT `--marker`, resolves a tag, or runs
-          # `git archive`, the fetch step becomes mandatory --
-          #   run: git fetch --force --tags --unshallow || git fetch --force --tags
-          # because a shallow clone lacks both the tag and its tree.
+          # invokes this generator WITHOUT `--marker`, resolves a tag, or archives one,
+          # a step that force-fetches the tags AND unshallows becomes mandatory, because
+          # a shallow clone lacks both the tag and its tree. Copy the "Make tags and
+          # history visible" step from wisent-desktop-auth's gate; it is not spelled out
+          # here on purpose, so that the fleet audit -- which decides this workflow needs
+          # such a step by looking for that command as a substring -- cannot be talked
+          # out of flagging a future defect by a comment that merely quotes the cure.
           best="$(python3 scripts/baseline.py --marker)"
           if [ "$best" != "$marker" ]; then
             echo "::error::the baseline was recovered from $marker, but $best is" \
