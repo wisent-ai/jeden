@@ -2,6 +2,7 @@
 name = "jeden"
 version = "0.1.0"
 edition = "2021"
+license-file = "LICENSE"
 [lib]
 path = "rust/lib.rs"
 

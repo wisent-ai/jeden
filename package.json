@@ -11,5 +11,5 @@
     "check:rust": "cargo check",
     "build:rust": "cargo build --release && ./scripts/sign-sandbox-helper.sh"
   },
-  "license": "UNLICENSED"
+  "license": "SEE LICENSE IN LICENSE"
 }

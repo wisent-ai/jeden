@@ -1,6 +1,6 @@
 # Jeden
 
-Jeden is Wisent's private coding-agent harness. Model routing, policy, terminal interaction, sessions, memory, tools, hooks, and MCP integration are implemented and controlled locally.
+Jeden is Wisent's local coding-agent harness. Model routing, policy, terminal interaction, sessions, memory, tools, hooks, and MCP integration are implemented and controlled locally.
 
 ## Design contract
 
@@ -15,7 +15,7 @@ Tool schemas are derived from each input contract and sent with the model reques
 
 ## Current scope
 
-The private milestone includes:
+The public development source includes:
 
 - interactive terminal and one-shot `jeden run` modes;
 - session transcripts and artifacts under `~/.jeden/sessions/`;
@@ -119,7 +119,7 @@ WISENT_APP_AGENT_ID=wisent-app
 
 ## Billing and subscription routing
 
-Billing is owned by Weles. Configure `WELES_URL` and `WELES_TOKEN`; Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` only opens a Weles-hosted HTTPS setup URL.
+Wisent Platform Billing owns billing. The compatibility transport currently reads `WELES_URL` and `WELES_TOKEN`; Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` only opens the configured platform-hosted HTTPS setup URL.
 
 The interactive slash surface provides:
 
@@ -127,9 +127,9 @@ The interactive slash surface provides:
 - `/subscriptions list|status` for redacted subscription and quota views;
 - `/subscriptions purchase|renew|disable` for approved, caller-idempotent mutations.
 
-`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Weles.
+`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Wisent Platform Billing.
 
-For model calls, Jeden discovers active Weles subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
+For model calls, Jeden discovers active platform subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
 
 ## Release automation
 
@@ -185,3 +185,10 @@ jeden tools --cwd .
 ## JSON action protocol
 
 The complete native action, tool-call, selector, and anchored-patch contract is documented in [docs/JSON_ACTION_PROTOCOL.md](docs/JSON_ACTION_PROTOCOL.md).
+
+
+## Project status and support
+
+- **Maturity**: public development source at SemVer `0.x`; no stable public contract is promised.
+- **Distribution**: source is available under the Apache License 2.0; no supported public binary channel is currently promised.
+- **Support**: use the public `wisent-ai/jeden` issue tracker for non-sensitive reports and GitHub Security Advisories for vulnerabilities.

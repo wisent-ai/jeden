@@ -4,7 +4,7 @@
   "description": "Jeden ACP client for Visual Studio Code",
   "version": "0.1.0",
   "publisher": "wisent-ai",
-  "license": "UNLICENSED",
+  "license": "SEE LICENSE IN ../../LICENSE",
   "engines": { "vscode": "^1.90.0" },
   "categories": ["Machine Learning", "Other"],
   "activationEvents": ["onView:jeden.chat", "onCommand:jeden.connect"],
