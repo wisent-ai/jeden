@@ -9,6 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const API_VERSION: &str = "v1";
+const PLATFORM_BILLING_URL_ENV: &str = "WISENT_PLATFORM_BILLING_URL";
+const PLATFORM_BILLING_TOKEN_ENV: &str = "WISENT_PLATFORM_BILLING_TOKEN";
+const LEGACY_BILLING_URL_ENV: &str = "WELES_URL";
+const LEGACY_BILLING_TOKEN_ENV: &str = "WELES_TOKEN";
 const MAX_POLL_EVENTS: usize = 256;
 const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_PROVIDERS: usize = 128;
@@ -152,11 +156,35 @@ pub struct WelesClient {
     correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 
+pub(crate) fn platform_billing_configured() -> bool {
+    [PLATFORM_BILLING_URL_ENV, LEGACY_BILLING_URL_ENV]
+        .iter()
+        .any(|name| {
+            std::env::var(name)
+                .ok()
+                .is_some_and(|value| !value.trim().is_empty())
+        })
+}
+
+fn platform_billing_endpoint() -> Option<String> {
+    std::env::var(PLATFORM_BILLING_URL_ENV)
+        .or_else(|_| std::env::var(LEGACY_BILLING_URL_ENV))
+        .ok()
+}
+
+fn platform_billing_token() -> SecretRef {
+    if std::env::var_os(PLATFORM_BILLING_TOKEN_ENV).is_some() {
+        SecretRef::environment(PLATFORM_BILLING_TOKEN_ENV)
+    } else {
+        SecretRef::environment(LEGACY_BILLING_TOKEN_ENV)
+    }
+}
+
 impl WelesClient {
     pub fn from_env() -> Self {
         Self::with_secret_ref(
-            std::env::var("WELES_URL").ok(),
-            Some(SecretRef::environment("WELES_TOKEN")),
+            platform_billing_endpoint(),
+            Some(platform_billing_token()),
             Duration::from_millis(500),
             ReqwestTransport::production(),
         )
@@ -210,14 +238,14 @@ impl WelesClient {
     pub fn health(&self) -> ServiceHealth {
         let available = self.endpoint.is_some();
         ServiceHealth {
-            service: "weles".into(),
+            service: "platform-billing".into(),
             version: API_VERSION.into(),
             available,
             endpoint: self.endpoint.clone(),
             detail: if available {
                 "configured; provider state is resolved on demand".into()
             } else {
-                "WELES_URL is not configured".into()
+                "WISENT_PLATFORM_BILLING_URL is not configured".into()
             },
             checked_at_ms: now_ms(),
         }

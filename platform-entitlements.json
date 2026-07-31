@@ -1,0 +1,15 @@
+{
+  "schema": "wisent.product-entitlements.current",
+  "product": "jeden",
+  "organization_id": "WISENT_ORGANIZATION_ID",
+  "billing_url": "WISENT_PLATFORM_BILLING_URL",
+  "billing_token": "WISENT_PLATFORM_BILLING_TOKEN",
+  "community": ["jeden.local"],
+  "managed": ["jeden.managed", "jeden.team"],
+  "managed_failure": "fail-closed",
+  "community_failure": "local harness remains available",
+  "legacy_environment": {
+    "WELES_URL": "WISENT_PLATFORM_BILLING_URL",
+    "WELES_TOKEN": "WISENT_PLATFORM_BILLING_TOKEN"
+  }
+}

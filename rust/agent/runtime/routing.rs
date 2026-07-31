@@ -1,7 +1,7 @@
 use super::*;
 use crate::control_plane::billing::{AccountState, SubscriptionState, MAX_BILLING_ITEMS};
 use crate::control_plane::contract::{RequestMeta, WelesApiV2};
-use crate::control_plane::weles::WelesClient;
+use crate::control_plane::weles::{platform_billing_configured, WelesClient};
 use crate::model_router::{RetryPolicy, RouteDescriptor};
 use crate::routing::{SubscriptionPoolSnapshot, SubscriptionTarget};
 use sha2::{Digest, Sha256};
@@ -109,17 +109,14 @@ fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
     })
 }
 
-fn subscription_pool_from_weles() -> Result<Option<SubscriptionPoolSnapshot>, String> {
-    if env::var("WELES_URL")
-        .ok()
-        .is_none_or(|value| value.trim().is_empty())
-    {
+fn subscription_pool_from_platform_billing() -> Result<Option<SubscriptionPoolSnapshot>, String> {
+    if !platform_billing_configured() {
         return Ok(None);
     }
     let client = WelesClient::from_env();
     let accounts = client
         .accounts(None)
-        .map_err(|error| format!("cannot list Weles accounts for subscription routing: {error}"))?;
+        .map_err(|error| format!("cannot list platform billing accounts for subscription routing: {error}"))?;
     let mut targets = Vec::new();
     let mut revisions = Vec::new();
     'accounts: for (account_index, account) in accounts.into_iter().enumerate() {
@@ -306,7 +303,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         }
         (model, _) => model,
     };
-    let subscription_pool = subscription_pool_from_weles();
+    let subscription_pool = subscription_pool_from_platform_billing();
     let catalog_error = bare_model_error.or(match (&selected_model, &catalog) {
         (None, _) => Some(
             "no model selected; choose a model advertised by Brama; run /setup to configure"
