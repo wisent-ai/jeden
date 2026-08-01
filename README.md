@@ -1,7 +1,7 @@
 # Jeden
 
 <!-- wisent-readme-signals:start -->
-[![CI](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml)
+[![build-ci](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/wisent-ai/jeden?display_name=tag&sort=semver)](https://github.com/wisent-ai/jeden/releases)
 [![Downloads](https://img.shields.io/github/downloads/wisent-ai/jeden/total)](https://github.com/wisent-ai/jeden/releases)
 [![License](https://img.shields.io/github/license/wisent-ai/jeden)](https://github.com/wisent-ai/jeden)
