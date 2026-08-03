@@ -1,15 +1,35 @@
 # Jeden
 
-<!-- wisent-readme-signals:start -->
-[![build-ci](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/wisent-ai/jeden/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/wisent-ai/jeden?display_name=tag&sort=semver)](https://github.com/wisent-ai/jeden/releases)
-[![Downloads](https://img.shields.io/github/downloads/wisent-ai/jeden/total)](https://github.com/wisent-ai/jeden/releases)
-[![License](https://img.shields.io/github/license/wisent-ai/jeden)](https://github.com/wisent-ai/jeden)
-[![Discord](https://img.shields.io/badge/Discord-Join%20Wisent-5865F2?logo=discord&logoColor=white)](https://discord.gg/qRjpkthq54)
-<!-- wisent-readme-signals:end -->
+Jeden is Wisent's local coding-agent harness: it executes coding tasks in a developer's terminal against Wisent-controlled model routing while keeping policy, tools, sessions, and memory under local control.
 
+## Problem and intended users
 
-Jeden is Wisent's local coding-agent harness. Model routing, policy, terminal interaction, sessions, memory, tools, hooks, and MCP integration are implemented and controlled locally.
+Wisent engineers run coding agents against production-adjacent repositories and need the agent's inference path, spend attribution, and tool permissions to remain under Wisent's control rather than a third-party hosted agent's. Hosted agent products route prompts and code through external infrastructure, bill through opaque accounts, and enforce tool policy server-side.
+
+Jeden serves two audiences:
+
+- **Wisent engineers**, who run interactive and one-shot coding tasks in the terminal with local approval over every write and command;
+- **Wisent tooling and automation**, which drives the same harness through its machine interfaces (RPC, ACP, headless mode, SDKs) inside editors and workflows.
+
+## Product boundaries
+
+Included capabilities are listed under [Current scope](#current-scope). Explicit non-goals:
+
+- Jeden is not a hosted or multi-tenant service; it is a local harness.
+- Jeden's local runtime is usable without a hosted Wisent account.
+- Jeden does not provide model inference itself; it uses Brama or another compatible OpenAI-style endpoint and caller-supplied credentials.
+- Jeden never handles cardholder data; commercial billing is owned by Wisent Platform Billing.
+
+Supported environments: the release pipeline builds signed canary artifacts for `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc`. Other platforms are build-from-source only.
+
+Operator-managed and external: the Brama URL and signing credential (Stado/Skarbiec-managed), Wisent Platform Billing configuration, and MCP server configuration.
+
+## Core use cases
+
+1. **Interactive task with approvals.** A Wisent engineer in a project checkout wants a code change executed and reviewed. They run `jeden` and type the task; the agent works through jailed tools, and every file write or shell command pauses for interactive approval unless explicitly enabled. The result is the applied change with visual diffs and a full transcript under `~/.jeden/sessions/`. Constraint: no write or command executes without a grant, and destructive confirmations default to **Cancel**.
+2. **One-shot scripted task.** Automation needs a bounded task without a terminal. It runs `jeden run "<task>"`, optionally with `--allow-write` or `--allow-command`. The result is the final answer on stdout with the session recorded. Constraint: grants are explicit per invocation, and failover never occurs after model output has become visible.
+3. **Continuing prior work.** An engineer wants to inspect or resume earlier work. They use `jeden sessions`, `show`, `export`, or `resume`. The result is a fresh session seeded with the selected history; abandoned history is never deleted.
+4. **Editor and machine integration.** An editor extension or a CI job needs the same harness programmatically. It uses `jeden acp`, `jeden rpc`, `jeden headless`, or the TypeScript/Python SDKs. The result is protocol-level access to the same run loop; non-terminal output is deterministic text.
 
 ## Design contract
 
@@ -22,13 +42,71 @@ Jeden separates four concerns:
 
 Tool schemas are derived from each input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer.
 
+## Quick start
+
+Prerequisites:
+
+- a supported platform (`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`) or a Rust toolchain for source builds;
+- a Brama-compatible model endpoint and caller-owned signing credential;
+- optional: Wisent Platform Billing URL and token for billing-attributed routing.
+
+From source (the currently documented path):
+
+```sh
+git clone https://github.com/wisent-ai/jeden.git && cd jeden
+cargo build --locked --release   # or: bin/jeden-rust, which falls back to cargo run
+```
+
+Required environment for real model calls:
+
+```sh
+WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>
+STADO_MODEL_ROUTER_URL=<stado-managed-model-router-url>
+# Set only when the model-router service requires its distinct bearer.
+STADO_MODEL_ROUTER_TOKEN=<model-router-bearer>
+WISENT_APP_AGENT_ID=wisent-app
+```
+
+`ENTITLEMENTS_ROUTER_BIN` optionally overrides the local `entitlements-router` executable used by authentication status commands.
+
+First run:
+
+```sh
+jeden            # opens the welcome view; run /setup to connect the model router
+```
+
+Inside the terminal, `/setup` is an idempotent wizard (router URL, agent id, credential, default model) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
+
+```sh
+jeden run "Respond exactly: OK"   # expected output: OK
+```
+
+`jeden doctor` diagnoses missing prerequisites and degraded services. Signed canary artifacts are published to GitHub Releases for the three supported targets, and `jeden update` moves an installed binary along the verified channel; see [Release automation](#release-automation).
+
+Common setup failures and recovery:
+
+- `STADO_MODEL_ROUTER_URL is required` — the router endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
+- `WISENT_APP_AGENT_AUTH_SECRET` missing — the signing credential is not in the environment; obtain it through the Stado/Skarbiec-managed launcher (`scripts/run-with-stado.sh`) rather than writing it to a file.
+- Model calls fail with quota exhaustion — the active Weles subscription is in cooldown; check `/subscriptions status` or wait for the `Retry-After` bound while the router selects the next eligible subscription.
+- Anything else — run `jeden doctor` for per-service health and `/setup validate` for an end-to-end probe; both report what failed and which step to fix first.
+
+Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's state — user-level under `~/.jeden/` (sessions, memory, configuration) and project-level `.jeden/` directories in the checkouts where it was used.
+
+## Primary interfaces
+
+- **CLI** (`jeden`, `jeden run`, management subcommands) — canonical for human interactive and one-shot use.
+- **Interactive terminal views and slash commands** — canonical for in-terminal management; non-terminal stdin renders deterministic text lists for scripts.
+- **`jeden rpc` (NDJSON), `jeden acp`, `jeden headless`** — canonical for automation and editor integration; `--json` flags cover scripting.
+- **SDKs** — `packages/sdk-typescript` and `python/jeden_sdk` for embedding the machine interfaces.
+- **MCP** — the extension interface for external tool servers.
+
 ## Current scope
 
-The public development source includes:
+The private milestone includes the capabilities below. Per-capability implementation status is tracked in [docs/JEDEN_PRODUCT_COMPLETENESS.md](docs/JEDEN_PRODUCT_COMPLETENESS.md); anything marked there as `partial` or `missing` is not promised as finished behavior.
 
 - interactive terminal and one-shot `jeden run` modes;
 - session transcripts and artifacts under `~/.jeden/sessions/`;
-- model routing through `BRAMA_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
+- model routing through required `STADO_MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
 - model selection through `--model`, `JEDEN_MODEL`, or native config;
 - jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;
 - guarded file mutations using the digest or snapshot tag returned by `read_file`;
@@ -114,21 +192,11 @@ jeden roadmap check --json --cwd .
 jeden roadmap render --cwd .
 ```
 
-The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command containing the required title, area, priority, summary, and acceptance fields. Optional dependencies and external prerequisites use repeated `--depends-on` and `--external-prerequisite` flags. `roadmap work <id>` sets the active goal and plan, creates todos from the item’s acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
-
-Required environment for real model calls:
-
-```sh
-WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>
-BRAMA_URL=<brama-url>
-WISENT_APP_AGENT_ID=wisent-app
-```
-
-`ENTITLEMENTS_ROUTER_BIN` optionally overrides the local `entitlements-router` executable used by authentication status commands.
+The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command containing the required title, area, priority, summary, and acceptance fields. Optional dependencies and external prerequisites use repeated `--depends-on` and `--external-prerequisite` flags. `roadmap work <id>` sets the active goal and plan, creates todos from the item's acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
 
 ## Billing and subscription routing
 
-Wisent Platform Billing owns billing. The compatibility transport currently reads `WELES_URL` and `WELES_TOKEN`; Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` only opens the configured platform-hosted HTTPS setup URL.
+Wisent Platform Billing owns billing. The current compatibility transport still reads `WELES_URL` and `WELES_TOKEN`; those names will migrate without changing the billing authority. Weles Automation is not the billing owner. Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` opens the configured platform-hosted HTTPS setup URL.
 
 The interactive slash surface provides:
 
@@ -136,15 +204,15 @@ The interactive slash surface provides:
 - `/subscriptions list|status` for redacted subscription and quota views;
 - `/subscriptions purchase|renew|disable` for approved, caller-idempotent mutations.
 
-`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Wisent Platform Billing.
+`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Weles.
 
-For model calls, Jeden discovers active platform subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
+For model calls, Jeden discovers active Weles subscriptions and their quota snapshots. It freezes a deterministic order per logical request, sends the selected `billingTarget` to Brama, and preserves the same request, idempotency, and decision identities across attempts. A typed quota-exhaustion response moves the target into a durable, `Retry-After`-bounded cooldown and selects the next eligible subscription. Failover never occurs after model output has become visible. The served account, subscription, quota bucket, and decision ID are recorded in the session audit and usage ledger.
 
 ## Release automation
 
 The version in `Cargo.toml` is the SemVer floor. Local and development builds identify their source as `<base>+dev.<commits-since-base>.<short-sha>`, with `.dirty` appended for a modified tree; release builds may set `JEDEN_BUILD_VERSION`, and the canary workflow's generated version takes precedence unchanged.
 
-Every successful `contractual-ci` run caused by a push to this repository's `main` branch automatically launches the signed canary workflow for the exact CI-tested commit. The generated version advances the crate's patch component and adds a unique prerelease identity: `X.Y.(Z+1)-canary.<run>.<attempt>.sha<commit>`. Tag-triggered and manually dispatched canaries remain supported. Stable promotion remains manual and requires immutable evidence digests.
+Every successful `build-ci` run caused by a push to this repository's `main` branch automatically launches the signed canary workflow for the exact CI-tested commit. The generated version advances the crate's patch component and adds a unique prerelease identity: `X.Y.(Z+1)-canary.<run>.<attempt>.sha<commit>`. Tag-triggered and manually dispatched canaries remain supported. Stable promotion remains manual and requires immutable evidence digests.
 
 After the canary evidence matrix passes, the same workflow also advances the stable SemVer automatically: it commits a `[skip ci]` bump of the `Cargo.toml` floor to `X.Y.(Z+1)` on `main` and tags that commit `vX.Y.(Z+1)`. The tag step is idempotent (an existing tag ends the job quietly) and `[skip ci]` keeps the bump commit from retriggering the pipeline. As a result every green `main` run yields one canary artifact and moves both the in-repo version floor and the stable tag forward by one patch — no manual versioning steps.
 
@@ -195,9 +263,9 @@ jeden tools --cwd .
 
 The complete native action, tool-call, selector, and anchored-patch contract is documented in [docs/JSON_ACTION_PROTOCOL.md](docs/JSON_ACTION_PROTOCOL.md).
 
-
 ## Project status and support
 
-- **Maturity**: public development source at SemVer `0.x`; no stable public contract is promised.
+- **Maturity**: public development source at SemVer `0.x` — there is no stable public contract yet. The released command vocabulary is frozen in `released-surface.json` and gated by the version-check workflow.
+- **Channels**: `canary` (published per green `main` run) and `stable` (manual promotion requiring immutable evidence digests); both channels ship signed artifacts when enabled.
 - **Distribution**: source is available under the Apache License 2.0; no supported public binary channel is currently promised.
-- **Support**: use the public `wisent-ai/jeden` issue tracker for non-sensitive reports and GitHub Security Advisories for vulnerabilities.
+- **Support and security reports**: use the public `wisent-ai/jeden` issue tracker for non-sensitive reports and GitHub Security Advisories for vulnerabilities.
