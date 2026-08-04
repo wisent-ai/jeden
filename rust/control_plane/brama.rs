@@ -155,7 +155,9 @@ pub enum BramaError {
 impl std::fmt::Display for BramaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unconfigured => f.write_str("Brama service endpoint is not configured; run /setup to configure"),
+            Self::Unconfigured => f.write_str(
+                "BRAMA_URL is required; configure the Brama model-router service URL",
+            ),
             Self::Transport(e) => write!(f, "Brama transport error: {e}"),
             Self::Http { status, message } => write!(f, "Brama returned HTTP {status}: {message}"),
             Self::RateLimited { retry_after_ms } => write!(
@@ -193,10 +195,10 @@ static CACHE: LazyLock<Mutex<HashMap<String, CachedCatalog>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// On-disk catalog cache shared across processes: `~/.jeden/cache/`
-/// `brama-models-<sha256(endpoint)[:16]>.json`. The in-memory CACHE above only
-/// lives for one process, so every cold `jeden` start used to re-download the
-/// full catalog (~12 s on a cold relay); the disk entry makes warm starts
-/// free and seeds ETag revalidation after the TTL expires.
+/// `brama-models-<sha256(endpoint + bearer + agent scope)[:16]>.json`. The
+/// caller scope is part of the key because Brama filters and discovers models
+/// for the signed agent. The in-memory CACHE above only lives for one process,
+/// so a fresh `jeden` start can reuse the matching scoped catalog.
 fn disk_cache_path(key: &str) -> std::path::PathBuf {
     use sha2::Digest;
     let digest = sha2::Sha256::digest(key.as_bytes());
@@ -238,10 +240,53 @@ fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&str>) {
     }
 }
 
+fn caller_credentials() -> Option<(String, String)> {
+    let secret = std::env::var("WISENT_APP_AGENT_AUTH_SECRET")
+        .ok()
+        .filter(|value| !value.is_empty())?;
+    let agent_id = std::env::var("WISENT_APP_AGENT_ID")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "wisent-app".into());
+    Some((agent_id, secret))
+}
+
+fn insert_caller_auth_headers(headers: &mut BTreeMap<String, String>, body: &[u8]) {
+    let Some((agent_id, secret)) = caller_credentials() else {
+        return;
+    };
+    let Ok(body) = std::str::from_utf8(body) else {
+        return;
+    };
+    let Ok((timestamp, body_hash, signature)) =
+        crate::model_router::hmac_headers(body, &agent_id, &secret)
+    else {
+        return;
+    };
+    headers.insert("x-agent-id".into(), agent_id);
+    headers.insert("x-agent-timestamp".into(), timestamp);
+    headers.insert("x-agent-body-sha256".into(), body_hash);
+    headers.insert("x-agent-signature".into(), signature);
+}
+
+fn catalog_cache_key(endpoint: &str, authorization: Option<&SecretRef>) -> String {
+    use sha2::Digest;
+    let bearer_scope = authorization
+        .and_then(SecretRef::resolve)
+        .map(|token| hex::encode(sha2::Sha256::digest(token.as_bytes())))
+        .unwrap_or_else(|| "anonymous".into());
+    let agent_scope = caller_credentials()
+        .map(|(agent_id, _)| agent_id)
+        .unwrap_or_else(|| "unsigned".into());
+    format!("{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}")
+}
+
 impl BramaClient {
     pub fn from_env() -> Self {
         Self::with_secret_ref(
-            std::env::var("BRAMA_URL").ok(),
+            std::env::var("BRAMA_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty()),
             Some(SecretRef::environment("BRAMA_TOKEN")),
             DEFAULT_TTL,
             ReqwestTransport::production(),
@@ -303,7 +348,7 @@ impl BramaClient {
             detail: if available {
                 "configured; catalog is resolved on demand".into()
             } else {
-                "BRAMA_URL is not configured; run /setup to configure".into()
+                "BRAMA_URL is required; configure the Brama model-router service URL".into()
             },
             checked_at_ms: now_ms(),
         }
@@ -311,8 +356,9 @@ impl BramaClient {
 
     pub fn invalidate(&self) {
         if let Some(endpoint) = &self.endpoint {
+            let key = catalog_cache_key(endpoint, self.authorization.as_ref());
             if let Ok(mut cache) = CACHE.lock() {
-                cache.remove(endpoint);
+                cache.remove(&key);
             }
         }
     }
@@ -324,7 +370,8 @@ impl BramaClient {
     }
 
     pub fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
-        let key = self.key()?;
+        let endpoint = self.key()?;
+        let key = catalog_cache_key(&endpoint, self.authorization.as_ref());
         let prior = CACHE
             .lock()
             .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
@@ -377,6 +424,7 @@ impl BramaClient {
         if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
+        insert_caller_auth_headers(&mut headers, &[]);
         if let Some(etag) = prior
             .as_ref()
             .and_then(|entry| entry.etag.as_ref())
@@ -386,7 +434,7 @@ impl BramaClient {
         }
         let response = match self.transport.execute(TransportRequest {
             method: reqwest::Method::GET,
-            url: format!("{key}/{API_VERSION}/models"),
+            url: format!("{endpoint}/{API_VERSION}/models"),
             headers,
             body: None,
             max_response_bytes: MAX_RESPONSE_BYTES,
@@ -491,6 +539,7 @@ impl BramaClient {
         if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
+        insert_caller_auth_headers(&mut headers, body.as_deref().unwrap_or_default());
         let response = self
             .transport
             .execute(TransportRequest {

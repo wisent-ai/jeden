@@ -12,24 +12,32 @@ done
 ROOT="$(CDPATH= cd -- "$(dirname -- "$PRG")/.." && pwd)"
 MANIFEST="$ROOT/Cargo.toml"
 BIN="$ROOT/target/release/jeden"
+STADO_BOOTSTRAP="$ROOT/scripts/run-with-stado.sh"
 
-release_is_current() {
-  # A packaged launcher has no source tree to compare against; its bundled
-  # executable is therefore authoritative.
-  [ ! -f "$MANIFEST" ] && return 0
-  [ "$MANIFEST" -nt "$BIN" ] && return 1
-  [ -f "$ROOT/Cargo.lock" ] && [ "$ROOT/Cargo.lock" -nt "$BIN" ] && return 1
-  if [ -d "$ROOT/rust" ] && [ -n "$(find "$ROOT/rust" -newer "$BIN" -print)" ]; then
-    return 1
-  fi
-  return 0
+needs_model_runtime() {
+  case "${1:-}" in
+    ""|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token) return 0 ;;
+    *) return 1 ;;
+  esac
 }
 
-if [ -x "$BIN" ] && release_is_current; then
+run_jeden() {
+  if needs_model_runtime "${1:-}" \
+    && { [ -z "${BRAMA_URL:-}" ] || [ -z "${WISENT_APP_AGENT_AUTH_SECRET:-}" ]; } \
+    && [ "${JEDEN_STADO_BOOTSTRAPPED:-0}" != 1 ] \
+    && [ -f "$STADO_BOOTSTRAP" ] \
+    && [ -f "${JEDEN_SKARBIEC_TOKEN_FILE:-$HOME/.stado/local-operator-skarbiec-token}" ]; then
+    JEDEN_BIN="$BIN" JEDEN_STADO_BOOTSTRAPPED=1 \
+      exec /usr/bin/env bash "$STADO_BOOTSTRAP" "$@"
+  fi
   exec "$BIN" "$@"
-fi
-if [ ! -f "$MANIFEST" ]; then
+}
+
+
+if [ -f "$MANIFEST" ]; then
+  cargo build --quiet --manifest-path "$MANIFEST" --release --bin jeden
+elif [ ! -x "$BIN" ]; then
   printf '%s\n' "jeden: packaged executable not found: $BIN" >&2
   exit 127
 fi
-exec cargo run --quiet --manifest-path "$MANIFEST" --bin jeden -- "$@"
+run_jeden "$@"
