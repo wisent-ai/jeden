@@ -284,7 +284,11 @@ pub fn hmac_headers(
         .unwrap_or_default()
         .as_secs()
         .to_string();
-    let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
+    let body_hash = if body.is_empty() {
+        String::new()
+    } else {
+        hex::encode(Sha256::digest(body.as_bytes()))
+    };
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).map_err(|e| e.to_string())?;
     mac.update(format!("{}:{}:{}", agent_id, ts, body_hash).as_bytes());
     Ok((ts, body_hash, hex::encode(mac.finalize().into_bytes())))
