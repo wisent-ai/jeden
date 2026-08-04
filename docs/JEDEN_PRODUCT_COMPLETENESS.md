@@ -23,13 +23,13 @@ This is the canonical record of every audited capability gap, the automated targ
 
 ## Quantitative baseline
 
-- Auth: three inspect-only choices; zero locally executed login flows.
-- Models: one OpenAI Chat Completions-shaped router protocol; no catalog discovery.
-- Tools: 43 registered low-level operations, not 43 complete session-scoped tool families.
-- Settings: seven native schema keys.
-- Extensions: candidates are listed but factories are not loaded.
-- MCP: stdio only; one process and handshake per operation.
-- Sessions: untyped JSONL events without entry graph, active leaf, or migrations.
+- Auth: provider picker generated from the Weles registry; typed device-code/paste/API-key login and tracked logout execute locally.
+- Models: one OpenAI Chat Completions-shaped router protocol; automatic Brama catalog discovery with retry and cache.
+- Tools: fifty-three registered low-level operations, not fifty-three complete session-scoped tool families.
+- Settings: sixteen native schema keys.
+- Extensions: factories imported in a sandboxed host, ABI-checked, isolated, with generation teardown.
+- MCP: stdio plus streamable HTTP; persistent per-session manager with cache, health, and reconnect.
+- Sessions: versioned typed events with entry graph, active leaf, checksums, and migrations.
 
 # Complete gap matrix
 
@@ -37,96 +37,96 @@ This is the canonical record of every audited capability gap, the automated targ
 
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
-| Provider discovery | Three hard-coded choices | Versioned Weles provider registry generating auth UI | surface-only | P0 |
-| Login | Displays credential plan | Execute typed OAuth/device/API-key operations and track completion | surface-only | P0 |
-| Logout | Host-owned message | Revoke/remove account and refresh state | surface-only | P0 |
-| Account lifecycle | No local contract | Weles account references, status, expiry, refresh, rotation, disable | external-uncontracted | P0 |
-| Credential precedence | Router signing secret only | Explicit runtime/config/account/environment policy | missing | P1 |
-| Model catalog | Route strings | Brama catalog: provider, availability, limits, modalities, tools, reasoning, cost, fallbacks | surface-only | P0 |
-| Model discovery | None | Automatic remote/local discovery owned by Brama registry | missing | P1 |
-| Local/custom providers | Router URL override | Registered descriptors and explicit keyless/auth state | partial | P1 |
+| Provider discovery | Weles registry plus extension entries generate the picker | Versioned Weles provider registry generating auth UI | complete | P0 |
+| Login | Typed device-code/paste/API-key operations with completion tracking; no generic browser OAuth | Execute typed OAuth/device/API-key operations and track completion | partial/strong | P0 |
+| Logout | Tracked Weles logout operation; state refresh implicit | Revoke/remove account and refresh state | partial/strong | P0 |
+| Account lifecycle | Typed Weles contract: status, expiry, refresh, auto-refresh, logout; no rotation/disable | Weles account references, status, expiry, refresh, rotation, disable | partial | P0 |
+| Credential precedence | Ad-hoc env bearer/secret plus Weles account pool; no precedence policy | Explicit runtime/config/account/environment policy | missing | P1 |
+| Model catalog | Versioned Brama catalog with availability, limits, modalities, tools, reasoning, cost, standby routes | Brama catalog: provider, availability, limits, modalities, tools, reasoning, cost, standbys | complete | P0 |
+| Model discovery | Automatic catalog fetch with retry/cache plus extension-contributed entries | Automatic remote/local discovery owned by Brama registry | partial/strong | P1 |
+| Local/custom providers | Extension-registered descriptors plus router URL override; no explicit keyless state | Registered descriptors and explicit keyless/auth state | partial | P1 |
 | Wire protocol | OpenAI chat shape | Versioned normalized Wisent event stream | partial | P0 |
 | Stream lifecycle | Text delta plus final tools | Typed text/thinking/tool/usage/retry/route/end/error events | partial | P0 |
-| Stream corruption | Malformed chunks may be skipped | Typed terminal error; never silent loss | partial | P0 |
+| Stream corruption | Typed terminal error on malformed chunks and early EOF; loss always reported | Typed terminal error; loss always reported | complete | P0 |
 | Tool argument streaming | Strict final parse | Incremental validated deltas and authoritative final parse | partial | P1 |
-| Model metadata | ID and optional prices | Context/output limits, modalities, reasoning, tools, cache, promotion | missing | P0 |
-| Availability validation | Any route accepted | Resolve to live permitted catalog entry before request | missing | P0 |
-| Provider/model policy | None | Project/path-scoped policy enforced before routing | missing | P1 |
-| Canonical families | None | Stable family/equivalence metadata | missing | P2 |
-| Automatic retry | Manual replay | Classified retry, jitter, retry-after, idempotency, cancellation | missing | P0 |
-| Failover | Opaque router behavior | Explicit fallback policy and route-change events | external-uncontracted | P0 |
-| Context promotion | Same-route compaction | Metadata-driven promotion before compaction | missing | P1 |
+| Model metadata | Catalog limits, modalities, reasoning, tools, cache prices, promotion | Context/output limits, modalities, reasoning, tools, cache, promotion | complete | P0 |
+| Availability validation | Catalog resolve enforced at config build and /model; virtual routes bypass | Resolve to live permitted catalog entry before request | partial/strong | P0 |
+| Provider/model policy | Unwired policy engine; nothing enforced before routing | Project/path-scoped policy enforced before routing | missing | P1 |
+| Canonical families | Catalog standby/promotion equivalence edges drive failover; no family abstraction | Stable family/equivalence metadata | partial | P2 |
+| Automatic retry | Classified retry with jitter, retry-after, cancellation, recorded events | Classified retry, jitter, retry-after, idempotency, cancellation | partial/strong | P0 |
+| Failover | Explicit config/catalog standby policy with recorded route-change events | Explicit standby policy and route-change events | partial/strong | P0 |
+| Context promotion | Metadata-driven route promotion on context overflow precedes compaction | Metadata-driven promotion before compaction | complete | P1 |
 | Compatibility shaping | Fixed body | Brama-owned adapters declared through capabilities | external-uncontracted | P1 |
-| Usage/cost | Real with configured prices | Catalog prices, quotas, attribution, missing-data indicators | partial | P2 |
-| Secret protection | No outbound layer | Automatic redaction/obfuscation with provenance | missing | P0 |
+| Usage/cost | Real with catalog prices, quota views, billing attribution; cost omitted when price missing | Catalog prices, quotas, attribution, missing-data indicators | partial | P2 |
+| Secret protection | Automatic redact/obfuscate on model-bound copies; no typed provenance | Automatic redaction/obfuscation with provenance | partial | P0 |
 
 ## Tool runtime
 
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
-| Text selectors | Declared but whole-file read | Real ranges, multi-ranges, raw/conflict modes, bounded streaming | partial | P0 |
-| Directory depth | Shallow | Recursive deterministic metadata-rich listings | partial | P1 |
+| Text selectors | Line ranges, multi-ranges, raw/conflict modes, bounded streaming | Real ranges, multi-ranges, raw/conflict modes, bounded streaming | complete | P0 |
+| Directory depth | Recursive deterministic sorted listings with type/size metadata | Recursive deterministic metadata-rich listings | partial/strong | P1 |
 | Binary/images | Base64 hard cap | Typed complete blocks, resize, artifacts | partial | P1 |
-| Documents/notebooks | Basic extraction | Rich formats and editable notebook cell round-trip | partial | P2 |
-| Archive/SQLite writes | Read-only | Safe entry/row create, update, delete | missing | P2 |
-| Internal URIs | Separate ad hoc operations | Unified artifacts/agents/memory/skills/MCP/SSH/issues/PR router | missing | P1 |
+| Documents/notebooks | Text extraction plus notebook cell round-trip on write | Rich formats and editable notebook cell round-trip | partial | P2 |
+| Archive/SQLite writes | SHA-guarded entry upsert/delete and row insert/update/delete | Safe entry/row create, update, delete | complete | P2 |
+| Internal URIs | read/write route artifact/mcp/http plus archive/sqlite; agents/memory/skills/ssh/issues/PR absent | Unified artifacts/agents/memory/skills/MCP/SSH/issues/PR router | partial | P1 |
 | File write | SHA guarded | Diagnostics, generated policy, executable handling, invalidation | partial | P1 |
 | Anchored edit | Real | Snapshot recovery, parser blocks, diagnostics, no-op guard | partial | P1 |
-| Grep/glob | Sync traversal, incomplete ignore | Parallel cancellable deterministic scans with partial results | partial | P1 |
-| AST search/edit | None | Structural search and preview/apply rewrite | missing | P1 |
-| LSP | None | Diagnostics, navigation, rename, actions, formatting, lifecycle | missing | P1 |
-| Shell | Blocking sh | Session shell, PTY, stream, cancellation, hardening, artifacts | partial | P0 |
-| Process | Direct child only | Process groups, descendant cleanup, signals, stream, recovery | partial | P0 |
-| Background jobs | Detached metadata | Durable manager: poll, cancel, delivery, revival, cleanup | surface-only | P0 |
-| Python/JS eval | New process per call | Persistent cancellable kernels with rich displays and reset | partial | P1 |
-| Browser | Config UI only | Chromium/CDP tabs, actions, screenshots, cancellation | surface-only | P1 |
-| Debugger | Diagnostics UI only | DAP lifecycle and inspection | surface-only | P1 |
-| Web search | Known-URL fetch only | Search routing, citations, sources, fallback | missing | P1 |
-| GitHub | Local Git inspection | Issues, PRs, search, Actions, worktrees, guarded push | missing | P2 |
-| SSH | Host config only | Connection manager and remote URI read/search/write/exec | surface-only | P1 |
-| Image inspect/generate | Metadata only/none | Vision analysis and provider-routed generation/edit | missing | P2 |
-| TTS | None | Provider-routed synthesis to artifact | missing | P3 |
-| Pending actions | Bridge no-op | Persistent preview/apply/discard registry | surface-only | P0 |
-| Checkpoint/rewind | None | Graph checkpoint and branch-safe rewind | missing | P1 |
-| Output spill | Manual artifacts | Shared bounded sink preserving full output automatically | missing | P0 |
-| Cancellation | Between-step flag | One token through all active operations | partial | P0 |
+| Grep/glob | Parallel gitignore-aware deterministic scans; cancel aborts without partial results | Parallel cancellable deterministic scans with partial results | partial | P1 |
+| AST search/edit | Bounded tree-sitter search and preview/apply/discard rewrite | Structural search and preview/apply rewrite | complete | P1 |
+| LSP | Persistent bounded client: diagnostics, navigation, rename, actions, formatting, lifecycle | Diagnostics, navigation, rename, actions, formatting, lifecycle | complete | P1 |
+| Shell | Blocking sh plus persistent PTY session with resize, streaming, cancellation, artifacts | Session shell, PTY, stream, cancellation, hardening, artifacts | partial | P0 |
+| Process | Process tree with group signals, descendant cleanup, bounded streamed capture | Process groups, descendant cleanup, signals, stream, recovery | partial | P0 |
+| Background jobs | Durable scheduler: spawn, poll, cancel, deliver, merge, health, orphan reaping | Durable manager: poll, cancel, delivery, revival, cleanup | partial/strong | P0 |
+| Python/JS eval | Persistent cancellable kernels with rich display artifacts and reset | Persistent cancellable kernels with rich displays and reset | complete | P1 |
+| Browser | Chromium/CDP tabs, actions, screenshots via embedded bridge | Chromium/CDP tabs, actions, screenshots, cancellation | partial | P1 |
+| Debugger | DAP session lifecycle plus typed request passthrough | DAP lifecycle and inspection | partial | P1 |
+| Web search | Provider-routed search with citations and provider standby; key required | Search routing, citations, sources, provider standby | partial | P1 |
+| GitHub | gh-backed issues/PRs/search/Actions plus worktrees and guarded push | Issues, PRs, search, Actions, worktrees, guarded push | complete | P2 |
+| SSH | Reusable multiplexed connections with remote read/search/write/exec | Connection manager and remote URI read/search/write/exec | partial | P1 |
+| Image inspect/generate | Metadata inspect; router-backed generate/edit to artifacts; no vision analysis | Vision analysis and provider-routed generation/edit | partial | P2 |
+| TTS | Provider-routed synthesis to artifact via media router | Provider-routed synthesis to artifact | complete | P3 |
+| Pending actions | Persistent TTL preview/apply/discard registry backing AST rewrite | Persistent preview/apply/discard registry | partial | P0 |
+| Checkpoint/rewind | Ledger checkpoints with list and branch-safe rewind to a new leaf | Graph checkpoint and branch-safe rewind | complete | P1 |
+| Output spill | Shared bounded sink auto-spills full output to artifact with sha256 | Shared bounded sink preserving full output automatically | complete | P0 |
+| Cancellation | One shared token propagated to children and polled inside tool operations | One token through all active operations | partial/strong | P0 |
 | Concurrency | Sequential | Declared shared/exclusive semantics and bounded parallelism | missing | P1 |
 
 ## Sessions, context, and persistence
 
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
-| Session schema | Untyped events | Versioned typed entries with ID, parent, leaf, migrations | partial | P0 |
-| Durability | Append without latch | Atomic/latched persistence and explicit recovery | partial | P0 |
-| Corruption | Invalid lines skipped | Detect, preserve, recover, report | partial | P0 |
-| Resume | User/final text only | Faithful model/messages/tools/modes/todos/compaction/MCP reconstruction | partial | P0 |
+| Session schema | Versioned typed events with ID, parent, leaf, checksums, migrations | Versioned typed entries with ID, parent, leaf, migrations | complete | P0 |
+| Durability | Fsync'd append, atomic rename plus dir-sync state writes, explicit tail recovery | Atomic/latched persistence and explicit recovery | complete | P0 |
+| Corruption | Checksum-verified reads; malformed lines hard-error; truncated tail detected, preserved, reported | Detect, preserve, recover, report | complete | P0 |
+| Resume | Ledger replay of snapshots, checkpoints, tool results, compaction cut points; no modes/todos/MCP | Faithful model/messages/tools/modes/todos/compaction/MCP reconstruction | partial | P0 |
 | Session switch | Incomplete | Transactional switch with rollback | partial | P0 |
-| Tree | Branch path list | Entry graph navigation, search, labels, summaries | surface-only | P0 |
-| Branch/fork | Reduced or RAM-only history | Full semantic lineage and artifact preservation across restart | partial | P0 |
-| Compaction | Whole-history RAM summary | Typed durable cut point, recent suffix, reload, strategies | partial | P0 |
-| Handoff | Old artifact and RAM seed | Durable parent-linked target session | partial | P0 |
+| Tree | Flat branch list plus session names, branch/checkpoint labels, and search-sessions; no entry-graph navigation or summaries | Entry graph navigation, search, labels, summaries | partial | P0 |
+| Branch/fork | Durable lineage and full-window snapshot seed across restart; artifacts not carried | Full semantic lineage and artifact preservation across restart | partial | P0 |
+| Compaction | Durable typed cut point with auto-trigger; no recent-suffix retention or strategies | Typed durable cut point, recent suffix, reload, strategies | partial | P0 |
+| Handoff | Durable brief artifact and durable parent-linked target session | Durable parent-linked target session | complete | P0 |
 | Export/share | Raw events/local encrypted file | Rich typed export and redacted compressed E2EE share | partial | P2 |
 | Artifact lifecycle | Session files | Content-addressed blobs, graph refs, fork/export, GC | partial | P1 |
-| Context files | Documented, no loader found | Walk-up discovery, imports, precedence, provenance, watch | missing | P0 |
-| Sticky rules | None | Always-applied registry and provenance | missing | P0 |
-| Rule matching/TTSR | Inert complaint log | Runtime matching and typed stream interventions | surface-only | P1 |
+| Context files | Walk-up loader with imports, precedence, provenance, budgets; no watch | Walk-up discovery, imports, precedence, provenance, watch | partial | P0 |
+| Sticky rules | Always-applied registry with precedence and provenance injected into system prompt | Always-applied registry and provenance | complete | P0 |
+| Rule matching/TTSR | Prompt-time rule matching wired; no typed stream interventions | Runtime matching and typed stream interventions | partial | P1 |
 
 ## Memory and collaboration
 
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
-| Manual memory | JSONL notes | Locking, stable IDs, typed backend | partial | P1 |
-| Recall | Lexical | Semantic/fact/temporal scores and provenance | partial | P2 |
+| Manual memory | SQLite WAL/FTS5 store with stable IDs, revisions, tombstones, scope locks | Locking, stable IDs, typed backend | complete | P1 |
+| Recall | FTS5 with temporal decay, confidence, typed provenance; semantic hybrid behind an unwired provider | Semantic/fact/temporal scores and provenance | partial/strong | P2 |
 | Extraction | None | Background extraction from closed sessions | missing | P2 |
-| Consolidation | Bullet rebuild | Leased model consolidation with redaction | surface-only | P2 |
-| Queue | File marker | Durable worker, wake, lease, heartbeat, retry, status | surface-only | P2 |
+| Consolidation | Model compaction summary persisted as consolidated memory; leased Consolidator unwired | Leased model consolidation with redaction | partial | P2 |
+| Queue | Durable SQLite jobs with lease, heartbeat, backoff retry, status; manual drain | Durable worker, wake, lease, heartbeat, retry, status | partial/strong | P2 |
 | Generated skills | None | Managed verified playbooks | missing | P3 |
-| Pre-compaction memory | None | Bounded relevant context from backend | missing | P2 |
-| E2EE | AES-GCM primitive | Integrate into full collaboration protocol | partial | P1 |
-| Relay | File/in-memory log | Durable content-blind relay with health | partial | P2 |
+| Pre-compaction memory | Bounded recall-ranked context from the store injected before compaction | Bounded relevant context from backend | complete | P2 |
+| E2EE | Sealed versioned frames with role checks wired into /collab, /join, relay | Integrate into full collaboration protocol | partial/strong | P1 |
+| Relay | Durable SQLite-WAL content-blind relay with /health and backpressure | Durable content-blind relay with health | complete | P2 |
 | Live replication | Lifecycle markers | Transcript, stream, state, tools, participants, agents | missing | P2 |
-| Guest control | None | Permissioned prompt, abort, view/full roles | missing | P2 |
-| Write authorization | Shared key | Separate revocable write capability | missing | P2 |
+| Guest control | Role-permissioned frames enforced in protocol and relay; no host prompt/abort consumer | Permissioned prompt, abort, view/full roles | partial | P2 |
+| Write authorization | Separate role-bound write tokens, hashed server-side, rotatable/revocable | Separate revocable write capability | partial/strong | P2 |
 | Web guest | None | Native client generated from protocol | missing | P3 |
 
 ## MCP, extensions, plugins, skills, and agents
@@ -134,26 +134,26 @@ This is the canonical record of every audited capability gap, the automated targ
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
 | MCP config | Two JSON roots | Validated multi-source descriptors, substitutions, auth, provenance | partial | P1 |
-| MCP transports | Stdio only | Standard stdio JSONL, HTTP, SSE, OAuth, server requests | partial | P1 |
-| MCP lifecycle | Process per request | Persistent parallel manager, cache, health, reconnect, teardown | missing | P0 |
-| Dynamic tools | Generic calls/static native aliases | Live tools/list registration and refresh | partial | P1 |
-| Resources/prompts | One-shot | Templates, subscriptions, notifications, live refresh | partial | P2 |
-| Reconnect | Re-spawn probe | Real state recovery with backoff/circuit breaker | surface-only | P1 |
-| Extension discovery | Candidate listing | Import factories, ABI, initialize, isolate, teardown | surface-only | P0 |
-| Event bus | None | Typed session/provider/turn/message/tool/approval/retry events | missing | P1 |
-| Tools/commands/UI | Separate limited paths | Unified live registration and native renderers | missing | P1 |
-| Live reload | Marker for next run | Atomic registry rebuild and rollback | surface-only | P1 |
+| MCP transports | Stdio plus streamable HTTP with session id and SSE parsing; no OAuth/SSE-listen/server requests | Standard stdio JSONL, HTTP, SSE, OAuth, server requests | partial | P1 |
+| MCP lifecycle | Persistent per-session manager: parallel connect, cache, health, reconnect, teardown | Persistent parallel manager, cache, health, reconnect, teardown | partial/strong | P0 |
+| Dynamic tools | Live tools/list registered as native executable tools; list-changed refresh | Live tools/list registration and refresh | partial/strong | P1 |
+| Resources/prompts | List/read/get with per-server cache and list-change refresh; no templates/subscriptions | Templates, subscriptions, notifications, live refresh | partial | P2 |
+| Reconnect | Exponential backoff, circuit breaker, state-resetting reconnect with re-list | Real state recovery with backoff/circuit breaker | partial/strong | P1 |
+| Extension discovery | Sandboxed Node host import, ABI-checked activation, isolated grants, generational teardown | Import factories, ABI, initialize, isolate, teardown | partial/strong | P0 |
+| Event bus | Closed typed session journal plus durable outbox and narrow SDK live stream | Typed session/provider/turn/message/tool/approval/retry events | partial | P1 |
+| Tools/commands/UI | Single versioned registry generating tool/command/view inventories with health and conflicts | Unified live registration and native renderers | partial/strong | P1 |
+| Live reload | Atomic in-process rebuild with generation; failed builds keep the previous registry | Atomic registry rebuild and rollback | partial/strong | P1 |
 | Shell hooks | Five events | Adapter onto full typed event contract | partial | P1 |
-| Custom tools | Fresh Node, limited shim | Versioned ABI, validation, cancel, updates, context, artifacts | partial | P1 |
+| Custom tools | Fresh Node per call behind versioned ABI with schema, cancel, grants, artifacts | Versioned ABI, validation, cancel, updates, context, artifacts | partial/strong | P1 |
 | Marketplace | Real management | Preserve and expose activation health | partial/strong | P1 |
-| Plugin activation | Mostly commands/hooks | Activate tools/extensions/skills/agents/rules/MCP/LSP | partial | P1 |
-| Package/link plugins | None | Versioned lifecycle, lock, features, rollback, doctor | missing | P2 |
-| Skills/rules | None | Multi-source declarative discovery and safe internal URIs | missing | P1 |
-| Custom agents | None | Tools/model/output/spawn/skills definitions | missing | P1 |
-| Task scheduler | One sync child | Batch DAG, bounded concurrency, isolation, progress, typed output | partial | P1 |
-| Job manager | Detached metadata | Durable ownership and recovery | surface-only | P0 |
-| Agent communication | None | Mailboxes, direct messages, wait, wake | missing | P2 |
-| Isolation | Shared workspace | Automatic platform copy-on-write/worktree and merge/capture | missing | P1 |
+| Plugin activation | Tools, extensions, skills, agents, rules, commands, hooks, providers, models; no MCP/LSP | Activate tools/extensions/skills/agents/rules/MCP/LSP | partial | P1 |
+| Package/link plugins | Signed install/upgrade/remove with lock, feature resolver, transactional rollback, dev-link | Versioned lifecycle, lock, features, rollback, doctor | partial/strong | P2 |
+| Skills/rules | Multi-source SKILL.md/rules with precedence, safe assets, matcher-based prompt injection | Multi-source declarative discovery and safe internal URIs | partial/strong | P1 |
+| Custom agents | Declarative agents with tools/model/output/spawn/skills, discovered multi-source, enforced at spawn | Tools/model/output/spawn/skills definitions | partial/strong | P1 |
+| Task scheduler | Batch DAG with slot-bounded concurrency, isolated sandboxes, poll/health, schema-validated output | Batch DAG, bounded concurrency, isolation, progress, typed output | complete | P1 |
+| Job manager | Durable atomic job records with pid-liveness recovery; leased fencing coordinator unwired | Durable ownership and recovery | partial/strong | P0 |
+| Agent communication | Durable mailboxes with send/inbox/wait/wake via irc tool | Mailboxes, direct messages, wait, wake | complete | P2 |
+| Isolation | Automatic apfs-clone/git-worktree/copy isolation with patch capture and merge | Automatic platform copy-on-write/worktree and merge/capture | complete | P1 |
 
 ## Native terminal interface
 
@@ -162,12 +162,12 @@ Jeden must use an original Wisent/Jeden design system. It must not reuse another
 | Gap | Current | Required native end state | Status | Priority |
 |---|---|---|---|---|
 | Identity | Mixed legacy labels/fixed palette | One explicit Jeden terminology and visual token system | partial | P1 |
-| Editor | Append-only buffer | Cursor, selection, movement, deletion, undo, history, multiline, external editor | partial | P0 |
-| Paste | None | Bracketed paste, fragmented escapes, clipboard, large-paste safety | missing | P1 |
-| Attachments | None | File/image add, preview, remove, capability validation | missing | P1 |
+| Editor | Cursor, selection, word/line movement, undo/redo, history, multiline, external editor | Cursor, selection, movement, deletion, undo, history, multiline, external editor | complete | P0 |
+| Paste | Bracketed paste, escape/control stripping, clipboard text+image, bounded large-paste cap | Bracketed paste, fragmented escapes, clipboard, large-paste safety | partial/strong | P1 |
+| Attachments | File/clipboard-image add, list, remove, size/type limits, image-capability failover | File/image add, preview, remove, capability validation | partial/strong | P1 |
 | Streaming | Text live block | Structured text/thinking/tool/progress components | partial | P1 |
-| Steering/follow-up | None | Editable queued delivery during streaming | missing | P1 |
-| Keybindings | Hard-coded | Action IDs, configurable bindings, conflict diagnostics | partial | P2 |
+| Steering/follow-up | Queued follow-up/steer during streaming with recall edit; steer has no backend provider | Editable queued delivery during streaming | partial | P1 |
+| Keybindings | Action IDs and conflict diagnostics; bindings fixed in code | Action IDs, configurable bindings, conflict diagnostics | partial | P2 |
 | Picker | Searchable panel | Keep; add focus, layers, argument completion, lifecycle | partial/strong | P2 |
 | Confirmation | Default cancel | Add risk, origin, scope, consequences | partial/strong | P2 |
 | Approvals | Binary key | Rich policy-aware decisions with scoped persistence | partial | P1 |
@@ -175,34 +175,34 @@ Jeden must use an original Wisent/Jeden design system. It must not reuse another
 | Unicode | Character count | ANSI-safe grapheme and terminal-width model | partial | P0 |
 | Terminal protocols | Basic events | Capability probing, normalized keys, suspend/resume, cleanup | partial | P1 |
 | Images | None | Capability-detected inline rendering with text fallback | missing | P2 |
-| Themes/accessibility | Fixed ANSI | Native dark/light themes, custom schema, non-color signals | missing | P2 |
-| Completion | Static names | Live capabilities, args, descriptions, health | partial | P1 |
-| Status | Placeholder fields | Live context, cost, route, jobs, collab, errors | surface-only | P1 |
+| Themes/accessibility | Dark+light presets, custom theme.json, NO_COLOR, mono/high-contrast, emphasis signals | Native dark/light themes, custom schema, non-color signals | partial/strong | P2 |
+| Completion | Live registry-driven slash completion with selection; no path completion | Live capabilities, args, descriptions, health | partial/strong | P1 |
+| Status | Live tokens/cost, quota, route health, jobs, services, modes, context; no collab/errors | Live context, cost, route, jobs, collab, errors | partial/strong | P1 |
 | Non-TTY | Mixed terminal framing | Clean line and JSON protocols without ANSI | partial | P0 |
-| RPC/ACP UI | None | Structured elicitation and approval bridge | missing | P1 |
+| RPC/ACP UI | Structured elicitation and permission bridge on both RPC and ACP | Structured elicitation and approval bridge | complete | P1 |
 
 ## Reliability and platform
 
 | Gap | Current | Required automated end state | Status | Priority |
 |---|---|---|---|---|
-| Cancellation | Boundary checks | Token through HTTP/tools/process trees/MCP/extensions/agents | partial | P0 |
+| Cancellation | Token through HTTP stream, tools, process trees, extensions, ACP agents; MCP fixed-timeout only | Token through HTTP/tools/process trees/MCP/extensions/agents | partial | P0 |
 | Process ownership | Direct-child kill | Groups, descendant cleanup, grace/force, recovery | partial | P0 |
-| Deadlines | Fixed local values | Hierarchical deadlines and first-event/idle timeout | partial | P1 |
-| Retry | None | Classified retry/failover with cancellation | missing | P0 |
-| Output bounds | Inconsistent caps | Shared sink and artifact provenance | missing | P0 |
-| Doctor | Config presence | Active probes for all services and runtimes | partial | P1 |
-| Updater | Pull then build | Verified staged release, atomic swap, rollback, health | partial | P1 |
-| SDK | Binary only | Public AgentSession library and events | missing | P0 for embedding |
-| RPC | One-shot JSON only | Correlated long-lived protocol, events, abort, dispose | missing | P0 for automation |
-| ACP | None | Adapter over the same public session API | missing | P1 |
+| Deadlines | Hierarchical effective deadline plus first-event/idle stream timeouts | Hierarchical deadlines and first-event/idle timeout | partial/strong | P1 |
+| Retry | Classified retry with jitter, Retry-After, cancellation, failover, recorded events | Classified retry/failover with cancellation | partial/strong | P0 |
+| Output bounds | Shared BoundedOutput sink with artifact spill and sha256 across process/pty/kernel/tools/extensions | Shared sink and artifact provenance | partial/strong | P0 |
+| Doctor | Active probes for brama/weles/storage/process/MCP/extensions/LSP/browser/collab/task/memory/keymap | Active probes for all services and runtimes | complete | P1 |
+| Updater | Signed staged release with journaled atomic swap, rollback recovery, SBOM+provenance verification, post-install health probe | Verified staged release, atomic swap, rollback, health | complete | P1 |
+| SDK | Public lib exports sdk::AgentSession and async SessionClient with events, abort, resume, dispose | Public AgentSession library and events | complete | P0 for embedding |
+| RPC | Correlated long-lived jeden-rpc stdio server plus mTLS headless daemon with events, abort, dispose, idempotency, replay | Correlated long-lived protocol, events, abort, dispose | complete | P0 for automation |
+| ACP | ACP v1 stdio adapter over sdk::AgentSession with load, prompt streaming, cancel, close | Adapter over the same public session API | complete | P1 |
 | Platforms | Shell assumptions | Explicit macOS/Linux/Windows contracts | partial | P2 |
 | Scan cache | None | Policy-keyed TTL/invalidation/recheck cache | missing | P2 |
-| Conformance | Few focused tests | Generated capability and behavioral contract suite | missing | P0 |
+| Conformance | Area-wide suite of contract, inventory, and digest-bound behavior-evidence probes plus generated capability/UI-honesty audit | Generated capability and behavioral contract suite | partial/strong | P0 |
 | UI honesty | Surfaces exceed backend | Build/runtime gate forbids active UI for inactive capability | partial | P0 |
 
-# Existing surface-only paths requiring clean cutover
+# Existing partial paths requiring clean cutover
 
-Login, logout, model/provider selection, extensions, reload plugins, browser, debugger, SSH, jobs, MCP reconnect, MCP notifications, memory enqueue/rebuild, tree, fork, resume, collaboration, share, advisor, and placeholder status fields must either gain the complete backend above or be removed. No compatibility no-op remains in the final product.
+Login, logout, model/provider selection, extensions, reload plugins, browser, debugger, SSH, jobs, MCP reconnect, MCP notifications, memory enqueue/rebuild, tree, fork, resume, collaboration, share, and advisor must either gain the complete backend above or be removed. No compatibility no-op remains in the final product.
 
 # Automated target architecture
 

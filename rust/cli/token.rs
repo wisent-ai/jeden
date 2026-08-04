@@ -25,20 +25,25 @@ fn redacted(value: &str) -> String {
     format!("…{tail} ({} chars)", value.chars().count())
 }
 
-fn brama_url() -> String {
+fn brama_url() -> Result<String, String> {
     env::var("BRAMA_URL")
-        .or_else(|_| env::var("WISENT_MODEL_ROUTER_URL"))
-        .unwrap_or_default()
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| {
+            "BRAMA_URL is required; configure the Brama model-router service URL"
+                .to_string()
+        })
 }
 
 fn configured() -> Result<(String, String, String), String> {
+    let url = brama_url()?;
     let secret = env::var(SECRET_KEY).unwrap_or_default();
     if secret.is_empty() {
         return Err(format!(
-            "{SECRET_KEY} is not configured; run /setup to store it in ~/.jeden/.env"
+            "{SECRET_KEY} is not configured; launch with bin/jeden-rust or scripts/run-with-stado.sh"
         ));
     }
-    Ok((brama_url(), env::var(AGENT_ID_KEY).unwrap_or_default(), secret))
+    Ok((url, env::var(AGENT_ID_KEY).unwrap_or_default(), secret))
 }
 
 /// CLI `jeden token [--list] [--reveal] [--json]`. `--reveal` prints the bare
@@ -65,7 +70,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
     let mut lines = vec![
         format!("Brama:   {brama}"),
         format!("Agent:   {agent_id}"),
-        format!("Token:   {} — stored in ~/.jeden/.env", redacted(&secret)),
+        format!("Token:   {} — injected in memory by Stado/Skarbiec", redacted(&secret)),
         "Reveal:  jeden token --reveal (prints the bare value for scripting)".to_string(),
     ];
     if list {

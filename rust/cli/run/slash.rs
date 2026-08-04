@@ -66,10 +66,9 @@ pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<String, Str
     if crate::model_router::is_virtual_model_route(model) {
         return Ok(model.to_string());
     }
-    let runtime_config = load_config(cwd);
     let endpoint = env::var("BRAMA_URL")
         .ok()
-        .or(runtime_config.model_router_url);
+        .filter(|value| !value.trim().is_empty());
     let client = crate::control_plane::brama::BramaClient::configured(
         endpoint,
         env::var("BRAMA_TOKEN").ok(),

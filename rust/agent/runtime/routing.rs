@@ -270,7 +270,6 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         route_descriptors(routing.get("contextPromotions"), "contextPromotions");
     let endpoint = env::var("BRAMA_URL")
         .ok()
-        .or(config.model_router_url.clone())
         .filter(|value| !value.trim().is_empty());
     let selected_model = args
         .model
@@ -343,10 +342,12 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             }
         })
     };
-    let config_error = retry
-        .as_ref()
-        .err()
-        .cloned()
+    let endpoint_error = endpoint.is_none().then(|| {
+        "BRAMA_URL is required; configure the Brama model-router service URL"
+            .to_string()
+    });
+    let config_error = endpoint_error
+        .or_else(|| retry.as_ref().err().cloned())
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned())
         .or(catalog_error)
@@ -451,13 +452,13 @@ fn usage_path(cwd: &Path) -> PathBuf {
 
 pub(in crate::agent) fn usage_cost(
     cwd: &Path,
-    config: &Config,
+    _config: &Config,
     model: &str,
     usage: &CompletionUsage,
 ) -> Option<Value> {
     let endpoint = env::var("BRAMA_URL")
         .ok()
-        .or(config.model_router_url.clone());
+        .filter(|value| !value.trim().is_empty());
     let client = crate::control_plane::brama::BramaClient::configured(
         endpoint,
         env::var("BRAMA_TOKEN").ok(),

@@ -5,13 +5,13 @@ use super::types::{
 };
 use crate::tool_runtime::runtime_ops::OperationContext;
 use base64::Engine;
-use reqwest::blocking::Client;
+use reqwest::{blocking::Client, Url};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
-
+use std::time::{Duration, Instant};
 const MAX_INPUT_IMAGE: usize = 20 * 1024 * 1024;
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -20,95 +20,304 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "image_generate",
-        "Generate an image through a configured provider and preserve it as an artifact",
+        "Generate an image through the authenticated Stado media router and preserve it as an artifact",
     ),
     (
         "image_edit",
-        "Edit an image through a configured provider and preserve it as an artifact",
+        "Edit an image through the authenticated Stado media router and preserve it as an artifact",
     ),
     (
         "tts",
-        "Synthesize speech through a configured provider and preserve it as an artifact",
+        "Synthesize speech through the authenticated Stado media router and preserve it as an artifact",
     ),
 ];
-#[derive(Clone)]
-struct Provider {
-    name: String,
-    endpoint: String,
-    key: String,
-    model: String,
+
+#[derive(Serialize)]
+struct ImageGenerateRequest {
+    prompt: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    style: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    negative_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    height: Option<u32>,
 }
+
+#[derive(Deserialize)]
+struct ImageGenerateResponse {
+    success: bool,
+    job_id: String,
+    image_base64: Option<String>,
+    mime_type: Option<String>,
+    error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct EncodedMediaSample {
+    data_base64: String,
+    content_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    filename: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+enum CapabilityRequest {
+    KieImage {
+        provider: String,
+        action: String,
+        model: String,
+        prompt: String,
+        image: EncodedMediaSample,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        aspect_ratio: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        quality: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        style: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        negative_prompt: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        seed: Option<i64>,
+    },
+    TextToSpeech {
+        provider: String,
+        text: String,
+        voice_id: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        model: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        format: Option<String>,
+    },
+}
+
+#[derive(Deserialize)]
+struct CapabilitySubmission {
+    success: bool,
+    job_id: String,
+    status: String,
+    error: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct CapabilityStatus {
+    job_id: String,
+    status: String,
+    error: Option<String>,
+}
+
+struct MediaRouterClient {
+    origin: Url,
+    token: String,
+    client: Client,
+}
+
+impl MediaRouterClient {
+    fn configured() -> Result<Self, String> {
+        let raw_origin = std::env::var("STADO_MEDIA_ROUTER_URL")
+            .map_err(|_| "STADO_MEDIA_ROUTER_URL is required".to_string())?;
+        let token = std::env::var("JEDEN_MEDIA_ROUTER_TOKEN")
+            .map_err(|_| "JEDEN_MEDIA_ROUTER_TOKEN is required".to_string())?;
+        if token.trim().is_empty() || token.trim() != token || token.chars().any(char::is_control) {
+            return Err("JEDEN_MEDIA_ROUTER_TOKEN is empty or malformed".into());
+        }
+        let mut origin = Url::parse(raw_origin.trim())
+            .map_err(|error| format!("invalid STADO_MEDIA_ROUTER_URL: {error}"))?;
+        let loopback = matches!(
+            origin.host_str(),
+            Some("localhost" | "127.0.0.1" | "::1")
+        );
+        let insecure_loopback = std::env::var("STADO_MEDIA_ROUTER_ALLOW_INSECURE_LOOPBACK")
+            .ok()
+            .is_some_and(|value| value == "1");
+        if origin.scheme() != "https" && !(origin.scheme() == "http" && loopback && insecure_loopback)
+        {
+            return Err(
+                "STADO_MEDIA_ROUTER_URL must use HTTPS or explicitly enabled loopback HTTP".into(),
+            );
+        }
+        if !origin.username().is_empty()
+            || origin.password().is_some()
+            || origin.query().is_some()
+            || origin.fragment().is_some()
+            || !matches!(origin.path(), "" | "/")
+        {
+            return Err("STADO_MEDIA_ROUTER_URL must be an origin without credentials or path".into());
+        }
+        origin.set_path("/");
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(
+                "10".parse().expect("valid media-router connect timeout"),
+            ))
+            .build()
+            .map_err(|error| format!("failed to initialize media-router client: {error}"))?;
+        Ok(Self {
+            origin,
+            token,
+            client,
+        })
+    }
+
+    fn endpoint(&self, path: &str) -> ServiceResult<Url> {
+        self.origin.join(path).map_err(|error| ServiceError::Protocol {
+            service: "media-router",
+            detail: error.to_string(),
+        })
+    }
+
+    fn post_json<T: Serialize, R: for<'de> Deserialize<'de>>(
+        &self,
+        path: &str,
+        body: &T,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<R> {
+        check_operation(context)?;
+        let response = self
+            .client
+            .post(self.endpoint(path)?)
+            .timeout(timeout(context))
+            .bearer_auth(&self.token)
+            .json(body)
+            .send()
+            .map_err(|error| backend_error("media-router", error))?;
+        if !response.status().is_success() {
+            return Err(response_failure("media-router", response));
+        }
+        response
+            .json()
+            .map_err(|error| ServiceError::Protocol {
+                service: "media-router",
+                detail: error.to_string(),
+            })
+    }
+
+    fn status(
+        &self,
+        job_id: &str,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<CapabilityStatus> {
+        check_job_id(job_id)?;
+        check_operation(context)?;
+        let response = self
+            .client
+            .get(self.endpoint(&format!("media/{job_id}"))?)
+            .timeout(timeout(context))
+            .bearer_auth(&self.token)
+            .send()
+            .map_err(|error| backend_error("media-router", error))?;
+        if !response.status().is_success() {
+            return Err(response_failure("media-router", response));
+        }
+        response
+            .json()
+            .map_err(|error| ServiceError::Protocol {
+                service: "media-router",
+                detail: error.to_string(),
+            })
+    }
+
+    fn content(
+        &self,
+        job_id: &str,
+        expected_type: &str,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<(Vec<u8>, String)> {
+        check_job_id(job_id)?;
+        check_operation(context)?;
+        let response = self
+            .client
+            .get(self.endpoint(&format!("media/{job_id}/content"))?)
+            .timeout(timeout(context))
+            .bearer_auth(&self.token)
+            .send()
+            .map_err(|error| backend_error("media-router", error))?;
+        if !response.status().is_success() {
+            return Err(response_failure("media-router", response));
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| ServiceError::Protocol {
+                service: "media-router",
+                detail: "media content response lacks Content-Type".into(),
+            })?
+            .to_ascii_lowercase();
+        if !content_type.starts_with(expected_type) {
+            return Err(ServiceError::Protocol {
+                service: "media-router",
+                detail: format!(
+                    "expected {expected_type} content, received {content_type}"
+                ),
+            });
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > "33554432".parse().expect("valid media output limit"))
+        {
+            return Err(ServiceError::OutputLimit {
+                limit: "33554432".parse().expect("valid media output limit"),
+            });
+        }
+        let bytes = response
+            .bytes()
+            .map_err(|error| backend_error("media-router", error))?
+            .to_vec();
+        if bytes.is_empty() {
+            return Err(ServiceError::Protocol {
+                service: "media-router",
+                detail: "media content response was empty".into(),
+            });
+        }
+        Ok((bytes, content_type))
+    }
+}
+
 pub(crate) struct MediaService {
     cwd: PathBuf,
-    image: Vec<Provider>,
-    tts: Vec<Provider>,
+    router: Result<MediaRouterClient, String>,
+    image_model: Option<String>,
+    tts_model: Option<String>,
 }
+
 impl MediaService {
     pub(crate) fn discover(cwd: &Path, value: &Value) -> Self {
-        let mut image = Vec::new();
-        let mut tts = Vec::new();
-        if let Some(key) = config::string(
-            value,
-            &["toolServices", "image", "apiKey"],
-            "OPENAI_API_KEY",
-        ) {
-            let base = config::string(
-                value,
-                &["toolServices", "image", "baseUrl"],
-                "OPENAI_BASE_URL",
-            )
-            .unwrap_or_else(|| "https://api.openai.com/v1".into());
-            image.push(Provider {
-                name: "openai".into(),
-                endpoint: format!("{}/images/generations", base.trim_end_matches('/')),
-                key: key.clone(),
-                model: config::string(
-                    value,
-                    &["toolServices", "image", "model"],
-                    "JEDEN_IMAGE_MODEL",
-                )
-                .unwrap_or_else(|| "gpt-image-1".into()),
-            });
-            tts.push(Provider {
-                name: "openai".into(),
-                endpoint: format!("{}/audio/speech", base.trim_end_matches('/')),
-                key,
-                model: config::string(value, &["toolServices", "tts", "model"], "JEDEN_TTS_MODEL")
-                    .unwrap_or_else(|| "gpt-4o-mini-tts".into()),
-            });
-        }
         Self {
             cwd: cwd.to_path_buf(),
-            image,
-            tts,
+            router: MediaRouterClient::configured(),
+            image_model: config::string(
+                value,
+                &["toolServices", "image", "model"],
+                "JEDEN_IMAGE_MODEL",
+            ),
+            tts_model: config::string(
+                value,
+                &["toolServices", "tts", "model"],
+                "JEDEN_TTS_MODEL",
+            ),
         }
     }
+
     pub(crate) fn health_for(&self, tool: &str) -> HealthDescriptor {
         match tool {
             "image_inspect" => HealthDescriptor::healthy("image", "builtin"),
-            "image_generate" | "image_edit" => self
-                .image
-                .first()
-                .map(|p| HealthDescriptor::healthy("image", &p.name))
-                .unwrap_or_else(|| {
-                    HealthDescriptor::unavailable(
-                        "image",
-                        "configure OPENAI_API_KEY or toolServices.image.apiKey",
-                    )
-                }),
-            "tts" => self
-                .tts
-                .first()
-                .map(|p| HealthDescriptor::healthy("tts", &p.name))
-                .unwrap_or_else(|| {
-                    HealthDescriptor::unavailable(
-                        "tts",
-                        "configure OPENAI_API_KEY or toolServices.tts provider",
-                    )
-                }),
+            "image_generate" | "image_edit" | "tts" => match &self.router {
+                Ok(_) => HealthDescriptor::healthy("media", "stado-media-router"),
+                Err(detail) => HealthDescriptor::unavailable("media", detail.clone()),
+            },
             _ => HealthDescriptor::unavailable("media", "unknown media tool"),
         }
     }
+
     pub(crate) fn execute(
         &self,
         tool: &str,
@@ -117,13 +326,24 @@ impl MediaService {
     ) -> ServiceResult<Value> {
         match tool {
             "image_inspect" => self.inspect(input, context),
-            "image_generate" | "image_edit" => self.image_request(tool, input, context),
+            "image_generate" => self.image_generate(input, context),
+            "image_edit" => self.image_edit(input, context),
             "tts" => self.tts_request(input, context),
             _ => Err(ServiceError::InvalidInput(format!(
                 "unknown media tool {tool}"
             ))),
         }
     }
+
+    fn router(&self) -> ServiceResult<&MediaRouterClient> {
+        self.router
+            .as_ref()
+            .map_err(|detail| ServiceError::Unavailable {
+                service: "media-router",
+                detail: detail.clone(),
+            })
+    }
+
     fn inspect(&self, input: &Value, context: &OperationContext<'_>) -> ServiceResult<Value> {
         check_operation(context)?;
         let path = self.jailed(input)?;
@@ -140,85 +360,201 @@ impl MediaService {
             &json!({"ok":true,"path":path.display().to_string(),"format":format,"width":width,"height":height,"bytes":bytes.len(),"sha256":hex::encode(Sha256::digest(&bytes))}),
         )
     }
-    fn image_request(
+
+    fn image_generate(
         &self,
-        tool: &str,
         input: &Value,
         context: &OperationContext<'_>,
     ) -> ServiceResult<Value> {
-        check_operation(context)?;
-        let providers = &self.image;
-        if providers.is_empty() {
-            return Err(ServiceError::Unavailable {
-                service: "image",
-                detail: self.health_for(tool).detail,
+        let prompt = nonempty(input.get("prompt"), "prompt")?;
+        let (width, height) = dimensions(input.get("size").and_then(Value::as_str))?;
+        let request = ImageGenerateRequest {
+            prompt,
+            provider: optional_string(input, "provider").or_else(|| Some("gemini".into())),
+            model: optional_string(input, "model").or_else(|| self.image_model.clone()),
+            style: optional_string(input, "style"),
+            negative_prompt: optional_string(input, "negative_prompt"),
+            width,
+            height,
+        };
+        let response: ImageGenerateResponse =
+            self.router()?.post_json("image", &request, context)?;
+        if !response.success {
+            return Err(ServiceError::Backend {
+                service: "media-router",
+                detail: response
+                    .error
+                    .unwrap_or_else(|| "image generation reported failure".into()),
             });
         }
-        let prompt = nonempty(input.get("prompt"), "prompt")?;
-        let mut body = json!({"model":providers[0].model,"prompt":prompt,"size":input.get("size").and_then(Value::as_str).unwrap_or("1024x1024"),"response_format":"b64_json"});
-        if tool == "image_edit" {
-            let path = self.jailed(input)?;
-            let bytes = fs::read(path)?;
-            if bytes.len() > MAX_INPUT_IMAGE {
-                return Err(ServiceError::OutputLimit {
-                    limit: MAX_INPUT_IMAGE,
-                });
-            }
-            body["image"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes));
-        }
-        let response = post_json_fallback(providers, &body, context, "image")?;
-        let encoded = response
-            .pointer("/data/0/b64_json")
-            .and_then(Value::as_str)
-            .ok_or_else(|| ServiceError::Protocol {
-                service: "image",
-                detail: "provider response lacks data[0].b64_json".into(),
-            })?;
+        check_job_id(&response.job_id)?;
+        let encoded = response.image_base64.ok_or_else(|| ServiceError::Protocol {
+            service: "media-router",
+            detail: "image response lacks image_base64".into(),
+        })?;
+        let mime_type = response.mime_type.ok_or_else(|| ServiceError::Protocol {
+            service: "media-router",
+            detail: "image response lacks mime_type".into(),
+        })?;
+        let extension = image_extension(&mime_type)?;
         let bytes = base64::engine::general_purpose::STANDARD
             .decode(encoded)
-            .map_err(|e| ServiceError::Protocol {
-                service: "image",
-                detail: e.to_string(),
+            .map_err(|error| ServiceError::Protocol {
+                service: "media-router",
+                detail: format!("invalid image_base64: {error}"),
             })?;
-        let mut artifact = write_media_artifact(context, "image", "png", &bytes)?;
-        artifact["provider"] = response.get("_provider").cloned().unwrap_or(Value::Null);
-        artifact["revisedPrompt"] = response
-            .pointer("/data/0/revised_prompt")
-            .cloned()
-            .unwrap_or(Value::Null);
+        if bytes.is_empty() {
+            return Err(ServiceError::Protocol {
+                service: "media-router",
+                detail: "decoded image was empty".into(),
+            });
+        }
+        let mut artifact = write_media_artifact(context, "image", extension, &bytes)?;
+        artifact["provider"] = json!("stado-media-router");
+        artifact["jobId"] = json!(response.job_id);
+        artifact["mimeType"] = json!(mime_type);
         Ok(artifact)
     }
-    fn tts_request(&self, input: &Value, context: &OperationContext<'_>) -> ServiceResult<Value> {
-        check_operation(context)?;
-        let provider = self.tts.first().ok_or_else(|| ServiceError::Unavailable {
-            service: "tts",
-            detail: self.health_for("tts").detail,
-        })?;
-        let text = nonempty(input.get("text"), "text")?;
-        if text.len() > 32_000 {
-            return Err(ServiceError::OutputLimit { limit: 32_000 });
+
+    fn image_edit(
+        &self,
+        input: &Value,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<Value> {
+        let prompt = nonempty(input.get("prompt"), "prompt")?;
+        let model = optional_string(input, "model")
+            .or_else(|| self.image_model.clone())
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(
+                    "image_edit requires model or JEDEN_IMAGE_MODEL".into(),
+                )
+            })?;
+        let path = self.jailed(input)?;
+        let bytes = fs::read(&path)?;
+        if bytes.len() > MAX_INPUT_IMAGE {
+            return Err(ServiceError::OutputLimit {
+                limit: MAX_INPUT_IMAGE,
+            });
         }
-        let format = input.get("format").and_then(Value::as_str).unwrap_or("mp3");
-        if !matches!(format, "mp3" | "wav" | "opus" | "aac" | "flac") {
+        let (format, _, _) = image_metadata(&bytes)?;
+        let content_type = match format {
+            "png" => "image/png",
+            "jpeg" => "image/jpeg",
+            "gif" => "image/gif",
+            "webp" => "image/webp",
+            _ => {
+                return Err(ServiceError::InvalidInput(
+                    "unsupported image edit format".into(),
+                ))
+            }
+        };
+        let request = CapabilityRequest::KieImage {
+            provider: "kie".into(),
+            action: "edit".into(),
+            model,
+            prompt,
+            image: EncodedMediaSample {
+                data_base64: base64::engine::general_purpose::STANDARD.encode(bytes),
+                content_type: content_type.into(),
+                filename: path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .map(str::to_owned),
+            },
+            aspect_ratio: aspect_ratio(input.get("size").and_then(Value::as_str))?,
+            quality: optional_string(input, "quality"),
+            style: optional_string(input, "style"),
+            negative_prompt: optional_string(input, "negative_prompt"),
+            seed: input.get("seed").and_then(Value::as_i64),
+        };
+        let submission: CapabilitySubmission =
+            self.router()?.post_json("media", &request, context)?;
+        let job_id = validate_submission(submission)?;
+        self.wait_for_completion(&job_id, context)?;
+        let (output, mime_type) = self.router()?.content(&job_id, "image/", context)?;
+        let extension = image_extension(&mime_type)?;
+        let mut artifact = write_media_artifact(context, "image", extension, &output)?;
+        artifact["provider"] = json!("stado-media-router");
+        artifact["jobId"] = json!(job_id);
+        artifact["mimeType"] = json!(mime_type);
+        Ok(artifact)
+    }
+
+    fn tts_request(&self, input: &Value, context: &OperationContext<'_>) -> ServiceResult<Value> {
+        let text = nonempty(input.get("text"), "text")?;
+        if text.len() > "32000".parse().expect("valid speech input limit") {
+            return Err(ServiceError::OutputLimit {
+                limit: "32000".parse().expect("valid speech input limit"),
+            });
+        }
+        let provider = optional_string(input, "provider").unwrap_or_else(|| "minimax".into());
+        if !matches!(provider.as_str(), "elevenlabs" | "minimax") {
+            return Err(ServiceError::InvalidInput(
+                "tts provider must be elevenlabs or minimax".into(),
+            ));
+        }
+        let voice_id = optional_string(input, "voice_id")
+            .or_else(|| optional_string(input, "voice"))
+            .unwrap_or_else(|| "male-qn-qingse".into());
+        let format = optional_string(input, "format").unwrap_or_else(|| "mp3".into());
+        if !matches!(format.as_str(), "mp3" | "wav" | "opus" | "aac" | "flac") {
             return Err(ServiceError::InvalidInput("unsupported TTS format".into()));
         }
-        let client = Client::builder()
-            .timeout(timeout(context))
-            .build()
-            .map_err(|e| ServiceError::Backend {
-                service: "tts",
-                detail: e.to_string(),
-            })?;
-        let response=client.post(&provider.endpoint).bearer_auth(&provider.key).json(&json!({"model":provider.model,"input":text,"voice":input.get("voice").and_then(Value::as_str).unwrap_or("alloy"),"response_format":format})).send().and_then(|r|r.error_for_status()).map_err(|e|ServiceError::Backend{service:"tts",detail:e.to_string()})?;
-        let bytes = response.bytes().map_err(|e| ServiceError::Backend {
-            service: "tts",
-            detail: e.to_string(),
-        })?;
-        check_operation(context)?;
-        let mut artifact = write_media_artifact(context, "tts", format, &bytes)?;
-        artifact["provider"] = json!(provider.name);
+        let request = CapabilityRequest::TextToSpeech {
+            provider,
+            text,
+            voice_id,
+            model: optional_string(input, "model").or_else(|| self.tts_model.clone()),
+            format: Some(format.clone()),
+        };
+        let submission: CapabilitySubmission =
+            self.router()?.post_json("media", &request, context)?;
+        let job_id = validate_submission(submission)?;
+        let (bytes, mime_type) = self.router()?.content(&job_id, "audio/", context)?;
+        let mut artifact = write_media_artifact(context, "tts", &format, &bytes)?;
+        artifact["provider"] = json!("stado-media-router");
+        artifact["jobId"] = json!(job_id);
+        artifact["mimeType"] = json!(mime_type);
         Ok(artifact)
     }
+
+    fn wait_for_completion(
+        &self,
+        job_id: &str,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<()> {
+        let local_deadline = Instant::now()
+            + Duration::from_secs("120".parse().expect("valid media polling timeout"));
+        let deadline = context.deadline().unwrap_or(local_deadline).min(local_deadline);
+        loop {
+            check_operation(context)?;
+            if Instant::now() >= deadline {
+                return Err(ServiceError::DeadlineExceeded);
+            }
+            let status = self.router()?.status(job_id, context)?;
+            if status.job_id != job_id {
+                return Err(ServiceError::Protocol {
+                    service: "media-router",
+                    detail: "media status returned a mismatched job_id".into(),
+                });
+            }
+            match status.status.as_str() {
+                "completed" => return Ok(()),
+                "failed" | "cancelled" | "timed_out" => {
+                    return Err(ServiceError::Backend {
+                        service: "media-router",
+                        detail: status
+                            .error
+                            .unwrap_or_else(|| format!("media job {}", status.status)),
+                    })
+                }
+                _ => std::thread::sleep(Duration::from_millis(
+                    "500".parse().expect("valid media poll interval"),
+                )),
+            }
+        }
+    }
+
     fn jailed(&self, input: &Value) -> ServiceResult<PathBuf> {
         let raw = nonempty(input.get("path"), "path")?;
         let path = PathBuf::from(raw);
@@ -229,11 +565,11 @@ impl MediaService {
         };
         let canonical = joined
             .canonicalize()
-            .map_err(|e| ServiceError::Io(e.to_string()))?;
+            .map_err(|error| ServiceError::Io(error.to_string()))?;
         let root = self
             .cwd
             .canonicalize()
-            .map_err(|e| ServiceError::Io(e.to_string()))?;
+            .map_err(|error| ServiceError::Io(error.to_string()))?;
         if !canonical.starts_with(root) {
             return Err(ServiceError::PermissionDenied(
                 "image path escapes workspace".into(),
@@ -242,48 +578,116 @@ impl MediaService {
         Ok(canonical)
     }
 }
-fn post_json_fallback(
-    providers: &[Provider],
-    body: &Value,
-    context: &OperationContext<'_>,
-    service: &'static str,
-) -> ServiceResult<Value> {
-    let client = Client::builder()
-        .timeout(timeout(context))
-        .build()
-        .map_err(|e| ServiceError::Backend {
-            service,
-            detail: e.to_string(),
-        })?;
-    let mut failures = Vec::new();
-    for provider in providers {
-        check_operation(context)?;
-        match client
-            .post(&provider.endpoint)
-            .bearer_auth(&provider.key)
-            .json(body)
-            .send()
-            .and_then(|r| r.error_for_status())
-            .and_then(|r| r.json::<Value>())
-        {
-            Ok(mut value) => {
-                value["_provider"] = json!(provider.name);
-                return Ok(value);
-            }
-            Err(error) => failures.push(format!("{}: {error}", provider.name)),
-        }
-    }
-    Err(ServiceError::Backend {
-        service,
-        detail: failures.join("; "),
-    })
+
+fn optional_string(input: &Value, key: &str) -> Option<String> {
+    input
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
+
+fn dimensions(size: Option<&str>) -> ServiceResult<(Option<u32>, Option<u32>)> {
+    let Some(size) = size else {
+        return Ok((None, None));
+    };
+    let (width, height) = size
+        .split_once('x')
+        .ok_or_else(|| ServiceError::InvalidInput("size must be WIDTHxHEIGHT".into()))?;
+    let width = width
+        .parse()
+        .map_err(|_| ServiceError::InvalidInput("invalid image width".into()))?;
+    let height = height
+        .parse()
+        .map_err(|_| ServiceError::InvalidInput("invalid image height".into()))?;
+    Ok((Some(width), Some(height)))
+}
+
+fn aspect_ratio(size: Option<&str>) -> ServiceResult<Option<String>> {
+    let (width, height) = dimensions(size)?;
+    Ok(width.zip(height).map(|(width, height)| format!("{width}:{height}")))
+}
+
+fn image_extension(mime_type: &str) -> ServiceResult<&'static str> {
+    match mime_type.trim().to_ascii_lowercase().as_str() {
+        "image/png" => Ok("png"),
+        "image/jpeg" | "image/jpg" => Ok("jpg"),
+        "image/webp" => Ok("webp"),
+        "image/gif" => Ok("gif"),
+        other => Err(ServiceError::Protocol {
+            service: "media-router",
+            detail: format!("unsupported image Content-Type {other}"),
+        }),
+    }
+}
+
+fn validate_submission(submission: CapabilitySubmission) -> ServiceResult<String> {
+    if !submission.success {
+        return Err(ServiceError::Backend {
+            service: "media-router",
+            detail: submission
+                .error
+                .unwrap_or_else(|| "media submission reported failure".into()),
+        });
+    }
+    check_job_id(&submission.job_id)?;
+    if submission.status.trim().is_empty() {
+        return Err(ServiceError::Protocol {
+            service: "media-router",
+            detail: "media submission lacks status".into(),
+        });
+    }
+    Ok(submission.job_id)
+}
+
+fn check_job_id(job_id: &str) -> ServiceResult<()> {
+    if job_id.is_empty()
+        || !job_id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    {
+        return Err(ServiceError::Protocol {
+            service: "media-router",
+            detail: "media-router returned an invalid job_id".into(),
+        });
+    }
+    Ok(())
+}
+
+fn response_failure(service: &'static str, response: reqwest::blocking::Response) -> ServiceError {
+    let status = response.status();
+    let detail = response
+        .text()
+        .map(|body| {
+            body.chars()
+                .take("512".parse().expect("valid error detail limit"))
+                .collect::<String>()
+        })
+        .unwrap_or_else(|_| "response body unavailable".into());
+    ServiceError::Backend {
+        service,
+        detail: format!("HTTP {status}: {detail}"),
+    }
+}
+
+fn backend_error(service: &'static str, error: reqwest::Error) -> ServiceError {
+    ServiceError::Backend {
+        service,
+        detail: error.to_string(),
+    }
+}
+
 fn timeout(context: &OperationContext<'_>) -> Duration {
     context
         .deadline()
-        .and_then(|d| d.checked_duration_since(std::time::Instant::now()))
-        .unwrap_or(Duration::from_secs(90))
-        .min(Duration::from_secs(120))
+        .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+        .unwrap_or(Duration::from_secs(
+            "90".parse().expect("valid media request timeout"),
+        ))
+        .min(Duration::from_secs(
+            "120".parse().expect("valid maximum media request timeout"),
+        ))
 }
 fn image_metadata(bytes: &[u8]) -> ServiceResult<(&'static str, u32, u32)> {
     if bytes.len() >= 24 && &bytes[..8] == b"\x89PNG\r\n\x1a\n" {

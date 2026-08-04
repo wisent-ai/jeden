@@ -54,16 +54,16 @@ From source (the currently documented path):
 
 ```sh
 git clone https://github.com/wisent-ai/jeden.git && cd jeden
-cargo build --locked --release   # or: bin/jeden-rust, which falls back to cargo run
+cargo build --locked --release   # or: bin/jeden-rust, which rebuilds stale source binaries
 ```
 
 Required environment for real model calls:
 
 ```sh
 WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>
-STADO_MODEL_ROUTER_URL=<stado-managed-model-router-url>
-# Set only when the model-router service requires its distinct bearer.
-STADO_MODEL_ROUTER_TOKEN=<model-router-bearer>
+BRAMA_URL=<brama-model-router-url>
+# Set only when Brama requires its distinct bearer.
+BRAMA_TOKEN=<brama-bearer>
 WISENT_APP_AGENT_ID=wisent-app
 ```
 
@@ -75,7 +75,12 @@ First run:
 jeden            # opens the welcome view; run /setup to connect the model router
 ```
 
-Inside the terminal, `/setup` is an idempotent wizard (router URL, agent id, credential, default model) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
+On a configured Wisent workstation, `bin/jeden-rust` automatically obtains the
+Brama bearer and agent signing credential from Skarbiec for interactive sessions
+and `jeden run`; credentials remain in the process environment only. The launcher
+uses `scripts/run-with-stado.sh` and the local operator token.
+
+Inside the terminal, `/setup` is an idempotent wizard (Brama URL, agent id, default model, and preferences) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
 
 ```sh
 jeden run "Respond exactly: OK"   # expected output: OK
@@ -85,8 +90,8 @@ jeden run "Respond exactly: OK"   # expected output: OK
 
 Common setup failures and recovery:
 
-- `STADO_MODEL_ROUTER_URL is required` — the router endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
-- `WISENT_APP_AGENT_AUTH_SECRET` missing — the signing credential is not in the environment; obtain it through the Stado/Skarbiec-managed launcher (`scripts/run-with-stado.sh`) rather than writing it to a file.
+- `BRAMA_URL is required` — the Brama endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
+- `WISENT_APP_AGENT_AUTH_SECRET` missing — launch through `bin/jeden-rust` or `scripts/run-with-stado.sh`; both obtain `agent:wisent-app/value` from Skarbiec without writing it to disk.
 - Model calls fail with quota exhaustion — the active Weles subscription is in cooldown; check `/subscriptions status` or wait for the `Retry-After` bound while the router selects the next eligible subscription.
 - Anything else — run `jeden doctor` for per-service health and `/setup validate` for an end-to-end probe; both report what failed and which step to fix first.
 
@@ -106,7 +111,7 @@ The private milestone includes the capabilities below. Per-capability implementa
 
 - interactive terminal and one-shot `jeden run` modes;
 - session transcripts and artifacts under `~/.jeden/sessions/`;
-- model routing through required `STADO_MODEL_ROUTER_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
+- model routing through required `BRAMA_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
 - model selection through `--model`, `JEDEN_MODEL`, or native config;
 - jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;
 - guarded file mutations using the digest or snapshot tag returned by `read_file`;
@@ -130,7 +135,7 @@ File mutations return Jeden-native visual diffs and previews. Oversized tool res
 
 ```sh
 jeden
-jeden --cwd ../content-platform
+jeden --cwd ../echo
 jeden run "summarize package.json"
 jeden run "create notes.txt" --allow-write
 jeden run "inspect the build" --allow-command
@@ -142,7 +147,7 @@ jeden artifact <session> <name> <output>
 jeden resume <session> "continue"
 jeden search-sessions "query"
 jeden recall_conversation --list
-jeden tools --cwd ../content-platform
+jeden tools --cwd ../echo
 jeden config --cwd .
 jeden doctor --cwd .
 jeden capabilities --json --cwd .

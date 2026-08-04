@@ -211,7 +211,7 @@ pub(crate) fn model_picker(
     let lang = ui_language(&config).code().to_string();
     let endpoint = std::env::var("BRAMA_URL")
         .ok()
-        .or(config.model_router_url.clone());
+        .filter(|value| !value.trim().is_empty());
     let active = current_model
         .map(str::to_string)
         .or(config.model)

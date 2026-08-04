@@ -26,9 +26,8 @@ fn config_v1_to_v2(value: &mut Value) -> Result<(), String> {
     let object = value
         .as_object_mut()
         .ok_or_else(|| "config root must be an object".to_string())?;
-    if let Some(legacy) = object.remove("model_url") {
-        object.entry("modelRouterUrl").or_insert(legacy);
-    }
+    object.remove("model_url");
+    object.remove("modelRouterUrl");
     Ok(())
 }
 
@@ -56,7 +55,7 @@ static CONFIG_MIGRATION_STEPS: [migrations::MigrationStep; 3] = [
         apply: config_v0_to_v1,
     },
     migrations::MigrationStep {
-        name: "canonical-model-router-key",
+        name: "remove-legacy-model-router-endpoints",
         from: 1,
         to: 2,
         apply: config_v1_to_v2,
@@ -93,8 +92,6 @@ pub(crate) fn migrate_config_file(path: &Path) -> Result<migrations::MigrationOu
 pub(crate) struct Config {
     #[serde(rename = "model")]
     pub(crate) model: Option<String>,
-    #[serde(rename = "modelRouterUrl")]
-    pub(crate) model_router_url: Option<String>,
     #[serde(rename = "agentId")]
     pub(crate) agent_id: Option<String>,
     #[serde(rename = "authProviders")]
@@ -463,7 +460,6 @@ pub(crate) fn load_config(cwd: &Path) -> Config {
     }
     Config {
         model: merged.model,
-        model_router_url: merged.model_router_url,
         agent_id: merged.agent_id,
         auth_providers: merged.auth_providers,
         models: model_catalog.into_values().collect(),

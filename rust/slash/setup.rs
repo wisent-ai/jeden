@@ -1,9 +1,9 @@
 //! Guided first-run configuration wizard (`/setup`, alias `/onboarding`).
 //!
 //! The wizard is idempotent: every step checks live state first and renders
-//! already-configured items as disabled `[OK]` rows. Router credentials are
-//! appended to (or updated in) `~/.jeden/.env` with mode 0600; the auth secret
-//! is never printed back — summaries only report `configured`.
+//! already-configured items as disabled `[OK]` rows. Nonsecret router settings
+//! may be persisted locally; credentials are injected by the trusted Stado
+//! launcher and are never written by the wizard.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -69,13 +69,10 @@ fn configured_value(key: &str) -> Option<String> {
         .or_else(|| env_file_value(&env_file_path(), key))
 }
 
-/// True when a Brama router endpoint is reachable from env, `~/.jeden/.env`,
-/// or the layered config (`modelRouterUrl`). Drives the welcome tip.
-pub(crate) fn brama_router_configured(cwd: &Path) -> bool {
+/// True when the required Brama model-router endpoint is available
+/// from the process environment or `~/.jeden/.env`. Drives the welcome tip.
+pub(crate) fn brama_router_configured(_cwd: &Path) -> bool {
     configured_value(BRAMA_URL_KEY).is_some()
-        || load_config(cwd)
-            .model_router_url
-            .is_some_and(|url| !url.trim().is_empty())
 }
 
 /// Prefill for an INPUT row, read best-effort from the repository's
@@ -150,7 +147,10 @@ fn save_brama_url(value: &str) -> Result<String, String> {
         return Err("BRAMA_URL must start with https:// or http://".into());
     }
     let path = write_env_keys(&[(BRAMA_URL_KEY.into(), value.into())])?;
-    Ok(format!("Saved BRAMA_URL to {} (0600).", path.display()))
+    Ok(format!(
+        "Saved BRAMA_URL to {} (0600).",
+        path.display()
+    ))
 }
 
 fn save_agent_id(value: &str) -> Result<String, String> {
@@ -165,17 +165,6 @@ fn save_agent_id(value: &str) -> Result<String, String> {
     ))
 }
 
-fn save_agent_secret(value: &str) -> Result<String, String> {
-    let value = value.trim();
-    if value.is_empty() {
-        return Err("WISENT_APP_AGENT_AUTH_SECRET cannot be empty".into());
-    }
-    let path = write_env_keys(&[(AGENT_SECRET_KEY.into(), value.into())])?;
-    Ok(format!(
-        "Saved WISENT_APP_AGENT_AUTH_SECRET to {} (0600); the value is stored but never echoed.",
-        path.display()
-    ))
-}
 
 struct SetupState {
     brama_url: Option<String>,
@@ -234,10 +223,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 .unwrap_or_else(|| " ".into());
             items.push(
                 PickerItem::action(
-                    "1. Set BRAMA_URL (Brama router URL)",
+                    "1. Set BRAMA_URL",
                     format!("/setup brama-url{prefill}"),
                 )
-                .detail("model router endpoint · stored in ~/.jeden/.env")
+                .detail("required Brama model-router endpoint · stored in ~/.jeden/.env")
                 .badge("INPUT")
                 .prefill(),
             );
@@ -261,15 +250,13 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     if state.secret_configured {
         items.push(configured_row(
             "3. WISENT_APP_AGENT_AUTH_SECRET configured",
-            "stored in ~/.jeden/.env",
+            "injected in memory by the Stado/Skarbiec launcher",
         ));
     } else {
-        items.push(
-            PickerItem::action("3. Set WISENT_APP_AGENT_AUTH_SECRET", "/setup agent-secret ")
-                .detail("stored in ~/.jeden/.env · never echoed back")
-                .badge("INPUT")
-                .prefill(),
-        );
+        items.push(configured_row(
+            "3. WISENT_APP_AGENT_AUTH_SECRET unavailable",
+            "launch with bin/jeden-rust or scripts/run-with-stado.sh",
+        ));
     }
     match &state.model {
         Some(model) => items.push(configured_row(
@@ -323,7 +310,7 @@ fn checklist_text(context: &SlashContext<'_>) -> String {
     let mut lines = vec![
         "Setup checklist (guided wizard: run /setup in the interactive TUI):".to_string(),
         format!(
-            "1. BRAMA_URL {} — set: jeden run \"/setup brama-url <https-url>\" (or: echo 'BRAMA_URL=<url>' >> ~/.jeden/.env)",
+            "1. BRAMA_URL {} — required; set: jeden run \"/setup brama-url <https-url>\" (or: echo 'BRAMA_URL=<url>' >> ~/.jeden/.env)",
             mark(state.brama_url.is_some())
         ),
         format!(
@@ -331,10 +318,10 @@ fn checklist_text(context: &SlashContext<'_>) -> String {
             mark(state.agent_id.is_some())
         ),
         format!(
-            "3. WISENT_APP_AGENT_AUTH_SECRET {} — set: jeden run \"/setup agent-secret <secret>\"",
+            "3. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value via scripts/run-with-stado.sh",
             mark(state.secret_configured)
         ),
-        "   Router values are written to ~/.jeden/.env (mode 0600); existing lines are preserved."
+        "   Only nonsecret router settings are written to ~/.jeden/.env; credentials are injected in memory by the trusted Stado launcher."
             .to_string(),
         match &state.model {
             Some(model) => format!("4. Model route [OK] {model} — change with: /model <route>"),
@@ -391,7 +378,7 @@ fn validate_text(context: &SlashContext<'_>) -> String {
     lines.join("\n")
 }
 
-const USAGE: &str = "Usage: /setup [status|validate|brama-url <url>|agent-id <id>|agent-secret <secret>|model|preferences]";
+const USAGE: &str = "Usage: /setup [status|validate|brama-url <url>|agent-id <id>|model|preferences]";
 
 /// Text-mode handler (non-interactive callers such as `jeden run "/setup …"`
 /// and the slash fallback). Bare `/setup` and `/setup status` print the
@@ -403,7 +390,6 @@ pub(crate) fn handle_text(args: &str, context: &SlashContext<'_>) -> Result<Stri
         "validate" => Ok(validate_text(context)),
         "brama-url" => save_brama_url(rest),
         "agent-id" => save_agent_id(rest),
-        "agent-secret" => save_agent_secret(rest),
         "model" | "preferences" => Ok(format!(
             "That step needs the interactive TUI; run bare `jeden` and then /setup.\n\n{}",
             checklist_text(context)
@@ -431,11 +417,10 @@ pub(crate) fn run_interactive(
         "" if interactive => setup_picker(&context).map(CommandOutcome::Picker),
         "" | "status" => Ok(CommandOutcome::Text(checklist_text(&context))),
         "validate" => Ok(CommandOutcome::Text(validate_text(&context))),
-        "brama-url" | "agent-id" | "agent-secret" => {
+        "brama-url" | "agent-id" => {
             let message = match verb.to_ascii_lowercase().as_str() {
                 "brama-url" => save_brama_url(rest)?,
-                "agent-id" => save_agent_id(rest)?,
-                _ => save_agent_secret(rest)?,
+                _ => save_agent_id(rest)?,
             };
             if interactive {
                 // Re-open the wizard so the user lands on the next missing step.

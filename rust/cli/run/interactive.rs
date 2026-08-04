@@ -115,7 +115,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         // the welcome tip points at /setup to connect a router.
         let endpoint = env::var("BRAMA_URL")
             .ok()
-            .or(config.model_router_url.clone());
+            .filter(|value| !value.trim().is_empty());
         let brama = crate::control_plane::brama::BramaClient::configured(
             endpoint,
             env::var("BRAMA_TOKEN").ok(),
