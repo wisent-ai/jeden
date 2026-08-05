@@ -1,4 +1,4 @@
-//! Guided first-run configuration wizard (`/setup`, alias `/onboarding`).
+//! Guided environment configuration wizard (`/setup`).
 //!
 //! The wizard is idempotent: every step checks live state first and renders
 //! already-configured items as disabled `[OK]` rows. Nonsecret router settings

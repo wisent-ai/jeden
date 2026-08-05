@@ -781,8 +781,13 @@ pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
         },
         SlashSpec {
             name: "setup",
-            description: "Guided first-run configuration",
-            aliases: &["onboarding"],
+            description: "Guided environment configuration",
+            aliases: &[],
+        },
+        SlashSpec {
+            name: "onboarding",
+            description: "Explain Jeden and reach the first successful task",
+            aliases: &[],
         },
         SlashSpec {
             name: "providers",

@@ -24,6 +24,7 @@ pub mod probierz;
 pub mod qr;
 pub mod report;
 pub mod roadmap;
+pub mod onboarding;
 pub mod routing;
 pub mod rpc;
 pub mod sdk;

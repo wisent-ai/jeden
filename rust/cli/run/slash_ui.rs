@@ -403,6 +403,9 @@ pub(crate) fn interactive_view(
     let (command, args) = trimmed
         .split_once(char::is_whitespace)
         .unwrap_or((trimmed, ""));
+    if command == "/onboarding" {
+        return Some(crate::onboarding::interactive(args.trim()));
+    }
     if matches!(command, "/model" | "/models" | "/switch") && matches!(args.trim(), "--all" | "-a")
     {
         return Some(model_picker(cwd, model, true).map(CommandOutcome::Picker));
@@ -430,7 +433,7 @@ pub(crate) fn interactive_view(
         "/login" => {
             return Some(Ok(CommandOutcome::Text(format_auth_status(cwd))));
         }
-        "/setup" | "/onboarding"
+        "/setup"
             if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() =>
         {
             // Piped stdin/stdout: print the manual checklist instead of a view.

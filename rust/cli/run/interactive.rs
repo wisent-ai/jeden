@@ -128,6 +128,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     } else {
         None
     };
+    let initial_picker = crate::onboarding::initial_picker()?.or(initial_model_picker);
     let session_model = Arc::new(Mutex::new(model));
     // One persistent conversation provides native cross-turn memory for the
     // entire interactive session. A self-rebuild seeds a fresh recorder with
@@ -318,7 +319,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     *handler_model.lock() = Some(next.to_string());
                     Ok(message)
                 }
-                "/setup" | "/onboarding" => {
+                "/setup" => {
                     return crate::slash::setup::run_interactive(
                         &run_args.cwd,
                         rest,
@@ -326,6 +327,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         ctx.interactive,
                     );
                 }
+                "/onboarding" => return crate::onboarding::interactive(rest),
                 "/roles" | "/role" => {
                     // Roles hub rows dispatch `/roles <role>`; the hub has no
                     // backend of its own, so forward to the role's existing
@@ -537,10 +539,13 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         } else {
             run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
         };
+        if !input.trim_start().starts_with('/') && result.is_ok() {
+            crate::onboarding::observe_successful_turn();
+        }
         result.map(tui::CommandOutcome::text)
     };
 
-    tui::run_basic_loop(status, classify, handler, initial_model_picker)
+    tui::run_basic_loop(status, classify, handler, initial_picker)
         .map_err(|e| e.to_string())?;
     hooks::session_stop(&session_cwd.lock().clone(), args.allow_command);
     if let Some(plan) = pending_relaunch.lock().take() {
