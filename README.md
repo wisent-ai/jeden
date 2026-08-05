@@ -76,9 +76,9 @@ jeden            # opens the welcome view; run /setup to connect the model route
 ```
 
 On a configured Wisent workstation, `bin/jeden-rust` automatically obtains the
-Brama bearer and agent signing credential from Skarbiec for interactive sessions
-and `jeden run`; credentials remain in the process environment only. The launcher
-uses dedicated `jeden-model-router-client` and `jeden-runtime-client` Skarbiec tokens.
+agent signing credential from `agent:wisent-app/value` for interactive sessions
+and `jeden run`; it remains in the process environment only. A deployment that
+requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
 
 Inside the terminal, `/setup` is an idempotent wizard (Brama URL, agent id, default model, and preferences) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
 
@@ -91,7 +91,7 @@ jeden run "Respond exactly: OK"   # expected output: OK
 Common setup failures and recovery:
 
 - `BRAMA_URL is required` — the Brama endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
-- `WISENT_APP_AGENT_AUTH_SECRET` missing — launch through `bin/jeden-rust` or `scripts/run-with-stado.sh`; both obtain it from `jeden-runtime/value` without writing it to disk.
+- `WISENT_APP_AGENT_AUTH_SECRET` missing — launch through `bin/jeden-rust` or `scripts/run-with-stado.sh`; both obtain `agent:wisent-app/value` without writing it to disk.
 - Model calls fail with quota exhaustion — the active Weles subscription is in cooldown; check `/subscriptions status` or wait for the `Retry-After` bound while the router selects the next eligible subscription.
 - Anything else — run `jeden doctor` for per-service health and `/setup validate` for an end-to-end probe; both report what failed and which step to fix first.
 

@@ -318,7 +318,7 @@ fn checklist_text(context: &SlashContext<'_>) -> String {
             mark(state.agent_id.is_some())
         ),
         format!(
-            "3. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item jeden-runtime/value via scripts/run-with-stado.sh",
+            "3. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value via scripts/run-with-stado.sh",
             mark(state.secret_configured)
         ),
         "   Only nonsecret router settings are written to ~/.jeden/.env; credentials are injected in memory by the trusted Stado launcher."
