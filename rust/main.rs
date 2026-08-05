@@ -20,6 +20,7 @@ pub mod mcp;
 pub mod memory;
 pub mod model_router;
 pub mod protocol;
+pub mod probierz;
 pub mod qr;
 pub mod report;
 pub mod roadmap;
@@ -91,6 +92,7 @@ fn usage() -> String {
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
+        "  jeden probierz [args...] — run Probierz discovery, evidence, and gate commands for Jeden\n",
         "  jeden capabilities [--json] [--cwd path]\n",
         "  jeden completions <bash|zsh|fish>\n",
         "  jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]\n",
@@ -162,7 +164,11 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     }
     if matches!(
         command.as_str(),
-        "resume" | "recall_conversation" | "recall-conversation" | "search-sessions"
+        "resume"
+            | "recall_conversation"
+            | "recall-conversation"
+            | "search-sessions"
+            | "probierz"
     ) {
         return Ok(Args {
             command,
@@ -419,6 +425,7 @@ pub fn main() -> ExitCode {
         "config" => config_command(&args),
         "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),
+        "probierz" => probierz::command(&args),
         "capabilities" => {
             if args.json {
                 capability::status_json(&args.cwd).map(|json| json + "\n")

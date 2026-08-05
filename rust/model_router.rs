@@ -242,6 +242,7 @@ pub(crate) fn with_attachments(
 #[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub url: String,
+    pub bearer_token: String,
     pub agent_id: String,
     pub secret: String,
     pub model: String,
@@ -361,6 +362,7 @@ pub fn chat_completion(
             "{}/v1/chat/completions",
             config.url.trim_end_matches('/')
         ))
+        .bearer_auth(&config.bearer_token)
         .header("content-type", "application/json")
         .header("x-agent-id", &config.agent_id)
         .header("x-agent-timestamp", ts)
@@ -826,8 +828,6 @@ fn build_streaming_body(
     let mut body = json!({
         "model": route.model,
         "messages": messages,
-        "stream": true,
-        "stream_options": {"include_usage": true},
     });
     if let Some(max_tokens) = max_tokens {
         body["max_tokens"] = json!(max_tokens);
@@ -837,7 +837,6 @@ fn build_streaming_body(
     }
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools.to_vec());
-        body["tool_choice"] = Value::String("auto".into());
     }
     if let Some(target) = target {
         body["billingTarget"] = serde_json::to_value(target).map_err(|error| error.to_string())?;
@@ -988,6 +987,7 @@ fn spawn_openai_stream_adapter(
         .map_err(AttemptError::permanent)?;
     let url = format!("{}/v1/chat/completions", config.url.trim_end_matches('/'));
     let agent_id = config.agent_id.clone();
+    let bearer_token = config.bearer_token.clone();
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
         .spawn(move || {
@@ -1000,6 +1000,7 @@ fn spawn_openai_stream_adapter(
             };
             let response = match client
                 .post(url)
+                .bearer_auth(bearer_token)
                 .header("content-type", "application/json")
                 .header("accept", "text/event-stream")
                 .header("x-agent-id", agent_id)

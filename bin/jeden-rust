@@ -16,7 +16,7 @@ STADO_BOOTSTRAP="$ROOT/scripts/run-with-stado.sh"
 
 needs_model_runtime() {
   case "${1:-}" in
-    ""|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token) return 0 ;;
+    ""|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token|probierz) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -35,7 +35,8 @@ run_jeden() {
 
 
 if [ -f "$MANIFEST" ]; then
-  cargo build --quiet --manifest-path "$MANIFEST" --release --bin jeden
+  cargo build --quiet --manifest-path "$MANIFEST" --release \
+    --bin jeden --bin jeden-sandbox-helper
 elif [ ! -x "$BIN" ]; then
   printf '%s\n' "jeden: packaged executable not found: $BIN" >&2
   exit 127

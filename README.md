@@ -86,6 +86,21 @@ Inside the terminal, `/setup` is an idempotent wizard (Brama URL, agent id, defa
 jeden run "Respond exactly: OK"   # expected output: OK
 ```
 
+Probierz owns reproducible Jeden journey execution and quality evidence. The
+`jeden probierz` command forwards arguments to a sibling Probierz source
+checkout, `PROBIERZ_ROOT`, or an installed `probierz` CLI. With no arguments it
+shows the current Jeden evidence status:
+
+```sh
+jeden probierz
+jeden probierz check tui
+jeden probierz run tui --app jeden \
+  --spec packages/tui/specs/jeden-onboarding-first-use.spec.mjs --record
+```
+
+The onboarding journey performs one real signed agent turn and stores its
+source-bound result and analysis in the Probierz evidence store.
+
 `jeden doctor` diagnoses missing prerequisites and degraded services. Signed canary artifacts are published to GitHub Releases for the three supported targets, and `jeden update` moves an installed binary along the verified channel; see [Release automation](#release-automation).
 
 Common setup failures and recovery:

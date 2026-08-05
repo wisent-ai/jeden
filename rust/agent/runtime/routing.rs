@@ -271,6 +271,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let endpoint = env::var("BRAMA_URL")
         .ok()
         .filter(|value| !value.trim().is_empty());
+    let bearer_token = env::var("BRAMA_TOKEN")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
     let selected_model = args
         .model
         .clone()
@@ -279,7 +282,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         .filter(|value| !value.trim().is_empty());
     let catalog_client = crate::control_plane::brama::BramaClient::configured(
         endpoint.clone(),
-        env::var("BRAMA_TOKEN").ok(),
+        bearer_token.clone(),
     );
     let catalog = model_catalog_with_retry(&args.cwd, &catalog_client);
     // Bare (provider-less) model ids resolve to the unique catalog route whose
@@ -346,7 +349,12 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         "BRAMA_URL is required; configure the Brama model-router service URL"
             .to_string()
     });
+    let token_error = bearer_token.is_none().then(|| {
+        "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential"
+            .to_string()
+    });
     let config_error = endpoint_error
+        .or(token_error)
         .or_else(|| retry.as_ref().err().cloned())
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned())
@@ -394,6 +402,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         .map(|_| args.cwd.join(".jeden/subscription-cooldowns.json"));
     ChatConfig {
         url: endpoint.unwrap_or_default(),
+        bearer_token: bearer_token.unwrap_or_default(),
         agent_id: env::var("WISENT_APP_AGENT_ID")
             .ok()
             .or(config.agent_id.clone())
