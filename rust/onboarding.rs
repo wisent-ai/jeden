@@ -1,4 +1,4 @@
-use onboarding_client::{
+use wisent_onboarding_client::{
     bundle_from_canonical, FileStorage, JourneyClient, ProgressStatus, ScopeKind,
     StadoTransport, Transport,
 };
@@ -45,7 +45,7 @@ fn transport() -> Box<dyn Transport> {
             return Box::new(transport);
         }
     }
-    Box::new(onboarding_client::OfflineTransport)
+    Box::new(wisent_onboarding_client::OfflineTransport)
 }
 
 async fn start_client() -> Result<Client, String> {
@@ -80,7 +80,7 @@ fn run<T>(future: impl Future<Output = Result<T, String>>) -> Result<T, String> 
         .block_on(future)
 }
 
-fn current_screen(client: &Client) -> Result<&onboarding_client::JourneyScreen, String> {
+fn current_screen(client: &Client) -> Result<&wisent_onboarding_client::Screen, String> {
     let progress = client
         .progress()
         .ok_or_else(|| "onboarding progress is unavailable".to_string())?;
@@ -96,7 +96,7 @@ fn current_screen(client: &Client) -> Result<&onboarding_client::JourneyScreen, 
         .ok_or_else(|| "onboarding screen is unavailable".to_string())
 }
 
-fn presentation_text(screen: &onboarding_client::JourneyScreen, key: &str) -> String {
+fn presentation_text(screen: &wisent_onboarding_client::Screen, key: &str) -> String {
     screen
         .presentation
         .get(key)

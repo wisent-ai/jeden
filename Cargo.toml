@@ -25,7 +25,7 @@ path = "rust/bin/jeden-sandbox-helper.rs"
 
 
 [dependencies]
-onboarding-client = { path = "../echo-web/crates/onboarding-client" }
+wisent-onboarding-client = { path = "../echo-web/crates/onboarding-client" }
 agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
 base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
