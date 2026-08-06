@@ -80,6 +80,15 @@ agent signing credential from `agent:wisent-app/value` for interactive sessions
 and `jeden run`; it remains in the process environment only. A deployment that
 requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
 
+The first-use journey (`/onboarding`) is separate from `/setup` and always runs
+from the definition compiled into the binary, so it works offline and completes
+on the first successful agent turn. When `STADO_INTEGRATION_API_URL` is set, the
+launcher additionally injects `JEDEN_STADO_INTEGRATION_TOKEN` from the Skarbiec
+item `jeden-integration-api` through the dedicated `jeden-onboarding-client`
+consumer, which turns on published-bundle reads and funnel events at the
+integration boundary. A missing endpoint, grant file, or item leaves the journey
+offline and never blocks the command.
+
 Inside the terminal, `/setup` is an idempotent wizard (Brama URL, agent id, default model, and preferences) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
 
 ```sh
