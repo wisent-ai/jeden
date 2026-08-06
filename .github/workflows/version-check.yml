@@ -122,6 +122,54 @@ jobs:
         # removal and mislabel the release.
         run: python3 scripts/surface.py > "$RUNNER_TEMP/candidate.json"
 
+      - name: Prove this gate can still refuse
+        run: |
+          set -euo pipefail
+          # A gate that has never refused is decoration, and the install step's probe does
+          # not cover the step below. That probe interrogated an `autoversion` it had put
+          # on PATH with an `export` in its OWN shell; every later step, including the one
+          # that consumes the real verdict, resolves the name through GITHUB_PATH instead.
+          # Those are two different resolutions, and only one of them was proved. Drop,
+          # misspell or reorder the GITHUB_PATH line and the install step still passes
+          # while a stranger answers from here on -- and a stranger that always answers
+          # `internal` sails through the comparison below, because while Cargo.toml
+          # declares the published floor `internal` IS the passing branch. So the ability
+          # to refuse is demanded again, from the same resolution the verdict below is read
+          # from, immediately before it is read.
+          #
+          # Built out of the COMMITTED baseline rather than a synthetic pair, so this also
+          # proves the frozen file parses, carries a surface, and is really what reaches a
+          # decision. One command is dropped with `- [first]` rather than a bare subscript,
+          # which this workspace refuses. All but one of the baseline's commands survive,
+          # so the candidate is never the empty surface the rule rejects outright as the far
+          # likelier broken extractor. `--current` is the floor, exactly as the comparison
+          # below spells it, since that is the version the published artifact's signed
+          # manifest records.
+          #
+          # This step reads no git ref: only the checked-out baseline and the rule. So it
+          # leaves the reason this workflow needs no tag fetch after checkout intact, and
+          # the revocation condition documented further down still says what it said.
+          dropped="$(jq -r '.surface | sort | first' released-surface.json)"
+          jq '{surface: (.surface - [(.surface | sort | first)])}' \
+            released-surface.json > "$RUNNER_TEMP/refusal.json"
+          floor="$(jq -r .minimumVersion released-surface.json)"
+          # `|| true` so an `autoversion` that crashes or prints no verdict is reported by
+          # the message below, naming the removal it was asked about, instead of killing
+          # the step with a stack trace. Safe only because nothing but the literal
+          # `breaking` passes: an empty answer falls through to the refusal.
+          verdict="$(autoversion decide --current "$floor" \
+            --published-surface released-surface.json \
+            --candidate-surface "$RUNNER_TEMP/refusal.json" \
+            --json | jq -r .change || true)"
+          if [ "$verdict" != breaking ]; then
+            echo "::error::removing '$dropped' from the command vocabulary published at" \
+              "floor $floor read '${verdict:-<nothing>}' instead of breaking, so this gate" \
+              "cannot refuse a removal and the verdict consumed by the next step is worth" \
+              "nothing. Fix the check; do not touch the baseline."
+            false
+          fi
+          echo "Removing '$dropped' is refused as breaking, so this gate can refuse."
+
       - name: Compare against the released contract
         run: |
           set -euo pipefail
