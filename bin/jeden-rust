@@ -16,7 +16,7 @@ STADO_BOOTSTRAP="$ROOT/scripts/run-with-stado.sh"
 
 needs_model_runtime() {
   case "${1:-}" in
-    ""|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token|probierz) return 0 ;;
+    ""|interactive|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token|probierz) return 0 ;;
     *) return 1 ;;
   esac
 }

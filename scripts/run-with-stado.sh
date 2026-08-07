@@ -37,6 +37,11 @@ fi
 # reads and event collection at the integration boundary. The client has its
 # own consumer and grant file, so the agent capability read above is never
 # reused for it.
+#
+# The endpoint itself is read by the binary from ~/.jeden/.env, which this shell
+# never parses, so the grant file — not an exported URL — is what decides
+# whether the credential is fetched. Without the endpoint the binary stays on
+# OfflineTransport and the injected value is simply unused.
 onboarding_endpoint="${STADO_INTEGRATION_API_URL:-${JEDEN_STADO_INTEGRATION_API_URL:-}}"
 onboarding_item="${JEDEN_ONBOARDING_INTEGRATION_ITEM:-jeden-integration-api}"
 onboarding_consumer="${JEDEN_ONBOARDING_SKARBIEC_CONSUMER:-jeden-onboarding-client}"
@@ -44,28 +49,25 @@ onboarding_token_file="${JEDEN_ONBOARDING_SKARBIEC_TOKEN_FILE:-$HOME/.stado/jede
 
 if [[ -n "$onboarding_endpoint" ]]; then
   export STADO_INTEGRATION_API_URL="$onboarding_endpoint"
-  if [[ -z "${JEDEN_STADO_INTEGRATION_TOKEN:-}" ]]; then
-    if [[ ! -f "$onboarding_token_file" ]]; then
-      printf '%s\n' \
-        "Jeden launcher found no onboarding grant at $onboarding_token_file; the first-use journey stays offline" \
-        >/dev/stderr
-    elif ! JEDEN_STADO_INTEGRATION_TOKEN="$(
-      WC_SKARBIEC_CONSUMER="$onboarding_consumer" \
-      WC_SKARBIEC_TOKEN_FILE="$onboarding_token_file" \
-        "$stado_bin" credentials get --field value "$onboarding_item"
-    )"; then
-      unset JEDEN_STADO_INTEGRATION_TOKEN
-      printf '%s\n' \
-        "Jeden launcher could not read $onboarding_item for Skarbiec consumer $onboarding_consumer; the first-use journey stays offline" \
-        >/dev/stderr
-    elif [[ -z "$JEDEN_STADO_INTEGRATION_TOKEN" ]]; then
-      unset JEDEN_STADO_INTEGRATION_TOKEN
-      printf '%s\n' \
-        "Jeden onboarding integration credential is empty; the first-use journey stays offline" \
-        >/dev/stderr
-    else
-      export JEDEN_STADO_INTEGRATION_TOKEN
-    fi
+fi
+
+if [[ -z "${JEDEN_STADO_INTEGRATION_TOKEN:-}" && -f "$onboarding_token_file" ]]; then
+  if ! JEDEN_STADO_INTEGRATION_TOKEN="$(
+    WC_SKARBIEC_CONSUMER="$onboarding_consumer" \
+    WC_SKARBIEC_TOKEN_FILE="$onboarding_token_file" \
+      "$stado_bin" credentials get --field token "$onboarding_item"
+  )"; then
+    unset JEDEN_STADO_INTEGRATION_TOKEN
+    printf '%s\n' \
+      "Jeden launcher could not read $onboarding_item for Skarbiec consumer $onboarding_consumer; the first-use journey stays offline" \
+      >/dev/stderr
+  elif [[ -z "$JEDEN_STADO_INTEGRATION_TOKEN" ]]; then
+    unset JEDEN_STADO_INTEGRATION_TOKEN
+    printf '%s\n' \
+      "Jeden onboarding integration credential is empty; the first-use journey stays offline" \
+      >/dev/stderr
+  else
+    export JEDEN_STADO_INTEGRATION_TOKEN
   fi
 fi
 export WISENT_APP_AGENT_ID="${WISENT_APP_AGENT_ID:-wisent-app}"
