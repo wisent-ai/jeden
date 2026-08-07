@@ -8,6 +8,30 @@ skarbiec_token_file="${JEDEN_SKARBIEC_TOKEN_FILE:-$HOME/.stado/local-operator-sk
 stado_bin="${JEDEN_STADO_BIN:-stado}"
 jeden_bin="${JEDEN_BIN:-jeden}"
 
+# The gateway verifies this signature by reading the item out of the Skarbiec
+# vault itself, so the value that authenticates is the item's current revision
+# and nothing else. On this workstation the local Skarbiec service answers the
+# same coordinate with an older revision -- both CLI builds read the vault's
+# current value while the service returns a superseded one -- and a caller that
+# signs with the service's answer is refused by a verifier behaving correctly,
+# with a 401 that names neither side.
+#
+# So the vault is asked first and the managed path stays as the fallback: one
+# authority for the value, the same one the far end checks against, and hosts
+# where the vault is not readable directly keep working.
+skarbiec_bin="${JEDEN_SKARBIEC_BIN:-$HOME/.stado/bin/skarbiec}"
+vault_file="${SKARBIEC_VAULT_FILE:-$HOME/.stado/skarbiec.vault.json}"
+
+if [[ -z "${WISENT_APP_AGENT_AUTH_SECRET:-}" && -x "$skarbiec_bin" && -f "$vault_file" ]]; then
+  WISENT_APP_AGENT_AUTH_SECRET="$(
+    SKARBIEC_VAULT_FILE="$vault_file" "$skarbiec_bin" get "$agent_secret_item" 2>/dev/null |
+      "${JEDEN_PYTHON_BIN:-python3}" -c 'import json,sys; print((json.load(sys.stdin).get("fields") or {}).get("value",""))' 2>/dev/null
+  )" || WISENT_APP_AGENT_AUTH_SECRET=""
+  if [[ -n "$WISENT_APP_AGENT_AUTH_SECRET" ]]; then
+    export WISENT_APP_AGENT_AUTH_SECRET
+  fi
+fi
+
 if [[ -z "${WISENT_APP_AGENT_AUTH_SECRET:-}" ]]; then
   if ! WISENT_APP_AGENT_AUTH_SECRET="$(
     WC_SKARBIEC_CONSUMER="$skarbiec_consumer" \
