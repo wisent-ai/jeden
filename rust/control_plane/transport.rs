@@ -89,6 +89,19 @@ impl ReqwestTransport {
         Arc::new(Self { client })
     }
 }
+/// Render an error together with everything underneath it.
+fn describe(error: reqwest::Error) -> String {
+    let mut rendered = error.to_string();
+    let mut source: Option<&(dyn std::error::Error + 'static)> =
+        std::error::Error::source(&error);
+    while let Some(cause) = source {
+        rendered.push_str(": ");
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    rendered
+}
+
 impl ControlPlaneTransport for ReqwestTransport {
     fn execute(&self, request: TransportRequest) -> Result<TransportResponse, String> {
         let mut builder = self.client.request(request.method, request.url);
@@ -100,7 +113,12 @@ impl ControlPlaneTransport for ReqwestTransport {
                 .header("content-type", "application/json")
                 .body(body);
         }
-        let response = builder.send().map_err(|error| error.to_string())?;
+        // `reqwest::Error`'s own Display stops at "error sending request for
+        // url (...)", which names the destination and withholds the reason. The
+        // cause chain underneath distinguishes a refused connect from a timeout
+        // from a closed connection, and without it every one of them reads as
+        // the network being down.
+        let response = builder.send().map_err(describe)?;
         if response
             .content_length()
             .is_some_and(|length| length > request.max_response_bytes)
