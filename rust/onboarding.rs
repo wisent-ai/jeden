@@ -1,6 +1,6 @@
 use wisent_onboarding_client::{
     bundle_from_canonical, FileStorage, JourneyClient, ProgressStatus, ScopeKind,
-    StadoTransport, Transport,
+    IntegrationTransport, Transport,
 };
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -41,7 +41,7 @@ fn transport() -> Box<dyn Transport> {
     let endpoint = env::var("STADO_INTEGRATION_API_URL").unwrap_or_default();
     let token = env::var("JEDEN_STADO_INTEGRATION_TOKEN").unwrap_or_default();
     if !endpoint.trim().is_empty() && !token.trim().is_empty() {
-        if let Ok(transport) = StadoTransport::new(endpoint.trim(), token) {
+        if let Ok(transport) = IntegrationTransport::new(endpoint.trim(), token) {
             return Box::new(transport);
         }
     }
