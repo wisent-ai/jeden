@@ -2,6 +2,7 @@
 set -euo pipefail
 
 agent_secret_item="${JEDEN_AGENT_SECRET_NAME:-agent:wisent-app}"
+model_router_item="${JEDEN_MODEL_ROUTER_ITEM:-jeden-model-router}"
 skarbiec_consumer="${JEDEN_SKARBIEC_CONSUMER:-local-operator}"
 skarbiec_token_file="${JEDEN_SKARBIEC_TOKEN_FILE:-$HOME/.stado/local-operator-skarbiec-token}"
 stado_bin="${JEDEN_STADO_BIN:-stado}"
@@ -25,11 +26,34 @@ if [[ -z "${WISENT_APP_AGENT_AUTH_SECRET:-}" ]]; then
   export WISENT_APP_AGENT_AUTH_SECRET
 fi
 
-# BRAMA_TOKEN is optional. When the configured Brama deployment requires a
-# bearer, its trusted launcher must inject BRAMA_TOKEN directly; this launcher
-# must not use the agent's Skarbiec capability to read an unrelated bearer.
+# BRAMA_TOKEN is optional to this launcher and required by the binary whenever
+# the configured Brama demands a bearer, which the fleet gateway does: an
+# unauthenticated /v1/models there answers 401. This is the trusted launcher, so
+# it injects the bearer rather than leaving the binary to fail with a message
+# naming a credential and no way to obtain it.
+#
+# The prohibition this replaces still holds: the agent capability read above is
+# for `agent:wisent-app` and is never reused. The bearer is a separate item read
+# under the operator's own consumer, which is the identity the vault grants
+# `read jeden-model-router#token` to -- `jeden-model-router-client`, the
+# consumer an earlier launcher used, holds no such grant and answers 403.
 if [[ -z "${BRAMA_URL:-}" && -n "${JEDEN_BRAMA_URL:-}" ]]; then
   export BRAMA_URL="$JEDEN_BRAMA_URL"
+fi
+
+if [[ -z "${BRAMA_TOKEN:-}" ]]; then
+  if BRAMA_TOKEN="$(
+    WC_SKARBIEC_CONSUMER="$skarbiec_consumer" \
+    WC_SKARBIEC_TOKEN_FILE="$skarbiec_token_file" \
+      "$stado_bin" credentials get --field token "$model_router_item"
+  )" && [[ -n "$BRAMA_TOKEN" ]]; then
+    export BRAMA_TOKEN
+  else
+    unset BRAMA_TOKEN
+    printf '%s\n' \
+      "Jeden launcher could not read $model_router_item for Skarbiec consumer $skarbiec_consumer; a Brama that requires a bearer will refuse this run" \
+      >/dev/stderr
+  fi
 fi
 
 # Onboarding telemetry is optional. The first-use journey always runs from the
