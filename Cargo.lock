@@ -3427,6 +3427,7 @@ checksum = "589f6da84c646204747d1270a2a5661ea66ed1cced2631d546fdfb155959f9ec"
 [[package]]
 name = "wisent-onboarding-client"
 version = "0.1.0"
+source = "git+https://github.com/wisent-ai/echo-web?rev=e2e4bdc08b336d41818a8589527cc6595cfc6c65#e2e4bdc08b336d41818a8589527cc6595cfc6c65"
 dependencies = [
  "async-trait",
  "reqwest",
