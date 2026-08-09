@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "product": "jeden",
+  "releases": true,
+  "version_source": {
+    "kind": "regex",
+    "path": "Cargo.toml",
+    "pattern": "(?m)^version\\s*=\\s*\"(?<version>[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?)\"\\s*$"
+  },
+  "platforms": {
+    "darwin-arm64": {
+      "runner_platform": "darwin-arm64",
+      "quality": [
+        {
+          "name": "release-compile",
+          "argv": ["scripts/release/quality-build.sh"]
+        }
+      ],
+      "build": {
+        "argv": ["scripts/release/build.sh"]
+      },
+      "stage": {
+        ".wisent-release/darwin-arm64/jeden": "jeden",
+        ".wisent-release/darwin-arm64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
+        ".wisent-release/darwin-arm64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
+        ".wisent-release/darwin-arm64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+      }
+    },
+    "linux-amd64": {
+      "runner_platform": "linux-amd64",
+      "quality": [
+        {
+          "name": "release-compile",
+          "argv": ["scripts/release/quality-build.sh"]
+        }
+      ],
+      "build": {
+        "argv": ["scripts/release/build.sh"]
+      },
+      "stage": {
+        ".wisent-release/linux-amd64/jeden": "jeden",
+        ".wisent-release/linux-amd64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
+        ".wisent-release/linux-amd64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
+        ".wisent-release/linux-amd64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+      }
+    }
+  },
+  "runtime": {
+    "binary": "jeden",
+    "launcher": "jeden",
+    "config_schema": 3,
+    "state_schema": 2,
+    "minimum_stado_version": "0.6.1",
+    "rollback_compatible_with": []
+  },
+  "promotion": {
+    "channels": ["candidate", "stable"],
+    "reconcile": true
+  }
+}
