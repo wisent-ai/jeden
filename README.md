@@ -34,7 +34,7 @@ Included capabilities are listed under [Current scope](#current-scope). Explicit
 - Jeden does not provide model inference itself; it uses Brama or another compatible OpenAI-style endpoint and caller-supplied credentials.
 - Jeden never handles cardholder data; commercial billing is owned by Wisent Platform Billing.
 
-Supported environments: the release pipeline builds signed canary artifacts for `aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, and `x86_64-pc-windows-msvc`. Other platforms are build-from-source only.
+Supported promoted environments: Stado builds `darwin-arm64` and `linux-amd64` from `.wisent-release.json`. Jeden still supports the existing `x86_64-pc-windows-msvc` output, but Stado v1 has no Windows runner coordinate; `scripts/release/package-windows.sh` refuses rather than dropping Windows or substituting different bytes.
 
 Operator-managed and external: the Brama URL and signing credential (Stado/Skarbiec-managed), Wisent Platform Billing configuration, and MCP server configuration.
 
@@ -146,7 +146,7 @@ jeden probierz run tui --app jeden \
 The onboarding journey performs one real signed agent turn and stores its
 source-bound result and analysis in the Probierz evidence store.
 
-`jeden doctor` diagnoses missing prerequisites and degraded services. Signed canary artifacts are published to GitHub Releases for the three supported targets, and `jeden update` moves an installed binary along the verified channel; see [Release automation](#release-automation).
+`jeden doctor` diagnoses missing prerequisites and degraded services. Stado publishes immutable candidate and stable archives for the supported fleet coordinates, and `jeden update` moves an installed binary along a verified channel; see [Release automation](#release-automation).
 
 Common setup failures and recovery:
 
@@ -275,13 +275,11 @@ For model calls, Jeden discovers active Weles subscriptions and their quota snap
 
 ## Release automation
 
-The version in `Cargo.toml` is the SemVer floor. Local and development builds identify their source as `<base>+dev.<commits-since-base>.<short-sha>`, with `.dirty` appended for a modified tree; release builds may set `JEDEN_BUILD_VERSION`, and the canary workflow's generated version takes precedence unchanged.
+The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and passes that exact value, source directory, output directory, and platform to the checked-in `scripts/release/*` entrypoints; no run number or provider identity participates in the version.
 
-Every successful `build-ci` run caused by a push to this repository's `main` branch automatically launches the signed canary workflow for the exact CI-tested commit. The generated version advances the crate's patch component and adds a unique prerelease identity: `X.Y.(Z+1)-canary.<run>.<attempt>.sha<commit>`. Tag-triggered and manually dispatched canaries remain supported. Stable promotion remains manual and requires immutable evidence digests.
+Each supported fleet runner performs a locked release compile and stages the real `jeden` executable with SPDX SBOM, in-toto/SLSA provenance, and a DSSE evidence payload. Stado archives the declared stage mapping, records the source and build receipts, and obtains release signatures from Skarbiec-owned authority before candidate or stable promotion. Stable promotion reconciles the declared runtime without rebuilding bytes.
 
-After the canary evidence matrix passes, the same workflow also advances the stable SemVer automatically: it commits a `[skip ci]` bump of the `Cargo.toml` floor to `X.Y.(Z+1)` on `main` and tags that commit `vX.Y.(Z+1)`. The tag step is idempotent (an existing tag ends the job quietly) and `[skip ci]` keeps the bump commit from retriggering the pipeline. As a result every green `main` run yields one canary artifact and moves both the in-repo version floor and the stable tag forward by one patch — no manual versioning steps.
-
-Automatic canary publication fails closed unless the release authority is configured through `RELEASE_STORE_BASE_URL`, the release OIDC exchange settings, canary KMS signing settings and public keys, and stable updater trust-root identifiers. The workflow never falls back to unsigned publication.
+`darwin-arm64` and `linux-amd64` are canonical promoted outputs. The existing MSVC Windows output remains an explicit prerequisite: until Stado has a Windows fleet runner, `scripts/release/package-windows.sh` exits with a refusal and the manifest does not pretend that a Darwin or Linux runner produced Windows bytes.
 
 ## Configuration and context
 
@@ -343,7 +341,7 @@ The complete native action, tool-call, selector, and anchored-patch contract is 
 
 ## Project status and support
 
-- **Maturity**: public development source at SemVer `0.x` — there is no stable public contract yet. The released command vocabulary is frozen in `released-surface.json` and gated by the version-check workflow.
-- **Channels**: `canary` (published per green `main` run) and `stable` (manual promotion requiring immutable evidence digests); both channels ship signed artifacts when enabled.
-- **Distribution**: source is available under the Apache License 2.0; no supported public binary channel is currently promised.
+- **Maturity**: public development source at SemVer `0.x` — there is no stable public contract yet. The released command vocabulary is frozen in `released-surface.json`.
+- **Channels**: Stado owns immutable `candidate` and `stable` promotion and reconciliation; product scripts only build and stage deterministic bytes and evidence.
+- **Distribution**: source is available under the Apache License 2.0; promoted Darwin ARM64 and Linux AMD64 archives are identified by Stado release receipts.
 - **Support and security reports**: use the public `wisent-ai/jeden` issue tracker for non-sensitive reports and GitHub Security Advisories for vulnerabilities.
