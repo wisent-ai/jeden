@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "releases": true,
+  "type": "signed canary and stable multi-platform binary archives",
+  "manifest": "manifest.dsse.json",
+  "publisher": [
+    "GitHub Releases",
+    "Stado release store"
+  ]
+}

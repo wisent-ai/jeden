@@ -20,6 +20,9 @@ env:
 
 jobs:
 
+  rust-gates:
+    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@2de57851b29b57da01fff370817a45ad121c93bc
+
   native-platform:
     name: Native build (${{ matrix.os }})
     strategy:
