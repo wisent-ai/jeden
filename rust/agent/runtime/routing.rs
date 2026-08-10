@@ -270,10 +270,20 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         route_descriptors(routing.get("contextPromotions"), "contextPromotions");
     let endpoint = env::var("BRAMA_URL")
         .ok()
-        .filter(|value| !value.trim().is_empty());
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("STADO_MODEL_ROUTER_URL")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        });
     let bearer_token = env::var("BRAMA_TOKEN")
         .ok()
-        .filter(|value| !value.trim().is_empty());
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("STADO_MODEL_ROUTER_TOKEN")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        });
     let selected_model = args
         .model
         .clone()
