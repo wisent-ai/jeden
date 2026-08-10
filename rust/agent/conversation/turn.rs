@@ -34,8 +34,47 @@ fn distill_goal(router: &ChatConfig, task: &str) -> Option<String> {
         json!({ "role": "system", "content": GOAL_SYSTEM_PROMPT }),
         json!({ "role": "user", "content": format!("<user>{task}</user>") }),
     ];
+    if let Some(local) = local_goal_config() {
+        // A configured local goal endpoint is exclusive: falling back to Brama
+        // on its failure would silently bill the subscription the operator
+        // configured it to avoid (Omp issue #3187's lesson). No goal is better
+        // than a billed one.
+        let completion = chat_completion(&local, ask, Some(1024), &[]).ok()?;
+        return normalize_goal(&completion.content);
+    }
     let completion = chat_completion(router, ask, Some(1024), &[]).ok()?;
     normalize_goal(&completion.content)
+}
+
+/// OpenAI-compatible local endpoint for the dedicated goal student (a small
+/// Qwen fine-tuned by `training/goal-model/`), e.g. llama-server on loopback.
+/// Configured via `JEDEN_GOAL_MODEL_URL` (plus optional
+/// `JEDEN_GOAL_MODEL_NAME`); the server ignores the Brama auth headers.
+fn local_goal_config() -> Option<ChatConfig> {
+    let url = std::env::var("JEDEN_GOAL_MODEL_URL").ok()?.trim().to_string();
+    if url.is_empty() {
+        return None;
+    }
+    let model = std::env::var("JEDEN_GOAL_MODEL_NAME")
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| "goal-model".to_string());
+    Some(ChatConfig {
+        url,
+        bearer_token: String::new(),
+        agent_id: String::new(),
+        secret: String::new(),
+        model,
+        service_tier: String::new(),
+        retry: crate::model_router::RetryPolicy::default(),
+        fallbacks: Vec::new(),
+        context_promotions: Vec::new(),
+        image_capable_models: BTreeSet::new(),
+        subscription_pool: None,
+        subscription_cooldown_path: None,
+        config_error: None,
+    })
 }
 
 fn normalize_goal(raw: &str) -> Option<String> {
