@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "product": "jeden",
+  "releases": true,
+  "version_source": {
+    "kind": "regex",
+    "path": "Cargo.toml",
+    "pattern": "(?m)^version\\s*=\\s*\"(?<version>[0-9A-Za-z.+-]+)\"\\s*$"
+  },
+  "platforms": {
+    "linux-amd64": {
+      "runner_platform": "linux-amd64",
+      "quality": [],
+      "build": {
+        "argv": [
+          "bash",
+          "release/stado-build.sh",
+          "--bin",
+          "jeden",
+          "--bin",
+          "jeden-quality-report",
+          "--bin",
+          "jeden-reference-benchmark",
+          "--bin",
+          "jeden-sandbox-helper"
+        ]
+      },
+      "stage": {
+        ".wisent-output/bin/jeden": "bin/jeden",
+        ".wisent-output/bin/jeden-quality-report": "bin/jeden-quality-report",
+        ".wisent-output/bin/jeden-reference-benchmark": "bin/jeden-reference-benchmark",
+        ".wisent-output/bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
+        ".wisent-output/evidence/DIGESTS": "evidence/DIGESTS"
+      }
+    }
+  },
+  "promotion": {
+    "channels": [
+      "candidate",
+      "stable"
+    ],
+    "reconcile": false
+  }
+}
