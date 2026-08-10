@@ -228,6 +228,9 @@ impl AgentSession {
         let approve_inner = self.inner.clone();
         let approve_id = request_id.clone();
         let approve_error = event_error.clone();
+        let goal_inner = self.inner.clone();
+        let goal_id = request_id.clone();
+        let goal_error = event_error.clone();
 
         let mut hooks = agent::RunHooks {
             cancel,
@@ -256,9 +259,20 @@ impl AgentSession {
                     }
                 }
             }),
+            goal: Box::new(move |text| {
+                if let Err(error) = goal_inner.emit(SessionEvent {
+                    request_id: goal_id.clone(),
+                    event: SessionEventKind::Goal {
+                        text: text.to_string(),
+                    },
+                }) {
+                    if let Ok(mut slot) = goal_error.lock() {
+                        *slot = Some(error);
+                    }
+                }
+            }),
             ask_user: Some(Box::new(move |question, options| {
-                let token = ask_inner.interaction_token("elicit");
-                ask_inner.emit(SessionEvent {
+                let token = ask_inner.interaction_token("elicit");                ask_inner.emit(SessionEvent {
                     request_id: ask_id.clone(),
                     event: SessionEventKind::Elicitation {
                         token: token.clone(),

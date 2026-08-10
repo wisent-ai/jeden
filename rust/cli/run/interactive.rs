@@ -243,6 +243,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             interactive: ctx.interactive,
             progress: Box::new(|message: &str| (ctx.progress)(message)),
             stream: Box::new(|piece: &str| (ctx.stream)(piece)),
+            goal: Box::new(|goal: &str| (ctx.progress)(goal)),
             ask_user: ctx.ask_user.map(|ask_user| {
                 Box::new(move |question: &str, options: &[String]| ask_user(question, options))
                     as Box<dyn Fn(&str, &[String]) -> Result<String, String>>
