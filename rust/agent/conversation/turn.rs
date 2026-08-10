@@ -15,6 +15,12 @@ impl Conversation {
         } else {
             apply_mode_instructions(&args.cwd, task)?
         };
+        if let Some(goal) = args.goal.as_deref().map(str::trim).filter(|goal| !goal.is_empty()) {
+            effective_task = format!(
+                "Active work goal for this turn: {}. Keep every step aligned with this goal and report completed work against it.\n\n{}",
+                goal, effective_task
+            );
+        }
         if !args.model_only {
             let hook_context =
                 crate::hooks::user_prompt_submit(&args.cwd, task, args.allow_command);
@@ -61,6 +67,7 @@ impl Conversation {
                 "maxSteps": args.max_steps,
                 "maxTokens": args.max_tokens,
                 "modelOnly": args.model_only,
+                "goal": args.goal,
             }),
         )?;
 

@@ -70,6 +70,7 @@ pub(crate) struct Args {
     pub(crate) allow_write: bool,
     pub(crate) allow_command: bool,
     pub(crate) yolo: bool,
+    pub(crate) goal: Option<String>,
     pub(crate) model_only: bool,
     pub(crate) json: bool,
     pub(crate) resume_session: Option<PathBuf>,

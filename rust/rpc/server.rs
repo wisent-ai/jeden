@@ -307,6 +307,13 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         .map(str::to_string)
         .unwrap_or_else(|| wire_id(&id));
     let prompt = string_param(&request.params, "prompt")?;
+    let goal = request
+        .params
+        .get("goal")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|goal| !goal.is_empty())
+        .map(str::to_string);
     let session = state
         .sessions
         .lock()
@@ -343,7 +350,11 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
             }
         }
     });
-    let result = session.prompt(PromptRequest { request_id, prompt });
+    let result = session.prompt(PromptRequest {
+        request_id,
+        prompt,
+        goal,
+    });
     prompt_done.store(true, Ordering::Release);
     forwarder
         .join()
