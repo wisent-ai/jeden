@@ -309,6 +309,7 @@ impl AcpState {
             let result = session.prompt(JedenPromptRequest {
                 request_id: request_id.clone(),
                 prompt,
+                goal: None,
             });
             prompt_done.store(true, Ordering::Release);
             let _ = forwarder.join();

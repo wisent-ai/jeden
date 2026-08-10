@@ -135,6 +135,7 @@ impl SessionBackend for AgentSessionFacade {
         let result = session.prompt(PromptRequest {
             request_id: request_id.to_owned(),
             prompt: prompt.to_owned(),
+            goal: None,
         });
         if result.is_err() {
             emit(

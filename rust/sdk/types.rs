@@ -39,6 +39,10 @@ impl Default for SessionOptions {
 pub struct PromptRequest {
     pub request_id: String,
     pub prompt: String,
+    /// Exact objective for this turn. When present, Jeden keeps the model's work
+    /// aligned to it and records it separately from the effective prompt.
+    #[serde(default)]
+    pub goal: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

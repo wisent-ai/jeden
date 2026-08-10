@@ -209,7 +209,11 @@ impl AgentSession {
             .lock()
             .map_err(|_| "conversation lock poisoned".to_string())?;
         let conversation = conversation_guard.as_mut().ok_or("session disposed")?;
-        let args = args_from_options(&self.inner.options, request.prompt.clone());
+        let args = args_from_options(
+            &self.inner.options,
+            request.prompt.clone(),
+            request.goal.clone(),
+        );
         let event_error = Arc::new(Mutex::new(None::<String>));
         let request_id = request.request_id.clone();
 
@@ -421,7 +425,7 @@ fn resolve_session_path(value: &Path) -> PathBuf {
     }
 }
 
-fn args_from_options(options: &SessionOptions, prompt: String) -> Args {
+fn args_from_options(options: &SessionOptions, prompt: String, goal: Option<String>) -> Args {
     Args {
         command: "run".into(),
         cwd: options.cwd.clone(),
@@ -434,6 +438,7 @@ fn args_from_options(options: &SessionOptions, prompt: String) -> Args {
         model_only: false,
         json: false,
         resume_session: None,
+        goal,
         positionals: vec![prompt],
     }
 }
