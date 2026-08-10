@@ -114,6 +114,12 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
                 terminal: true,
             }
         }
+        SessionEventKind::Goal { text } => MappedEvent {
+            update: Some(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+                format!("Goal: {text}").into(),
+            ))),
+            terminal: false,
+        },
         SessionEventKind::Error { .. } => MappedEvent {
             update: None,
             terminal: true,

@@ -418,6 +418,7 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             false,
         ),
         SessionEventKind::Result { text } => ("result".into(), json!({"text": text}), true),
+        SessionEventKind::Goal { text } => ("goal".into(), json!({"text": text}), false),
         SessionEventKind::Error { message } => ("error".into(), json!({"message": message}), true),
     }
 }

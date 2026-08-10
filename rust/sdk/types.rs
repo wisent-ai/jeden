@@ -75,6 +75,9 @@ pub enum SessionEventKind {
     Result {
         text: String,
     },
+    Goal {
+        text: String,
+    },
     Error {
         message: String,
     },
