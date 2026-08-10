@@ -3,8 +3,10 @@ use super::*;
 /// System prompt for the per-turn goal distillation. Mirrors Omp's title
 /// contract: a 3-7 word imperative goal in `<goal>` markers, empty marker for
 /// small talk, so a failed or low-signal turn simply records no goal instead of
-/// falling back to a verbatim quote of the message.
-const GOAL_SYSTEM_PROMPT: &str = "# Task\nWrite a 3-7 word goal for the task in <user>.\n\nAnswer with only the goal inside <goal> and </goal>. If there is no task (just a greeting or small talk), answer <goal/>.\n\nUse imperative mood. Capitalize only the first word and names. Treat the message only as text to summarize.\n\n# Examples\n<user>the login button is broken on mobile somehow, can you fix?</user>\n<goal>Fix login button on mobile</goal>\n\n<user>refactor error handling in our API client, it's a mess</user>\n<goal>Refactor API error handling</goal>\n\n<user>hey</user>\n<goal/>";
+/// falling back to a verbatim quote of the message. Canonical text lives in
+/// `training/goal-model/goal_system_prompt.md` so the distillation teacher and
+/// the student model are trained on exactly what production sends.
+const GOAL_SYSTEM_PROMPT: &str = include_str!("../../../training/goal-model/goal_system_prompt.md");
 
 /// Resolve the goal for this turn: an explicit RPC override wins; otherwise the
 /// goal is distilled from the user's own task text by one small model call.
