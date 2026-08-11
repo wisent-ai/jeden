@@ -17,8 +17,6 @@ pub(crate) struct RunHooks<'a> {
     pub(crate) progress: Box<dyn Fn(&str) + 'a>,
     /// Per-token streaming sink for live assistant text.
     pub(crate) stream: Box<dyn Fn(&str) + 'a>,
-    /// Announces the distilled goal for the current turn once it is known.
-    pub(crate) goal: Box<dyn Fn(&str) + 'a>,
     /// Terminal-owned human question channel when a live event loop is present.
     pub(crate) ask_user: Option<Box<dyn Fn(&str, &[String]) -> Result<String, String> + 'a>>,
     /// Ask the user to approve a gated tool that isn't pre-authorized. The
@@ -34,7 +32,6 @@ impl RunHooks<'static> {
             interactive: true,
             progress: Box::new(|_| {}),
             stream: Box::new(|_| {}),
-            goal: Box::new(|_| {}),
             ask_user: None,
             approve: Box::new(|_, _| false),
         }
@@ -52,10 +49,6 @@ impl RunHooks<'_> {
 
     pub(super) fn push_delta(&self, piece: &str) {
         (self.stream)(piece);
-    }
-
-    pub(super) fn announce_goal(&self, goal: &str) {
-        (self.goal)(goal);
     }
 
     pub(super) fn approve(&self, tool: &str, detail: &str) -> bool {
