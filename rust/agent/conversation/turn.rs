@@ -41,22 +41,27 @@ fn distill_goal(router: &ChatConfig, task: &str) -> Option<String> {
         // on its failure would silently bill the subscription the operator
         // configured it to avoid (Omp issue #3187's lesson). No goal is better
         // than a billed one.
-        let completion = chat_completion(&local, ask, Some(1024), &[]).ok()?;
+        let completion = chat_completion(&local, ask, Some(64), &[]).ok()?;
         return normalize_goal(&completion.content);
     }
     let completion = chat_completion(router, ask, Some(1024), &[]).ok()?;
     normalize_goal(&completion.content)
 }
 
-/// OpenAI-compatible local endpoint for the dedicated goal student (a small
-/// Qwen fine-tuned by `training/goal-model/`), e.g. llama-server on loopback.
-/// Configured via `JEDEN_GOAL_MODEL_URL` (plus optional
-/// `JEDEN_GOAL_MODEL_NAME`); the server ignores the Brama auth headers.
+/// OpenAI-compatible endpoint for the dedicated goal student. An explicit
+/// `JEDEN_GOAL_MODEL_URL` wins; otherwise installing the canonical GGUF under
+/// `~/.jeden/models/goal-model/` activates the managed loopback service.
 fn local_goal_config() -> Option<ChatConfig> {
-    let url = std::env::var("JEDEN_GOAL_MODEL_URL").ok()?.trim().to_string();
-    if url.is_empty() {
-        return None;
-    }
+    let configured = std::env::var("JEDEN_GOAL_MODEL_URL")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let url = configured.or_else(|| {
+        crate::dirs_home()
+            .join(".jeden/models/goal-model/goal-qwen3-0.6b-q8_0.gguf")
+            .is_file()
+            .then(|| "http://127.0.0.1:8377/v1".to_string())
+    })?;
     let model = std::env::var("JEDEN_GOAL_MODEL_NAME")
         .ok()
         .map(|name| name.trim().to_string())
