@@ -10,7 +10,11 @@
 
 # Jeden: The Ultimate Self-Improving Coding Agent with Internet Access, Embedded Secret Management, QA, and More
 
-Jeden is Wisent's local coding-agent harness: it executes coding tasks in a developer's terminal against Wisent-controlled model routing while keeping policy, tools, sessions, and memory under local control.
+The Ultimate AI Agent for Autonomous Company Building.
+
+Jeden is a harness for AI Agents built from real-life experiences. It routes your models intelligently, manages credentials, understands how to pursue, complete and verify tasks over time. Turns your AI into a 10x harness. Compatible with OpenAI, Anthropic, Kimi and any other model.
+
+The Ultimate Self-Improving AI Harness. Delivered by the Wisent Team and incorporating our custom solutions into one agentic form. Experience the power of Weles (Browser Use), Skarbiec (Credential Management), Stado (Fleet Management), Tama (Automatic Blocks, Sandboxing and Hooks), Probierz (Autonomous QA), Most (Connectors), Brama (Model Routing) and Oko (Team Strategy Management Tool).
 
 ## Problem and intended users
 
