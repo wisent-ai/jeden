@@ -20,6 +20,9 @@ env:
 
 jobs:
 
+  rust-gates:
+    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@2de57851b29b57da01fff370817a45ad121c93bc
+
   native-platform:
     name: Native build (${{ matrix.os }})
     strategy:
@@ -35,3 +38,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Check native library and binaries
         run: cargo check --locked --lib --bins
+
+  tag:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [rust-gates, native-platform]
+    permissions:
+      contents: write
+    uses: wisent-ai/quality-control/.github/workflows/tag-on-manifest-bump.yml@897485548846d7dfe38832b6b9a38212cdd1685a
+    with:
+      manifest: Cargo.toml

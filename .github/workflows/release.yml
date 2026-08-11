@@ -14,56 +14,6 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  bump-version:
-    needs: build-evidence
-    if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main' &&
-      github.event.workflow_run.head_repository.full_name == github.repository
-    name: Advance stable SemVer automatically
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write
-    steps:
-      - name: Check out main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Tag v<next> and bump the Cargo.toml floor
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email 'github-actions[bot]@users.noreply.github.com'
-          base="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
-          if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
-            echo '::error::Cargo package version must be a stable SemVer for automatic versioning'
-            exit 1
-          fi
-          next="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((10#${BASH_REMATCH[3]} + 1))"
-          if git rev-parse -q --verify "refs/tags/v$next" >/dev/null; then
-            echo "Tag v$next already exists; nothing to do."
-            exit 0
-          fi
-          python3 - "$next" <<'PY'
-          import pathlib, re, sys
-          path = pathlib.Path('Cargo.toml')
-          text = path.read_text(encoding='utf-8')
-          updated, count = re.subn(r'(?m)^version = "[0-9]+\.[0-9]+\.[0-9]+"$', f'version = "{sys.argv[1]}"', text, count=1)
-          if count != 1:
-              raise SystemExit('Cargo.toml version line not found exactly once')
-          path.write_text(updated, encoding='utf-8')
-          PY
-          git commit -am "chore(release): bump base version to $next [skip ci]"
-          git tag -a "v$next" -m "Stable $next (automatic; green contractual-ci at ${{ github.event.workflow_run.head_sha }})"
-          git push origin main
-          git push origin "v$next"
 
   build-evidence:
     if: >-
