@@ -19,13 +19,17 @@ Output: labeled.jsonl (adds goal, goal_source=teacher:<model>, gold=true for Omp
 """
 
 import hashlib
+import http.client
 import json
 import os
 import re
+import socket
+import threading
 import time
 import urllib.error
 import sys
 import urllib.request
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -45,6 +49,19 @@ CONCURRENCY = int(os.environ.get("GOAL_TEACHER_CONCURRENCY", "24"))
 HTTP_ATTEMPTS = int(os.environ.get("GOAL_TEACHER_HTTP_ATTEMPTS", "8"))
 HTTP_TIMEOUT = int(os.environ.get("GOAL_TEACHER_HTTP_TIMEOUT", "45"))
 LABEL_CACHE = Path(os.environ.get("GOAL_LABEL_CACHE", ""))
+TEACHER_URL = urllib.parse.urlsplit(BASE_URL)
+THREAD_STATE = threading.local()
+CONNECT_IP = os.environ.get("GOAL_TEACHER_CONNECT_IP", "").strip()
+if CONNECT_IP:
+    teacher_host = urllib.parse.urlsplit(BASE_URL).hostname
+    system_getaddrinfo = socket.getaddrinfo
+
+    def teacher_getaddrinfo(host, port, *args, **kwargs):
+        if host == teacher_host:
+            host = CONNECT_IP
+        return system_getaddrinfo(host, port, *args, **kwargs)
+
+    socket.getaddrinfo = teacher_getaddrinfo
 
 GOAL_RE = re.compile(r"<goal>(.*?)</goal>", re.DOTALL)
 
@@ -82,6 +99,50 @@ def load_label_cache():
     return cached
 
 
+def close_teacher_connection():
+    connection = getattr(THREAD_STATE, "connection", None)
+    if connection is not None:
+        connection.close()
+        THREAD_STATE.connection = None
+
+
+def teacher_request(body):
+    connection = getattr(THREAD_STATE, "connection", None)
+    if connection is None:
+        connection_type = (
+            http.client.HTTPSConnection
+            if TEACHER_URL.scheme == "https"
+            else http.client.HTTPConnection
+        )
+        connection = connection_type(
+            TEACHER_URL.hostname,
+            TEACHER_URL.port,
+            timeout=HTTP_TIMEOUT,
+        )
+        THREAD_STATE.connection = connection
+    path = f"{TEACHER_URL.path.rstrip('/')}/chat/completions"
+    connection.request(
+        "POST",
+        path,
+        body=body,
+        headers={
+            "content-type": "application/json",
+            "authorization": f"Bearer {TOKEN}",
+        },
+    )
+    response = connection.getresponse()
+    payload = response.read()
+    if response.status >= 400:
+        raise urllib.error.HTTPError(
+            f"{BASE_URL}/chat/completions",
+            response.status,
+            response.reason,
+            response.headers,
+            None,
+        )
+    return json.loads(payload)
+
+
 def label_http(row, temperature):
     body = json.dumps(
         {
@@ -94,23 +155,21 @@ def label_http(row, temperature):
             "max_tokens": 64,
         }
     ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{BASE_URL}/chat/completions",
-        data=body,
-        headers={
-            "content-type": "application/json",
-            "authorization": f"Bearer {TOKEN}",
-        },
-    )
     for attempt in range(HTTP_ATTEMPTS):
         try:
-            with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as response:
-                payload = json.loads(response.read())
+            payload = teacher_request(body)
             return parse_goal(payload["choices"][0]["message"].get("content"))
         except urllib.error.HTTPError as error:
+            close_teacher_connection()
             if error.code < 500 or attempt + 1 == HTTP_ATTEMPTS:
                 raise
-        except (urllib.error.URLError, TimeoutError, OSError):
+        except (
+            http.client.HTTPException,
+            urllib.error.URLError,
+            TimeoutError,
+            OSError,
+        ):
+            close_teacher_connection()
             if attempt + 1 == HTTP_ATTEMPTS:
                 raise
         time.sleep(min(2**attempt, 15))
