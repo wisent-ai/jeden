@@ -9,7 +9,6 @@
 <!-- wisent-readme-signals:end -->
 
 # Jeden: The Ultimate Self-Improving Coding Agent with Internet Access, Embedded Secret Management, QA, and More
-
 The Ultimate AI Agent for Autonomous Company Building.
 
 Jeden is a harness for AI Agents built from real-life experiences. It routes your models intelligently, manages credentials, understands how to pursue, complete and verify tasks over time. Turns your AI into a 10x harness. Compatible with OpenAI, Anthropic, Kimi and any other model.
