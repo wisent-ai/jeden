@@ -1,6 +1,6 @@
 use crate::agent::{Conversation, RunHooks};
 use crate::Args;
-use agent_contract::{
+use pursuit::{
     collect_preference_evidence, pursue, PursuitConfig, Stage, StageResponse, StageRunner,
 };
 use serde_json::json;

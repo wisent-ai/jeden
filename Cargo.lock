@@ -92,15 +92,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "agent-contract"
-version = "0.1.0"
-source = "git+https://github.com/wisent-ai/agent-contract?rev=6dff967a09b8ffdd00526f5194012ad7b75187e3#6dff967a09b8ffdd00526f5194012ad7b75187e3"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1510,7 +1501,6 @@ version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "agent-client-protocol",
- "agent-contract",
  "arc-swap",
  "base64",
  "crossterm",
@@ -1522,6 +1512,7 @@ dependencies = [
  "hmac",
  "ignore",
  "parking_lot",
+ "pursuit",
  "qrcode",
  "rand 0.8.6",
  "regex",
@@ -1946,6 +1937,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "pursuit"
+version = "0.1.0"
+source = "git+https://github.com/wisent-ai/pursuit?rev=5b63ea6fede4862c8a53073101903d960edec6cb#5b63ea6fede4862c8a53073101903d960edec6cb"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
