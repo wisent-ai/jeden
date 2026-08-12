@@ -154,8 +154,23 @@ pub fn fire_event(
 }
 
 /// Fire `PreToolUse` for `tool`; returns `Some(reason)` if a hook blocks it.
-pub fn pretool_block(cwd: &Path, tool: &str, input: &Value, allow_project: bool) -> Option<String> {
-    let payload = json!({ "event": "PreToolUse", "tool": tool, "input": input, "cwd": cwd });
+pub fn pretool_block(
+    cwd: &Path,
+    tool: &str,
+    input: &Value,
+    allow_project: bool,
+    transcript_path: &Path,
+) -> Option<String> {
+    let payload = json!({
+        "event": "PreToolUse",
+        "hook_event_name": "PreToolUse",
+        "tool": tool,
+        "tool_name": tool,
+        "input": input,
+        "tool_input": input,
+        "cwd": cwd,
+        "transcript_path": transcript_path,
+    });
     let outcomes = fire_event(cwd, "PreToolUse", tool, &payload, allow_project);
     super::pretool_block_decision(&outcomes)
 }

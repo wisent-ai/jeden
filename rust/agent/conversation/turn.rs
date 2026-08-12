@@ -229,6 +229,7 @@ impl Conversation {
                                 &tool,
                                 &input,
                                 args.allow_command,
+                                &self.recorder.path().join("transcript.jsonl"),
                             ) {
                                 hooks.note(&format!("tool blocked by hook: {}", tool));
                                 let result = json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) });
@@ -301,6 +302,7 @@ impl Conversation {
                                     &tool.tool,
                                     &tool.input,
                                     args.allow_command,
+                                    &self.recorder.path().join("transcript.jsonl"),
                                 ) {
                                     hooks.note(&format!("tool blocked by hook: {}", tool.tool));
                                     let result = json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) });
