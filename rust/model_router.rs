@@ -1268,16 +1268,28 @@ fn empty_response(message: impl Into<String>, visible_output: bool) -> AttemptEr
 
 fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> AttemptError {
     let normalized = body.to_ascii_lowercase();
+    let contract = serde_json::from_str::<Value>(&body).ok();
+    let declared_retryable = contract
+        .as_ref()
+        .and_then(|value| value.pointer("/error/retryable"))
+        .and_then(Value::as_bool);
+    let error_code = contract
+        .as_ref()
+        .and_then(|value| value.pointer("/error/code"))
+        .and_then(Value::as_str);
     // A 429 `subscription_unavailable` fires while a reauth is still in
     // progress; it clears on its own, so treat it as transient rather than
     // quota exhaustion.
     let subscription_transient = status == 429 && normalized.contains("subscription_unavailable");
-    let quota_exhausted = status == 402
+    let quota_exhausted = error_code == Some("provider_quota_exhausted")
+        || status == 402
         || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
     let class = if subscription_transient {
         StreamErrorClass::TransientHttp
     } else if quota_exhausted {
         StreamErrorClass::QuotaExhausted
+    } else if declared_retryable == Some(false) {
+        StreamErrorClass::Permanent
     } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
     } else if is_context_overflow_body(&body) {
