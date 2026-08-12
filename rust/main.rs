@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 pub mod agent;
+pub mod autonomy;
 pub mod capability;
 pub mod cas;
 pub mod cli;
@@ -20,11 +21,11 @@ pub mod mcp;
 pub mod memory;
 pub mod model_router;
 pub mod protocol;
+pub mod onboarding;
 pub mod probierz;
 pub mod qr;
 pub mod report;
 pub mod roadmap;
-pub mod onboarding;
 pub mod routing;
 pub mod rpc;
 pub mod sdk;
@@ -41,16 +42,16 @@ pub(crate) use cli::commands::expand::resolve_file_command;
 pub(crate) use cli::completions::completions_command;
 pub(crate) use cli::config::schema::config_command;
 pub(crate) use cli::config::{load_config, Config};
+
+pub(crate) use cli::token::token_command;
+pub(crate) use cli::gallery::gallery_command;
 pub(crate) use cli::run::interactive::interactive;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
 pub(crate) use cli::sessions::{
-
     artifact_command, export_session_command, list_artifacts_command, list_sessions,
     read_session_value, recall_conversation_command, recall_conversation_text,
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
-pub(crate) use cli::token::token_command;
-pub(crate) use cli::gallery::gallery_command;
 pub(crate) use cli::stats::stats_command;
 pub(crate) use cli::worktree::worktree_command;
 
@@ -74,6 +75,7 @@ pub(crate) struct Args {
     pub(crate) model_only: bool,
     pub(crate) json: bool,
     pub(crate) resume_session: Option<PathBuf>,
+    pub(crate) autonomous: bool,
     pub(crate) positionals: Vec<String>,
 }
 
@@ -83,6 +85,7 @@ fn usage() -> String {
         "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden --version | -V\n",
         "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
@@ -238,8 +241,8 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             other => args.positionals.push(other.to_string()),
         }
     }
-    if args.command == "run" && args.positionals.is_empty() {
-        return Err("run requires a task".into());
+    if matches!(args.command.as_str(), "run" | "pursue") && args.positionals.is_empty() {
+        return Err(format!("{} requires a task", args.command));
     }
     if args.command == "interactive" && !args.positionals.is_empty() {
         return Err(format!(
@@ -386,6 +389,7 @@ pub fn main() -> ExitCode {
         "help" => Ok(usage()),
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
+        "pursue" => autonomy::command(&args),
         "rpc" => rpc::serve_stdio().map(|_| String::new()),
         "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
             .map(|_| String::new()),

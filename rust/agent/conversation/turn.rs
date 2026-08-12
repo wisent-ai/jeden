@@ -10,7 +10,7 @@ impl Conversation {
     ) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let mut router = model_router_config(&config, args);
-        let mut effective_task = if args.model_only {
+        let mut effective_task = if args.model_only || args.autonomous {
             task.to_string()
         } else {
             apply_mode_instructions(&args.cwd, task)?

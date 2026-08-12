@@ -438,6 +438,7 @@ fn args_from_options(options: &SessionOptions, prompt: String, goal: Option<Stri
         model_only: false,
         json: false,
         resume_session: None,
+        autonomous: false,
         goal,
         positionals: vec![prompt],
     }

@@ -43,15 +43,17 @@ Operator-managed and external: the Brama URL and signing credential (Stado/Skarb
 2. **One-shot scripted task.** Automation needs a bounded task without a terminal. It runs `jeden run "<task>"`, optionally with `--allow-write` or `--allow-command`. The result is the final answer on stdout with the session recorded. Constraint: grants are explicit per invocation, and failover never occurs after model output has become visible.
 3. **Continuing prior work.** An engineer wants to inspect or resume earlier work. They use `jeden sessions`, `show`, `export`, or `resume`. The result is a fresh session seeded with the selected history; abandoned history is never deleted.
 4. **Editor and machine integration.** An editor extension or a CI job needs the same harness programmatically. It uses `jeden acp`, `jeden rpc`, `jeden headless`, or the TypeScript/Python SDKs. The result is protocol-level access to the same run loop; non-terminal output is deterministic text.
+5. **Autonomous outcome pursuit.** An operator has a rough objective but cannot stay present to correct each interpretation. They run `jeden pursue "<objective>"` with explicit execution grants. Jeden derives a source-grounded outcome contract, subjects it to an independent read-only review, executes only the accepted contract, and repairs the result until a second independent review can cite evidence for every criterion. The result is a durable contract, verdict, receipt, and the sessions behind each decision under `<cwd>/.jeden/autonomy/`.
 
 ## Design contract
 
-Jeden separates four concerns:
+Jeden separates five concerns:
 
 - **Inference** — model calls go through Brama using HMAC-signed OpenAI-compatible chat completions.
 - **Policy** — the harness prompt and approval rules are explicit and local.
 - **Tools** — a small allowlisted registry enforces path jails and write or command permission.
 - **Run loop** — the model may return native tool calls or strict JSON actions that enter the same local execution loop.
+- **Outcome contract** — autonomous pursuit turns a rough objective into disprovable acceptance criteria before granting it an execution phase.
 
 Tool schemas are derived from each input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer.
 
@@ -69,6 +71,8 @@ flowchart LR
     Loop --> Brama["Brama model router, HMAC-signed"]
     Brama --> Loop
 ```
+
+`jeden pursue` adds a bounded protocol around the same run loop: read-only distillation, independent contract review, granted execution, and independent acceptance review. A rejected review returns concrete repairs to the existing execution conversation; only a verdict with evidence for every criterion produces a successful receipt. The complete state machine and artifact contract are in [the autonomous task protocol](docs/AUTONOMOUS_TASK_PROTOCOL.md).
 
 - **Durable state:** Sessions live under `~/.jeden/sessions/` (`JEDEN_SESSION_ROOT` overrides). Each session directory holds `state.json` and `transcript.jsonl`, an append-only ledger of sequenced, parent-linked, checksum-sealed events that is validated on read and `fsync`ed on every append. Durable memory is SQLite/FTS at `~/.jeden/memory.sqlite3` (`JEDEN_MEMORY_DB` overrides). The rest of `~/.jeden/` holds `.env`, `config.json`/`config.yml`, the Brama model-catalog cache, and user-scoped `tools/`, `extensions/`, `commands/`, and `plugins/`. Per-project state lives in `<cwd>/.jeden/`. All of it is on the operator's disk; Jeden uploads none of it.
 - **Credential boundary:** `WISENT_APP_AGENT_AUTH_SECRET` is read from the process environment only. `bin/jeden-rust` and `scripts/run-with-stado.sh` read the Skarbiec item `agent:wisent-app` and export it into that environment; `/setup` writes only non-secret values (`BRAMA_URL`, `WISENT_APP_AGENT_ID`, model, preferences) to `~/.jeden/.env` at mode `0600` and never writes the secret. Each Brama request carries `x-agent-id`, `x-agent-timestamp`, `x-agent-body-sha256`, and `x-agent-signature`, an HMAC over the request body, so the secret itself never leaves the process. Configured and automatically discovered secret values are replaced with `[REDACTED]` in the model-bound copy of the context while the local transcript keeps the original text.
@@ -158,7 +162,7 @@ Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's stat
 
 ## Primary interfaces
 
-- **CLI** (`jeden`, `jeden run`, management subcommands) — canonical for human interactive and one-shot use.
+- **CLI** (`jeden`, `jeden run`, `jeden pursue`, management subcommands) — canonical for human interactive, direct one-shot, and contract-driven autonomous use.
 - **Interactive terminal views and slash commands** — canonical for in-terminal management; non-terminal stdin renders deterministic text lists for scripts.
 - **`jeden rpc` (NDJSON), `jeden acp`, `jeden headless`** — canonical for automation and editor integration; `--json` flags cover scripting.
 - **SDKs** — `packages/sdk-typescript` and `python/jeden_sdk` for embedding the machine interfaces.
@@ -169,6 +173,7 @@ Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's stat
 The private milestone includes the capabilities below. Per-capability implementation status is tracked in [docs/JEDEN_PRODUCT_COMPLETENESS.md](docs/JEDEN_PRODUCT_COMPLETENESS.md); anything marked there as `partial` or `missing` is not promised as finished behavior.
 
 - interactive terminal and one-shot `jeden run` modes;
+- autonomous outcome pursuit through `jeden pursue`, with source-grounded contracts, independent reviews, and durable receipts;
 - session transcripts and artifacts under `~/.jeden/sessions/`;
 - model routing through required `BRAMA_URL`, `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
 - model selection through `--model`, `JEDEN_MODEL`, or native config;
@@ -198,6 +203,7 @@ jeden --cwd ../echo
 jeden run "summarize package.json"
 jeden run "create notes.txt" --allow-write
 jeden run "inspect the build" --allow-command
+jeden pursue "replace the rough idea with the observable product result" --yolo
 jeden sessions
 jeden show <session>
 jeden export <session> <output>
@@ -212,6 +218,8 @@ jeden doctor --cwd .
 jeden capabilities --json --cwd .
 jeden roadmap list --status planned --priority P1 --json --cwd .
 ```
+
+Use `run` when the supplied task is already the contract. Use `pursue` when the input is only an intent seed and Jeden must recover the concrete outcome, boundaries, preferences, evidence, and finish line before implementation; see [Autonomous Task Protocol](docs/AUTONOMOUS_TASK_PROTOCOL.md).
 
 ## Interactive terminal views
 
@@ -330,11 +338,11 @@ The complete native action, tool-call, selector, and anchored-patch contract is 
 | Concern | Contract |
 |---|---|
 | Configuration | Process environment wins over every file. At startup Jeden loads `<cwd>/.env`, `.env.local`, `.env.production`, `.env.vercel`, then `~/.jeden/.env`, and each file sets only variables that are still unset. Project `<cwd>/.jeden/config.json` overrides user `~/.jeden/config.json` and `~/.jeden/config.yml`. `/setup` appends non-secret keys to `~/.jeden/.env` at mode `0600` and applies them to the running process; other file changes take effect on the next invocation. |
-| State | Operator-owned and local. User scope `~/.jeden/`: `sessions/`, `memory.sqlite3`, `.env`, `config.json`/`config.yml`, `cache/`, `tools/`, `extensions/`, `commands/`, `plugins/`, `hooks.json`, `mcp.json`. Project scope `<cwd>/.jeden/`: `config.json`, `usage.json`, `mode-state.json`, `subscription-cooldowns.json`, `tasks/`, `commands/`, `extensions/`, `tools/`, `hooks.json`, `mcp.json`. Session transcripts are append-only and are never expired or deleted by Jeden. |
+| State | Operator-owned and local. User scope `~/.jeden/`: `sessions/`, `memory.sqlite3`, `.env`, `config.json`/`config.yml`, `cache/`, `tools/`, `extensions/`, `commands/`, `plugins/`, `hooks.json`, `mcp.json`. Project scope `<cwd>/.jeden/`: `config.json`, `usage.json`, `mode-state.json`, `subscription-cooldowns.json`, `tasks/`, `autonomy/`, `commands/`, `extensions/`, `tools/`, `hooks.json`, `mcp.json`. Each autonomy run retains its preference evidence, reviewed contract, execution records, verdicts, receipt, and session paths. Session transcripts are append-only and are never expired or deleted by Jeden. |
 | Credentials | `WISENT_APP_AGENT_AUTH_SECRET` is the Brama signing credential and exists only in the process environment; `bin/jeden-rust` and `scripts/run-with-stado.sh` source it from the Skarbiec item `agent:wisent-app`. `BRAMA_TOKEN` is a separate optional bearer for deployments whose Brama requires one. Rotation and revocation are owned by Skarbiec, not by Jeden: the harness holds no credential store and writes no secret to disk. |
 | Networking | Outbound only, initiated by Jeden. Required: `BRAMA_URL` over `http(s)`. Optional when configured: Wisent Platform Billing, the Stado integration API, the Stado media router, and the update manifest host. Brama and Weles surface HTTP `429` as a typed rate-limit error carrying `Retry-After`; MCP servers that keep failing open a circuit breaker instead of retrying. Tool network egress is confined to the execution grant's host/port allowlist with pinned addresses and re-authorized redirects. |
 | Cost | The operator's Brama routing and any Weles subscription incur the cost; model calls are the only action that creates it. Every completion appends tokens, the Brama-catalog-priced cost breakdown, and the served billing target and decision ID to `<cwd>/.jeden/usage.json`. Purchases are bounded by an explicit, revision-pinned policy with allowed products, allowed currencies, a per-purchase cap, and a per-period cap; auto-purchase and auto-renew both default to disabled, and every financial mutation requires `--approve` plus a caller-supplied idempotency key. |
-| Observability | `jeden doctor` returns a JSON health report probing Brama, Weles, storage, process, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable. `jeden conformance` reports completion-area coverage. `jeden stats` (`--json`, `--summary`, or `--serve` on `127.0.0.1`) and `/usage show` read the usage ledger. The per-session event ledger is the audit record. Jeden emits no telemetry to Wisent from a default local run. |
+| Observability | `jeden doctor` returns a JSON health report probing Brama, Weles, storage, process, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable. `jeden conformance` reports completion-area coverage. `jeden stats` (`--json`, `--summary`, or `--serve` on `127.0.0.1`) and `/usage show` read the usage ledger. The per-session event ledger is the audit record; each `jeden pursue` run additionally emits `contract.json`, `verdict.json`, and `receipt.json` beneath `<cwd>/.jeden/autonomy/<run-id>/`. Jeden emits no telemetry to Wisent from a default local run. |
 | Upgrades | `jeden update` verifies a DSSE release manifest at `JEDEN_UPDATE_MANIFEST` against the binary's embedded `canary` and `stable` ed25519 trust roots, checks the artifact digest plus SBOM and provenance evidence, then installs transactionally. `JEDEN_UPDATE_CHANNEL` selects `canary` or `stable` and defaults to `stable`; no other channel is accepted. Version floor is the SemVer in `Cargo.toml`; the released command vocabulary is frozen in `released-surface.json`. |
 | Recovery | Backing up `~/.jeden/` and `<cwd>/.jeden/` is the operator's responsibility — Jeden ships no backup or restore command. A failed update rolls back to the journaled last-known-good binary automatically. A session transcript with a truncated tail is read up to the last valid event and must be continued in a child session; `/checkpoint` and `/rewind` add lineage without deleting abandoned history. `/memory rebuild` reconstructs the memory index. The roadmap registry and the cooldown store write a temporary file, `fsync` it, and rename it into place, so a crash leaves the previous document intact. |
 
