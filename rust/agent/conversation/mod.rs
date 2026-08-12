@@ -6,7 +6,9 @@ mod history;
 mod local_exec;
 mod turn;
 
-pub(super) use action::{action_or_text, action_to_value, run_tool_action};
+pub(super) use action::{
+    action_or_text, action_to_value, record_unexecuted_tool_action, run_tool_action,
+};
 
 /// A persistent agent conversation. In interactive mode one `Conversation`
 /// lives for the whole session so each turn sees the full prior history (real

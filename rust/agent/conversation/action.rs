@@ -23,6 +23,21 @@ pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
 pub(in crate::agent) fn tool_to_value(action: &ToolAction) -> Value {
     json!({ "tool": action.tool, "input": action.input })
 }
+pub(in crate::agent) fn record_unexecuted_tool_action(
+    recorder: &mut SessionRecorder,
+    step: u32,
+    action: &ToolAction,
+    result: &Value,
+) -> Result<(), String> {
+    recorder.record(
+        "tool_call",
+        json!({ "step": step, "tool": action.tool, "input": action.input }),
+    )?;
+    recorder.record(
+        "tool_result",
+        json!({ "step": step, "tool": action.tool, "result": result }),
+    )
+}
 
 pub(in crate::agent) fn run_tool_action(
     args: &Args,

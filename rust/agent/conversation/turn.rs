@@ -15,7 +15,12 @@ impl Conversation {
         } else {
             apply_mode_instructions(&args.cwd, task)?
         };
-        if let Some(goal) = args.goal.as_deref().map(str::trim).filter(|goal| !goal.is_empty()) {
+        if let Some(goal) = args
+            .goal
+            .as_deref()
+            .map(str::trim)
+            .filter(|goal| !goal.is_empty())
+        {
             effective_task = format!(
                 "Active work goal for this turn: {}. Keep every step aligned with this goal and report completed work against it.\n\n{}",
                 goal, effective_task
@@ -226,7 +231,17 @@ impl Conversation {
                                 args.allow_command,
                             ) {
                                 hooks.note(&format!("tool blocked by hook: {}", tool));
-                                json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) })
+                                let result = json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) });
+                                record_unexecuted_tool_action(
+                                    &mut self.recorder,
+                                    step,
+                                    &ToolAction {
+                                        tool: tool.clone(),
+                                        input: input.clone(),
+                                    },
+                                    &result,
+                                )?;
+                                result
                             } else {
                                 match resolve_tool_approval(args, &tool, &input, hooks) {
                                     ToolDecision::Allow {
@@ -256,7 +271,17 @@ impl Conversation {
                                     }
                                     ToolDecision::Deny(reason) => {
                                         hooks.note(&format!("tool denied: {}", tool));
-                                        json!({ "ok": false, "error": reason })
+                                        let result = json!({ "ok": false, "error": reason });
+                                        record_unexecuted_tool_action(
+                                            &mut self.recorder,
+                                            step,
+                                            &ToolAction {
+                                                tool: tool.clone(),
+                                                input: input.clone(),
+                                            },
+                                            &result,
+                                        )?;
+                                        result
                                     }
                                 }
                             };
@@ -278,7 +303,14 @@ impl Conversation {
                                     args.allow_command,
                                 ) {
                                     hooks.note(&format!("tool blocked by hook: {}", tool.tool));
-                                    results.push(json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) }));
+                                    let result = json!({ "ok": false, "error": format!("blocked by PreToolUse hook: {}", reason) });
+                                    record_unexecuted_tool_action(
+                                        &mut self.recorder,
+                                        step,
+                                        &tool,
+                                        &result,
+                                    )?;
+                                    results.push(result);
                                     continue;
                                 }
                                 match resolve_tool_approval(args, &tool.tool, &tool.input, hooks) {
@@ -306,7 +338,14 @@ impl Conversation {
                                     }
                                     ToolDecision::Deny(reason) => {
                                         hooks.note(&format!("tool denied: {}", tool.tool));
-                                        results.push(json!({ "ok": false, "error": reason }));
+                                        let result = json!({ "ok": false, "error": reason });
+                                        record_unexecuted_tool_action(
+                                            &mut self.recorder,
+                                            step,
+                                            &tool,
+                                            &result,
+                                        )?;
+                                        results.push(result);
                                     }
                                 }
                             }
