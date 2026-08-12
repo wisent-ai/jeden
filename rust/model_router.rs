@@ -356,7 +356,7 @@ pub fn chat_completion(
     let client = Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     let response = client
         .post(format!(
             "{}/v1/chat/completions",
@@ -370,9 +370,11 @@ pub fn chat_completion(
         .header("x-agent-signature", sig)
         .body(body_text)
         .send()
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     let status = response.status();
-    let text = response.text().map_err(|e| e.to_string())?;
+    let text = response
+        .text()
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     if !status.is_success() {
         return Err(format!(
             "model router {}: {}",
@@ -994,7 +996,9 @@ fn spawn_openai_stream_adapter(
             let client = match Client::builder().timeout(Duration::from_secs(300)).build() {
                 Ok(client) => client,
                 Err(error) => {
-                    let _ = sender.send(WireMessage::Network(error.to_string()));
+                    let _ = sender.send(WireMessage::Network(
+                        crate::control_plane::transport::describe_reqwest(error),
+                    ));
                     return;
                 }
             };
@@ -1012,7 +1016,9 @@ fn spawn_openai_stream_adapter(
             {
                 Ok(response) => response,
                 Err(error) => {
-                    let _ = sender.send(WireMessage::Network(error.to_string()));
+                    let _ = sender.send(WireMessage::Network(
+                        crate::control_plane::transport::describe_reqwest(error),
+                    ));
                     return;
                 }
             };
@@ -1039,7 +1045,9 @@ fn spawn_openai_stream_adapter(
                 return;
             }
             if !(200..300).contains(&status) || !content_type.contains("event-stream") {
-                let result = response.text().map_err(|error| error.to_string());
+                let result = response
+                    .text()
+                    .map_err(crate::control_plane::transport::describe_reqwest);
                 let _ = sender.send(WireMessage::FullBody(result));
                 return;
             }
