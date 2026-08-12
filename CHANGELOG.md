@@ -39,7 +39,7 @@ files, +1333/-402 excluding lockfiles).
   (`rust/cli/token.rs`).
 - Added the launcher `scripts/run-with-stado.sh`, which resolves its Skarbiec
   consumer and token file.
-- Added contract-driven autonomous pursuit through `jeden pursue`, including Transcript Lake preference evidence, independent contract and acceptance reviews, bounded repair rounds, and durable contracts, verdicts, and receipts under `.jeden/autonomy/`.
+- Added `jeden pursue` as an integration with the separately owned, revision-pinned [Agent Contract](https://github.com/wisent-ai/agent-contract) protocol. Jeden supplies Brama-backed conversations and approval-gated tools; Agent Contract owns preference evidence, contract and verdict schemas, independent review and repair loops, validators, and receipts under `.agent-contract/runs/`.
 
 ### Changed
 

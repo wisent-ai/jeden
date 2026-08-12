@@ -29,6 +29,7 @@ path = "rust/bin/jeden-sandbox-helper.rs"
 # resolves only on a machine that happens to hold both checkouts, and nowhere in
 # CI. `image-video-router` consumes the same crate this way.
 wisent-onboarding-client = { git = "https://github.com/wisent-ai/echo-web", rev = "e2e4bdc08b336d41818a8589527cc6595cfc6c65", package = "wisent-onboarding-client" }
+agent-contract = { git = "https://github.com/wisent-ai/agent-contract", rev = "6dff967a09b8ffdd00526f5194012ad7b75187e3" }
 agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
 base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
