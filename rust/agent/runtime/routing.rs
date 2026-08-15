@@ -114,9 +114,9 @@ fn subscription_pool_from_platform_billing() -> Result<Option<SubscriptionPoolSn
         return Ok(None);
     }
     let client = WelesClient::from_env();
-    let accounts = client
-        .accounts(None)
-        .map_err(|error| format!("cannot list platform billing accounts for subscription routing: {error}"))?;
+    let accounts = client.accounts(None).map_err(|error| {
+        format!("cannot list platform billing accounts for subscription routing: {error}")
+    })?;
     let mut targets = Vec::new();
     let mut revisions = Vec::new();
     'accounts: for (account_index, account) in accounts.into_iter().enumerate() {
@@ -231,11 +231,26 @@ fn model_catalog_with_retry(
         match crate::control_plane::model_catalog(cwd, client, false) {
             Ok(catalog) => return Ok(catalog),
             Err(error) => {
-                let transient = match &error {
-                    BramaError::Transport(_) | BramaError::RateLimited { .. } => true,
-                    BramaError::Http { status, .. } => *status == 429 || (500..600).contains(status),
+                // The status family is a guess about the gateway's intent; the
+                // body is the gateway saying it. A refused subscription answers
+                // `503 ... "retryable": false` and every retry of that is two
+                // provider round trips and eight seconds spent on a credential
+                // only a human can renew, so an explicit `false` wins.
+                let refused_outright = match &error {
+                    BramaError::Http { message, .. } => {
+                        message.contains("\"retryable\":false")
+                            || message.contains("\"retryable\": false")
+                    }
                     _ => false,
                 };
+                let transient = !refused_outright
+                    && match &error {
+                        BramaError::Transport(_) | BramaError::RateLimited { .. } => true,
+                        BramaError::Http { status, .. } => {
+                            *status == 429 || (500..600).contains(status)
+                        }
+                        _ => false,
+                    };
                 if !transient || attempt == DELAYS.len() {
                     return Err(error);
                 }
@@ -355,13 +370,11 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             }
         })
     };
-    let endpoint_error = endpoint.is_none().then(|| {
-        "BRAMA_URL is required; configure the Brama model-router service URL"
-            .to_string()
-    });
+    let endpoint_error = endpoint
+        .is_none()
+        .then(|| "BRAMA_URL is required; configure the Brama model-router service URL".to_string());
     let token_error = bearer_token.is_none().then(|| {
-        "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential"
-            .to_string()
+        "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential".to_string()
     });
     let config_error = endpoint_error
         .or(token_error)

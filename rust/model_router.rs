@@ -440,9 +440,7 @@ fn parse_completion_response(text: &str) -> Result<Completion, String> {
     let data: Value =
         serde_json::from_str(text).map_err(|e| format!("invalid model router JSON: {e}"))?;
     let usage = usage_from_value(&data);
-    let message = data
-        .pointer("/choices/0/message")
-        .ok_or(NO_MESSAGE)?;
+    let message = data.pointer("/choices/0/message").ok_or(NO_MESSAGE)?;
     let finish_reason = data
         .pointer("/choices/0/finish_reason")
         .and_then(Value::as_str)
@@ -1292,7 +1290,15 @@ fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> Attem
     let quota_exhausted = error_code == Some("provider_quota_exhausted")
         || status == 402
         || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
-    let class = if subscription_transient {
+    // An explicit `"retryable": false` is the gateway answering the question
+    // this function guesses at from the status family. It wins: a subscription
+    // the provider rejected needs a human to authorize it again, and retrying
+    // spends the session's budget on a wait that cannot end.
+    let refused_outright =
+        normalized.contains("\"retryable\":false") || normalized.contains("\"retryable\": false");
+    let class = if refused_outright {
+        StreamErrorClass::Permanent
+    } else if subscription_transient {
         StreamErrorClass::TransientHttp
     } else if quota_exhausted {
         StreamErrorClass::QuotaExhausted
