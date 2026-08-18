@@ -22,9 +22,13 @@ impl Conversation {
             "python_eval" => json!({ "code": code }),
             _ => json!({ "command": code }),
         };
-        if let Some(reason) =
-            crate::hooks::pretool_block(&args.cwd, tool, &input, args.allow_command)
-        {
+        if let Some(reason) = crate::hooks::pretool_block(
+            &args.cwd,
+            tool,
+            &input,
+            args.allow_command,
+            &self.recorder.path().join("transcript.jsonl"),
+        ) {
             return Ok(format!("Blocked by PreToolUse hook: {reason}"));
         }
         let result = match resolve_tool_approval(args, tool, &input, hooks) {

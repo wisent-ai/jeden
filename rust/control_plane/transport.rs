@@ -90,7 +90,7 @@ impl ReqwestTransport {
     }
 }
 /// Render an error together with everything underneath it.
-fn describe(error: reqwest::Error) -> String {
+pub(crate) fn describe_reqwest(error: reqwest::Error) -> String {
     let mut rendered = error.to_string();
     let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(&error);
     while let Some(cause) = source {
@@ -117,7 +117,7 @@ impl ControlPlaneTransport for ReqwestTransport {
         // cause chain underneath distinguishes a refused connect from a timeout
         // from a closed connection, and without it every one of them reads as
         // the network being down.
-        let response = builder.send().map_err(describe)?;
+        let response = builder.send().map_err(describe_reqwest)?;
         if response
             .content_length()
             .is_some_and(|length| length > request.max_response_bytes)

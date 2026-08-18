@@ -356,7 +356,7 @@ pub fn chat_completion(
     let client = Client::builder()
         .timeout(Duration::from_secs(120))
         .build()
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     let response = client
         .post(format!(
             "{}/v1/chat/completions",
@@ -370,9 +370,11 @@ pub fn chat_completion(
         .header("x-agent-signature", sig)
         .body(body_text)
         .send()
-        .map_err(|e| e.to_string())?;
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     let status = response.status();
-    let text = response.text().map_err(|e| e.to_string())?;
+    let text = response
+        .text()
+        .map_err(crate::control_plane::transport::describe_reqwest)?;
     if !status.is_success() {
         return Err(format!(
             "model router {}: {}",
@@ -992,7 +994,9 @@ fn spawn_openai_stream_adapter(
             let client = match Client::builder().timeout(Duration::from_secs(300)).build() {
                 Ok(client) => client,
                 Err(error) => {
-                    let _ = sender.send(WireMessage::Network(error.to_string()));
+                    let _ = sender.send(WireMessage::Network(
+                        crate::control_plane::transport::describe_reqwest(error),
+                    ));
                     return;
                 }
             };
@@ -1010,7 +1014,9 @@ fn spawn_openai_stream_adapter(
             {
                 Ok(response) => response,
                 Err(error) => {
-                    let _ = sender.send(WireMessage::Network(error.to_string()));
+                    let _ = sender.send(WireMessage::Network(
+                        crate::control_plane::transport::describe_reqwest(error),
+                    ));
                     return;
                 }
             };
@@ -1037,7 +1043,9 @@ fn spawn_openai_stream_adapter(
                 return;
             }
             if !(200..300).contains(&status) || !content_type.contains("event-stream") {
-                let result = response.text().map_err(|error| error.to_string());
+                let result = response
+                    .text()
+                    .map_err(crate::control_plane::transport::describe_reqwest);
                 let _ = sender.send(WireMessage::FullBody(result));
                 return;
             }
@@ -1266,11 +1274,21 @@ fn empty_response(message: impl Into<String>, visible_output: bool) -> AttemptEr
 
 fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> AttemptError {
     let normalized = body.to_ascii_lowercase();
+    let contract = serde_json::from_str::<Value>(&body).ok();
+    let declared_retryable = contract
+        .as_ref()
+        .and_then(|value| value.pointer("/error/retryable"))
+        .and_then(Value::as_bool);
+    let error_code = contract
+        .as_ref()
+        .and_then(|value| value.pointer("/error/code"))
+        .and_then(Value::as_str);
     // A 429 `subscription_unavailable` fires while a reauth is still in
     // progress; it clears on its own, so treat it as transient rather than
     // quota exhaustion.
     let subscription_transient = status == 429 && normalized.contains("subscription_unavailable");
-    let quota_exhausted = status == 402
+    let quota_exhausted = error_code == Some("provider_quota_exhausted")
+        || status == 402
         || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
     // An explicit `"retryable": false` is the gateway answering the question
     // this function guesses at from the status family. It wins: a subscription
@@ -1284,6 +1302,8 @@ fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> Attem
         StreamErrorClass::TransientHttp
     } else if quota_exhausted {
         StreamErrorClass::QuotaExhausted
+    } else if declared_retryable == Some(false) {
+        StreamErrorClass::Permanent
     } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
     } else if is_context_overflow_body(&body) {
