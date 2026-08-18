@@ -15,14 +15,15 @@ pub mod conformance;
 pub mod context;
 pub mod control_plane;
 pub mod eval;
+pub mod goal_lifecycle;
 pub mod hooks;
 pub mod marketplace;
 pub mod mcp;
 pub mod memory;
 pub mod model_router;
-pub mod protocol;
 pub mod onboarding;
 pub mod probierz;
+pub mod protocol;
 pub mod qr;
 pub mod report;
 pub mod roadmap;
@@ -43,7 +44,6 @@ pub(crate) use cli::completions::completions_command;
 pub(crate) use cli::config::schema::config_command;
 pub(crate) use cli::config::{load_config, Config};
 
-pub(crate) use cli::token::token_command;
 pub(crate) use cli::gallery::gallery_command;
 pub(crate) use cli::run::interactive::interactive;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
@@ -53,6 +53,7 @@ pub(crate) use cli::sessions::{
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
 pub(crate) use cli::stats::stats_command;
+pub(crate) use cli::token::token_command;
 pub(crate) use cli::worktree::worktree_command;
 
 pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
@@ -119,7 +120,7 @@ fn usage() -> String {
         "  /usage [show|reset]    show token/cost accounting\n",
         "  /browser [status|headless|visible]\n",
         "  /plan [on|off|status]  control plan mode\n",
-        "  /goal [set|done|drop]  control goal mode\n",
+        "  /goal [set|done|drop|auto on|off]  control goal mode; auto lets Oko's lifecycle model start/finish goals\n",
         "  /loop [on|off|status]  control continuation loop\n",
         "  /todo [list|add|done]  manage todos\n",
         "  /roadmap              open the native roadmap picker\n",
@@ -169,11 +170,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     }
     if matches!(
         command.as_str(),
-        "resume"
-            | "recall_conversation"
-            | "recall-conversation"
-            | "search-sessions"
-            | "probierz"
+        "resume" | "recall_conversation" | "recall-conversation" | "search-sessions" | "probierz"
     ) {
         return Ok(Args {
             command,

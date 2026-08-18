@@ -248,6 +248,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     as Box<dyn Fn(&str, &[String]) -> Result<String, String>>
             }),
             approve: Box::new(|tool: &str, detail: &str| (ctx.approve)(tool, detail)),
+            goal_event: None,
         };
 
         if local_escape_enabled {
@@ -376,9 +377,9 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 "/login" => {
                     let target = rest.trim();
                     if target.is_empty() {
-                        return Ok(tui::CommandOutcome::text(crate::cli::auth::format_auth_status(
-                            &run_args.cwd,
-                        )));
+                        return Ok(tui::CommandOutcome::text(
+                            crate::cli::auth::format_auth_status(&run_args.cwd),
+                        ));
                     }
                     // Device-code flow: stream the code+QR into the live region,
                     // status goes to the spinner, Esc cancels the Weles poll.
@@ -388,9 +389,12 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         ask_user: ctx.ask_user,
                     };
                     let cancel = ctx.cancel.clone();
-                    crate::cli::auth::start_login_with_bridge(&run_args.cwd, target, &bridge, &move || {
-                        cancel.load(std::sync::atomic::Ordering::Relaxed)
-                    })
+                    crate::cli::auth::start_login_with_bridge(
+                        &run_args.cwd,
+                        target,
+                        &bridge,
+                        &move || cancel.load(std::sync::atomic::Ordering::Relaxed),
+                    )
                 }
                 "/compact" => handler_conv.lock().compact(&run_args, rest, &mut hooks),
                 "/handoff" => handler_conv.lock().handoff(&run_args, rest, &mut hooks),
@@ -545,8 +549,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         result.map(tui::CommandOutcome::text)
     };
 
-    tui::run_basic_loop(status, classify, handler, initial_picker)
-        .map_err(|e| e.to_string())?;
+    tui::run_basic_loop(status, classify, handler, initial_picker).map_err(|e| e.to_string())?;
     hooks::session_stop(&session_cwd.lock().clone(), args.allow_command);
     if let Some(plan) = pending_relaunch.lock().take() {
         self_rebuild::execute(plan)?;

@@ -100,6 +100,12 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
             )),
             terminal: false,
         },
+        // Goal-lifecycle updates have no ACP session-update equivalent; the
+        // desktop consumes them over the RPC session-event stream instead.
+        SessionEventKind::Goal { .. } => MappedEvent {
+            update: None,
+            terminal: false,
+        },
         SessionEventKind::Result { text } => {
             let update = if *streamed {
                 None

@@ -12,4 +12,4 @@ benchmarks/output/
 
 target/
 *.rmeta
-packages/*/dist/
+packages/*/dist/.worktrees/

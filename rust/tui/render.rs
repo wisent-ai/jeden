@@ -121,8 +121,7 @@ pub(crate) fn boxed_split(
     let framed = format!(" {} ", sanitize_terminal_text(title));
     let title_left = visible_len(&framed) <= pane;
     let label = clamp_visible(&framed, if title_left { pane } else { right_width });
-    let head_pad = if title_left { pane } else { right_width }
-        .saturating_sub(visible_len(&label));
+    let head_pad = if title_left { pane } else { right_width }.saturating_sub(visible_len(&label));
     let (left_head, right_head) = if title_left {
         (
             format!("{}{}", paint(&label, "bold", color), "─".repeat(head_pad)),

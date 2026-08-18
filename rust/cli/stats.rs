@@ -33,10 +33,15 @@ fn usage_file_totals(path: &Path) -> Value {
             .get("totalTokens")
             .and_then(Value::as_f64)
             .unwrap_or_else(|| {
-                ["inputTokens", "outputTokens", "cacheReadTokens", "cacheWriteTokens"]
-                    .iter()
-                    .map(|key| event.get(key).and_then(Value::as_f64).unwrap_or_default())
-                    .sum::<f64>()
+                [
+                    "inputTokens",
+                    "outputTokens",
+                    "cacheReadTokens",
+                    "cacheWriteTokens",
+                ]
+                .iter()
+                .map(|key| event.get(key).and_then(Value::as_f64).unwrap_or_default())
+                .sum::<f64>()
             });
         let event_cost = event
             .pointer("/cost/total")
@@ -132,11 +137,7 @@ fn sessions_json() -> Value {
         }
     }
     dirs.sort_by(|left, right| right.1.cmp(&left.1));
-    let recent: Vec<Value> = dirs
-        .iter()
-        .take(5)
-        .map(|(name, _)| json!(name))
-        .collect();
+    let recent: Vec<Value> = dirs.iter().take(5).map(|(name, _)| json!(name)).collect();
     json!({"count": dirs.len(), "recent": recent})
 }
 
@@ -172,12 +173,13 @@ fn stats_text(cwd: &Path) -> String {
         ));
     }
     if stats["quota"]["available"].as_bool() == Some(true) {
-        for provider in stats["quota"]["providers"].as_array().cloned().unwrap_or_default() {
+        for provider in stats["quota"]["providers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
             for entry in provider["entries"].as_array().cloned().unwrap_or_default() {
-                let amount = match (
-                    entry["remaining"].as_u64(),
-                    entry["limit"].as_u64(),
-                ) {
+                let amount = match (entry["remaining"].as_u64(), entry["limit"].as_u64()) {
                     (Some(remaining), Some(limit)) if limit > 0 => {
                         format!("{remaining}/{limit} ({}% free)", entry["percentFree"])
                     }
@@ -267,7 +269,12 @@ fn serve(cwd: &Path, port: u16) -> Result<String, String> {
                 .next()
                 .unwrap_or("/");
             match path {
-                "/" => write_response(&mut stream, "200 OK", "text/html; charset=utf-8", DASHBOARD_HTML),
+                "/" => write_response(
+                    &mut stream,
+                    "200 OK",
+                    "text/html; charset=utf-8",
+                    DASHBOARD_HTML,
+                ),
                 "/api/stats" => {
                     let body = stats_json(&cwd).to_string();
                     write_response(&mut stream, "200 OK", "application/json", &body);

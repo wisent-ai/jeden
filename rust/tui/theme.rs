@@ -83,20 +83,11 @@ pub struct Theme {
 // Embedded presets as oh-my-pi style JSON documents (vars + colors mapping).
 
 const PRESET_JSON: &[(&str, &str)] = &[
-    (
-        "graphite-dark",
-        include_str!("themes/graphite-dark.json"),
-    ),
-    (
-        "paper-light",
-        include_str!("themes/paper-light.json"),
-    ),
+    ("graphite-dark", include_str!("themes/graphite-dark.json")),
+    ("paper-light", include_str!("themes/paper-light.json")),
     ("titanium", include_str!("themes/titanium.json")),
     ("nord", include_str!("themes/nord.json")),
-    (
-        "color-blind",
-        include_str!("themes/color-blind.json"),
-    ),
+    ("color-blind", include_str!("themes/color-blind.json")),
 ];
 
 fn preset_palette(name: &str) -> Option<Palette> {

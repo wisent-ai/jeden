@@ -74,7 +74,10 @@ fn item_row(item: &PickerItem, marker: &str, width: usize) -> String {
         return clamp_visible(&format!("{head}{detail}"), width);
     }
     let metrics = clamp_visible(&item.metrics, width);
-    let head = clamp_visible(&head, width.saturating_sub(visible_len(&metrics) + visible_len(" ")));
+    let head = clamp_visible(
+        &head,
+        width.saturating_sub(visible_len(&metrics) + visible_len(" ")),
+    );
     let gap = width.saturating_sub(visible_len(&head) + visible_len(&metrics));
     format!("{head}{}{metrics}", " ".repeat(gap))
 }
@@ -100,12 +103,17 @@ pub(crate) fn picker_panel(
     // footer, the footer itself and the bottom border. Undercount this and
     // the box grows past the terminal — the title is the first thing lost.
     let chrome_rows = [
-        "query", "blank", "detail-gap", "detail", "top", "rule", "footer", "bottom",
+        "query",
+        "blank",
+        "detail-gap",
+        "detail",
+        "top",
+        "rule",
+        "footer",
+        "bottom",
     ]
     .len();
-    let visible_items = height
-        .saturating_sub(chrome_rows)
-        .max(usize::from(true));
+    let visible_items = height.saturating_sub(chrome_rows).max(usize::from(true));
     let start = state
         .selected
         .saturating_sub(visible_items.saturating_sub(usize::from(true)));
@@ -121,7 +129,11 @@ pub(crate) fn picker_panel(
                 .take(visible_items)
             {
                 let item = &state.spec.items[index];
-                let marker = if position == state.selected { "›" } else { " " };
+                let marker = if position == state.selected {
+                    "›"
+                } else {
+                    " "
+                };
                 let row = item_row(item, marker, width.saturating_sub(CATEGORY_MARKERS.len()));
                 rows.push(if item.disabled {
                     paint(&row, "dim", color)
@@ -132,11 +144,7 @@ pub(crate) fn picker_panel(
                 });
             }
         }
-        rows.push(paint(
-            tr(&state.spec.lang, "picker.footer"),
-            "dim",
-            color,
-        ));
+        rows.push(paint(tr(&state.spec.lang, "picker.footer"), "dim", color));
         return boxed(&state.spec.title, &rows, width, color);
     }
 

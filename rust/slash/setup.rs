@@ -147,10 +147,7 @@ fn save_brama_url(value: &str) -> Result<String, String> {
         return Err("BRAMA_URL must start with https:// or http://".into());
     }
     let path = write_env_keys(&[(BRAMA_URL_KEY.into(), value.into())])?;
-    Ok(format!(
-        "Saved BRAMA_URL to {} (0600).",
-        path.display()
-    ))
+    Ok(format!("Saved BRAMA_URL to {} (0600).", path.display()))
 }
 
 fn save_agent_id(value: &str) -> Result<String, String> {
@@ -164,7 +161,6 @@ fn save_agent_id(value: &str) -> Result<String, String> {
         path.display()
     ))
 }
-
 
 struct SetupState {
     brama_url: Option<String>,
@@ -222,13 +218,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 .map(|url| format!(" {url}"))
                 .unwrap_or_else(|| " ".into());
             items.push(
-                PickerItem::action(
-                    "1. Set BRAMA_URL",
-                    format!("/setup brama-url{prefill}"),
-                )
-                .detail("required Brama model-router endpoint · stored in ~/.jeden/.env")
-                .badge("INPUT")
-                .prefill(),
+                PickerItem::action("1. Set BRAMA_URL", format!("/setup brama-url{prefill}"))
+                    .detail("required Brama model-router endpoint · stored in ~/.jeden/.env")
+                    .badge("INPUT")
+                    .prefill(),
             );
         }
     }
@@ -242,7 +235,9 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 "2. Set WISENT_APP_AGENT_ID",
                 format!("/setup agent-id {DEFAULT_AGENT_ID}"),
             )
-            .detail(format!("default: {DEFAULT_AGENT_ID} · stored in ~/.jeden/.env"))
+            .detail(format!(
+                "default: {DEFAULT_AGENT_ID} · stored in ~/.jeden/.env"
+            ))
             .badge("INPUT")
             .prefill(),
         ),
@@ -361,14 +356,20 @@ fn validate_text(context: &SlashContext<'_>) -> String {
         probe_line("weles"),
         format!(
             "- model: {}",
-            state.model.unwrap_or_else(|| "not selected — pick one with /model".into())
+            state
+                .model
+                .unwrap_or_else(|| "not selected — pick one with /model".into())
         ),
         format!("- language: {}", state.language),
         format!(
             "Probes available: {}/{} · overall: {}",
             available,
             report.probes.len(),
-            if report.healthy { "healthy" } else { "unhealthy" }
+            if report.healthy {
+                "healthy"
+            } else {
+                "unhealthy"
+            }
         ),
         "Smoke: try: jeden run \"Respond exactly: OK\"".to_string(),
     ];
@@ -378,7 +379,8 @@ fn validate_text(context: &SlashContext<'_>) -> String {
     lines.join("\n")
 }
 
-const USAGE: &str = "Usage: /setup [status|validate|brama-url <url>|agent-id <id>|model|preferences]";
+const USAGE: &str =
+    "Usage: /setup [status|validate|brama-url <url>|agent-id <id>|model|preferences]";
 
 /// Text-mode handler (non-interactive callers such as `jeden run "/setup …"`
 /// and the slash fallback). Bare `/setup` and `/setup status` print the

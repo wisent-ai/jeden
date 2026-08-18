@@ -417,6 +417,9 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             json!({"token": token, "tool": tool, "detail": detail}),
             false,
         ),
+        SessionEventKind::Goal { text, status } => {
+            ("goal".into(), json!({"text": text, "status": status}), false)
+        }
         SessionEventKind::Result { text } => ("result".into(), json!({"text": text}), true),
         SessionEventKind::Error { message } => ("error".into(), json!({"message": message}), true),
     }

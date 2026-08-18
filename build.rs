@@ -28,8 +28,7 @@ fn main() {
         .unwrap_or_else(|| {
             let commits = git(&["rev-list", "--count", "HEAD"]).unwrap_or_else(|| "0".into());
             let sha = git(&["rev-parse", "--short", "HEAD"]).unwrap_or_else(|| "unknown".into());
-            let dirty = git(&["status", "--porcelain"])
-                .is_some_and(|status| !status.is_empty());
+            let dirty = git(&["status", "--porcelain"]).is_some_and(|status| !status.is_empty());
             format!(
                 "{base}+dev.{commits}.{sha}{}",
                 if dirty { ".dirty" } else { "" }

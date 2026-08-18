@@ -22,6 +22,10 @@ pub(crate) struct RunHooks<'a> {
     /// Ask the user to approve a gated tool that isn't pre-authorized. The
     /// detail string carries safety/approval context for the prompt body.
     pub(crate) approve: Box<dyn Fn(&str, &str) -> bool + 'a>,
+    /// Optional sink for goal-lifecycle events `(text, status)`. `Arc` (not a
+    /// borrowed box) because background classification threads outlive the
+    /// turn; `None` where no session event stream exists (CLI/TUI).
+    pub(crate) goal_event: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
 }
 
 impl RunHooks<'static> {
@@ -34,6 +38,7 @@ impl RunHooks<'static> {
             stream: Box::new(|_| {}),
             ask_user: None,
             approve: Box::new(|_, _| false),
+            goal_event: None,
         }
     }
 }

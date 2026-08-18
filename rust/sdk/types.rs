@@ -72,6 +72,12 @@ pub enum SessionEventKind {
         tool: String,
         detail: String,
     },
+    /// Goal-lifecycle update from Oko's classifier: `status` is "active"
+    /// (goal started) or "done" (goal finished).
+    Goal {
+        text: String,
+        status: String,
+    },
     Result {
         text: String,
     },

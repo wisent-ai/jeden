@@ -10,8 +10,12 @@ pub(crate) mod session;
 pub(crate) mod todo;
 
 fn format_goal_status(goal: &GoalState) -> String {
+    let auto = if goal.auto { "on" } else { "off" };
     if goal.objective.is_empty() {
-        return "Goal mode has no objective. Use /goal set <objective>.".into();
+        return format!(
+            "Goal mode has no objective. Use /goal set <objective>.\nAuto lifecycle (oko): {}",
+            auto
+        );
     }
     let state = if goal.enabled {
         if goal.paused {
@@ -33,8 +37,8 @@ fn format_goal_status(goal: &GoalState) -> String {
         })
         .unwrap_or_else(|| "off".into());
     format!(
-        "Goal mode: {}\nObjective: {}\nBudget: {}",
-        state, goal.objective, budget
+        "Goal mode: {}\nObjective: {}\nBudget: {}\nAuto lifecycle (oko): {}",
+        state, goal.objective, budget, auto
     )
 }
 
@@ -274,6 +278,17 @@ pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, S
                 }
             ))
         }
+        "auto" => match rest.trim().to_ascii_lowercase().as_str() {
+            "on" => {
+                state.goal.auto = true;
+                Ok("Goal auto lifecycle enabled: Oko's lifecycle model may start and finish goals from your prompts.".into())
+            }
+            "off" => {
+                state.goal.auto = false;
+                Ok("Goal auto lifecycle disabled.".into())
+            }
+            _ => Err("Usage: /goal auto <on|off>".into()),
+        },
         _ => {
             state.goal.objective = args.trim().to_string();
             state.goal.enabled = true;

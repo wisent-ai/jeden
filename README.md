@@ -239,6 +239,10 @@ Destructive rows open a confirmation view with **Cancel** selected by default. M
 
 When stdin is not a terminal, interactive views render as deterministic text lists and direct slash arguments remain available for scripts.
 
+### Goal mode and the Oko lifecycle model
+
+`/goal set <objective>` pins a durable objective that every turn is kept aligned with; `/goal status`, `/goal pause`, `/goal resume`, `/goal budget <n|off>`, and `/goal drop` manage it. `/goal auto on` additionally lets Oko's locally served goal-lifecycle model classify each user prompt in the background (loopback endpoint, `JEDEN_LIFECYCLE_MODEL_URL` override): a prompt that starts a genuinely new durable objective sets the goal automatically, and an explicit user confirmation of completion drops it, mirroring `/goal drop`. Every classified prompt records a `goal_lifecycle` session-ledger event, and sessions driven over `jeden rpc` receive a `goal` session event with the goal title and `active`/`done` status. Classification is fail-open and never blocks or rewrites the current turn: when the service does not answer, Jeden behaves exactly as with `/goal auto off` (the default).
+
 ## Roadmap Registry
 
 `roadmap/roadmap.yaml` is the canonical, versioned team roadmap. `roadmap/schema/roadmap-v1.schema.json` defines the machine contract; `docs/JEDEN_NEXT_PHASES_PLAN.md` and `roadmap/views/JEDEN_NEXT_PHASES_PLAN.md` are deterministic generated views. Every mutating operation is serialized through a stable sibling lock, validates an `expectedRevision`, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML, and fsyncs the parent directory. Pass `--revision <n>` in automation; an omitted revision uses the snapshot read by that invocation and still fails if another writer commits first.

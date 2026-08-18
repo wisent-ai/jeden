@@ -77,6 +77,10 @@ pub(crate) struct GoalState {
     pub(crate) objective: String,
     #[serde(default)]
     pub(crate) budget: Option<f64>,
+    /// When true, Oko's goal-lifecycle model may start and finish goals
+    /// automatically from classified user prompts.
+    #[serde(default)]
+    pub(crate) auto: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

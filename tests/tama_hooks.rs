@@ -58,8 +58,9 @@ fn tama_registry_end_to_end() {
     assert!(describe.contains("Tama registry ("));
     assert!(describe.contains(&registry.display().to_string()));
     assert!(describe.contains("user_prompt_submit -> UserPromptSubmit [*] 1 hook(s)"));
-    assert!(describe
-        .contains("pre_tool_use:bash -> PreToolUse [^(run_command|run_process)$] 1 hook(s), blocking"));
+    assert!(describe.contains(
+        "pre_tool_use:bash -> PreToolUse [^(run_command|run_process)$] 1 hook(s), blocking"
+    ));
 
     // The echo hook fires on user-prompt: drive the same firing path
     // `user_prompt_submit` uses (`fire_event` with the UserPromptSubmit
@@ -75,7 +76,8 @@ fn tama_registry_end_to_end() {
 
     // The blocking deny hook (exit 3) blocks run_command and run_process
     // pre-tool calls, but not tools outside the bash matcher.
-    let blocked = jeden::hooks::pretool_block(&cwd, "run_command", &json!({"command": "ls"}), false);
+    let blocked =
+        jeden::hooks::pretool_block(&cwd, "run_command", &json!({"command": "ls"}), false);
     assert!(blocked.is_some(), "run_command should be blocked");
     assert!(
         jeden::hooks::pretool_block(&cwd, "run_process", &json!({}), false).is_some(),

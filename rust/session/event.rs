@@ -44,6 +44,7 @@ pub(crate) enum SessionPayloadV2 {
     Branch(Value),
     Checkpoint(Value),
     Rewind(Value),
+    GoalLifecycle(Value),
     MemoryMutation(Value),
     RoadmapItemCreated(Value),
     RoadmapItemUpdated(Value),
@@ -103,6 +104,7 @@ impl SessionPayloadV2 {
             "branch" => Self::Branch(data),
             "checkpoint" => Self::Checkpoint(data),
             "rewind" => Self::Rewind(data),
+            "goal_lifecycle" => Self::GoalLifecycle(data),
             "memory_mutation" => Self::MemoryMutation(data),
             "memory_recall" => Self::MemoryRecall(data),
             "roadmap_item_created" => Self::RoadmapItemCreated(data),
@@ -189,6 +191,7 @@ impl SessionPayloadV2 {
             Self::Branch(_) => "branch",
             Self::Checkpoint(_) => "checkpoint",
             Self::Rewind(_) => "rewind",
+            Self::GoalLifecycle(_) => "goal_lifecycle",
             Self::MemoryMutation(_) => "memory_mutation",
             Self::RoadmapItemCreated(_) => "roadmap_item_created",
             Self::RoadmapItemUpdated(_) => "roadmap_item_updated",
@@ -248,6 +251,7 @@ impl SessionPayloadV2 {
             | Self::Branch(v)
             | Self::Checkpoint(v)
             | Self::Rewind(v)
+            | Self::GoalLifecycle(v)
             | Self::MemoryMutation(v)
             | Self::RoadmapItemCreated(v)
             | Self::RoadmapItemUpdated(v)

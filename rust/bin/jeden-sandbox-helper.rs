@@ -108,6 +108,14 @@ mod platform {
 
     fn run() -> Result<(), String> {
         let mut args = env::args_os().skip(1).peekable();
+        if args.peek().is_some_and(|value| value == "--version") {
+            args.next();
+            if args.next().is_some() {
+                return Err(usage());
+            }
+            println!("jeden-sandbox-helper {}", env!("CARGO_PKG_VERSION"));
+            return Ok(());
+        }
         if args.peek().is_some_and(|value| value == "--probe") {
             args.next();
             if args.next().is_some() {

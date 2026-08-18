@@ -1,7 +1,3 @@
-use wisent_onboarding_client::{
-    bundle_from_canonical, FileStorage, JourneyClient, ProgressStatus, ScopeKind,
-    IntegrationTransport, Transport,
-};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -9,6 +5,10 @@ use std::env;
 use std::future::Future;
 use std::path::PathBuf;
 use uuid::Uuid;
+use wisent_onboarding_client::{
+    bundle_from_canonical, FileStorage, IntegrationTransport, JourneyClient, ProgressStatus,
+    ScopeKind, Transport,
+};
 
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
@@ -112,9 +112,11 @@ fn picker_for(client: &Client) -> Result<PickerSpec, String> {
     if progress.status == ProgressStatus::Completed {
         return Ok(PickerSpec::new(
             "Jeden first-use complete",
-            vec![PickerItem::action("Replay the product guide", "/onboarding reset")
-                .detail("starts a new first-use attempt without changing setup")
-                .badge("REPLAY")],
+            vec![
+                PickerItem::action("Replay the product guide", "/onboarding reset")
+                    .detail("starts a new first-use attempt without changing setup")
+                    .badge("REPLAY"),
+            ],
         ));
     }
 
@@ -195,7 +197,10 @@ async fn apply(action: &str) -> Result<Client, String> {
 pub(crate) fn initial_picker() -> Result<Option<PickerSpec>, String> {
     run(async {
         let client = start_client().await?;
-        if client.progress().is_some_and(|progress| progress.status == ProgressStatus::Completed) {
+        if client
+            .progress()
+            .is_some_and(|progress| progress.status == ProgressStatus::Completed)
+        {
             return Ok(None);
         }
         client
@@ -220,7 +225,10 @@ pub(crate) fn text(action: &str) -> Result<String, String> {
 pub(crate) fn observe_successful_turn() {
     let _ = run(async {
         let mut client = start_client().await?;
-        if client.progress().is_some_and(|progress| progress.status == ProgressStatus::Completed) {
+        if client
+            .progress()
+            .is_some_and(|progress| progress.status == ProgressStatus::Completed)
+        {
             return Ok(());
         }
         while !current_screen(&client)?.transitions.is_empty() {

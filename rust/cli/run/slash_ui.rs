@@ -101,7 +101,10 @@ fn model_metrics(model: &ModelEntry, widths: &[usize]) -> String {
         .enumerate()
         .map(|(slot, part)| {
             let width = widths.get(slot).copied().unwrap_or_default();
-            format!("{}{part}", " ".repeat(width.saturating_sub(part.chars().count())))
+            format!(
+                "{}{part}",
+                " ".repeat(width.saturating_sub(part.chars().count()))
+            )
         })
         .collect::<Vec<_>>()
         .join("  ")
@@ -119,7 +122,10 @@ const SUBSCRIPTION_PROVIDERS: &[&str] = &["claude-code", "codex", "kimi"];
 
 /// Subscription providers first in a fixed order, everything else alphabetical.
 fn provider_rank(provider: &str) -> (u8, &str) {
-    match SUBSCRIPTION_PROVIDERS.iter().position(|known| *known == provider) {
+    match SUBSCRIPTION_PROVIDERS
+        .iter()
+        .position(|known| *known == provider)
+    {
         Some(index) => (index as u8, ""),
         None => (SUBSCRIPTION_PROVIDERS.len() as u8, provider),
     }
@@ -136,12 +142,7 @@ fn model_rank(model: &ModelEntry, active: Option<&str>) -> u8 {
     }
 }
 
-fn model_row(
-    model: &ModelEntry,
-    active: Option<&str>,
-    lang: &str,
-    widths: &[usize],
-) -> PickerItem {
+fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str, widths: &[usize]) -> PickerItem {
     let selected = active == Some(model.id.as_str());
     let detail = format!(
         "context {} · output {} · {}{}",
@@ -188,9 +189,8 @@ fn summary_key(base: &'static str, lang: &str, count: usize) -> &'static str {
             _ => return base,
         }
     }
-    let few = lang == "pl"
-        && (2..=4).contains(&(count % 10))
-        && !(12..=14).contains(&(count % 100));
+    let few =
+        lang == "pl" && (2..=4).contains(&(count % 10)) && !(12..=14).contains(&(count % 100));
     if few {
         match base {
             "picker.summary.subscription" => "picker.summary.subscription.few",
@@ -237,7 +237,10 @@ pub(crate) fn model_picker(
     let mut items = Vec::new();
     for (route, detail) in [
         ("any", "auto-select across available subscriptions"),
-        ("any-vision-capable", "auto-select a vision-capable subscription"),
+        (
+            "any-vision-capable",
+            "auto-select a vision-capable subscription",
+        ),
     ] {
         let selected = active == Some(route);
         items.push(
@@ -266,16 +269,22 @@ pub(crate) fn model_picker(
             covered += count;
             summary.push(summary_row(
                 format!("● {provider}"),
-                tr(&lang, summary_key("picker.summary.subscription", &lang, count))
-                    .replace("{}", &count.to_string()),
+                tr(
+                    &lang,
+                    summary_key("picker.summary.subscription", &lang, count),
+                )
+                .replace("{}", &count.to_string()),
             ));
         }
     }
     let remainder = total.saturating_sub(covered);
     let catalog_row = summary_row(
         "○ catalog".to_string(),
-        tr(&lang, summary_key("picker.summary.catalog", &lang, remainder))
-            .replace("{}", &remainder.to_string()),
+        tr(
+            &lang,
+            summary_key("picker.summary.catalog", &lang, remainder),
+        )
+        .replace("{}", &remainder.to_string()),
     );
     if show_all {
         // No summary rows here: with a category bar the picker renders as two
@@ -303,8 +312,7 @@ pub(crate) fn model_picker(
         let catalog_tab = tabs.len() - 1;
         let tab_index = |id: &str| -> usize {
             let group = provider_group(id);
-            tabs
-                .iter()
+            tabs.iter()
                 .position(|name| name.as_str() == group)
                 .unwrap_or(catalog_tab)
         };
@@ -433,9 +441,7 @@ pub(crate) fn interactive_view(
         "/login" => {
             return Some(Ok(CommandOutcome::Text(format_auth_status(cwd))));
         }
-        "/setup"
-            if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() =>
-        {
+        "/setup" if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() => {
             // Piped stdin/stdout: print the manual checklist instead of a view.
             let session_root = crate::session_root();
             let context = SlashContext {
@@ -443,8 +449,7 @@ pub(crate) fn interactive_view(
                 model,
                 session_root: &session_root,
             };
-            return Some(crate::slash::setup::handle_text("", &context)
-                .map(CommandOutcome::Text));
+            return Some(crate::slash::setup::handle_text("", &context).map(CommandOutcome::Text));
         }
         "/providers" => {
             return Some(provider_picker(cwd).map(CommandOutcome::Picker));
@@ -464,7 +469,6 @@ pub(crate) fn interactive_view(
     };
     slash::interactive_picker(&context, input).map(|picker| picker.map(CommandOutcome::Picker))
 }
-
 
 #[cfg(test)]
 mod tests {

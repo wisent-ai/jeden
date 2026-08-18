@@ -228,6 +228,8 @@ impl AgentSession {
         let approve_inner = self.inner.clone();
         let approve_id = request_id.clone();
         let approve_error = event_error.clone();
+        let goal_inner = self.inner.clone();
+        let goal_id = request_id.clone();
 
         let mut hooks = agent::RunHooks {
             cancel,
@@ -322,6 +324,17 @@ impl AgentSession {
                     }
                 }
             }),
+            goal_event: Some(Arc::new(move |text: &str, status: &str| {
+                // Best-effort: a background goal-lifecycle event never fails
+                // or outlives the prompt's error handling.
+                let _ = goal_inner.emit(SessionEvent {
+                    request_id: goal_id.clone(),
+                    event: SessionEventKind::Goal {
+                        text: text.to_string(),
+                        status: status.to_string(),
+                    },
+                });
+            })),
         };
         let text = conversation.run_turn(&args, &request.prompt, &[], &mut hooks)?;
         if let Some(error) = event_error

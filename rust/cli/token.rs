@@ -30,8 +30,7 @@ fn brama_url() -> Result<String, String> {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
-            "BRAMA_URL is required; configure the Brama model-router service URL"
-                .to_string()
+            "BRAMA_URL is required; configure the Brama model-router service URL".to_string()
         })
 }
 
@@ -70,7 +69,10 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
     let mut lines = vec![
         format!("Brama:   {brama}"),
         format!("Agent:   {agent_id}"),
-        format!("Token:   {} — injected in memory by Stado/Skarbiec", redacted(&secret)),
+        format!(
+            "Token:   {} — injected in memory by Stado/Skarbiec",
+            redacted(&secret)
+        ),
         "Reveal:  jeden token --reveal (prints the bare value for scripting)".to_string(),
     ];
     if list {

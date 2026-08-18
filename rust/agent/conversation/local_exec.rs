@@ -94,10 +94,7 @@ fn format_local_result(result: &Value) -> String {
         lines.push("stderr:".to_string());
         push_stream_lines(&mut lines, stderr);
     }
-    let ok = result
-        .get("ok")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
     if !ok {
         if let Some(code) = result.get("code").and_then(Value::as_i64) {
             lines.push(format!("(exit code: {code})"));

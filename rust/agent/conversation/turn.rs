@@ -15,7 +15,12 @@ impl Conversation {
         } else {
             apply_mode_instructions(&args.cwd, task)?
         };
-        if let Some(goal) = args.goal.as_deref().map(str::trim).filter(|goal| !goal.is_empty()) {
+        if let Some(goal) = args
+            .goal
+            .as_deref()
+            .map(str::trim)
+            .filter(|goal| !goal.is_empty())
+        {
             effective_task = format!(
                 "Active work goal for this turn: {}. Keep every step aligned with this goal and report completed work against it.\n\n{}",
                 goal, effective_task
@@ -70,6 +75,27 @@ impl Conversation {
                 "goal": args.goal,
             }),
         )?;
+
+        if !args.model_only && !args.autonomous {
+            // Oko goal-lifecycle classification: background-only and fail-open.
+            // Results update mode state and session events, never this turn's
+            // prompt text. The ledger event lands via the process-wide append
+            // lock, so it is safe next to this thread's own recording.
+            let turn_index = self
+                .messages
+                .iter()
+                .filter(|message| {
+                    message.get("role").and_then(serde_json::Value::as_str) == Some("user")
+                })
+                .count() as u64;
+            crate::goal_lifecycle::spawn_turn_classification(
+                args.cwd.clone(),
+                task.to_string(),
+                self.recorder.path(),
+                turn_index,
+                hooks.goal_event.clone(),
+            );
+        }
 
         let tool_specs = if args.model_only {
             Vec::new()

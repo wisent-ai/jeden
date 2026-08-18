@@ -238,7 +238,12 @@ pub fn describe_source(cwd: &Path) -> Option<String> {
         let count = spec
             .get("hooks")
             .and_then(Value::as_array)
-            .map(|entries| entries.iter().filter(|e| entry_command(e).is_some()).count())
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter(|e| entry_command(e).is_some())
+                    .count()
+            })
             .unwrap_or(0);
         if count == 0 {
             continue;
@@ -282,7 +287,10 @@ mod tests {
 
     #[test]
     fn event_mapping() {
-        assert_eq!(mapped("user_prompt_submit"), ("UserPromptSubmit", String::new()));
+        assert_eq!(
+            mapped("user_prompt_submit"),
+            ("UserPromptSubmit", String::new())
+        );
         assert_eq!(mapped("stop"), ("Stop", String::new()));
         assert_eq!(mapped("session_start"), ("SessionStart", String::new()));
         assert_eq!(
@@ -302,17 +310,26 @@ mod tests {
 
     #[test]
     fn tool_matchers() {
-        assert_eq!(tool_matcher("read"), "^(read|read_file|read_binary_file|read_archive|read_document)$");
+        assert_eq!(
+            tool_matcher("read"),
+            "^(read|read_file|read_binary_file|read_archive|read_document)$"
+        );
         assert_eq!(tool_matcher("edit"), "^(edit|edit_file|apply_patch)$");
         assert_eq!(tool_matcher("write"), "^(write|write_file)$");
         assert_eq!(tool_matcher("multiedit"), "^(edit|apply_patch)$");
         assert_eq!(tool_matcher("notebook"), "^read_document$");
         assert_eq!(tool_matcher("task"), "^delegate_task$");
         assert_eq!(tool_matcher("todo"), "^todo$");
-        assert_eq!(tool_matcher("eval"), "^(eval_session|python_eval|node_eval)$");
+        assert_eq!(
+            tool_matcher("eval"),
+            "^(eval_session|python_eval|node_eval)$"
+        );
         assert_eq!(tool_matcher("ssh"), "^ssh_exec$");
         assert_eq!(tool_matcher("ask"), "^ask_user$");
-        assert_eq!(tool_matcher("lookup"), "^(search_files|search_text|grep_regex|glob_paths|ast_search)$");
+        assert_eq!(
+            tool_matcher("lookup"),
+            "^(search_files|search_text|grep_regex|glob_paths|ast_search)$"
+        );
         assert_eq!(tool_matcher("wait"), "^todo$");
         assert_eq!(tool_matcher("goal"), "^todo$");
         assert_eq!(tool_matcher("functions_ask"), "^functions_ask$");
@@ -326,7 +343,10 @@ mod tests {
             stderr: "denied".into(),
         };
         // Blocking events: any failure becomes jeden's exit-2 block signal.
-        assert_eq!(normalize_outcome("PreToolUse", true, failed.clone()).exit_code, 2);
+        assert_eq!(
+            normalize_outcome("PreToolUse", true, failed.clone()).exit_code,
+            2
+        );
         // ... unless the hook explicitly approves.
         let approve = HookOutcome {
             exit_code: 3,
@@ -348,12 +368,19 @@ mod tests {
             stdout: String::new(),
             stderr: "denied".into(),
         };
-        assert_eq!(normalize_outcome("PreToolUse", false, exit_two).exit_code, 0);
-        let verdict_nonblocking = normalize_outcome("PreToolUse", false, HookOutcome {
-            exit_code: 0,
-            stdout: "{\"decision\":\"block\"}".into(),
-            stderr: String::new(),
-        });
+        assert_eq!(
+            normalize_outcome("PreToolUse", false, exit_two).exit_code,
+            0
+        );
+        let verdict_nonblocking = normalize_outcome(
+            "PreToolUse",
+            false,
+            HookOutcome {
+                exit_code: 0,
+                stdout: "{\"decision\":\"block\"}".into(),
+                stderr: String::new(),
+            },
+        );
         assert_eq!(verdict_nonblocking.exit_code, 0);
         assert!(verdict_nonblocking.stdout.is_empty());
     }

@@ -40,6 +40,11 @@ files, +1333/-402 excluding lockfiles).
 - Added the launcher `scripts/run-with-stado.sh`, which resolves its Skarbiec
   consumer and token file.
 - Added `jeden pursue` as an integration with the separately owned, revision-pinned [Pursuit](https://github.com/wisent-ai/pursuit) engine. Jeden supplies Brama-backed conversations and approval-gated tools; Pursuit owns preference evidence, outcome contracts, independent review and repair loops, validators, and receipts under `.pursuit/runs/`.
+- Added optional Oko goal-lifecycle classification (`rust/goal_lifecycle.rs`):
+  `/goal auto on|off` gates automatic goal start/finish from classified user
+  prompts, each classified prompt records a `goal_lifecycle` ledger event, and
+  RPC sessions emit a `goal` session event. Fail-open against the loopback
+  service (`JEDEN_LIFECYCLE_MODEL_URL`, default `http://127.0.0.1:11439`).
 
 ### Changed
 

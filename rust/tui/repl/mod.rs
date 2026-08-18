@@ -171,4 +171,3 @@ pub(super) fn apply_turn_result(
         }
     }
 }
-

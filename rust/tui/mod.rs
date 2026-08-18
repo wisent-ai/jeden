@@ -382,21 +382,29 @@ pub struct TurnCtx<'a> {
     pub approve: &'a dyn Fn(&str, &str) -> bool,
 }
 
-
 #[cfg(test)]
 mod turn_kind_tests {
     use super::{default_turn_kind, TurnKind};
 
     #[test]
     fn login_with_provider_runs_in_background() {
-        assert_eq!(default_turn_kind("/login claude-code"), TurnKind::Background);
+        assert_eq!(
+            default_turn_kind("/login claude-code"),
+            TurnKind::Background
+        );
         assert_eq!(default_turn_kind("/login"), TurnKind::Background);
     }
 
     #[test]
     fn network_views_run_in_background() {
-        for input in ["/model", "/model --all", "/models", "/usage", "/providers", "/logout kimi"]
-        {
+        for input in [
+            "/model",
+            "/model --all",
+            "/models",
+            "/usage",
+            "/providers",
+            "/logout kimi",
+        ] {
             assert_eq!(default_turn_kind(input), TurnKind::Background, "{input}");
         }
     }

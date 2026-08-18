@@ -161,12 +161,14 @@ fn branch_of(path: &Path) -> String {
 fn parse_gitfile(path: &Path) -> Option<(PathBuf, PathBuf)> {
     let content = fs::read_to_string(path.join(".git")).ok()?;
     let gitdir = content.trim().strip_prefix("gitdir:")?.trim();
-    let marker = format!("{}.git{}worktrees{}", std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR, std::path::MAIN_SEPARATOR);
+    let marker = format!(
+        "{}.git{}worktrees{}",
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR,
+        std::path::MAIN_SEPARATOR
+    );
     let index = gitdir.find(&marker)?;
-    Some((
-        PathBuf::from(&gitdir[..index]),
-        PathBuf::from(gitdir),
-    ))
+    Some((PathBuf::from(&gitdir[..index]), PathBuf::from(gitdir)))
 }
 
 fn read_jobs(store: &Path) -> Vec<JobRecord> {
@@ -179,8 +181,7 @@ fn read_jobs(store: &Path) -> Vec<JobRecord> {
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(job) = serde_json::from_slice::<JobRecord>(&fs::read(&path).unwrap_or_default())
-        {
+        if let Ok(job) = serde_json::from_slice::<JobRecord>(&fs::read(&path).unwrap_or_default()) {
             jobs.push(job);
         }
     }
@@ -318,7 +319,11 @@ fn to_row(worktree: &ManagedWorktree, now: u64) -> WorktreeRow {
         age: format_age(now.saturating_sub(worktree.created_ms)),
         age_ms: now.saturating_sub(worktree.created_ms),
         job_id: worktree.job_id.clone(),
-        status: worktree.status.as_ref().map(status_name).map(str::to_string),
+        status: worktree
+            .status
+            .as_ref()
+            .map(status_name)
+            .map(str::to_string),
         stale: worktree.stale(),
     }
 }
@@ -396,12 +401,12 @@ fn render_list(args: &Args) -> String {
                     .unwrap_or_default()
                         + "\n";
                 }
-                let mut out = format!("{note}\nrepository worktrees from `git worktree list` ({}):\n", rows.len());
+                let mut out = format!(
+                    "{note}\nrepository worktrees from `git worktree list` ({}):\n",
+                    rows.len()
+                );
                 for row in &rows {
-                    out.push_str(&format!(
-                        "  {} · {} · {}\n",
-                        row.path, row.branch, row.age
-                    ));
+                    out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
                 }
                 out
             }
@@ -435,10 +440,7 @@ fn render_list(args: &Args) -> String {
             rows.len()
         );
         for row in &rows {
-            out.push_str(&format!(
-                "  {} · {} · {}\n",
-                row.path, row.branch, row.age
-            ));
+            out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
         }
         if clone_workspaces > 0 {
             out.push_str(&format!(
@@ -452,12 +454,7 @@ fn render_list(args: &Args) -> String {
 /// Canonicalized safety roots: a worktree may only be removed when it lives
 /// inside one of the managed workspace roots and is neither the current
 /// checkout nor the repository top level.
-fn removal_allowed(
-    path: &Path,
-    roots: &[PathBuf],
-    cwd: &Path,
-    repo_top: Option<&Path>,
-) -> bool {
+fn removal_allowed(path: &Path, roots: &[PathBuf], cwd: &Path, repo_top: Option<&Path>) -> bool {
     if !is_worktree_checkout(path) {
         return false;
     }
@@ -487,9 +484,7 @@ fn render_clear(args: &Args, dry_run: bool) -> String {
         }
         for worktree in &managed {
             if let Some(parent) = worktree.path.parent() {
-                set.insert(
-                    fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()),
-                );
+                set.insert(fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()));
             }
         }
         set.into_iter().collect()

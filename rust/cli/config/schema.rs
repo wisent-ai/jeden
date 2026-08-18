@@ -282,7 +282,9 @@ fn grouped_setting_rows(
     rows: Vec<(&str, PickerItem)>,
     lang: &str,
 ) -> (Vec<String>, Vec<PickerItem>) {
-    const KNOWN_PREFIXES: &[&str] = &["tools", "commands", "startup", "context", "rules", "hooks", "secrets", "ui"];
+    const KNOWN_PREFIXES: &[&str] = &[
+        "tools", "commands", "startup", "context", "rules", "hooks", "secrets", "ui",
+    ];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
         let label = if KNOWN_PREFIXES.contains(&prefix) {

@@ -292,7 +292,9 @@ impl CompletionModel {
             ));
         }
         out.push_str("        *)\n");
-        out.push_str("            COMPREPLY=( $(compgen -W \"${global_flags}\" -- \"${cur}\") ) ;;\n");
+        out.push_str(
+            "            COMPREPLY=( $(compgen -W \"${global_flags}\" -- \"${cur}\") ) ;;\n",
+        );
         out.push_str("    esac\n");
         out.push_str("}\n");
         out.push_str("complete -F _jeden_completions jeden\n");

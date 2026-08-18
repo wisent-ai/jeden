@@ -155,9 +155,9 @@ pub enum BramaError {
 impl std::fmt::Display for BramaError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unconfigured => f.write_str(
-                "BRAMA_URL is required; configure the Brama model-router service URL",
-            ),
+            Self::Unconfigured => {
+                f.write_str("BRAMA_URL is required; configure the Brama model-router service URL")
+            }
             Self::Transport(e) => write!(f, "Brama transport error: {e}"),
             Self::Http { status, message } => write!(f, "Brama returned HTTP {status}: {message}"),
             Self::RateLimited { retry_after_ms } => write!(

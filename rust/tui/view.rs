@@ -285,10 +285,7 @@ impl PickerState {
         if indices.is_empty() {
             return usize::MIN;
         }
-        if indices
-            .iter()
-            .all(|index| self.spec.items[*index].disabled)
-        {
+        if indices.iter().all(|index| self.spec.items[*index].disabled) {
             return position.min(indices.len() - SELECTION_STEP);
         }
         let mut current = position.min(indices.len() - SELECTION_STEP);
@@ -473,7 +470,6 @@ impl ConfirmState {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {

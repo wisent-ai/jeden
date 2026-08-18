@@ -6,7 +6,13 @@
 use crate::tui::{self, ConfirmState, Message, PickerItem, PickerSpec, PickerState};
 use crate::Args;
 
-const PRESETS: &[&str] = &["graphite-dark", "paper-light", "titanium", "nord", "color-blind"];
+const PRESETS: &[&str] = &[
+    "graphite-dark",
+    "paper-light",
+    "titanium",
+    "nord",
+    "color-blind",
+];
 const WIDTH: usize = 96;
 
 /// One fixture pass under the currently effective theme.
@@ -106,7 +112,10 @@ pub(crate) fn gallery_command(args: &Args) -> Result<String, String> {
             .copied()
             .find(|preset| *preset == name)
             .ok_or_else(|| {
-                format!("unknown theme `{name}`; bundled presets: {}", PRESETS.join(", "))
+                format!(
+                    "unknown theme `{name}`; bundled presets: {}",
+                    PRESETS.join(", ")
+                )
             })?]
     } else {
         Vec::new()

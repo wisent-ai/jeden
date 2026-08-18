@@ -100,8 +100,8 @@ fn display_row(label: impl Into<String>) -> PickerItem {
 /// Compact 20-cell bar: `█` cells for the used share, `░` for the free share.
 fn quota_bar(remaining: u64, limit: u64) -> String {
     const CELLS: u128 = 20;
-    let free = ((u128::from(remaining) * CELLS + u128::from(limit) / 2) / u128::from(limit))
-        as usize;
+    let free =
+        ((u128::from(remaining) * CELLS + u128::from(limit) / 2) / u128::from(limit)) as usize;
     let free = free.min(CELLS as usize);
     format!("{}{}", "█".repeat(CELLS as usize - free), "░".repeat(free))
 }
@@ -132,7 +132,10 @@ fn bucket_amount(bucket: &QuotaBucket) -> (Option<String>, String) {
     match (bucket.remaining, bucket.limit) {
         (Some(remaining), Some(limit)) if limit > 0 => (
             Some(format!("{}%", percent_free(remaining, limit))),
-            format!("{} {remaining}/{limit} remaining", quota_bar(remaining, limit)),
+            format!(
+                "{} {remaining}/{limit} remaining",
+                quota_bar(remaining, limit)
+            ),
         ),
         (Some(remaining), _) => (None, format!("unmetered · {remaining} remaining")),
         (None, Some(limit)) => (None, format!("limit {limit}")),
@@ -182,7 +185,10 @@ fn quota_rows() -> Vec<PickerItem> {
                 }
                 QuotaEntry::Unavailable { label, error } => unavailable_row(label, error),
             };
-            groups.entry(account.provider.clone()).or_default().push(row);
+            groups
+                .entry(account.provider.clone())
+                .or_default()
+                .push(row);
         }
     }
     let mut items = Vec::new();
@@ -196,7 +202,11 @@ fn quota_rows() -> Vec<PickerItem> {
         });
         let exhausted = rows.iter().any(|row| row.exhausted);
         let mut header = display_row(format!("── {provider} ({}) ──", rows.len()));
-        header.badge = Some(if exhausted { "✖".into() } else { "✔".into() });
+        header.badge = Some(if exhausted {
+            "✖".into()
+        } else {
+            "✔".into()
+        });
         items.push(header);
         items.extend(rows.into_iter().map(|row| {
             let mut item = display_row(row.label).detail(row.detail);

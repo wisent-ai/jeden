@@ -92,8 +92,7 @@ impl ReqwestTransport {
 /// Render an error together with everything underneath it.
 fn describe(error: reqwest::Error) -> String {
     let mut rendered = error.to_string();
-    let mut source: Option<&(dyn std::error::Error + 'static)> =
-        std::error::Error::source(&error);
+    let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(&error);
     while let Some(cause) = source {
         rendered.push_str(": ");
         rendered.push_str(&cause.to_string());

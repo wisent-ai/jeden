@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::slash::common::{split_args, split_head};
+pub(crate) use crate::slash::state::mutate_mode_state;
 pub(crate) use crate::slash::state::read_mode_state;
 use crate::slash::state::write_mode_state;
 use crate::tools;

@@ -129,14 +129,12 @@ impl MediaRouterClient {
         }
         let mut origin = Url::parse(raw_origin.trim())
             .map_err(|error| format!("invalid STADO_MEDIA_ROUTER_URL: {error}"))?;
-        let loopback = matches!(
-            origin.host_str(),
-            Some("localhost" | "127.0.0.1" | "::1")
-        );
+        let loopback = matches!(origin.host_str(), Some("localhost" | "127.0.0.1" | "::1"));
         let insecure_loopback = std::env::var("STADO_MEDIA_ROUTER_ALLOW_INSECURE_LOOPBACK")
             .ok()
             .is_some_and(|value| value == "1");
-        if origin.scheme() != "https" && !(origin.scheme() == "http" && loopback && insecure_loopback)
+        if origin.scheme() != "https"
+            && !(origin.scheme() == "http" && loopback && insecure_loopback)
         {
             return Err(
                 "STADO_MEDIA_ROUTER_URL must use HTTPS or explicitly enabled loopback HTTP".into(),
@@ -148,7 +146,9 @@ impl MediaRouterClient {
             || origin.fragment().is_some()
             || !matches!(origin.path(), "" | "/")
         {
-            return Err("STADO_MEDIA_ROUTER_URL must be an origin without credentials or path".into());
+            return Err(
+                "STADO_MEDIA_ROUTER_URL must be an origin without credentials or path".into(),
+            );
         }
         origin.set_path("/");
         let client = Client::builder()
@@ -165,10 +165,12 @@ impl MediaRouterClient {
     }
 
     fn endpoint(&self, path: &str) -> ServiceResult<Url> {
-        self.origin.join(path).map_err(|error| ServiceError::Protocol {
-            service: "media-router",
-            detail: error.to_string(),
-        })
+        self.origin
+            .join(path)
+            .map_err(|error| ServiceError::Protocol {
+                service: "media-router",
+                detail: error.to_string(),
+            })
     }
 
     fn post_json<T: Serialize, R: for<'de> Deserialize<'de>>(
@@ -189,12 +191,10 @@ impl MediaRouterClient {
         if !response.status().is_success() {
             return Err(response_failure("media-router", response));
         }
-        response
-            .json()
-            .map_err(|error| ServiceError::Protocol {
-                service: "media-router",
-                detail: error.to_string(),
-            })
+        response.json().map_err(|error| ServiceError::Protocol {
+            service: "media-router",
+            detail: error.to_string(),
+        })
     }
 
     fn status(
@@ -214,12 +214,10 @@ impl MediaRouterClient {
         if !response.status().is_success() {
             return Err(response_failure("media-router", response));
         }
-        response
-            .json()
-            .map_err(|error| ServiceError::Protocol {
-                service: "media-router",
-                detail: error.to_string(),
-            })
+        response.json().map_err(|error| ServiceError::Protocol {
+            service: "media-router",
+            detail: error.to_string(),
+        })
     }
 
     fn content(
@@ -255,9 +253,7 @@ impl MediaRouterClient {
         if !content_type.starts_with(expected_type) {
             return Err(ServiceError::Protocol {
                 service: "media-router",
-                detail: format!(
-                    "expected {expected_type} content, received {content_type}"
-                ),
+                detail: format!("expected {expected_type} content, received {content_type}"),
             });
         }
         if response
@@ -299,11 +295,7 @@ impl MediaService {
                 &["toolServices", "image", "model"],
                 "JEDEN_IMAGE_MODEL",
             ),
-            tts_model: config::string(
-                value,
-                &["toolServices", "tts", "model"],
-                "JEDEN_TTS_MODEL",
-            ),
+            tts_model: config::string(value, &["toolServices", "tts", "model"], "JEDEN_TTS_MODEL"),
         }
     }
 
@@ -388,10 +380,12 @@ impl MediaService {
             });
         }
         check_job_id(&response.job_id)?;
-        let encoded = response.image_base64.ok_or_else(|| ServiceError::Protocol {
-            service: "media-router",
-            detail: "image response lacks image_base64".into(),
-        })?;
+        let encoded = response
+            .image_base64
+            .ok_or_else(|| ServiceError::Protocol {
+                service: "media-router",
+                detail: "image response lacks image_base64".into(),
+            })?;
         let mime_type = response.mime_type.ok_or_else(|| ServiceError::Protocol {
             service: "media-router",
             detail: "image response lacks mime_type".into(),
@@ -416,18 +410,12 @@ impl MediaService {
         Ok(artifact)
     }
 
-    fn image_edit(
-        &self,
-        input: &Value,
-        context: &OperationContext<'_>,
-    ) -> ServiceResult<Value> {
+    fn image_edit(&self, input: &Value, context: &OperationContext<'_>) -> ServiceResult<Value> {
         let prompt = nonempty(input.get("prompt"), "prompt")?;
         let model = optional_string(input, "model")
             .or_else(|| self.image_model.clone())
             .ok_or_else(|| {
-                ServiceError::InvalidInput(
-                    "image_edit requires model or JEDEN_IMAGE_MODEL".into(),
-                )
+                ServiceError::InvalidInput("image_edit requires model or JEDEN_IMAGE_MODEL".into())
             })?;
         let path = self.jailed(input)?;
         let bytes = fs::read(&path)?;
@@ -525,7 +513,10 @@ impl MediaService {
     ) -> ServiceResult<()> {
         let local_deadline = Instant::now()
             + Duration::from_secs("120".parse().expect("valid media polling timeout"));
-        let deadline = context.deadline().unwrap_or(local_deadline).min(local_deadline);
+        let deadline = context
+            .deadline()
+            .unwrap_or(local_deadline)
+            .min(local_deadline);
         loop {
             check_operation(context)?;
             if Instant::now() >= deadline {
@@ -606,7 +597,9 @@ fn dimensions(size: Option<&str>) -> ServiceResult<(Option<u32>, Option<u32>)> {
 
 fn aspect_ratio(size: Option<&str>) -> ServiceResult<Option<String>> {
     let (width, height) = dimensions(size)?;
-    Ok(width.zip(height).map(|(width, height)| format!("{width}:{height}")))
+    Ok(width
+        .zip(height)
+        .map(|(width, height)| format!("{width}:{height}")))
 }
 
 fn image_extension(mime_type: &str) -> ServiceResult<&'static str> {

@@ -46,12 +46,9 @@ impl JedenStageRunner {
     }
 
     fn run_planner(&mut self, prompt: &str) -> Result<StageResponse, String> {
-        let text = self.planner.run_turn(
-            &self.read_only_args,
-            prompt,
-            &[],
-            &mut self.hooks,
-        )?;
+        let text = self
+            .planner
+            .run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
         Ok(StageResponse::new(text, Some(self.planner.session_path())))
     }
 
@@ -60,12 +57,7 @@ impl JedenStageRunner {
             self.executor = Some(Conversation::new(&self.execution_args.cwd)?);
         }
         let executor = self.executor.as_mut().expect("executor was initialized");
-        let text = executor.run_turn(
-            &self.execution_args,
-            prompt,
-            &[],
-            &mut self.hooks,
-        )?;
+        let text = executor.run_turn(&self.execution_args, prompt, &[], &mut self.hooks)?;
         Ok(StageResponse::new(text, Some(executor.session_path())))
     }
 
@@ -81,12 +73,7 @@ impl JedenStageRunner {
             .contract_reviewer
             .as_mut()
             .expect("contract reviewer was initialized");
-        let text = reviewer.run_turn(
-            &self.read_only_args,
-            prompt,
-            &[],
-            &mut self.hooks,
-        )?;
+        let text = reviewer.run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
         Ok(StageResponse::new(text, Some(reviewer.session_path())))
     }
 
@@ -102,12 +89,7 @@ impl JedenStageRunner {
             .acceptance_reviewer
             .as_mut()
             .expect("acceptance reviewer was initialized");
-        let text = reviewer.run_turn(
-            &self.read_only_args,
-            prompt,
-            &[],
-            &mut self.hooks,
-        )?;
+        let text = reviewer.run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
         Ok(StageResponse::new(text, Some(reviewer.session_path())))
     }
 }
@@ -118,9 +100,7 @@ impl StageRunner for JedenStageRunner {
             Stage::Distill | Stage::ContractRevision { .. } => self.run_planner(prompt),
             Stage::ContractReview { round } => self.run_contract_reviewer(*round, prompt),
             Stage::Execute { .. } | Stage::Repair { .. } => self.run_executor(prompt),
-            Stage::AcceptanceReview { round } => {
-                self.run_acceptance_reviewer(*round, prompt)
-            }
+            Stage::AcceptanceReview { round } => self.run_acceptance_reviewer(*round, prompt),
         }
     }
 }
@@ -138,11 +118,8 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     } else {
         None
     };
-    let preference_evidence = collect_preference_evidence(
-        &args.cwd,
-        &objective,
-        transcript_lake.as_deref(),
-    );
+    let preference_evidence =
+        collect_preference_evidence(&args.cwd, &objective, transcript_lake.as_deref());
     let config = PursuitConfig::new(&args.cwd, objective, preference_evidence);
     let mut runner = JedenStageRunner::new(args)?;
     let outcome = pursue(config, &mut runner).map_err(|error| error.to_string())?;
