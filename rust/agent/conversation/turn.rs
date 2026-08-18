@@ -76,6 +76,7 @@ impl Conversation {
             }),
         )?;
 
+        let mut classification_handle = None;
         if !args.model_only && !args.autonomous {
             // Oko goal-lifecycle classification: background-only and fail-open.
             // Results update mode state and session events, never this turn's
@@ -88,13 +89,13 @@ impl Conversation {
                     message.get("role").and_then(serde_json::Value::as_str) == Some("user")
                 })
                 .count() as u64;
-            crate::goal_lifecycle::spawn_turn_classification(
+            classification_handle = Some(crate::goal_lifecycle::spawn_turn_classification(
                 args.cwd.clone(),
                 task.to_string(),
                 self.recorder.path(),
                 turn_index,
                 hooks.goal_event.clone(),
-            );
+            ));
         }
 
         let tool_specs = if args.model_only {
@@ -234,6 +235,20 @@ impl Conversation {
                             // When plan mode is on, the final answer IS the plan;
                             // persist it so `/plan-review` can surface it.
                             capture_plan_if_enabled(&args.cwd, &text);
+                            if !args.model_only && !args.autonomous {
+                                // Goal-completion judgement: the goals agent
+                                // reads this final report and closes the active
+                                // goal only when it is a genuine completion.
+                                // Background-only and fail-open, like the
+                                // classification above.
+                                crate::goal_lifecycle::spawn_completion_judgement(
+                                    args.cwd.clone(),
+                                    self.recorder.path(),
+                                    text.clone(),
+                                    hooks.goal_event.clone(),
+                                    classification_handle.take(),
+                                );
+                            }
                             let answer = self.maybe_advisor_review(args, text, hooks)?;
                             let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
                             return Ok(answer);
