@@ -1,0 +1,462 @@
+:root {
+  --wisent-color-background: #f8fdfb;
+  --wisent-color-canvas-muted: #ecf2f0;
+  --wisent-color-white: #ffffff;
+  --wisent-color-almost-black: #111111;
+  --wisent-color-ink: #2d3130;
+  --wisent-color-forest: #273329;
+  --wisent-color-secondary-text: #59605d;
+  --wisent-color-muted-text: #8b9290;
+  --wisent-color-border: #dee4e2;
+  --wisent-color-border-strong: #c1c8c6;
+  --wisent-color-subtle-border: #eeeeee;
+  --wisent-color-brand50: #f9fff9;
+  --wisent-color-brand100: #eeffef;
+  --wisent-color-brand200: #e2ffe4;
+  --wisent-color-brand300: #d6ffd9;
+  --wisent-color-brand400: #bae6bd;
+  --wisent-color-brand: #9ecca0;
+  --wisent-color-brand500: #9ecca0;
+  --wisent-color-brand-hover: #8dbb8f;
+  --wisent-color-brand600: #769978;
+  --wisent-color-brand-link: #769978;
+  --wisent-color-brand700: #4f6650;
+  --wisent-color-brand800: #3b4c3c;
+  --wisent-color-brand900: #273329;
+  --wisent-color-success: #15803d;
+  --wisent-color-warning: #b45309;
+  --wisent-color-danger: #b91c1c;
+  --wisent-font-sans: 'Hubot Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --wisent-font-expanded: 'Hubot Sans Expanded', 'Hubot Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --wisent-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --wisent-space-xxs: 2px;
+  --wisent-space-xs: 4px;
+  --wisent-space-sm: 6px;
+  --wisent-space-md: 8px;
+  --wisent-space-lg: 12px;
+  --wisent-space-xl: 16px;
+  --wisent-space-2xl: 20px;
+  --wisent-space-3xl: 24px;
+  --wisent-space-4xl: 32px;
+  --wisent-space-5xl: 40px;
+  --wisent-radius-sm: 6px;
+  --wisent-radius-md: 8px;
+  --wisent-radius-lg: 12px;
+  --wisent-radius-xl: 16px;
+  --wisent-radius-2xl: 22px;
+  --wisent-shadow-surface: 0 4px 12px rgba(10, 13, 18, 0.04);
+  --wisent-shadow-raised: 0 12px 30px rgba(10, 13, 18, 0.08);
+  --wisent-motion-fast: 150ms;
+  --wisent-motion-standard: 180ms;
+}
+
+@font-face {
+  font-family: "Hubot Sans";
+  src: url("./fonts/HubotSans/HubotSans-Regular.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hubot Sans";
+  src: url("./fonts/HubotSans/HubotSans-Medium.otf") format("opentype");
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Hubot Sans Expanded";
+  src: url("./fonts/HubotSans/HubotSansExpanded-SemiBold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono/IBMPlexMono-Regular.otf") format("opentype");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("./fonts/IBMPlexMono/IBMPlexMono-SemiBold.otf") format("opentype");
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+}
+
+.wisent-oauth-button {
+  appearance: none;
+  align-items: center;
+  background: var(--wisent-color-white);
+  border: 1px solid var(--wisent-color-border);
+  box-sizing: border-box;
+  color: var(--wisent-color-forest);
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--wisent-font-sans);
+  font-size: 14px;
+  font-weight: 500;
+  justify-content: center;
+  line-height: 20px;
+  min-width: 0;
+  transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease, opacity var(--wisent-motion-fast) ease;
+}
+
+.wisent-oauth-button:hover:not(:disabled) {
+  background: var(--wisent-color-background);
+  border-color: var(--wisent-color-muted-text);
+}
+
+.wisent-oauth-button:focus-visible {
+  outline: 2px solid var(--wisent-color-brand-link);
+  outline-offset: 2px;
+}
+
+.wisent-oauth-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wisent-oauth-button--icon {
+  border-radius: var(--wisent-radius-lg);
+  flex: 1 1 0;
+  height: 44px;
+  padding: 10px 12px;
+}
+
+.wisent-oauth-button--label {
+  border-color: var(--wisent-color-subtle-border);
+  border-radius: var(--wisent-radius-md);
+  gap: var(--wisent-space-xl);
+  min-height: 38px;
+  padding: 6px 6px 6px 12px;
+}
+
+.wisent-oauth-button__label {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+}
+
+.wisent-oauth-button__icon-box {
+  align-items: center;
+  background: var(--wisent-color-almost-black);
+  border-radius: var(--wisent-radius-sm);
+  color: var(--wisent-color-white);
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 26px;
+  justify-content: center;
+  width: 28px;
+}
+
+.wisent-provider-icon {
+  display: block;
+  height: 24px;
+  width: 24px;
+}
+
+.wisent-oauth-button--label .wisent-provider-icon {
+  height: 16px;
+  width: 16px;
+}
+
+.wisent-oauth-button__spinner {
+  animation: wisent-spin 700ms linear infinite;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 999px;
+  display: block;
+  height: 16px;
+  width: 16px;
+}
+
+@keyframes wisent-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wisent-oauth-button,
+  .wisent-oauth-button__spinner {
+    animation-duration: 1ms;
+    transition-duration: 1ms;
+  }
+}
+
+.wisent-button {
+  appearance: none;
+  align-items: center;
+  border: 1px solid transparent;
+  box-sizing: border-box;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: var(--wisent-font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  gap: var(--wisent-space-md);
+  justify-content: center;
+  transition:
+    background-color var(--wisent-motion-fast) ease,
+    border-color var(--wisent-motion-fast) ease,
+    box-shadow var(--wisent-motion-fast) ease,
+    transform var(--wisent-motion-fast) ease;
+}
+
+.wisent-button--medium {
+  border-radius: var(--wisent-radius-lg);
+  min-height: 40px;
+  padding: 8px 16px;
+}
+
+.wisent-button--small {
+  border-radius: var(--wisent-radius-md);
+  min-height: 34px;
+  padding: 6px 12px;
+}
+
+.wisent-button--primary {
+  background: var(--wisent-color-brand);
+  border-color: color-mix(in srgb, var(--wisent-color-brand600) 32%, transparent);
+  color: var(--wisent-color-forest);
+}
+
+.wisent-button--primary:hover:not(:disabled) {
+  background: var(--wisent-color-brand-hover);
+  box-shadow: var(--wisent-shadow-surface);
+}
+
+.wisent-button--secondary {
+  background: var(--wisent-color-white);
+  border-color: var(--wisent-color-border-strong);
+  color: var(--wisent-color-ink);
+}
+
+.wisent-button--secondary:hover:not(:disabled),
+.wisent-button--quiet:hover:not(:disabled) {
+  background: var(--wisent-color-canvas-muted);
+}
+
+.wisent-button--quiet {
+  background: transparent;
+  color: var(--wisent-color-secondary-text);
+}
+
+.wisent-button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+.wisent-button:focus-visible {
+  outline: 2px solid var(--wisent-color-brand600);
+  outline-offset: 2px;
+}
+
+.wisent-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.wisent-button__spinner {
+  animation: wisent-spin 700ms linear infinite;
+  border: 2px solid currentColor;
+  border-radius: 999px;
+  border-right-color: transparent;
+  height: 14px;
+  width: 14px;
+}
+
+.wisent-panel,
+.wisent-metric-card {
+  background: var(--wisent-color-white);
+  border: 1px solid var(--wisent-color-border);
+  border-radius: var(--wisent-radius-xl);
+  box-shadow: var(--wisent-shadow-surface);
+  color: var(--wisent-color-ink);
+}
+
+.wisent-panel {
+  padding: var(--wisent-space-xl);
+}
+
+.wisent-badge {
+  align-items: center;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 999px;
+  display: inline-flex;
+  font-family: var(--wisent-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  gap: var(--wisent-space-xs);
+  line-height: 16px;
+  padding: 4px 8px;
+}
+
+.wisent-badge--neutral { color: var(--wisent-color-secondary-text); }
+.wisent-badge--brand { color: var(--wisent-color-brand600); }
+.wisent-badge--success { color: var(--wisent-color-success); }
+.wisent-badge--warning { color: var(--wisent-color-warning); }
+.wisent-badge--danger { color: var(--wisent-color-danger); }
+
+.wisent-page-header {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--wisent-space-xl);
+}
+
+.wisent-page-header__icon {
+  align-items: center;
+  background: var(--wisent-color-brand100);
+  border: 1px solid color-mix(in srgb, var(--wisent-color-brand600) 18%, transparent);
+  border-radius: var(--wisent-radius-lg);
+  color: var(--wisent-color-brand600);
+  display: flex;
+  flex: 0 0 48px;
+  height: 48px;
+  justify-content: center;
+}
+
+.wisent-page-header__copy {
+  display: grid;
+  gap: var(--wisent-space-xs);
+}
+
+.wisent-page-header__eyebrow,
+.wisent-page-header__title,
+.wisent-page-header__description {
+  margin: 0;
+}
+
+.wisent-page-header__eyebrow {
+  color: var(--wisent-color-brand600);
+  font-family: var(--wisent-font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.wisent-page-header__title {
+  color: var(--wisent-color-ink);
+  font-family: var(--wisent-font-expanded);
+  font-size: clamp(28px, 3vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+}
+
+.wisent-page-header__description {
+  color: var(--wisent-color-secondary-text);
+  font-family: var(--wisent-font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.wisent-metric-card {
+  display: grid;
+  gap: var(--wisent-space-lg);
+  padding: var(--wisent-space-xl);
+}
+
+.wisent-metric-card__topline {
+  align-items: center;
+  display: flex;
+  gap: var(--wisent-space-md);
+}
+
+.wisent-metric-card__icon {
+  align-items: center;
+  background: var(--wisent-color-brand100);
+  border-radius: var(--wisent-radius-md);
+  color: var(--wisent-color-brand600);
+  display: flex;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.wisent-metric-card__title {
+  color: var(--wisent-color-muted-text);
+  font-family: var(--wisent-font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.wisent-metric-card__value {
+  color: var(--wisent-color-ink);
+  font-family: var(--wisent-font-expanded);
+  font-size: 26px;
+  font-weight: 600;
+}
+
+.wisent-metric-card__detail {
+  color: var(--wisent-color-secondary-text);
+  font-family: var(--wisent-font-sans);
+  font-size: 12px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .wisent-panel,
+  .wisent-metric-card,
+  .wisent-button--secondary {
+    background: #242927;
+    color: #f8fdfb;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Documentation layout — the canonical convention resurrected from
+   wisent.com/documentation (2026-07-17). One look for every product's docs;
+   content stays with the product. All colors are canonical tokens.
+--------------------------------------------------------------------------- */
+.wisent-docs { display: grid; grid-template-columns: 240px minmax(0, 780px); gap: 64px; margin: 0 auto; max-width: 1180px; padding: 64px 32px 120px; color: var(--wisent-color-ink); font-size: 16px; line-height: 1.65; }
+.wisent-docs__sidebar { align-self: start; position: sticky; top: 32px; }
+.wisent-docs__label { margin: 0 0 18px; color: var(--wisent-color-mutedText); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wisent-docs-nav { display: flex; flex-direction: column; gap: 2px; }
+.wisent-docs-nav__item { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondaryText); font-size: 14px; font-weight: 500; text-decoration: none; }
+.wisent-docs-nav__item:hover { background: color-mix(in srgb, var(--wisent-color-canvasMuted) 50%, transparent); }
+.wisent-docs-nav__item--active { background: var(--wisent-color-canvasMuted); color: var(--wisent-color-forest); font-weight: 600; }
+.wisent-docs-nav__group-label { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondaryText); font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; }
+.wisent-docs-nav__group-label::-webkit-details-marker { display: none; }
+.wisent-docs-nav__group-label::after { content: "\2304"; margin-left: auto; color: var(--wisent-color-mutedText); }
+.wisent-docs-nav__children { margin: 2px 0 4px 16px; display: flex; flex-direction: column; gap: 2px; }
+.wisent-docs__source { display: flex; justify-content: space-between; margin-top: 22px; border-top: 1px solid var(--wisent-color-border); padding: 16px 12px 0; color: var(--wisent-color-secondaryText); font-size: 12px; text-decoration: none; }
+.wisent-docs__mobile { display: none; }
+.wisent-docs__breadcrumb { display: flex; gap: 8px; margin-bottom: 40px; color: var(--wisent-color-mutedText); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wisent-docs__breadcrumb a { color: inherit; text-decoration: none; }
+.wisent-docs__kicker { margin: 0 0 10px; color: var(--wisent-color-brand600); font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.wisent-docs__main h1 { margin: 0; color: var(--wisent-color-almostBlack); font-size: 32px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em; }
+.wisent-docs__lede { margin: 12px 0 36px; color: var(--wisent-color-secondaryText); font-size: 18px; line-height: 1.55; }
+.wisent-docs__sections section { border-top: 1px solid var(--wisent-color-border); padding: 34px 0 8px; }
+.wisent-docs__sections section:first-child { border-top: 0; padding-top: 0; }
+.wisent-docs__sections h2 { margin: 0 0 14px; color: var(--wisent-color-almostBlack); font-size: 23px; font-weight: 600; line-height: 1.25; }
+.wisent-docs__sections p { margin: 0 0 16px; color: var(--wisent-color-ink); }
+.wisent-docs__sections ul, .wisent-docs__sections ol { margin: 0 0 20px; padding-left: 24px; }
+.wisent-docs__sections li { margin: 6px 0; padding-left: 4px; color: var(--wisent-color-ink); }
+.wisent-docs__sections code { border: 1px solid var(--wisent-color-border); border-radius: 4px; background: var(--wisent-color-canvasMuted); padding: 2px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; }
+.wisent-docs-code { margin: 18px 0 24px; overflow: hidden; border-radius: 8px; border: 1px solid var(--wisent-color-forest); background: var(--wisent-color-almostBlack); color: var(--wisent-color-brand50); }
+.wisent-docs-code__title { border-bottom: 1px solid var(--wisent-color-forest); padding: 9px 14px; color: var(--wisent-color-mutedText); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.wisent-docs-code pre { margin: 0; overflow-x: auto; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.wisent-docs-code pre code { border: 0; background: transparent; padding: 0; color: inherit; font-size: 13px; line-height: 1.7; }
+.wisent-docs-callout { margin: 20px 0; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-canvasMuted); padding: 16px; }
+.wisent-docs-callout--tip { border-color: var(--wisent-color-brand400); background: var(--wisent-color-brand50); }
+.wisent-docs-callout p { margin: 6px 0 0; color: var(--wisent-color-secondaryText); }
+.wisent-docs-steps { display: grid; gap: 12px; margin: 18px 0; }
+.wisent-docs__pagination { display: flex; justify-content: space-between; border-top: 1px solid var(--wisent-color-border); margin-top: 26px; padding-top: 26px; }
+.wisent-docs__pagination a { color: var(--wisent-color-forest); font-size: 13px; font-weight: 700; text-decoration: none; }
+.wisent-docs__pagination a:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+@media (max-width: 900px) {
+  .wisent-docs { display: block; padding: 32px 20px 90px; }
+  .wisent-docs__sidebar { position: static; margin-bottom: 28px; }
+  .wisent-docs-nav--desktop, .wisent-docs__label, .wisent-docs__source { display: none; }
+  .wisent-docs__mobile { display: block; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-canvasMuted); padding: 4px 8px; }
+  .wisent-docs__mobile-toggle { padding: 8px; font-size: 14px; font-weight: 600; color: var(--wisent-color-ink); cursor: pointer; }
+}
