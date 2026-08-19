@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f2f1ed" />
+    <meta name="description" content="Jeden documentation — a private coding-agent harness: local policy, controlled tools, durable sessions, and model freedom." />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://jeden.wisent.com/docs" />
+    <meta property="og:title" content="Overview — Jeden documentation" />
+    <meta property="og:description" content="A private coding-agent harness built by Wisent." />
+    <meta property="og:image" content="https://jeden.wisent.com/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://jeden.wisent.com/docs" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/script.js" defer></script>
+    <title>Overview — Jeden documentation</title>
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="site-header" data-header>
+      <a class="brand" href="/" aria-label="Jeden home">
+        <svg class="brand-mark" viewBox="0 0 32 31" aria-hidden="true">
+          <path d="M32 13.665v3.229c-.1.506-.18 1.017-.302 1.519-1.372 5.667-4.884 9.514-10.539 11.472-1.118.387-2.326.527-3.492.781h-3.112c-.142-.032-.283-.074-.427-.094C7.612 29.664 3.193 26.207.903 20.253.44 19.048.293 17.73 0 16.463v-2.367c.103-.595.178-1.198.316-1.785C1.739 6.214 5.601 2.319 11.744.518 12.584.271 13.469.169 14.333 0h3.334c.124.031.246.075.373.09 6.709.808 12.213 5.667 13.653 12.057.114.504.206 1.012.307 1.518ZM3.707 8.538c-.076.091-.131.141-.167.202-.844 1.452-1.366 3.01-1.592 4.658-.02.146.15.388.3.475.965.562 1.932 1.127 2.936 1.621.467.229.593.496.596.982.036 5.005 2.274 8.863 6.521 11.672.372.246.702.289 1.129.137 3.093-1.104 5.506-3.013 7.314-5.674.635-.933.517-.774 1.508-.556 1.64.36 3.279.723 4.912 1.105.323.075.527.025.674-.269.585-1.171 1.186-2.336 1.759-3.512.12-.246.151-.535.233-.835-9.237-2.129-17.956-5.347-26.123-10.006Zm26.412 8.26c.789-6.027-3.017-12.398-9.859-14.473-6.04-1.831-12.377.443-15.526 4.749 7.928 4.519 16.408 7.663 25.385 9.724Z" />
+        </svg>
+        <span>JEDEN</span>
+      </a>
+      <nav class="nav" aria-label="Primary navigation" data-nav>
+        <a href="/#principles">Principles</a>
+        <a href="/#capabilities">Capabilities</a>
+        <a href="/#security">Security</a>
+        <a href="/docs">Docs</a>
+      </nav>
+      <a class="header-cta" href="mailto:contact@wisent.ai?subject=Jeden%20private%20preview">Request access <span aria-hidden="true">↗</span></a>
+      <button class="menu-button" type="button" aria-label="Open menu" aria-expanded="false" data-menu>
+        <span></span><span></span>
+      </button>
+    </header>
+
+    <div class="docs-layout">
+      <aside class="docs-sidebar">
+        <p class="sidebar-label">Jeden documentation</p>
+        <nav aria-label="Jeden documentation">
+          <a href="/docs" class="active" aria-current="page">Overview</a>
+          <a href="/docs/sessions">Sessions</a>
+          <a href="/docs/tools">Tools</a>
+          <a href="/docs/boundaries">Boundaries</a>
+        </nav>
+        <a class="sidebar-source" href="https://github.com/wisent-ai/jeden">Harness source <span aria-hidden="true">↗</span></a>
+      </aside>
+
+      <main class="docs-main">
+        <div class="doc-breadcrumb"><a href="/">Jeden</a><span>/</span><span>Docs</span></div>
+        <header class="doc-header">
+          <p class="doc-eyebrow">The harness</p>
+          <h1>A coding agent you can <em>actually own.</em></h1>
+          <p>Jeden is Wisent&rsquo;s private coding-agent harness: local policy, controlled tools, durable sessions, and model freedom. One local process keeps the whole loop &mdash; from the first file read to the final verification &mdash; on your machine and under your rules.</p>
+        </header>
+
+        <div class="doc-sections">
+          <section>
+            <h2>What Jeden is</h2>
+            <p>Jeden is a harness for AI agents built from real-life experiences. It routes models intelligently, manages credentials, and understands how to pursue, complete, and verify tasks over time &mdash; while the agent&rsquo;s inference path, spend attribution, and tool permissions remain under your control rather than a third-party hosted agent&rsquo;s. It is compatible with OpenAI, Anthropic, Kimi, and any other model reachable through an OpenAI-style endpoint.</p>
+            <p>Jeden is not a hosted or multi-tenant service; it is a local harness. It runs as a single local process: nothing but that process reads the checkout, and inference is reachable only through the Brama model router &mdash; Jeden carries no provider API key and no provider SDK.</p>
+            <p>Jeden serves two audiences:</p>
+            <ul>
+              <li><strong>Engineers</strong>, who run interactive and one-shot coding tasks in the terminal with local approval over every write and command.</li>
+              <li><strong>Tooling and automation</strong>, which drives the same harness through its machine interfaces (RPC, ACP, headless mode, SDKs) inside editors and workflows.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>Design contract</h2>
+            <p>Jeden separates five concerns. Each part stays visible, inspectable, and local &mdash; the model can reason freely, but the harness decides what may actually happen.</p>
+            <ul>
+              <li><strong>Inference</strong> &mdash; model calls go through Brama using HMAC-signed, OpenAI-compatible chat completions.</li>
+              <li><strong>Policy</strong> &mdash; the harness prompt and approval rules are explicit and local.</li>
+              <li><strong>Tools</strong> &mdash; a small allowlisted registry enforces path jails and write or command permission.</li>
+              <li><strong>Run loop</strong> &mdash; the model may return native tool calls or strict JSON actions that enter the same local execution loop.</li>
+              <li><strong>Pursuit adapter</strong> &mdash; <code>jeden pursue</code> maps the separately owned Pursuit engine stages onto persistent planner and executor conversations plus fresh read-only reviewers.</li>
+            </ul>
+          </section>
+
+          <section>
+            <h2>How a task runs</h2>
+            <p>A task enters through one interface &mdash; CLI, TUI, <code>rpc</code>, <code>acp</code>, headless, or an SDK &mdash; and one run loop drives it to completion. The loop sends the conversation and the derived tool schemas to Brama, receives either a final answer or tool calls, executes each tool locally under the path jail and the approval policy, appends the outcome to the session ledger, and repeats until the model answers.</p>
+            <p>Tool schemas are derived from each tool&rsquo;s input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer. File mutations return Jeden-native visual diffs and previews, and oversized tool results are persisted as session artifacts and replaced in the model loop with a compact reference.</p>
+          </section>
+
+          <section>
+            <h2>Quick start</h2>
+            <p>Prerequisites: a supported platform (<code>aarch64-apple-darwin</code>, <code>x86_64-unknown-linux-gnu</code>, <code>x86_64-pc-windows-msvc</code>) or a Rust toolchain for source builds, a Brama-compatible model endpoint, and a caller-owned signing credential.</p>
+            <figure class="code-block">
+              <figcaption>Build from source</figcaption>
+              <pre><code>git clone https://github.com/wisent-ai/jeden.git &amp;&amp; cd jeden
+cargo build --locked --release   # or: bin/jeden-rust</code></pre>
+            </figure>
+            <figure class="code-block">
+              <figcaption>Required environment for real model calls</figcaption>
+              <pre><code>WISENT_APP_AGENT_AUTH_SECRET=&lt;signing-credential&gt;
+BRAMA_URL=&lt;brama-model-router-url&gt;
+# Set only when Brama requires its distinct bearer.
+BRAMA_TOKEN=&lt;brama-bearer&gt;
+WISENT_APP_AGENT_ID=wisent-app</code></pre>
+            </figure>
+            <p>Running <code>jeden</code> opens the welcome view; <code>/setup</code> is an idempotent wizard (Brama URL, agent id, default model, preferences) that never writes secrets to disk, and <code>/setup validate</code> probes live state and ends with a smoke call. <code>jeden doctor</code> diagnoses missing prerequisites and degraded services. A successful setup is observable:</p>
+            <figure class="code-block">
+              <figcaption>Verify</figcaption>
+              <pre><code>jeden run "Respond exactly: OK"   # expected output: OK</code></pre>
+            </figure>
+          </section>
+
+          <section>
+            <h2>Current scope</h2>
+            <p>The private milestone includes:</p>
+            <ul>
+              <li>interactive terminal and one-shot <code>jeden run</code> modes;</li>
+              <li>autonomous outcome pursuit through <code>jeden pursue</code>, with source-grounded contracts, independent reviews, and durable receipts;</li>
+              <li>session transcripts and artifacts under <code>~/.jeden/sessions/</code>;</li>
+              <li>model routing through required <code>BRAMA_URL</code>, <code>WISENT_APP_AGENT_ID</code>, and <code>WISENT_APP_AGENT_AUTH_SECRET</code>;</li>
+              <li>model selection through <code>--model</code>, <code>JEDEN_MODEL</code>, or native config;</li>
+              <li>jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;</li>
+              <li>guarded file mutations using the digest or snapshot tag returned by <code>read_file</code>;</li>
+              <li>custom JavaScript tools, project and user lifecycle hooks, and native <code>.jeden</code> configuration paths;</li>
+              <li>interactive approval for writes and commands unless explicitly enabled.</li>
+            </ul>
+            <p>Maturity: public development source at SemVer <code>0.x</code> &mdash; there is no stable public contract yet. Source is available under the Apache License 2.0; use the public <a href="https://github.com/wisent-ai/jeden/issues">wisent-ai/jeden issue tracker</a> for non-sensitive reports and GitHub Security Advisories for vulnerabilities.</p>
+          </section>
+        </div>
+
+        <nav class="docs-pagination" aria-label="Documentation pagination">
+          <span></span>
+          <a href="/docs/sessions">Sessions →</a>
+        </nav>
+      </main>
+    </div>
+
+    <footer>
+      <a class="brand footer-brand" href="/">
+        <svg class="brand-mark" viewBox="0 0 32 31" aria-hidden="true"><path d="M32 13.665v3.229c-.1.506-.18 1.017-.302 1.519-1.372 5.667-4.884 9.514-10.539 11.472-1.118.387-2.326.527-3.492.781h-3.112c-.142-.032-.283-.074-.427-.094C7.612 29.664 3.193 26.207.903 20.253.44 19.048.293 17.73 0 16.463v-2.367c.103-.595.178-1.198.316-1.785C1.739 6.214 5.601 2.319 11.744.518 12.584.271 13.469.169 14.333 0h3.334c.124.031.246.075.373.09 6.709.808 12.213 5.667 13.653 12.057.114.504.206 1.012.307 1.518ZM3.707 8.538c-.076.091-.131.141-.167.202-.844 1.452-1.366 3.01-1.592 4.658-.02.146.15.388.3.475.965.562 1.932 1.127 2.936 1.621.467.229.593.496.596.982.036 5.005 2.274 8.863 6.521 11.672.372.246.702.289 1.129.137 3.093-1.104 5.506-3.013 7.314-5.674.635-.933.517-.774 1.508-.556 1.64.36 3.279.723 4.912 1.105.323.075.527.025.674-.269.585-1.171 1.186-2.336 1.759-3.512.12-.246.151-.535.233-.835-9.237-2.129-17.956-5.347-26.123-10.006Z"/></svg>
+        <span>JEDEN</span>
+      </a>
+      <div class="footer-meta"><span>A WISENT SYSTEM</span><span>© <span data-year></span> WISENT AI, INC.</span></div>
+      <div class="footer-links"><a href="https://www.wisent.ai" target="_blank" rel="noreferrer">Wisent ↗</a><a href="mailto:contact@wisent.ai">Contact ↗</a></div>
+    </footer>
+  </body>
+</html>
