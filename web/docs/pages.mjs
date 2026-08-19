@@ -16,7 +16,6 @@ export const nav = [
   { label: "Overview", href: "/docs" },
   { label: "Sessions", href: "/docs/sessions" },
   { label: "Tools", href: "/docs/tools" },
-  { label: "Boundaries", href: "/docs/boundaries" },
 ];
 
 export const pages = [
@@ -41,7 +40,7 @@ export const pages = [
         title: "What Jeden is",
         paragraphs: [
           "Jeden is a harness for AI agents built from real-life experiences. It routes models intelligently, manages credentials, and understands how to pursue, complete, and verify tasks over time — while the agent’s inference path, spend attribution, and tool permissions remain under your control rather than a third-party hosted agent’s. It is compatible with OpenAI, Anthropic, Kimi, and any other model reachable through an OpenAI-style endpoint.",
-          "Jeden is not a hosted or multi-tenant service; it is a local harness. It runs as a single local process: nothing but that process reads the checkout, and inference is reachable only through the Brama model router — Jeden carries no provider API key and no provider SDK.",
+          "Jeden is not a hosted or multi-tenant service; it is a local harness, and its local runtime is usable without a hosted Wisent account. It runs as a single local process: nothing but that process reads the checkout, and inference is reachable only through the Brama model router — Jeden carries no provider API key and no provider SDK.",
           "Jeden serves two audiences:",
         ],
         bullets: [
@@ -55,7 +54,7 @@ export const pages = [
           "Jeden separates five concerns. Each part stays visible, inspectable, and local — the model can reason freely, but the harness decides what may actually happen.",
         ],
         bullets: [
-          "<strong>Inference</strong> — model calls go through Brama using HMAC-signed, OpenAI-compatible chat completions.",
+          "<strong>Inference</strong> — model calls go through Brama using HMAC-signed, OpenAI-compatible chat completions: each request carries <code>x-agent-id</code>, <code>x-agent-timestamp</code>, <code>x-agent-body-sha256</code>, and <code>x-agent-signature</code>, so the signing secret itself never leaves the process.",
           "<strong>Policy</strong> — the harness prompt and approval rules are explicit and local.",
           "<strong>Tools</strong> — a small allowlisted registry enforces path jails and write or command permission.",
           "<strong>Run loop</strong> — the model may return native tool calls or strict JSON actions that enter the same local execution loop.",
@@ -67,13 +66,14 @@ export const pages = [
         paragraphs: [
           "A task enters through one interface — CLI, TUI, <code>rpc</code>, <code>acp</code>, headless, or an SDK — and one run loop drives it to completion. The loop sends the conversation and the derived tool schemas to Brama, receives either a final answer or tool calls, executes each tool locally under the path jail and the approval policy, appends the outcome to the session ledger, and repeats until the model answers.",
           "Tool schemas are derived from each tool’s input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer. File mutations return Jeden-native visual diffs and previews, and oversized tool results are persisted as session artifacts and replaced in the model loop with a compact reference.",
+          "Failure handling is fail-closed. Without <code>BRAMA_URL</code> the run stops with <code>BRAMA_URL is required</code> and no model call is made. Transient model errors retry with the router’s backoff, but neither retry nor subscription failover happens once model output has become visible; a typed quota-exhaustion response records a <code>Retry-After</code>-bounded cooldown in <code>.jeden/subscription-cooldowns.json</code> before the next eligible subscription is selected.",
         ],
       },
       {
         title: "Quick start",
         paragraphs: [
           "Prerequisites: a supported platform (<code>aarch64-apple-darwin</code>, <code>x86_64-unknown-linux-gnu</code>, <code>x86_64-pc-windows-msvc</code>) or a Rust toolchain for source builds, a Brama-compatible model endpoint, and a caller-owned signing credential.",
-          "Running <code>jeden</code> opens the welcome view; <code>/setup</code> is an idempotent wizard (Brama URL, agent id, default model, preferences) that never writes secrets to disk, and <code>/setup validate</code> probes live state and ends with a smoke call. <code>jeden doctor</code> diagnoses missing prerequisites and degraded services. A successful setup is observable:",
+          "Running <code>jeden</code> opens the welcome view; <code>/setup</code> is an idempotent wizard (Brama URL, agent id, default model, preferences) that writes only non-secret values to <code>~/.jeden/.env</code> at mode <code>0600</code>, and <code>/setup validate</code> probes live state and ends with a smoke call. <code>WISENT_APP_AGENT_AUTH_SECRET</code> is read from the process environment only — the harness holds no credential store and writes no secret to disk; the bundled launch scripts export it from the Skarbiec item <code>agent:wisent-app</code>, which also owns rotation and revocation. <code>jeden doctor</code> returns a JSON health report probing Brama, Weles, storage, process, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable. A successful setup is observable:",
         ],
         commands: [
           {
@@ -102,6 +102,7 @@ export const pages = [
           "jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;",
           "guarded file mutations using the digest or snapshot tag returned by <code>read_file</code>;",
           "custom JavaScript tools, project and user lifecycle hooks, and native <code>.jeden</code> configuration paths;",
+          "transactional <code>jeden update</code> that verifies a DSSE release manifest against the binary’s embedded <code>canary</code> and <code>stable</code> ed25519 trust roots, checks the artifact digest plus SBOM and provenance evidence, and rolls back to the journaled last-known-good binary on failure;",
           "interactive approval for writes and commands unless explicitly enabled.",
         ],
         callout: {
@@ -133,6 +134,8 @@ export const pages = [
         paragraphs: [
           "Sessions live under <code>~/.jeden/sessions/</code> (<code>JEDEN_SESSION_ROOT</code> overrides). Each session directory holds <code>state.json</code> and <code>transcript.jsonl</code>, an append-only ledger of sequenced, parent-linked, checksum-sealed events that is validated on read and <code>fsync</code>ed on every append.",
           "Per-project state lives in <code><cwd>/.jeden/</code>. All of it is on the operator’s disk; Jeden uploads none of it, and session transcripts are never expired or deleted by Jeden. Backing up <code>~/.jeden/</code> and <code><cwd>/.jeden/</code> is the operator’s responsibility — Jeden ships no backup or restore command.",
+          "Configured and automatically discovered secret values are replaced with <code>[REDACTED]</code> in the model-bound copy of the context, while the local transcript keeps the original text.",
+          "Jeden emits no telemetry to Wisent from a default local run; the per-session event ledger is Jeden’s audit record. Every completion appends tokens, the Brama-catalog-priced cost breakdown, and the served billing target and decision ID to <code><cwd>/.jeden/usage.json</code>; <code>jeden stats</code> and <code>/usage show</code> read the ledger.",
         ],
       },
       {
@@ -232,6 +235,13 @@ export const pages = [
         ],
       },
       {
+        title: "Network access",
+        paragraphs: [
+          "Jeden initiates every connection. The terminal, <code>jeden run</code>, <code>jeden rpc</code>, and <code>jeden acp</code> are stdio-only and open no socket; listening sockets exist only in the opt-in <code>jeden headless <addr></code> (mutual TLS), <code>jeden collab-relay</code>, and <code>jeden stats --serve</code> (bound to <code>127.0.0.1</code>).",
+          "The one required outbound dependency is <code>BRAMA_URL</code>; optional dependencies — Wisent Platform Billing for subscription and quota decisions, the Stado integration and media APIs, and the release manifest host for <code>jeden update</code> — activate only when configured. Tool-initiated network access (<code>fetch_url</code>, <code>fetch_readable_url</code>, SSH) is checked against the execution grant’s host and port allowlist with pinned addresses and re-authorized redirects.",
+        ],
+      },
+      {
         title: "Custom tools, MCP, and hooks",
         paragraphs: [
           "Custom JavaScript tools load from <code>~/.jeden/tools/</code> and <code><cwd>/.jeden/tools/</code>. A custom module exports a default factory that receives the current workspace helpers and returns one tool or a list of tools; tool names must be unique and cannot collide with built-ins. Custom execution remains subject to the same jail, approval, and hook policy as built-in tools.",
@@ -258,72 +268,6 @@ export const pages = [
           tone: "note",
           text: "In a terminal, management commands without arguments open native searchable views instead of printing command syntax; selecting a row dispatches the same validated slash command that can still be entered directly. Use <code>run</code> when the supplied task is already concrete; use <code>pursue</code> when the input is only an intent seed and Pursuit must recover the concrete outcome, boundaries, preferences, evidence, and finish line first.",
         },
-      },
-    ],
-  },
-  {
-    slug: "boundaries",
-    href: "/docs/boundaries",
-    file: "boundaries.html",
-    meta: {
-      htmlTitle: "Boundaries — Jeden documentation",
-      description:
-        "Jeden boundaries — explicit non-goals, the credential and network boundaries, fail-closed defaults, and operational guarantees.",
-      ogTitle: "Boundaries — Jeden documentation",
-      ogDescription: "The security model of the Jeden harness.",
-      canonical: "https://jeden.wisent.com/docs/boundaries",
-    },
-    eyebrow: "Security model",
-    title: "Trust is not <em>a toggle.</em>",
-    description:
-      "Jeden makes authority narrow, visible, and revocable: explicit non-goals, an environment-only credential boundary, outbound-only networking, and defaults that fail closed.",
-    sections: [
-      {
-        title: "Product boundaries",
-        paragraphs: ["Explicit non-goals:"],
-        bullets: [
-          "Jeden is not a hosted or multi-tenant service; it is a local harness.",
-          "Jeden’s local runtime is usable without a hosted Wisent account.",
-          "Jeden does not provide model inference itself; it uses Brama or another compatible OpenAI-style endpoint and caller-supplied credentials.",
-          "Jeden never handles cardholder data; commercial billing is owned by Wisent Platform Billing.",
-          "Jeden does not define autonomous objective pursuit; <a href=\"https://github.com/wisent-ai/pursuit\">Pursuit</a> owns intent distillation, outcome contracts, independent reviews, repair loops, validators, and receipts, while Jeden supplies model conversations and tools through the integration interface.",
-        ],
-      },
-      {
-        title: "Credential boundary",
-        paragraphs: [
-          "<code>WISENT_APP_AGENT_AUTH_SECRET</code> is read from the process environment only. <code>bin/jeden-rust</code> and <code>scripts/run-with-stado.sh</code> read the Skarbiec item <code>agent:wisent-app</code> and export it into that environment; <code>/setup</code> writes only non-secret values to <code>~/.jeden/.env</code> at mode <code>0600</code> and never writes the secret. Rotation and revocation are owned by Skarbiec, not by Jeden: the harness holds no credential store and writes no secret to disk.",
-          "Each Brama request carries <code>x-agent-id</code>, <code>x-agent-timestamp</code>, <code>x-agent-body-sha256</code>, and <code>x-agent-signature</code> — an HMAC over the request body — so the secret itself never leaves the process. Configured and automatically discovered secret values are replaced with <code>[REDACTED]</code> in the model-bound copy of the context while the local transcript keeps the original text.",
-        ],
-      },
-      {
-        title: "Network boundary",
-        paragraphs: [
-          "Jeden initiates every connection. The terminal, <code>jeden run</code>, <code>jeden rpc</code>, and <code>jeden acp</code> are stdio-only and open no socket; listening sockets exist only in the opt-in <code>jeden headless <addr></code> (mutual TLS), <code>jeden collab-relay</code>, and <code>jeden stats --serve</code> (bound to <code>127.0.0.1</code>).",
-          "The one required outbound dependency is <code>BRAMA_URL</code>. Optional outbound dependencies activate only when configured: Wisent Platform Billing for subscription and quota decisions, the Stado integration API for onboarding bundles and funnel events, the Stado media router for image and speech tools, and the release manifest host for <code>jeden update</code>. Tool-initiated network access (<code>fetch_url</code>, <code>fetch_readable_url</code>, SSH) is checked against the execution grant’s host and port allowlist with pinned addresses and re-authorized redirects.",
-        ],
-      },
-      {
-        title: "Failure boundary",
-        paragraphs: ["Everything fails closed:"],
-        bullets: [
-          "without <code>BRAMA_URL</code> the run stops with <code>BRAMA_URL is required</code> and no model call is made;",
-          "write and command tools stop for approval unless <code>--allow-write</code>, <code>--allow-command</code>, or <code>--yolo</code> is passed;",
-          "project hooks in <code>.jeden/hooks.json</code> run only with <code>--allow-command</code>, so a cloned repository cannot silently execute shell;",
-          "transient model errors retry with the router’s backoff, but neither retry nor subscription failover happens once model output has become visible;",
-          "a typed quota-exhaustion response records a <code>Retry-After</code>-bounded cooldown in <code>.jeden/subscription-cooldowns.json</code> before the next eligible subscription is selected;",
-          "a transcript with a truncated tail refuses further appends and must be resumed into a child session.",
-        ],
-      },
-      {
-        title: "Operational guarantees",
-        bullets: [
-          "State is operator-owned and local: user scope under <code>~/.jeden/</code>, project scope under <code><cwd>/.jeden/</code>. Session transcripts are append-only and never expired or deleted by Jeden.",
-          "Jeden emits no telemetry to Wisent from a default local run; the per-session event ledger is Jeden’s audit record.",
-          "Every completion appends tokens, the Brama-catalog-priced cost breakdown, and the served billing target and decision ID to <code><cwd>/.jeden/usage.json</code>; <code>jeden stats</code> and <code>/usage show</code> read the ledger.",
-          "<code>jeden doctor</code> returns a JSON health report probing Brama, Weles, storage, process, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable.",
-          "<code>jeden update</code> verifies a DSSE release manifest against the binary’s embedded <code>canary</code> and <code>stable</code> ed25519 trust roots, checks the artifact digest plus SBOM and provenance evidence, then installs transactionally; a failed update rolls back to the journaled last-known-good binary automatically.",
-        ],
       },
     ],
   },
