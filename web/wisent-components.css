@@ -442,6 +442,14 @@
 .wisent-docs__sections ul, .wisent-docs__sections ol { margin: 0 0 20px; padding-left: 24px; }
 .wisent-docs__sections li { margin: 6px 0; padding-left: 4px; color: var(--wisent-color-ink); }
 .wisent-docs__sections code { border: 1px solid var(--wisent-color-border); border-radius: 4px; background: var(--wisent-color-canvas-muted); padding: 2px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; }
+.wisent-docs__version { margin: -12px 0 18px; color: var(--wisent-color-muted-text); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wisent-docs__anchor { margin-left: 8px; color: var(--wisent-color-border-strong); text-decoration: none; opacity: 0; }
+.wisent-docs__sections h2:hover .wisent-docs__anchor { opacity: 1; }
+.wisent-docs__anchor:focus { opacity: 1; }
+.wisent-docs__sections section { scroll-margin-top: 24px; }
+.wisent-docs-code__title { display: flex; justify-content: space-between; align-items: center; }
+.wisent-docs-code__copy { border: 1px solid var(--wisent-color-forest); border-radius: 4px; background: transparent; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; cursor: pointer; }
+.wisent-docs-code__copy:hover { color: var(--wisent-color-brand50); }
 .wisent-docs-code { margin: 18px 0 24px; overflow: hidden; border-radius: 8px; border: 1px solid var(--wisent-color-forest); background: var(--wisent-color-almost-black); color: var(--wisent-color-brand50); }
 .wisent-docs-code__title { border-bottom: 1px solid var(--wisent-color-forest); padding: 9px 14px; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
 .wisent-docs-code pre { margin: 0; overflow-x: auto; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -449,6 +457,10 @@
 .wisent-docs-callout { margin: 20px 0; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-canvas-muted); padding: 16px; }
 .wisent-docs-callout--tip { border-color: var(--wisent-color-brand400); background: var(--wisent-color-brand50); }
 .wisent-docs-callout p { margin: 6px 0 0; color: var(--wisent-color-secondary-text); }
+.wisent-docs-table { width: 100%; margin: 18px 0 24px; border-collapse: collapse; font-size: 14px; }
+.wisent-docs-table th, .wisent-docs-table td { border-bottom: 1px solid var(--wisent-color-border); padding: 11px 12px; text-align: left; vertical-align: top; }
+.wisent-docs-table th { color: var(--wisent-color-almost-black); font-weight: 600; }
+.wisent-docs-table caption { caption-side: top; text-align: left; margin-bottom: 8px; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
 .wisent-docs-steps { display: grid; gap: 12px; margin: 18px 0; }
 .wisent-docs__pagination { display: flex; justify-content: space-between; border-top: 1px solid var(--wisent-color-border); margin-top: 26px; padding-top: 26px; }
 .wisent-docs__pagination a { color: var(--wisent-color-forest); font-size: 13px; font-weight: 700; text-decoration: none; }

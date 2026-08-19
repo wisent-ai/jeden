@@ -13,7 +13,7 @@
     "build:docs": "node web/scripts/build-docs.mjs"
   },
   "dependencies": {
-    "@wisent-ai/components": "file:vendor/wisent-components/cf6db540cec9392b1128f0eb2a6e4dc4e926ffea/wisent-ai-components-0.2.2.tgz",
+    "@wisent-ai/components": "file:vendor/wisent-components/2f86aeda18d0db8a8d2dd727666d51dc0a4d0d80/wisent-ai-components-0.4.0.tgz",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
