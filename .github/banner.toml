@@ -1,11 +1,13 @@
 [automation]
 managed = true
-source_fingerprint = "39ae27fdb2ff2e34"
+source_fingerprint = "aa0edfbc75162c7a"
 category = "agent"
+copy_status = "approved"
+approved_in = "019fe3db-84a1-7000-bf79-c5455aefd43f@2026-08-09T23:59:29Z"
 
 [banner]
-title = "Run coding agents locally, under your policy."
-description = "Rust coding-agent harness with controlled tools, durable sessions, memory, and model freedom."
+title = "Jeden: The Ultimate Self-Improving Coding Agent with Internet Access, Embedded Secret Management, QA, and More"
+description = ""
 product = "Wisent"
 url = "wisent.com"
 theme = "dark"
