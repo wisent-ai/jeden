@@ -1,7 +1,7 @@
 [automation]
 managed = true
-source_fingerprint = "aa0edfbc75162c7a"
-category = "agent"
+source_fingerprint = "703e2bed98e74af5"
+category = "developer"
 copy_status = "approved"
 approved_in = "019fe3db-84a1-7000-bf79-c5455aefd43f@2026-08-09T23:59:29Z"
 
@@ -11,7 +11,7 @@ description = ""
 product = "Wisent"
 url = "wisent.com"
 theme = "dark"
-layout = "orbit-left"
+layout = "signal-left"
 art_seed = "jeden"
 width = 1584
 height = 396
