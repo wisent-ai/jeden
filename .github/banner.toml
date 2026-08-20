@@ -1,15 +1,15 @@
 [automation]
 managed = true
-source_fingerprint = "5b51eb3bde925001"
-category = "developer"
+source_fingerprint = "39ae27fdb2ff2e34"
+category = "agent"
 
 [banner]
 title = "Run coding agents locally, under your policy."
 description = "Rust coding-agent harness with controlled tools, durable sessions, memory, and model freedom."
 product = "Wisent"
-url = "wisent.ai"
+url = "wisent.com"
 theme = "dark"
-layout = "signal-left"
+layout = "orbit-left"
 art_seed = "jeden"
 width = 1584
 height = 396
