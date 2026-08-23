@@ -414,57 +414,70 @@
 /* ---------------------------------------------------------------------------
    Documentation layout — the canonical convention resurrected from
    wisent.com/documentation (2026-07-17). One look for every product's docs;
-   content stays with the product. All colors are canonical tokens.
+   content stays with the product. Restyled 2026-08-22 to carry the original
+   February design language again: Hubot Sans typography, light brand code
+   blocks, motion on interaction. All colors are canonical tokens.
 --------------------------------------------------------------------------- */
-.wisent-docs { background: var(--wisent-color-background); color: var(--wisent-color-ink); font-size: 16px; line-height: 1.65; }
+.wisent-docs { background: var(--wisent-color-background); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); font-size: 16px; line-height: 1.65; }
 .wisent-docs__inner { display: grid; grid-template-columns: 240px minmax(0, 780px); gap: 64px; margin: 0 auto; max-width: 1180px; padding: 64px 32px 120px; }
 .wisent-docs__sidebar { align-self: start; position: sticky; top: 32px; }
-.wisent-docs__label { margin: 0 0 18px; color: var(--wisent-color-muted-text); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wisent-docs__label { margin: 0 0 18px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
 .wisent-docs-nav { display: flex; flex-direction: column; gap: 2px; }
-.wisent-docs-nav__item { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 500; text-decoration: none; }
-.wisent-docs-nav__item:hover { background: color-mix(in srgb, var(--wisent-color-canvas-muted) 50%, transparent); }
+.wisent-docs-nav__item { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-docs-nav__item:hover { background: color-mix(in srgb, var(--wisent-color-canvas-muted) 55%, transparent); color: var(--wisent-color-forest); }
 .wisent-docs-nav__item--active { background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); font-weight: 600; }
-.wisent-docs-nav__group-label { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; }
+.wisent-docs-nav__item:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: 2px; }
+.wisent-docs-nav__group-label { display: flex; min-height: 36px; align-items: center; border-radius: 8px; padding: 6px 12px; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 600; cursor: pointer; list-style: none; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-docs-nav__group-label:hover { background: color-mix(in srgb, var(--wisent-color-canvas-muted) 55%, transparent); color: var(--wisent-color-forest); }
 .wisent-docs-nav__group-label::-webkit-details-marker { display: none; }
-.wisent-docs-nav__group-label::after { content: "\2304"; margin-left: auto; color: var(--wisent-color-muted-text); }
+.wisent-docs-nav__group-label::after { content: ""; width: 16px; height: 16px; margin-left: auto; flex: 0 0 auto; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8l4 4 4-4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8l4 4 4-4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; transition: transform var(--wisent-motion-fast) ease; }
+.wisent-docs-nav__group[open] > .wisent-docs-nav__group-label::after { transform: rotate(180deg); }
 .wisent-docs-nav__children { margin: 2px 0 4px 16px; display: flex; flex-direction: column; gap: 2px; }
-.wisent-docs__source { display: flex; justify-content: space-between; margin-top: 22px; border-top: 1px solid var(--wisent-color-border); padding: 16px 12px 0; color: var(--wisent-color-secondary-text); font-size: 12px; text-decoration: none; }
+.wisent-docs__source { display: flex; justify-content: space-between; margin-top: 22px; border-top: 1px solid var(--wisent-color-border); padding: 16px 12px 0; color: var(--wisent-color-secondary-text); font-size: 12px; text-decoration: none; transition: color var(--wisent-motion-fast) ease; }
+.wisent-docs__source:hover { color: var(--wisent-color-forest); }
 .wisent-docs__mobile { display: none; }
-.wisent-docs__breadcrumb { display: flex; gap: 8px; margin-bottom: 40px; color: var(--wisent-color-muted-text); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.wisent-docs__breadcrumb a { color: inherit; text-decoration: none; }
+.wisent-docs__breadcrumb { display: flex; gap: 8px; margin-bottom: 40px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+.wisent-docs__breadcrumb a { color: inherit; text-decoration: none; transition: color var(--wisent-motion-fast) ease; }
+.wisent-docs__breadcrumb a:hover { color: var(--wisent-color-forest); }
 .wisent-docs__kicker { margin: 0 0 10px; color: var(--wisent-color-brand600); font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
-.wisent-docs__main h1 { margin: 0; color: var(--wisent-color-almost-black); font-size: 32px; font-weight: 600; line-height: 1.15; letter-spacing: -.02em; }
+.wisent-docs__main h1 { margin: 0; color: var(--wisent-color-almost-black); font-family: var(--wisent-font-expanded); font-size: 34px; font-weight: 600; line-height: 1.12; letter-spacing: -.01em; }
 .wisent-docs__lede { margin: 12px 0 36px; color: var(--wisent-color-secondary-text); font-size: 18px; line-height: 1.55; }
-.wisent-docs__sections section { border-top: 1px solid var(--wisent-color-border); padding: 34px 0 8px; }
+.wisent-docs__sections section { border-top: 1px solid var(--wisent-color-border); padding: 34px 0 8px; scroll-margin-top: 24px; }
 .wisent-docs__sections section:first-child { border-top: 0; padding-top: 0; }
 .wisent-docs__sections h2 { margin: 0 0 14px; color: var(--wisent-color-almost-black); font-size: 23px; font-weight: 600; line-height: 1.25; }
 .wisent-docs__sections p { margin: 0 0 16px; color: var(--wisent-color-ink); }
 .wisent-docs__sections ul, .wisent-docs__sections ol { margin: 0 0 20px; padding-left: 24px; }
 .wisent-docs__sections li { margin: 6px 0; padding-left: 4px; color: var(--wisent-color-ink); }
-.wisent-docs__sections code { border: 1px solid var(--wisent-color-border); border-radius: 4px; background: var(--wisent-color-canvas-muted); padding: 2px 5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .86em; }
-.wisent-docs__version { margin: -12px 0 18px; color: var(--wisent-color-muted-text); font-size: 11px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-.wisent-docs__anchor { margin-left: 8px; color: var(--wisent-color-border-strong); text-decoration: none; opacity: 0; }
+.wisent-docs__sections li::marker { color: var(--wisent-color-brand600); }
+.wisent-docs__sections code { border: 1px solid var(--wisent-color-border); border-radius: 4px; background: var(--wisent-color-canvas-muted); padding: 2px 5px; font-family: var(--wisent-font-mono); font-size: .86em; }
+.wisent-docs__version { margin: -12px 0 18px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 11px; }
+.wisent-docs__anchor { margin-left: 8px; color: var(--wisent-color-border-strong); text-decoration: none; opacity: 0; transition: opacity var(--wisent-motion-fast) ease; }
 .wisent-docs__sections h2:hover .wisent-docs__anchor { opacity: 1; }
 .wisent-docs__anchor:focus { opacity: 1; }
-.wisent-docs__sections section { scroll-margin-top: 24px; }
-.wisent-docs-code__title { display: flex; justify-content: space-between; align-items: center; }
-.wisent-docs-code__copy { border: 1px solid var(--wisent-color-forest); border-radius: 4px; background: transparent; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; cursor: pointer; }
-.wisent-docs-code__copy:hover { color: var(--wisent-color-brand50); }
-.wisent-docs-code { margin: 18px 0 24px; overflow: hidden; border-radius: 8px; border: 1px solid var(--wisent-color-forest); background: var(--wisent-color-almost-black); color: var(--wisent-color-brand50); }
-.wisent-docs-code__title { border-bottom: 1px solid var(--wisent-color-forest); padding: 9px 14px; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.wisent-docs-code { margin: 18px 0 24px; overflow: hidden; border-radius: 8px; border: 1px solid var(--wisent-color-brand400); background: var(--wisent-color-brand50); box-shadow: var(--wisent-shadow-surface); }
+.wisent-docs-code__title { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-bottom: 1px solid color-mix(in srgb, var(--wisent-color-brand400) 60%, transparent); background: var(--wisent-color-brand400); padding: 9px 14px; color: var(--wisent-color-brand800); font-size: 13px; font-weight: 500; }
+.wisent-docs-code__copy { appearance: none; border: 1px solid color-mix(in srgb, var(--wisent-color-brand800) 35%, transparent); border-radius: 6px; background: transparent; color: var(--wisent-color-brand800); font-family: var(--wisent-font-sans); font-size: 11px; font-weight: 600; padding: 3px 9px; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease; }
+.wisent-docs-code__copy:hover { background: color-mix(in srgb, var(--wisent-color-white) 55%, transparent); border-color: var(--wisent-color-brand800); }
 .wisent-docs-code pre { margin: 0; overflow-x: auto; padding: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.wisent-docs-code pre code { border: 0; background: transparent; padding: 0; color: inherit; font-size: 13px; line-height: 1.7; }
+.wisent-docs-code pre code { border: 0; background: transparent; padding: 0; color: var(--wisent-color-brand800); font-family: var(--wisent-font-mono); font-size: 13px; line-height: 1.7; }
 .wisent-docs-callout { margin: 20px 0; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-canvas-muted); padding: 16px; }
+.wisent-docs-callout strong { color: var(--wisent-color-almost-black); font-weight: 600; }
 .wisent-docs-callout--tip { border-color: var(--wisent-color-brand400); background: var(--wisent-color-brand50); }
 .wisent-docs-callout p { margin: 6px 0 0; color: var(--wisent-color-secondary-text); }
 .wisent-docs-table { width: 100%; margin: 18px 0 24px; border-collapse: collapse; font-size: 14px; }
 .wisent-docs-table th, .wisent-docs-table td { border-bottom: 1px solid var(--wisent-color-border); padding: 11px 12px; text-align: left; vertical-align: top; }
-.wisent-docs-table th { color: var(--wisent-color-almost-black); font-weight: 600; }
-.wisent-docs-table caption { caption-side: top; text-align: left; margin-bottom: 8px; color: var(--wisent-color-muted-text); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
-.wisent-docs-steps { display: grid; gap: 12px; margin: 18px 0; }
-.wisent-docs__pagination { display: flex; justify-content: space-between; border-top: 1px solid var(--wisent-color-border); margin-top: 26px; padding-top: 26px; }
-.wisent-docs__pagination a { color: var(--wisent-color-forest); font-size: 13px; font-weight: 700; text-decoration: none; }
-.wisent-docs__pagination a:hover { text-decoration: underline; text-underline-offset: 4px; }
+.wisent-docs-table th { border-bottom-color: var(--wisent-color-border-strong); color: var(--wisent-color-almost-black); font-weight: 600; }
+.wisent-docs-table caption { caption-side: top; text-align: left; margin-bottom: 8px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; }
+.wisent-docs-steps { display: grid; gap: 12px; margin: 18px 0; list-style: none; padding-left: 0; counter-reset: wisent-step; }
+.wisent-docs-steps li { display: flex; gap: 12px; align-items: baseline; counter-increment: wisent-step; padding-left: 0; }
+.wisent-docs-steps li::before { content: counter(wisent-step); flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 999px; background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 600; transform: translateY(4px); }
+.wisent-docs__pagination { display: flex; justify-content: space-between; gap: 24px; border-top: 1px solid var(--wisent-color-border); margin-top: 26px; padding-top: 26px; }
+.wisent-docs__pagination a { color: var(--wisent-color-forest); font-size: 13px; font-weight: 700; text-decoration: none; transition: color var(--wisent-motion-fast) ease; }
+.wisent-docs__pagination a:hover { color: var(--wisent-color-brand600); text-decoration: underline; text-underline-offset: 4px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wisent-docs-nav__item, .wisent-docs-nav__group-label, .wisent-docs-nav__group-label::after, .wisent-docs__source, .wisent-docs__breadcrumb a, .wisent-docs__anchor, .wisent-docs-code__copy, .wisent-docs__pagination a { transition: none; }
+}
 
 @media (max-width: 900px) {
   .wisent-docs__inner { display: block; padding: 32px 20px 90px; }
