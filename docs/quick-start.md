@@ -97,7 +97,8 @@ formats are in [sessions](sessions.md).
   writing it to disk.
 - Anything else — `jeden doctor` returns a per-service JSON health report
   and exits non-zero when any probe is unavailable; `/setup validate` runs
-  an end-to-end probe.
+  an end-to-end probe. Every refusal sentence and its repair is in the
+  [runbook](runbook.md).
 
 That is the whole path. The command vocabulary is in `jeden --help`; the
 released vocabulary is frozen in `released-surface.json` at the repository

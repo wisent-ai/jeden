@@ -5,7 +5,8 @@ error sentences. Ground truth is `rust/main.rs` (parser and dispatch) plus
 the per-command modules named below; the released vocabulary is frozen in
 `released-surface.json`. Exit codes are uniform: `0` on success, `1` on any
 error (errors print `Error: <message>` on stderr), with the two documented
-exceptions at [doctor](#jeden-doctor) and [conformance](#jeden-conformance).
+exceptions at [doctor](#jeden-doctor---json---cwd-path) and
+[conformance](#jeden-conformance---json---cwd-path).
 
 ## Global parsing rules
 
@@ -137,7 +138,7 @@ path (`~/.jeden/config.yml`). Errors, verbatim:
 `<key> expects a finite number`, `<key> must be one of: <values>`,
 `<key> expects a JSON array`. Note that file-only keys like `model` are not
 in the registry: `jeden config set model x` refuses with
-`unknown config key: model` — see [configuration](configuration.md#two-kinds-of-keys).
+`unknown config key: model` — see [configuration](configuration.md#file-only-keys).
 
 ### `jeden doctor [--json] [--cwd path]`
 

@@ -90,3 +90,20 @@ Lists recorded sessions. `jeden show`, `export`, `artifacts`, and `resume`
 inspect or continue them; see [sessions](sessions.md). Machine access to the
 same run loop is [rpc](rpc.md); the knobs are
 [configuration](configuration.md).
+
+## Reading map
+
+- Concepts, one page per noun: [session](concepts/session.md),
+  [event envelope](concepts/event-envelope.md),
+  [ledger](concepts/ledger.md), [outbox](concepts/outbox.md),
+  [mode state](concepts/mode-state.md),
+  [usage record](concepts/usage-record.md),
+  [capability](concepts/capability.md),
+  [headless tenant](concepts/headless-tenant.md).
+- Interfaces: the full [CLI](cli.md), the [RPC protocol](rpc.md), the
+  mutual-TLS [headless service](headless.md).
+- Executed walkthroughs:
+  [offline refusals](walkthrough-offline-refusals.md) and
+  [session export and recovery](walkthrough-session-export.md), with
+  runnable scripts in `examples/`.
+- When something refuses: the [runbook](runbook.md).

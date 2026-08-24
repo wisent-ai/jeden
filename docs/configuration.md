@@ -36,7 +36,42 @@ recorded migration steps.
 jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]
 ```
 
-## Keys
+`get`/`set`/`reset` accept only the schema'd keys below; anything else
+refuses with `unknown config key: <key>`. A value of the wrong shape
+refuses with the key's own sentence: `<key> expects a boolean (true/false,
+yes/no, on/off, 1/0)`, `<key> expects a finite number`, `<key> must be one
+of: <values>`, `<key> expects a JSON array`, `<key> expects a JSON object`.
+`reset` without a key: `config reset requires a key`. All executed against
+`jeden 0.1.1+dev.356.9b82942`.
+
+## Keys in the `jeden config` schema
+
+What `jeden config list` prints, with type and default
+(`rust/cli/config/schema.rs`):
+
+| Key | Type (default) | Meaning |
+|---|---|---|
+| `tools.approvalMode` | enum `always-ask` \| `write` \| `yolo` (`always-ask`) | default approval policy for tool execution |
+| `commands.enableClaudeUser` | boolean (true) | user slash commands from `~/.claude/commands` |
+| `commands.enableClaudeProject` | boolean (true) | project slash commands from `.claude/commands` |
+| `commands.enableOpencodeUser` | boolean (true) | user slash commands from `~/.config/opencode/commands` |
+| `commands.enableOpencodeProject` | boolean (true) | project slash commands from `.opencode/commands` |
+| `startup.showSplash` | boolean (false) | startup splash animation on normal launches |
+| `startup.quiet` | boolean (false) | suppress startup chrome including the splash |
+| `context.maxBytes` | number (131072) | max UTF-8 bytes loaded from discovered context and rule files |
+| `context.maxTokens` | number (32768) | approximate token budget for discovered context and rule files |
+| `rules.alwaysApply` | array ([]) | typed sticky rules injected into every rebuilt system prompt |
+| `hooks.tamaRegistry` | string ("") | Tama hook registry path (shared-hooks `registry.json`); empty disables Tama hooks, unset auto-discovers |
+| `secrets.mode` | enum `redact` \| `obfuscate` (`redact`) | protect known secrets in model-bound text |
+| `secrets.minLength` | number (8) | minimum length for automatically discovered environment secrets |
+| `secrets.discoverEnvironment` | boolean (true) | protect values of secret-named environment variables |
+| `ui.language` | enum, 65 locale codes + `auto` (`auto`) | conversation language; `auto` follows the user's messages; `JEDEN_LANGUAGE` wins |
+| `ui.theme` | enum `auto`, `graphite-dark`, `paper-light`, `titanium`, `nord`, `color-blind`, `mono`, `high-contrast`, `custom` (`auto`) | color theme; `custom` loads `.jeden/theme.json` |
+
+## File-only keys
+
+Read from the merged config document but not settable through
+`jeden config set` — edit the file or let `/setup` append them:
 
 | Key | Meaning |
 |---|---|
@@ -45,12 +80,9 @@ jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd
 | `authProviders` | per-provider auth configuration |
 | `models[]` | `{id, cost{input, output, cacheRead, cacheWrite}}` local model catalog entries |
 | `modelOverrides` | per-model `{cost}` overrides |
-| `modelRouting` | `retry{maxAttempts, baseDelayMs, maxDelayMs, firstEventTimeoutMs, idleTimeoutMs, jitterRatio}`, `fallbacks[]`, `contextPromotions[]` of `{model, serviceTier?}` — see [model-access](model-access.md) |
-| `context` | `maxBytes` (default 131072), `maxTokens` (default 32768) for loaded context files |
-| `rules` | always-apply rule configuration |
-| `secrets` | `mode` (default `redact`), `replacement` (default `[REDACTED]`), `minLength` (default 8), `values`, `environment`, `files`, `discoverEnvironment` (default true) — configured and discovered secret values are replaced in the model-bound context while the local transcript keeps the original |
+| `modelRouting` | `retry{maxAttempts, baseDelayMs, maxDelayMs, firstEventTimeoutMs, idleTimeoutMs, jitterRatio}`, `fallbacks[]`, `contextPromotions[]` of `{model, serviceTier?}` — see [model-access](model-access.md); invalid values fail the turn with the exact sentences in the [runbook](runbook.md#the-run-refuses-before-any-model-call) |
+| `secrets.values` / `secrets.environment` / `secrets.files` / `secrets.replacement` | extra protected literals, named variables, secret files, and the replacement text (default `[REDACTED]`); the model-bound context is rewritten while the local transcript keeps the original |
 | `billing` | `autoPurchaseEnabled` and `autoRenewEnabled` (both default false), `preferredCurrency`, `maxSingleMicrounits`, `maxPeriodMicrounits` |
-| `ui` | `language` (one of the wisent-app locale codes; `JEDEN_LANGUAGE` wins), `theme` (default `auto`) |
 
 ## Environment variables
 
