@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "documents": {
+    "docs/what-is-jeden.md": {},
+    "docs/quick-start.md": {},
+    "docs/sessions.md": {},
+    "docs/rpc.md": {},
+    "docs/model-access.md": {},
+    "docs/configuration.md": {}
+  },
+  "sources": ["rust/", "README.md", "scripts/run-with-stado.sh", "bin/jeden-rust", "protocol/schema/", ".env.example"],
+  "instruction": "The docs must stay true to the Rust source in rust/ (CLI usage, RPC wire contract, session/usage/mode-state ledger formats, Brama signing, config layering) and to the credential rule in scripts/run-with-stado.sh."
+}
