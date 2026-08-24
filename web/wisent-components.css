@@ -415,10 +415,10 @@
    Documentation layout — the canonical convention resurrected from
    wisent.com/documentation (2026-07-17). One look for every product's docs;
    content stays with the product. Restyled 2026-08-22 to carry the original
-   February design language again: Hubot Sans typography, light brand code
+   February design language again: Hubot Sans typography, white canvas, light brand code
    blocks, motion on interaction. All colors are canonical tokens.
 --------------------------------------------------------------------------- */
-.wisent-docs { background: var(--wisent-color-background); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); font-size: 16px; line-height: 1.65; }
+.wisent-docs { background: var(--wisent-color-white); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); font-size: 16px; line-height: 1.65; }
 .wisent-docs__inner { display: grid; grid-template-columns: 240px minmax(0, 780px); gap: 64px; margin: 0 auto; max-width: 1180px; padding: 64px 32px 120px; }
 .wisent-docs__sidebar { align-self: start; position: sticky; top: 32px; }
 .wisent-docs__label { margin: 0 0 18px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; }
@@ -440,12 +440,14 @@
 .wisent-docs__breadcrumb a { color: inherit; text-decoration: none; transition: color var(--wisent-motion-fast) ease; }
 .wisent-docs__breadcrumb a:hover { color: var(--wisent-color-forest); }
 .wisent-docs__kicker { margin: 0 0 10px; color: var(--wisent-color-brand600); font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
-.wisent-docs__main h1 { margin: 0; color: var(--wisent-color-almost-black); font-family: var(--wisent-font-expanded); font-size: 34px; font-weight: 600; line-height: 1.12; letter-spacing: -.01em; }
-.wisent-docs__lede { margin: 12px 0 36px; color: var(--wisent-color-secondary-text); font-size: 18px; line-height: 1.55; }
+.wisent-docs__main h1 { margin: 0; color: var(--wisent-color-almost-black); font-family: var(--wisent-font-expanded); font-size: 24px; font-weight: 600; line-height: 1.25; letter-spacing: -.01em; }
+.wisent-docs__lede { margin: 12px 0 36px; color: var(--wisent-color-secondary-text); font-size: 16px; line-height: 1.55; }
 .wisent-docs__sections section { border-top: 1px solid var(--wisent-color-border); padding: 34px 0 8px; scroll-margin-top: 24px; }
 .wisent-docs__sections section:first-child { border-top: 0; padding-top: 0; }
-.wisent-docs__sections h2 { margin: 0 0 14px; color: var(--wisent-color-almost-black); font-size: 23px; font-weight: 600; line-height: 1.25; }
+.wisent-docs__sections h2 { margin: 0 0 14px; color: var(--wisent-color-almost-black); font-size: 20px; font-weight: 600; line-height: 1.3; }
 .wisent-docs__sections p { margin: 0 0 16px; color: var(--wisent-color-ink); }
+.wisent-docs__sections p a, .wisent-docs__sections li a { color: var(--wisent-color-brand700); text-decoration: underline; text-decoration-color: var(--wisent-color-border-strong); text-underline-offset: 3px; }
+.wisent-docs__sections p a:hover, .wisent-docs__sections li a:hover { color: var(--wisent-color-forest); text-decoration-color: currentcolor; }
 .wisent-docs__sections ul, .wisent-docs__sections ol { margin: 0 0 20px; padding-left: 24px; }
 .wisent-docs__sections li { margin: 6px 0; padding-left: 4px; color: var(--wisent-color-ink); }
 .wisent-docs__sections li::marker { color: var(--wisent-color-brand600); }
