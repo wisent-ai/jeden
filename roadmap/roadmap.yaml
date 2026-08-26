@@ -1253,7 +1253,7 @@ items:
   area: agent-quality
   priority: P0
   status: implemented
-  summary: Versioned repository roadmap with revision-guarded atomic storage, validation, CLI, slash, native TUI, session provenance, and generated documentation.
+  summary: Versioned repository roadmap with revision-guarded atomic storage, validation, CLI, slash, native TUI, and session provenance.
   implementation: ''
   rationale: ''
   implementationOrder: ''
@@ -1264,8 +1264,6 @@ items:
     text: CLI, slash command, and native TUI picker use one RoadmapStore
   - id: acceptance-3
     text: roadmap work activates goal, plan, acceptance todos, session provenance, and artifact or branch linkage
-  - id: acceptance-4
-    text: roadmap render deterministically generates the human Markdown view
   dependsOn: []
   capabilities:
   - service/roadmap-registry
@@ -1284,10 +1282,6 @@ items:
   - uri: artifact://roadmap-verification.json
     acceptanceId: acceptance-3
     addedAt: '1783984899'
-    addedBy: lukaszbartoszcze
-  - uri: artifact://roadmap-verification.json
-    acceptanceId: acceptance-4
-    addedAt: '1783984913'
     addedBy: lukaszbartoszcze
   createdAt: '1783984540'
   createdBy: lukaszbartoszcze

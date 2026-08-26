@@ -80,7 +80,7 @@ flowchart LR
 - **Network boundary:** Jeden initiates every connection. The terminal, `jeden run`, `jeden rpc`, and `jeden acp` are stdio-only and open no socket; listening sockets exist only in the opt-in `jeden headless <addr>` (mutual TLS), `jeden collab-relay`, and `jeden stats --serve` (bound to `127.0.0.1`). The one required outbound dependency is `BRAMA_URL`. Optional outbound dependencies activate only when configured: Wisent Platform Billing for subscription and quota decisions, the Stado integration API for onboarding bundles and funnel events, the Stado media router for image and speech tools, and the release manifest host for `jeden update`. Tool-initiated network access (`fetch_url`, `fetch_readable_url`, SSH) is checked against the execution grant's host and port allowlist, rejects non-`http(s)` schemes and URL userinfo, resolves and pins the address, re-authorizes every redirect, and refuses non-public addresses unless the grant permits them.
 - **Failure boundary:** Everything fails closed. Without `BRAMA_URL` the run stops with `BRAMA_URL is required` and no model call is made. Write and command tools stop for approval unless `--allow-write`, `--allow-command`, or `--yolo` is passed, and project hooks in `.jeden/hooks.json` run only with `--allow-command` so a cloned repository cannot silently execute shell. Transient model errors retry with the router's backoff, but neither retry nor subscription failover happens once model output has become visible. A typed quota-exhaustion response records a `Retry-After`-bounded cooldown in `.jeden/subscription-cooldowns.json` and the next eligible subscription is selected. A transcript with a truncated tail refuses further appends and must be resumed into a child session. `jeden update` stages, journals, and post-health-checks the new binary, and restores the last-known-good copy when any step fails.
 
-The exact action, tool-call, selector, and anchored-patch wire contract is in [docs/JSON_ACTION_PROTOCOL.md](docs/JSON_ACTION_PROTOCOL.md).
+The action, tool-call, selector, and guarded-mutation contracts are maintained at [jeden.wisent.com/docs/tools](https://jeden.wisent.com/docs/tools).
 
 ## Quick start
 
@@ -171,7 +171,7 @@ Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's stat
 
 ## Current scope
 
-The private milestone includes the capabilities below. Per-capability implementation status is tracked in [docs/JEDEN_PRODUCT_COMPLETENESS.md](docs/JEDEN_PRODUCT_COMPLETENESS.md); anything marked there as `partial` or `missing` is not promised as finished behavior.
+The private milestone includes the capabilities below. The live product documentation at [jeden.wisent.com/docs](https://jeden.wisent.com/docs) describes the supported contract; unlisted or incomplete behavior is not promised.
 
 - interactive terminal and one-shot `jeden run` modes;
 - autonomous outcome pursuit through `jeden pursue`, with source-grounded contracts, independent reviews, and durable receipts;
@@ -245,7 +245,7 @@ When stdin is not a terminal, interactive views render as deterministic text lis
 
 ## Roadmap Registry
 
-`roadmap/roadmap.yaml` is the canonical, versioned team roadmap. `roadmap/schema/roadmap-v1.schema.json` defines the machine contract; `docs/JEDEN_NEXT_PHASES_PLAN.md` and `roadmap/views/JEDEN_NEXT_PHASES_PLAN.md` are deterministic generated views. Every mutating operation is serialized through a stable sibling lock, validates an `expectedRevision`, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML, and fsyncs the parent directory. Pass `--revision <n>` in automation; an omitted revision uses the snapshot read by that invocation and still fails if another writer commits first.
+`roadmap/roadmap.yaml` is the canonical, versioned team roadmap and `roadmap/schema/roadmap-v1.schema.json` defines its machine contract. Every mutating operation is serialized through a stable sibling lock, validates an `expectedRevision`, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML, and fsyncs the parent directory. Pass `--revision <n>` in automation; an omitted revision uses the snapshot read by that invocation and still fails if another writer commits first.
 
 Statuses are explicit: `backlog`, `planned`, `in_progress`, `implemented`, `not_run`, `failed`, `external_blocked`, `passed`, and `dropped`. `passed` requires evidence; `external_blocked` requires an external prerequisite. Dependencies must resolve and remain acyclic, and capability IDs must exist in the capability registry.
 
@@ -266,7 +266,6 @@ jeden roadmap acceptance evidence "$ITEM_ID" "$ACCEPTANCE_ID" \
   "artifact://$ARTIFACT_NAME" --revision "$REVISION" --cwd .
 jeden roadmap work JED-024 --cwd .
 jeden roadmap check --json --cwd .
-jeden roadmap render --cwd .
 ```
 
 The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command containing the required title, area, priority, summary, and acceptance fields. Optional dependencies and external prerequisites use repeated `--depends-on` and `--external-prerequisite` flags. `roadmap work <id>` sets the active goal and plan, creates todos from the item's acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
@@ -336,7 +335,7 @@ jeden tools --cwd .
 
 ## JSON action protocol
 
-The complete native action, tool-call, selector, and anchored-patch contract is documented in [docs/JSON_ACTION_PROTOCOL.md](docs/JSON_ACTION_PROTOCOL.md).
+The complete native action, tool-call, selector, and anchored-patch contract is documented at [jeden.wisent.com/docs/tools](https://jeden.wisent.com/docs/tools).
 
 ## Operational model
 

@@ -105,7 +105,7 @@ fn usage() -> String {
         "  jeden token [--list] [--reveal] [--json] — print the agent Brama credential (redacted by default)\n",
         "  jeden stats [--json|--summary|--serve [--port N]] — usage/quota snapshot or local web dashboard\n",
         "  jeden gallery [--theme NAME|--all] [--color] — render TUI components across themes (dev tool)\n\n",
-        "  jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|render|work> [args] [--json] [--cwd path]\n\n",
+        "  jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]\n\n",
         "Slash commands:\n",
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
         "  /logout [provider]     show Weles-managed logout ownership\n",
