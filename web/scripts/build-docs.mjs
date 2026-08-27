@@ -8,7 +8,7 @@
  * Run from anywhere: `npm run build:docs` (repo root) or
  * `node web/scripts/build-docs.mjs`.
  */
-import { copyFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createElement as h } from "react";
@@ -94,6 +94,14 @@ const SITE_FOOTER = `    <footer>
       <div class="footer-links"><a href="https://www.wisent.ai" target="_blank" rel="noreferrer">Wisent ↗</a><a href="mailto:contact@wisent.ai">Contact ↗</a></div>
     </footer>`;
 
+function html(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+}
+
 function shell(page, body) {
   const { meta } = page;
   return `<!doctype html>
@@ -103,14 +111,14 @@ function shell(page, body) {
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#f2f1ed" />
-    <meta name="description" content="${meta.description}" />
+    <meta name="description" content="${html(meta.description)}" />
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="${meta.canonical}" />
-    <meta property="og:title" content="${meta.ogTitle}" />
-    <meta property="og:description" content="${meta.ogDescription}" />
+    <meta property="og:url" content="${html(meta.canonical)}" />
+    <meta property="og:title" content="${html(meta.ogTitle)}" />
+    <meta property="og:description" content="${html(meta.ogDescription)}" />
     <meta property="og:image" content="https://jeden.wisent.com/og-image.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <link rel="canonical" href="${meta.canonical}" />
+    <link rel="canonical" href="${html(meta.canonical)}" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -118,7 +126,7 @@ function shell(page, body) {
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/wisent-components.css" />
     <script src="/script.js" defer></script>
-    <title>${meta.htmlTitle}</title>
+    <title>${html(meta.htmlTitle)}</title>
   </head>
   <body>
     <div class="grain" aria-hidden="true"></div>
@@ -138,6 +146,13 @@ ${SITE_FOOTER}
 const componentStyles = fileURLToPath(await import.meta.resolve("@wisent-ai/components/styles.css"));
 await copyFile(componentStyles, path.join(webRoot, "wisent-components.css"));
 
+function pageLink(page) {
+  return {
+    label: page.navLabel ?? nav.find((item) => item.href === page.href)?.label ?? page.slug,
+    href: page.href,
+  };
+}
+
 for (const [i, page] of pages.entries()) {
   const body = renderToStaticMarkup(
     h(DocumentationLayout, {
@@ -147,8 +162,8 @@ for (const [i, page] of pages.entries()) {
       sourceLabel,
       nav,
       currentHref: page.href,
-      previous: i > 0 ? { label: nav[i - 1].label, href: nav[i - 1].href } : undefined,
-      next: i < pages.length - 1 ? { label: nav[i + 1].label, href: nav[i + 1].href } : undefined,
+      previous: i > 0 ? pageLink(pages[i - 1]) : undefined,
+      next: i < pages.length - 1 ? pageLink(pages[i + 1]) : undefined,
       page: {
         slug: page.slug,
         eyebrow: page.eyebrow,
@@ -159,7 +174,31 @@ for (const [i, page] of pages.entries()) {
     }),
   );
   const outFile = path.join(docsDir, page.file);
+  await mkdir(path.dirname(outFile), { recursive: true });
   await writeFile(outFile, shell(page, body));
   console.log(`wrote docs/${page.file}`);
 }
+
+const sitemapUrls = [
+  { href: "/", priority: "1.0" },
+  ...pages.map((page) => ({
+    href: page.href,
+    priority: page.href === "/docs" ? "0.8" : "0.7",
+  })),
+];
+const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${sitemapUrls
+  .map(
+    ({ href, priority }) => `  <url>
+    <loc>https://jeden.wisent.com${href}</loc>
+    <changefreq>weekly</changefreq>
+    <priority>${priority}</priority>
+  </url>`,
+  )
+  .join("\n")}
+</urlset>
+`;
+await writeFile(path.join(webRoot, "sitemap.xml"), sitemap);
+console.log("wrote sitemap.xml");
 console.log("wrote wisent-components.css");

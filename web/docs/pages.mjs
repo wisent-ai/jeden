@@ -6,6 +6,8 @@
  * This module is data only — the layout is the canonical DocumentationLayout
  * from @wisent-ai/components.
  */
+import { cliPages } from "./cli-pages.mjs";
+
 
 export const product = "Jeden";
 export const homeHref = "/";
@@ -16,6 +18,7 @@ export const nav = [
   { label: "Overview", href: "/docs" },
   { label: "Sessions", href: "/docs/sessions" },
   { label: "Tools", href: "/docs/tools" },
+  { label: "CLI", href: "/docs/cli" },
 ];
 
 export const pages = [
@@ -271,4 +274,5 @@ export const pages = [
       },
     ],
   },
+  ...cliPages,
 ];
