@@ -85,10 +85,11 @@ button { font: inherit; }
 .hero-visual { position: relative; height: 610px; display: flex; align-items: center; justify-content: center; }
 .hero-visual::before { content: ""; position: absolute; width: 510px; height: 510px; border-radius: 50%; background: radial-gradient(circle, rgba(215,255,63,.46) 0%, rgba(215,255,63,.08) 43%, transparent 70%); filter: blur(12px); }
 .orbit { position: absolute; border: 1px solid rgba(20,21,18,.13); border-radius: 50%; }
-.orbit-one { width: 540px; height: 540px; animation: spin 28s linear infinite; }
+.orbit-one { width: 540px; height: 540px; animation: jeden-orbit-rotate 28s linear infinite; }
 .orbit-one::before { content: ""; position: absolute; width: 8px; height: 8px; border-radius: 50%; background: var(--orange); top: 72px; left: 65px; box-shadow: 0 0 0 5px rgba(255,101,52,.11); }
 .orbit-two { width: 670px; height: 380px; transform: rotate(-17deg); border-color: rgba(20,21,18,.08); }
-@keyframes spin { to { transform: rotate(360deg); } }
+/* Decorative hero ring, not a loading indicator: nothing is waiting on it. */
+@keyframes jeden-orbit-rotate { to { transform: rotate(360deg); } }
 
 .terminal { position: relative; width: min(620px, 100%); background: #121410; color: #eceee5; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 35px 80px rgba(27,28,23,.22); z-index: 2; transform: perspective(1200px) rotateY(-2deg) rotateX(1deg); }
 .terminal-bar { height: 45px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 15px; border-bottom: 1px solid rgba(255,255,255,.1); color: #9da095; font: 400 9px/1 var(--mono); text-transform: uppercase; letter-spacing: .1em; }
