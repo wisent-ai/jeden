@@ -31,7 +31,11 @@ case "$PLATFORM" in
 esac
 
 cd "$SOURCE_DIR"
-CARGO_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+# Read it with awk, not python3 -c 'import tomllib'. tomllib is Python 3.11+ and
+# this machine's python3 is 3.10, so the release build of a Rust crate failed on
+# the interpreter that happened to be first on PATH. Restricted to [package] so a
+# dependency's own version line cannot answer instead.
+CARGO_VERSION=$(awk -F'"' '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version[[:space:]]*=/{print $2; exit}' Cargo.toml)
 [ "$CARGO_VERSION" = "$VERSION" ] || fail "WISENT_VERSION $VERSION does not match Cargo.toml $CARGO_VERSION"
 
 TARGET_DIR="$OUTPUT_DIR/cargo-$PLATFORM"

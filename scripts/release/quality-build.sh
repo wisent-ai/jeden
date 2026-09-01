@@ -21,7 +21,9 @@ case "$PLATFORM" in
 esac
 
 cd "$SOURCE_DIR"
-CARGO_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+# Same reason as scripts/release/build.sh: tomllib needs Python 3.11+ and the
+# python3 first on PATH here is 3.10.
+CARGO_VERSION=$(awk -F'"' '/^\[package\]/{p=1;next} /^\[/{p=0} p && /^version[[:space:]]*=/{print $2; exit}' Cargo.toml)
 [ "$CARGO_VERSION" = "$VERSION" ] || fail "WISENT_VERSION $VERSION does not match Cargo.toml $CARGO_VERSION"
 mkdir -p "$OUTPUT_DIR/quality-$PLATFORM"
 CARGO_TARGET_DIR="$OUTPUT_DIR/quality-$PLATFORM" JEDEN_BUILD_VERSION="$VERSION" \
