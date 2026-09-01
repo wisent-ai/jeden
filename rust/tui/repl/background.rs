@@ -12,10 +12,10 @@ use super::super::{
     EditorState, FollowUpQueue, Message, TurnCtx,
 };
 use super::questions::prompt_user_question;
-use super::{message_block, spinner_glyph, ReplRenderer};
+use super::{message_block, skeleton_bar, ReplRenderer};
 /// Worker→render-loop message during a background turn.
 enum TurnMsg {
-    /// Spinner status line ("thinking…", "tool: read_file").
+    /// Status line beside the skeleton ("thinking…", "tool: read_file").
     Note(String),
     /// A chunk of live assistant text.
     Delta(String),
@@ -73,7 +73,7 @@ fn prompt_tool_approval(
     }
 }
 
-/// Run a background turn on a worker thread while animating a spinner and
+/// Run a background turn on a worker thread while sweeping a skeleton bar and
 /// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
 /// agent loop polls between steps. Returns the handler's result.
 pub(super) fn run_background_turn<H>(
@@ -90,7 +90,7 @@ where
     H: Fn(&str, &TurnCtx) -> Result<CommandOutcome, String> + Sync,
 {
     let cancel = Arc::new(AtomicBool::new(false));
-    // Note = spinner status line; Delta = a live assistant text chunk.
+    // Note = the status line beside the skeleton; Delta = a live assistant text chunk.
     let (tx, rx) = mpsc::channel::<TurnMsg>();
     let mut note = String::from("working…");
     let mut streamed = String::new();
@@ -109,7 +109,7 @@ where
     let color = stdout_supports_color();
 
     // Build the live region for a background turn: streamed assistant text (as it
-    // arrives) above the spinner status line.
+    // arrives) above the skeleton and its status line.
     let build_live = |streamed: &str, note: &str, frame: usize, cancelling: bool| -> Vec<String> {
         let mut lines = Vec::new();
         if !streamed.trim().is_empty() {
@@ -120,9 +120,9 @@ where
             ));
         }
         let label = if cancelling {
-            format!("{} cancelling…", spinner_glyph(frame))
+            format!("{} cancelling…", skeleton_bar(frame))
         } else {
-            format!("{} {} · esc to cancel", spinner_glyph(frame), note)
+            format!("{} {} · esc to cancel", skeleton_bar(frame), note)
         };
         lines.extend(message_block(
             &Message::new("system", label),

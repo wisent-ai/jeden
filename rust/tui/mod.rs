@@ -338,13 +338,13 @@ pub enum TurnKind {
     /// Runs inline on the main thread with raw mode suspended for commands
     /// that need the cooked terminal or return instantly.
     Foreground,
-    /// Runs on a worker thread while the TUI stays live (spinner + Esc-cancel).
+    /// Runs on a worker thread while the TUI stays live (skeleton + Esc-cancel).
     Background,
 }
 
 /// Default policy: agent turns (plain prompts, `/retry`, `/btw`) run in the
 /// background so the TUI stays live; view commands that fetch from Brama/Weles
-/// before rendering join them so the spinner acts as their loading state
+/// before rendering join them so the skeleton acts as their loading state
 /// instead of freezing the UI (`/login` also needs Esc-cancel for the device
 /// poll). Local, instant commands run inline in the cooked terminal.
 pub fn default_turn_kind(input: &str) -> TurnKind {
@@ -372,7 +372,7 @@ pub struct TurnCtx<'a> {
     /// Immutable typed attachments captured for this turn. Payload bytes remain
     /// shared through `Arc` handles until provider-bound serialization.
     pub attachments: &'a [Attachment],
-    /// Live status sink rendered next to the spinner.
+    /// Live status sink rendered beside the skeleton.
     pub progress: &'a dyn Fn(&str),
     /// Per-token streaming sink for live assistant text.
     pub stream: &'a dyn Fn(&str),

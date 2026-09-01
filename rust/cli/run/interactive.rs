@@ -382,7 +382,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         ));
                     }
                     // Device-code flow: stream the code+QR into the live region,
-                    // status goes to the spinner, Esc cancels the Weles poll.
+                    // status goes beside the skeleton, Esc cancels the Weles poll.
                     let bridge = crate::cli::auth::TurnBridge {
                         progress: ctx.progress,
                         stream: ctx.stream,

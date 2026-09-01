@@ -12,7 +12,7 @@ pub(super) mod questions;
 
 /// Sticky-prompt renderer for native scrollback. Finalized transcript blocks are
 /// printed once into the terminal's normal buffer (they scroll into real history
-/// and persist); only the bottom "live region" (prompt / spinner / streamed text)
+/// and persist); only the bottom "live region" (prompt / skeleton / streamed text)
 /// is repainted in place. All cursor moves are RELATIVE, so terminal scrolling
 /// from committed output never corrupts positioning.
 pub(super) struct ReplRenderer {
@@ -118,9 +118,20 @@ impl Drop for RawModeGuard {
     }
 }
 
-pub(super) fn spinner_glyph(frame: usize) -> char {
-    const FRAMES: [char; 10] = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
-    FRAMES[frame % FRAMES.len()]
+/// The terminal's skeleton: a block standing where the answer will land, with a
+/// highlight sweeping across it.
+///
+/// A rotating glyph says only that something is happening. This says the same
+/// thing in the shape of the text that is coming, which is the treatment every
+/// other Wisent surface gives a wait. The sweep runs out and back so a wrapping
+/// frame counter never makes the highlight jump.
+pub(super) fn skeleton_bar(frame: usize) -> String {
+    const WIDTH: usize = 8;
+    let step = frame % (WIDTH * 2 - 2);
+    let lit = if step < WIDTH { step } else { WIDTH * 2 - 2 - step };
+    (0..WIDTH)
+        .map(|cell| if cell == lit { '▓' } else { '░' })
+        .collect()
 }
 
 pub(super) fn apply_turn_result(

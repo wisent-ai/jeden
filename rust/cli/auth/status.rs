@@ -212,7 +212,7 @@ impl InteractionBridge for ConsoleBridge {
     }
 }
 
-/// Bridge for TUI background turns: status updates go to the spinner note,
+/// Bridge for TUI background turns: status updates go to the skeleton's note,
 /// the device-code block (with QR) streams into the live text region, and
 /// questions use the live prompt — so `/login <provider>` stays cancellable
 /// with Esc and never touches stderr. Falls back to an error when the turn
