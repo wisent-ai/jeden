@@ -20,10 +20,10 @@
         "argv": ["scripts/release/build.sh"]
       },
       "stage": {
-        ".wisent-release/darwin-arm64/jeden": "jeden",
-        ".wisent-release/darwin-arm64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
-        ".wisent-release/darwin-arm64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
-        ".wisent-release/darwin-arm64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+        "stage-darwin-arm64/bin/jeden": "bin/jeden",
+        "stage-darwin-arm64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
+        "stage-darwin-arm64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
+        "stage-darwin-arm64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
       }
     },
     "linux-amd64": {
@@ -38,10 +38,10 @@
         "argv": ["scripts/release/build.sh"]
       },
       "stage": {
-        ".wisent-release/linux-amd64/jeden": "jeden",
-        ".wisent-release/linux-amd64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
-        ".wisent-release/linux-amd64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
-        ".wisent-release/linux-amd64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+        "stage-linux-amd64/bin/jeden": "bin/jeden",
+        "stage-linux-amd64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
+        "stage-linux-amd64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
+        "stage-linux-amd64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
       }
     }
   },

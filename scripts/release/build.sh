@@ -35,17 +35,17 @@ CARGO_VERSION=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml"
 [ "$CARGO_VERSION" = "$VERSION" ] || fail "WISENT_VERSION $VERSION does not match Cargo.toml $CARGO_VERSION"
 
 TARGET_DIR="$OUTPUT_DIR/cargo-$PLATFORM"
-STAGE_DIR="$SOURCE_DIR/.wisent-release/$PLATFORM"
+STAGE_DIR="$OUTPUT_DIR/stage-$PLATFORM"
 rm -rf "$STAGE_DIR"
-mkdir -p "$TARGET_DIR" "$STAGE_DIR/receipts"
+mkdir -p "$TARGET_DIR" "$STAGE_DIR/bin" "$STAGE_DIR/receipts"
 
 CARGO_TARGET_DIR="$TARGET_DIR" JEDEN_BUILD_VERSION="$VERSION" \
   cargo build --locked --release --target "$TARGET" --bin jeden
-cp "$TARGET_DIR/$TARGET/release/$EXECUTABLE" "$STAGE_DIR/jeden"
-chmod 0755 "$STAGE_DIR/jeden"
+cp "$TARGET_DIR/$TARGET/release/$EXECUTABLE" "$STAGE_DIR/bin/jeden"
+chmod 0755 "$STAGE_DIR/bin/jeden"
 
 python3 scripts/release/write-evidence.py \
-  --binary "$STAGE_DIR/jeden" \
+  --binary "$STAGE_DIR/bin/jeden" \
   --receipts "$STAGE_DIR/receipts" \
   --version "$VERSION" \
   --platform "$PLATFORM"

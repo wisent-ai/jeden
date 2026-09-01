@@ -11,6 +11,7 @@ artifacts/
 benchmarks/output/
 
 target/
+.wisent-output/
 *.rmeta
 packages/*/dist/
 .worktrees/
