@@ -96,14 +96,12 @@ impl std::fmt::Display for QueueError {
 
 impl std::error::Error for QueueError {}
 
-#[derive(Debug, Clone)]
-#[derive(Default)]
+#[derive(Debug, Clone, Default)]
 pub struct FollowUpQueue {
     messages: VecDeque<QueuedMessage>,
     next_id: u64,
     keymap: DeliveryKeyMap,
 }
-
 
 impl FollowUpQueue {
     pub fn len(&self) -> usize {

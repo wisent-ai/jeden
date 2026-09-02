@@ -22,8 +22,8 @@ fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize)
     {
         let level = heading.get(1).map(|m| m.as_str().len()).unwrap_or(1);
         let heading_re = regex::Regex::new(r"^(#{1,6})\s").unwrap();
-        for index in start_line..lines.len() {
-            if let Some(next) = heading_re.captures(&lines[index]) {
+        for (index, text) in lines.iter().enumerate().skip(start_line) {
+            if let Some(next) = heading_re.captures(text) {
                 if next.get(1).map(|m| m.as_str().len()).unwrap_or(7) <= level {
                     return Ok((start_line, index));
                 }

@@ -73,9 +73,16 @@ fn prompt_tool_approval(
     }
 }
 
+/// A question the worker asked: its text, the offered choices, and the channel
+/// the event loop answers on.
+type PendingQuestion = (String, Vec<String>, mpsc::Sender<Result<String, String>>);
+
 /// Run a background turn on a worker thread while sweeping a skeleton bar and
 /// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
 /// agent loop polls between steps. Returns the handler's result.
+// The renderer, editor, and follow-up queue are separate `&mut` borrows owned
+// by the caller's loop, so no struct can group them without moving that state.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn run_background_turn<H>(
     renderer: &mut ReplRenderer,
     handler: &H,
@@ -188,11 +195,7 @@ where
 
         loop {
             let mut pending_approval: Option<(String, String, mpsc::Sender<bool>)> = None;
-            let mut pending_question: Option<(
-                String,
-                Vec<String>,
-                mpsc::Sender<Result<String, String>>,
-            )> = None;
+            let mut pending_question: Option<PendingQuestion> = None;
             while let Ok(message) = rx.try_recv() {
                 match message {
                     TurnMsg::Note(m) => {

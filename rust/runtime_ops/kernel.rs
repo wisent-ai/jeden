@@ -451,6 +451,9 @@ fn drain_kernel_stderr(
         }
     }
 }
+// Four termination flags and three capture buffers, assembled by the poll loop
+// that owns them; this call is the first place they become one value.
+#[allow(clippy::too_many_arguments)]
 fn finish_kernel(
     ok: bool,
     timed_out: bool,

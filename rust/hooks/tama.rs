@@ -47,15 +47,12 @@ pub fn registry_path(cwd: &Path) -> Option<PathBuf> {
         return explicit_path(raw);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    for candidate in [
+    [
         home.join("Documents/CodingProjects/Wisent/hooks-rotator/shared-hooks/registry.json"),
         home.join(".shared-hooks/registry.json"),
-    ] {
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
 }
 
 fn explicit_path(raw: &str) -> Option<PathBuf> {

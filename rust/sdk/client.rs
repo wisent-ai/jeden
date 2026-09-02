@@ -215,6 +215,9 @@ impl SessionClient {
     }
 
     /// Sends a validated request and awaits its correlated response or protocol error.
+    // `ClientError` is published SDK surface; boxing it would break every
+    // downstream `match` compiled against this signature.
+    #[allow(clippy::result_large_err)]
     pub async fn request(&self, request: RequestEnvelope) -> Result<Value, ClientError> {
         request.validate()?;
         if self.is_disposed() {
@@ -249,6 +252,9 @@ impl SessionClient {
     }
 
     /// Builds a request from explicit caller metadata and awaits its result.
+    // `ClientError` is published SDK surface; boxing it would break every
+    // downstream `match` compiled against this signature.
+    #[allow(clippy::result_large_err)]
     pub async fn call(
         &self,
         id: impl Into<String>,
@@ -262,6 +268,9 @@ impl SessionClient {
 
     /// Requests replay from an explicit cursor. The client generates only the correlation ID;
     /// idempotency metadata remains caller supplied.
+    // `ClientError` is published SDK surface; boxing it would break every
+    // downstream `match` compiled against this signature.
+    #[allow(clippy::result_large_err)]
     pub async fn replay(
         &self,
         session_id: impl Into<String>,
@@ -275,6 +284,9 @@ impl SessionClient {
     }
 
     /// Replays a session after the last event cursor observed by this client.
+    // `ClientError` is published SDK surface; boxing it would break every
+    // downstream `match` compiled against this signature.
+    #[allow(clippy::result_large_err)]
     pub async fn reconnect(
         &self,
         session_id: impl Into<String>,
@@ -287,6 +299,9 @@ impl SessionClient {
     }
 
     /// Sends the canonical mutating cancellation request with caller-owned idempotency metadata.
+    // `ClientError` is published SDK surface; boxing it would break every
+    // downstream `match` compiled against this signature.
+    #[allow(clippy::result_large_err)]
     pub async fn cancel(
         &self,
         request_id: impl Into<String>,

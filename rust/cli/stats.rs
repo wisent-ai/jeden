@@ -136,7 +136,7 @@ fn sessions_json() -> Value {
             dirs.push((entry.file_name().to_string_lossy().to_string(), modified));
         }
     }
-    dirs.sort_by(|left, right| right.1.cmp(&left.1));
+    dirs.sort_by_key(|(_, modified)| std::cmp::Reverse(*modified));
     let recent: Vec<Value> = dirs.iter().take(5).map(|(name, _)| json!(name)).collect();
     json!({"count": dirs.len(), "recent": recent})
 }

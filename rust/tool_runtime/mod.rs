@@ -124,6 +124,11 @@ fn execute_dynamic(
         .find_map(|registration| (registration.execute)(runtime, tool, input))
 }
 
+/// The `ask_user` question channel: prompt plus offered choices in, the
+/// human's answer out. Borrowed, because whoever owns the terminal outlives
+/// the runtime handed to a single tool call.
+pub(crate) type AskUserFn<'a> = &'a dyn Fn(&str, &[String]) -> Result<String, String>;
+
 pub struct ToolRuntime<'a> {
     pub cwd: &'a Path,
     pub artifact_dir: Option<&'a Path>,
@@ -133,7 +138,7 @@ pub struct ToolRuntime<'a> {
     /// Cooked-terminal access for non-TUI execution.
     pub interactive: bool,
     /// Background TUI turns use this channel instead of reading stdin.
-    pub ask_user: Option<&'a dyn Fn(&str, &[String]) -> Result<String, String>>,
+    pub ask_user: Option<AskUserFn<'a>>,
 }
 
 pub(crate) fn tool_allowed_by_env(tool: &str) -> bool {

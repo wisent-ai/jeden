@@ -10,6 +10,11 @@ pub(crate) struct TaskSandboxHealth {
     helper: Option<PathBuf>,
 }
 
+// The three helpers below exist for the one platform whose sandbox this module
+// knows how to enforce; `health()` calls them from its `target_os = "macos"` arm
+// only. Without the attribute they are dead code on Linux and Windows, where the
+// gate compiles with `-D warnings` and refused the build.
+#[cfg(target_os = "macos")]
 fn helper_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(configured) = env::var_os("JEDEN_TASK_SANDBOX_HELPER") {
@@ -25,6 +30,7 @@ fn helper_candidates() -> Vec<PathBuf> {
     candidates
 }
 
+#[cfg(target_os = "macos")]
 fn signed(path: &Path) -> Result<(), String> {
     let output = Command::new("/usr/bin/codesign")
         .arg("--verify")
@@ -47,6 +53,7 @@ fn signed(path: &Path) -> Result<(), String> {
     }
 }
 
+#[cfg(target_os = "macos")]
 fn enforcement_probe(path: &Path) -> Result<(), String> {
     let output = Command::new(path)
         .arg("--probe")

@@ -26,9 +26,9 @@ pub(crate) fn sanitize_marketplace_name(value: &str) -> String {
     for ch in value.trim().chars() {
         if ch.is_ascii_alphanumeric() || ch == '.' || ch == '_' || ch == '-' {
             out.push(ch);
-        } else if matches!(ch, '@' | '/' | '\\') {
-            out.push('-');
-        } else if !out.ends_with('-') {
+        } else if matches!(ch, '@' | '/' | '\\') || !out.ends_with('-') {
+            // An explicit separator earns its own dash even beside one already
+            // written; every other rejected character just joins the run.
             out.push('-');
         }
     }
@@ -215,10 +215,7 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         return Ok(format!("Registered explicit untrusted dev-link {} at {} as installed/inactive; marketplace verification was not bypassed.", record.id, record.path.display()));
     }
     if verb == "add" {
-        let source = rest.to_vec()
-            .join(" ")
-            .trim()
-            .to_string();
+        let source = rest.to_vec().join(" ").trim().to_string();
         if source.is_empty() {
             return Err("Usage: /marketplace add <source>".into());
         }

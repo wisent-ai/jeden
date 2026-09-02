@@ -454,6 +454,10 @@ fn node_supports_typescript(node: &str) -> bool {
         .unwrap_or(false)
 }
 
+// These parameters are the extension host's invocation contract: mode,
+// generation, timeout, env, sources, both authorization flags, and the
+// borrowed operation context. Nothing in scope owns that set together.
+#[allow(clippy::too_many_arguments)]
 fn run_host(
     cwd: &Path,
     mode: &str,

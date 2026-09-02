@@ -151,6 +151,10 @@ impl MarketplaceService {
         Ok(())
     }
 
+    // Trust root, signed envelope, replay bound, clock, requested deps, target
+    // platform, and fetcher each come from a different caller, so grouping them
+    // would only move the same argument list one call up.
+    #[allow(clippy::too_many_arguments)]
     pub fn install_and_activate<F>(
         &self,
         root: &TrustRootV1,

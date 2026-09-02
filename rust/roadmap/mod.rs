@@ -1000,11 +1000,9 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             })?;
             let revision = expected_revision(&store, &options)?;
             let add = command == "depends";
-            let event = if add {
-                "roadmap_item_updated"
-            } else {
-                "roadmap_item_updated"
-            };
+            // Attach and detach are the same item mutation; the payload's
+            // `operation` is what tells a reader which way it went.
+            let event = "roadmap_item_updated";
             let roadmap = store.mutate(
                 revision,
                 event,
@@ -1390,40 +1388,6 @@ fn work_command(
             session_path.display()
         ))
     }
-}
-
-fn atomic_write_text(path: &Path, content: &str) -> Result<(), RoadmapError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| RoadmapError::Io("output path has no parent".into()))?;
-    fs::create_dir_all(parent)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let temp = parent.join(format!(
-        ".{}.tmp-{}-{nonce}",
-        path.file_name()
-            .map(|name| name.to_string_lossy())
-            .unwrap_or_default(),
-        std::process::id()
-    ));
-    let result = (|| -> Result<(), RoadmapError> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)?;
-        file.write_all(content.as_bytes())?;
-        file.flush()?;
-        file.sync_all()?;
-        fs::rename(&temp, path)?;
-        File::open(parent)?.sync_all()?;
-        Ok(())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temp);
-    }
-    result
 }
 
 pub fn split_command_line(input: &str) -> Result<Vec<String>, RoadmapError> {

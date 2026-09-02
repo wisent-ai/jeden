@@ -80,7 +80,8 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                         &conn,
                         &format!("SELECT count(*) AS count FROM {}", sqlite_identifier(name)?),
                     )?;
-                    table["rows"] = count_rows.first()
+                    table["rows"] = count_rows
+                        .first()
                         .and_then(|row| row.get("count"))
                         .cloned()
                         .unwrap_or(Value::Null);

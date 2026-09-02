@@ -349,6 +349,11 @@ fn find_transcript_lake() -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// A `(text, status)` sink for goal-lifecycle events, shared rather than
+/// borrowed because the background threads below outlive the turn that
+/// started them.
+pub(crate) type GoalEventSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
 /// Background classification for one user turn. Never blocks the caller:
 /// spawns a thread that classifies the prompt, records the `goal_lifecycle`
 /// ledger event, emits the RPC `goal` session event when a sink exists, and —
@@ -361,7 +366,7 @@ pub(crate) fn spawn_turn_classification(
     prompt: String,
     session_dir: PathBuf,
     turn_index: u64,
-    goal_event: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+    goal_event: Option<GoalEventSink>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
         let state = crate::slash::read_mode_state(&cwd);
@@ -446,7 +451,7 @@ pub(crate) fn spawn_completion_judgement(
     cwd: PathBuf,
     session_dir: PathBuf,
     assistant_final: String,
-    goal_event: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+    goal_event: Option<GoalEventSink>,
     classification: Option<std::thread::JoinHandle<()>>,
 ) {
     std::thread::spawn(move || {

@@ -56,6 +56,9 @@ impl Default for RetryPolicy {
     }
 }
 
+// Boxing `RouteChanged`'s descriptors would rewrite every construction and
+// every match arm across the router for a value that is built once per retry.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum RouteResult {
@@ -849,6 +852,9 @@ fn build_streaming_body(
     Ok(body)
 }
 
+// Six of these become the request body and the last two are the caller's live
+// delta sink and cancel probe, so no one struct owns the set.
+#[allow(clippy::too_many_arguments)]
 fn streaming_attempt(
     config: &ChatConfig,
     route: &RouteDescriptor,

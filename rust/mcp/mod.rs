@@ -603,12 +603,16 @@ pub fn get_prompt(
     })
 }
 
+/// One handshake per server: its name, the connection, and how the handshake
+/// went.
+type Handshakes = Vec<(String, ServerConnection, Result<(), String>)>;
+
 fn connect_parallel(
     pending: Vec<(String, ServerConnection)>,
     cwd: &Path,
     timeout_ms: u64,
     force: bool,
-) -> Result<Vec<(String, ServerConnection, Result<(), String>)>, String> {
+) -> Result<Handshakes, String> {
     if pending.is_empty() {
         return Ok(Vec::new());
     }

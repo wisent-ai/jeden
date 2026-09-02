@@ -68,6 +68,10 @@ impl MemoryStore {
         )
     }
 
+    // These are the caller-supplied columns of the row being written; the only
+    // struct with this shape is `MemoryRecord`, which also carries the ids,
+    // revision, and timestamps this call is the one to assign.
+    #[allow(clippy::too_many_arguments)]
     pub fn remember_with_key(
         &self,
         kind: &str,

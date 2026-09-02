@@ -9,6 +9,12 @@ pub(crate) struct RunResult {
     pub(crate) session_path: Option<PathBuf>,
 }
 
+/// Prompt plus offered choices in, the human's answer out.
+pub(crate) type AskUser<'a> = Box<dyn Fn(&str, &[String]) -> Result<String, String> + 'a>;
+
+/// Tool name plus approval detail in, the verdict out.
+pub(crate) type ApproveTool<'a> = Box<dyn Fn(&str, &str) -> bool + 'a>;
+
 /// Cooperative controls for a turn: cancellation, live progress, streaming,
 /// terminal-owned questions, tool approval, and non-TUI interactivity.
 pub(crate) struct RunHooks<'a> {
@@ -18,14 +24,12 @@ pub(crate) struct RunHooks<'a> {
     /// Per-token streaming sink for live assistant text.
     pub(crate) stream: Box<dyn Fn(&str) + 'a>,
     /// Terminal-owned human question channel when a live event loop is present.
-    pub(crate) ask_user: Option<Box<dyn Fn(&str, &[String]) -> Result<String, String> + 'a>>,
+    pub(crate) ask_user: Option<AskUser<'a>>,
     /// Ask the user to approve a gated tool that isn't pre-authorized. The
     /// detail string carries safety/approval context for the prompt body.
-    pub(crate) approve: Box<dyn Fn(&str, &str) -> bool + 'a>,
-    /// Optional sink for goal-lifecycle events `(text, status)`. `Arc` (not a
-    /// borrowed box) because background classification threads outlive the
-    /// turn; `None` where no session event stream exists (CLI/TUI).
-    pub(crate) goal_event: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+    pub(crate) approve: ApproveTool<'a>,
+    /// `None` where no session event stream exists (CLI/TUI).
+    pub(crate) goal_event: Option<crate::goal_lifecycle::GoalEventSink>,
 }
 
 impl RunHooks<'static> {
@@ -60,6 +64,9 @@ impl RunHooks<'_> {
         (self.approve)(tool, detail)
     }
 
+    // `ProgressSink` is a published `Arc` alias whose closure borrows this
+    // turn's progress box, so the payload can never be `Send + Sync`.
+    #[allow(clippy::arc_with_non_send_sync)]
     pub(super) fn operation_context<'a>(&'a self, artifact_dir: &Path) -> OperationContext<'a> {
         let progress = &self.progress;
         OperationContext::new(

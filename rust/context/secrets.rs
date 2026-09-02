@@ -59,7 +59,7 @@ impl SecretPolicy {
         }
         let mut seen = BTreeSet::new();
         sources.retain(|source| seen.insert(source.value.clone()));
-        sources.sort_by(|left, right| right.value.len().cmp(&left.value.len()));
+        sources.sort_by_key(|source| std::cmp::Reverse(source.value.len()));
         Ok(Self {
             mode: config.mode,
             replacement: config.replacement.clone(),

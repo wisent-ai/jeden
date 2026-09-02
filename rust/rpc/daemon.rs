@@ -373,6 +373,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         }
     }
 
+    // `ErrorV1` is the wire envelope `jeden.session.v1` puts on the socket, so
+    // an `Err` here is already the response body, not an internal error type.
+    #[allow(clippy::result_large_err)]
     fn dispatch(
         &self,
         connection: &AuthenticatedConnection,
@@ -563,6 +566,9 @@ async fn write_async_frame<W: tokio::io::AsyncWrite + Unpin>(
         .map_err(|error| error.to_string())
 }
 
+// `ErrorV1` is the wire envelope `jeden.session.v1` puts on the socket; boxing
+// it here would change the shape every dispatch arm already returns.
+#[allow(clippy::result_large_err)]
 fn string_field<'a>(params: &'a Value, field: &str) -> Result<&'a str, ErrorV1> {
     params
         .get(field)
@@ -573,6 +579,9 @@ fn string_field<'a>(params: &'a Value, field: &str) -> Result<&'a str, ErrorV1> 
 
 /// An absent `limit` means "everything"; a present one must be a whole number
 /// of at least one, so a `0` or a float is a named refusal, not a silent no-op.
+// `ErrorV1` is the wire envelope `jeden.session.v1` puts on the socket; boxing
+// it here would change the shape every dispatch arm already returns.
+#[allow(clippy::result_large_err)]
 fn positive_limit(params: &Value) -> Result<Option<usize>, ErrorV1> {
     match params.get("limit") {
         None | Some(Value::Null) => Ok(None),

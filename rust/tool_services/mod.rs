@@ -94,8 +94,11 @@ impl ServiceHub {
     }
 }
 
-static HUBS: LazyLock<Mutex<BTreeMap<PathBuf, (u64, Arc<ServiceHub>)>>> =
-    LazyLock::new(|| Mutex::new(BTreeMap::new()));
+/// One hub per working directory, tagged with the config fingerprint it was
+/// built from so a config edit retires the cached entry.
+type HubCache = Mutex<BTreeMap<PathBuf, (u64, Arc<ServiceHub>)>>;
+
+static HUBS: LazyLock<HubCache> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 fn canonical(cwd: &Path) -> PathBuf {
     cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf())
 }

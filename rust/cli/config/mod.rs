@@ -112,8 +112,7 @@ pub(crate) struct Config {
     pub(crate) ui: UiConfig,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub(crate) struct BillingPreferencesConfig {
     #[serde(rename = "autoPurchaseEnabled", default)]
     pub(crate) auto_purchase_enabled: bool,
@@ -126,7 +125,6 @@ pub(crate) struct BillingPreferencesConfig {
     #[serde(rename = "maxPeriodMicrounits", default)]
     pub(crate) max_period_microunits: u64,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContextConfig {

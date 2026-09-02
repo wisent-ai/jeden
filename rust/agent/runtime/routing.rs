@@ -227,7 +227,7 @@ fn model_catalog_with_retry(
         std::time::Duration::from_secs(2),
         std::time::Duration::from_secs(8),
     ];
-    for attempt in 0..=DELAYS.len() {
+    for (attempt, delay) in DELAYS.iter().enumerate() {
         match crate::control_plane::model_catalog(cwd, client, false) {
             Ok(catalog) => return Ok(catalog),
             Err(error) => {
@@ -251,15 +251,15 @@ fn model_catalog_with_retry(
                         }
                         _ => false,
                     };
-                if !transient || attempt == DELAYS.len() {
+                if !transient {
                     return Err(error);
                 }
                 eprintln!("retry {}/{} after {}", attempt + 1, DELAYS.len(), error);
-                std::thread::sleep(DELAYS[attempt]);
+                std::thread::sleep(*delay);
             }
         }
     }
-    unreachable!("catalog retry loop returns on the final attempt")
+    crate::control_plane::model_catalog(cwd, client, false)
 }
 
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {

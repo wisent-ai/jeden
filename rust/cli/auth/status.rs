@@ -220,7 +220,7 @@ impl InteractionBridge for ConsoleBridge {
 pub(crate) struct TurnBridge<'a> {
     pub progress: &'a dyn Fn(&str),
     pub stream: &'a dyn Fn(&str),
-    pub ask_user: Option<&'a dyn Fn(&str, &[String]) -> Result<String, String>>,
+    pub ask_user: Option<crate::tool_runtime::AskUserFn<'a>>,
 }
 
 impl InteractionBridge for TurnBridge<'_> {

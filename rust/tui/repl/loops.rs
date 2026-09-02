@@ -148,6 +148,11 @@ fn attachment_command(
     }
 }
 
+/// The bottom live region: an active interactive view above the prompt, or a
+/// fixed prompt followed by a shrinking slash-suggestion panel.
+// Each parameter is a separate borrow of independent REPL state, so there is no
+// owner struct to group them behind without cloning at both call sites.
+#[allow(clippy::too_many_arguments)]
 fn editor_live_lines(
     status: &PromptStatus,
     editor: &EditorState,
@@ -161,7 +166,7 @@ fn editor_live_lines(
     color: bool,
 ) -> (Vec<String>, usize) {
     let _capabilities = crate::capability::for_cwd(std::path::Path::new(&status.cwd));
-    let width = columns.min(112).max(1);
+    let width = columns.clamp(1, 112);
     let has_interactive_view = picker.is_some() || confirm.is_some() || view.is_some();
     let mut cursor_rows_below = 0;
     let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
@@ -204,9 +209,10 @@ fn editor_live_lines(
         };
         let hint_rows = slash_hints.len();
         lines.extend(slash_hints);
-        lines.extend(
-            std::iter::repeat_n(String::new(), reserved_hint_rows.saturating_sub(hint_rows)),
-        );
+        lines.extend(std::iter::repeat_n(
+            String::new(),
+            reserved_hint_rows.saturating_sub(hint_rows),
+        ));
         let trailing_rows = lines.len().saturating_sub(prompt_start + prompt_height);
         cursor_rows_below = place_editor_cursor(
             &mut lines[prompt_start..],

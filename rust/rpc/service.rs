@@ -169,12 +169,8 @@ impl SessionBackend for AgentSessionFacade {
             prompt: prompt.to_owned(),
             goal: None,
         });
-        if result.is_err() {
-            emit(
-                "error".into(),
-                json!({"message": result.as_ref().unwrap_err()}),
-                true,
-            );
+        if let Err(error) = &result {
+            emit("error".into(), json!({"message": error}), true);
         }
         forwarder
             .join()

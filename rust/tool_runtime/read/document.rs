@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
+use std::sync::LazyLock;
 use std::time::Duration;
 
 use crate::tool_runtime::shared::{
@@ -131,6 +132,12 @@ fn tag_text(xml: &str, tag: &str) -> String {
         .unwrap_or_default()
 }
 
+/// An entry's `<link href="...">`, which the entry loop asks for once per item.
+static LINK_HREF: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?is)<link[^>]*href=["']([^"']+)["'][^>]*>"#)
+        .expect("static feed link pattern")
+});
+
 fn readable_text_from_feed(raw: &str) -> String {
     let mut lines = Vec::new();
     let feed_title = tag_text(raw, "title");
@@ -148,9 +155,8 @@ fn readable_text_from_feed(raw: &str) -> String {
                     t
                 }
             };
-            let link = regex::Regex::new(r#"(?is)<link[^>]*href=["']([^"']+)["'][^>]*>"#)
-                .ok()
-                .and_then(|re| re.captures(body))
+            let link = LINK_HREF
+                .captures(body)
                 .and_then(|c| c.get(1).map(|m| readable_text_from_html(m.as_str())))
                 .unwrap_or_else(|| tag_text(body, "link"));
             if link.is_empty() {

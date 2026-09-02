@@ -49,11 +49,7 @@ fn collect(root: &Path, out: &mut Vec<PathBuf>) {
         .collect::<Vec<_>>();
     paths.sort();
     for path in paths {
-        if path.is_dir() {
-            collect(&path, out);
-        } else {
-            collect(&path, out);
-        }
+        collect(&path, out);
         if out.len() >= MAX_DEFINITIONS {
             break;
         }

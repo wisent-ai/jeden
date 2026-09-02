@@ -130,8 +130,10 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
         ReplayStore::new(data_root.join("replay"), 10_000),
         executor,
     ));
-    let mut config = HeadlessConfig::default();
-    config.reconnect_key = load_or_create_reconnect_key(&data_root.join("reconnect.key"))?;
+    let config = HeadlessConfig {
+        reconnect_key: load_or_create_reconnect_key(&data_root.join("reconnect.key"))?,
+        ..Default::default()
+    };
     let daemon = Arc::new(HeadlessDaemon::new(tls, directory, service, config)?);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

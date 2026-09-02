@@ -30,7 +30,10 @@ const TWO_COLUMN_WELCOME_MIN_WIDTH: usize = 76;
 
 fn pad_visible(value: &str, width: usize) -> String {
     let mut padded = clamp_visible(value, width);
-    padded.extend(std::iter::repeat_n(' ', width.saturating_sub(visible_len(&padded))));
+    padded.extend(std::iter::repeat_n(
+        ' ',
+        width.saturating_sub(visible_len(&padded)),
+    ));
     padded
 }
 
@@ -776,7 +779,7 @@ pub(super) fn busy_editor_lines(
 }
 
 pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
-    let width = options.columns.min(112).max(1);
+    let width = options.columns.clamp(1, 112);
     let prompt = compact_prompt(
         width,
         &options.status,
@@ -814,7 +817,10 @@ pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
     }
     let mut lines = Vec::new();
     lines.extend(main_lines);
-    lines.extend(std::iter::repeat_n(String::new(), available_rows.saturating_sub(lines.len())));
+    lines.extend(std::iter::repeat_n(
+        String::new(),
+        available_rows.saturating_sub(lines.len()),
+    ));
     lines.extend(slash_hints);
     lines.extend(prompt);
     // Never let an embedded newline reach the absolute-positioned diff renderer.

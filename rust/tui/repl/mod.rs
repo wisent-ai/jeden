@@ -93,15 +93,12 @@ pub(super) fn compose_repl(
 
 /// One finalized message rendered as scrollback lines (boxed, newline-split).
 pub(crate) fn message_block(message: &Message, columns: usize, color: bool) -> Vec<String> {
-    let width = columns.min(120).max(50);
+    let width = columns.clamp(50, 120);
     format_message(message, width, color)
         .into_iter()
         .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
         .collect()
 }
-
-/// The bottom live region: an active interactive view above the prompt, or a
-/// fixed prompt followed by a shrinking slash-suggestion panel.
 
 struct RawModeGuard;
 

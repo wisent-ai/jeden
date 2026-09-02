@@ -526,10 +526,10 @@ pub(super) fn load(inputs: &[Input]) -> Loaded {
             _ => None,
         };
         capability.active = capability.healthy && winning_source == Some(&capability.path);
-        if winning_source.is_some() && winning_source != Some(&capability.path) {
+        if let Some(source) = winning_source.filter(|source| **source != capability.path) {
             capability.error = Some(format!(
                 "shadowed by higher-precedence definition {}",
-                winning_source.expect("checked winning source").display()
+                source.display()
             ));
         }
     }
