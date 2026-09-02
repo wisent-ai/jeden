@@ -1,6 +1,10 @@
 use std::env;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+// Only the macOS helpers below spawn anything with piped output; `command()`
+// hands its `Command` back to the caller to run.
+#[cfg(target_os = "macos")]
+use std::process::Stdio;
 
 #[derive(Clone, Debug)]
 pub(crate) struct TaskSandboxHealth {
@@ -75,14 +79,17 @@ fn enforcement_probe(path: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn health() -> TaskSandboxHealth {
+    // Exactly one of these two blocks survives `cfg`, so each is this function's
+    // tail expression on the platform that keeps it — which is why neither says
+    // `return`.
     #[cfg(not(target_os = "macos"))]
     {
-        return TaskSandboxHealth {
+        TaskSandboxHealth {
             enforced: false,
             backend: "task-platform-sandbox",
             detail: "a signed task sandbox helper is currently implemented only for macOS".into(),
             helper: None,
-        };
+        }
     }
     #[cfg(target_os = "macos")]
     {
