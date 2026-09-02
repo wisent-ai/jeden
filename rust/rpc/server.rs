@@ -1,7 +1,7 @@
 use super::{
     AgentSessionFacade, BoundedExecutor, HeadlessConfig, HeadlessDaemon, IdempotencyStore,
-    MtlsConfig, ReloadableTlsAcceptor, ReplayStore, SessionService, TenantDirectory, TenantGuard,
-    TenantLimits,
+    MtlsConfig, ReloadableTlsAcceptor, ReplayStore, SessionService, TenantDirectory, TenantError,
+    TenantGuard, TenantLimits,
 };
 use rand::RngCore;
 use std::collections::HashSet;
@@ -64,6 +64,11 @@ struct HeadlessIdentityMapping {
     san: String,
     principal: String,
     tenant: String,
+    /// Absolute host directories this principal may read and continue sessions
+    /// inside. Absent means the principal only ever sees the scratch workspaces
+    /// this daemon creates for it.
+    #[serde(default)]
+    workspaces: Vec<PathBuf>,
 }
 
 pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<(), String> {
@@ -80,9 +85,20 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
     }
     let directory = TenantDirectory::new();
     for mapping in mappings {
+        let san = mapping.san.clone();
         directory
-            .map_san(mapping.san, mapping.principal, mapping.tenant)
-            .map_err(|_| "invalid identity mapping".to_string())?;
+            .map_san(
+                mapping.san,
+                mapping.principal,
+                mapping.tenant,
+                mapping.workspaces,
+            )
+            .map_err(|error| match error {
+                TenantError::InvalidWorkspace(message) => {
+                    format!("invalid identity mapping for {san}: {message}")
+                }
+                _ => format!("invalid identity mapping for {san}"),
+            })?;
     }
     let revoked_serials = positionals
         .get(5)

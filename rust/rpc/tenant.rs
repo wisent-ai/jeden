@@ -25,6 +25,38 @@ impl TenantId {
 pub struct TenantPrincipal {
     pub principal: PrincipalId,
     pub tenant: TenantId,
+    /// Absolute, canonical host directories this principal may read and
+    /// continue sessions inside. Empty means the historical behaviour: the
+    /// principal only ever sees the scratch workspaces this daemon made for it.
+    pub workspaces: Vec<PathBuf>,
+}
+
+impl TenantPrincipal {
+    pub fn workspaces(&self) -> &[PathBuf] {
+        &self.workspaces
+    }
+
+    /// True when `path` resolves inside one granted workspace. A principal with
+    /// no grant never matches, so an absent `workspaces` key cannot widen
+    /// anything. Both sides are canonicalised so a symlink or `..` cannot
+    /// escape the grant; an unresolvable path is refused rather than assumed.
+    pub fn grants_path(&self, path: &Path) -> bool {
+        if self.workspaces.is_empty() {
+            return false;
+        }
+        if path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+        {
+            return false;
+        }
+        let Ok(candidate) = path.canonicalize() else {
+            return false;
+        };
+        self.workspaces
+            .iter()
+            .any(|root| candidate.starts_with(root))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,6 +64,7 @@ pub enum TenantError {
     IdentityNotMapped,
     AccessDenied,
     InvalidStorageKey,
+    InvalidWorkspace(String),
     StorageUnavailable,
     QuotaExceeded { retry_after_millis: u64 },
 }
@@ -67,10 +100,40 @@ impl TenantDirectory {
         san: impl Into<String>,
         principal: impl Into<String>,
         tenant: impl Into<String>,
+        workspaces: Vec<PathBuf>,
     ) -> Result<(), TenantError> {
         let san = san.into();
         let principal = validate_id(principal.into())?;
         let tenant = validate_id(tenant.into())?;
+        let mut granted = Vec::with_capacity(workspaces.len());
+        for workspace in workspaces {
+            // A grant is resolved once, at map time, so every later containment
+            // check is a pure component comparison against a real directory.
+            if !workspace.is_absolute()
+                || workspace
+                    .components()
+                    .any(|part| matches!(part, Component::ParentDir))
+            {
+                return Err(TenantError::InvalidWorkspace(format!(
+                    "workspace {} must be an absolute path without ..",
+                    workspace.display()
+                )));
+            }
+            let resolved = workspace.canonicalize().map_err(|error| {
+                TenantError::InvalidWorkspace(format!(
+                    "workspace {} is not readable: {}",
+                    workspace.display(),
+                    error
+                ))
+            })?;
+            if !resolved.is_dir() {
+                return Err(TenantError::InvalidWorkspace(format!(
+                    "workspace {} is not an existing directory",
+                    workspace.display()
+                )));
+            }
+            granted.push(resolved);
+        }
         self.mappings
             .write()
             .map_err(|_| TenantError::StorageUnavailable)?
@@ -79,6 +142,7 @@ impl TenantDirectory {
                 TenantPrincipal {
                     principal: PrincipalId(principal),
                     tenant: TenantId(tenant),
+                    workspaces: granted,
                 },
             );
         Ok(())

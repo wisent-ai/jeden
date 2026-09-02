@@ -88,7 +88,11 @@ impl SessionInner {
 impl AgentSession {
     pub fn new(options: SessionOptions) -> Result<Self, String> {
         let conversation = agent::Conversation::new(&options.cwd)?;
-        Ok(Self {
+        Ok(Self::from_conversation(options, conversation))
+    }
+
+    fn from_conversation(options: SessionOptions, conversation: agent::Conversation) -> Self {
+        Self {
             inner: Arc::new(SessionInner {
                 options,
                 conversation: Mutex::new(Some(conversation)),
@@ -98,7 +102,7 @@ impl AgentSession {
                 next_subscriber: AtomicU64::new(1),
                 disposed: AtomicBool::new(false),
             }),
-        })
+        }
     }
 
     pub fn open(options: SessionOptions, id_or_path: impl AsRef<Path>) -> Result<Self, String> {
@@ -122,6 +126,22 @@ impl AgentSession {
             conversation.load_history(&session.inner.options.cwd, turns)?;
         }
         Ok(session)
+    }
+
+    /// Continue an existing ledger in place: the same turns as `resume`, but
+    /// subsequent turns append to `id_or_path` itself instead of seeding a new
+    /// session directory. This is what lets a headless client keep writing to
+    /// the ledger the operator's own terminal opened.
+    pub fn resume_in_place(
+        options: SessionOptions,
+        id_or_path: impl AsRef<Path>,
+    ) -> Result<Self, String> {
+        let source = resolve_session_path(id_or_path.as_ref());
+        if !source.join("state.json").is_file() {
+            return Err(format!("session not found: {}", source.display()));
+        }
+        let conversation = agent::Conversation::open(&options.cwd, &source)?;
+        Ok(Self::from_conversation(options, conversation))
     }
 
     pub fn capabilities() -> Capabilities {

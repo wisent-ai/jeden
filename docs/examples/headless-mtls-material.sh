@@ -21,6 +21,10 @@ OUT="${1:-headless-demo-material}"
 SAN_URI="${SAN_URI:-spiffe://demo/agent-1}"
 PRINCIPAL="${PRINCIPAL:-agent-1}"
 TENANT="${TENANT:-tenant-1}"
+# Absolute directories this client may read and continue the host's own sessions
+# in, colon-separated. Empty is the default and means the tenant sees only the
+# sessions it creates through the daemon, in its own scratch workspace.
+WORKSPACES="${WORKSPACES:-}"
 
 mkdir -p "$OUT"
 cd "$OUT"
@@ -49,9 +53,18 @@ EOF
 rm -f server.csr client.csr
 
 echo "== identity map"
+workspaces_json=""
+if [ -n "$WORKSPACES" ]; then
+    workspaces_json=$(printf '%s' "$WORKSPACES" | awk -F: '{
+        for (i = 1; i <= NF; i++) if (length($i)) {
+            printf "%s\"%s\"", (started++ ? ", " : ""), $i
+        }
+    }')
+    workspaces_json=", \"workspaces\": [$workspaces_json]"
+fi
 cat > identity-map.json <<EOF
 [
-  { "san": "$SAN_URI", "principal": "$PRINCIPAL", "tenant": "$TENANT" }
+  { "san": "$SAN_URI", "principal": "$PRINCIPAL", "tenant": "$TENANT"$workspaces_json }
 ]
 EOF
 cat identity-map.json

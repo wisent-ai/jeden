@@ -10,7 +10,8 @@ pub use daemon::{BoundedExecutor, HeadlessConfig, HeadlessDaemon, Readiness, Sub
 pub use idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};
 pub use replay::{EventCursor, ReplayError, ReplayStore, SessionEventV1};
 pub use service::{
-    AgentSessionFacade, ServiceError, SessionBackend, SessionService, SubmitOutcome,
+    AgentSessionFacade, ServiceError, SessionBackend, SessionListing, SessionService,
+    SessionSummary, SubmitOutcome,
 };
 pub use tenant::{
     TenantDirectory, TenantError, TenantGuard, TenantId, TenantLimits, TenantPrincipal,

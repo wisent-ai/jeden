@@ -469,6 +469,43 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     .map_err(service_error)?;
                 Ok(json!({"cancelled": cancelled}))
             }
+            "session/list" => {
+                let limit = positive_limit(&request.params)?;
+                let listing = self
+                    .service
+                    .list_sessions(&connection.identity, limit)
+                    .map_err(service_error)?;
+                Ok(json!({
+                    "sessions": listing
+                        .sessions
+                        .iter()
+                        .map(|session| session.wire_value())
+                        .collect::<Vec<_>>(),
+                    "skipped": listing.skipped,
+                }))
+            }
+            "session/open" => {
+                let session_id = string_field(&request.params, "sessionId")?;
+                let summary = self
+                    .service
+                    .open_session(&connection.identity, session_id)
+                    .map_err(service_error)?;
+                Ok(json!({
+                    "sessionId": summary.session_id,
+                    "path": summary.path,
+                    "cwd": summary.cwd,
+                    "turns": summary.turns,
+                }))
+            }
+            "session/history" => {
+                let session_id = string_field(&request.params, "sessionId")?;
+                let limit = positive_limit(&request.params)?;
+                let (turns, truncated) = self
+                    .service
+                    .history(&connection.identity, session_id, limit)
+                    .map_err(service_error)?;
+                Ok(json!({"turns": turns, "truncated": truncated}))
+            }
             _ => Err(protocol_error("method_not_found", "unknown session method")),
         }
     }
@@ -532,6 +569,21 @@ fn string_field<'a>(params: &'a Value, field: &str) -> Result<&'a str, ErrorV1> 
         .and_then(Value::as_str)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| protocol_error("invalid_request", &format!("missing {field}")))
+}
+
+/// An absent `limit` means "everything"; a present one must be a whole number
+/// of at least one, so a `0` or a float is a named refusal, not a silent no-op.
+fn positive_limit(params: &Value) -> Result<Option<usize>, ErrorV1> {
+    match params.get("limit") {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => match value.as_u64() {
+            Some(limit) if limit >= 1 => Ok(Some(usize::try_from(limit).unwrap_or(usize::MAX))),
+            _ => Err(protocol_error(
+                "invalid_request",
+                "limit must be an integer of at least 1",
+            )),
+        },
+    }
 }
 
 fn wire_error(id: Value, error: ErrorV1) -> Value {

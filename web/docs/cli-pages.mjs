@@ -93,12 +93,15 @@ const commands = [
     inputs: [
       "Required: bind address, server certificate chain, server private key, client CA bundle, and a JSON identity map.",
       "Optional: a text file of revoked client-certificate serials.",
-      "Each identity-map entry must supply <code>san</code>, <code>principal</code>, and <code>tenant</code>.",
+      "Each identity-map entry must supply <code>san</code>, <code>principal</code>, and <code>tenant</code>, and may supply <code>workspaces</code>: a list of absolute host directories that principal is granted.",
     ],
-    effect: "Creates <code>.jeden/headless</code> service state, a durable reconnect key, tenant idempotency/replay stores, and an mTLS listener at the requested address.",
+    effect: "Creates <code>.jeden/headless</code> service state, a durable reconnect key, tenant idempotency/replay stores, and an mTLS listener at the requested address. Beyond <code>health/readiness</code>, <code>session/create</code>, <code>session/reconnect</code>, <code>session/prompt</code>, <code>session/replay</code> and <code>session/cancel</code>, it serves <code>session/list</code>, <code>session/open</code> and <code>session/history</code>: a principal with granted <code>workspaces</code> lists the host's own sessions whose recorded <code>cwd</code> lies inside a grant, opens one under its own host session id so later prompts continue that very ledger, and reads its replayed turns without resuming it. A principal without <code>workspaces</code> keeps seeing only the sessions it created here, jailed to its tenant scratch workspace.",
     refusals: [
       "Any argument count other than five or six is refused with the exact usage line shown above.",
       "Unreadable or invalid identity maps, empty maps, invalid mappings, TLS material failures, revoked certificates, certificates without an identity SAN, and bind failures are refused.",
+      "A <code>workspaces</code> entry that is not an absolute path, contains <code>..</code>, or is not an existing readable directory is named and refused when the identity map is loaded.",
+      "<code>session/open</code> and <code>session/history</code> refuse <code>access_denied</code> for a principal without granted workspaces, for an id that is not a session directory under the session root, and for a session whose recorded <code>cwd</code> lies outside every grant; a missing or blank <code>sessionId</code> and a <code>limit</code> below one are <code>invalid_request</code>.",
+      "A session directory whose <code>state.json</code> cannot be read is left out of <code>session/list</code> and counted in the reply's <code>skipped</code> field rather than silently dropped.",
       "Tenant request, session, and stored-byte limits are enforced instead of admitting excess work.",
     ],
   },

@@ -51,6 +51,11 @@ impl From<ReplayError> for ServiceError {
 
 pub trait SessionBackend: Send + Sync + 'static {
     fn create(&self, tenant: &TenantId, session_id: &str) -> Result<PathBuf, String>;
+    /// Resume an existing host session ledger at `dir` and register it under
+    /// `session_id` so prompts address it exactly like a created session.
+    fn open(&self, tenant: &TenantId, session_id: &str, dir: &Path) -> Result<PathBuf, String>;
+    /// The replayed `{"role","content"}` turns of the ledger at `dir`.
+    fn turns(&self, dir: &Path) -> Result<Vec<Value>, String>;
     fn prompt(
         &self,
         tenant: &TenantId,
@@ -106,6 +111,33 @@ impl SessionBackend for AgentSessionFacade {
         Ok(path)
     }
 
+    fn open(&self, tenant: &TenantId, session_id: &str, dir: &Path) -> Result<PathBuf, String> {
+        // `AgentSession::resume_in_place` (rust/sdk/session.rs:135) replays the
+        // ledger at `dir` and keeps its recorder pointed at that same directory,
+        // so every later turn appends to the ledger the operator's own terminal
+        // wrote. Plain `AgentSession::resume` (rust/sdk/session.rs:112) would
+        // seed a fresh session directory instead, which is a fork, not a
+        // continuation. The session's own recorded `cwd` is reused as the
+        // working directory so tools resolve exactly as they did on the host.
+        let session = AgentSession::resume_in_place(
+            SessionOptions {
+                cwd: session_cwd(dir)?,
+                ..SessionOptions::default()
+            },
+            dir,
+        )?;
+        let path = session.session_path()?;
+        self.sessions
+            .lock()
+            .map_err(|_| "agent session lock poisoned".to_string())?
+            .insert((tenant.as_str().to_owned(), session_id.to_owned()), session);
+        Ok(path)
+    }
+
+    fn turns(&self, dir: &Path) -> Result<Vec<Value>, String> {
+        crate::cli::sessions::session_conversation_turns(dir)
+    }
+
     fn prompt(
         &self,
         tenant: &TenantId,
@@ -157,13 +189,59 @@ impl SessionBackend for AgentSessionFacade {
     }
 }
 
+/// One session this daemon holds: its owner and the ledger directory it writes.
+#[derive(Debug, Clone)]
+struct SessionEntry {
+    tenant: TenantId,
+    path: PathBuf,
+}
+
+/// One row of `session/list` and the reply of `session/open`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionSummary {
+    pub session_id: String,
+    pub path: PathBuf,
+    pub cwd: PathBuf,
+    pub started_at: String,
+    pub turns: usize,
+    pub open: bool,
+}
+
+impl SessionSummary {
+    pub fn wire_value(&self) -> Value {
+        json!({
+            "sessionId": self.session_id,
+            "path": self.path,
+            "cwd": self.cwd,
+            "startedAt": self.started_at,
+            "turns": self.turns,
+            "open": self.open,
+        })
+    }
+}
+
+/// `skipped` counts session directories whose `state.json` could not be read,
+/// so an unreadable session is reported rather than silently dropped.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionListing {
+    pub sessions: Vec<SessionSummary>,
+    pub skipped: usize,
+}
+
 pub struct SessionService<B: SessionBackend> {
     backend: Arc<B>,
     tenants: TenantGuard,
     idempotency: IdempotencyStore,
     replay: ReplayStore,
     executor: Arc<BoundedExecutor>,
-    sessions: Mutex<HashMap<String, TenantId>>,
+    sessions: Mutex<HashMap<String, SessionEntry>>,
+    /// Both counters are process-local while the replay and idempotency stores on
+    /// disk are durable, so a restarted daemon would hand out `session-1` and
+    /// `request-1` again and its first prompt would land on a stream that already
+    /// holds a terminal event — the append is refused and the client polls a stale,
+    /// finished stream. The instance stamp is what makes an id unique for as long
+    /// as those stores keep it.
+    instance: String,
     next_session: AtomicU64,
     next_request: AtomicU64,
 }
@@ -183,6 +261,7 @@ impl<B: SessionBackend> SessionService<B> {
             replay,
             executor,
             sessions: Mutex::new(HashMap::new()),
+            instance: instance_stamp(),
             next_session: AtomicU64::new(1),
             next_request: AtomicU64::new(1),
         }
@@ -191,18 +270,228 @@ impl<B: SessionBackend> SessionService<B> {
     pub fn create_session(&self, caller: &TenantPrincipal) -> Result<String, ServiceError> {
         self.tenants.register_session(&caller.tenant)?;
         let id = format!(
-            "session-{}",
+            "session-{}-{}",
+            self.instance,
             self.next_session.fetch_add(1, Ordering::Relaxed)
         );
-        if let Err(error) = self.backend.create(&caller.tenant, &id) {
-            let _ = self.tenants.release_session(&caller.tenant);
-            return Err(ServiceError::Runtime(error));
-        }
+        let path = match self.backend.create(&caller.tenant, &id) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = self.tenants.release_session(&caller.tenant);
+                return Err(ServiceError::Runtime(error));
+            }
+        };
         self.sessions
             .lock()
             .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?
-            .insert(id.clone(), caller.tenant.clone());
+            .insert(
+                id.clone(),
+                SessionEntry {
+                    tenant: caller.tenant.clone(),
+                    path,
+                },
+            );
         Ok(id)
+    }
+
+    /// Every session the caller may see, newest first. With granted workspaces
+    /// that is the host's own ledgers under `session_root()`; without one it is
+    /// exactly what this tenant created through this daemon.
+    pub fn list_sessions(
+        &self,
+        caller: &TenantPrincipal,
+        limit: Option<usize>,
+    ) -> Result<SessionListing, ServiceError> {
+        let held = self.held_sessions()?;
+        let mut sessions = Vec::new();
+        let mut skipped = 0usize;
+        if caller.workspaces().is_empty() {
+            for (id, entry) in held.iter() {
+                if entry.tenant != caller.tenant {
+                    continue;
+                }
+                match self.summarize(id, &entry.path, true) {
+                    Ok(summary) => sessions.push(summary),
+                    Err(()) => skipped += 1,
+                }
+            }
+        } else {
+            let root = crate::session_root();
+            let entries = std::fs::read_dir(&root).map_err(|error| {
+                ServiceError::Runtime(format!("cannot read {}: {}", root.display(), error))
+            })?;
+            for entry in entries.flatten() {
+                let dir = entry.path();
+                if !dir.is_dir() {
+                    continue;
+                }
+                let id = entry.file_name().to_string_lossy().into_owned();
+                let cwd = match session_state(&dir) {
+                    Ok(state) => state.cwd,
+                    Err(_) => {
+                        skipped += 1;
+                        continue;
+                    }
+                };
+                if !caller.grants_path(&cwd) {
+                    continue;
+                }
+                match self.summarize(&id, &dir, held.contains_key(&id)) {
+                    Ok(summary) => sessions.push(summary),
+                    Err(()) => skipped += 1,
+                }
+            }
+        }
+        // Newest first; `startedAt` is a string of epoch seconds, so it is
+        // compared numerically and anything unparseable sorts last.
+        sessions.sort_by(|left, right| {
+            let rank = |value: &str| value.parse::<u64>().ok();
+            match (rank(&right.started_at), rank(&left.started_at)) {
+                (Some(right), Some(left)) => right.cmp(&left),
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+        });
+        if let Some(limit) = limit {
+            sessions.truncate(limit);
+        }
+        Ok(SessionListing { sessions, skipped })
+    }
+
+    /// Resume one of the host's own sessions and register it under its own host
+    /// session id, so `session/prompt`, `session/replay` and `session/cancel`
+    /// address it exactly like a created session.
+    pub fn open_session(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+    ) -> Result<SessionSummary, ServiceError> {
+        let dir = self.resolve_granted_session(caller, session_id)?;
+        if let Some(entry) = self.held_sessions()?.get(session_id) {
+            if entry.tenant != caller.tenant {
+                return Err(ServiceError::AccessDenied);
+            }
+            // Opening twice is idempotent: no second backend session, no second
+            // quota unit.
+            return self
+                .summarize(session_id, &entry.path, true)
+                .map_err(|()| unreadable_session(session_id));
+        }
+        self.tenants.register_session(&caller.tenant)?;
+        let path = match self.backend.open(&caller.tenant, session_id, &dir) {
+            Ok(path) => path,
+            Err(error) => {
+                let _ = self.tenants.release_session(&caller.tenant);
+                return Err(ServiceError::Runtime(error));
+            }
+        };
+        let summary = match self.summarize(session_id, &path, true) {
+            Ok(summary) => summary,
+            Err(()) => {
+                let _ = self.tenants.release_session(&caller.tenant);
+                return Err(unreadable_session(session_id));
+            }
+        };
+        // Registered under the HOST session id, in the very map
+        // `authorize_session` consults, so a following `session/prompt` reaches
+        // the ledger the terminal wrote: the backend session behind this id was
+        // resumed in place by `AgentSession::resume_in_place`
+        // (rust/sdk/session.rs:135) and keeps appending to `path`.
+        self.sessions
+            .lock()
+            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?
+            .insert(
+                session_id.to_owned(),
+                SessionEntry {
+                    tenant: caller.tenant.clone(),
+                    path,
+                },
+            );
+        Ok(summary)
+    }
+
+    /// The replayed turns of a session the caller may open or already created.
+    /// Read-only: it neither resumes nor registers the session. `limit` keeps
+    /// the newest N turns and reports whether anything older was dropped.
+    pub fn history(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+        limit: Option<usize>,
+    ) -> Result<(Vec<Value>, bool), ServiceError> {
+        let dir = match self.held_sessions()?.get(session_id) {
+            Some(entry) if entry.tenant == caller.tenant => entry.path.clone(),
+            Some(_) => return Err(ServiceError::AccessDenied),
+            None => self.resolve_granted_session(caller, session_id)?,
+        };
+        let mut turns = self
+            .backend
+            .turns(&dir)
+            .map_err(|_| unreadable_session(session_id))?;
+        let truncated = limit.is_some_and(|limit| turns.len() > limit);
+        if let Some(limit) = limit {
+            if truncated {
+                let dropped = turns.len() - limit;
+                turns.drain(..dropped);
+            }
+        }
+        Ok((turns, truncated))
+    }
+
+    fn held_sessions(&self) -> Result<HashMap<String, SessionEntry>, ServiceError> {
+        self.sessions
+            .lock()
+            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))
+            .map(|sessions| sessions.clone())
+    }
+
+    /// `Err(())` means the ledger could not be read; callers either skip the row
+    /// or turn it into a typed refusal.
+    fn summarize(&self, session_id: &str, dir: &Path, open: bool) -> Result<SessionSummary, ()> {
+        let state = session_state(dir).map_err(|_| ())?;
+        let turns = self.backend.turns(dir).map_err(|_| ())?;
+        Ok(SessionSummary {
+            session_id: session_id.to_owned(),
+            path: dir.to_path_buf(),
+            cwd: state.cwd,
+            started_at: state.started_at,
+            turns: turns.len(),
+            open,
+        })
+    }
+
+    /// A session id is only a host session when it names one directory directly
+    /// under `session_root()` whose recorded `cwd` sits in a granted workspace.
+    fn resolve_granted_session(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+    ) -> Result<PathBuf, ServiceError> {
+        if session_id.trim().is_empty() {
+            return Err(ServiceError::InvalidRequest(
+                "sessionId must not be empty".into(),
+            ));
+        }
+        if caller.workspaces().is_empty() {
+            return Err(ServiceError::AccessDenied);
+        }
+        let candidate = PathBuf::from(session_id);
+        let mut components = candidate.components();
+        if !matches!(components.next(), Some(std::path::Component::Normal(_)))
+            || components.next().is_some()
+        {
+            return Err(ServiceError::AccessDenied);
+        }
+        let dir = crate::session_root().join(session_id);
+        if !dir.join("state.json").is_file() {
+            return Err(ServiceError::AccessDenied);
+        }
+        let state = session_state(&dir).map_err(|_| ServiceError::AccessDenied)?;
+        if !caller.grants_path(&state.cwd) {
+            return Err(ServiceError::AccessDenied);
+        }
+        Ok(dir)
     }
 
     pub fn submit_prompt(
@@ -220,7 +509,8 @@ impl<B: SessionBackend> SessionService<B> {
         self.authorize_session(caller, session_id)?;
         let request_digest = IdempotencyStore::request_digest(prompt.as_bytes());
         let request_id = format!(
-            "request-{}",
+            "request-{}-{}",
+            self.instance,
             self.next_request.fetch_add(1, Ordering::Relaxed)
         );
         match self.idempotency.begin(
@@ -363,8 +653,10 @@ impl<B: SessionBackend> SessionService<B> {
             .sessions
             .lock()
             .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?;
+        // An opened host session is registered in the same map under the same
+        // host session id, so it authorizes exactly like a created one.
         match sessions.get(session_id) {
-            Some(owner) if owner == &caller.tenant => Ok(()),
+            Some(entry) if entry.tenant == caller.tenant => Ok(()),
             _ => Err(ServiceError::AccessDenied),
         }
     }
@@ -393,6 +685,55 @@ impl<B: SessionBackend> SessionService<B> {
     }
 }
 
+/// The two `state.json` fields a session row is built from.
+struct SessionState {
+    cwd: PathBuf,
+    started_at: String,
+}
+
+/// A short, sortable stamp for one service instance: the second it started and a
+/// random half, so two daemons started in the same second on one store still
+/// hand out distinct ids.
+fn instance_stamp() -> String {
+    let started = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let mut nonce = [0_u8; 3];
+    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut nonce);
+    format!("{started}{}", hex::encode(nonce))
+}
+
+fn session_state(dir: &Path) -> Result<SessionState, String> {
+    let path = dir.join("state.json");
+    let value: Value = serde_json::from_slice(
+        &std::fs::read(&path)
+            .map_err(|error| format!("cannot read {}: {}", path.display(), error))?,
+    )
+    .map_err(|error| format!("invalid {}: {}", path.display(), error))?;
+    let cwd = value
+        .get("cwd")
+        .and_then(Value::as_str)
+        .ok_or_else(|| format!("{} has no cwd", path.display()))?;
+    let started_at = value
+        .get("startedAt")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Ok(SessionState {
+        cwd: PathBuf::from(cwd),
+        started_at,
+    })
+}
+
+fn session_cwd(dir: &Path) -> Result<PathBuf, String> {
+    session_state(dir).map(|state| state.cwd)
+}
+
+fn unreadable_session(session_id: &str) -> ServiceError {
+    ServiceError::Runtime(format!("session {session_id} ledger is unreadable"))
+}
+
 fn map_event(event: SessionEventKind) -> (String, Value, bool) {
     match event {
         SessionEventKind::Status { message } => {
@@ -417,9 +758,11 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             json!({"token": token, "tool": tool, "detail": detail}),
             false,
         ),
-        SessionEventKind::Goal { text, status } => {
-            ("goal".into(), json!({"text": text, "status": status}), false)
-        }
+        SessionEventKind::Goal { text, status } => (
+            "goal".into(),
+            json!({"text": text, "status": status}),
+            false,
+        ),
         SessionEventKind::Result { text } => ("result".into(), json!({"text": text}), true),
         SessionEventKind::Error { message } => ("error".into(), json!({"message": message}), true),
     }

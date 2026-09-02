@@ -11,7 +11,7 @@ use x509_parser::extensions::GeneralName;
 use x509_parser::parse_x509_certificate;
 
 use std::collections::HashSet;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const REQUIRED_ALPN: &str = "jeden.session.v1";
@@ -239,7 +239,19 @@ impl ReloadableTlsAcceptor {
     }
 }
 
+/// rustls 0.23 refuses to guess a process-level provider when more than one is
+/// linked, and both are here: `ring` and `aws-lc-rs` arrive through different
+/// feature paths of the reqwest stack this binary already carries. The refusal is
+/// a panic at the first TLS call, which is what `jeden headless` did on every
+/// start. The listener therefore names its provider once, before any config
+/// exists; an `Err` means another component installed one first, which is the
+/// same outcome this wants.
+static CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+});
+
 fn load_server_config(source: &MtlsConfig, generation: u64) -> Result<ConcreteTrustState, String> {
+    LazyLock::force(&CRYPTO_PROVIDER);
     let certificates = load_certificates(&source.certificate_chain)?;
     let key = load_private_key(&source.private_key)?;
     let mut roots = RootCertStore::empty();
