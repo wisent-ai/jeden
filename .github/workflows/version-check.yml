@@ -17,6 +17,19 @@ name: Version check
 # signed manifest records as `minimumVersion`. The shared rule refuses anything
 # that is not a major.minor.patch triple, and the floor is the only stable triple
 # the published evidence names.
+#
+# That last paragraph was the contract and not the behaviour. The gate used to
+# call `quality-control/.github/workflows/rust-autoversion.yml@2de5785`, which
+# reads `.version` from the baseline — for this repository
+# `0.1.1-canary.8.1.shac034047b9341` — so AutoVersion refused every commit with
+# "is not a major.minor.patch triple, so there is no slot to advance". The gate
+# had been red on every push for that reason, which is the same class of defect
+# as a declaration nothing consumes: one side named the floor, the other read the
+# prerelease. The rule is still the shared one, installed from the same pin; only
+# the value handed to it is the floor the comment always said it was. The steps
+# are inline because that shared workflow no longer exists on quality-control's
+# main — it was deleted on 2026-08-09 — and pinning a deleted file by SHA leaves
+# nothing to fix when it is wrong.
 
 on:
   pull_request:
@@ -29,11 +42,86 @@ permissions:
 
 jobs:
   autoversion:
-    uses: wisent-ai/quality-control/.github/workflows/rust-autoversion.yml@2de57851b29b57da01fff370817a45ad121c93bc
-    with:
-      manifest: Cargo.toml
-      baseline: released-surface.json
-      surface-command: python3 scripts/surface.py
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Install the shared version rule
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/autoversion"
+          "$RUNNER_TEMP/autoversion/bin/python" -m pip install --quiet \
+            "git+https://github.com/lbartoszcze/AutoVersion@v0.1.0"
+          rule="$RUNNER_TEMP/autoversion/bin/autoversion"
+          test -x "$rule"
+          echo "AUTOVERSION=$rule" >> "$GITHUB_ENV"
+
+      - name: Read candidate public surface
+        run: |
+          set -euo pipefail
+          python3 scripts/surface.py > "$RUNNER_TEMP/candidate-surface.json"
+          jq -e '.surface | arrays | length > 0' "$RUNNER_TEMP/candidate-surface.json" >/dev/null
+
+      - name: Enforce released surface and committed manifest version
+        env:
+          MANIFEST: Cargo.toml
+          BASELINE: released-surface.json
+        run: |
+          set -euo pipefail
+          git diff --quiet -- "$MANIFEST" || {
+            echo "::error::$MANIFEST was modified while deriving the candidate; the gate only accepts the committed version."
+            false
+          }
+          declared="$(python3 - "$MANIFEST" <<'PY'
+          import pathlib, sys, tomllib
+          value = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+          version = value.get("package", {}).get("version")
+          if not isinstance(version, str) or not version:
+              raise SystemExit(f"{sys.argv[1]} has no non-empty [package].version")
+          print(version)
+          PY
+          )"
+          # The floor, because that is the scale `declared` is on. A baseline that
+          # names no floor falls back to its version, which is what every other
+          # repository in the pack publishes.
+          released="$(jq -er '(.minimumVersion // .version) | strings | select(length > 0)' "$BASELINE")"
+          printf '%s' "$released" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+            echo "::error::$BASELINE names '$released' as the comparable version, which is not a major.minor.patch triple."
+            false
+          }
+          jq -e '.surface | arrays | length > 0' "$BASELINE" >/dev/null
+
+          jq '{surface: .surface}' "$BASELINE" > "$RUNNER_TEMP/identical.json"
+          jq '{surface: (.surface - [(.surface | sort | first)])}' "$BASELINE" > "$RUNNER_TEMP/removed.json"
+          unchanged="$($AUTOVERSION decide --current "$released" \
+            --published-surface "$BASELINE" --candidate-surface "$RUNNER_TEMP/identical.json" \
+            --json | jq -er .change)"
+          removed="$($AUTOVERSION decide --current "$released" \
+            --published-surface "$BASELINE" --candidate-surface "$RUNNER_TEMP/removed.json" \
+            --json | jq -er .change)"
+          if [ "$unchanged" != internal ] || [ "$removed" != breaking ]; then
+            echo "::error::AutoVersion self-check returned identical=$unchanged removed=$removed."
+            false
+          fi
+
+          verdict="$($AUTOVERSION decide --current "$released" \
+            --published-surface "$BASELINE" \
+            --candidate-surface "$RUNNER_TEMP/candidate-surface.json" --json)"
+          echo "$verdict"
+          change="$(printf '%s' "$verdict" | jq -er .change)"
+          required="$(printf '%s' "$verdict" | jq -er .next)"
+          if [ "$declared" = "$released" ]; then
+            if [ "$change" != internal ]; then
+              echo "::error::$MANIFEST commits $declared, but the public surface is $change and requires $required."
+              false
+            fi
+          elif [ "$declared" != "$required" ]; then
+            echo "::error::$MANIFEST commits $declared, but the $change change from $released requires $required."
+            false
+          fi
+          echo "Committed manifest version $declared satisfies the $change public-surface change from $released."
 
   baseline-provenance:
     runs-on: ubuntu-latest
