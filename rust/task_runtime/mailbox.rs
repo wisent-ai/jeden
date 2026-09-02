@@ -127,7 +127,7 @@ impl Mailbox {
                 .inbox(agent, true)?
                 .into_iter()
                 .filter(|m| {
-                    correlation.map_or(true, |id| {
+                    correlation.is_none_or(|id| {
                         m.correlation_id.as_deref() == Some(id) || m.reply_to.as_deref() == Some(id)
                     })
                 })

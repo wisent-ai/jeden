@@ -187,7 +187,7 @@ fn parallel_literal(
         .map(usize::from)
         .unwrap_or(2)
         .min(8);
-    let chunk = (files.len().max(1) + workers - 1) / workers;
+    let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
             let output = &output;
@@ -239,7 +239,7 @@ fn parallel_literal(
     let mut values = output
         .into_inner()
         .map_err(|_| "search result lock poisoned")?;
-    values.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    values.sort_by_key(|a| (a.0, a.1));
     Ok(values)
 }
 
@@ -312,7 +312,7 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .map(usize::from)
         .unwrap_or(2)
         .min(8);
-    let chunk = (files.len().max(1) + workers - 1) / workers;
+    let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
             let output = &output;
@@ -384,7 +384,7 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let mut found = output
         .into_inner()
         .map_err(|_| "grep result lock poisoned")?;
-    found.sort_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)));
+    found.sort_by_key(|a| (a.0, a.1));
     let matches=found.into_iter().skip(skip).take(limit).map(|(file,line,text)|json!({"path":rel_path(runtime.cwd,&files[file]),"line":line,"text":text})).collect::<Vec<_>>();
     Ok(json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches}))
 }

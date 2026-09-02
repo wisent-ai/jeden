@@ -113,6 +113,7 @@ pub(crate) struct Config {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub(crate) struct BillingPreferencesConfig {
     #[serde(rename = "autoPurchaseEnabled", default)]
     pub(crate) auto_purchase_enabled: bool,
@@ -126,17 +127,6 @@ pub(crate) struct BillingPreferencesConfig {
     pub(crate) max_period_microunits: u64,
 }
 
-impl Default for BillingPreferencesConfig {
-    fn default() -> Self {
-        Self {
-            auto_purchase_enabled: false,
-            auto_renew_enabled: false,
-            preferred_currency: None,
-            max_single_microunits: 0,
-            max_period_microunits: 0,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct ContextConfig {

@@ -80,7 +80,7 @@ pub fn negotiate_version(range: &VersionRange) -> Result<ProtocolVersion, Protoc
     }
     Ok(ProtocolVersion {
         major: WORKER_PROTOCOL_MAJOR,
-        minor: WORKER_PROTOCOL_MINOR.min(maximum_minor),
+        minor: WORKER_PROTOCOL_MINOR,
     })
 }
 

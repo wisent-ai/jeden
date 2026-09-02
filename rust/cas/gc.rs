@@ -92,7 +92,7 @@ pub fn collect_garbage(
                 .modified()
                 .ok()
                 .and_then(|modified| now.duration_since(modified).ok());
-            if age.map_or(true, |age| age < options.minimum_age) {
+            if age.is_none_or(|age| age < options.minimum_age) {
                 report.retained_young_objects += 1;
                 continue;
             }

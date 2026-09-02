@@ -148,10 +148,10 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     .map(|value| Some(ClipboardContent::from(value)))
                     .map_err(|error| format!("Clipboard text is not UTF-8: {error}"));
             }
-            return Err(image_error
+            Err(image_error
                 .or(image.reason)
                 .or(text.reason)
-                .unwrap_or_else(|| "Clipboard unavailable".into()));
+                .unwrap_or_else(|| "Clipboard unavailable".into()))
         }
         #[cfg(not(target_os = "macos"))]
         {

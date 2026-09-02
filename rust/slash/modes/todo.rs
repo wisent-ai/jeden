@@ -231,7 +231,7 @@ pub(crate) fn handle_todo(
     let verb = argv.first().map(String::as_str).unwrap_or("list");
     let text = argv
         .split_first()
-        .map(|(_, rest)| rest.iter().cloned().collect::<Vec<_>>().join(" "))
+        .map(|(_, rest)| rest.to_vec().join(" "))
         .unwrap_or_default();
     if verb.is_empty() || verb == "list" {
         if state.todos.is_empty() {

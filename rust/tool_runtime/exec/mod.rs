@@ -428,7 +428,7 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
         (captured.text, 0, 0, Vec::new())
     };
     Ok(json!({
-        "ok": status >= 200 && status < 300,
+        "ok": (200..300).contains(&status),
         "url": url,
         "status": status,
         "contentType": content_type,

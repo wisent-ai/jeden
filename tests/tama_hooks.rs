@@ -23,6 +23,10 @@ fn temp_dir(tag: &str) -> PathBuf {
 fn tama_registry_end_to_end() {
     let home = temp_dir("home");
     let cwd = temp_dir("cwd");
+    // `pretool_block` puts this in the payload as `transcript_path`, which is what
+    // a hook reads to find the session it is being asked about. The session here is
+    // synthetic, so the path is the one this checkout would hold.
+    let transcript = cwd.join("transcript.jsonl");
     env::set_var("HOME", &home);
 
     // 1. Disabled via empty env var: no Tama section, no blocking, silent.
@@ -34,7 +38,7 @@ fn tama_registry_end_to_end() {
     );
     assert!(describe.contains("No hooks configured."));
     assert_eq!(
-        jeden::hooks::pretool_block(&cwd, "run_command", &json!({}), false),
+        jeden::hooks::pretool_block(&cwd, "run_command", &json!({}), false, &transcript),
         None
     );
 
@@ -76,15 +80,20 @@ fn tama_registry_end_to_end() {
 
     // The blocking deny hook (exit 3) blocks run_command and run_process
     // pre-tool calls, but not tools outside the bash matcher.
-    let blocked =
-        jeden::hooks::pretool_block(&cwd, "run_command", &json!({"command": "ls"}), false);
+    let blocked = jeden::hooks::pretool_block(
+        &cwd,
+        "run_command",
+        &json!({"command": "ls"}),
+        false,
+        &transcript,
+    );
     assert!(blocked.is_some(), "run_command should be blocked");
     assert!(
-        jeden::hooks::pretool_block(&cwd, "run_process", &json!({}), false).is_some(),
+        jeden::hooks::pretool_block(&cwd, "run_process", &json!({}), false, &transcript).is_some(),
         "run_process should be blocked"
     );
     assert_eq!(
-        jeden::hooks::pretool_block(&cwd, "write_file", &json!({}), false),
+        jeden::hooks::pretool_block(&cwd, "write_file", &json!({}), false, &transcript),
         None,
         "write_file is outside the bash matcher and must not be blocked"
     );

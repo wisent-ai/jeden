@@ -218,9 +218,7 @@ fn validate_evidence(aggregator: &Aggregator, evidence: &Evidence) -> Result<(),
             ));
         }
         Status::Passed | Status::Failed if !evidence.prerequisites.is_empty() => {
-            return Err(format!(
-                "only ExternalBlocked evidence may list prerequisites"
-            ));
+            return Err("only ExternalBlocked evidence may list prerequisites".to_string());
         }
         _ => {}
     }

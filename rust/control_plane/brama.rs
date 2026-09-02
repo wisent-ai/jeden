@@ -204,7 +204,7 @@ fn disk_cache_path(key: &str) -> std::path::PathBuf {
     let digest = sha2::Sha256::digest(key.as_bytes());
     crate::dirs_home().join(format!(
         ".jeden/cache/brama-models-{}.json",
-        hex::encode(digest)[..16].to_string()
+        &hex::encode(digest)[..16]
     ))
 }
 

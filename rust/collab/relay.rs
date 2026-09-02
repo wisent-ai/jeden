@@ -292,13 +292,11 @@ pub fn serve(addr: &str) -> Result<(), String> {
         "jeden collab-relay listening on http://{bound} (durable {})",
         store.path().display()
     );
-    for stream in listener.incoming() {
-        if let Ok(stream) = stream {
-            let store = store.clone();
-            std::thread::spawn(move || {
-                let _ = handle_conn(stream, &store);
-            });
-        }
+    for stream in listener.incoming().flatten() {
+        let store = store.clone();
+        std::thread::spawn(move || {
+            let _ = handle_conn(stream, &store);
+        });
     }
     Ok(())
 }

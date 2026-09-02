@@ -215,10 +215,7 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         return Ok(format!("Registered explicit untrusted dev-link {} at {} as installed/inactive; marketplace verification was not bypassed.", record.id, record.path.display()));
     }
     if verb == "add" {
-        let source = rest
-            .iter()
-            .cloned()
-            .collect::<Vec<_>>()
+        let source = rest.to_vec()
             .join(" ")
             .trim()
             .to_string();

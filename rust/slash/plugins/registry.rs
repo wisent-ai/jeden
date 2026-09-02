@@ -68,6 +68,6 @@ pub(crate) fn sorted_object_values(value: &Value) -> Vec<Value> {
         .as_object()
         .map(|map| map.values().cloned().collect::<Vec<_>>())
         .unwrap_or_default();
-    values.sort_by(|a, b| format_plugin(a).cmp(&format_plugin(b)));
+    values.sort_by_key(format_plugin);
     values
 }

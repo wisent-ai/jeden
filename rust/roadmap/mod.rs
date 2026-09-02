@@ -367,7 +367,6 @@ impl RoadmapStore {
         })
     }
 
-
     fn validation_errors(&self, roadmap: &RoadmapFile, validate_capabilities: bool) -> Vec<String> {
         let mut errors = Vec::new();
         if roadmap.schema_version != ROADMAP_SCHEMA_VERSION {

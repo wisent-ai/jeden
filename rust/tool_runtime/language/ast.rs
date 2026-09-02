@@ -30,7 +30,7 @@ fn language(name: &str, path: &Path) -> Result<Language, String> {
     }
 }
 
-fn parse<'a>(source: &'a [u8], language: &Language) -> Result<tree_sitter::Tree, String> {
+fn parse(source: &[u8], language: &Language) -> Result<tree_sitter::Tree, String> {
     let mut parser = Parser::new();
     parser
         .set_language(language)

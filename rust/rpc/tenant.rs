@@ -88,6 +88,12 @@ pub struct TenantDirectory {
     mappings: Arc<RwLock<HashMap<String, TenantPrincipal>>>,
 }
 
+impl Default for TenantDirectory {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TenantDirectory {
     pub fn new() -> Self {
         Self {

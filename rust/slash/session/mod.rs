@@ -156,13 +156,12 @@ fn slash_session_export(session: &Value, format: &str) -> Result<String, String>
             .unwrap_or_default()
         {
             let label = slash_html_escape(
-                &format!(
+                format!(
                     "{} {}",
                     event.get("ts").and_then(Value::as_str).unwrap_or(""),
                     event.get("type").and_then(Value::as_str).unwrap_or("")
                 )
-                .trim()
-                .to_string(),
+                .trim(),
             );
             let data = slash_html_escape(
                 &serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))

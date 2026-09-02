@@ -187,7 +187,7 @@ fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value, String> {
             }
         }
         "enum" => {
-            if spec.enum_values.iter().any(|value| *value == trimmed) {
+            if spec.enum_values.contains(&trimmed) {
                 Ok(json!(trimmed))
             } else {
                 Err(format!(
@@ -298,7 +298,7 @@ fn grouped_setting_rows(
         }
     }
     groups.sort_by_key(|(name, _)| usize::from(*name == "other"));
-    let mut tabs = vec![crate::cli::i18n::tr(&lang, "picker.tab.all").to_string()];
+    let mut tabs = vec![crate::cli::i18n::tr(lang, "picker.tab.all").to_string()];
     let mut items = Vec::new();
     for (name, group_rows) in groups {
         tabs.push(name.to_string());

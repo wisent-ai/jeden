@@ -247,7 +247,7 @@ pub(super) fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32, &'static str)>
             }
             let marker = bytes[index + 1];
             let len = u16::from_be_bytes([bytes[index + 2], bytes[index + 3]]) as usize;
-            if matches!(marker, 0xc0 | 0xc1 | 0xc2 | 0xc3) {
+            if matches!(marker, 0xc0..=0xc3) {
                 return Some((
                     u16::from_be_bytes([bytes[index + 7], bytes[index + 8]]) as u32,
                     u16::from_be_bytes([bytes[index + 5], bytes[index + 6]]) as u32,

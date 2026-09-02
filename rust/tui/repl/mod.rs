@@ -128,7 +128,11 @@ impl Drop for RawModeGuard {
 pub(super) fn skeleton_bar(frame: usize) -> String {
     const WIDTH: usize = 8;
     let step = frame % (WIDTH * 2 - 2);
-    let lit = if step < WIDTH { step } else { WIDTH * 2 - 2 - step };
+    let lit = if step < WIDTH {
+        step
+    } else {
+        WIDTH * 2 - 2 - step
+    };
     (0..WIDTH)
         .map(|cell| if cell == lit { '▓' } else { '░' })
         .collect()

@@ -205,7 +205,7 @@ fn editor_live_lines(
         let hint_rows = slash_hints.len();
         lines.extend(slash_hints);
         lines.extend(
-            std::iter::repeat(String::new()).take(reserved_hint_rows.saturating_sub(hint_rows)),
+            std::iter::repeat_n(String::new(), reserved_hint_rows.saturating_sub(hint_rows)),
         );
         let trailing_rows = lines.len().saturating_sub(prompt_start + prompt_height);
         cursor_rows_below = place_editor_cursor(

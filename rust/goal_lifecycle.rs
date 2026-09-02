@@ -320,11 +320,7 @@ fn transcript_lake_title(prompt: &str) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    child
-        .stdin
-        .take()?
-        .write_all(prompt.as_bytes())
-        .ok()?;
+    child.stdin.take()?.write_all(prompt.as_bytes()).ok()?;
     let output = child.wait_with_output().ok()?;
     if !output.status.success() {
         return None;

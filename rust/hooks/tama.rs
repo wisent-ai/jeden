@@ -14,8 +14,8 @@
 //!
 //! Source precedence: env `JEDEN_TAMA_REGISTRY` (path; empty string disables)
 //! > config key `hooks.tamaRegistry` (path; empty disables) > auto-discovery of
-//! `~/Documents/CodingProjects/Wisent/hooks-rotator/shared-hooks/registry.json`
-//! and `~/.shared-hooks/registry.json`. No registry found = silently no hooks.
+//! > `~/Documents/CodingProjects/Wisent/hooks-rotator/shared-hooks/registry.json`
+//! > and `~/.shared-hooks/registry.json`. No registry found = silently no hooks.
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};

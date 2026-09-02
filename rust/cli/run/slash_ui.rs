@@ -331,10 +331,10 @@ pub(crate) fn model_picker(
             .iter()
             .map(|name| name.as_str() != "catalog")
             .collect::<Vec<_>>();
-        return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
+        Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
             .with_tabs(tabs)
             .with_tab_marks(marks)
-            .localized(&lang));
+            .localized(&lang))
     } else {
         // Curated view, same two-pane shape as `--all`: the brands column is
         // the picker's left pane, so the provider rows are not repeated among
@@ -376,10 +376,10 @@ pub(crate) fn model_picker(
         // Every tab here is a subscription the user holds, so all are ●; the
         // catalog stays a row in the item pane with its own ○.
         let marks = tabs.iter().map(|_| true).collect::<Vec<_>>();
-        return Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
+        Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
             .with_tabs(tabs)
             .with_tab_marks(marks)
-            .localized(&lang));
+            .localized(&lang))
     }
 }
 

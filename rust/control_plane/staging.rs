@@ -98,11 +98,8 @@ fn identity(endpoint: &str) -> String {
 pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), ContractError> {
     let prerequisites = REQUIRED_ENV
         .iter()
-        .filter_map(|(name, detail)| {
-            required(name)
-                .is_empty()
-                .then(|| format!("{name}: {detail}"))
-        })
+        .filter(|&(name, _detail)| required(name)
+                .is_empty()).map(|(name, detail)| format!("{name}: {detail}"))
         .collect::<Vec<_>>();
     if !prerequisites.is_empty() {
         return Err(ContractError::ExternalBlocked { prerequisites });
