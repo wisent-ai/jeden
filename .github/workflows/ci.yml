@@ -21,7 +21,9 @@ env:
 jobs:
 
   rust-gates:
-    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@2de57851b29b57da01fff370817a45ad121c93bc
+    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@caf52813f475b2485e27696eb3474a672e7a020a
+    secrets:
+      repository_token: ${{ secrets.WISENT_PACKAGES_TOKEN }}
 
   native-platform:
     name: Native build (${{ matrix.os }})
@@ -35,6 +37,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Cargo.toml names two private wisent-ai dependencies, `pursuit` and
+      # `echo-web`, and a runner's git holds no credential for either, so every
+      # leg of this matrix stopped at "failed to authenticate when downloading
+      # repository" before compiling a line. The rewrite is the same one
+      # `rust-gates.yml` performs, and it is repeated here because this job calls
+      # cargo itself rather than through that workflow.
+      - name: Configure private Git dependency access
+        shell: bash
+        env:
+          REPOSITORY_TOKEN: ${{ secrets.WISENT_PACKAGES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REPOSITORY_TOKEN" ]; then
+            echo "::error::WISENT_PACKAGES_TOKEN is not set, so cargo cannot read the private wisent-ai dependencies this crate names (pursuit, echo-web). Set it to a token with read access to both."
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${REPOSITORY_TOKEN}@github.com/".insteadOf \
+            https://github.com/
+          printf '%s\n' 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"
       - uses: dtolnay/rust-toolchain@stable
       - name: Check native library and binaries
         run: cargo check --locked --lib --bins
