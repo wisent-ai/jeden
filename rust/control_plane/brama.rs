@@ -5,6 +5,7 @@ use super::transport::{
 use super::{now_ms, ServiceHealth};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
@@ -14,6 +15,17 @@ const DEFAULT_TTL: Duration = Duration::from_secs(300);
 const MAX_CACHES: usize = 8;
 const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
+/// Brama's own readiness verdict, as `/readyz` reports it.
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BramaReadiness {
+    pub status: u16,
+    pub ready: bool,
+    pub degraded: bool,
+    pub operator_action_required: bool,
+    pub reason: String,
+    pub providers_without_credential: Vec<String>,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPrice {
@@ -352,6 +364,71 @@ impl BramaClient {
             },
             checked_at_ms: now_ms(),
         }
+    }
+
+    /// What Brama says about its own readiness, which is the only answer that
+    /// covers credentials. `/health` reports that a process exists — its body says
+    /// `dependencies: not_probed` — and `/v1/models` reports that a catalog can be
+    /// listed; a subscription whose credential the provider rejects appears in
+    /// neither, and the first thing that notices is a user's prompt failing. This
+    /// route redeems one credential per configured provider and answers
+    /// `degraded` with `operator_action_required` and its own sentence, which is
+    /// the state `jeden run` then fails inside.
+    ///
+    /// It is not under `/v1`, so it does not go through the versioned request
+    /// helper and negotiates no schema headers.
+    pub fn readiness(&self) -> Result<BramaReadiness, BramaError> {
+        let endpoint = self.key()?;
+        let mut headers = BTreeMap::new();
+        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+            headers.insert("authorization".into(), format!("Bearer {token}"));
+        }
+        let response = self
+            .transport
+            .execute(TransportRequest {
+                method: reqwest::Method::GET,
+                url: format!("{endpoint}/readyz"),
+                headers,
+                body: None,
+                max_response_bytes: MAX_RESPONSE_BYTES,
+            })
+            .map_err(BramaError::Transport)?;
+        let value: Value = serde_json::from_slice(&response.body).map_err(|error| {
+            BramaError::InvalidResponse(format!("readiness response is not JSON: {error}"))
+        })?;
+        let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
+        Ok(BramaReadiness {
+            status: response.status,
+            ready: flag("ready"),
+            degraded: flag("degraded"),
+            operator_action_required: flag("operator_action_required"),
+            reason: value
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            providers_without_credential: value
+                .get("providers")
+                .and_then(Value::as_array)
+                .map(|providers| {
+                    providers
+                        .iter()
+                        .filter(|provider| {
+                            !provider
+                                .get("credential")
+                                .and_then(Value::as_bool)
+                                .unwrap_or(false)
+                        })
+                        .filter_map(|provider| {
+                            provider
+                                .get("provider")
+                                .and_then(Value::as_str)
+                                .map(str::to_owned)
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+        })
     }
 
     pub fn invalidate(&self) {
