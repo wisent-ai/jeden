@@ -389,16 +389,22 @@ fn brama_probe(cwd: &Path, client: &crate::control_plane::brama::BramaClient) ->
         "configuredModel": configured,
         "readiness": readiness.as_ref().ok(),
     });
+    // Fatal, not degraded: `available()` is what the report's verdict and the
+    // exit code read, and a model that does not resolve fails every prompt this
+    // checkout can send. `HealthProbe::unavailable` carries no evidence, so the
+    // state is set here to keep the catalog and the readiness answer attached.
     if let Some((model, error)) = route_error {
-        return HealthProbe::degraded(
-            "brama",
-            started,
-            format!(
+        return HealthProbe {
+            subsystem: "brama",
+            state: ProbeState::Unavailable,
+            active: false,
+            latency_ms: elapsed(started),
+            detail: format!(
                 "configured model `{model}` does not resolve in the catalog Brama serves this agent ({} route(s)): {error}",
                 catalog.models.len()
             ),
-            Some(evidence),
-        );
+            evidence: Some(evidence),
+        };
     }
     match readiness {
         Ok(readiness) if !readiness.ready => HealthProbe::unavailable(

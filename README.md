@@ -157,6 +157,8 @@ Common setup failures and recovery:
 - `BRAMA_URL is required` — the Brama endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
 - `WISENT_APP_AGENT_AUTH_SECRET` missing — launch through `bin/jeden-rust` or `scripts/run-with-stado.sh`; both obtain `agent:wisent-app/value` without writing it to disk.
 - Model calls fail with quota exhaustion — the active Weles subscription is in cooldown; check `/subscriptions status` or wait for the `Retry-After` bound while the router selects the next eligible subscription.
+- `configured model <id> does not resolve in the catalog Brama serves this agent` — the model in `~/.jeden/config.yml`, `.jeden/config.json` or `JEDEN_MODEL` is not a route Brama offers this agent id; `jeden doctor` reports it unavailable and lists the catalog size, and `/models` names the routes that do resolve.
+- `traffic can be served, but an active subscription credential could not be redeemed` — Brama's own `/readyz` verdict, reported as degraded with the providers whose credential it could not redeem; the gateway answers, and the subscription behind the route needs re-authorization.
 - Anything else — run `jeden doctor` for per-service health and `/setup validate` for an end-to-end probe; both report what failed and which step to fix first.
 
 Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's state — user-level under `~/.jeden/` (sessions, memory, configuration) and project-level `.jeden/` directories in the checkouts where it was used.
