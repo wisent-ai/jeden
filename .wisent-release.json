@@ -13,11 +13,15 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["scripts/release/quality-build.sh"]
+          "argv": [
+            "scripts/release/quality-build.sh"
+          ]
         }
       ],
       "build": {
-        "argv": ["scripts/release/build.sh"]
+        "argv": [
+          "scripts/release/build.sh"
+        ]
       },
       "stage": {
         "stage-darwin-arm64/bin/jeden": "bin/jeden",
@@ -31,11 +35,15 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["scripts/release/quality-build.sh"]
+          "argv": [
+            "scripts/release/quality-build.sh"
+          ]
         }
       ],
       "build": {
-        "argv": ["scripts/release/build.sh"]
+        "argv": [
+          "scripts/release/build.sh"
+        ]
       },
       "stage": {
         "stage-linux-amd64/bin/jeden": "bin/jeden",
@@ -43,18 +51,51 @@
         "stage-linux-amd64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
         "stage-linux-amd64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
       }
+    },
+    "web": {
+      "runner_platform": "darwin-arm64",
+      "quality": [
+        {
+          "name": "web-quality",
+          "argv": [
+            "stado",
+            "web",
+            "quality",
+            "--root",
+            "web"
+          ]
+        }
+      ],
+      "build": {
+        "argv": [
+          "stado",
+          "web",
+          "build",
+          "--root",
+          "web"
+        ]
+      },
+      "stage": {
+        "dist/jeden-web.tar.gz": "jeden-web.tar.gz",
+        "dist/jeden-web.tar.gz.sha256": "jeden-web.tar.gz.sha256",
+        "dist/SOURCE_REVISION": "SOURCE_REVISION"
+      },
+      "secret_env": {}
     }
   },
   "runtime": {
-    "binary": "jeden",
-    "launcher": "jeden",
+    "binary": "bin/jeden",
+    "launcher": "bin/jeden",
     "config_schema": 3,
     "state_schema": 2,
     "minimum_stado_version": "0.6.1",
     "rollback_compatible_with": []
   },
   "promotion": {
-    "channels": ["candidate", "stable"],
+    "channels": [
+      "candidate",
+      "stable"
+    ],
     "reconcile": true
   }
 }
