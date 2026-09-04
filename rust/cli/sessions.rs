@@ -731,6 +731,17 @@ fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, String> {
                     messages.push(json!({ "role": "user", "content": prompt }));
                 }
             }
+            // The request for a delivery report went to the model as a user
+            // message; a resumed conversation must carry the same exchange.
+            "contract_violation"
+                if data.get("outcome").and_then(Value::as_str) == Some("requested") =>
+            {
+                messages.push(json!({
+                    "role": "user",
+                    "content": data.get("prompt").and_then(Value::as_str)
+                        .unwrap_or(crate::agent::task_contract::REPAIR_INSTRUCTION),
+                }));
+            }
             _ => {}
         }
     }

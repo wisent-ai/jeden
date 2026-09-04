@@ -469,6 +469,9 @@ pub(crate) fn contract_settings() -> Value {
         "communication": communication,
         "functionality": functionality,
         "path": user_config_path().display().to_string(),
+        "taskContract": crate::agent::task_contract::snapshot(
+            &super::ui_language(&crate::load_config(Path::new(".")))
+        ),
     })
 }
 
@@ -498,6 +501,9 @@ pub(crate) fn set_contract_settings(
         "communication": communication,
         "functionality": functionality,
         "path": path.display().to_string(),
+        "taskContract": crate::agent::task_contract::snapshot(
+            &super::ui_language(&crate::load_config(Path::new(".")))
+        ),
     }))
 }
 

@@ -78,6 +78,10 @@ pub(crate) enum SessionPayloadV2 {
     PendingApply(Value),
     PendingDiscard(Value),
     PendingExpire(Value),
+    /// The task contract was not met: `rule`, `outcome`, and a human `message`.
+    ContractViolation(Value),
+    TaskContract(Value),
+    TaskReport(Value),
 }
 
 impl SessionPayloadV2 {
@@ -138,6 +142,9 @@ impl SessionPayloadV2 {
             "pending_apply" => Self::PendingApply(data),
             "pending_discard" => Self::PendingDiscard(data),
             "pending_expire" => Self::PendingExpire(data),
+            "contract_violation" => Self::ContractViolation(data),
+            "task_contract" => Self::TaskContract(data),
+            "task_report" => Self::TaskReport(data),
             _ => return Err(format!("unsupported session event type: {kind}")),
         })
     }
@@ -225,6 +232,9 @@ impl SessionPayloadV2 {
             Self::PendingApply(_) => "pending_apply",
             Self::PendingDiscard(_) => "pending_discard",
             Self::PendingExpire(_) => "pending_expire",
+            Self::ContractViolation(_) => "contract_violation",
+            Self::TaskContract(_) => "task_contract",
+            Self::TaskReport(_) => "task_report",
         }
     }
 
@@ -284,7 +294,10 @@ impl SessionPayloadV2 {
             | Self::PendingClaim(v)
             | Self::PendingApply(v)
             | Self::PendingDiscard(v)
-            | Self::PendingExpire(v) => v,
+            | Self::PendingExpire(v)
+            | Self::ContractViolation(v)
+            | Self::TaskContract(v)
+            | Self::TaskReport(v) => v,
         }
     }
 }

@@ -4,6 +4,7 @@ pub(crate) mod language_prose;
 mod recorder;
 mod routing;
 pub(crate) mod specs;
+pub(crate) mod task_contract;
 
 pub(crate) use recorder::now_stamp;
 pub(in crate::agent) use recorder::SessionRecorder;

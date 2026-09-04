@@ -25,6 +25,7 @@ pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult, Trac
 pub(crate) use runtime::model_router_config;
 pub(crate) use runtime::now_stamp;
 pub(crate) use runtime::specs::system_prompt_checked;
+pub(crate) use runtime::task_contract;
 pub(crate) use state::{
     loop_next_prompt, record_branch, update_last_session_path, update_task_outcome, MAX_LOOP_ITERS,
 };

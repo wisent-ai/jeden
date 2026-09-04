@@ -113,6 +113,8 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     let ui_lang = ui_language(&config);
     let language = language_prompt_section(&ui_lang);
     let mut contract = engineering_contract_section(&ui_lang).to_string();
+    contract.push_str("\n\n");
+    contract.push_str(&super::task_contract::section(&ui_lang));
     append_operator_contracts(&mut contract, &config);
     let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)
@@ -128,7 +130,7 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
             )
         })
         .unwrap_or_default();
-    let prompt = format!("You are Jeden, Wisent's private agent harness.\n\nRules:\n- Answer with {{\"action\":\"final\",\"text\":\"your concise answer\"}} when done.\n- Use tool calls when the model-router supports native tool_calls, or answer with {{\"action\":\"tool\",\"tool\":\"tool_name\",\"input\":{{...}}}}.\n- Do not create tests unless the user explicitly asks.\n- Do not create docs unless the user explicitly asks.\n- Do not invent files, command outputs, or tool results.\n- Tool approval uses read/write/exec tiers. Write-tier tools mutate files or session state; exec-tier tools run code/processes or spawn agents. The active /approval policy, --allow-* flags, and --yolo decide whether a call runs or prompts.\n\n{language}\n\n{contract}\n\nDelegation via delegate_task:\n- Scope before you spawn: read the request, map the work, name independent slices. Never outsource the top-level plan or the user's intent.\n- Spawn-one-then-wait is a bug: either fan out real independent slices in parallel or do it inline. Prerequisites every slice depends on run inline first.{}{}\n\nExecutable Rust tools:\n{}", memory, policy.system_injection(), tools);
+    let prompt = format!("You are Jeden, Wisent's private agent harness.\n\nRules:\n- Answer with {{\"action\":\"final\",\"text\":\"your concise answer\",\"report\":{{...}}}} when done; the task delivery instruction defines the required report. Model-only and Pursuit stage requests retain their own output contracts.\n- Use tool calls when the model-router supports native tool_calls, or answer with {{\"action\":\"tool\",\"tool\":\"tool_name\",\"input\":{{...}}}}.\n- Product implementation and repair include the applicable CLI, GUI, documentation, diagnostics and real tests required by the task contract. Questions, reading and planning do not authorize implementation. Respect explicit user restrictions.\n- Do not invent files, command outputs, or tool results.\n- Tool approval uses read/write/exec tiers. Write-tier tools mutate files or session state; exec-tier tools run code/processes or spawn agents. The active /approval policy, --allow-* flags, and --yolo decide whether a call runs or prompts.\n\n{language}\n\n{contract}\n\n{}\n\nDelegation via delegate_task:\n- Scope before you spawn: read the request, map the work, name independent slices. Never outsource the top-level plan or the user's intent.\n- Spawn-one-then-wait is a bug: either fan out real independent slices in parallel or do it inline. Prerequisites every slice depends on run inline first.{}{}\n\nExecutable Rust tools:\n{}", super::task_contract::turn_instruction(), memory, policy.system_injection(), tools);
     Ok(policy.protect_model_text(&prompt))
 }
 

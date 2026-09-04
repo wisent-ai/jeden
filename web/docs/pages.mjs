@@ -201,6 +201,40 @@ export const pages = [
         ],
       },
       {
+        title: "Task contract and delivery report",
+        paragraphs: [
+          "Every ordinary user turn, including a delegated task, carries Jeden’s built-in task contract. Completion means durable, reusable product functionality rather than a one-off action. Only an assigned implementation task authorizes product changes: a question, request to read or explain, or planning request does not. Defects related to the assigned task are repaired at their source; diagnostics must make failures actionable; and applicable CLI, GUI, and public documentation surfaces must agree.",
+          "Behavioral tests live in the product’s <code>tests/&lt;area&gt;</code> tree and execute a complete lifecycle through the real product, its real interface, and real dependencies, observing the final state rather than accepting mocks, canned responses, dry runs, or syntax checks. Probierz owns the run and retains its supported reports, traces, screenshots, recordings, evidence level, and gate verdict.",
+          "The model must explain every requirement in exactly seven report entries: <code>functionality</code>, <code>diagnostics</code>, <code>cli</code>, <code>gui</code>, <code>documentation</code>, <code>tests</code>, and <code>delivery</code>. Each entry has a concrete explanation and an evidence array. <code>done</code> requires at least one source or retained Probierz evidence reference; <code>not_applicable</code> honestly explains why a surface does not apply; <code>blocked</code> identifies an unresolved prerequisite and does not trigger a completion judgement. Structural acceptance does not independently prove that a model’s claims are true.",
+          "When the configured <code>--max-steps</code> budget leaves another model step, Jeden returns a missing or invalid report to the model once with a corrective request. A second violation—or a first violation after the step budget is exhausted—is refused as an error, records a rejected <code>contract_violation</code> and <code>run_error</code>, and is never silently accepted or delivered as a successful final. CLI/TUI, <code>jeden run</code>, RPC, headless, and the SDKs share this run-loop behavior; Jeden Desktop projects the same human-readable final report. Model-only turns and Pursuit stages keep their separate output formats.",
+          "The RPC <code>config/contracts/get</code> and <code>config/contracts/set</code> results include <code>taskContract</code>: a localized, versioned built-in description containing <code>instructions</code> and <code>requirements</code> (<code>id</code>, <code>title</code>, and <code>description</code>). It is read-only, not a third editable operator contract, and Jeden Desktop shows it read-only beside the editable communication and functionality settings. <code>/prompt</code> shows the contract active for the current session.",
+        ],
+        commands: [
+          {
+            label: "Required final action shape",
+            code: `{
+  "action": "final",
+  "text": "Concise answer.",
+  "report": {
+    "functionality": {"status": "done", "explanation": "Reusable behavior implemented.", "evidence": ["src/feature.rs"]},
+    "diagnostics": {"status": "done", "explanation": "Failures identify the cause and recovery.", "evidence": ["src/diagnostics.rs"]},
+    "cli": {"status": "done", "explanation": "The existing CLI flow exposes the behavior.", "evidence": ["src/cli.rs"]},
+    "gui": {"status": "not_applicable", "explanation": "This change has no GUI surface.", "evidence": []},
+    "documentation": {"status": "done", "explanation": "Public usage is documented.", "evidence": ["web/docs/pages.mjs"]},
+    "tests": {"status": "done", "explanation": "The real lifecycle and final state ran through Probierz.", "evidence": ["Probierz run jeden/feature"]},
+    "delivery": {"status": "blocked", "explanation": "Release signing credential is unavailable.", "evidence": []}
+  }
+}`,
+          },
+          {
+            label: "Inspect the active and RPC-projected contract",
+            code: `jeden run "Implement the requested reusable behavior"
+/prompt
+printf '%s\n' '{"id":1,"method":"config/contracts/get","params":{}}' | jeden rpc`,
+          },
+        ],
+      },
+      {
         title: "Communication modes",
         paragraphs: [
           "The <code>communication.mode</code> setting chooses what Jeden shows of its own work while it answers. <code>normal</code> shows tool names while Jeden works and then the answer with its code. <code>debug</code> also shows every tool call with its input, every tool result, and the model's reasoning when the route streams it. <code>quiet</code> shows only the answer.",

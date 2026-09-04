@@ -136,6 +136,42 @@ Jeden adds each non-empty contract to every new or rebuilt system prompt. The
 contracts supplement the built-in engineering rules and cannot relax tool
 grants, path jails, safety checks, or evidence requirements.
 
+Every ordinary user turn, including a delegated task, carries Jeden's built-in
+task contract. Completion means durable, reusable product functionality rather
+than a one-off action. Only an assigned implementation task authorizes product
+changes: a question, request to read or explain, or planning request does not.
+Defects related to the assigned task are repaired at their source; diagnostics
+must identify failures; and applicable CLI, GUI, and public documentation
+surfaces must agree. Behavioral tests belong in the product's
+`tests/<area>` tree, exercise a complete lifecycle through the real product and
+real dependencies, and observe the final state. Probierz owns those runs and
+their retained reports, traces, screenshots, recordings, evidence level, and
+gate verdict.
+
+The model must return a structured report covering exactly `functionality`,
+`diagnostics`, `cli`, `gui`, `documentation`, `tests`, and `delivery`. It must
+explain concretely what happened for every requirement and cite source or
+Probierz evidence for every `done` entry. `not_applicable` is honest when a
+surface truly does not apply; `blocked` names an unresolved prerequisite and
+does not pretend the task is complete. Parsing checks the report's structure,
+not the truth of its claims.
+
+When the configured `--max-steps` budget leaves another model step, Jeden gives
+a missing or invalid report back to the model once for correction. A second
+violation—or a first violation with no remaining step—is refused as an error,
+records a rejected `contract_violation` plus `run_error`, and is never silently
+delivered as a successful final. The terminal, `jeden run`, RPC, headless
+service, and SDKs all
+enter the same run loop and enforce this contract; Jeden Desktop renders the
+same final text and report. `/prompt` shows the active contract. Model-only
+turns and Pursuit stages retain their separate output formats.
+
+RPC `config/contracts/get` and `config/contracts/set` return the editable
+communication and functionality settings plus `taskContract`, a versioned,
+localized, built-in read-only description with `instructions` and
+`requirements`. It is inspectable by clients and shown read-only in Jeden
+Desktop Settings; it is not a third operator-editable contract.
+
 The communication mode chooses what Jeden shows of its own work. `normal`
 shows tool names while it works and then the answer with its code; `debug`
 also shows each tool call with its input, each tool result, and the model's

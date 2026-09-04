@@ -5,7 +5,11 @@ use serde_json::{json, Value};
 #[serde(tag = "action")]
 pub enum Action {
     #[serde(rename = "final")]
-    Final { text: String },
+    Final {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        report: Option<Value>,
+    },
     #[serde(rename = "tool")]
     Tool { tool: String, input: Value },
     #[serde(rename = "tools")]
@@ -77,6 +81,7 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
                 .ok_or("final action requires text")?;
             Ok(Action::Final {
                 text: text.to_string(),
+                report: value.get("report").cloned(),
             })
         }
         "tool" => {

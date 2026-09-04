@@ -10,6 +10,8 @@ impl Conversation {
     ) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let mut router = model_router_config(&config, args);
+        let report_required = !args.model_only && !args.autonomous;
+        let language = crate::cli::config::ui_language(&config);
         let mut effective_task = if args.model_only || args.autonomous {
             task.to_string()
         } else {
@@ -62,6 +64,10 @@ impl Conversation {
                 effective_task.push_str(&sections.join("\n\n"));
             }
         }
+        if report_required {
+            effective_task.push_str("\n\n");
+            effective_task.push_str(task_contract::turn_instruction());
+        }
         self.recorder.record(
             "user",
             json!({
@@ -75,6 +81,11 @@ impl Conversation {
                 "goal": args.goal,
             }),
         )?;
+        if report_required {
+            let mut contract = task_contract::snapshot(&language);
+            contract["task"] = json!(task);
+            self.recorder.record("task_contract", contract)?;
+        }
 
         let mut classification_handle = None;
         if !args.model_only && !args.autonomous {
@@ -114,6 +125,8 @@ impl Conversation {
             Some(max) => Box::new(u32::from(true)..=max),
             None => Box::new(u32::from(true)..),
         };
+        // A missing or incomplete report is corrected once, never accepted as success.
+        let mut report_requested = false;
         'steps: for step in step_iter {
             if hooks.cancelled() {
                 let err = "Turn cancelled.".to_string();
@@ -134,6 +147,10 @@ impl Conversation {
             let suppress = std::cell::Cell::new(false);
             let pending = std::cell::RefCell::new(String::new());
             let mut on_delta = |piece: &str| -> bool {
+                // Do not expose an answer before its delivery report is checked.
+                if report_required {
+                    return false;
+                }
                 if !decided.get() {
                     pending.borrow_mut().push_str(piece);
                     let mut buffered = pending.borrow_mut();
@@ -227,9 +244,66 @@ impl Conversation {
                         .push(json!({ "role": "assistant", "content": content }));
 
                     match action {
-                        Action::Final { text } => {
+                        Action::Final { text, report } => {
+                            let report = if report_required {
+                                match task_contract::DeliveryReport::parse(report) {
+                                    Ok(report) => Some(report),
+                                    Err(reason) => {
+                                        let can_repair = !report_requested
+                                            && args.max_steps.is_none_or(|max| step < max);
+                                        let instruction = format!(
+                                            "{reason}\n\n{}",
+                                            task_contract::REPAIR_INSTRUCTION
+                                        );
+                                        self.recorder.record(
+                                            task_contract::VIOLATION_EVENT,
+                                            json!({
+                                                "step": step,
+                                                "rule": "delivery-report",
+                                                "outcome": if can_repair { "requested" } else { "rejected" },
+                                                "message": reason,
+                                                "prompt": if can_repair { Some(&instruction) } else { None },
+                                            }),
+                                        )?;
+                                        if can_repair {
+                                            report_requested = true;
+                                            hooks.note(
+                                                "delivery report incomplete; requesting correction",
+                                            );
+                                            self.messages.push(json!({
+                                                "role": "user",
+                                                "content": instruction,
+                                            }));
+                                            continue 'steps;
+                                        }
+                                        let error =
+                                            format!("Task contract not satisfied: {reason}");
+                                        self.recorder
+                                            .record("run_error", json!({ "message": error }))?;
+                                        return Err(error);
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            let blocked = report.as_ref().is_some_and(|report| report.is_blocked());
+                            let text = if let Some(report) = &report {
+                                let rendered = report.render(&language);
+                                self.recorder.record(
+                                    "task_report",
+                                    json!({
+                                        "version": task_contract::VERSION,
+                                        "status": if blocked { "blocked" } else { "complete" },
+                                        "report": report,
+                                        "text": rendered,
+                                    }),
+                                )?;
+                                format!("{}\n\n{}", text.trim_end(), rendered)
+                            } else {
+                                text
+                            };
                             self.recorder
-                                .record("final", json!({ "step": step, "text": text }))?;
+                                .record("final", json!({ "step": step, "text": text, "taskStatus": if blocked { "blocked" } else { "complete" } }))?;
                             // Persist the user-visible answer (not the raw JSON
                             // action blob) so the next turn's context is clean.
                             if let Some(last) = self.messages.last_mut() {
@@ -238,7 +312,7 @@ impl Conversation {
                             // When plan mode is on, the final answer IS the plan;
                             // persist it so `/plan-review` can surface it.
                             capture_plan_if_enabled(&args.cwd, &text);
-                            if !args.model_only && !args.autonomous {
+                            if report_required && !blocked {
                                 // Goal-completion judgement: the goals agent
                                 // reads this final report and closes the active
                                 // goal only when it is a genuine completion.

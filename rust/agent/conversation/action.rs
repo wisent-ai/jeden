@@ -5,6 +5,7 @@ pub(in crate::agent) fn action_or_text(content: &str) -> Result<Action, String> 
         Ok(_) => parse_action(content),
         Err(error) if error.starts_with("model returned non-json content") => Ok(Action::Final {
             text: content.to_string(),
+            report: None,
         }),
         Err(error) => Err(error),
     }
@@ -12,7 +13,7 @@ pub(in crate::agent) fn action_or_text(content: &str) -> Result<Action, String> 
 
 pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
     match action {
-        Action::Final { text } => json!({ "action": "final", "text": text }),
+        Action::Final { .. } => serde_json::to_value(action).expect("serializable final action"),
         Action::Tool { tool, input } => json!({ "action": "tool", "tool": tool, "input": input }),
         Action::Tools { tools } => {
             json!({ "action": "tools", "tools": tools.iter().map(tool_to_value).collect::<Vec<_>>() })
