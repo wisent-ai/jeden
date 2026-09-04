@@ -2,7 +2,7 @@ name: Canary build evidence
 
 on:
   workflow_run:
-    workflows: ['contractual-ci']
+    workflows: ['build-ci']
     types: [completed]
     branches: [main]
 
