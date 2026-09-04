@@ -52,6 +52,7 @@ Jeden separates five concerns:
 
 - **Inference** — model calls go through Brama using HMAC-signed OpenAI-compatible chat completions.
 - **Policy** — the harness prompt and approval rules are explicit and local.
+- **Operator contracts** — two local, editable settings separately define how Jeden communicates and how it executes and completes work.
 - **Tools** — a small allowlisted registry enforces path jails and write or command permission.
 - **Run loop** — the model may return native tool calls or strict JSON actions that enter the same local execution loop.
 - **Pursuit adapter** — `jeden pursue` maps the separately owned engine stages onto persistent planner and executor conversations plus fresh read-only reviewers.
@@ -120,6 +121,21 @@ agent signing credential from `agent:wisent-app/value` for interactive sessions
 and `jeden run`; it remains in the process environment only. A deployment that
 requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
 
+Communication and functionality contracts are optional user defaults. The CLI
+and Jeden Desktop Settings screen edit the same values in
+`~/.jeden/config.yml`; project config may override them:
+
+```sh
+jeden config set contracts.communication "Answer in Polish using three plain sentences."
+jeden config set contracts.functionality "Finish the requested behavior before answering."
+jeden config get contracts.communication
+jeden config reset contracts.functionality
+```
+
+Jeden adds each non-empty contract to every new or rebuilt system prompt. The
+contracts supplement the built-in engineering rules and cannot relax tool
+grants, path jails, safety checks, or evidence requirements.
+
 The first-use journey (`/onboarding`) is separate from `/setup` and always runs
 from the definition compiled into the binary, so it works offline and completes
 on the first successful agent turn. When `STADO_INTEGRATION_API_URL` is set, the
@@ -185,6 +201,7 @@ The private milestone includes the capabilities below. The live product document
 - custom JavaScript tools from `~/.jeden/tools/` and `<cwd>/.jeden/tools/`;
 - project and user lifecycle hooks;
 - native `.jeden` configuration, context, command, extension, plugin, memory, and mode-state paths;
+- editable communication and functionality contracts through CLI, RPC, and Jeden Desktop Settings;
 - interactive approval for writes and commands unless explicitly enabled.
 
 File mutations return Jeden-native visual diffs and previews. Oversized tool results are persisted as session artifacts and replaced in the model loop with a compact reference.

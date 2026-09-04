@@ -304,6 +304,8 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
             "quickReplies": quick_replies()
         })),
         "session/new" | "new" => create_session(state, request.params, false),
+        "config/contracts/get" => Ok(crate::cli::config::schema::contract_settings()),
+        "config/contracts/set" => set_contract_settings(&request.params),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),
@@ -520,6 +522,15 @@ fn resolve_approval(
     Ok(json!({"accepted": true}))
 }
 
+fn set_contract_settings(params: &Value) -> Result<Value, (&'static str, String)> {
+    let communication =
+        text_param(params, "communication").map_err(|error| ("invalid_params", error))?;
+    let functionality =
+        text_param(params, "functionality").map_err(|error| ("invalid_params", error))?;
+    crate::cli::config::schema::set_contract_settings(&communication, &functionality)
+        .map_err(|error| ("config_write_failed", error))
+}
+
 fn find_session(
     state: &Arc<ServerState>,
     params: &Value,
@@ -547,6 +558,14 @@ fn string_param(params: &Value, key: &str) -> Result<String, String> {
         .filter(|value| !value.trim().is_empty())
         .map(str::to_string)
         .ok_or_else(|| format!("{} must be a non-empty string", key))
+}
+
+fn text_param(params: &Value, key: &str) -> Result<String, String> {
+    params
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .ok_or_else(|| format!("{} must be a string", key))
 }
 
 fn wire_id(id: &Value) -> String {

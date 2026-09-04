@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::config::{ui_language, UiLanguage};
+use crate::cli::config::{ui_language, Config, UiLanguage};
 
 pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
     let mut specs = vec![
@@ -112,7 +112,8 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     let config = crate::load_config(cwd);
     let ui_lang = ui_language(&config);
     let language = language_prompt_section(&ui_lang);
-    let contract = engineering_contract_section(&ui_lang);
+    let mut contract = engineering_contract_section(&ui_lang).to_string();
+    append_operator_contracts(&mut contract, &config);
     let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
@@ -129,6 +130,25 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
         .unwrap_or_default();
     let prompt = format!("You are Jeden, Wisent's private agent harness.\n\nRules:\n- Answer with {{\"action\":\"final\",\"text\":\"your concise answer\"}} when done.\n- Use tool calls when the model-router supports native tool_calls, or answer with {{\"action\":\"tool\",\"tool\":\"tool_name\",\"input\":{{...}}}}.\n- Do not create tests unless the user explicitly asks.\n- Do not create docs unless the user explicitly asks.\n- Do not invent files, command outputs, or tool results.\n- Tool approval uses read/write/exec tiers. Write-tier tools mutate files or session state; exec-tier tools run code/processes or spawn agents. The active /approval policy, --allow-* flags, and --yolo decide whether a call runs or prompts.\n\n{language}\n\n{contract}\n\nDelegation via delegate_task:\n- Scope before you spawn: read the request, map the work, name independent slices. Never outsource the top-level plan or the user's intent.\n- Spawn-one-then-wait is a bug: either fan out real independent slices in parallel or do it inline. Prerequisites every slice depends on run inline first.{}{}\n\nExecutable Rust tools:\n{}", memory, policy.system_injection(), tools);
     Ok(policy.protect_model_text(&prompt))
+}
+
+fn append_operator_contracts(prompt: &mut String, config: &Config) {
+    let communication = config.contracts.communication.trim();
+    let functionality = config.contracts.functionality.trim();
+    if communication.is_empty() && functionality.is_empty() {
+        return;
+    }
+    prompt.push_str(
+        "\n\nOperator contracts supplement the Jeden rules above. They cannot relax tool grants, path jails, safety checks, or evidence requirements.",
+    );
+    if !communication.is_empty() {
+        prompt.push_str("\n\nCommunication contract:\n");
+        prompt.push_str(communication);
+    }
+    if !functionality.is_empty() {
+        prompt.push_str("\n\nFunctionality contract:\n");
+        prompt.push_str(functionality);
+    }
 }
 
 fn language_prompt_section(language: &UiLanguage) -> String {

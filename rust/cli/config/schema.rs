@@ -20,6 +20,9 @@ pub(crate) struct SettingSpec {
     pub(crate) enum_values: &'static [&'static str],
 }
 
+pub(crate) const COMMUNICATION_CONTRACT_KEY: &str = "contracts.communication";
+pub(crate) const FUNCTIONALITY_CONTRACT_KEY: &str = "contracts.functionality";
+
 pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
     SettingSpec {
         key: "tools.approvalMode",
@@ -82,6 +85,20 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         typ: "number",
         description: "Approximate token budget for discovered context and rule files.",
         default_json: "32768",
+        enum_values: &[],
+    },
+    SettingSpec {
+        key: COMMUNICATION_CONTRACT_KEY,
+        typ: "string",
+        description: "Instructions for how Jeden communicates: language, tone, length, structure, and terminology.",
+        default_json: "\"\"",
+        enum_values: &[],
+    },
+    SettingSpec {
+        key: FUNCTIONALITY_CONTRACT_KEY,
+        typ: "string",
+        description: "Instructions for how Jeden carries out work and what it must complete before answering.",
+        default_json: "\"\"",
         enum_values: &[],
     },
     SettingSpec {
@@ -283,7 +300,15 @@ fn grouped_setting_rows(
     lang: &str,
 ) -> (Vec<String>, Vec<PickerItem>) {
     const KNOWN_PREFIXES: &[&str] = &[
-        "tools", "commands", "startup", "context", "rules", "hooks", "secrets", "ui",
+        "tools",
+        "commands",
+        "startup",
+        "context",
+        "contracts",
+        "rules",
+        "hooks",
+        "secrets",
+        "ui",
     ];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
@@ -390,6 +415,50 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
         .with_tabs(tabs)
         .localized(&lang)
 }
+pub(crate) fn contract_settings() -> Value {
+    let config = read_user_writable_config();
+    let communication = setting_spec(COMMUNICATION_CONTRACT_KEY)
+        .map(|spec| effective_setting_value(&config, spec))
+        .unwrap_or_else(|| json!(""));
+    let functionality = setting_spec(FUNCTIONALITY_CONTRACT_KEY)
+        .map(|spec| effective_setting_value(&config, spec))
+        .unwrap_or_else(|| json!(""));
+    json!({
+        "communication": communication,
+        "functionality": functionality,
+        "path": user_config_path().display().to_string(),
+    })
+}
+
+pub(crate) fn set_contract_settings(
+    communication: &str,
+    functionality: &str,
+) -> Result<Value, String> {
+    let communication_spec =
+        setting_spec(COMMUNICATION_CONTRACT_KEY).expect("communication contract setting");
+    let functionality_spec =
+        setting_spec(FUNCTIONALITY_CONTRACT_KEY).expect("functionality contract setting");
+    let communication = parse_setting_value(communication_spec, communication)?;
+    let functionality = parse_setting_value(functionality_spec, functionality)?;
+    let mut config = read_user_writable_config();
+    config_set_value(
+        &mut config,
+        COMMUNICATION_CONTRACT_KEY,
+        communication.clone(),
+    )?;
+    config_set_value(
+        &mut config,
+        FUNCTIONALITY_CONTRACT_KEY,
+        functionality.clone(),
+    )?;
+    let path = write_user_config(&config)?;
+    Ok(json!({
+        "communication": communication,
+        "functionality": functionality,
+        "path": path.display().to_string(),
+    }))
+}
+
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {
     let (verb, rest) = args
         .positionals

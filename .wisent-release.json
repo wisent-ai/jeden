@@ -48,7 +48,7 @@
   "runtime": {
     "binary": "jeden",
     "launcher": "jeden",
-    "config_schema": 3,
+    "config_schema": 4,
     "state_schema": 2,
     "minimum_stado_version": "0.6.1",
     "rollback_compatible_with": []

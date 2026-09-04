@@ -186,6 +186,20 @@ export const pages = [
           text: "A context line such as <code>@./extra.md</code> imports another file under the same context root. Oversized context files are skipped. File-based custom commands load from project and user <code>.jeden/commands/</code> directories; native extensions load from <code>.jeden/extensions/</code>, and plugin and marketplace state lives under <code>~/.jeden/plugins/</code>.",
         },
       },
+      {
+        title: "Communication and functionality contracts",
+        paragraphs: [
+          "The <code>contracts.communication</code> setting tells Jeden how to communicate: language, tone, length, structure, and terminology. The <code>contracts.functionality</code> setting tells it how to carry out work and what must be complete before it answers.",
+          "Jeden adds non-empty contracts to every new or rebuilt system prompt after its built-in engineering contract. They supplement the built-in rules and cannot relax tool grants, path jails, safety checks, or evidence requirements.",
+          "The CLI and Jeden Desktop Settings screen edit the same user defaults in <code>~/.jeden/config.yml</code>. A project may override either key in <code><cwd>/.jeden/config.json</code>; an empty value adds no extra instruction.",
+        ],
+        commands: [
+          {
+            label: "Set, inspect, or clear the contracts",
+            code: 'jeden config set contracts.communication "Answer in Polish using three plain sentences."\njeden config set contracts.functionality "Finish the requested behavior before answering."\njeden config get contracts.communication\njeden config get contracts.functionality\njeden config reset contracts.communication\njeden config reset contracts.functionality',
+          },
+        ],
+      },
     ],
   },
   {
