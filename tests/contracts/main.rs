@@ -274,6 +274,12 @@ fn operator_contracts_and_task_contract_are_served_through_rpc_for_jeden_desktop
         result["result"]["path"],
         json!(home.config_file().display().to_string())
     );
+    // Nothing configured: Jeden's own communication contract is in force and
+    // the Settings screen gets its text to show.
+    assert_eq!(result["result"]["communicationSource"], json!("default"));
+    assert!(result["result"]["communicationDefault"]
+        .as_str()
+        .is_some_and(|text| text.starts_with("Write to the user in plain language:")));
     // The built-in task contract rides along, read-only, for the Settings screen.
     let contract = &result["result"]["taskContract"];
     assert_eq!(contract["version"], json!(1));
@@ -301,6 +307,7 @@ fn operator_contracts_and_task_contract_are_served_through_rpc_for_jeden_desktop
         result["result"]["functionality"],
         json!("Finish the task in full.")
     );
+    assert_eq!(result["result"]["communicationSource"], json!("operator"));
     assert_eq!(
         file_value(&home.config_file(), "/contracts/communication"),
         json!("Short sentences.")
@@ -326,6 +333,14 @@ fn operator_contracts_and_task_contract_are_served_through_rpc_for_jeden_desktop
         file_value(&home.config_file(), "/contracts/communication"),
         json!("Short sentences.")
     );
+
+    // `none` turns the default off; Jeden says so.
+    let result = home.rpc(
+        "contracts-none",
+        "config/contracts/set",
+        json!({"communication": "none", "functionality": ""}),
+    );
+    assert_eq!(result["result"]["communicationSource"], json!("disabled"));
 }
 
 #[test]
@@ -348,8 +363,55 @@ fn task_contract_is_in_every_system_prompt() {
         );
     }
     assert!(prompt.contains("creates, edits and deletes a real isolated fleet through the CLI"));
+    // With nothing configured, Jeden's default communication contract is in
+    // the prompt: plain language, then what was done, blockers, next steps.
+    assert!(
+        prompt.contains(
+            "Communication contract (Jeden default):\nWrite to the user in plain language:"
+        ),
+        "{prompt}"
+    );
+    assert!(prompt.contains("\"What was done\""));
+    assert!(prompt.contains("\"Blockers\""));
+    assert!(prompt.contains("\"Next steps\""));
 
-    // Polish conversations get the Polish contract.
+    // The operator's own text replaces the default; `none` removes it.
+    let (code, _, _) = home.config(&[
+        "set",
+        "contracts.communication",
+        "Answer in three sentences.",
+    ]);
+    assert_eq!(code, 0);
+    let prompt = String::from_utf8_lossy(
+        &home
+            .command()
+            .args(["run", "/prompt"])
+            .output()
+            .expect("run jeden run /prompt with an operator contract")
+            .stdout,
+    )
+    .into_owned();
+    assert!(
+        prompt.contains("Communication contract:\nAnswer in three sentences."),
+        "{prompt}"
+    );
+    assert!(!prompt.contains("Jeden default"), "{prompt}");
+    let (code, _, _) = home.config(&["set", "contracts.communication", "none"]);
+    assert_eq!(code, 0);
+    let prompt = String::from_utf8_lossy(
+        &home
+            .command()
+            .args(["run", "/prompt"])
+            .output()
+            .expect("run jeden run /prompt with the contract turned off")
+            .stdout,
+    )
+    .into_owned();
+    assert!(!prompt.contains("Communication contract"), "{prompt}");
+
+    // Polish conversations get the Polish contracts.
+    let (code, _, _) = home.config(&["reset", "contracts.communication"]);
+    assert_eq!(code, 0);
     let (code, _, _) = home.config(&["set", "ui.language", "pl"]);
     assert_eq!(code, 0);
     let output = home
@@ -360,6 +422,12 @@ fn task_contract_is_in_every_system_prompt() {
     let prompt = String::from_utf8_lossy(&output.stdout);
     assert!(prompt.contains("Kontrakt zadania:"), "{prompt}");
     assert!(prompt.contains("- tests (Realne testy):"), "{prompt}");
+    assert!(
+        prompt.contains(
+            "Communication contract (Jeden default):\nPisz do użytkownika prostym językiem:"
+        ),
+        "{prompt}"
+    );
 }
 
 #[test]

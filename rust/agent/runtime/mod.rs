@@ -1,5 +1,6 @@
 use super::*;
 
+pub(crate) mod communication_contract;
 pub(crate) mod language_prose;
 mod recorder;
 mod routing;

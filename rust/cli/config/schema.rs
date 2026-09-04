@@ -96,7 +96,7 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
     SettingSpec {
         key: COMMUNICATION_CONTRACT_KEY,
         typ: "string",
-        description: "Instructions for how Jeden communicates: language, tone, length, structure, and terminology.",
+        description: "How Jeden writes to you. Empty means Jeden's default: plain language, then three parts — what was done, blockers, next steps. Write your own text to replace it, or 'none' to add no communication instruction.",
         default_json: "\"\"",
         enum_values: &[],
     },
@@ -457,6 +457,10 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
         .with_tabs(tabs)
         .localized(&lang)
 }
+/// The two operator contracts plus what Jeden actually uses for
+/// communication: `communicationSource` says whether the text in force is
+/// Jeden's default, the operator's own, or nothing, and
+/// `communicationDefault` is the default text for the current language.
 pub(crate) fn contract_settings() -> Value {
     let config = read_user_writable_config();
     let communication = setting_spec(COMMUNICATION_CONTRACT_KEY)
@@ -465,13 +469,22 @@ pub(crate) fn contract_settings() -> Value {
     let functionality = setting_spec(FUNCTIONALITY_CONTRACT_KEY)
         .map(|spec| effective_setting_value(&config, spec))
         .unwrap_or_else(|| json!(""));
+    contract_settings_json(communication, functionality, &user_config_path())
+}
+
+fn contract_settings_json(communication: Value, functionality: Value, path: &Path) -> Value {
+    let language = super::ui_language(&crate::load_config(Path::new(".")));
+    let (source, _) = crate::agent::communication_contract::resolve(
+        communication.as_str().unwrap_or_default(),
+        &language,
+    );
     json!({
         "communication": communication,
         "functionality": functionality,
-        "path": user_config_path().display().to_string(),
-        "taskContract": crate::agent::task_contract::snapshot(
-            &super::ui_language(&crate::load_config(Path::new(".")))
-        ),
+        "communicationSource": source.as_str(),
+        "communicationDefault": crate::agent::communication_contract::default_text(&language),
+        "path": path.display().to_string(),
+        "taskContract": crate::agent::task_contract::snapshot(&language),
     })
 }
 
@@ -497,14 +510,7 @@ pub(crate) fn set_contract_settings(
         functionality.clone(),
     )?;
     let path = write_user_config(&config)?;
-    Ok(json!({
-        "communication": communication,
-        "functionality": functionality,
-        "path": path.display().to_string(),
-        "taskContract": crate::agent::task_contract::snapshot(
-            &super::ui_language(&crate::load_config(Path::new(".")))
-        ),
-    }))
+    Ok(contract_settings_json(communication, functionality, &path))
 }
 
 const COMMUNICATION_KEYS: [&str; 5] = [

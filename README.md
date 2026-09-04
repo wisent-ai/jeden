@@ -121,20 +121,34 @@ agent signing credential from `agent:wisent-app/value` for interactive sessions
 and `jeden run`; it remains in the process environment only. A deployment that
 requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
 
-Communication and functionality contracts are optional user defaults. The CLI
-and Jeden Desktop Settings screen edit the same values in
-`~/.jeden/config.yml`; project config may override them:
+Communication and functionality contracts are user defaults. The CLI and the
+Jeden Desktop Settings screen edit the same values in `~/.jeden/config.yml`;
+project config may override them:
 
 ```sh
 jeden config set contracts.communication "Answer in Polish using three plain sentences."
 jeden config set contracts.functionality "Finish the requested behavior before answering."
 jeden config get contracts.communication
 jeden config reset contracts.functionality
+jeden config set contracts.communication none
 ```
 
-Jeden adds each non-empty contract to every new or rebuilt system prompt. The
-contracts supplement the built-in engineering rules and cannot relax tool
-grants, path jails, safety checks, or evidence requirements.
+The communication contract has a built-in default. When it is empty, Jeden
+tells the model to write in plain language — short, ordinary sentences — and to
+give every answer in three parts under their own headings: what was done (in
+the past tense, with real names, paths, commands and numbers), blockers (each
+with the exact error and what was tried, or "none"), and next steps (what the
+user has to do or decide, or what Jeden does next, or "none"). Polish
+conversations get the same contract in Polish. Your own text replaces that
+default; the value `none` turns it off. `jeden run /prompt` shows the contract
+in force, and the RPC result of `config/contracts/get` says which one it is in
+`communicationSource` (`default`, `operator`, or `disabled`) and carries the
+default text in `communicationDefault`, which Jeden Desktop shows under the
+field.
+
+Jeden adds each contract to every new or rebuilt system prompt. The contracts
+supplement the built-in engineering rules and cannot relax tool grants, path
+jails, safety checks, or evidence requirements.
 
 Every ordinary user turn, including a delegated task, carries Jeden's built-in
 task contract. Completion means durable, reusable product functionality rather

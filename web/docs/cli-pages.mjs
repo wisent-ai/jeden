@@ -276,7 +276,7 @@ const commands = [
       "No action defaults to <code>list</code>.",
       "<code>--cwd</code> selects the project layer used when computing effective values; <code>--json</code> selects structured output.",
       "Use the linked leaf commands for their required key/value inputs.",
-      "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings and default to empty.",
+      "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings. An empty communication contract means Jeden's default (plain language, then what was done, blockers, next steps); <code>none</code> turns it off.",
       "The communication keys are <code>communication.mode</code> (<code>normal</code>, <code>debug</code>, <code>quiet</code>) and the overrides <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, and <code>communication.code</code> (<code>auto</code>, <code>show</code>, <code>hide</code>).",
     ],
     effect: "Lists merged effective settings, prints the writable user path, reads one setting, or atomically writes a schema-validated user value/default depending on the selected action. New and rebuilt system prompts include each non-empty operator contract; the built-in task contract remains read-only and is exposed separately as <code>taskContract</code> by RPC contract settings. The next turn of every session honours the communication mode.",
@@ -440,7 +440,7 @@ const commands = [
     purpose: "Validate and persist one user configuration setting.",
     inputs: [
       "Required: exact schema key and value. Multi-token values are joined with spaces before type parsing; JSON arrays and records must be valid JSON.",
-      "Use <code>contracts.communication</code> for language, tone, length, structure, and terminology instructions. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
+      "Use <code>contracts.communication</code> to say how Jeden writes to you: your text replaces Jeden's default (plain language, then what was done, blockers, next steps) and <code>none</code> turns it off. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
       "Use <code>communication.mode</code> to choose <code>normal</code>, <code>debug</code>, or <code>quiet</code>, and <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, or <code>communication.code</code> with <code>auto</code>, <code>show</code>, or <code>hide</code> to override one item.",
     ],
     effect: "Parses the schema type, updates the nested user configuration object, atomically writes the user config, and prints the key/path or structured mutation result. A non-empty contract is added to every new or rebuilt system prompt; a communication setting applies from the next turn, including in a running session.",
@@ -454,7 +454,7 @@ const commands = [
     invocation: "jeden config reset <key> [--json]",
     purpose: "Persist one setting's schema default into the user configuration.",
     inputs: ["Required: an exact schema key. Optional: <code>--json</code> for the key, default value, type, description, and path."],
-    effect: "Sets the nested user key to the schema default, atomically writes the user config, and prints the reset result. Resetting either contract stores an empty string, which adds no extra prompt instruction; resetting <code>communication.mode</code> returns to <code>normal</code> and resetting an override returns it to <code>auto</code>.",
+    effect: "Sets the nested user key to the schema default, atomically writes the user config, and prints the reset result. Resetting <code>contracts.communication</code> returns to Jeden's default communication contract; resetting <code>contracts.functionality</code> stores an empty string, which adds no extra prompt instruction; resetting <code>communication.mode</code> returns to <code>normal</code> and resetting an override returns it to <code>auto</code>.",
     refusals: ["Missing input is refused as <code>config reset requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
   },
 

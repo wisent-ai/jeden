@@ -189,14 +189,15 @@ export const pages = [
       {
         title: "Communication and functionality contracts",
         paragraphs: [
-          "The <code>contracts.communication</code> setting tells Jeden how to communicate: language, tone, length, structure, and terminology. The <code>contracts.functionality</code> setting tells it how to carry out work and what must be complete before it answers.",
-          "Jeden adds non-empty contracts to every new or rebuilt system prompt after its built-in engineering contract. They supplement the built-in rules and cannot relax tool grants, path jails, safety checks, or evidence requirements.",
-          "The CLI and Jeden Desktop Settings screen edit the same user defaults in <code>~/.jeden/config.yml</code>. A project may override either key in <code><cwd>/.jeden/config.json</code>; an empty value adds no extra instruction.",
+          "The <code>contracts.communication</code> setting tells Jeden how to write to you. The <code>contracts.functionality</code> setting tells it how to carry out work and what must be complete before it answers.",
+          "The communication contract has a built-in default. When the setting is empty, Jeden tells the model to write in plain language — short, ordinary sentences — and to give every answer in three parts under their own headings: what was done, in the past tense with real names, paths, commands and numbers; blockers, each with the exact error and what was tried, or \"none\"; and next steps, what you have to do or decide or what Jeden does next, or \"none\". Polish conversations get the same contract in Polish. Your own text replaces the default; the value <code>none</code> turns it off.",
+          "Jeden adds the contracts to every new or rebuilt system prompt after its built-in engineering and task contracts. They supplement the built-in rules and cannot relax tool grants, path jails, safety checks, or evidence requirements. <code>jeden run /prompt</code> shows the contract in force, and <code>config/contracts/get</code> reports which one it is in <code>communicationSource</code> (<code>default</code>, <code>operator</code>, or <code>disabled</code>) with the default text in <code>communicationDefault</code>.",
+          "The CLI and Jeden Desktop Settings screen edit the same user defaults in <code>~/.jeden/config.yml</code>; the Settings screen also shows the default text while it is in force. A project may override either key in <code><cwd>/.jeden/config.json</code>.",
         ],
         commands: [
           {
-            label: "Set, inspect, or clear the contracts",
-            code: 'jeden config set contracts.communication "Answer in Polish using three plain sentences."\njeden config set contracts.functionality "Finish the requested behavior before answering."\njeden config get contracts.communication\njeden config get contracts.functionality\njeden config reset contracts.communication\njeden config reset contracts.functionality',
+            label: "Set, inspect, replace, or turn off the contracts",
+            code: 'jeden config get contracts.communication\njeden config set contracts.communication "Answer in Polish using three plain sentences."\njeden config set contracts.communication none\njeden config reset contracts.communication\njeden config set contracts.functionality "Finish the requested behavior before answering."\njeden config reset contracts.functionality',
           },
         ],
       },

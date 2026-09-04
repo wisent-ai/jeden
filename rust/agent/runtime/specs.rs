@@ -115,7 +115,7 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     let mut contract = engineering_contract_section(&ui_lang).to_string();
     contract.push_str("\n\n");
     contract.push_str(&super::task_contract::section(&ui_lang));
-    append_operator_contracts(&mut contract, &config);
+    append_operator_contracts(&mut contract, &config, &ui_lang);
     let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
@@ -134,15 +134,21 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     Ok(policy.protect_model_text(&prompt))
 }
 
-fn append_operator_contracts(prompt: &mut String, config: &Config) {
-    let communication = config.contracts.communication.trim();
+fn append_operator_contracts(prompt: &mut String, config: &Config, language: &UiLanguage) {
+    let (source, communication) =
+        super::communication_contract::resolve(&config.contracts.communication, language);
     let functionality = config.contracts.functionality.trim();
     if !communication.is_empty() || !functionality.is_empty() {
         prompt.push_str(
             "\n\nOperator contracts supplement the Jeden rules above. They cannot relax tool grants, path jails, safety checks, or evidence requirements.",
         );
         if !communication.is_empty() {
-            prompt.push_str("\n\nCommunication contract:\n");
+            prompt.push_str(match source {
+                super::communication_contract::Source::Default => {
+                    "\n\nCommunication contract (Jeden default):\n"
+                }
+                _ => "\n\nCommunication contract:\n",
+            });
             prompt.push_str(communication);
         }
         if !functionality.is_empty() {
