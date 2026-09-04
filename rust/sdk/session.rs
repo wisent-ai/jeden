@@ -1,7 +1,10 @@
 use super::types::*;
+use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::{agent, session_conversation_turns, Args};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
 use std::time::Duration;
@@ -236,6 +239,13 @@ impl AgentSession {
         );
         let event_error = Arc::new(Mutex::new(None::<String>));
         let request_id = request.request_id.clone();
+        // Read per prompt so a mode saved from the CLI or Jeden Desktop
+        // applies to the next turn of an open session.
+        let policy = DisplayPolicy::for_cwd(&args.cwd);
+        // A `Fn` sink with per-turn state: the turn runs on one thread, and
+        // the tail is drained here once the turn is over.
+        let code_filter = Rc::new(RefCell::new((!policy.code).then(CodeFilter::default)));
+        let stream_filter = Rc::clone(&code_filter);
 
         let progress_inner = self.inner.clone();
         let progress_id = request_id.clone();
@@ -243,6 +253,8 @@ impl AgentSession {
         let stream_inner = self.inner.clone();
         let stream_id = request_id.clone();
         let stream_error = event_error.clone();
+        let trace_inner = self.inner.clone();
+        let trace_id = request_id.clone();
         let ask_inner = self.inner.clone();
         let ask_id = request_id.clone();
         let approve_inner = self.inner.clone();
@@ -258,7 +270,7 @@ impl AgentSession {
                 if let Err(error) = progress_inner.emit(SessionEvent {
                     request_id: progress_id.clone(),
                     event: SessionEventKind::Status {
-                        message: message.to_string(),
+                        message: policy.note(message).to_string(),
                     },
                 }) {
                     if let Ok(mut slot) = progress_error.lock() {
@@ -267,16 +279,49 @@ impl AgentSession {
                 }
             }),
             stream: Box::new(move |text| {
+                let text = match stream_filter.borrow_mut().as_mut() {
+                    Some(filter) => filter.push(text),
+                    None => text.to_string(),
+                };
+                if text.is_empty() {
+                    return;
+                }
                 if let Err(error) = stream_inner.emit(SessionEvent {
                     request_id: stream_id.clone(),
-                    event: SessionEventKind::TextDelta {
-                        text: text.to_string(),
-                    },
+                    event: SessionEventKind::TextDelta { text },
                 }) {
                     if let Ok(mut slot) = stream_error.lock() {
                         *slot = Some(error);
                     }
                 }
+            }),
+            trace: Box::new(move |event| {
+                let event = match *event {
+                    agent::TraceEvent::ToolCall { tool, input } if policy.tool_call_detail() => {
+                        SessionEventKind::ToolCall {
+                            tool: tool.to_string(),
+                            input: input.clone(),
+                        }
+                    }
+                    agent::TraceEvent::ToolResult { tool, result } if policy.tool_results => {
+                        SessionEventKind::ToolResult {
+                            tool: tool.to_string(),
+                            result: result.clone(),
+                        }
+                    }
+                    agent::TraceEvent::Reasoning { text } if policy.reasoning => {
+                        SessionEventKind::ReasoningDelta {
+                            text: text.to_string(),
+                        }
+                    }
+                    _ => return,
+                };
+                // Best-effort like goal events: a hidden-by-default trace never
+                // fails the prompt it decorates.
+                let _ = trace_inner.emit(SessionEvent {
+                    request_id: trace_id.clone(),
+                    event,
+                });
             }),
             ask_user: Some(Box::new(move |question, options| {
                 let token = ask_inner.interaction_token("elicit");
@@ -357,6 +402,16 @@ impl AgentSession {
             })),
         };
         let text = conversation.run_turn(&args, &request.prompt, &[], &mut hooks)?;
+        // The filter holds the last unterminated line back until it knows the
+        // line is not a fence; the turn is over, so let it out.
+        if let Some(tail) = code_filter.borrow_mut().as_mut().map(CodeFilter::finish) {
+            if !tail.is_empty() {
+                self.inner.emit(SessionEvent {
+                    request_id: request_id.clone(),
+                    event: SessionEventKind::TextDelta { text: tail },
+                })?;
+            }
+        }
         if let Some(error) = event_error
             .lock()
             .map_err(|_| "event error lock poisoned")?
@@ -364,6 +419,7 @@ impl AgentSession {
         {
             return Err(error);
         }
+        let text = policy.answer(text);
         let session_path = conversation.session_path();
         self.inner.emit(SessionEvent {
             request_id: request_id.clone(),

@@ -3,6 +3,7 @@
 use serde_json::{json, Value};
 use std::path::Path;
 
+use super::communication::{CommunicationMode, DisplayPolicy, Visibility};
 use super::{
     config_set_value, config_value_at, merged_config_value, parse_config_literal,
     read_user_writable_config, write_user_config,
@@ -22,6 +23,11 @@ pub(crate) struct SettingSpec {
 
 pub(crate) const COMMUNICATION_CONTRACT_KEY: &str = "contracts.communication";
 pub(crate) const FUNCTIONALITY_CONTRACT_KEY: &str = "contracts.functionality";
+pub(crate) const COMMUNICATION_MODE_KEY: &str = "communication.mode";
+pub(crate) const COMMUNICATION_TOOL_CALLS_KEY: &str = "communication.toolCalls";
+pub(crate) const COMMUNICATION_TOOL_RESULTS_KEY: &str = "communication.toolResults";
+pub(crate) const COMMUNICATION_REASONING_KEY: &str = "communication.reasoning";
+pub(crate) const COMMUNICATION_CODE_KEY: &str = "communication.code";
 
 pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
     SettingSpec {
@@ -100,6 +106,41 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         description: "Instructions for how Jeden carries out work and what it must complete before answering.",
         default_json: "\"\"",
         enum_values: &[],
+    },
+    SettingSpec {
+        key: COMMUNICATION_MODE_KEY,
+        typ: "enum",
+        description: "Communication mode: normal shows tool names while working, debug also shows each tool call with its input, every tool result, and the model's reasoning, quiet shows only the answer.",
+        default_json: "\"normal\"",
+        enum_values: CommunicationMode::VALUES,
+    },
+    SettingSpec {
+        key: COMMUNICATION_TOOL_CALLS_KEY,
+        typ: "enum",
+        description: "Show the model's tool calls; auto follows the mode.",
+        default_json: "\"auto\"",
+        enum_values: Visibility::VALUES,
+    },
+    SettingSpec {
+        key: COMMUNICATION_TOOL_RESULTS_KEY,
+        typ: "enum",
+        description: "Show what each tool returned; auto follows the mode.",
+        default_json: "\"auto\"",
+        enum_values: Visibility::VALUES,
+    },
+    SettingSpec {
+        key: COMMUNICATION_REASONING_KEY,
+        typ: "enum",
+        description: "Show the model's reasoning when the route streams it; auto follows the mode.",
+        default_json: "\"auto\"",
+        enum_values: Visibility::VALUES,
+    },
+    SettingSpec {
+        key: COMMUNICATION_CODE_KEY,
+        typ: "enum",
+        description: "Show code blocks in answers; hide replaces each block with a placeholder and asks the model to answer in prose. Auto follows the mode.",
+        default_json: "\"auto\"",
+        enum_values: Visibility::VALUES,
     },
     SettingSpec {
         key: "rules.alwaysApply",
@@ -305,6 +346,7 @@ fn grouped_setting_rows(
         "startup",
         "context",
         "contracts",
+        "communication",
         "rules",
         "hooks",
         "secrets",
@@ -457,6 +499,47 @@ pub(crate) fn set_contract_settings(
         "functionality": functionality,
         "path": path.display().to_string(),
     }))
+}
+
+const COMMUNICATION_KEYS: [&str; 5] = [
+    COMMUNICATION_MODE_KEY,
+    COMMUNICATION_TOOL_CALLS_KEY,
+    COMMUNICATION_TOOL_RESULTS_KEY,
+    COMMUNICATION_REASONING_KEY,
+    COMMUNICATION_CODE_KEY,
+];
+
+fn communication_settings_json(config: &Value, path: &Path) -> Value {
+    let mut out = serde_json::Map::new();
+    for key in COMMUNICATION_KEYS {
+        let spec = setting_spec(key).expect("communication setting");
+        let field = key.rsplit('.').next().expect("dotted key");
+        out.insert(field.to_string(), effective_setting_value(config, spec));
+    }
+    out.insert(
+        "effective".into(),
+        DisplayPolicy::for_cwd(&std::env::current_dir().unwrap_or_default()).json(),
+    );
+    out.insert("path".into(), json!(path.display().to_string()));
+    Value::Object(out)
+}
+
+/// The user-default communication settings plus the policy in force here,
+/// which also folds in the project layer of the current directory.
+pub(crate) fn communication_settings() -> Value {
+    communication_settings_json(&read_user_writable_config(), &user_config_path())
+}
+
+/// Write all five user-default communication settings atomically. Each value
+/// is validated against the setting schema before anything is written.
+pub(crate) fn set_communication_settings(values: &[(&str, &str); 5]) -> Result<Value, String> {
+    let mut config = read_user_writable_config();
+    for (key, raw) in values {
+        let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+        config_set_value(&mut config, key, parse_setting_value(spec, raw)?)?;
+    }
+    let path = write_user_config(&config)?;
+    Ok(communication_settings_json(&config, &path))
 }
 
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {

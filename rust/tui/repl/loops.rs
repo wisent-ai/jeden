@@ -57,6 +57,7 @@ where
             attachments: &[],
             progress: &|_| {},
             stream: &|_| {},
+            trace: &|_| {},
             ask_user: None,
             approve: &|_, _| false,
         };
@@ -591,6 +592,7 @@ where
                                 attachments: &active_attachments,
                                 progress: &|_| {},
                                 stream: &|_| {},
+                                trace: &|_| {},
                                 ask_user: None,
                                 approve: &|_, _| false,
                             };

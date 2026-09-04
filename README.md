@@ -136,6 +136,25 @@ Jeden adds each non-empty contract to every new or rebuilt system prompt. The
 contracts supplement the built-in engineering rules and cannot relax tool
 grants, path jails, safety checks, or evidence requirements.
 
+The communication mode chooses what Jeden shows of its own work. `normal`
+shows tool names while it works and then the answer with its code; `debug`
+also shows each tool call with its input, each tool result, and the model's
+reasoning when the route streams it; `quiet` shows only the answer. Four
+overrides default to `auto` and follow the mode: `communication.toolCalls`,
+`communication.toolResults`, `communication.reasoning`, and
+`communication.code`, each `auto`, `show`, or `hide`. Hidden code replaces every
+fenced block with `[code hidden: N lines]` and asks the model to answer in
+prose. The mode is read at the start of each turn, so `/settings set
+communication.mode quiet` changes the next turn of a running session; the
+terminal, `jeden rpc`, `jeden headless`, `jeden acp`, and Jeden Desktop honour
+it, and the session transcript records everything regardless.
+
+```sh
+jeden config set communication.mode debug
+jeden config set communication.toolResults hide
+jeden config set communication.code hide
+```
+
 The first-use journey (`/onboarding`) is separate from `/setup` and always runs
 from the definition compiled into the binary, so it works offline and completes
 on the first successful agent turn. When `STADO_INTEGRATION_API_URL` is set, the

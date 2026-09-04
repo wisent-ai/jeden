@@ -187,6 +187,9 @@ fn role_color(role: &str) -> &'static str {
         "assistant" => "magenta",
         "error" => "red",
         "system" => "yellow",
+        // Machinery the communication mode chose to show sits below the
+        // conversation it explains.
+        "tool" | "reasoning" => "dim",
         _ => "cyan",
     }
 }

@@ -157,12 +157,15 @@ impl Conversation {
                     true
                 }
             };
+            let mut on_reasoning =
+                |piece: &str| hooks.trace(&TraceEvent::Reasoning { text: piece });
             let call = chat_completion_streaming(
                 &router,
                 outbound_messages,
                 args.max_tokens.map(|t| t as usize),
                 &tool_specs,
                 &mut on_delta,
+                &mut on_reasoning,
                 &|| hooks.cancelled(),
             );
             match call {
@@ -277,6 +280,7 @@ impl Conversation {
                                         input: input.clone(),
                                     },
                                     &result,
+                                    hooks,
                                 )?;
                                 result
                             } else {
@@ -317,6 +321,7 @@ impl Conversation {
                                                 input: input.clone(),
                                             },
                                             &result,
+                                            hooks,
                                         )?;
                                         result
                                     }
@@ -347,6 +352,7 @@ impl Conversation {
                                         step,
                                         &tool,
                                         &result,
+                                        hooks,
                                     )?;
                                     results.push(result);
                                     continue;
@@ -382,6 +388,7 @@ impl Conversation {
                                             step,
                                             &tool,
                                             &result,
+                                            hooks,
                                         )?;
                                         results.push(result);
                                     }

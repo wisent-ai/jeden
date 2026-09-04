@@ -736,6 +736,19 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             ("status".into(), json!({"message": message}), false)
         }
         SessionEventKind::TextDelta { text } => ("textDelta".into(), json!({"text": text}), false),
+        SessionEventKind::ReasoningDelta { text } => {
+            ("reasoningDelta".into(), json!({"text": text}), false)
+        }
+        SessionEventKind::ToolCall { tool, input } => (
+            "toolCall".into(),
+            json!({"tool": tool, "input": input}),
+            false,
+        ),
+        SessionEventKind::ToolResult { tool, result } => (
+            "toolResult".into(),
+            json!({"tool": tool, "result": result}),
+            false,
+        ),
         SessionEventKind::Elicitation {
             token,
             question,

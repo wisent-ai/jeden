@@ -498,16 +498,20 @@ fn subscription_targets_for_route<'a>(
 }
 
 /// Streaming chat completion. Requests SSE (`stream: true`); for each content
-/// delta it calls `on_delta`. Falls back to whole-body parsing if the endpoint
-/// ignores `stream` and returns a normal JSON completion. Tool-call responses
-/// are accumulated and returned as an action string (no partial tool deltas are
+/// delta it calls `on_delta`, and for each reasoning delta `on_reasoning`
+/// (reasoning never counts as visible output, so a route may still retry
+/// after it). Falls back to whole-body parsing if the endpoint ignores
+/// `stream` and returns a normal JSON completion. Tool-call responses are
+/// accumulated and returned as an action string (no partial tool deltas are
 /// surfaced). Returns the same action/content string as `chat_completion`.
+#[allow(clippy::too_many_arguments)]
 pub fn chat_completion_streaming(
     config: &ChatConfig,
     messages: Vec<Value>,
     max_tokens: Option<usize>,
     tools: &[Value],
     on_delta: &mut dyn FnMut(&str) -> bool,
+    on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StreamingCompletion, StreamFailure> {
     if let Some(message) = &config.config_error {
@@ -634,6 +638,7 @@ pub fn chat_completion_streaming(
                     target,
                     target.and(subscription_decision.as_ref()),
                     on_delta,
+                    on_reasoning,
                     cancelled,
                 ) {
                     Ok(completion) => {
@@ -852,8 +857,8 @@ fn build_streaming_body(
     Ok(body)
 }
 
-// Six of these become the request body and the last two are the caller's live
-// delta sink and cancel probe, so no one struct owns the set.
+// Six of these become the request body and the last three are the caller's
+// live delta sinks and cancel probe, so no one struct owns the set.
 #[allow(clippy::too_many_arguments)]
 fn streaming_attempt(
     config: &ChatConfig,
@@ -864,6 +869,7 @@ fn streaming_attempt(
     target: Option<&crate::routing::SubscriptionTarget>,
     decision: Option<&crate::routing::RouteDecisionV2>,
     on_delta: &mut dyn FnMut(&str) -> bool,
+    on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Completion, AttemptError> {
     let body = build_streaming_body(route, messages, max_tokens, tools, target, decision)
@@ -949,7 +955,7 @@ fn streaming_attempt(
                     .map_err(|message| malformed(message, state.visible_output))?
                 {
                     first_event_seen = true;
-                    if state.apply_payload(&payload, on_delta)? {
+                    if state.apply_payload(&payload, on_delta, on_reasoning)? {
                         return state.finish();
                     }
                 }
@@ -960,7 +966,7 @@ fn streaming_attempt(
                     .finish()
                     .map_err(|message| malformed(message, state.visible_output))?
                 {
-                    if state.apply_payload(&payload, on_delta)? {
+                    if state.apply_payload(&payload, on_delta, on_reasoning)? {
                         return state.finish();
                     }
                 }
@@ -1114,7 +1120,7 @@ impl SseDecoder {
 #[derive(Debug)]
 enum OpenAiStreamEvent {
     Text(String),
-    Thinking,
+    Thinking(String),
     ToolCalls(Vec<Value>),
     Usage(CompletionUsage),
     Metadata,
@@ -1136,6 +1142,7 @@ impl OpenAiStreamState {
         &mut self,
         payload: &str,
         on_delta: &mut dyn FnMut(&str) -> bool,
+        on_reasoning: &mut dyn FnMut(&str),
     ) -> Result<bool, AttemptError> {
         for event in parse_stream_events(payload)
             .map_err(|message| malformed(message, self.visible_output))?
@@ -1145,7 +1152,8 @@ impl OpenAiStreamState {
                     self.content.push_str(&piece);
                     self.visible_output |= on_delta(&piece);
                 }
-                OpenAiStreamEvent::Thinking | OpenAiStreamEvent::Metadata => {}
+                OpenAiStreamEvent::Thinking(piece) => on_reasoning(&piece),
+                OpenAiStreamEvent::Metadata => {}
                 OpenAiStreamEvent::ToolCalls(calls) => {
                     accumulate_tool_call_deltas(&mut self.tool_calls, &calls)
                         .map_err(|message| malformed(message, self.visible_output))?;
@@ -1233,10 +1241,14 @@ fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent>, String> 
         .get("reasoning_content")
         .or_else(|| delta.get("reasoning"))
     {
-        if !reasoning.is_null() && !reasoning.is_string() {
-            return Err("model stream reasoning delta is not a string or null".into());
+        match reasoning {
+            Value::Null => {}
+            Value::String(text) if !text.is_empty() => {
+                events.push(OpenAiStreamEvent::Thinking(text.clone()));
+            }
+            Value::String(_) => {}
+            _ => return Err("model stream reasoning delta is not a string or null".into()),
         }
-        events.push(OpenAiStreamEvent::Thinking);
         recognized = true;
     }
     if let Some(calls) = delta.get("tool_calls") {

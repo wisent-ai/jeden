@@ -21,7 +21,7 @@ mod state;
 
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;
-pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult};
+pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult, TraceEvent};
 pub(crate) use runtime::model_router_config;
 pub(crate) use runtime::now_stamp;
 pub(crate) use runtime::specs::system_prompt_checked;

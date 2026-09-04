@@ -15,6 +15,16 @@ pub(crate) type AskUser<'a> = Box<dyn Fn(&str, &[String]) -> Result<String, Stri
 /// Tool name plus approval detail in, the verdict out.
 pub(crate) type ApproveTool<'a> = Box<dyn Fn(&str, &str) -> bool + 'a>;
 
+/// What a turn shows of its own machinery: the model's tool calls, what the
+/// tools returned, and the model's reasoning stream. Borrowed so a turn whose
+/// surface hides them pays nothing; the transcript records them regardless.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum TraceEvent<'a> {
+    ToolCall { tool: &'a str, input: &'a Value },
+    ToolResult { tool: &'a str, result: &'a Value },
+    Reasoning { text: &'a str },
+}
+
 /// Cooperative controls for a turn: cancellation, live progress, streaming,
 /// terminal-owned questions, tool approval, and non-TUI interactivity.
 pub(crate) struct RunHooks<'a> {
@@ -23,6 +33,9 @@ pub(crate) struct RunHooks<'a> {
     pub(crate) progress: Box<dyn Fn(&str) + 'a>,
     /// Per-token streaming sink for live assistant text.
     pub(crate) stream: Box<dyn Fn(&str) + 'a>,
+    /// Tool calls, tool results, and reasoning as they happen, for surfaces
+    /// whose communication mode shows them.
+    pub(crate) trace: Box<dyn Fn(&TraceEvent<'_>) + 'a>,
     /// Terminal-owned human question channel when a live event loop is present.
     pub(crate) ask_user: Option<AskUser<'a>>,
     /// Ask the user to approve a gated tool that isn't pre-authorized. The
@@ -40,6 +53,7 @@ impl RunHooks<'static> {
             interactive: true,
             progress: Box::new(|_| {}),
             stream: Box::new(|_| {}),
+            trace: Box::new(|_| {}),
             ask_user: None,
             approve: Box::new(|_, _| false),
             goal_event: None,
@@ -58,6 +72,10 @@ impl RunHooks<'_> {
 
     pub(super) fn push_delta(&self, piece: &str) {
         (self.stream)(piece);
+    }
+
+    pub(super) fn trace(&self, event: &TraceEvent<'_>) {
+        (self.trace)(event);
     }
 
     pub(super) fn approve(&self, tool: &str, detail: &str) -> bool {

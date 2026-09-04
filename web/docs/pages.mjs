@@ -200,6 +200,20 @@ export const pages = [
           },
         ],
       },
+      {
+        title: "Communication modes",
+        paragraphs: [
+          "The <code>communication.mode</code> setting chooses what Jeden shows of its own work while it answers. <code>normal</code> shows tool names while Jeden works and then the answer with its code. <code>debug</code> also shows every tool call with its input, every tool result, and the model's reasoning when the route streams it. <code>quiet</code> shows only the answer.",
+          "Four keys override one item each and default to <code>auto</code>, which follows the mode: <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, and <code>communication.code</code>. Setting a key to <code>show</code> or <code>hide</code> wins over the mode, so <code>debug</code> with <code>communication.toolResults hide</code> shows calls and reasoning but no results.",
+          "Hiding code replaces every fenced code block in an answer with <code>[code hidden: N lines]</code> and tells the model to answer in prose; tools still write and run code. The setting is read at the start of every turn, so <code>/settings set communication.mode quiet</code> changes the next turn of a running session, and Jeden Desktop edits the same values on its Settings screen. The session transcript records every tool call, result, and answer regardless of the mode.",
+        ],
+        commands: [
+          {
+            label: "Choose a mode and override one item",
+            code: "jeden config set communication.mode debug\njeden config set communication.toolResults hide\njeden config set communication.code hide\njeden config get communication.mode\njeden config reset communication.code",
+          },
+        ],
+      },
     ],
   },
   {

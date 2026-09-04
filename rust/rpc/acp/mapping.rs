@@ -74,6 +74,38 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
                 terminal: false,
             }
         }
+        // Reasoning is a thought; a tool call and its result are one ACP tool
+        // call keyed by the tool name, the only identity a turn's trace carries.
+        SessionEventKind::ReasoningDelta { text } => MappedEvent {
+            update: Some(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+                text.into(),
+            ))),
+            terminal: false,
+        },
+        SessionEventKind::ToolCall { tool, input } => MappedEvent {
+            update: Some(SessionUpdate::ToolCall(
+                ToolCall::new(tool.clone(), tool)
+                    .status(ToolCallStatus::InProgress)
+                    .raw_input(input),
+            )),
+            terminal: false,
+        },
+        SessionEventKind::ToolResult { tool, result } => {
+            let failed = result.get("ok").and_then(Value::as_bool) == Some(false);
+            MappedEvent {
+                update: Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                    tool,
+                    ToolCallUpdateFields::new()
+                        .status(if failed {
+                            ToolCallStatus::Failed
+                        } else {
+                            ToolCallStatus::Completed
+                        })
+                        .raw_output(result),
+                ))),
+                terminal: false,
+            }
+        }
         SessionEventKind::Elicitation {
             token,
             question,

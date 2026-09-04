@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use super::{run_turn_shared, self_rebuild};
 use crate::cli::commands::expand::resolve_file_command;
+use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::cli::config::load_config;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
 use crate::cli::run::slash_ui::{interactive_view, model_picker};
@@ -238,11 +239,33 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         run_args.model = handler_model.lock().clone();
         run_args.json = false;
         run_args.cwd = handler_cwd.lock().clone();
+        // Read per turn so `/settings set communication.mode …` or a save from
+        // Jeden Desktop changes what the next turn shows.
+        let policy = DisplayPolicy::for_cwd(&run_args.cwd);
+        let code_filter = std::cell::RefCell::new((!policy.code).then(CodeFilter::default));
         let mut hooks = agent::RunHooks {
             cancel: ctx.cancel.clone(),
             interactive: ctx.interactive,
-            progress: Box::new(|message: &str| (ctx.progress)(message)),
-            stream: Box::new(|piece: &str| (ctx.stream)(piece)),
+            progress: Box::new(|message: &str| (ctx.progress)(policy.note(message))),
+            stream: Box::new(|piece: &str| {
+                let text = match code_filter.borrow_mut().as_mut() {
+                    Some(filter) => filter.push(piece),
+                    None => piece.to_string(),
+                };
+                if !text.is_empty() {
+                    (ctx.stream)(&text);
+                }
+            }),
+            trace: Box::new(|event: &agent::TraceEvent<'_>| {
+                let shown = match event {
+                    agent::TraceEvent::ToolCall { .. } => policy.tool_call_detail(),
+                    agent::TraceEvent::ToolResult { .. } => policy.tool_results,
+                    agent::TraceEvent::Reasoning { .. } => policy.reasoning,
+                };
+                if shown {
+                    (ctx.trace)(event);
+                }
+            }),
             ask_user: ctx.ask_user.map(|ask_user| {
                 Box::new(move |question: &str, options: &[String]| ask_user(question, options))
                     as Box<dyn Fn(&str, &[String]) -> Result<String, String>>
@@ -535,13 +558,16 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                             &attachments,
                             &mut hooks,
                         )
+                        .map(|text| policy.answer(text))
                     } else {
                         run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
+                            .map(|text| policy.answer(text))
                     }
                 }
             }
         } else {
             run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
+                .map(|text| policy.answer(text))
         };
         if !input.trim_start().starts_with('/') && result.is_ok() {
             crate::onboarding::observe_successful_turn();

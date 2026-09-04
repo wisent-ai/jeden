@@ -23,20 +23,31 @@ pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
 pub(in crate::agent) fn tool_to_value(action: &ToolAction) -> Value {
     json!({ "tool": action.tool, "input": action.input })
 }
+/// Record a tool call the turn refused to run, with the refusal as its result.
 pub(in crate::agent) fn record_unexecuted_tool_action(
     recorder: &mut SessionRecorder,
     step: u32,
     action: &ToolAction,
     result: &Value,
+    hooks: &RunHooks<'_>,
 ) -> Result<(), String> {
     recorder.record(
         "tool_call",
         json!({ "step": step, "tool": action.tool, "input": action.input }),
     )?;
+    hooks.trace(&TraceEvent::ToolCall {
+        tool: &action.tool,
+        input: &action.input,
+    });
     recorder.record(
         "tool_result",
         json!({ "step": step, "tool": action.tool, "result": result }),
-    )
+    )?;
+    hooks.trace(&TraceEvent::ToolResult {
+        tool: &action.tool,
+        result,
+    });
+    Ok(())
 }
 
 pub(in crate::agent) fn run_tool_action(
@@ -52,6 +63,10 @@ pub(in crate::agent) fn run_tool_action(
         "tool_call",
         json!({ "step": step, "tool": action.tool, "input": action.input }),
     )?;
+    hooks.trace(&TraceEvent::ToolCall {
+        tool: &action.tool,
+        input: &action.input,
+    });
     let artifact_dir = recorder.artifact_dir();
     let runtime = crate::tool_runtime::ToolRuntime {
         cwd: &args.cwd,
@@ -70,5 +85,9 @@ pub(in crate::agent) fn run_tool_action(
         "tool_result",
         json!({ "step": step, "tool": action.tool, "result": result }),
     )?;
+    hooks.trace(&TraceEvent::ToolResult {
+        tool: &action.tool,
+        result: &result,
+    });
     Ok(result)
 }

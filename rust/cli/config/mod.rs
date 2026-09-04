@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::cli::auth::AuthProviderConfig;
 use crate::{config_path, legacy_user_config_path, user_config_path};
 
+pub(crate) mod communication;
 #[path = "../../migrations/mod.rs"]
 pub(crate) mod migrations;
 pub(crate) mod schema;
@@ -130,6 +131,8 @@ pub(crate) struct Config {
     pub(crate) rules: RulesConfig,
     #[serde(default)]
     pub(crate) contracts: ContractsConfig,
+    #[serde(default)]
+    pub(crate) communication: communication::CommunicationConfig,
     #[serde(default)]
     pub(crate) secrets: SecretsConfig,
     #[serde(default)]
@@ -489,6 +492,7 @@ pub(crate) fn load_config(cwd: &Path) -> Config {
         context: merged.context,
         rules: merged.rules,
         contracts: merged.contracts,
+        communication: merged.communication,
         secrets: merged.secrets,
         billing: merged.billing,
         ui: merged.ui,

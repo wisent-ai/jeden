@@ -80,7 +80,7 @@ const commands = [
       "No command-specific positional input or option is required.",
       "Clients send one JSON request per line with an <code>id</code>, <code>method</code>, and optional <code>params</code> object.",
     ],
-    effect: "Keeps an in-process session map, emits one-line JSON responses and interaction events, and creates normal Jeden session state for requests that start or resume work. The <code>config/contracts/get</code> and <code>config/contracts/set</code> methods read and atomically write the two user contract settings used by Jeden Desktop. It opens no listener.",
+    effect: "Keeps an in-process session map, emits one-line JSON responses and interaction events, and creates normal Jeden session state for requests that start or resume work. The <code>config/contracts/get</code> and <code>config/contracts/set</code> methods read and atomically write the two user contract settings used by Jeden Desktop; <code>config/communication/get</code> and <code>config/communication/set</code> do the same for the communication mode and its four overrides and return the resolved <code>effective</code> policy. Session events include <code>toolCall</code>, <code>toolResult</code>, and <code>reasoningDelta</code> only when the communication mode shows them. It opens no listener.",
     refusals: [
       "Frames larger than 1 MiB are refused.",
       "Malformed JSON, missing methods, unknown methods, invalid parameters, and writes to a closed output stream are returned as RPC errors rather than guessed.",
@@ -277,8 +277,9 @@ const commands = [
       "<code>--cwd</code> selects the project layer used when computing effective values; <code>--json</code> selects structured output.",
       "Use the linked leaf commands for their required key/value inputs.",
       "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings and default to empty.",
+      "The communication keys are <code>communication.mode</code> (<code>normal</code>, <code>debug</code>, <code>quiet</code>) and the overrides <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, and <code>communication.code</code> (<code>auto</code>, <code>show</code>, <code>hide</code>).",
     ],
-    effect: "Lists merged effective settings, prints the writable user path, reads one setting, or atomically writes a schema-validated user value/default depending on the selected action. New and rebuilt system prompts include each non-empty contract.",
+    effect: "Lists merged effective settings, prints the writable user path, reads one setting, or atomically writes a schema-validated user value/default depending on the selected action. New and rebuilt system prompts include each non-empty contract; the next turn of every session honours the communication mode.",
     refusals: [
       "Unknown actions are refused with the exact usage line shown above.",
       "Unknown keys and values that do not match the setting's boolean, finite-number, enum, array, object, or string schema are refused before writing.",
@@ -429,7 +430,7 @@ const commands = [
     path: "config/get",
     invocation: "jeden config get <key> [--json] [--cwd path]",
     purpose: "Read one effective schema-backed setting.",
-    inputs: ["Required: an exact key from the setting schema, including <code>contracts.communication</code> or <code>contracts.functionality</code>. Optional: <code>--json</code> for metadata and <code>--cwd</code> for the project layer."],
+    inputs: ["Required: an exact key from the setting schema, including <code>contracts.communication</code>, <code>contracts.functionality</code>, <code>communication.mode</code>, or one of the four <code>communication.*</code> overrides. Optional: <code>--json</code> for metadata and <code>--cwd</code> for the project layer."],
     effect: "Prints the effective string or JSON value; JSON mode also returns type, description, default, and enum metadata. It does not write configuration.",
     refusals: ["Missing input is refused as <code>config get requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
   },
@@ -440,8 +441,9 @@ const commands = [
     inputs: [
       "Required: exact schema key and value. Multi-token values are joined with spaces before type parsing; JSON arrays and records must be valid JSON.",
       "Use <code>contracts.communication</code> for language, tone, length, structure, and terminology instructions. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
+      "Use <code>communication.mode</code> to choose <code>normal</code>, <code>debug</code>, or <code>quiet</code>, and <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, or <code>communication.code</code> with <code>auto</code>, <code>show</code>, or <code>hide</code> to override one item.",
     ],
-    effect: "Parses the schema type, updates the nested user configuration object, atomically writes the user config, and prints the key/path or structured mutation result. A non-empty contract is added to every new or rebuilt system prompt.",
+    effect: "Parses the schema type, updates the nested user configuration object, atomically writes the user config, and prints the key/path or structured mutation result. A non-empty contract is added to every new or rebuilt system prompt; a communication setting applies from the next turn, including in a running session.",
     refusals: [
       "Missing input is refused as <code>config set requires a key</code> or <code>config set requires a value</code>; unknown keys are refused.",
       "Invalid booleans, non-finite numbers, out-of-enum values, non-array JSON, and non-object JSON are refused with a key-specific message before writing.",
@@ -452,7 +454,7 @@ const commands = [
     invocation: "jeden config reset <key> [--json]",
     purpose: "Persist one setting's schema default into the user configuration.",
     inputs: ["Required: an exact schema key. Optional: <code>--json</code> for the key, default value, type, description, and path."],
-    effect: "Sets the nested user key to the schema default, atomically writes the user config, and prints the reset result. Resetting either contract stores an empty string, which adds no extra prompt instruction.",
+    effect: "Sets the nested user key to the schema default, atomically writes the user config, and prints the reset result. Resetting either contract stores an empty string, which adds no extra prompt instruction; resetting <code>communication.mode</code> returns to <code>normal</code> and resetting an override returns it to <code>auto</code>.",
     refusals: ["Missing input is refused as <code>config reset requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
   },
 

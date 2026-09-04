@@ -62,6 +62,23 @@ pub enum SessionEventKind {
     TextDelta {
         text: String,
     },
+    /// A model reasoning chunk. Emitted only when the session's communication
+    /// mode shows reasoning; never part of the answer.
+    ReasoningDelta {
+        text: String,
+    },
+    /// A tool the model invoked, with its input. Emitted only when the
+    /// session's communication mode shows tool calls with their inputs.
+    ToolCall {
+        tool: String,
+        input: Value,
+    },
+    /// What a tool returned, as recorded in the transcript. Emitted only when
+    /// the session's communication mode shows tool results.
+    ToolResult {
+        tool: String,
+        result: Value,
+    },
     Elicitation {
         token: String,
         question: String,

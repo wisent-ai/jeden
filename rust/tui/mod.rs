@@ -376,6 +376,8 @@ pub struct TurnCtx<'a> {
     pub progress: &'a dyn Fn(&str),
     /// Per-token streaming sink for live assistant text.
     pub stream: &'a dyn Fn(&str),
+    /// Tool calls, tool results, and reasoning the handler decided to show.
+    pub(crate) trace: &'a dyn Fn(&crate::agent::TraceEvent<'_>),
     /// Ask a question while the terminal event loop owns stdin.
     pub ask_user: Option<crate::tool_runtime::AskUserFn<'a>>,
     /// Ask the user to approve a gated tool; returns true to allow.

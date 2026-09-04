@@ -306,6 +306,8 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "session/new" | "new" => create_session(state, request.params, false),
         "config/contracts/get" => Ok(crate::cli::config::schema::contract_settings()),
         "config/contracts/set" => set_contract_settings(&request.params),
+        "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
+        "config/communication/set" => set_communication_settings(&request.params),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),
@@ -529,6 +531,28 @@ fn set_contract_settings(params: &Value) -> Result<Value, (&'static str, String)
         text_param(params, "functionality").map_err(|error| ("invalid_params", error))?;
     crate::cli::config::schema::set_contract_settings(&communication, &functionality)
         .map_err(|error| ("config_write_failed", error))
+}
+
+fn set_communication_settings(params: &Value) -> Result<Value, (&'static str, String)> {
+    use crate::cli::config::schema::{
+        COMMUNICATION_CODE_KEY, COMMUNICATION_MODE_KEY, COMMUNICATION_REASONING_KEY,
+        COMMUNICATION_TOOL_CALLS_KEY, COMMUNICATION_TOOL_RESULTS_KEY,
+    };
+    let mode = string_param(params, "mode").map_err(|error| ("invalid_params", error))?;
+    let tool_calls =
+        string_param(params, "toolCalls").map_err(|error| ("invalid_params", error))?;
+    let tool_results =
+        string_param(params, "toolResults").map_err(|error| ("invalid_params", error))?;
+    let reasoning = string_param(params, "reasoning").map_err(|error| ("invalid_params", error))?;
+    let code = string_param(params, "code").map_err(|error| ("invalid_params", error))?;
+    crate::cli::config::schema::set_communication_settings(&[
+        (COMMUNICATION_MODE_KEY, mode.as_str()),
+        (COMMUNICATION_TOOL_CALLS_KEY, tool_calls.as_str()),
+        (COMMUNICATION_TOOL_RESULTS_KEY, tool_results.as_str()),
+        (COMMUNICATION_REASONING_KEY, reasoning.as_str()),
+        (COMMUNICATION_CODE_KEY, code.as_str()),
+    ])
+    .map_err(|error| ("config_write_failed", error))
 }
 
 fn find_session(

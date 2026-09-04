@@ -135,19 +135,24 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
 fn append_operator_contracts(prompt: &mut String, config: &Config) {
     let communication = config.contracts.communication.trim();
     let functionality = config.contracts.functionality.trim();
-    if communication.is_empty() && functionality.is_empty() {
-        return;
+    if !communication.is_empty() || !functionality.is_empty() {
+        prompt.push_str(
+            "\n\nOperator contracts supplement the Jeden rules above. They cannot relax tool grants, path jails, safety checks, or evidence requirements.",
+        );
+        if !communication.is_empty() {
+            prompt.push_str("\n\nCommunication contract:\n");
+            prompt.push_str(communication);
+        }
+        if !functionality.is_empty() {
+            prompt.push_str("\n\nFunctionality contract:\n");
+            prompt.push_str(functionality);
+        }
     }
-    prompt.push_str(
-        "\n\nOperator contracts supplement the Jeden rules above. They cannot relax tool grants, path jails, safety checks, or evidence requirements.",
-    );
-    if !communication.is_empty() {
-        prompt.push_str("\n\nCommunication contract:\n");
-        prompt.push_str(communication);
-    }
-    if !functionality.is_empty() {
-        prompt.push_str("\n\nFunctionality contract:\n");
-        prompt.push_str(functionality);
+    let policy = crate::cli::config::communication::DisplayPolicy::resolve(&config.communication);
+    if !policy.code {
+        prompt.push_str(
+            "\n\nDisplay: the operator's communication mode hides code blocks, so every fenced block in an answer is replaced by a placeholder before they read it. Answer in prose: name files, functions, commands, and values inline, and put no code blocks or code listings in the answer. Tools may still write and run code.",
+        );
     }
 }
 
