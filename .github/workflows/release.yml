@@ -49,6 +49,21 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }}
           persist-credentials: false
 
+      - name: Configure private Git dependency access
+        shell: bash
+        env:
+          REPOSITORY_TOKEN: ${{ secrets.WISENT_PACKAGES_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "$REPOSITORY_TOKEN" ]; then
+            echo "::error::WISENT_PACKAGES_TOKEN is not set, so cargo cannot read the private wisent-ai dependencies this crate names (pursuit, echo-web). Set it to a token with read access to both."
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${REPOSITORY_TOKEN}@github.com/".insteadOf \
+            https://github.com/
+          printf '%s\n' 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"
+
       - name: Resolve automatic canary version
         id: version
         shell: bash
