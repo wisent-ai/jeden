@@ -187,5 +187,6 @@ await test("A task that needs no tools still retains the complete report", async
 
 await retain();
 if (process.env.PROBIERZ_MEDIA_MANIFEST) {
+  await mkdir(dirname(process.env.PROBIERZ_MEDIA_MANIFEST), { recursive: true });
   await writeFile(process.env.PROBIERZ_MEDIA_MANIFEST, JSON.stringify([{ file: tracePath, kind: "trace", contentType: "application/json" }], null, 2));
 }
