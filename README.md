@@ -243,7 +243,7 @@ When stdin is not a terminal, interactive views render as deterministic text lis
 
 ### Goal mode and the Oko lifecycle model
 
-`/goal set <objective>` pins a durable objective that every turn is kept aligned with; `/goal status`, `/goal pause`, `/goal resume`, `/goal budget <n|off>`, and `/goal drop` manage it. `/goal auto on` additionally lets Oko's locally served goal-lifecycle model classify each user prompt in the background (loopback endpoint, `JEDEN_LIFECYCLE_MODEL_URL` override): a prompt that starts a genuinely new durable objective sets the goal automatically, and an explicit user confirmation of completion drops it, mirroring `/goal drop`. Every classified prompt records a `goal_lifecycle` session-ledger event, and sessions driven over `jeden rpc` receive a `goal` session event with the goal title and `active`/`done` status. Classification is fail-open and never blocks or rewrites the current turn: when the service does not answer, Jeden behaves exactly as with `/goal auto off` (the default).
+`/goal set <objective>` pins a durable objective that every turn is kept aligned with; `/goal status`, `/goal pause`, `/goal resume`, `/goal budget <n|off>`, and `/goal drop` manage it. `/goal auto on` additionally lets Oko's locally served goal-lifecycle model classify each user prompt in the background (loopback endpoint, `JEDEN_LIFECYCLE_MODEL_URL` override): a prompt that starts a genuinely new durable objective sets the goal automatically, and an explicit user confirmation of completion drops it, mirroring `/goal drop`. Every classified prompt records a `goal_lifecycle` session-ledger event; `startGoal` records its resolved title so historical clients can reconstruct the goal timeline, and sessions driven over `jeden rpc` receive a `goal` session event with the goal title and `active`/`done` status. Classification is fail-open and never blocks or rewrites the current turn: when the service does not answer, Jeden behaves exactly as with `/goal auto off` (the default).
 
 ## Roadmap Registry
 
@@ -310,6 +310,11 @@ Before each run, Jeden loads user context from `~/.jeden/instructions.md` and `~
 A context line such as `@./extra.md` imports another file under the same context root. Oversized context files are skipped.
 
 File-based custom commands load from project and user `.jeden/commands/` directories. Native extensions load from project and user `.jeden/extensions/` directories. Plugin and marketplace state lives under `~/.jeden/plugins/`.
+
+`jeden rpc` publishes executable file-based commands as `quickReplies` in both
+the `ready` frame and the `capabilities` response. Each entry carries its
+capability ID, label, slash prompt, and discovery source; native clients use
+that projection instead of reproducing command-directory precedence.
 
 ## Sessions and memory
 

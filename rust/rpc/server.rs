@@ -187,6 +187,31 @@ fn load_or_create_reconnect_key(path: &Path) -> Result<Vec<u8>, String> {
     fs::write(path, &key).map_err(|error| format!("failed to persist reconnect key: {error}"))?;
     Ok(key)
 }
+fn quick_replies() -> Vec<Value> {
+    let Ok(cwd) = std::env::current_dir() else {
+        return Vec::new();
+    };
+    crate::capability::slash_descriptors(&cwd)
+        .into_iter()
+        .filter_map(|descriptor| {
+            if !descriptor.ui.visible || !descriptor.ui.executable {
+                return None;
+            }
+            let crate::capability::FunctionTarget::FileSlash { command, .. } = &descriptor.target
+            else {
+                return None;
+            };
+            let prompt = descriptor.ui.action.clone()?;
+            Some(json!({
+                "id": descriptor.id,
+                "label": command,
+                "prompt": prompt,
+                "source": descriptor.source,
+            }))
+        })
+        .take(64)
+        .collect()
+}
 
 pub fn serve_stdio() -> Result<(), String> {
     let input = io::BufReader::new(io::stdin());
@@ -211,7 +236,8 @@ where
         "type": "ready",
         "protocol": "jeden-rpc",
         "version": 1,
-        "capabilities": AgentSession::capabilities()
+        "capabilities": AgentSession::capabilities(),
+        "quickReplies": quick_replies()
     }))?;
 
     let mut workers = Vec::new();
@@ -274,7 +300,8 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
     let result = match request.method.as_str() {
         "initialize" | "capabilities" => Ok(json!({
             "protocol": "jeden-rpc",
-            "capabilities": AgentSession::capabilities()
+            "capabilities": AgentSession::capabilities(),
+            "quickReplies": quick_replies()
         })),
         "session/new" | "new" => create_session(state, request.params, false),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),

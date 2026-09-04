@@ -385,6 +385,13 @@ pub(crate) fn spawn_turn_classification(
         }) else {
             return;
         };
+        let resolved_goal = match decision.action {
+            LifecycleAction::StartGoal => Some(resolve_goal_title(&prompt)),
+            LifecycleAction::ContinueCurrent | LifecycleAction::FinishGoal => {
+                goal_objective.clone()
+            }
+            LifecycleAction::Ignore => None,
+        };
         let _ = crate::cli::sessions::append_ledger_entry(
             &session_dir,
             crate::agent::now_stamp(),
@@ -393,13 +400,13 @@ pub(crate) fn spawn_turn_classification(
                 "action": decision.action.as_str(),
                 "goal_ref": decision.goal_ref,
                 "lifecycle_evidence": decision.lifecycle_evidence,
-                "goal": goal_objective,
+                "goal": resolved_goal,
                 "model": LIFECYCLE_MODEL_LABEL,
             }),
         );
         match decision.action {
             LifecycleAction::StartGoal => {
-                let title = resolve_goal_title(&prompt);
+                let title = resolved_goal.expect("startGoal always resolves a title");
                 if state.goal.auto {
                     let objective = title.clone();
                     let _ = crate::slash::mutate_mode_state(&cwd, move |state| {
