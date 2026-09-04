@@ -186,6 +186,23 @@ localized, built-in read-only description with `instructions` and
 `requirements`. It is inspectable by clients and shown read-only in Jeden
 Desktop Settings; it is not a third operator-editable contract.
 
+The contract journey lives in
+`tests/contracts/task-contract-lifecycle.probierz.spec.mjs`. With the real Brama
+workload environment configured and `JEDEN_BIN` naming the source-built binary,
+run it from this repository through Probierz:
+
+```sh
+probierz run tui --app jeden \
+  --spec "$PWD/tests/contracts/task-contract-lifecycle.probierz.spec.mjs" \
+  --no-repair JEDEN_CONTRACT_JOURNEY=1 TUI_CMD="$JEDEN_BIN"
+```
+
+It runs the existing operator-contract stories, exercises CLI/RPC persistence,
+and asks the real model to create, edit and remove an isolated file and report
+each operation. A separate no-tool task checks that the report remains required.
+Failures retain the command output, filesystem state and session ledgers; an
+unavailable model is a failed run, not a passing substitute.
+
 The communication mode chooses what Jeden shows of its own work. `normal`
 shows tool names while it works and then the answer with its code; `debug`
 also shows each tool call with its input, each tool result, and the model's

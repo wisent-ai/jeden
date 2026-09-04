@@ -2,6 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "cleanUrls": true,
   "trailingSlash": false,
+  "git": {
+    "deploymentEnabled": {
+      "main": true
+    }
+  },
   "headers": [
     {
       "source": "/(.*)",

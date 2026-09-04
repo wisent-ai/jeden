@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, readFile, writeFile, access } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -144,7 +144,7 @@ async function modelTurn(task) {
   succeeded(result);
   const answer = JSON.parse(result.stdout.trim());
   assert.equal(answer.ok, true);
-  assert.ok(answer.sessionPath.startsWith(`${sessions}/`), "the turn must use its isolated session root");
+  assert.ok(answer.sessionPath.startsWith(`${sessions}${sep}`), "the turn must use its isolated session root");
   const events = (await readFile(join(answer.sessionPath, "transcript.jsonl"), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line)).map((event) => event.payload ?? event);
   const contracts = events.filter((event) => event.type === "task_contract");
   assert.equal(contracts.length, 1);
