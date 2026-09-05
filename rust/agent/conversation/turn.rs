@@ -10,7 +10,16 @@ impl Conversation {
     ) -> Result<String, String> {
         let config = load_config(&args.cwd);
         let mut router = model_router_config(&config, args);
-        let report_required = !args.model_only && !args.autonomous;
+        // The stage that can change the product owes the delivery report,
+        // whoever drove it. Excluding every autonomous stage exempted the
+        // Pursuit execution stage — the one that writes code — so it answered
+        // with prose, recorded no `task_report`, and nothing checked whether
+        // it had covered the CLI, the GUI, the documentation or real tests.
+        // Read-only stages (planning, reviews) still keep their own output
+        // contracts, and they are read-only precisely because they may not
+        // write.
+        let report_required =
+            !args.model_only && (!args.autonomous || args.allow_write || args.allow_command);
         let language = crate::cli::config::ui_language(&config);
         let mut effective_task = if args.model_only || args.autonomous {
             task.to_string()
