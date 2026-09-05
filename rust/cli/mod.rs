@@ -5,6 +5,7 @@ pub(crate) mod billing;
 pub(crate) mod commands;
 pub(crate) mod completions;
 pub(crate) mod config;
+pub(crate) mod contracts;
 pub(crate) mod gallery;
 pub(crate) mod i18n;
 pub(crate) mod i18n_translations;

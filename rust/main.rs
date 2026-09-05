@@ -96,6 +96,7 @@ fn usage() -> String {
         "  jeden artifacts <session-id-or-path>\n",
         "  jeden artifact <session-id-or-path> <name> [output]\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
+        "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
         "  jeden probierz [args...] — run Probierz discovery, evidence, and gate commands for Jeden\n",
@@ -229,7 +230,13 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                 if other.starts_with("--")
                     && (matches!(
                         args.command.as_str(),
-                        "export" | "roadmap" | "worktree" | "token" | "stats" | "gallery"
+                        "export"
+                            | "roadmap"
+                            | "worktree"
+                            | "token"
+                            | "stats"
+                            | "gallery"
+                            | "contracts"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
@@ -426,6 +433,7 @@ pub fn main() -> ExitCode {
         "recall_conversation" | "recall-conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),
+        "contracts" => cli::contracts::command(&args),
         "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),
         "probierz" => probierz::command(&args),

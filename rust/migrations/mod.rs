@@ -330,14 +330,25 @@ where
 }
 
 pub(crate) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
+    write_bytes_atomic(
+        path,
+        &serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
+    )
+}
+
+/// Write `text` to `path` through a synced sibling and a rename, so a reader
+/// sees either the old file or the whole new one. The text is written as is;
+/// callers own the trailing newline.
+pub(crate) fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
+    write_bytes_atomic(path, text.trim_end_matches('\n').as_bytes())
+}
+
+fn write_bytes_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     let staged = sibling(path, "write-stage");
-    write_synced(
-        &staged,
-        &serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?,
-    )?;
+    write_synced(&staged, bytes)?;
     fs::rename(&staged, path)
         .map_err(|error| format!("atomic commit {}: {error}", path.display()))?;
     sync_parent(path)
