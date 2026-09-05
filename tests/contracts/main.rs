@@ -431,6 +431,119 @@ fn task_contract_is_in_every_system_prompt() {
 }
 
 #[test]
+fn contracts_install_writes_the_block_another_harness_reads() {
+    let home = Home::new("install");
+    let target = home.root.join("APPEND_SYSTEM.md");
+    fs::write(&target, "Existing rule one.\n").expect("seed target");
+    let contracts = |args: &[&str]| {
+        let output = home
+            .command()
+            .arg("contracts")
+            .args(args)
+            .output()
+            .expect("run jeden contracts");
+        (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    };
+    let file = target.display().to_string();
+
+    // `render` is the text every Jeden session already carries.
+    let (code, rendered, _) = contracts(&["render"]);
+    assert_eq!(code, 0);
+    assert!(rendered.starts_with("Task contract:\n"), "{rendered}");
+    assert!(rendered.contains("Communication contract (Jeden default):\n"));
+
+    // Absent, then installed, then current; the existing text survives.
+    let (code, _, stderr) = contracts(&["status", "--file", &file]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        stderr.trim(),
+        format!(
+            "Error: absent: {file} carries no Jeden contracts; run jeden contracts install --file"
+        )
+    );
+    let (code, stdout, _) = contracts(&["install", "--file", &file]);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        format!("Installed the Jeden contracts into {file}\n")
+    );
+    let written = fs::read_to_string(&target).expect("read target");
+    assert!(
+        written.starts_with("Existing rule one.\n\n<!-- jeden contracts: start -->\n"),
+        "{written}"
+    );
+    assert!(
+        written.ends_with("<!-- jeden contracts: end -->\n"),
+        "{written}"
+    );
+    assert!(
+        written.contains(rendered.trim_end()),
+        "the block is the rendered text"
+    );
+    let (code, stdout, _) = contracts(&["status", "--file", &file]);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        format!("current: {file} carries the contracts this binary renders\n")
+    );
+    let (code, stdout, _) = contracts(&["install", "--file", &file]);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        format!("{file} already carries the Jeden contracts\n")
+    );
+
+    // A changed contract makes the block stale; installing again replaces
+    // only the block.
+    let (code, _, _) = home.config(&[
+        "set",
+        "contracts.communication",
+        "Answer in three sentences.",
+    ]);
+    assert_eq!(code, 0);
+    let (code, _, stderr) = contracts(&["status", "--file", &file]);
+    assert_eq!(code, 1);
+    assert_eq!(
+        stderr.trim(),
+        format!("Error: stale: {file} carries older contracts; run jeden contracts install --file")
+    );
+    let (code, stdout, _) = contracts(&["install", "--file", &file, "--json"]);
+    assert_eq!(code, 0);
+    let result: Value = serde_json::from_str(&stdout).expect("install json");
+    assert_eq!(result["changed"], json!(true));
+    assert_eq!(result["target"], json!("file"));
+    let written = fs::read_to_string(&target).expect("read target");
+    assert_eq!(
+        written.matches("<!-- jeden contracts: start -->").count(),
+        1
+    );
+    assert!(written.starts_with("Existing rule one.\n\n"));
+    assert!(written.contains("Communication contract:\nAnswer in three sentences."));
+    assert!(!written.contains("Jeden default"));
+
+    // Refusals name what is missing.
+    let (code, _, stderr) = contracts(&["status"]);
+    assert_eq!(code, 1);
+    assert!(
+        stderr.starts_with("Error: contracts install and status require --omp or --file <path>"),
+        "{stderr}"
+    );
+    let (code, _, stderr) = contracts(&["install", "--file"]);
+    assert_eq!(code, 1);
+    assert_eq!(stderr.trim(), "Error: --file requires a path");
+    let (code, _, stderr) = contracts(&["bogus"]);
+    assert_eq!(code, 1);
+    assert!(
+        stderr.starts_with("Error: Usage: jeden contracts"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn task_contract_delivery_report_is_enforced_on_a_real_turn() {
     let home = Home::new("turn");
     fs::write(
