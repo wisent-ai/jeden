@@ -111,6 +111,11 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://jeden.wisent.com/docs/cli/contracts</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://jeden.wisent.com/docs/cli/doctor</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

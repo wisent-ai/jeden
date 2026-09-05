@@ -150,8 +150,25 @@ Jeden adds each contract to every new or rebuilt system prompt. The contracts
 supplement the built-in engineering rules and cannot relax tool grants, path
 jails, safety checks, or evidence requirements.
 
+Sessions that Omp runs on this machine get the same contracts. `jeden contracts
+render` prints the task contract and the communication contract in force as
+one text; `jeden contracts install --omp` writes that text into
+`~/.omp/agent/APPEND_SYSTEM.md` between the lines `<!-- jeden contracts: start -->`
+and `<!-- jeden contracts: end -->`, replacing the previous block and leaving
+the rest of the file alone, because Omp appends that file to every system
+prompt; `jeden contracts status --omp` says whether the installed block is
+`current`, `stale`, or `absent` and exits non-zero unless it is current.
+`--file <path>` targets any other file the same way. The Wisent product
+catalog runs the install after every Jeden CLI installation and sweep, so a
+contract that changes with a release reaches Omp without anyone remembering to.
+
 Every ordinary user turn, including a delegated task, carries Jeden's built-in
-task contract. Completion means durable, reusable product functionality rather
+task contract, and so does the autonomous execution stage: an autonomous stage
+that may write files or run commands answers with the same report, while the
+read-only planning and review stages keep Pursuit's own output contracts.
+`jeden contracts render` prints that scope, and the RPC contract snapshot the
+Jeden Desktop Settings screen reads carries it as `appliesTo`.
+Completion means durable, reusable product functionality rather
 than a one-off action. Only an assigned implementation task authorizes product
 changes: a question, request to read or explain, or planning request does not.
 Defects related to the assigned task are repaired at their source; diagnostics
