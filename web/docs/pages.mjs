@@ -94,6 +94,20 @@ export const pages = [
         ],
       },
       {
+        title: "Run a named VS Code task on macOS",
+        paragraphs: [
+          "On a configured Wisent workstation, <code>scripts/run-with-stado.sh</code> obtains the agent signing credential and the separate <code>jeden-model-router/token</code> bearer from Skarbiec, then launches the installed Jeden without building it. The reusable task in <code>scripts/vscode-tasks.json</code> runs a disk diagnosis with <code>gpt-6-astra</code> in a dedicated integrated terminal, without typing into another terminal's prompt or changing the default model.",
+          "For a checkout at <code>~/Documents/CodingProjects/Wisent/jeden</code>, run the command below from the repository root only when VS Code has no user task file. If that file already exists, preserve it and add this task to its <code>tasks</code> array instead. Choose <strong>Terminal → Run Task… → Jeden: diagnoza dysku bez zmian</strong>; the named terminal retains the command and final exit status, and only one instance can run at a time.",
+          "The task asks for paths, sizes, growth causes and APFS accounting without deletion, compilation, configuration changes or consent prompts. It grants command execution, not a filesystem sandbox; these restrictions are part of the diagnosis prompt. A Brama refusal remains a failed run instead of causing a model switch or a new login.",
+        ],
+        commands: [
+          {
+            label: "Install the source-backed user task",
+            code: 'ln -s "$PWD/scripts/vscode-tasks.json" \\\n  "$HOME/Library/Application Support/Code/User/tasks.json"',
+          },
+        ],
+      },
+      {
         title: "Current scope",
         paragraphs: ["The private milestone includes:"],
         bullets: [
