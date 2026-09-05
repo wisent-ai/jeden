@@ -412,7 +412,7 @@ pub(crate) fn interactive_view(
         .split_once(char::is_whitespace)
         .unwrap_or((trimmed, ""));
     if command == "/onboarding" {
-        return Some(crate::onboarding::interactive(args.trim()));
+        return Some(crate::onboarding::interactive(args.trim(), cwd));
     }
     if matches!(command, "/model" | "/models" | "/switch") && matches!(args.trim(), "--all" | "-a")
     {

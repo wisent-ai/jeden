@@ -445,6 +445,59 @@ pub(crate) fn parse_config_literal(raw: &str) -> Value {
     serde_json::from_str::<Value>(trimmed).unwrap_or_else(|_| json!(trimmed))
 }
 
+fn read_user_config_file_strict(path: &Path) -> Result<Option<Value>, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "cannot read existing user configuration {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    let value = match path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "yml" | "yaml" => serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string()),
+        _ => serde_json::from_str::<Value>(&text).map_err(|error| error.to_string()),
+    }
+    .map_err(|error| {
+        format!(
+            "invalid existing user configuration {}: {error}",
+            path.display()
+        )
+    })?;
+    if !value.is_object() {
+        return Err(format!(
+            "invalid existing user configuration {}: root must be an object",
+            path.display()
+        ));
+    }
+    Ok(Some(value))
+}
+
+/// The writable user layer for operations that must never replace unreadable
+/// or malformed existing state with a fresh configuration.
+pub(crate) fn read_user_writable_config_strict() -> Result<Value, String> {
+    let current = read_user_config_file_strict(&user_config_path())?;
+    if current
+        .as_ref()
+        .and_then(Value::as_object)
+        .is_some_and(|object| !object.is_empty())
+    {
+        return Ok(current.expect("checked as present"));
+    }
+    if let Some(legacy) = read_user_config_file_strict(&legacy_user_config_path())? {
+        return Ok(legacy);
+    }
+    Ok(current.unwrap_or_else(|| json!({})))
+}
+
 pub(crate) fn read_user_writable_config() -> Value {
     let current = read_config_value(&user_config_path());
     if current

@@ -166,6 +166,8 @@ struct SetupState {
     brama_url: Option<String>,
     agent_id: Option<String>,
     secret_configured: bool,
+    workspace: Option<PathBuf>,
+    workspace_error: Option<String>,
     model: Option<String>,
     language: String,
     theme: String,
@@ -185,6 +187,11 @@ fn setup_state(context: &SlashContext<'_>) -> SetupState {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("auto")
         .to_string();
+    let (workspace, workspace_error) = match crate::cli::workspace::status(context.cwd) {
+        Ok(Some(report)) => (Some(report.workspace), None),
+        Ok(None) => (None, None),
+        Err(error) => (None, Some(error)),
+    };
     SetupState {
         brama_url: configured_value(BRAMA_URL_KEY),
         agent_id: configured_value(AGENT_ID_KEY),
@@ -192,6 +199,8 @@ fn setup_state(context: &SlashContext<'_>) -> SetupState {
         model,
         language: ui_language(&config).code().to_string(),
         theme,
+        workspace,
+        workspace_error,
     }
 }
 
@@ -208,9 +217,30 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     let lang = crate::cli::i18n::lang_code(context.cwd);
     let state = setup_state(context);
     let mut items = Vec::new();
+    match (&state.workspace, &state.workspace_error) {
+        (Some(workspace), _) => items.push(configured_row(
+            "1. Existing workspace adopted",
+            format!("{} · future tasks use this path unless --cwd is supplied", workspace.display()),
+        )),
+        (None, Some(error)) => items.push(
+            PickerItem::action("1. Adopted workspace is unavailable", "")
+                .detail(error)
+                .badge("ERROR")
+                .disabled(true),
+        ),
+        (None, None) => items.push(
+            PickerItem::action(
+                "1. Adopt this existing workspace",
+                format!("/setup workspace {}", context.cwd.display()),
+            )
+            .detail("keeps the working tree and session history in place")
+            .badge("WORKSPACE")
+            .prefill(),
+        ),
+    }
     match &state.brama_url {
         Some(url) => items.push(configured_row(
-            "1. BRAMA_URL configured",
+            "2. BRAMA_URL configured",
             format!("{url} · stored in ~/.jeden/.env"),
         )),
         None => {
@@ -218,7 +248,7 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 .map(|url| format!(" {url}"))
                 .unwrap_or_else(|| " ".into());
             items.push(
-                PickerItem::action("1. Set BRAMA_URL", format!("/setup brama-url{prefill}"))
+                PickerItem::action("2. Set BRAMA_URL", format!("/setup brama-url{prefill}"))
                     .detail("required Brama model-router endpoint · stored in ~/.jeden/.env")
                     .badge("INPUT")
                     .prefill(),
@@ -227,12 +257,12 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     }
     match &state.agent_id {
         Some(id) => items.push(configured_row(
-            "2. WISENT_APP_AGENT_ID configured",
+            "3. WISENT_APP_AGENT_ID configured",
             format!("{id} · stored in ~/.jeden/.env"),
         )),
         None => items.push(
             PickerItem::action(
-                "2. Set WISENT_APP_AGENT_ID",
+                "3. Set WISENT_APP_AGENT_ID",
                 format!("/setup agent-id {DEFAULT_AGENT_ID}"),
             )
             .detail(format!(
@@ -244,28 +274,28 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     }
     if state.secret_configured {
         items.push(configured_row(
-            "3. WISENT_APP_AGENT_AUTH_SECRET configured",
+            "4. WISENT_APP_AGENT_AUTH_SECRET configured",
             "injected in memory by the Stado/Skarbiec launcher",
         ));
     } else {
         items.push(configured_row(
-            "3. WISENT_APP_AGENT_AUTH_SECRET unavailable",
+            "4. WISENT_APP_AGENT_AUTH_SECRET unavailable",
             "launch with bin/jeden-rust or scripts/run-with-stado.sh",
         ));
     }
     match &state.model {
         Some(model) => items.push(configured_row(
-            format!("4. Model route: {model}"),
+            format!("5. Model route: {model}"),
             "change anytime with /model",
         )),
         None => items.push(
-            PickerItem::action("4. Select model route", "/setup model")
+            PickerItem::action("5. Select model route", "/setup model")
                 .detail("fetch the Brama catalog and pick a route")
                 .badge("MODEL"),
         ),
     }
     items.push(
-        PickerItem::action("5. Language & theme (optional)", "/setup preferences")
+        PickerItem::action("6. Language & theme (optional)", "/setup preferences")
             .detail(format!(
                 "current: language {} · theme {}",
                 state.language, state.theme
@@ -273,11 +303,11 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             .badge("PREFS"),
     );
     items.push(
-        PickerItem::action("6. Validate setup", "/setup validate")
+        PickerItem::action("7. Validate setup", "/setup validate")
             .detail("run doctor and show the final summary")
             .badge("CHECK"),
     );
-    Ok(PickerSpec::new("Setup — first-run configuration", items).localized(&lang))
+    Ok(PickerSpec::new("Setup — existing workspace and model access", items).localized(&lang))
 }
 
 /// Optional preferences: the existing enum setting rows from the settings
@@ -302,31 +332,43 @@ fn preferences_picker(cwd: &Path) -> PickerSpec {
 fn checklist_text(context: &SlashContext<'_>) -> String {
     let state = setup_state(context);
     let mark = |configured: bool| if configured { "[OK]" } else { "[missing]" };
+    let workspace_line = match (&state.workspace, &state.workspace_error) {
+        (Some(path), _) => format!(
+            "1. Workspace [OK] {} — existing files and matching Jeden sessions remain in place",
+            path.display()
+        ),
+        (None, Some(error)) => format!("1. Workspace [invalid] — {error}"),
+        (None, None) => format!(
+            "1. Workspace [missing] — adopt: jeden workspace adopt {}",
+            context.cwd.display()
+        ),
+    };
     let mut lines = vec![
         "Setup checklist (guided wizard: run /setup in the interactive TUI):".to_string(),
+        workspace_line,
         format!(
-            "1. BRAMA_URL {} — required; set: jeden run \"/setup brama-url <https-url>\" (or: echo 'BRAMA_URL=<url>' >> ~/.jeden/.env)",
+            "2. BRAMA_URL {} — required; set: jeden run \"/setup brama-url <https-url>\" (or: echo 'BRAMA_URL=<url>' >> ~/.jeden/.env)",
             mark(state.brama_url.is_some())
         ),
         format!(
-            "2. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",
+            "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",
             mark(state.agent_id.is_some())
         ),
         format!(
-            "3. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value via scripts/run-with-stado.sh",
+            "4. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value via scripts/run-with-stado.sh",
             mark(state.secret_configured)
         ),
         "   Only nonsecret router settings are written to ~/.jeden/.env; credentials are injected in memory by the trusted Stado launcher."
             .to_string(),
         match &state.model {
-            Some(model) => format!("4. Model route [OK] {model} — change with: /model <route>"),
-            None => "4. Model route [missing] — pick in the TUI with /model (writes .jeden/config.json)".to_string(),
+            Some(model) => format!("5. Model route [OK] {model} — change with: /model <route>"),
+            None => "5. Model route [missing] — pick in the TUI with /model (writes .jeden/config.json)".to_string(),
         },
         format!(
-            "5. Preferences (optional) [language {} · theme {}] — jeden config set ui.language <code> · jeden config set ui.theme <name>",
+            "6. Preferences (optional) [language {} · theme {}] — jeden config set ui.language <code> · jeden config set ui.theme <name>",
             state.language, state.theme
         ),
-        "6. Validate — jeden doctor · smoke: jeden run \"Respond exactly: OK\"".to_string(),
+        "7. Validate — /setup validate".to_string(),
     ];
     lines.push("Status is read-only: nothing was changed.".to_string());
     lines.join("\n")
@@ -352,6 +394,11 @@ fn validate_text(context: &SlashContext<'_>) -> String {
         .count();
     let mut lines = vec![
         "Setup validation (jeden doctor):".to_string(),
+        match (&state.workspace, &state.workspace_error) {
+            (Some(path), _) => format!("- workspace: adopted — {}", path.display()),
+            (None, Some(error)) => format!("- workspace: invalid — {error}"),
+            (None, None) => "- workspace: not adopted — run /setup workspace <path>".into(),
+        },
         probe_line("brama"),
         probe_line("weles"),
         format!(
@@ -380,7 +427,7 @@ fn validate_text(context: &SlashContext<'_>) -> String {
 }
 
 const USAGE: &str =
-    "Usage: /setup [status|validate|brama-url <url>|agent-id <id>|model|preferences]";
+    "Usage: /setup [status|validate|workspace <path>|brama-url <url>|agent-id <id>|model|preferences]";
 
 /// Text-mode handler (non-interactive callers such as `jeden run "/setup …"`
 /// and the slash fallback). Bare `/setup` and `/setup status` print the
@@ -390,6 +437,10 @@ pub(crate) fn handle_text(args: &str, context: &SlashContext<'_>) -> Result<Stri
     match verb.to_ascii_lowercase().as_str() {
         "" | "status" => Ok(checklist_text(context)),
         "validate" => Ok(validate_text(context)),
+        "workspace" => {
+            let path = if rest.trim().is_empty() { context.cwd } else { Path::new(rest.trim()) };
+            Ok(crate::cli::workspace::adopt(path, context.cwd)?.text())
+        }
         "brama-url" => save_brama_url(rest),
         "agent-id" => save_agent_id(rest),
         "model" | "preferences" => Ok(format!(
@@ -419,8 +470,12 @@ pub(crate) fn run_interactive(
         "" if interactive => setup_picker(&context).map(CommandOutcome::Picker),
         "" | "status" => Ok(CommandOutcome::Text(checklist_text(&context))),
         "validate" => Ok(CommandOutcome::Text(validate_text(&context))),
-        "brama-url" | "agent-id" => {
+        "workspace" | "brama-url" | "agent-id" => {
             let message = match verb.to_ascii_lowercase().as_str() {
+                "workspace" => {
+                    let path = if rest.trim().is_empty() { cwd } else { Path::new(rest.trim()) };
+                    crate::cli::workspace::adopt(path, cwd)?.text()
+                }
                 "brama-url" => save_brama_url(rest)?,
                 _ => save_agent_id(rest)?,
             };

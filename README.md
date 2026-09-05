@@ -76,7 +76,7 @@ flowchart LR
 
 `jeden pursue` integrates the same local run loop with [Pursuit](https://github.com/wisent-ai/pursuit): read-only distillation, independent contract review, granted execution, and independent acceptance review. Pursuit owns the orchestration state machine and artifacts; Jeden owns only the Brama-backed `StageRunner` adapter, its conversations, and its tool policy.
 
-- **Durable state:** Sessions live under `~/.jeden/sessions/` (`JEDEN_SESSION_ROOT` overrides). Each session directory holds `state.json` and `transcript.jsonl`, an append-only ledger of sequenced, parent-linked, checksum-sealed events that is validated on read and `fsync`ed on every append. Durable memory is SQLite/FTS at `~/.jeden/memory.sqlite3` (`JEDEN_MEMORY_DB` overrides). The rest of `~/.jeden/` holds `.env`, `config.json`/`config.yml`, the Brama model-catalog cache, and user-scoped `tools/`, `extensions/`, `commands/`, and `plugins/`. Per-project state lives in `<cwd>/.jeden/`. All of it is on the operator's disk; Jeden uploads none of it.
+- **Durable state:** Sessions live under `~/.jeden/sessions/` (`JEDEN_SESSION_ROOT` overrides). Each session directory holds `state.json` and `transcript.jsonl`, an append-only ledger of sequenced, parent-linked, checksum-sealed events that is validated on read and `fsync`ed on every append. `jeden workspace adopt <path>` validates an existing directory and atomically stores only its canonical path as `workspace.defaultPath` in `~/.jeden/config.yml`; interactive and agent commands use it unless `--cwd` is explicit. It does not copy or alter the repository or its sessions. Durable memory is SQLite/FTS at `~/.jeden/memory.sqlite3` (`JEDEN_MEMORY_DB` overrides). The rest of `~/.jeden/` holds `.env`, `config.json`/`config.yml`, the Brama model-catalog cache, and user-scoped `tools/`, `extensions/`, `commands/`, and `plugins/`. Per-project state lives in `<cwd>/.jeden/`. All of it is on the operator's disk; Jeden uploads none of it.
 - **Credential boundary:** `WISENT_APP_AGENT_AUTH_SECRET` is read from the process environment only. `bin/jeden-rust` and `scripts/run-with-stado.sh` read the Skarbiec item `agent:wisent-app` and export it into that environment; `/setup` writes only non-secret values (`BRAMA_URL`, `WISENT_APP_AGENT_ID`, model, preferences) to `~/.jeden/.env` at mode `0600` and never writes the secret. Each Brama request carries `x-agent-id`, `x-agent-timestamp`, `x-agent-body-sha256`, and `x-agent-signature`, an HMAC over the request body, so the secret itself never leaves the process. Configured and automatically discovered secret values are replaced with `[REDACTED]` in the model-bound copy of the context while the local transcript keeps the original text.
 - **Network boundary:** Jeden initiates every connection. The terminal, `jeden run`, `jeden rpc`, and `jeden acp` are stdio-only and open no socket; listening sockets exist only in the opt-in `jeden headless <addr>` (mutual TLS), `jeden collab-relay`, and `jeden stats --serve` (bound to `127.0.0.1`). A `jeden headless` principal may be granted named absolute workspaces in the identity map, and may then list, open, and continue the host's own sessions whose recorded working directory lies inside one of those workspaces; a principal without that grant stays confined to the sessions it created through the daemon. The one required outbound dependency is `BRAMA_URL`. Optional outbound dependencies activate only when configured: Wisent Platform Billing for subscription and quota decisions, the Stado integration API for onboarding bundles and funnel events, the Stado media router for image and speech tools, and the release manifest host for `jeden update`. Tool-initiated network access (`fetch_url`, `fetch_readable_url`, SSH) is checked against the execution grant's host and port allowlist, rejects non-`http(s)` schemes and URL userinfo, resolves and pins the address, re-authorizes every redirect, and refuses non-public addresses unless the grant permits them.
 - **Failure boundary:** Everything fails closed. Without `BRAMA_URL` the run stops with `BRAMA_URL is required` and no model call is made. Write and command tools stop for approval unless `--allow-write`, `--allow-command`, or `--yolo` is passed, and project hooks in `.jeden/hooks.json` run only with `--allow-command` so a cloned repository cannot silently execute shell. Transient model errors retry with the router's backoff, but neither retry nor subscription failover happens once model output has become visible. A typed quota-exhaustion response records a `Retry-After`-bounded cooldown in `.jeden/subscription-cooldowns.json` and the next eligible subscription is selected. A transcript with a truncated tail refuses further appends and must be resumed into a child session. `jeden update` stages, journals, and post-health-checks the new binary, and restores the last-known-good copy when any step fails.
@@ -264,15 +264,32 @@ jeden config set communication.code hide
 ```
 
 The first-use journey (`/onboarding`) is separate from `/setup` and always runs
-from the definition compiled into the binary, so it works offline and completes
-on the first successful agent turn. When `STADO_INTEGRATION_API_URL` is set, the
-launcher additionally injects `JEDEN_STADO_INTEGRATION_TOKEN` from the Skarbiec
-item `jeden-integration-api` through the dedicated `jeden-onboarding-client`
+from the definition compiled into the binary, so it works offline. Its first
+action can adopt the current or another existing workspace through the same
+operation as `jeden workspace adopt`; skipping persists nothing and keeps the
+invocation directory usable. The journey still completes only on the first
+successful agent turn. `/onboarding reset` replays the workspace selection and
+guide without deleting the earlier selection, working tree, or session history.
+When `STADO_INTEGRATION_API_URL` is set, the launcher additionally injects
+`JEDEN_STADO_INTEGRATION_TOKEN` from the Skarbiec item
+`jeden-integration-api` through the dedicated `jeden-onboarding-client`
 consumer, which turns on published-bundle reads and funnel events at the
-integration boundary. A missing endpoint, grant file, or item leaves the journey
-offline and never blocks the command.
+integration boundary. A missing endpoint, grant file, or item leaves the
+journey offline and never blocks the command.
 
-Inside the terminal, `/setup` is an idempotent wizard (Brama URL, agent id, default model, and preferences) that never writes secrets to disk; `/setup validate` probes live state and ends with a smoke call. A successful setup is observable:
+Inside the terminal, `/setup` is an idempotent wizard for an existing workspace,
+Brama URL, agent id, default model, and preferences. `/setup workspace <path>`
+uses the canonical adoption operation; `/setup validate` shows the selected
+path beside the normal health report. The setup flow never writes secrets to
+disk. Inspect, adopt, and confirm a repository without copying data:
+
+```sh
+jeden workspace discover /path/to/repository
+jeden workspace adopt /path/to/repository
+jeden workspace status
+```
+
+A successful model setup is observable:
 
 ```sh
 jeden run "Respond exactly: OK"   # expected output: OK
@@ -463,6 +480,16 @@ that projection instead of reproducing command-directory precedence.
 ## Sessions and memory
 
 `jeden export`, `show`, `artifacts`, `artifact`, `search-sessions`, `resume`, and `recall_conversation` inspect or reuse recorded work. Resumed work starts a fresh session seeded with the selected history.
+
+`workspace discover` validates an existing directory, its existing
+`.jeden/config.json`, Git worktree marker, and the canonical session states that
+name a `cwd` inside it. `workspace adopt` performs that entire read before one
+atomic user-config write. Repeating the same path reports `unchanged`; malformed
+project config, missing paths, and `..` are refused before selection changes,
+while unreadable session directories are counted as rejected rather than
+silently hidden. `workspace status` returns the accepted path, repository root,
+source kind, and accepted/rejected session counts. The complete command
+contract is at [jeden.wisent.com/docs/cli/workspace](https://jeden.wisent.com/docs/cli/workspace).
 
 `/checkpoint [label]` records the exact model-visible context, `/checkpoint list` prints durable checkpoint event IDs, and `/rewind <checkpoint-event-id>` appends a new active lineage without deleting abandoned history. In the interactive attachment tray, `/attach <relative-path>`, `/attachments`, and `/detach <id|all>` manage bounded workspace-jailed text and PNG, JPEG, GIF, or WebP inputs consumed by the next submitted turn.
 

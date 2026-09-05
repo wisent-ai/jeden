@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::env;
 use std::future::Future;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use uuid::Uuid;
 use wisent_onboarding_client::{
     bundle_from_canonical, FileStorage, IntegrationTransport, JourneyClient, ProgressStatus,
@@ -12,7 +12,7 @@ use wisent_onboarding_client::{
 
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
-const EVIDENCE_REVISION: &str = "jeden-first-use-2026-08-04";
+const EVIDENCE_REVISION: &str = "jeden-first-use-2026-09-05";
 const JOURNEY_VERSION_ID: &str = "10000000-0000-4000-8000-000000000005";
 const FALLBACK: &str = include_str!("onboarding_first_use.json");
 
@@ -105,7 +105,7 @@ fn presentation_text(screen: &wisent_onboarding_client::Screen, key: &str) -> St
         .to_string()
 }
 
-fn picker_for(client: &Client) -> Result<PickerSpec, String> {
+fn picker_for(client: &Client, cwd: &Path, notice: Option<&str>) -> Result<PickerSpec, String> {
     let progress = client
         .progress()
         .ok_or_else(|| "onboarding progress is unavailable".to_string())?;
@@ -124,6 +124,30 @@ fn picker_for(client: &Client) -> Result<PickerSpec, String> {
     let title = presentation_text(screen, "title");
     let body = presentation_text(screen, "body");
     let mut items = vec![PickerItem::action(body, "").disabled(true)];
+    if let Some(notice) = notice {
+        items.push(PickerItem::action(notice, "").badge("ACCEPTED").disabled(true));
+    }
+    if screen.actions.iter().any(|action| action == "adopt_workspace") {
+        items.push(
+            PickerItem::action(
+                format!("Adopt {}", cwd.display()),
+                format!("/onboarding adopt-workspace {}", cwd.display()),
+            )
+            .detail("validate and select this existing workspace without copying it")
+            .badge("USE EXISTING"),
+        );
+        items.push(
+            PickerItem::action("Choose another workspace path", "/onboarding adopt-workspace ")
+                .detail("enter an existing readable repository or directory")
+                .badge("INPUT")
+                .prefill(),
+        );
+        items.push(
+            PickerItem::action("Skip for now", "/onboarding skip")
+                .detail("keep the current directory for this run; nothing is persisted"),
+        );
+        return Ok(PickerSpec::new(title, items));
+    }
     if screen.transitions.is_empty() {
         items.push(
             PickerItem::action("Continue in the prompt", "")
@@ -149,9 +173,15 @@ fn picker_for(client: &Client) -> Result<PickerSpec, String> {
     Ok(PickerSpec::new(title, items))
 }
 
-async fn apply(action: &str) -> Result<Client, String> {
+async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), String> {
     let mut client = start_client().await?;
-    match action {
+    let mut notice = None;
+    let (verb, rest) = action
+        .trim()
+        .split_once(char::is_whitespace)
+        .map(|(verb, rest)| (verb, rest.trim()))
+        .unwrap_or((action.trim(), ""));
+    match verb {
         "" | "show" => {}
         "next" => {
             client
@@ -160,24 +190,32 @@ async fn apply(action: &str) -> Result<Client, String> {
                 .map_err(|error| error.to_string())?;
         }
         "skip" => {
-            client
-                .skip(EVIDENCE_REVISION)
-                .await
-                .map_err(|error| error.to_string())?;
-            while !current_screen(&client)?.transitions.is_empty() {
-                if client
+            if current_screen(&client)?.screen_kind == "source_selection" {
+                client
                     .advance(&BTreeMap::new(), EVIDENCE_REVISION)
                     .await
                     .map_err(|error| error.to_string())?
-                    .is_none()
-                {
-                    break;
+                    .ok_or_else(|| "onboarding workspace step could not advance".to_string())?;
+            } else {
+                client
+                    .skip(EVIDENCE_REVISION)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                while !current_screen(&client)?.transitions.is_empty() {
+                    if client
+                        .advance(&BTreeMap::new(), EVIDENCE_REVISION)
+                        .await
+                        .map_err(|error| error.to_string())?
+                        .is_none()
+                    {
+                        break;
+                    }
                 }
+                client
+                    .resume(EVIDENCE_REVISION)
+                    .await
+                    .map_err(|error| error.to_string())?;
             }
-            client
-                .resume(EVIDENCE_REVISION)
-                .await
-                .map_err(|error| error.to_string())?;
         }
         "reset" => {
             client
@@ -185,16 +223,32 @@ async fn apply(action: &str) -> Result<Client, String> {
                 .await
                 .map_err(|error| error.to_string())?;
         }
-        _ => return Err("usage: /onboarding [next|skip|reset]".into()),
+        "adopt-workspace" => {
+            let path = if rest.is_empty() { cwd } else { Path::new(rest) };
+            let report = crate::cli::workspace::adopt(path, cwd)?;
+            let evidence = BTreeMap::from([("workspace_adopted".to_string(), json!(true))]);
+            client
+                .advance(&evidence, EVIDENCE_REVISION)
+                .await
+                .map_err(|error| error.to_string())?
+                .ok_or_else(|| "onboarding workspace step could not advance".to_string())?;
+            notice = Some(format!(
+                "{}: {} · {} existing session(s) accepted",
+                if report.status == "unchanged" { "Already using" } else { "Adopted" },
+                report.workspace.display(),
+                report.sessions.accepted
+            ));
+        }
+        _ => return Err("usage: /onboarding [next|skip|reset|adopt-workspace <path>]".into()),
     }
     client
         .expose(EVIDENCE_REVISION)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(client)
+    Ok((client, notice))
 }
 
-pub(crate) fn initial_picker() -> Result<Option<PickerSpec>, String> {
+pub(crate) fn initial_picker(cwd: &Path) -> Result<Option<PickerSpec>, String> {
     run(async {
         let client = start_client().await?;
         if client
@@ -207,19 +261,19 @@ pub(crate) fn initial_picker() -> Result<Option<PickerSpec>, String> {
             .expose(EVIDENCE_REVISION)
             .await
             .map_err(|error| error.to_string())?;
-        picker_for(&client).map(Some)
+        picker_for(&client, cwd, None).map(Some)
     })
 }
 
-pub(crate) fn interactive(action: &str) -> Result<CommandOutcome, String> {
+pub(crate) fn interactive(action: &str, cwd: &Path) -> Result<CommandOutcome, String> {
     run(async {
-        let client = apply(action.trim()).await?;
-        picker_for(&client).map(CommandOutcome::Picker)
+        let (client, notice) = apply(action.trim(), cwd).await?;
+        picker_for(&client, cwd, notice.as_deref()).map(CommandOutcome::Picker)
     })
 }
 
-pub(crate) fn text(action: &str) -> Result<String, String> {
-    interactive(action).map(CommandOutcome::into_text)
+pub(crate) fn text(action: &str, cwd: &Path) -> Result<String, String> {
+    interactive(action, cwd).map(CommandOutcome::into_text)
 }
 
 pub(crate) fn observe_successful_turn() {

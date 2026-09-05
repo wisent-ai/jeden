@@ -1,1 +1,111 @@
-{"analytics_contract":{"completion_event":"onboarding_completed","contract_version":"1","exposure_event":"onboarding_step_viewed","first_success_event":"onboarding_first_success_observed","primary_action_event":"onboarding_step_completed","surface":"terminal_first_use"},"entry_screen_id":"promise","first_success_fact":"successful_agent_turn","journey_id":"first-use","journey_version":"2026-08-04.1","product_id":"jeden","published_at":"2026-08-04T00:00:00Z","schema_version":1,"screens":[{"actions":["continue"],"body_key":"jeden.onboarding.promise.body","presentation":{"body":"Jeden works in your current repository: it reads the local rules, uses explicit tools, edits the real files, and reports grounded evidence instead of a simulated answer.","renderer":"promise","title":"Turn a coding task into a verified change"},"required":true,"screen_id":"promise","screen_kind":"promise","title_key":"jeden.onboarding.promise.title","transitions":[{"next_screen_id":"control_model","priority":10,"reason_code":"canonical_progression"}]},{"actions":["continue"],"body_key":"jeden.onboarding.control_model.body","presentation":{"body":"Write and command permissions are visible in the prompt. Jeden asks before gated actions, preserves existing work, and keeps setup, provider access, and product guidance as separate flows.","renderer":"explanation","title":"You stay in control"},"required":true,"screen_id":"control_model","screen_kind":"explanation","title_key":"jeden.onboarding.control_model.title","transitions":[{"next_screen_id":"first_success","priority":10,"reason_code":"canonical_progression"}]},{"actions":["complete"],"body_key":"jeden.onboarding.first_success.body","completion_evidence":{"fact":"successful_agent_turn","kind":"fact","operator":"eq","value":true},"presentation":{"body":"Close this guide and describe a concrete change or investigation. Your first successful agent turn completes the journey; if no model route is connected, use /setup separately.","renderer":"first_success","title":"Give Jeden one real task"},"required":true,"screen_id":"first_success","screen_kind":"first_success","title_key":"jeden.onboarding.first_success.title","transitions":[]}],"source_revision":"e40bba0091d9157b5caa56b237b4f59c9f0ea82f"}
+{
+  "analytics_contract": {
+    "completion_event": "onboarding_completed",
+    "contract_version": "1",
+    "exposure_event": "onboarding_step_viewed",
+    "first_success_event": "onboarding_first_success_observed",
+    "primary_action_event": "onboarding_step_completed",
+    "surface": "terminal_first_use"
+  },
+  "entry_screen_id": "workspace",
+  "first_success_fact": "successful_agent_turn",
+  "journey_id": "first-use",
+  "journey_version": "2026-09-05.1",
+  "product_id": "jeden",
+  "published_at": "2026-09-05T00:00:00Z",
+  "schema_version": 1,
+  "screens": [
+    {
+      "actions": ["adopt_workspace"],
+      "body_key": "jeden.onboarding.workspace.body",
+      "presentation": {
+        "body": "Adopt an existing repository or workspace in place. Jeden validates its local configuration, associates the sessions already recorded for it, and uses it for the next task without copying or changing the working tree.",
+        "renderer": "workspace",
+        "title": "Start with the work you already have"
+      },
+      "required": true,
+      "screen_id": "workspace",
+      "screen_kind": "source_selection",
+      "title_key": "jeden.onboarding.workspace.title",
+      "transitions": [
+        {
+          "next_screen_id": "promise",
+          "priority": 10,
+          "reason_code": "workspace_adopted",
+          "condition": {
+            "kind": "fact",
+            "fact": "workspace_adopted",
+            "operator": "eq",
+            "value": true
+          }
+        },
+        {
+          "next_screen_id": "promise",
+          "priority": 1,
+          "reason_code": "workspace_skipped"
+        }
+      ]
+    },
+    {
+      "actions": ["continue"],
+      "body_key": "jeden.onboarding.promise.body",
+      "presentation": {
+        "body": "Jeden works in the adopted repository: it reads the local rules, uses explicit tools, edits the real files, and reports grounded evidence instead of a simulated answer.",
+        "renderer": "promise",
+        "title": "Turn a coding task into a verified change"
+      },
+      "required": true,
+      "screen_id": "promise",
+      "screen_kind": "promise",
+      "title_key": "jeden.onboarding.promise.title",
+      "transitions": [
+        {
+          "next_screen_id": "control_model",
+          "priority": 10,
+          "reason_code": "canonical_progression"
+        }
+      ]
+    },
+    {
+      "actions": ["continue"],
+      "body_key": "jeden.onboarding.control_model.body",
+      "presentation": {
+        "body": "Write and command permissions are visible in the prompt. Jeden asks before gated actions, preserves existing work, and keeps workspace selection, Brama access, and product guidance as separate operations.",
+        "renderer": "explanation",
+        "title": "You stay in control"
+      },
+      "required": true,
+      "screen_id": "control_model",
+      "screen_kind": "explanation",
+      "title_key": "jeden.onboarding.control_model.title",
+      "transitions": [
+        {
+          "next_screen_id": "first_success",
+          "priority": 10,
+          "reason_code": "canonical_progression"
+        }
+      ]
+    },
+    {
+      "actions": ["complete"],
+      "body_key": "jeden.onboarding.first_success.body",
+      "completion_evidence": {
+        "fact": "successful_agent_turn",
+        "kind": "fact",
+        "operator": "eq",
+        "value": true
+      },
+      "presentation": {
+        "body": "Close this guide and describe a concrete change or investigation. The task starts in the accepted workspace and your first successful agent turn completes the journey; if no model route is connected, use /setup separately.",
+        "renderer": "first_success",
+        "title": "Give Jeden one real task"
+      },
+      "required": true,
+      "screen_id": "first_success",
+      "screen_kind": "first_success",
+      "title_key": "jeden.onboarding.first_success.title",
+      "transitions": []
+    }
+  ],
+  "source_revision": "jeden-existing-workspace-onboarding-2026-09-05"
+}

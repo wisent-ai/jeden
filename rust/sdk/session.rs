@@ -518,6 +518,7 @@ fn args_from_options(options: &SessionOptions, prompt: String, goal: Option<Stri
     Args {
         command: "run".into(),
         cwd: options.cwd.clone(),
+        cwd_explicit: true,
         model: options.model.clone(),
         max_tokens: options.max_tokens,
         max_steps: options.max_steps,

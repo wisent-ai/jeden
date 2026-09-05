@@ -55,6 +55,7 @@ pub(crate) use cli::sessions::{
 pub(crate) use cli::stats::stats_command;
 pub(crate) use cli::token::token_command;
 pub(crate) use cli::worktree::worktree_command;
+pub(crate) use cli::workspace::command as workspace_command;
 
 pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 
@@ -66,6 +67,7 @@ fn version_text() -> String {
 pub(crate) struct Args {
     pub(crate) command: String,
     pub(crate) cwd: PathBuf,
+    pub(crate) cwd_explicit: bool,
     pub(crate) model: Option<String>,
     pub(crate) max_tokens: Option<u32>,
     pub(crate) max_steps: Option<u32>,
@@ -96,6 +98,7 @@ fn usage() -> String {
         "  jeden artifacts <session-id-or-path>\n",
         "  jeden artifact <session-id-or-path> <name> [output]\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
+        "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
         "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
@@ -194,7 +197,10 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     };
     while let Some(arg) = rest.next() {
         match arg.as_str() {
-            "--cwd" => args.cwd = PathBuf::from(rest.next().ok_or("--cwd requires a value")?),
+            "--cwd" => {
+                args.cwd = PathBuf::from(rest.next().ok_or("--cwd requires a value")?);
+                args.cwd_explicit = true;
+            }
             "--model" => args.model = Some(rest.next().ok_or("--model requires a value")?),
             "--max-tokens" => {
                 args.max_tokens = Some(
@@ -237,6 +243,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "stats"
                             | "gallery"
                             | "contracts"
+                            | "workspace"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
@@ -340,7 +347,7 @@ fn user_config_path() -> PathBuf {
 
 pub fn main() -> ExitCode {
     let argv = env::args().skip(usize::from(true)).collect::<Vec<_>>();
-    let args = match parse_args(argv) {
+    let mut args = match parse_args(argv) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("Error: {}\n{}", e, usage());
@@ -350,6 +357,18 @@ pub fn main() -> ExitCode {
     if args.command == "version" {
         println!("{}", version_text());
         return ExitCode::SUCCESS;
+    }
+    if matches!(
+        args.command.as_str(),
+        "interactive" | "run" | "pursue" | "rpc" | "acp"
+    ) {
+        match cli::workspace::effective_cwd(&args.cwd, args.cwd_explicit) {
+            Ok(cwd) => args.cwd = cwd,
+            Err(error) => {
+                eprintln!("Error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
     }
     if let Err(error) = load_env_files(&args.cwd) {
         eprintln!("Error: failed to load environment files: {}", error);
@@ -433,6 +452,7 @@ pub fn main() -> ExitCode {
         "recall_conversation" | "recall-conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),
+        "workspace" => workspace_command(&args),
         "contracts" => cli::contracts::command(&args),
         "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),

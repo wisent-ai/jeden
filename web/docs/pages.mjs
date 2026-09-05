@@ -76,7 +76,7 @@ export const pages = [
         title: "Quick start",
         paragraphs: [
           "Prerequisites: a supported platform (<code>aarch64-apple-darwin</code>, <code>x86_64-unknown-linux-gnu</code>, <code>x86_64-pc-windows-msvc</code>) or a Rust toolchain for source builds, a Brama-compatible model endpoint, and a caller-owned signing credential.",
-          "Running <code>jeden</code> opens the welcome view; <code>/setup</code> is an idempotent wizard (Brama URL, agent id, default model, preferences) that writes only non-secret values to <code>~/.jeden/.env</code> at mode <code>0600</code>, and <code>/setup validate</code> probes live state and ends with a smoke call. <code>WISENT_APP_AGENT_AUTH_SECRET</code> is read from the process environment only — the harness holds no credential store and writes no secret to disk; the bundled launch scripts export it from the Skarbiec item <code>agent:wisent-app</code>, which also owns rotation and revocation. <code>jeden doctor</code> returns a JSON health report probing Brama, Weles, storage, process, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable. A successful setup is observable:",
+          "Running <code>jeden</code> opens the welcome view. Its first screen can adopt an existing repository in place; the same operation is available as <code>jeden workspace adopt &lt;path&gt;</code>, <code>/setup workspace &lt;path&gt;</code>, and the Jeden Desktop Settings screen. The accepted canonical path becomes the default for the next task unless <code>--cwd</code> is explicit. <code>/setup</code> remains an idempotent wizard for workspace, Brama URL, agent id, default model, and preferences; it writes non-secret router values to <code>~/.jeden/.env</code> at mode <code>0600</code>, while workspace selection uses the atomic user config. <code>WISENT_APP_AGENT_AUTH_SECRET</code> is read from the process environment only — the harness holds no credential store and writes no secret to disk; the bundled launch scripts export it from the Skarbiec item <code>agent:wisent-app</code>, which also owns rotation and revocation. <code>jeden doctor</code> returns a JSON health report and exits non-zero when an active probe is unavailable.",
         ],
         commands: [
           {
@@ -166,6 +166,25 @@ export const pages = [
             code: 'jeden sessions\njeden show <session>\njeden export <session> <output>\njeden artifacts <session>\njeden artifact <session> <name> <output>\njeden resume <session> "continue"\njeden search-sessions "query"\njeden recall_conversation --list',
           },
         ],
+      },
+      {
+        title: "Adopt existing work",
+        paragraphs: [
+          "<code>jeden workspace discover [path]</code> validates an existing directory without writing. <code>jeden workspace adopt &lt;path&gt;</code> then stores only its canonical absolute path as <code>workspace.defaultPath</code> in <code>~/.jeden/config.yml</code>, after validation succeeds. Relative input is resolved from the invocation directory; a path containing <code>..</code>, a missing or unreadable directory, or malformed existing <code>&lt;workspace&gt;/.jeden/config.json</code> is refused before user state changes.",
+          "Adoption does not import or copy a repository, configuration, credential, or transcript. The working tree remains byte-for-byte where the user owns it. Session ledgers remain under the canonical session root and are associated by the <code>cwd</code> already recorded in each <code>state.json</code>. Re-adopting the same canonical path reports <code>unchanged</code>; unreadable session state is counted as rejected instead of silently omitted.",
+          "The terminal first-use screen and <code>/setup workspace &lt;path&gt;</code> call the same operation as Jeden Desktop’s first-use folder chooser and Settings → Default workspace over <code>workspace/adopt</code> RPC. Both show the accepted canonical path and accepted/rejected session counts. Replay is <code>/onboarding reset</code> in the terminal and <strong>Settings → First-run walkthrough → Show it again</strong> on macOS.",
+          "Jeden iOS cannot read or adopt a path from the phone. Its supported adapter is the canonical headless session protocol: after a host identity is configured, choose a row under <strong>On this host</strong>. Completion is recorded only after <code>session/open</code> resumes that exact ledger and <code>session/history</code> returns its retained turns. The next mobile prompt therefore uses the session’s recorded host workspace. The Settings gear shows every accepted host session and <strong>Choose an existing workspace session</strong> replays the same first-use selector. The host repository and ledger never leave the host.",
+        ],
+        commands: [
+          {
+            label: "Inspect and adopt without copying data",
+            code: "jeden workspace discover /path/to/repository\njeden workspace adopt /path/to/repository\njeden workspace status",
+          },
+        ],
+        callout: {
+          tone: "note",
+          text: "Workspace input is optional. Skipping first use keeps the current directory usable for that run and persists nothing. <code>--cwd &lt;path&gt;</code> always overrides an adopted default. On iOS, dismissing source selection changes neither the phone’s saved host records nor the daemon’s repository or sessions.",
+        },
       },
       {
         title: "Checkpoints and rewind",
