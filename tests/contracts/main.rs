@@ -97,6 +97,20 @@ impl Home {
         )
     }
 
+    fn contracts(&self, args: &[&str]) -> (i32, String, String) {
+        let output = self
+            .command()
+            .arg("contracts")
+            .args(args)
+            .output()
+            .expect("run jeden contracts");
+        (
+            output.status.code().unwrap_or(-1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+            String::from_utf8_lossy(&output.stderr).into_owned(),
+        )
+    }
+
     fn rpc(&self, id: &str, method: &str, params: Value) -> Value {
         let mut child = self
             .command()
@@ -261,6 +275,15 @@ fn operator_contracts_are_written_read_and_reset_through_the_cli() {
     let (code, _, stderr) = home.config(&["get", "contracts.style"]);
     assert_eq!(code, 1);
     assert_eq!(stderr.trim(), "Error: unknown config key: contracts.style");
+
+    // The scope is part of the operator-facing contract text, so the CLI
+    // states which turns it binds rather than leaving it to be inferred.
+    let (code, stdout, _) = home.contracts(&["render"]);
+    assert_eq!(code, 0, "stdout: {stdout}");
+    assert!(
+        stdout.contains("The contract binds operator turns and the autonomous execution stage"),
+        "contracts render must state the scope:\n{stdout}"
+    );
 }
 
 #[test]
@@ -292,6 +315,11 @@ fn operator_contracts_and_task_contract_are_served_through_rpc_for_jeden_desktop
         .iter()
         .map(|requirement| requirement["id"].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
+    assert_eq!(
+        contract["appliesTo"],
+        json!(["interactive", "autonomous-execution"]),
+        "the Settings screen reads the same scope the prompt states"
+    );
     assert_eq!(ids, REQUIREMENTS);
 
     let result = home.rpc(
@@ -676,4 +704,61 @@ fn task_contract_delivery_report_is_enforced_on_a_real_turn() {
     assert!(events_of(&events, "task_contract").is_empty());
     assert!(events_of(&events, "task_report").is_empty());
     assert!(events_of(&events, "contract_violation").is_empty());
+}
+
+/// The Pursuit execution stage is a task, and it owes the same report.
+///
+/// Until 2026-09-05 `report_required` excluded every autonomous stage, so the
+/// one stage that writes code answered with prose, recorded no `task_contract`
+/// and no `task_report`, and nothing checked whether it had covered the CLI,
+/// the GUI, the documentation or real tests. This drives a real writing turn
+/// with the autonomous stage flags and reads the ledger it produced.
+#[test]
+fn task_contract_binds_a_writing_autonomous_stage() {
+    let home = Home::new("autonomous");
+    fs::write(
+        home.workspace().join("NOTES.md"),
+        "The deploy target is charless-mac-mini.\n",
+    )
+    .expect("seed workspace file");
+
+    let (outcome, events) = home.run_turn(
+        "Use the read_file tool to read NOTES.md and tell me the deploy target in one sentence.",
+        &["--autonomous", "--allow-write"],
+    );
+    let contracts = events_of(&events, "task_contract");
+    assert_eq!(
+        contracts.len(),
+        1,
+        "a writing autonomous stage records the contract; events: {events:?}"
+    );
+    match outcome {
+        Outcome::Delivered(answer) => {
+            assert!(
+                answer.contains("How it was done"),
+                "a delivered autonomous stage carries the rendered report:\n{answer}"
+            );
+            assert_eq!(
+                events_of(&events, "task_report").len(),
+                1,
+                "one task_report per delivered autonomous stage"
+            );
+        }
+        Outcome::Refused(stderr) => {
+            assert!(
+                stderr.starts_with("Error: Task contract not satisfied: "),
+                "unexpected refusal: {stderr}"
+            );
+        }
+    }
+
+    // A read-only autonomous stage keeps Pursuit's own output contract.
+    let (_, events) = home.run_turn(
+        "Name the deploy target in NOTES.md in one sentence.",
+        &["--autonomous"],
+    );
+    assert!(
+        events_of(&events, "task_contract").is_empty(),
+        "a read-only autonomous stage is not bound by the delivery report; events: {events:?}"
+    );
 }

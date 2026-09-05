@@ -64,12 +64,34 @@ impl Requirement {
     }
 }
 
+/// The turns this contract binds, as the CLI, the RPC snapshot and the docs
+/// all state it.
+///
+/// `interactive` is an operator-driven `jeden run`. `autonomous-execution` is
+/// the Pursuit execution stage, which changes the product exactly as an
+/// interactive turn does and was exempt until 2026-09-05: `report_required`
+/// excluded every autonomous stage, so the one stage that writes code
+/// delivered no report and no `task_report` event, and nothing checked that it
+/// had covered CLI, GUI, documentation or tests. Read-only Pursuit stages
+/// (planner, contract reviewer, acceptance reviewer) keep their own output
+/// contracts and are not listed here.
+pub(crate) const APPLIES_TO: [&str; 2] = ["interactive", "autonomous-execution"];
+
+fn scope_sentence(language: &UiLanguage) -> &'static str {
+    if language.code() == "pl" {
+        "Kontrakt obowiązuje w turach operatora i w wykonawczym etapie autonomicznym; etapy tylko do czytania (planowanie, przeglądy) mają własne kontrakty wyjścia.\n"
+    } else {
+        "The contract binds operator turns and the autonomous execution stage; read-only stages (planning, reviews) keep their own output contracts.\n"
+    }
+}
+
 pub(crate) fn section(language: &UiLanguage) -> String {
     let mut text = if language.code() == "pl" {
         "Kontrakt zadania:\nZadanie obejmuje trwałe zachowanie produktu, nie jednorazową naprawę. Nie zastępuj funkcjonalności ręcznym restartem ani skryptem inline. Naprawiaj usterki związane z przydzielonym zadaniem; nie rozszerzaj go na niezwiązane obserwacje. Przed implementacją ustal kryteria ukończenia i właściwe interfejsy na podstawie kontraktu produktu. Każdy punkt wymaga opisu wykonania. Pytanie, czytanie lub plan nie upoważniają do zmian: wyjaśnij wtedy, dlaczego dany punkt nie dotyczy zadania. Ograniczenia użytkownika i uprawnień nadal obowiązują.\n".to_string()
     } else {
         "Task contract:\nDeliver durable product behavior, not a one-time repair. Never substitute a manual restart or inline script for a product capability. Fix defects related to the assigned task, not unrelated observations. Establish completion criteria and applicable surfaces from the product contract before implementation. Explain every requirement. A question, reading request or plan does not authorize changes: explain why the corresponding requirements do not apply. User scope restrictions and tool permissions still apply.\n".to_string()
     };
+    text.push_str(scope_sentence(language));
     for requirement in &REQUIREMENTS {
         let (title, description) = requirement.prose(language);
         writeln!(text, "- {} ({title}): {description}", requirement.id).unwrap();
@@ -81,6 +103,7 @@ pub(crate) fn snapshot(language: &UiLanguage) -> Value {
     json!({
         "version": VERSION,
         "instructions": section(language),
+        "appliesTo": APPLIES_TO,
         "requirements": REQUIREMENTS.iter().map(|requirement| {
             let (title, description) = requirement.prose(language);
             json!({ "id": requirement.id, "title": title, "description": description })
