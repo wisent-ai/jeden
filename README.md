@@ -121,6 +121,30 @@ agent signing credential from `agent:wisent-app/value` for interactive sessions
 and `jeden run`; it remains in the process environment only. A deployment that
 requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
 
+On a configured macOS workstation, `scripts/run-with-stado.sh` obtains the
+signing value and the separate `jeden-model-router/token` bearer from Skarbiec
+and launches the installed Jeden without building it. The reusable VS Code
+task in `scripts/vscode-tasks.json` runs a disk diagnosis in a dedicated
+integrated terminal with `gpt-6-astra`; it does not type into an existing
+terminal's prompt or change the default model.
+
+For a checkout at `~/Documents/CodingProjects/Wisent/jeden`, install the task
+from this repository root when VS Code has no user task file:
+
+```sh
+ln -s "$PWD/scripts/vscode-tasks.json" \
+  "$HOME/Library/Application Support/Code/User/tasks.json"
+```
+
+If that file already exists, keep it and add this task to its `tasks` array
+instead. Choose **Terminal → Run Task… → Jeden: diagnoza dysku bez zmian**.
+VS Code keeps the command and final exit status in the named terminal and
+refuses a second concurrent instance. The task requests paths, sizes, growth
+causes and APFS accounting without deletion, compilation, configuration changes
+or consent prompts. It grants command execution, not a filesystem sandbox;
+these restrictions are part of the diagnosis prompt. Brama refusals remain
+visible as failures rather than switching models or starting a login.
+
 Communication and functionality contracts are user defaults. The CLI and the
 Jeden Desktop Settings screen edit the same values in `~/.jeden/config.yml`;
 project config may override them:

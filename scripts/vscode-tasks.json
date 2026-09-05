@@ -1,0 +1,28 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Jeden: diagnoza dysku bez zmian",
+      "type": "process",
+      "command": "${env:HOME}/Documents/CodingProjects/Wisent/jeden/scripts/run-with-stado.sh",
+      "args": [
+        "run",
+        "Zidentyfikuj, co zapycha dysk na tym Macu i dlaczego zajęcie miejsca narasta. Podaj konkretne ścieżki, rozmiary oraz procesy lub polecenia, które tworzą te dane. Sprawdź rozkład zajętości dysku, nie tylko jeden podejrzany katalog; uwzględnij współdzielenie bloków APFS. Na razie wyłącznie diagnoza: niczego nie usuwaj, nie czyść, nie kompiluj i nie zmieniaj konfiguracji. Nie wywołuj systemowych okien zgody ani powiadomień. Odpowiedz krótko i konkretnie po polsku.",
+        "--model",
+        "gpt-6-astra",
+        "--cwd",
+        "${env:HOME}",
+        "--allow-command"
+      ],
+      "options": { "cwd": "${env:HOME}" },
+      "presentation": {
+        "reveal": "always",
+        "focus": false,
+        "panel": "dedicated",
+        "showReuseMessage": false
+      },
+      "runOptions": { "instanceLimit": 1 },
+      "problemMatcher": []
+    }
+  ]
+}
