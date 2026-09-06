@@ -204,14 +204,15 @@ Defects related to the assigned task are repaired at their source; diagnostics
 must identify failures; and applicable CLI, GUI, and public documentation
 surfaces must agree. Behavioral tests belong in the product's
 `tests/<area>` tree, exercise a complete lifecycle through the real product and
-real dependencies, and observe the final state. Probierz owns those runs and
-their retained reports, traces, screenshots, recordings, evidence level, and
-gate verdict.
+real dependencies, and observe the final state. Tests may be created and run
+directly with the product's own tools; Probierz is optional. Every run retains
+its exact source revision, commands, exit statuses, supported reports, traces,
+screenshots and recordings, and actual result.
 
 The model must return a structured report covering exactly `functionality`,
 `diagnostics`, `cli`, `gui`, `documentation`, `tests`, and `delivery`. It must
 explain concretely what happened for every requirement and cite source or
-Probierz evidence for every `done` entry. `not_applicable` is honest when a
+test evidence for every `done` entry. `not_applicable` is honest when a
 surface truly does not apply; `blocked` names an unresolved prerequisite and
 does not pretend the task is complete. Parsing checks the report's structure,
 not the truth of its claims.
