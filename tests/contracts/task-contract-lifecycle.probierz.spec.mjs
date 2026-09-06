@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile, access } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,8 +16,25 @@ const sessions = join(root, "sessions");
 const temporary = join(root, "temporary");
 await Promise.all([home, workspace, sessions, temporary].map((path) => mkdir(path)));
 const required = ["functionality", "diagnostics", "cli", "gui", "documentation", "tests", "delivery"];
-const trace = { commands: [], observations: [], workspace, sessions };
+const trace = {
+  schemaVersion: 1,
+  kind: "probierz-jeden-task-contract-lifecycle",
+  status: "failed",
+  completedAt: new Date().toISOString(),
+  observation: { reply: "The task-contract lifecycle has not completed." },
+  commands: [],
+  observations: [],
+  workspace,
+  sessions,
+};
 const tracePath = join(root, "trace.json");
+process.once("exit", (code) => {
+  const exitCode = process.exitCode ?? code;
+  trace.status = exitCode === 0 ? "completed" : "failed";
+  trace.completedAt = new Date().toISOString();
+  trace.observation.reply = `Jeden task-contract lifecycle exited with status ${exitCode}.`;
+  writeFileSync(tracePath, JSON.stringify(trace, null, 2));
+});
 const environment = {
   ...process.env,
   HOME: home,
@@ -28,6 +46,7 @@ const binary = process.env.TUI_CMD;
 assert.ok(binary && isAbsolute(binary), "TUI_CMD must name the source-bound Jeden binary");
 
 async function retain() {
+  trace.completedAt = new Date().toISOString();
   await writeFile(tracePath, JSON.stringify(trace, null, 2));
 }
 
