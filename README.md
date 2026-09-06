@@ -235,7 +235,7 @@ run it from this repository through Probierz:
 ```sh
 probierz run tui --app jeden \
   --spec "$PWD/tests/contracts/task-contract-lifecycle.probierz.spec.mjs" \
-  --no-repair JEDEN_CONTRACT_JOURNEY=1 TUI_CMD="$JEDEN_BIN"
+  --no-repair PROBIERZ_JOURNEY=task-contract-lifecycle TUI_CMD="$JEDEN_BIN"
 ```
 
 It runs the existing operator-contract stories, exercises CLI/RPC persistence,
