@@ -97,6 +97,11 @@ From source (the currently documented path):
 git clone https://github.com/wisent-ai/jeden.git && cd jeden
 cargo build --locked --release   # or: bin/jeden-rust, which rebuilds stale source binaries
 ```
+On macOS, keep the built and code-signed `jeden-sandbox-helper` beside `jeden`.
+The release pipeline builds and stages both executables, and records both
+digests in its SBOM and provenance. Copying only `jeden` does not provide the
+enforced task sandbox and is refused before a task runs.
+
 
 Required environment for real model calls:
 

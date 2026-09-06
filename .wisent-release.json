@@ -21,6 +21,7 @@
       },
       "stage": {
         "stage-darwin-arm64/bin/jeden": "bin/jeden",
+        "stage-darwin-arm64/bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
         "stage-darwin-arm64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
         "stage-darwin-arm64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
         "stage-darwin-arm64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"

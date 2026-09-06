@@ -17,20 +17,36 @@ def write_json(path: Path, value: object) -> bytes:
 
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--binary", required=True)
+parser.add_argument("--binary", required=True, action="append")
 parser.add_argument("--receipts", required=True)
 parser.add_argument("--version", required=True)
 parser.add_argument("--platform", required=True)
 args = parser.parse_args()
 
-binary = Path(args.binary)
+binaries = [Path(value) for value in args.binary]
 receipts = Path(args.receipts)
 receipts.mkdir(parents=True, exist_ok=True)
-binary_bytes = binary.read_bytes()
-binary_sha256 = hashlib.sha256(binary_bytes).hexdigest()
-binary_sha1 = hashlib.sha1(binary_bytes, usedforsecurity=False).hexdigest()
-package_verification_code = hashlib.sha1(binary_sha1.encode("ascii"), usedforsecurity=False).hexdigest()
-subject = {"name": "jeden", "digest": {"sha256": binary_sha256}}
+files = []
+subjects = []
+sha1_checksums = []
+for index, binary in enumerate(binaries):
+    name = "jeden" if index == 0 else binary.name
+    binary_bytes = binary.read_bytes()
+    binary_sha256 = hashlib.sha256(binary_bytes).hexdigest()
+    binary_sha1 = hashlib.sha1(binary_bytes, usedforsecurity=False).hexdigest()
+    sha1_checksums.append(binary_sha1)
+    subjects.append({"name": name, "digest": {"sha256": binary_sha256}})
+    files.append({
+        "SPDXID": f"SPDXRef-File-{name}",
+        "checksums": [
+            {"algorithm": "SHA1", "checksumValue": binary_sha1},
+            {"algorithm": "SHA256", "checksumValue": binary_sha256},
+        ],
+        "fileName": name,
+    })
+package_verification_code = hashlib.sha1(
+    "".join(sorted(sha1_checksums)).encode("ascii"), usedforsecurity=False
+).hexdigest()
 
 sbom = {
     "SPDXID": "SPDXRef-DOCUMENT",
@@ -39,15 +55,8 @@ sbom = {
         "creators": ["Tool: jeden-release-evidence-v1"],
     },
     "dataLicense": "CC0-1.0",
-    "documentNamespace": f"stado://receipts/jeden/{args.version}/{args.platform}/sbom/{binary_sha256}",
-    "files": [{
-        "SPDXID": "SPDXRef-File-jeden",
-        "checksums": [
-            {"algorithm": "SHA1", "checksumValue": binary_sha1},
-            {"algorithm": "SHA256", "checksumValue": binary_sha256},
-        ],
-        "fileName": "jeden",
-    }],
+    "documentNamespace": f"stado://receipts/jeden/{args.version}/{args.platform}/sbom/{package_verification_code}",
+    "files": files,
     "name": f"jeden-{args.version}-{args.platform}",
     "packages": [{
         "SPDXID": "SPDXRef-Package-jeden",
@@ -59,7 +68,10 @@ sbom = {
     }],
     "relationships": [
         {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": "SPDXRef-Package-jeden"},
-        {"spdxElementId": "SPDXRef-Package-jeden", "relationshipType": "CONTAINS", "relatedSpdxElement": "SPDXRef-File-jeden"},
+        *[
+            {"spdxElementId": "SPDXRef-Package-jeden", "relationshipType": "CONTAINS", "relatedSpdxElement": file["SPDXID"]}
+            for file in files
+        ],
     ],
     "spdxVersion": "SPDX-2.3",
 }
@@ -68,7 +80,7 @@ sbom_bytes = write_json(receipts / "sbom.spdx.json", sbom)
 provenance = {
     "_type": "https://in-toto.io/Statement/v1",
     "predicateType": "https://slsa.dev/provenance/v1",
-    "subject": [subject],
+    "subject": subjects,
     "predicate": {
         "buildDefinition": {
             "buildType": "https://stado.wisent.com/build-types/wisent-release/v1",
@@ -84,7 +96,7 @@ provenance_bytes = write_json(receipts / "provenance.intoto.json", provenance)
 evidence_statement = {
     "_type": "https://in-toto.io/Statement/v1",
     "predicateType": "https://stado.wisent.com/predicates/release-evidence/v1",
-    "subject": [subject],
+    "subject": subjects,
     "predicate": {
         "platform": args.platform,
         "version": args.version,

@@ -47,9 +47,18 @@ CARGO_TARGET_DIR="$TARGET_DIR" JEDEN_BUILD_VERSION="$VERSION" \
   cargo build --locked --release --target "$TARGET" --bin jeden
 cp "$TARGET_DIR/$TARGET/release/$EXECUTABLE" "$STAGE_DIR/bin/jeden"
 chmod 0755 "$STAGE_DIR/bin/jeden"
+set -- --binary "$STAGE_DIR/bin/jeden"
+if [ "$PLATFORM" = darwin-arm64 ]; then
+  CARGO_TARGET_DIR="$TARGET_DIR" JEDEN_BUILD_VERSION="$VERSION" \
+    cargo build --locked --release --target "$TARGET" --bin jeden-sandbox-helper
+  cp "$TARGET_DIR/$TARGET/release/jeden-sandbox-helper" "$STAGE_DIR/bin/jeden-sandbox-helper"
+  chmod 0755 "$STAGE_DIR/bin/jeden-sandbox-helper"
+  scripts/sign-sandbox-helper.sh "$STAGE_DIR/bin/jeden-sandbox-helper"
+  set -- "$@" --binary "$STAGE_DIR/bin/jeden-sandbox-helper"
+fi
 
 python3 scripts/release/write-evidence.py \
-  --binary "$STAGE_DIR/bin/jeden" \
+  "$@" \
   --receipts "$STAGE_DIR/receipts" \
   --version "$VERSION" \
   --platform "$PLATFORM"
