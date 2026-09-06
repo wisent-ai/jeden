@@ -106,6 +106,26 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://jeden.wisent.com/docs/cli/workspace</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://jeden.wisent.com/docs/cli/workspace/status</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://jeden.wisent.com/docs/cli/workspace/discover</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
+    <loc>https://jeden.wisent.com/docs/cli/workspace/adopt</loc>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://jeden.wisent.com/docs/cli/config</loc>
     <changefreq>weekly</changefreq>
     <priority>0.7</priority>

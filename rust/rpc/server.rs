@@ -295,6 +295,39 @@ where
     Ok(())
 }
 
+fn workspace_status() -> Result<Value, (&'static str, String)> {
+    let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
+    crate::cli::workspace::status(&cwd)
+        .map(|report| {
+            report
+                .map(|report| report.value())
+                .unwrap_or_else(|| json!({"status": "not_adopted"}))
+        })
+        .map_err(|error| ("invalid_workspace", error))
+}
+
+fn workspace_discover(params: &Value) -> Result<Value, (&'static str, String)> {
+    let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| cwd.clone());
+    crate::cli::workspace::inspect(&path, &cwd, "discovered")
+        .map(|report| report.value())
+        .map_err(|error| ("invalid_workspace", error))
+}
+
+fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, String)> {
+    let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
+    let path = string_param(params, "path")
+        .map(PathBuf::from)
+        .map_err(|error| ("invalid_request", error))?;
+    crate::cli::workspace::adopt(&path, &cwd)
+        .map(|report| report.value())
+        .map_err(|error| ("invalid_workspace", error))
+}
+
 fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), Value> {
     let id = request.id.clone();
     let result = match request.method.as_str() {
@@ -308,6 +341,9 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "config/contracts/set" => set_contract_settings(&request.params),
         "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
         "config/communication/set" => set_communication_settings(&request.params),
+        "workspace/status" => workspace_status(),
+        "workspace/discover" => workspace_discover(&request.params),
+        "workspace/adopt" => workspace_adopt(&request.params),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),

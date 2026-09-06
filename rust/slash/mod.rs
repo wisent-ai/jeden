@@ -44,7 +44,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/tools" => Some(Ok(if split_args(args).iter().any(|arg| arg == "--json") { tools::tools_json(context.cwd) } else { tools::tools_slash_text(context.cwd) })),
         "/stats" | "/debug" => Some(commands::handle_doctor(context)),
         "/setup" => Some(setup::handle_text(args, context)),
-        "/onboarding" => Some(crate::onboarding::text(args)),
+        "/onboarding" => Some(crate::onboarding::text(args, context.cwd)),
         "/usage" => Some(commands::usage::handle_usage(args, context)),
 
         "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),

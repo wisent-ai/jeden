@@ -129,7 +129,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     } else {
         None
     };
-    let initial_picker = crate::onboarding::initial_picker()?.or(initial_model_picker);
+    let initial_picker = crate::onboarding::initial_picker(&args.cwd)?.or(initial_model_picker);
     let session_model = Arc::new(Mutex::new(model));
     // One persistent conversation provides native cross-turn memory for the
     // entire interactive session. A self-rebuild seeds a fresh recorder with
@@ -344,14 +344,30 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     Ok(message)
                 }
                 "/setup" => {
-                    return crate::slash::setup::run_interactive(
+                    let outcome = crate::slash::setup::run_interactive(
                         &run_args.cwd,
                         rest,
                         handler_model.lock().as_deref(),
-                        ctx.interactive,
-                    );
+                        true,
+                    )?;
+                    if rest.split_whitespace().next().is_some_and(|verb| verb.eq_ignore_ascii_case("workspace")) {
+                        let selected = crate::cli::workspace::configured_path()?
+                            .ok_or_else(|| "workspace adoption did not persist a path".to_string())?;
+                        handler_conv.lock().rebase(&selected)?;
+                        *handler_cwd.lock() = selected;
+                    }
+                    return Ok(outcome);
                 }
-                "/onboarding" => return crate::onboarding::interactive(rest),
+                "/onboarding" => {
+                    let outcome = crate::onboarding::interactive(rest, &run_args.cwd)?;
+                    if rest.split_whitespace().next() == Some("adopt-workspace") {
+                        let selected = crate::cli::workspace::configured_path()?
+                            .ok_or_else(|| "workspace adoption did not persist a path".to_string())?;
+                        handler_conv.lock().rebase(&selected)?;
+                        *handler_cwd.lock() = selected;
+                    }
+                    return Ok(outcome);
+                }
                 "/roles" | "/role" => {
                     // Roles hub rows dispatch `/roles <role>`; the hub has no
                     // backend of its own, so forward to the role's existing
