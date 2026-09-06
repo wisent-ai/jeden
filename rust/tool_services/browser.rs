@@ -18,7 +18,7 @@ unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
 }
 
-const EMBEDDED_BRIDGE: &str = include_str!("../../scripts/browser-bridge.mjs");
+const EMBEDDED_BRIDGE: &str = include_str!("browser-bridge.mjs");
 
 fn default_chromium(config: &Value) -> Option<String> {
     config::string(

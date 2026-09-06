@@ -9,8 +9,8 @@
   "scripts": {
     "check": "cargo check",
     "check:rust": "cargo check",
-    "build:rust": "cargo build --release && ./scripts/sign-sandbox-helper.sh",
-    "build:docs": "node web/scripts/build-docs.mjs"
+    "build:rust": "cargo build --release && { if [ \"$(uname -s)\" != Darwin ]; then exit 0; fi; helper=target/release/jeden-sandbox-helper; test -x \"$helper\" || { echo \"sandbox helper is missing or not executable: $helper\" >&2; exit 1; }; /usr/bin/codesign --force --sign \"${JEDEN_CODESIGN_IDENTITY:--}\" \"$helper\" && /usr/bin/codesign --verify --strict \"$helper\"; }",
+    "build:docs": "node web/docs/pages.mjs"
   },
   "dependencies": {
     "@wisent-ai/components": "file:vendor/wisent-components/f78f99fe8e0b5326b6008ec2951becea94b4148d/wisent-ai-components-0.8.1.tgz",
