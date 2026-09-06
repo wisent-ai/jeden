@@ -553,15 +553,18 @@ impl BramaClient {
             return Ok(catalog);
         }
         let status = response.status;
-        let etag = response.headers.get("etag").cloned();
-        let text = String::from_utf8(response.body)
-            .map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
         if !(200..300).contains(&status) {
             return Err(BramaError::Http {
                 status,
-                message: "request failed; response body suppressed".into(),
+                message: format!(
+                    "/{API_VERSION}/models: {:?}",
+                    String::from_utf8_lossy(&response.body)
+                ),
             });
         }
+        let etag = response.headers.get("etag").cloned();
+        let text = String::from_utf8(response.body)
+            .map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
         let mut catalog: ModelCatalog =
             serde_json::from_str(&text).map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
         if catalog.catalog_revision.is_empty() {
@@ -641,7 +644,10 @@ impl BramaClient {
         if !(200..300).contains(&response.status) {
             return Err(BramaError::Http {
                 status: response.status,
-                message: "request failed; response body suppressed".into(),
+                message: format!(
+                    "/{API_VERSION}{path}: {:?}",
+                    String::from_utf8_lossy(&response.body)
+                ),
             });
         }
         Ok(response)

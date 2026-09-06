@@ -55,6 +55,7 @@ const commands = [
       "A missing value for a valued option is refused (for example <code>--model requires a value</code>); non-integer token or step bounds are refused.",
       "Model work fails closed when required router configuration or credentials are absent, and write or command tools remain approval-gated unless their tier was granted.",
       "On macOS, a missing task sandbox helper is reported as <code>jeden-sandbox-helper is not installed beside the Jeden executable; build and code-sign it or set JEDEN_TASK_SANDBOX_HELPER</code>. Install the complete release, keeping its signed <code>jeden-sandbox-helper</code> beside <code>jeden</code>; the release SBOM and provenance identify both executables.",
+      "A non-rate-limit HTTP failure from Brama includes its status, the requested API path, and the quoted response body. An empty quoted body means that the upstream server supplied no error detail; it is not a model answer. The CLI and RPC report the same failure.",
     ],
   },
   {
