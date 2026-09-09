@@ -350,9 +350,15 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         handler_model.lock().as_deref(),
                         true,
                     )?;
-                    if rest.split_whitespace().next().is_some_and(|verb| verb.eq_ignore_ascii_case("workspace")) {
-                        let selected = crate::cli::workspace::configured_path()?
-                            .ok_or_else(|| "workspace adoption did not persist a path".to_string())?;
+                    if rest
+                        .split_whitespace()
+                        .next()
+                        .is_some_and(|verb| verb.eq_ignore_ascii_case("workspace"))
+                    {
+                        let selected =
+                            crate::cli::workspace::configured_path()?.ok_or_else(|| {
+                                "workspace adoption did not persist a path".to_string()
+                            })?;
                         handler_conv.lock().rebase(&selected)?;
                         *handler_cwd.lock() = selected;
                     }
@@ -361,8 +367,10 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 "/onboarding" => {
                     let outcome = crate::onboarding::interactive(rest, &run_args.cwd)?;
                     if rest.split_whitespace().next() == Some("adopt-workspace") {
-                        let selected = crate::cli::workspace::configured_path()?
-                            .ok_or_else(|| "workspace adoption did not persist a path".to_string())?;
+                        let selected =
+                            crate::cli::workspace::configured_path()?.ok_or_else(|| {
+                                "workspace adoption did not persist a path".to_string()
+                            })?;
                         handler_conv.lock().rebase(&selected)?;
                         *handler_cwd.lock() = selected;
                     }

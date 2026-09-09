@@ -10,8 +10,10 @@
 //!
 //! A turn needs the environment the binary needs: `BRAMA_URL`, `BRAMA_TOKEN`,
 //! `WISENT_APP_AGENT_ID`, `WISENT_APP_AGENT_AUTH_SECRET`, `JEDEN_MODEL`.
-//! `scripts/run-with-stado.sh` exports them on a configured workstation; a
-//! missing one fails the test by name instead of skipping it.
+//! The binary resolves the two credentials itself, asking Stado for
+//! `agent:wisent-app/value` and `jeden-model-router/token` when the
+//! environment does not carry them; a missing one fails the test by name
+//! instead of skipping it.
 //!
 //! Run: `cargo test --test routing -- --nocapture`
 

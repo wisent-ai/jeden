@@ -15,6 +15,7 @@ use crate::{handle_slash, load_config, session_root, Args, Config};
 mod approval;
 mod commands;
 mod conversation;
+pub(crate) mod credential;
 mod hooks;
 mod runtime;
 mod state;
@@ -23,7 +24,24 @@ pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;
 pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult, TraceEvent};
 pub(crate) use runtime::communication_contract;
-pub(crate) use runtime::model_router_config;
+
+/// The router configuration, with Jeden's own credential accounted for.
+///
+/// `credential::ensure` has usually already run by here, on the first
+/// control-plane read of this process. This call is what turns a refusal into
+/// a sentence the operator sees, once, at the start of a turn: a run that
+/// cannot sign a request used to fail with `BRAMA_URL is required` and no
+/// account of what could not be read.
+pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_router::ChatConfig {
+    let (secret, bearer) = credential::ensure();
+    for (variable, source) in [(credential::SECRET, secret), (credential::BEARER, bearer)] {
+        if let Some(said) = source.refusal() {
+            eprintln!("jeden: {variable} is unavailable: {said}");
+        }
+    }
+    runtime::model_router_config(config, args)
+}
+
 pub(crate) use runtime::now_stamp;
 pub(crate) use runtime::specs::system_prompt_checked;
 pub(crate) use runtime::task_contract;

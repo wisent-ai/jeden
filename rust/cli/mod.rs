@@ -13,5 +13,5 @@ pub(crate) mod run;
 pub(crate) mod sessions;
 pub(crate) mod stats;
 pub(crate) mod token;
-pub(crate) mod worktree;
 pub(crate) mod workspace;
+pub(crate) mod worktree;

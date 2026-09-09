@@ -54,8 +54,8 @@ pub(crate) use cli::sessions::{
 };
 pub(crate) use cli::stats::stats_command;
 pub(crate) use cli::token::token_command;
-pub(crate) use cli::worktree::worktree_command;
 pub(crate) use cli::workspace::command as workspace_command;
+pub(crate) use cli::worktree::worktree_command;
 
 pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 

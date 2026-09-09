@@ -12,27 +12,16 @@ done
 ROOT="$(CDPATH= cd -- "$(dirname -- "$PRG")/.." && pwd)"
 MANIFEST="$ROOT/Cargo.toml"
 BIN="$ROOT/target/release/jeden"
-STADO_BOOTSTRAP="$ROOT/scripts/run-with-stado.sh"
 
-needs_model_runtime() {
-  case "${1:-}" in
-    ""|interactive|run|rpc|headless|acp|resume|recall_conversation|recall-conversation|token|probierz) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
+# The binary resolves its own credential: on the first control-plane read it
+# asks Stado for `agent:wisent-app/value` and `jeden-model-router/token` when
+# the environment does not carry them. This launcher used to exec
+# `scripts/run-with-stado.sh` for that, and the scripts purge on 2026-09-06
+# deleted the file while leaving the exec behind, so a configured workstation
+# fell straight through to `BRAMA_URL is required`.
 run_jeden() {
-  if needs_model_runtime "${1:-}" \
-    && { [ -z "${BRAMA_URL:-}" ] || [ -z "${WISENT_APP_AGENT_AUTH_SECRET:-}" ]; } \
-    && [ "${JEDEN_STADO_BOOTSTRAPPED:-0}" != 1 ] \
-    && [ -f "$STADO_BOOTSTRAP" ] \
-    && [ -f "${JEDEN_SKARBIEC_TOKEN_FILE:-$HOME/.stado/local-operator-skarbiec-token}" ]; then
-    JEDEN_BIN="$BIN" JEDEN_STADO_BOOTSTRAPPED=1 \
-      exec /usr/bin/env bash "$STADO_BOOTSTRAP" "$@"
-  fi
-  exec "$BIN" "$@"
+    exec "$BIN" "$@"
 }
-
 
 if [ -f "$MANIFEST" ]; then
   cargo build --quiet --manifest-path "$MANIFEST" --release \

@@ -34,15 +34,32 @@ fn brama_url() -> Result<String, String> {
         })
 }
 
-fn configured() -> Result<(String, String, String), String> {
+fn configured() -> Result<(String, String, String, &'static str), String> {
+    // Where the value came from is part of the answer: an operator reading
+    // this needs to know whether the launcher carried it or the vault did.
+    // The same resolution every request path uses: the secret comes from
+    // Stado when this process was not launched carrying it. The refusal below
+    // used to name `scripts/run-with-stado.sh`, a file this repository
+    // deleted, which left a reader with an instruction that could not be
+    // followed; it now carries what Stado itself said.
+    let (secret_source, _) = crate::agent::credential::ensure();
     let url = brama_url()?;
     let secret = env::var(SECRET_KEY).unwrap_or_default();
     if secret.is_empty() {
-        return Err(format!(
-            "{SECRET_KEY} is not configured; launch with bin/jeden-rust or scripts/run-with-stado.sh"
-        ));
+        return Err(match secret_source.refusal() {
+            Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
+            None => format!(
+                "{SECRET_KEY} is not configured; Skarbiec item `agent:wisent-app` holds it and \
+                 `stado secrets get agent:wisent-app --field value` is how this process reads it"
+            ),
+        });
     }
-    Ok((url, env::var(AGENT_ID_KEY).unwrap_or_default(), secret))
+    Ok((
+        url,
+        env::var(AGENT_ID_KEY).unwrap_or_default(),
+        secret,
+        secret_source.as_str(),
+    ))
 }
 
 /// CLI `jeden token [--list] [--reveal] [--json]`. `--reveal` prints the bare
@@ -53,14 +70,15 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
         .positionals
         .iter()
         .any(|part| part == "--list" || part == "list");
-    let (brama, agent_id, secret) = configured()?;
+    let (brama, agent_id, secret, source) = configured()?;
     if args.json {
         return Ok(format!(
-            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{}}}\n",
+            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{}}}\n",
             serde_json::to_string(&brama).map_err(|error| error.to_string())?,
             serde_json::to_string(&agent_id).map_err(|error| error.to_string())?,
             serde_json::to_string(&if reveal { secret } else { redacted(&secret) })
                 .map_err(|error| error.to_string())?,
+            serde_json::to_string(source).map_err(|error| error.to_string())?,
         ));
     }
     if reveal {
@@ -69,10 +87,16 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
     let mut lines = vec![
         format!("Brama:   {brama}"),
         format!("Agent:   {agent_id}"),
-        format!(
-            "Token:   {} — injected in memory by Stado/Skarbiec",
-            redacted(&secret)
-        ),
+        match source {
+            "stado" => format!(
+                "Token:   {} — read through Stado from the Skarbiec item agent:wisent-app",
+                redacted(&secret)
+            ),
+            _ => format!(
+                "Token:   {} — carried in this process's environment",
+                redacted(&secret)
+            ),
+        },
         "Reveal:  jeden token --reveal (prints the bare value for scripting)".to_string(),
     ];
     if list {
@@ -103,9 +127,9 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
 /// Slash `/token`: redacted summary only. The transcript is model-bound, so
 /// the full secret is never printed here by design.
 pub(crate) fn token_slash() -> Result<String, String> {
-    let (brama, agent_id, secret) = configured()?;
+    let (brama, agent_id, secret, source) = configured()?;
     Ok(format!(
-        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted — transcript text can reach the model).\nPrint the full value from your shell with: jeden token --reveal\n",
+        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted — transcript text can reach the model, source: {source}).\nPrint the full value from your shell with: jeden token --reveal\n",
         redacted(&secret)
     ))
 }

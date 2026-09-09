@@ -125,9 +125,17 @@ fn picker_for(client: &Client, cwd: &Path, notice: Option<&str>) -> Result<Picke
     let body = presentation_text(screen, "body");
     let mut items = vec![PickerItem::action(body, "").disabled(true)];
     if let Some(notice) = notice {
-        items.push(PickerItem::action(notice, "").badge("ACCEPTED").disabled(true));
+        items.push(
+            PickerItem::action(notice, "")
+                .badge("ACCEPTED")
+                .disabled(true),
+        );
     }
-    if screen.actions.iter().any(|action| action == "adopt_workspace") {
+    if screen
+        .actions
+        .iter()
+        .any(|action| action == "adopt_workspace")
+    {
         items.push(
             PickerItem::action(
                 format!("Adopt {}", cwd.display()),
@@ -137,10 +145,13 @@ fn picker_for(client: &Client, cwd: &Path, notice: Option<&str>) -> Result<Picke
             .badge("USE EXISTING"),
         );
         items.push(
-            PickerItem::action("Choose another workspace path", "/onboarding adopt-workspace ")
-                .detail("enter an existing readable repository or directory")
-                .badge("INPUT")
-                .prefill(),
+            PickerItem::action(
+                "Choose another workspace path",
+                "/onboarding adopt-workspace ",
+            )
+            .detail("enter an existing readable repository or directory")
+            .badge("INPUT")
+            .prefill(),
         );
         items.push(
             PickerItem::action("Skip for now", "/onboarding skip")
@@ -224,7 +235,11 @@ async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), Str
                 .map_err(|error| error.to_string())?;
         }
         "adopt-workspace" => {
-            let path = if rest.is_empty() { cwd } else { Path::new(rest) };
+            let path = if rest.is_empty() {
+                cwd
+            } else {
+                Path::new(rest)
+            };
             let report = crate::cli::workspace::adopt(path, cwd)?;
             let evidence = BTreeMap::from([("workspace_adopted".to_string(), json!(true))]);
             client
@@ -234,7 +249,11 @@ async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), Str
                 .ok_or_else(|| "onboarding workspace step could not advance".to_string())?;
             notice = Some(format!(
                 "{}: {} · {} existing session(s) accepted",
-                if report.status == "unchanged" { "Already using" } else { "Adopted" },
+                if report.status == "unchanged" {
+                    "Already using"
+                } else {
+                    "Adopted"
+                },
                 report.workspace.display(),
                 report.sessions.accepted
             ));

@@ -9,7 +9,9 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::config::{config_set_value, config_value_at, read_user_writable_config_strict, write_user_config};
+use super::config::{
+    config_set_value, config_value_at, read_user_writable_config_strict, write_user_config,
+};
 use crate::{session_root, Args};
 
 pub(crate) const DEFAULT_WORKSPACE_KEY: &str = "workspace.defaultPath";
@@ -93,8 +95,12 @@ fn validate_project_config(workspace: &Path) -> Result<String, String> {
             ))
         }
     };
-    let value: Value = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("invalid existing Jeden configuration {}: {error}", path.display()))?;
+    let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "invalid existing Jeden configuration {}: {error}",
+            path.display()
+        )
+    })?;
     if !value.is_object() {
         return Err(format!(
             "invalid existing Jeden configuration {}: root must be an object",
@@ -134,8 +140,9 @@ fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
         }
         let state = match fs::read(&state_path)
             .map_err(|error| error.to_string())
-            .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string()))
-        {
+            .and_then(|bytes| {
+                serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())
+            }) {
             Ok(value) => value,
             Err(_) => {
                 rejected += 1;
@@ -214,9 +221,7 @@ pub(crate) fn configured_path() -> Result<Option<PathBuf>, String> {
         return Ok(None);
     };
     let path = value.as_str().ok_or_else(|| {
-        format!(
-            "{DEFAULT_WORKSPACE_KEY} in the user configuration must be a string"
-        )
+        format!("{DEFAULT_WORKSPACE_KEY} in the user configuration must be a string")
     })?;
     if path.trim().is_empty() {
         return Ok(None);
@@ -233,7 +238,9 @@ pub(crate) fn effective_cwd(requested: &Path, explicit: bool) -> Result<PathBuf,
     };
     inspect(&configured, requested, "selected")
         .map(|report| report.workspace)
-        .map_err(|error| format!("adopted workspace is unavailable: {error}; use --cwd to override"))
+        .map_err(|error| {
+            format!("adopted workspace is unavailable: {error}; use --cwd to override")
+        })
 }
 
 pub(crate) fn status(base: &Path) -> Result<Option<WorkspaceReport>, String> {
@@ -271,7 +278,11 @@ pub(crate) fn adopt(path: &Path, base: &Path) -> Result<WorkspaceReport, String>
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
-    let verb = args.positionals.first().map(String::as_str).unwrap_or("status");
+    let verb = args
+        .positionals
+        .first()
+        .map(String::as_str)
+        .unwrap_or("status");
     let report = match verb {
         "status" => match status(&args.cwd)? {
             Some(report) => report,
@@ -284,7 +295,11 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             }
         },
         "discover" => {
-            let path = args.positionals.get(1).map(PathBuf::from).unwrap_or_else(|| args.cwd.clone());
+            let path = args
+                .positionals
+                .get(1)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| args.cwd.clone());
             inspect(&path, &args.cwd, "discovered")?
         }
         "adopt" => {
@@ -294,7 +309,11 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 .ok_or("Usage: jeden workspace adopt <path> [--json]")?;
             adopt(Path::new(path), &args.cwd)?
         }
-        _ => return Err("Usage: jeden workspace [status|discover [path]|adopt <path>] [--json]".into()),
+        _ => {
+            return Err(
+                "Usage: jeden workspace [status|discover [path]|adopt <path>] [--json]".into(),
+            )
+        }
     };
     if args.json {
         serde_json::to_string(&report)

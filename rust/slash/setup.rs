@@ -220,7 +220,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     match (&state.workspace, &state.workspace_error) {
         (Some(workspace), _) => items.push(configured_row(
             "1. Existing workspace adopted",
-            format!("{} · future tasks use this path unless --cwd is supplied", workspace.display()),
+            format!(
+                "{} · future tasks use this path unless --cwd is supplied",
+                workspace.display()
+            ),
         )),
         (None, Some(error)) => items.push(
             PickerItem::action("1. Adopted workspace is unavailable", "")
@@ -438,7 +441,11 @@ pub(crate) fn handle_text(args: &str, context: &SlashContext<'_>) -> Result<Stri
         "" | "status" => Ok(checklist_text(context)),
         "validate" => Ok(validate_text(context)),
         "workspace" => {
-            let path = if rest.trim().is_empty() { context.cwd } else { Path::new(rest.trim()) };
+            let path = if rest.trim().is_empty() {
+                context.cwd
+            } else {
+                Path::new(rest.trim())
+            };
             Ok(crate::cli::workspace::adopt(path, context.cwd)?.text())
         }
         "brama-url" => save_brama_url(rest),

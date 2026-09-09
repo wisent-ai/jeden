@@ -17,7 +17,16 @@ impl SecretRef {
     pub fn inline(value: impl Into<String>) -> Self {
         Self::Inline(value.into())
     }
+    /// The value behind this reference, or nothing when it is unset or blank.
+    ///
+    /// Every control-plane secret in this binary is read by name here, so this
+    /// is where Jeden's own credential gets a chance to exist: the first read
+    /// of any name asks Stado for the signing secret and the gateway bearer
+    /// when this process was not launched carrying them, and installs them in
+    /// the environment the readers below and in the Brama client use. The work
+    /// happens once per process.
     pub fn resolve(&self) -> Option<String> {
+        crate::agent::credential::ensure();
         match self {
             Self::Environment(name) => std::env::var(name)
                 .ok()
