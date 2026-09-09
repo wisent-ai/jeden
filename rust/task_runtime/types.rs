@@ -11,7 +11,12 @@ pub struct TaskLimits {
     pub max_depth: u32,
     pub max_children: usize,
     pub max_output_bytes: u64,
-    pub wait_timeout_ms: u64,
+    /// How long one batch wave waits for a job before cancelling it and
+    /// reporting `TaskError::Timeout` with the task id. The wire name is
+    /// pinned because it is a published configuration key; the Rust name
+    /// differs from it so this budget is not read as a socket setting.
+    #[serde(rename = "waitTimeoutMs")]
+    pub wait_budget_ms: u64,
     pub kill_grace_ms: u64,
 }
 
@@ -23,7 +28,7 @@ impl Default for TaskLimits {
             max_depth: 4,
             max_children: 16,
             max_output_bytes: 2 * 1024 * 1024,
-            wait_timeout_ms: 300_000,
+            wait_budget_ms: 300_000,
             kill_grace_ms: 1_500,
         }
     }
