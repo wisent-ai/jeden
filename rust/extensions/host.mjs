@@ -193,7 +193,18 @@ async function executeTool() {
   if (tool.permission === 'command' && !allowCommand) throw new Error(`${target} requires --allow-command`);
   const updates = [];
   const update = (value) => { updates.push(value); console.log(`JEDEN_EXTENSION_PROGRESS\t${JSON.stringify(value)}`); };
-  const context = { cwd, toolName: target, source, generation, signal: abortController.signal, artifact, exec };
+  // A tool that installs new extension material has to be able to ask this
+  // session to load it. The session process holds the registry, so the
+  // request travels as a marker file the caller consumes right after this
+  // tool answers; the promise resolves at once because the reload happens
+  // outside this short-lived host.
+  const reloadRequest = resolve(cwd, '.jeden/runtime/extensions/reload-request.json');
+  const requestReload = async () => {
+    await mkdir(dirname(reloadRequest), { recursive: true });
+    await writeFile(reloadRequest, JSON.stringify({ tool: target, source, generation, at: new Date().toISOString() }));
+    return { reloaded: true, deferred: true };
+  };
+  const context = { cwd, toolName: target, source, generation, signal: abortController.signal, artifact, exec, requestReload };
   const result = tool.execute.length <= 1 ? await tool.execute(input) : await tool.execute(`jeden-${generation}-${Date.now()}`, input, update, context, undefined);
   return { ok: true, result, updates };
 }
