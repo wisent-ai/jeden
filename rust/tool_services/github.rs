@@ -7,6 +7,8 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+mod git;
+
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
         "github_issue",
@@ -24,7 +26,7 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
         "github_actions",
         "List, inspect, dispatch, rerun, or cancel GitHub Actions runs",
     ),
-    ("git_worktree", "List, add, remove, or prune Git worktrees"),
+    ("git_worktree", "List, remove, or prune Git worktrees"),
     (
         "git_guarded_push",
         "Push a clean checked-out branch after explicit confirmation and safety checks",
@@ -208,154 +210,6 @@ impl GithubService {
         }
         self.run_gh(context, args)
     }
-    fn worktree(
-        &self,
-        input: &Value,
-        context: &OperationContext<'_>,
-        allow_write: bool,
-    ) -> ServiceResult<Value> {
-        let action = input
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("list");
-        let mut args = vec!["worktree".into(), action.into()];
-        match action {
-            "list" => args.push("--porcelain".into()),
-            "add" => {
-                if !allow_write {
-                    return Err(ServiceError::PermissionDenied(
-                        "worktree add requires write permission".into(),
-                    ));
-                }
-                args.push(nonempty(input.get("path"), "path")?);
-                if let Some(branch) = input.get("branch").and_then(Value::as_str) {
-                    args.push(branch.into());
-                }
-            }
-            "remove" => {
-                if !allow_write {
-                    return Err(ServiceError::PermissionDenied(
-                        "worktree remove requires write permission".into(),
-                    ));
-                }
-                args.push(nonempty(input.get("path"), "path")?);
-            }
-            "prune" => {
-                if !allow_write {
-                    return Err(ServiceError::PermissionDenied(
-                        "worktree prune requires write permission".into(),
-                    ));
-                }
-            }
-            _ => {
-                return Err(ServiceError::InvalidInput(
-                    "worktree action must be list, add, remove, or prune".into(),
-                ))
-            }
-        }
-        let text = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "git",
-            &args,
-            None,
-            Duration::from_secs(30),
-        )?;
-        bounded_json(context, "github", &json!({"ok":true,"output":text}))
-    }
-    fn guarded_push(
-        &self,
-        input: &Value,
-        context: &OperationContext<'_>,
-        allow_write: bool,
-    ) -> ServiceResult<Value> {
-        if !allow_write {
-            return Err(ServiceError::PermissionDenied(
-                "push requires write permission".into(),
-            ));
-        }
-        if input.get("confirm").and_then(Value::as_bool) != Some(true) {
-            return Err(ServiceError::PermissionDenied(
-                "push requires confirm=true".into(),
-            ));
-        }
-        if input.get("force").and_then(Value::as_bool) == Some(true) {
-            return Err(ServiceError::PermissionDenied(
-                "force push is not supported".into(),
-            ));
-        }
-        let status = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "git",
-            &["status".into(), "--porcelain".into()],
-            None,
-            Duration::from_secs(10),
-        )?;
-        if !status.trim().is_empty() {
-            return Err(ServiceError::PermissionDenied(
-                "refusing to push a dirty worktree".into(),
-            ));
-        }
-        let branch = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "git",
-            &["branch".into(), "--show-current".into()],
-            None,
-            Duration::from_secs(10),
-        )?
-        .trim()
-        .to_string();
-        if branch.is_empty() {
-            return Err(ServiceError::PermissionDenied(
-                "refusing to push detached HEAD".into(),
-            ));
-        }
-        if !safe_git_name(&branch) {
-            return Err(ServiceError::PermissionDenied(
-                "checked-out branch contains unsafe characters".into(),
-            ));
-        }
-        if let Some(expected) = input.get("branch").and_then(Value::as_str) {
-            if expected != branch {
-                return Err(ServiceError::PermissionDenied(format!(
-                    "checked-out branch is {branch}, not {expected}"
-                )));
-            }
-        }
-        let remote = input
-            .get("remote")
-            .and_then(Value::as_str)
-            .unwrap_or("origin");
-        if !safe_git_name(remote) {
-            return Err(ServiceError::InvalidInput(
-                "remote contains unsafe characters".into(),
-            ));
-        }
-        let output = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "git",
-            &[
-                "push".into(),
-                remote.into(),
-                format!("HEAD:refs/heads/{branch}"),
-                "--porcelain".into(),
-            ],
-            None,
-            Duration::from_secs(120),
-        )?;
-        bounded_json(
-            context,
-            "github",
-            &json!({"ok":true,"remote":remote,"branch":branch,"output":output}),
-        )
-    }
     fn run_gh(&self, context: &OperationContext<'_>, args: Vec<String>) -> ServiceResult<Value> {
         let output = process::run(
             "github",
@@ -389,11 +243,4 @@ fn append_gh_arguments(args: &mut Vec<String>, input: &Value) -> ServiceResult<(
         }
     }
     Ok(())
-}
-fn safe_git_name(value: &str) -> bool {
-    !value.is_empty()
-        && !value.starts_with('-')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'/'))
 }

@@ -119,3 +119,38 @@ fn tama_registry_end_to_end() {
     let _ = fs::remove_dir_all(&home);
     let _ = fs::remove_dir_all(&cwd);
 }
+
+/// The worktree ban, read off the published tool contract.
+///
+/// `git_worktree` was the one worktree producer a model could invoke on this
+/// machine: it runs `git worktree <action>` through the process helper, so it
+/// never passes the shell and no `pre_tool_use:bash` guard sees it. The
+/// operator's instruction was that using worktrees be impossible, so the
+/// creation action is gone rather than guarded, and `list`, `remove` and
+/// `prune` remain because that is how a machine already holding worktrees is
+/// cleaned up.
+///
+/// The assertion is on `jeden tools`, the contract a caller actually reads.
+/// `JEDEN_TAMA_REGISTRY` is cleared because the test above sets it
+/// process-globally and a child would otherwise inherit a scratch registry.
+#[test]
+fn the_worktree_tool_offers_no_creation() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_jeden"))
+        .arg("tools")
+        .env_remove("JEDEN_TAMA_REGISTRY")
+        .output()
+        .expect("run jeden tools");
+    let listing = String::from_utf8_lossy(&output.stdout).into_owned();
+    let row = listing
+        .lines()
+        .find(|line| line.starts_with("git_worktree"))
+        .unwrap_or_else(|| panic!("git_worktree is listed: {listing}"))
+        .to_string();
+    assert!(
+        !row.contains("add"),
+        "the published contract must not offer creation: {row}"
+    );
+    for kept in ["List", "remove", "prune"] {
+        assert!(row.contains(kept), "{kept} stays available: {row}");
+    }
+}
