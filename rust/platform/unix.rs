@@ -1,11 +1,12 @@
 use super::*;
-use std::fs::{self, OpenOptions};
+use std::fs::File;
 use std::io::{Read, Write};
 use std::os::fd::{FromRawFd, RawFd};
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+
+mod atomicfs;
+mod workspace;
 
 pub(crate) struct UnixPlatform;
 impl UnixPlatform {
@@ -13,7 +14,6 @@ impl UnixPlatform {
         Self
     }
 }
-static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 struct UnixProcessTree {
     group: i32,
@@ -200,158 +200,6 @@ impl PtyPlatform for UnixPlatform {
         PtyCommandFrame { marker, bytes }
     }
 }
-
-impl WorkspacePlatform for UnixPlatform {
-    fn isolate(&self, parent: &Path, target: &Path) -> Result<&'static str, PlatformError> {
-        #[cfg(target_os = "macos")]
-        if quiet(
-            Command::new("cp")
-                .arg("-cR")
-                .arg(parent)
-                .arg(target)
-                .current_dir(parent),
-        ) {
-            return Ok("apfs-clone");
-        }
-        if parent.join(".git").exists()
-            && quiet(
-                Command::new("git")
-                    .args(["worktree", "add", "--detach"])
-                    .arg(target)
-                    .arg("HEAD")
-                    .current_dir(parent),
-            )
-        {
-            return Ok("git-worktree");
-        }
-        #[cfg(target_os = "linux")]
-        if quiet(
-            Command::new("cp")
-                .args(["--reflink=auto", "-a"])
-                .arg(parent)
-                .arg(target)
-                .current_dir(parent),
-        ) {
-            return Ok("reflink-copy");
-        }
-        copy_tree(parent, target)?;
-        Ok("native-copy")
-    }
-    fn snapshot(
-        &self,
-        parent: &Path,
-        workspace: &Path,
-        max: u64,
-    ) -> Result<Vec<u8>, PlatformError> {
-        if workspace.join(".git").exists() {
-            if !quiet(
-                Command::new("git")
-                    .args(["add", "-N", "--all"])
-                    .current_dir(workspace),
-            ) {
-                return Err(PlatformError::Process(
-                    "git add -N failed while preparing workspace snapshot".into(),
-                ));
-            }
-            bounded(
-                Command::new("git")
-                    .args([
-                        "diff",
-                        "--binary",
-                        "--no-ext-diff",
-                        "--src-prefix=a/",
-                        "--dst-prefix=b/",
-                    ])
-                    .current_dir(workspace),
-                max,
-                true,
-            )
-        } else {
-            bounded(
-                Command::new("diff")
-                    .args(["-ruN"])
-                    .arg(parent)
-                    .arg(workspace),
-                max,
-                true,
-            )
-        }
-    }
-    fn apply_snapshot(
-        &self,
-        parent: &Path,
-        snapshot: &[u8],
-        max: u64,
-    ) -> Result<(), PlatformError> {
-        if snapshot.is_empty() {
-            return Ok(());
-        }
-        let (ok, _, stderr) = bounded_with_stdin(
-            Command::new("git")
-                .args(["apply", "--3way", "--whitespace=nowarn", "-"])
-                .current_dir(parent),
-            max,
-            snapshot,
-        )?;
-        if ok {
-            Ok(())
-        } else {
-            Err(PlatformError::Process(
-                String::from_utf8_lossy(&stderr).into_owned(),
-            ))
-        }
-    }
-}
-
-impl AtomicFsPlatform for UnixPlatform {
-    fn create_secure_temp(
-        &self,
-        directory: &Path,
-        prefix: &OsStr,
-    ) -> Result<SecureTemp, PlatformError> {
-        fs::create_dir_all(directory)?;
-        for _ in 0..128 {
-            let n = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-            let mut name = prefix.to_os_string();
-            name.push(format!("-{}-{n}.tmp", std::process::id()));
-            let path = directory.join(name);
-            match OpenOptions::new()
-                .read(true)
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&path)
-            {
-                Ok(file) => return Ok(SecureTemp { path, file }),
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(e) => return Err(e.into()),
-            }
-        }
-        Err(PlatformError::Process(
-            "secure temporary-name space exhausted".into(),
-        ))
-    }
-    fn atomic_replace(
-        &self,
-        staged: &Path,
-        destination: &Path,
-        backup: Option<&Path>,
-    ) -> Result<(), PlatformError> {
-        if let Some(backup) = backup {
-            if destination.exists() {
-                if backup.exists() {
-                    fs::remove_file(backup)?;
-                }
-                fs::hard_link(destination, backup)
-                    .or_else(|_| fs::copy(destination, backup).map(|_| ()))?;
-                File::open(backup)?.sync_all()?;
-            }
-        }
-        File::open(staged)?.sync_all()?;
-        fs::rename(staged, destination)?;
-        sync_parent(destination)
-    }
-}
 impl DesktopPlatform for UnixPlatform {
     fn open_path(&self, path: &Path) -> Result<(), PlatformError> {
         #[cfg(target_os = "macos")]
@@ -398,75 +246,6 @@ fn set_window_size(fd: RawFd, cols: u16, rows: u16) -> Result<(), PlatformError>
     } else {
         Ok(())
     }
-}
-fn quiet(command: &mut Command) -> bool {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
-}
-fn bounded(command: &mut Command, max: u64, allow_one: bool) -> Result<Vec<u8>, PlatformError> {
-    let out = command.output()?;
-    if out.stdout.len() as u64 > max {
-        return Err(PlatformError::Process(format!(
-            "workspace snapshot exceeds {max} bytes"
-        )));
-    }
-    if !out.status.success() && !(allow_one && out.status.code() == Some(1)) {
-        return Err(PlatformError::Process(
-            String::from_utf8_lossy(&out.stderr).into_owned(),
-        ));
-    }
-    Ok(out.stdout)
-}
-fn bounded_with_stdin(
-    command: &mut Command,
-    max: u64,
-    input: &[u8],
-) -> Result<(bool, Vec<u8>, Vec<u8>), PlatformError> {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| PlatformError::Process("snapshot stdin unavailable".into()))?
-        .write_all(input)?;
-    let out = child.wait_with_output()?;
-    if out.stdout.len() as u64 > max || out.stderr.len() as u64 > max {
-        return Err(PlatformError::Process(format!(
-            "workspace diagnostics exceed {max} bytes"
-        )));
-    }
-    Ok((out.status.success(), out.stdout, out.stderr))
-}
-fn copy_tree(source: &Path, dest: &Path) -> Result<(), PlatformError> {
-    fs::create_dir(dest)?;
-    for item in fs::read_dir(source)? {
-        let item = item?;
-        let ty = item.file_type()?;
-        let out = dest.join(item.file_name());
-        if ty.is_dir() {
-            copy_tree(&item.path(), &out)?;
-        } else if ty.is_symlink() {
-            let target = fs::read_link(item.path())?;
-            std::os::unix::fs::symlink(target, out)?;
-        } else {
-            fs::copy(item.path(), out)?;
-        }
-    }
-    Ok(())
-}
-fn sync_parent(path: &Path) -> Result<(), PlatformError> {
-    let parent = path.parent().ok_or_else(|| {
-        PlatformError::Process("atomic replacement has no parent directory".into())
-    })?;
-    File::open(parent)?.sync_all()?;
-    Ok(())
 }
 #[repr(C)]
 struct Winsize {

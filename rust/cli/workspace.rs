@@ -6,14 +6,17 @@
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
     config_set_value, config_value_at, read_user_writable_config_strict, write_user_config,
 };
-use crate::{session_root, Args};
+use crate::Args;
 
+
+mod inspect;
+
+pub(crate) use inspect::inspect;
 pub(crate) const DEFAULT_WORKSPACE_KEY: &str = "workspace.defaultPath";
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,7 +47,7 @@ impl WorkspaceReport {
             .repository_root
             .as_ref()
             .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "not a Git worktree".into());
+            .unwrap_or_else(|| "not in a Git repository".into());
         format!(
             "Workspace: {}\nStatus: {}\nSource: {} ({})\nSessions: {} accepted, {} rejected\nConfiguration: {}\nResult: {} imported, {} unchanged, {} conflicting, {} rejected\nThe working tree and session ledgers were not copied or changed. Future Jeden tasks use this workspace unless --cwd is supplied.",
             self.workspace.display(),
@@ -64,156 +67,35 @@ impl WorkspaceReport {
     pub(crate) fn value(&self) -> Value {
         serde_json::to_value(self).unwrap_or_else(|_| json!({"status": "invalid_response"}))
     }
-}
 
-fn resolve_input(path: &Path, base: &Path) -> PathBuf {
-    if path.is_absolute() {
-        path.to_path_buf()
-    } else {
-        base.join(path)
+    /// A report for a workspace that was only looked at.
+    ///
+    /// The three result counters are zero by construction, not by tuning:
+    /// inspection reads a directory and imports nothing from it. Adoption is
+    /// the operation that moves sessions, and it fills them itself.
+    pub(crate) fn observed(
+        status: &str,
+        workspace: PathBuf,
+        source: &str,
+        repository_root: Option<PathBuf>,
+        configuration: String,
+        sessions: WorkspaceSessions,
+    ) -> Self {
+        Self {
+            status: status.into(),
+            workspace,
+            source: source.into(),
+            repository_root,
+            rejected: sessions.rejected,
+            sessions,
+            configuration,
+            imported: 0,
+            unchanged: 0,
+            conflicting: 0,
+        }
     }
 }
 
-fn repository_root(workspace: &Path) -> Option<PathBuf> {
-    workspace
-        .ancestors()
-        .find(|candidate| candidate.join(".git").exists())
-        .map(Path::to_path_buf)
-}
-
-fn validate_project_config(workspace: &Path) -> Result<String, String> {
-    let path = workspace.join(".jeden/config.json");
-    let bytes = match fs::read(&path) {
-        Ok(bytes) => bytes,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok("no project config; user defaults apply".into())
-        }
-        Err(error) => {
-            return Err(format!(
-                "cannot read existing Jeden configuration {}: {error}",
-                path.display()
-            ))
-        }
-    };
-    let value: Value = serde_json::from_slice(&bytes).map_err(|error| {
-        format!(
-            "invalid existing Jeden configuration {}: {error}",
-            path.display()
-        )
-    })?;
-    if !value.is_object() {
-        return Err(format!(
-            "invalid existing Jeden configuration {}: root must be an object",
-            path.display()
-        ));
-    }
-    Ok(format!("accepted existing {}", path.display()))
-}
-
-fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
-    let mut accepted = 0;
-    let mut rejected = 0;
-    let root = session_root();
-    let entries = match fs::read_dir(&root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(WorkspaceSessions { accepted, rejected })
-        }
-        Err(error) => {
-            return Err(format!(
-                "cannot read canonical session root {}: {error}",
-                root.display()
-            ))
-        }
-    };
-    for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => {
-                rejected += 1;
-                continue;
-            }
-        };
-        let state_path = entry.path().join("state.json");
-        if !state_path.is_file() {
-            continue;
-        }
-        let state = match fs::read(&state_path)
-            .map_err(|error| error.to_string())
-            .and_then(|bytes| {
-                serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())
-            }) {
-            Ok(value) => value,
-            Err(_) => {
-                rejected += 1;
-                continue;
-            }
-        };
-        let Some(cwd) = state.get("cwd").and_then(Value::as_str) else {
-            rejected += 1;
-            continue;
-        };
-        let Ok(cwd) = Path::new(cwd).canonicalize() else {
-            rejected += 1;
-            continue;
-        };
-        if cwd.starts_with(workspace) {
-            accepted += 1;
-        }
-    }
-    Ok(WorkspaceSessions { accepted, rejected })
-}
-
-pub(crate) fn inspect(path: &Path, base: &Path, status: &str) -> Result<WorkspaceReport, String> {
-    let requested = resolve_input(path, base);
-    if requested
-        .components()
-        .any(|component| matches!(component, std::path::Component::ParentDir))
-    {
-        return Err(format!(
-            "workspace path must not contain '..': {}",
-            requested.display()
-        ));
-    }
-    let workspace = requested.canonicalize().map_err(|error| {
-        format!(
-            "workspace {} is not an existing readable directory: {error}",
-            requested.display()
-        )
-    })?;
-    if !workspace.is_dir() {
-        return Err(format!(
-            "workspace {} is not an existing directory",
-            workspace.display()
-        ));
-    }
-    fs::read_dir(&workspace).map_err(|error| {
-        format!(
-            "workspace {} is not a readable directory: {error}",
-            workspace.display()
-        )
-    })?;
-    let configuration = validate_project_config(&workspace)?;
-    let repository_root = repository_root(&workspace);
-    let source = if repository_root.is_some() {
-        "git-worktree"
-    } else {
-        "directory"
-    };
-    let sessions = session_counts(&workspace)?;
-    Ok(WorkspaceReport {
-        status: status.into(),
-        workspace,
-        source: source.into(),
-        repository_root,
-        rejected: sessions.rejected,
-        sessions,
-        configuration,
-        imported: 0,
-        unchanged: 0,
-        conflicting: 0,
-    })
-}
 
 pub(crate) fn configured_path() -> Result<Option<PathBuf>, String> {
     let config = read_user_writable_config_strict()?;
