@@ -11,13 +11,64 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+/// Resolve one tool path against the workspace root.
+///
+/// An absolute path inside the workspace is the same file as its relative
+/// form, so it resolves rather than being refused. The bare refusal used to
+/// leave the caller guessing: on 2026-09-10 a turn asked to write
+/// `<workspace>/alpha.txt`, read `absolute path rejected`, guessed the
+/// relative form by keeping the last two segments, and created a phantom
+/// `workspace/` directory inside the workspace that then satisfied nothing
+/// the request asked for. An absolute path outside the workspace is still
+/// refused, and the refusal names the root every path is taken from.
 pub(crate) fn jail_path(cwd: &Path, input: &str) -> Result<PathBuf, String> {
-    let raw = if input.trim().is_empty() {
-        "."
+    let trimmed = input.trim();
+    let raw = if trimmed.is_empty() { "." } else { trimmed };
+    let absolute = Path::new(raw);
+    let relative = if absolute.is_absolute() {
+        match absolute.strip_prefix(cwd) {
+            Ok(inside) if inside.as_os_str().is_empty() => ".".to_string(),
+            Ok(inside) => inside.to_string_lossy().into_owned(),
+            Err(_) => {
+                return Err(format!(
+                    "{raw} is outside this workspace; paths are taken from the workspace root {}",
+                    cwd.display()
+                ))
+            }
+        }
     } else {
-        input.trim()
+        raw.to_string()
     };
-    super::runtime_ops::fs::validate_relative(cwd, raw).map_err(|error| error.to_string())
+    super::runtime_ops::fs::validate_relative(cwd, &relative).map_err(|error| error.to_string())
+}
+
+/// The directory a workspace keeps Jeden's own state in: the session pointer,
+/// mode state, the usage ledger and the retained completion state.
+pub(crate) const WORKSPACE_STATE_DIR: &str = ".jeden";
+
+/// Resolve a path a tool is about to change, refusing the harness's own state
+/// directory.
+///
+/// On 2026-09-10 a real turn wrote both files its assignment asked for into
+/// `.jeden/` and reported the work done: the workspace root held neither file,
+/// and the directory that holds the record the work is judged by held them
+/// instead. Session pointers, mode state, the usage ledger and completion
+/// state live there, so a tool write there rewrites that record. Reads stay
+/// allowed; only changes are refused.
+pub(crate) fn jail_write_path(cwd: &Path, input: &str) -> Result<PathBuf, String> {
+    let path = jail_path(cwd, input)?;
+    let inside_state = path.strip_prefix(cwd).is_ok_and(|relative| {
+        relative
+            .components()
+            .next()
+            .is_some_and(|first| first.as_os_str() == WORKSPACE_STATE_DIR)
+    });
+    if inside_state {
+        return Err(format!(
+            "{input}: {WORKSPACE_STATE_DIR}/ holds this workspace's Jeden state (sessions, mode, usage, retained completion) and no tool may change it; write the work where the request asks for it"
+        ));
+    }
+    Ok(path)
 }
 
 pub(crate) fn string_input(input: &Value, key: &str) -> Option<String> {

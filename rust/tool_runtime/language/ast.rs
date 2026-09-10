@@ -8,7 +8,9 @@ use crate::cli::sessions::{
     claim_pending_action, complete_pending_action, create_pending_action, discard_pending_action,
     PendingActionCreate,
 };
-use crate::tool_runtime::shared::{jail_path, sha256_hex, simple_diff, string_input, u64_input};
+use crate::tool_runtime::shared::{
+    jail_path, jail_write_path, sha256_hex, simple_diff, string_input, u64_input,
+};
 use crate::tool_runtime::ToolRuntime;
 
 const MAX_AST_BYTES: u64 = 4 * 1024 * 1024;
@@ -145,7 +147,7 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
             claim.id, claim.kind
         ));
     }
-    let path = jail_path(runtime.cwd, &claim.target)?;
+    let path = jail_write_path(runtime.cwd, &claim.target)?;
     let current = fs::read(&path).map_err(|error| error.to_string())?;
     let current_sha = sha256_hex(&current);
     if current_sha != claim.expected_sha256 {

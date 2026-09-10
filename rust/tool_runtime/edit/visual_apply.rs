@@ -6,7 +6,8 @@ use super::lines::apply_line_edit_ops;
 use super::visual_parse::parse_visual_edit_patch;
 use super::VisualPatchOp;
 use crate::tool_runtime::shared::{
-    jail_path, sha256_hex, simple_diff, snapshot_name, snapshot_tag, split_edit_lines, string_input,
+    jail_write_path, sha256_hex, simple_diff, snapshot_name, snapshot_tag, split_edit_lines,
+    string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -117,7 +118,7 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let sections = parse_visual_edit_patch(&patch)?;
     let mut source_files = std::collections::HashSet::new();
     for section in &sections {
-        let source = jail_path(runtime.cwd, &section.path)?;
+        let source = jail_write_path(runtime.cwd, &section.path)?;
         if !source_files.insert(source) {
             return Err(format!("duplicate patch file section: {}", section.path));
         }
@@ -125,7 +126,7 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let mut destination_files = std::collections::HashSet::new();
     let mut prepared = Vec::new();
     for section in &sections {
-        let file = jail_path(runtime.cwd, &section.path)?;
+        let file = jail_write_path(runtime.cwd, &section.path)?;
         let current_bytes = fs::read(&file).map_err(|e| e.to_string())?;
         let current_hash = sha256_hex(&current_bytes);
         let current_tag = snapshot_tag(&current_hash);
@@ -138,7 +139,7 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         let to_file = section
             .move_to
             .as_ref()
-            .map(|dest| jail_path(runtime.cwd, dest))
+            .map(|dest| jail_write_path(runtime.cwd, dest))
             .transpose()?;
         if let Some(to) = &to_file {
             if !destination_files.insert(to.clone()) {

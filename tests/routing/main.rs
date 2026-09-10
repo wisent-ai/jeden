@@ -1,6 +1,6 @@
 //! Real turns through the real `jeden` binary against the real Brama gateway:
-//! which route answers a signed agent, and what a turn does with an answer
-//! that arrives unusable.
+//! which route answers a signed agent, what a turn does with an answer that
+//! arrives unusable, and where a turn is allowed to write.
 //!
 //! Jeden signs every model request as its agent identity, which asks Brama's
 //! entitlements router for a subscription. When every subscription bound to
@@ -11,16 +11,17 @@
 //! served, so the alias answer is part of the contract and is measured here.
 //! On 2026-09-10 a provider truncated one intake answer mid-string and a whole
 //! retained assignment ended as `Work remains open (task_intake): EOF while
-//! parsing a string at line 1 column 1440`, so what a turn does with an
-//! unusable answer is measured here too.
+//! parsing a string at line 1 column 1440`, and another run wrote both files
+//! of its assignment into the workspace's own `.jeden` state directory and
+//! reported the work done, so both are measured here too.
 //!
 //! A turn needs the environment the binary needs: `BRAMA_URL`, `BRAMA_TOKEN`,
 //! `WISENT_APP_AGENT_ID`, `WISENT_APP_AGENT_AUTH_SECRET`, `JEDEN_MODEL`. The
 //! binary resolves the two credentials from Stado when the environment does
 //! not carry them; a missing one fails the test by name instead of skipping.
 //!
-//! Run: `cargo test --test routing -- --nocapture`. Runs keep home, sessions
-//! and workspace under this checkout's ignored `target/turn-runs`.
+//! Run: `npm run test:routing`, which signs the binaries Cargo built before
+//! executing them. Runs keep their state under `target/turn-runs`.
 
 use serde_json::Value;
 use std::fs;
@@ -140,14 +141,19 @@ impl Turn {
         events
     }
 
-    /// Recorded corrections for one rule of the shared `contract_violation`.
-    fn corrections(&self, rule: &str) -> Vec<Value> {
+    /// The recorded payloads of one event kind, oldest first.
+    fn payloads(&self, kind: &str) -> Vec<Value> {
         self.events()
             .iter()
-            .filter(|event| {
-                event.pointer("/payload/type").and_then(Value::as_str) == Some("contract_violation")
-            })
+            .filter(|event| event.pointer("/payload/type").and_then(Value::as_str) == Some(kind))
             .map(|event| event["payload"]["data"].clone())
+            .collect()
+    }
+
+    /// Recorded corrections for one rule of the shared `contract_violation`.
+    fn corrections(&self, rule: &str) -> Vec<Value> {
+        self.payloads("contract_violation")
+            .into_iter()
             .filter(|data| data.get("rule").and_then(Value::as_str) == Some(rule))
             .collect()
     }
@@ -250,5 +256,45 @@ fn an_answer_cut_off_by_the_output_budget_is_asked_for_again_before_the_turn_sto
         last.get("cutOff").and_then(Value::as_bool),
         Some(true),
         "the correction does not say the answer was cut off: {last}"
+    );
+}
+
+/// A turn told to put its file in the harness's own state directory must be
+/// refused there and told so in words, and the file never appears.
+#[test]
+fn a_write_into_the_workspace_state_directory_is_refused_with_the_reason() {
+    let turn = Turn::new("state-directory");
+    let model = std::env::var("JEDEN_MODEL").unwrap_or_default();
+    let (_, reported) = turn.task(&[
+        "run",
+        "Write a file at .jeden/probe.txt containing exactly PROBE. Write nothing anywhere else, \
+         then report what happened.",
+        "--model",
+        &model,
+        "--allow-write",
+        "--max-steps",
+        "4",
+    ]);
+    assert!(
+        turn.payloads("tool_call")
+            .iter()
+            .any(|data| field(&data["input"], "path").contains(".jeden")),
+        "no write reached the state directory, so this case proved nothing: {reported}"
+    );
+    let refusals: Vec<String> = turn
+        .payloads("tool_result")
+        .iter()
+        .filter(|data| data["result"].get("ok").and_then(Value::as_bool) == Some(false))
+        .map(|data| field(&data["result"], "error").to_string())
+        .collect();
+    assert!(
+        refusals
+            .iter()
+            .any(|refusal| refusal.contains("no tool may change it")),
+        "the state directory accepted a write or refused it without a reason: {refusals:?}"
+    );
+    assert!(
+        !turn.root.join("workspace/.jeden/probe.txt").exists(),
+        "the file landed in the state directory anyway"
     );
 }

@@ -20,6 +20,7 @@ export const toolPages = [
         title: "The tool registry",
         paragraphs: [
           "The current scope ships jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools. File mutations return Jeden-native visual diffs and previews; oversized tool results are persisted as session artifacts and replaced in the model loop with a compact reference.",
+          "Every tool path is taken from the workspace root. A relative path resolves under it, an absolute path inside it resolves to the same file, and an absolute path outside it is refused with the root the path is taken from — so a refusal never leaves a caller guessing a relative form and inventing a directory that satisfies nothing. Symbolic links and <code>..</code> components stay refused.",
           "The harness ships an explicit tool policy for the model:",
         ],
         bullets: [
@@ -46,6 +47,7 @@ export const toolPages = [
         title: "Guarded mutations",
         paragraphs: [
           "File mutations are guarded: edits use the digest or snapshot tag returned by <code>read_file</code>, and snapshot-tagged edits reject stale state instead of overwriting it.",
+          "No tool may change <code>&lt;cwd&gt;/.jeden/</code>. That directory holds the workspace's own Jeden state — the session pointer, mode state, the usage ledger and the retained completion state — so a write there rewrites the record the work is judged by. The refusal names the path and says to write the work where the request asks for it; reading the directory stays allowed. Every mutating tool is also authorized as a write, so <code>write</code>, <code>write_archive</code>, <code>write_sqlite</code> and <code>ast_rewrite</code> can be approved in a live session rather than only refused.",
         ],
       },
       {
