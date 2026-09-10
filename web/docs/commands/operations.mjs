@@ -193,4 +193,19 @@ export const operationCommands = [
     effect: "Prints deterministic fixture views for messages, pickers, tables, tabs, confirmations, progress, markdown, diff, QR, and related TUI components. Temporary theme environment changes are restored before return.",
     refusals: ["An unknown requested theme is refused as <code>unknown theme `NAME`; bundled presets: ...</code>."],
   },
+  {
+    path: "copy",
+    invocation: "jeden copy <text> | jeden copy - [--json]",
+    purpose: "Hand an exact payload to the operator's clipboard from outside an interactive session.",
+    inputs: [
+      "Required: the text to copy as positional words, or a single <code>-</code> to read the payload from standard input.",
+      "Optional: <code>--json</code> returns the copied byte count and the writer that accepted the payload.",
+    ],
+    effect: "Writes the payload with the first clipboard writer this platform offers (<code>pbcopy</code>, then the Windows and Wayland/X11 writers), the same order <code>/copy</code> uses inside a session. Nothing is stored, logged or sent anywhere else.",
+    refusals: [
+      "No text is refused as <code>copy requires the text to hand over, or - to read the payload from stdin</code>.",
+      "<code>copy -</code> with a terminal on standard input is refused as <code>copy - reads the payload from stdin, and stdin is a terminal here</code>.",
+      "An empty or whitespace payload is refused rather than replacing the clipboard with nothing.",
+    ],
+  },
 ];
