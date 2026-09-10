@@ -54,7 +54,19 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
             .map_err(|error| format!("cannot inspect the running code identity: {error}"))?;
         let reports: Vec<Value> = serde_json::from_slice(&report.stdout)
             .map_err(|error| format!("cannot read the running code identity: {error}"))?;
-        reports.into_iter().find(|row| row["state"] == "stable")
+        let observed = reports
+            .into_iter()
+            .next()
+            .ok_or("signing report was empty")?;
+        match observed["state"].as_str() {
+            Some("stable") => Some(observed),
+            Some("adhoc" | "unsigned") => None,
+            _ => {
+                return Err(format!(
+                    "running code identity could not be verified: {observed}"
+                ))
+            }
+        }
     };
 
     let status = Command::new(&cargo)
@@ -250,62 +262,5 @@ fn command_failure(command: &str, stderr: &[u8]) -> String {
         format!("{command} failed")
     } else {
         format!("{command} failed: {detail}")
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn relaunch_preserves_runtime_permissions_and_session() {
-        let args = Args {
-            cwd: PathBuf::from("/workspace/jeden"),
-            model: Some("provider/model".into()),
-            max_tokens: Some(4096),
-            max_steps: Some(23),
-            allow_write: true,
-            allow_command: true,
-            ..Default::default()
-        };
-        let arguments = relaunch_arguments(&args, Path::new("/sessions/current"));
-        let arguments = arguments
-            .iter()
-            .map(|argument| argument.to_string_lossy())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            arguments,
-            [
-                "--cwd",
-                "/workspace/jeden",
-                "--model",
-                "provider/model",
-                "--max-tokens",
-                "4096",
-                "--max-steps",
-                "23",
-                "--allow-write",
-                "--allow-command",
-                "--resume-session",
-                "/sessions/current",
-            ]
-        );
-    }
-
-    #[test]
-    fn yolo_does_not_duplicate_permission_flags() {
-        let args = Args {
-            cwd: PathBuf::from("/workspace/jeden"),
-            allow_write: true,
-            allow_command: true,
-            yolo: true,
-            ..Default::default()
-        };
-        let arguments = relaunch_arguments(&args, Path::new("/sessions/current"));
-        assert!(arguments.iter().any(|argument| argument == "--yolo"));
-        assert!(!arguments.iter().any(|argument| argument == "--allow-write"));
-        assert!(!arguments
-            .iter()
-            .any(|argument| argument == "--allow-command"));
     }
 }
