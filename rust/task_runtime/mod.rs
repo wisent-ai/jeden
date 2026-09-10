@@ -1,7 +1,7 @@
 pub use crate::cas;
 pub mod coordinator;
-mod dispatch;
 mod discovery;
+mod dispatch;
 mod mailbox;
 pub mod placement;
 pub mod protocol;
@@ -12,9 +12,9 @@ mod types;
 pub mod worker;
 mod workspace;
 
-pub use dispatch::execute_delegate;
 pub use coordinator::Coordinator;
 pub use discovery::discover_agents;
+pub use dispatch::execute_delegate;
 pub use mailbox::Mailbox;
 pub use placement::{select_worker, PlacementDecision};
 pub use protocol::{

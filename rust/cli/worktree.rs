@@ -181,7 +181,6 @@ fn parse_gitfile(path: &Path) -> Option<(PathBuf, PathBuf)> {
     Some((PathBuf::from(&gitdir[..index]), PathBuf::from(gitdir)))
 }
 
-
 fn to_row(worktree: &ManagedWorktree, now: u64) -> WorktreeRow {
     WorktreeRow {
         path: worktree.path.display().to_string(),
@@ -197,7 +196,6 @@ fn to_row(worktree: &ManagedWorktree, now: u64) -> WorktreeRow {
         stale: worktree.stale(),
     }
 }
-
 
 fn render_list(args: &Args) -> String {
     let cwd = &args.cwd;
@@ -251,11 +249,7 @@ fn render_list(args: &Args) -> String {
             .unwrap_or_default()
                 + "\n";
         }
-        let mut out = format!(
-            "git worktrees under {} ({}):\n",
-            cwd.display(),
-            rows.len()
-        );
+        let mut out = format!("git worktrees under {} ({}):\n", cwd.display(), rows.len());
         for row in &rows {
             out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
         }
@@ -267,7 +261,6 @@ fn render_list(args: &Args) -> String {
         out
     }
 }
-
 
 pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
     let mut action: Option<&str> = None;

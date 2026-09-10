@@ -13,8 +13,8 @@ mod lifecycle;
 mod spawn;
 mod support;
 
-pub(crate) use support::workspace_root_for;
 use support::process_alive;
+pub(crate) use support::workspace_root_for;
 
 static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 

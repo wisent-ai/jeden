@@ -13,7 +13,6 @@ use super::config::{
 };
 use crate::Args;
 
-
 mod inspect;
 
 pub(crate) use inspect::inspect;
@@ -95,7 +94,6 @@ impl WorkspaceReport {
         }
     }
 }
-
 
 pub(crate) fn configured_path() -> Result<Option<PathBuf>, String> {
     let config = read_user_writable_config_strict()?;

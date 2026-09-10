@@ -55,10 +55,7 @@ pub fn execute_delegate(
     Ok(json!({"job":job,"stdout":stdout,"stderr":stderr,"delegated":delegated}))
 }
 
-pub(super) fn execute_task(
-    scheduler: &TaskScheduler,
-    input: &Value,
-) -> Result<Value, TaskError> {
+pub(super) fn execute_task(scheduler: &TaskScheduler, input: &Value) -> Result<Value, TaskError> {
     if let Some(tasks) = input.get("tasks") {
         let batch: Vec<BatchTask> = serde_json::from_value(tasks.clone())?;
         return Ok(json!({"jobs":scheduler.batch(batch)?}));

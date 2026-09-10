@@ -25,10 +25,8 @@ const QUIET_TOOL: &str = "quiet_probe";
 const RELOAD_REQUEST: &str = ".jeden/runtime/extensions/reload-request.json";
 
 fn fixture(tag: &str) -> PathBuf {
-    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
-        "extension-reload-{tag}-{}",
-        std::process::id()
-    ));
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("extension-reload-{tag}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("create fixture dir");
     dir
