@@ -257,9 +257,12 @@ fn nothing_to_copy_is_refused_instead_of_wiping_the_clipboard() {
     let Some(tools) = tools() else {
         return refuses_without_a_writer();
     };
-    let kept = "the operator's own clipboard content";
-    write_clipboard(&tools, kept);
+    // The guard is taken before anything is written, so what the operator had
+    // is what comes back — the case needs its own content on the clipboard to
+    // prove a refusal left it alone.
     let restored = Restored::new(tools);
+    let kept = "the operator's own clipboard content";
+    write_clipboard(&restored.tools, kept);
 
     for arguments in [vec!["copy"], vec!["copy", "   "]] {
         let output = jeden().args(&arguments).output().expect("jeden copy runs");

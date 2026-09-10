@@ -28,6 +28,7 @@ export const EXPECTED_CLI_ROUTES = [
   ["/docs/cli/completions", "jeden completions <bash|zsh|fish>"],
   ["/docs/cli/worktree", "jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]"],
   ["/docs/cli/token", "jeden token [--list] [--reveal] [--json]"],
+  ["/docs/cli/copy", "jeden copy <text> | jeden copy - [--json]"],
   ["/docs/cli/contracts", "jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]"],
   ["/docs/cli/workspace", "jeden workspace [status|discover [path]|adopt <path>] [--json]"],
   ["/docs/cli/workspace/status", "jeden workspace status [--json]"],
