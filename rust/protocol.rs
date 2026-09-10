@@ -10,6 +10,8 @@ pub enum Action {
         #[serde(skip_serializing_if = "Option::is_none")]
         report: Option<Value>,
     },
+    #[serde(rename = "message")]
+    Message { text: String },
     #[serde(rename = "tool")]
     Tool { tool: String, input: Value },
     #[serde(rename = "tools")]
@@ -83,6 +85,12 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
                 text: text.to_string(),
                 report: value.get("report").cloned(),
             })
+        }
+        "message" => {
+            let text = value.get("text").and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+                .ok_or("message action requires nonempty text")?;
+            Ok(Action::Message { text: text.to_string() })
         }
         "tool" => {
             let action = parse_tool_action(&value)?;

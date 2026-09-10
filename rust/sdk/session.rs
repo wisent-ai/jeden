@@ -15,6 +15,7 @@ static NEXT_INTERACTION_ID: AtomicU64 = AtomicU64::new(1);
 struct SessionInner {
     options: SessionOptions,
     conversation: Mutex<Option<agent::Conversation>>,
+    session_path: RwLock<PathBuf>,
     subscribers: Mutex<HashMap<u64, mpsc::SyncSender<SessionEvent>>>,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     interactions: RwLock<Option<Arc<dyn InteractionHandler>>>,
@@ -98,6 +99,7 @@ impl AgentSession {
         Self {
             inner: Arc::new(SessionInner {
                 options,
+                session_path: RwLock::new(conversation.session_path()),
                 conversation: Mutex::new(Some(conversation)),
                 subscribers: Mutex::new(HashMap::new()),
                 active: Mutex::new(HashMap::new()),
@@ -126,7 +128,8 @@ impl AgentSession {
                 .lock()
                 .map_err(|_| "conversation lock poisoned".to_string())?;
             let conversation = guard.as_mut().ok_or("session disposed")?;
-            conversation.load_history(&session.inner.options.cwd, turns)?;
+            conversation.load_history(&session.inner.options.cwd, turns, &source)?;
+            *session.inner.session_path.write().map_err(|_| "session path lock poisoned")? = conversation.session_path();
         }
         Ok(session)
     }
@@ -185,6 +188,18 @@ impl AgentSession {
     }
 
     pub fn prompt(&self, request: PromptRequest) -> Result<PromptResult, String> {
+        self.dispatch_prompt(request, false)
+    }
+
+    pub fn continue_work(&self, request_id: String) -> Result<PromptResult, String> {
+        self.dispatch_prompt(PromptRequest {
+            request_id,
+            prompt: "Continue retained work".into(),
+            goal: None,
+        }, true)
+    }
+
+    fn dispatch_prompt(&self, request: PromptRequest, continuing: bool) -> Result<PromptResult, String> {
         if request.request_id.trim().is_empty() {
             return Err("request_id must not be empty".into());
         }
@@ -206,7 +221,7 @@ impl AgentSession {
             }
             active.insert(request.request_id.clone(), cancel.clone());
         }
-        let result = self.run_prompt(&request, cancel);
+        let result = self.run_prompt(&request, cancel, continuing);
         if let Ok(mut active) = self.inner.active.lock() {
             active.remove(&request.request_id);
         }
@@ -225,6 +240,7 @@ impl AgentSession {
         &self,
         request: &PromptRequest,
         cancel: Arc<AtomicBool>,
+        continuing: bool,
     ) -> Result<PromptResult, String> {
         let mut conversation_guard = self
             .inner
@@ -297,6 +313,15 @@ impl AgentSession {
             }),
             trace: Box::new(move |event| {
                 let event = match *event {
+                    agent::TraceEvent::CompletionState { state } => {
+                        if let Some(path) = state.get("sessionPath").and_then(serde_json::Value::as_str) {
+                            if let Ok(mut current) = trace_inner.session_path.write() {
+                                *current = PathBuf::from(path);
+                            }
+                        }
+                        SessionEventKind::Completion { state: state.clone() }
+                    }
+                    agent::TraceEvent::Message { text } => SessionEventKind::AssistantMessage { text: text.to_string() },
                     agent::TraceEvent::ToolCall { tool, input } if policy.tool_call_detail() => {
                         SessionEventKind::ToolCall {
                             tool: tool.to_string(),
@@ -401,7 +426,13 @@ impl AgentSession {
                 });
             })),
         };
-        let text = conversation.run_turn(&args, &request.prompt, &[], &mut hooks)?;
+        let result = if continuing {
+            conversation.continue_work(&args, &mut hooks)
+        } else {
+            conversation.run_turn(&args, &request.prompt, &[], &mut hooks)
+        };
+        *self.inner.session_path.write().map_err(|_| "session path lock poisoned")? = conversation.session_path();
+        let text = result?;
         // The filter holds the last unterminated line back until it knows the
         // line is not a fence; the turn is over, so let it out.
         if let Some(tail) = code_filter.borrow_mut().as_mut().map(CodeFilter::finish) {
@@ -421,14 +452,16 @@ impl AgentSession {
         }
         let text = policy.answer(text);
         let session_path = conversation.session_path();
+        let completion = conversation.completion_state()?;
         self.inner.emit(SessionEvent {
             request_id: request_id.clone(),
-            event: SessionEventKind::Result { text: text.clone() },
+            event: SessionEventKind::Result { text: text.clone(), completion: completion.clone() },
         })?;
         Ok(PromptResult {
             request_id,
             text,
             session_path,
+            completion,
         })
     }
 
@@ -458,12 +491,28 @@ impl AgentSession {
     }
 
     pub fn session_path(&self) -> Result<PathBuf, String> {
-        let guard = self
-            .inner
-            .conversation
-            .lock()
-            .map_err(|_| "conversation lock poisoned")?;
-        Ok(guard.as_ref().ok_or("session disposed")?.session_path())
+        if self.inner.disposed.load(Ordering::Acquire) {
+            return Err("session disposed".into());
+        }
+        self.inner.session_path.read().map(|path| path.clone())
+            .map_err(|_| "session path lock poisoned".into())
+    }
+
+    pub fn completion(&self) -> Result<serde_json::Value, String> {
+        crate::completion::snapshot(&self.session_path()?)
+    }
+
+    pub fn control_completion(&self, task_id: &str, action: &str, reason: &str, revision: u64) -> Result<serde_json::Value, String> {
+        let path = self.session_path()?;
+        let state = crate::completion::operator_control(&path, task_id, action, reason, revision)?;
+        if matches!(action, "pause" | "cancel") {
+            for cancel in self.inner.active.lock().map_err(|_| "active request lock poisoned")?.values() {
+                cancel.store(true, Ordering::Release);
+            }
+        }
+        let value = crate::completion::snapshot_value(&state);
+        crate::cli::sessions::append_ledger_entry(&path, crate::agent::now_stamp(), "completion_state", value.clone())?;
+        Ok(value)
     }
 
     pub fn dispose(&self) -> Result<(), String> {

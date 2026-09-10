@@ -261,7 +261,7 @@ where
                 continue;
             }
         };
-        if request.method == "prompt" || request.method == "session/prompt" {
+        if matches!(request.method.as_str(), "prompt" | "session/prompt" | "session/completion/continue") {
             let worker_state = state.clone();
             workers.push(thread::spawn(move || handle_prompt(worker_state, request)));
         } else if let Err(error) = handle_request(&state, request) {
@@ -347,6 +347,9 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),
+        "session/completion/get" | "session/completion/control" => {
+            completion_request(state, &request.params, request.method.ends_with("/control"))
+        }
         "dispose" | "session/dispose" => dispose_session(state, &request.params),
         "elicitation/resolve" | "session/input_response" => {
             resolve_elicitation(state, &request.params)
@@ -391,7 +394,8 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         .and_then(Value::as_str)
         .map(str::to_string)
         .unwrap_or_else(|| wire_id(&id));
-    let prompt = string_param(&request.params, "prompt")?;
+    let continuing = request.method == "session/completion/continue";
+    let prompt = if continuing { String::new() } else { string_param(&request.params, "prompt")? };
     let goal = request
         .params
         .get("goal")
@@ -435,11 +439,11 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
             }
         }
     });
-    let result = session.prompt(PromptRequest {
-        request_id,
-        prompt,
-        goal,
-    });
+    let result = if continuing {
+        session.continue_work(request_id)
+    } else {
+        session.prompt(PromptRequest { request_id, prompt, goal })
+    };
     prompt_done.store(true, Ordering::Release);
     forwarder
         .join()
@@ -506,6 +510,25 @@ fn session_status(
 ) -> Result<Value, (&'static str, String)> {
     let session = find_session(state, params)?;
     Ok(json!({"activeRequestIds": session.status().map_err(|error| ("session_error", error))?}))
+}
+
+fn completion_request(
+    state: &Arc<ServerState>,
+    params: &Value,
+    control: bool,
+) -> Result<Value, (&'static str, String)> {
+    let session = find_session(state, params)?;
+    let completion = if control {
+        let task_id = string_param(params, "taskId").map_err(|error| ("invalid_params", error))?;
+        let action = string_param(params, "action").map_err(|error| ("invalid_params", error))?;
+        let reason = string_param(params, "reason").map_err(|error| ("invalid_params", error))?;
+        let revision = params.get("revision").and_then(Value::as_u64)
+            .ok_or(("invalid_params", "revision must be an unsigned integer".into()))?;
+        session.control_completion(&task_id, &action, &reason, revision)
+    } else {
+        session.completion()
+    }.map_err(|error| ("completion_error", error))?;
+    Ok(json!({"sessionId": params["sessionId"], "completion": completion}))
 }
 
 fn dispose_session(

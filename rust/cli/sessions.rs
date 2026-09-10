@@ -552,19 +552,17 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     }
     let task = task_parts.join(" ").trim().to_string();
     let mut conversation = agent::Conversation::new(&args.cwd)?;
-    conversation.load_history(&args.cwd, turns)?;
-    if task.is_empty() {
-        return Ok(format!(
-            "Loaded {} prior turn(s) from {} into a new session. Continue with: jeden resume {} \"<task>\"\n",
-            count, dir.display(), id
-        ));
-    }
+    conversation.load_history(&args.cwd, turns, &dir)?;
     let mut run_args = args.clone();
     run_args.allow_write = allow_write;
     run_args.allow_command = allow_command;
     run_args.yolo = yolo;
     let mut hooks = agent::RunHooks::inert();
-    let text = conversation.run_turn(&run_args, &task, &[], &mut hooks)?;
+    let text = if task.is_empty() {
+        conversation.continue_work(&run_args, &mut hooks)?
+    } else {
+        conversation.run_turn(&run_args, &task, &[], &mut hooks)?
+    };
     let _ = agent::update_last_session_path(&args.cwd, &conversation.session_path());
     Ok(format!(
         "[resumed {} prior turn(s) from {}]\n{}\n",
@@ -698,7 +696,7 @@ fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, String> {
                     messages.push(json!({ "role": "assistant", "content": content }));
                 }
             }
-            "final" => {
+            "final" | "assistant_message" => {
                 if let Some(text) = data.get("text").and_then(Value::as_str) {
                     if let Some(last) = messages.last_mut().filter(|message| {
                         message.get("role").and_then(Value::as_str) == Some("assistant")

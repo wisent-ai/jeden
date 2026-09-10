@@ -51,6 +51,7 @@ pub struct PromptResult {
     pub request_id: String,
     pub text: String,
     pub session_path: PathBuf,
+    pub completion: Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,8 +96,15 @@ pub enum SessionEventKind {
         text: String,
         status: String,
     },
+    Completion {
+        state: Value,
+    },
+    AssistantMessage {
+        text: String,
+    },
     Result {
         text: String,
+        completion: Value,
     },
     Error {
         message: String,

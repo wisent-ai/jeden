@@ -62,9 +62,13 @@ pub trait SessionBackend: Send + Sync + 'static {
         session_id: &str,
         request_id: &str,
         prompt: &str,
+        continuing: bool,
         emit: Arc<dyn Fn(String, Value, bool) + Send + Sync>,
     ) -> Result<Value, String>;
     fn abort(&self, tenant: &TenantId, session_id: &str, request_id: &str) -> Result<bool, String>;
+    fn completion(&self, tenant: &TenantId, session_id: &str) -> Result<Value, String>;
+    fn control_completion(&self, tenant: &TenantId, session_id: &str, task_id: &str,
+        action: &str, reason: &str, revision: u64) -> Result<Value, String>;
 }
 
 #[derive(Clone)]
@@ -144,6 +148,7 @@ impl SessionBackend for AgentSessionFacade {
         session_id: &str,
         request_id: &str,
         prompt: &str,
+        continuing: bool,
         emit: Arc<dyn Fn(String, Value, bool) + Send + Sync>,
     ) -> Result<Value, String> {
         let session = self.session(tenant, session_id)?;
@@ -164,11 +169,13 @@ impl SessionBackend for AgentSessionFacade {
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
         });
-        let result = session.prompt(PromptRequest {
-            request_id: request_id.to_owned(),
-            prompt: prompt.to_owned(),
-            goal: None,
-        });
+        let result = if continuing {
+            session.continue_work(request_id.to_owned())
+        } else {
+            session.prompt(PromptRequest {
+                request_id: request_id.to_owned(), prompt: prompt.to_owned(), goal: None,
+            })
+        };
         if let Err(error) = &result {
             emit("error".into(), json!({"message": error}), true);
         }
@@ -182,6 +189,15 @@ impl SessionBackend for AgentSessionFacade {
 
     fn abort(&self, tenant: &TenantId, session_id: &str, request_id: &str) -> Result<bool, String> {
         self.session(tenant, session_id)?.abort(request_id)
+    }
+
+    fn completion(&self, tenant: &TenantId, session_id: &str) -> Result<Value, String> {
+        self.session(tenant, session_id)?.completion()
+    }
+
+    fn control_completion(&self, tenant: &TenantId, session_id: &str, task_id: &str,
+        action: &str, reason: &str, revision: u64) -> Result<Value, String> {
+        self.session(tenant, session_id)?.control_completion(task_id, action, reason, revision)
     }
 }
 
@@ -497,13 +513,37 @@ impl<B: SessionBackend> SessionService<B> {
         idempotency_key: &str,
         prompt: &str,
     ) -> Result<SubmitOutcome, ServiceError> {
+        self.submit_work(caller, session_id, idempotency_key, prompt, false)
+    }
+
+    pub fn continue_work(self: &Arc<Self>, caller: &TenantPrincipal, session_id: &str,
+        idempotency_key: &str) -> Result<SubmitOutcome, ServiceError> {
+        self.submit_work(caller, session_id, idempotency_key, "Continue retained work", true)
+    }
+
+    pub fn completion(&self, caller: &TenantPrincipal, session_id: &str) -> Result<Value, ServiceError> {
+        self.authorize_session(caller, session_id)?;
+        self.backend.completion(&caller.tenant, session_id).map_err(ServiceError::Runtime)
+    }
+
+    pub fn control_completion(&self, caller: &TenantPrincipal, session_id: &str, task_id: &str,
+        action: &str, reason: &str, revision: u64) -> Result<Value, ServiceError> {
+        self.authorize_session(caller, session_id)?;
+        self.backend.control_completion(&caller.tenant, session_id, task_id, action, reason, revision)
+            .map_err(ServiceError::Runtime)
+    }
+
+    fn submit_work(self: &Arc<Self>, caller: &TenantPrincipal, session_id: &str,
+        idempotency_key: &str, prompt: &str, continuing: bool) -> Result<SubmitOutcome, ServiceError> {
         if prompt.trim().is_empty() {
             return Err(ServiceError::InvalidRequest(
                 "prompt must not be empty".into(),
             ));
         }
         self.authorize_session(caller, session_id)?;
-        let request_digest = IdempotencyStore::request_digest(prompt.as_bytes());
+        let request_digest = IdempotencyStore::request_digest(
+            json!({"sessionId": session_id, "prompt": prompt, "continuing": continuing}).to_string().as_bytes(),
+        );
         let request_id = format!(
             "request-{}-{}",
             self.instance,
@@ -570,7 +610,7 @@ impl<B: SessionBackend> SessionService<B> {
             let result =
                 service
                     .backend
-                    .prompt(&tenant, &session_id, &request_id, &prompt, emit.clone());
+                    .prompt(&tenant, &session_id, &request_id, &prompt, continuing, emit.clone());
             let cached = match result {
                 Ok(value) => value,
                 Err(message) => json!({"error": {"code": "runtime_error", "message": message}}),
@@ -736,6 +776,8 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             ("status".into(), json!({"message": message}), false)
         }
         SessionEventKind::TextDelta { text } => ("textDelta".into(), json!({"text": text}), false),
+        SessionEventKind::Completion { state } => ("completion".into(), json!({"state": state}), false),
+        SessionEventKind::AssistantMessage { text } => ("assistantMessage".into(), json!({"text": text}), false),
         SessionEventKind::ReasoningDelta { text } => {
             ("reasoningDelta".into(), json!({"text": text}), false)
         }
@@ -772,7 +814,7 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             json!({"text": text, "status": status}),
             false,
         ),
-        SessionEventKind::Result { text } => ("result".into(), json!({"text": text}), true),
+        SessionEventKind::Result { text, completion } => ("result".into(), json!({"text": text, "completion": completion}), true),
         SessionEventKind::Error { message } => ("error".into(), json!({"message": message}), true),
     }
 }

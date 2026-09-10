@@ -24,13 +24,6 @@ pub const LIFECYCLE_MODEL_LABEL: &str = "oko-goal-lifecycle-v1";
 /// Keep the .txt byte-identical to that file; do not add headers to it.
 const SYSTEM_PROMPT: &str = include_str!("goal_lifecycle_prompt.txt");
 
-/// Verbatim copy of the goal-completion judge prompt. The lifecycle contract
-/// above deliberately refuses to close a goal on an assistant's say-so; this
-/// judge is the operator-requested counterpart that reads the assistant's own
-/// final report and keeps the goal open whenever that report names leftover,
-/// blocked, or deferred work.
-const JUDGE_PROMPT: &str = include_str!("goal_completion_judge_prompt.txt");
-
 const DEFAULT_COMPLETIONS_URL: &str = "http://127.0.0.1:11439/v1/chat/completions";
 const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 const CLASSIFY_TIMEOUT: Duration = Duration::from_secs(20);
@@ -244,54 +237,6 @@ pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
     parse_decision(response.pointer("/choices/0/message/content")?.as_str()?)
 }
 
-/// Ask the local model whether the active goal is genuinely complete, given
-/// the assistant's final answer for this turn. `Some(true)` means finished;
-/// any transport, parse, or contract violation reads as "no verdict".
-pub fn judge_completion(objective: &str, assistant_final: &str) -> Option<bool> {
-    let endpoint = endpoint()?;
-    let envelope = json!({
-        "goal_title": objective,
-        "assistant_final": [assistant_final.chars().take(6000).collect::<String>()],
-        "user_after": [],
-    });
-    let body = json!({
-        "model": endpoint.model,
-        "messages": [
-            { "role": "system", "content": JUDGE_PROMPT },
-            { "role": "user", "content": envelope.to_string() },
-        ],
-        "temperature": 0,
-        "max_tokens": 96,
-        "stream": false,
-        "chat_template_kwargs": { "enable_thinking": false },
-    });
-    let client = reqwest::blocking::Client::builder()
-        .timeout(CLASSIFY_TIMEOUT)
-        .build()
-        .ok()?;
-    let response: Value = client
-        .post(&endpoint.completions_url)
-        .json(&body)
-        .send()
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json()
-        .ok()?;
-    let content = response
-        .get("choices")?
-        .get(0)?
-        .get("message")?
-        .get("content")?
-        .as_str()?
-        .trim();
-    let verdict: Value = serde_json::from_str(content).ok()?;
-    match verdict.get("verdict").and_then(Value::as_str) {
-        Some("finished") => Some(true),
-        Some("open") => Some(false),
-        _ => None,
-    }
-}
 
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
 /// --stdin --json` when the executable is available, otherwise the prompt's
@@ -440,65 +385,42 @@ pub(crate) fn spawn_turn_classification(
     })
 }
 
-/// Background completion judgement after an agent turn yields its final
-/// answer. Never blocks the caller and is fail-open like classification.
-/// Orders itself strictly after this turn's prompt classification via
-/// `classification`, then re-reads goal state, so a fast turn cannot have
-/// the classifier re-open a goal this judge closes. When the judge reads
-/// the assistant's report as a genuine completion — past tense, no named
-/// leftovers — the active goal closes: ledger event, RPC `goal` event with
-/// status "done", and (under `/goal auto on`) the same state reset
-/// `/goal drop` performs. A report naming unfinished work leaves the goal
-/// open and records the open verdict. Note for stdio `jeden rpc` clients:
-/// the per-prompt event forwarder unsubscribes at the terminal result, so
-/// this judge's late "done" event reaches long-lived subscribers (desktop,
-/// daemon replay) but not a plain request/response stdio client; the
-/// ledger and mode state remain the source of truth.
-pub(crate) fn spawn_completion_judgement(
-    cwd: PathBuf,
-    session_dir: PathBuf,
-    assistant_final: String,
-    goal_event: Option<GoalEventSink>,
+/// Goal completion follows the native acceptance result, never a post-answer
+/// interpretation of the execution agent's own claims.
+pub(crate) fn finish_verified_goal(
+    cwd: &Path,
+    session_dir: &Path,
+    goal_event: Option<&GoalEventSink>,
     classification: Option<std::thread::JoinHandle<()>>,
-) {
-    std::thread::spawn(move || {
-        if let Some(handle) = classification {
-            let _ = handle.join();
-        }
-        let state = crate::slash::read_mode_state(&cwd);
-        let objective = state.goal.objective.trim().to_string();
-        if !state.goal.enabled || objective.is_empty() {
-            return;
-        }
-        let Some(finished) = judge_completion(&objective, &assistant_final) else {
-            return;
-        };
-        let _ = crate::cli::sessions::append_ledger_entry(
-            &session_dir,
-            crate::agent::now_stamp(),
-            "goal_lifecycle",
-            json!({
-                "action": if finished { "finishGoal" } else { "continueCurrent" },
-                "judge": "completion",
-                "goal": objective,
-                "model": LIFECYCLE_MODEL_LABEL,
-            }),
-        );
-        if !finished {
-            return;
-        }
-        if state.goal.auto {
-            // Mirror `/goal drop`.
-            let _ = crate::slash::mutate_mode_state(&cwd, |state| {
-                state.goal.enabled = false;
-                state.goal.paused = false;
-                state.goal.objective.clear();
-                state.goal.budget = None;
-                Ok(())
-            });
-        }
-        if let Some(emit) = &goal_event {
-            emit(&objective, "done");
-        }
-    });
+) -> Result<(), String> {
+    if let Some(handle) = classification {
+        let _ = handle.join();
+    }
+    let completion = crate::completion::read_state(session_dir)?;
+    if !completion.complete() {
+        return Err("cannot finish goal while retained work remains unverified".into());
+    }
+    let state = crate::slash::read_mode_state(cwd);
+    let objective = state.goal.objective.trim();
+    if !state.goal.enabled || objective.is_empty() {
+        return Ok(());
+    }
+    crate::cli::sessions::append_ledger_entry(
+        session_dir, crate::agent::now_stamp(), "goal_lifecycle",
+        json!({"action": "finishGoal", "judge": "verified_tasks",
+            "goal": objective, "completionRevision": completion.revision}),
+    )?;
+    if state.goal.auto {
+        crate::slash::mutate_mode_state(cwd, |state| {
+            state.goal.enabled = false;
+            state.goal.paused = false;
+            state.goal.objective.clear();
+            state.goal.budget = None;
+            Ok(())
+        })?;
+    }
+    if let Some(emit) = goal_event {
+        emit(objective, "done");
+    }
+    Ok(())
 }

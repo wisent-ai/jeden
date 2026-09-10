@@ -199,6 +199,9 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         Conversation::new(&args.cwd)?
     };
     let result = conversation.run_turn(args, &task, &[], hooks);
+    if !args.model_only {
+        update_last_session_path(&args.cwd, &conversation.session_path())?;
+    }
     if args.model_only {
         let text = result?;
         if args.json {
@@ -252,6 +255,7 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
             "originalError": Value::Null,
             "text": result.text,
             "sessionPath": result.session_path,
+            "completion": conversation.completion_state()?,
         }))
         .map_err(|e| e.to_string())?
             + "\n");

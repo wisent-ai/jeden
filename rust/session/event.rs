@@ -82,6 +82,10 @@ pub(crate) enum SessionPayloadV2 {
     ContractViolation(Value),
     TaskContract(Value),
     TaskReport(Value),
+    CompletionState(Value),
+    CompletionReview(Value),
+    CompletionRejected(Value),
+    AssistantMessage(Value),
 }
 
 impl SessionPayloadV2 {
@@ -145,6 +149,10 @@ impl SessionPayloadV2 {
             "contract_violation" => Self::ContractViolation(data),
             "task_contract" => Self::TaskContract(data),
             "task_report" => Self::TaskReport(data),
+            "completion_state" => Self::CompletionState(data),
+            "completion_review" => Self::CompletionReview(data),
+            "completion_rejected" => Self::CompletionRejected(data),
+            "assistant_message" => Self::AssistantMessage(data),
             _ => return Err(format!("unsupported session event type: {kind}")),
         })
     }
@@ -235,6 +243,10 @@ impl SessionPayloadV2 {
             Self::ContractViolation(_) => "contract_violation",
             Self::TaskContract(_) => "task_contract",
             Self::TaskReport(_) => "task_report",
+            Self::CompletionState(_) => "completion_state",
+            Self::CompletionReview(_) => "completion_review",
+            Self::CompletionRejected(_) => "completion_rejected",
+            Self::AssistantMessage(_) => "assistant_message",
         }
     }
 
@@ -297,7 +309,11 @@ impl SessionPayloadV2 {
             | Self::PendingExpire(v)
             | Self::ContractViolation(v)
             | Self::TaskContract(v)
-            | Self::TaskReport(v) => v,
+            | Self::TaskReport(v)
+            | Self::CompletionState(v)
+            | Self::CompletionReview(v)
+            | Self::CompletionRejected(v)
+            | Self::AssistantMessage(v) => v,
         }
     }
 }

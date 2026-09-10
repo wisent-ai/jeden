@@ -153,7 +153,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             turns.remove(0);
         }
         let count = turns.len();
-        initial_conversation.load_history(&args.cwd, turns)?;
+        initial_conversation.load_history(&args.cwd, turns, session_path)?;
         println!(
             "Resumed {} prior turn(s) from {} after rebuilding Jeden.",
             count,
@@ -261,6 +261,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     agent::TraceEvent::ToolCall { .. } => policy.tool_call_detail(),
                     agent::TraceEvent::ToolResult { .. } => policy.tool_results,
                     agent::TraceEvent::Reasoning { .. } => policy.reasoning,
+                    agent::TraceEvent::CompletionState { .. } | agent::TraceEvent::Message { .. } => true,
                 };
                 if shown {
                     (ctx.trace)(event);
@@ -525,7 +526,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     }
                     let turns = session_conversation_turns(&dir)?;
                     let count = turns.len();
-                    handler_conv.lock().load_history(&run_args.cwd, turns)?;
+                    handler_conv.lock().load_history(&run_args.cwd, turns, &dir)?;
                     Ok(format!(
                         "Resumed {} into this conversation ({} prior turns loaded).",
                         dir.display(),

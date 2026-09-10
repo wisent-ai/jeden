@@ -125,7 +125,7 @@ impl SessionRecorder {
         self.record_entry(event_type, data).map(|_| ())
     }
 
-    fn record_entry(
+    pub(in crate::agent) fn record_entry(
         &mut self,
         event_type: &str,
         mut data: Value,

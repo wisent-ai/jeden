@@ -53,6 +53,7 @@ pub(super) fn is_builtin_read_tool(tool: &str) -> bool {
             | "fetch_readable_url"
             | "list_artifacts"
             | "read_artifact"
+            | "task_evidence"
             | "ask_user"
     )
 }

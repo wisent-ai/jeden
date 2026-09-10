@@ -12,6 +12,7 @@ pub mod cas;
 pub mod cli;
 pub mod collab;
 pub mod conformance;
+pub mod completion;
 pub mod context;
 pub mod control_plane;
 pub mod eval;
@@ -244,6 +245,7 @@ fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "gallery"
                             | "contracts"
                             | "workspace"
+                            | "todo"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
@@ -413,6 +415,7 @@ pub fn main() -> ExitCode {
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
         "pursue" => autonomy::command(&args),
+        "todo" => completion::command(&args),
         "rpc" => rpc::serve_stdio().map(|_| String::new()),
         "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
             .map(|_| String::new()),

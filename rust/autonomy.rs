@@ -38,7 +38,7 @@ impl JedenStageRunner {
             read_only_args,
             execution_args,
             hooks: RunHooks::inert(),
-            planner: Conversation::new(&args.cwd)?,
+            planner: Conversation::new_stage(&args.cwd)?,
             executor: None,
             contract_reviewer: None,
             acceptance_reviewer: None,
@@ -54,7 +54,7 @@ impl JedenStageRunner {
 
     fn run_executor(&mut self, prompt: &str) -> Result<StageResponse, String> {
         if self.executor.is_none() {
-            self.executor = Some(Conversation::new(&self.execution_args.cwd)?);
+            self.executor = Some(Conversation::new_stage(&self.execution_args.cwd)?);
         }
         let executor = self.executor.as_mut().expect("executor was initialized");
         let text = executor.run_turn(&self.execution_args, prompt, &[], &mut self.hooks)?;
@@ -67,7 +67,7 @@ impl JedenStageRunner {
         prompt: &str,
     ) -> Result<StageResponse, String> {
         if self.contract_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.contract_reviewer = Some((round, Conversation::new(&self.read_only_args.cwd)?));
+            self.contract_reviewer = Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
         }
         let (_, reviewer) = self
             .contract_reviewer
@@ -83,7 +83,7 @@ impl JedenStageRunner {
         prompt: &str,
     ) -> Result<StageResponse, String> {
         if self.acceptance_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.acceptance_reviewer = Some((round, Conversation::new(&self.read_only_args.cwd)?));
+            self.acceptance_reviewer = Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
         }
         let (_, reviewer) = self
             .acceptance_reviewer

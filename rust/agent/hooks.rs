@@ -23,6 +23,8 @@ pub(crate) enum TraceEvent<'a> {
     ToolCall { tool: &'a str, input: &'a Value },
     ToolResult { tool: &'a str, result: &'a Value },
     Reasoning { text: &'a str },
+    CompletionState { state: &'a Value },
+    Message { text: &'a str },
 }
 
 /// Cooperative controls for a turn: cancellation, live progress, streaming,

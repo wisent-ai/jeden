@@ -8,6 +8,14 @@ impl Conversation {
         attachments: &[crate::model_router::ModelAttachment],
         hooks: &mut RunHooks,
     ) -> Result<String, String> {
+        let tracks_completion = self.tracks_completion(args);
+        let continuing = std::mem::take(&mut self.continuation);
+        self.recorder.ensure()?;
+        let completion_request = if tracks_completion && !continuing {
+            Some(self.capture_completion(args, task, hooks)?)
+        } else {
+            None
+        };
         let config = load_config(&args.cwd);
         let mut router = model_router_config(&config, args);
         // The stage that can change the product owes the delivery report,
@@ -78,9 +86,12 @@ impl Conversation {
             effective_task.push_str(task_contract::turn_instruction());
         }
         self.recorder.record(
-            "user",
+            if continuing { "auto_continue" } else { "user" },
             json!({
                 "task": effective_task,
+                "rawTask": task,
+                "prompt": effective_task,
+                "completionRequestId": completion_request,
                 "cwd": args.cwd,
                 "allowWrite": args.allow_write,
                 "allowCommand": args.allow_command,
@@ -95,9 +106,15 @@ impl Conversation {
             contract["task"] = json!(task);
             self.recorder.record("task_contract", contract)?;
         }
+        if tracks_completion {
+            if continuing {
+                crate::completion::clear_runtime_blocker(&self.recorder.path())?;
+            }
+            self.prepare_completion(args, hooks)?;
+        }
 
         let mut classification_handle = None;
-        if !args.model_only && !args.autonomous {
+        if !args.model_only && !args.autonomous && !continuing {
             // Oko goal-lifecycle classification: background-only and fail-open.
             // Results update mode state and session events, never this turn's
             // prompt text. The ledger event lands via the process-wide append
@@ -118,11 +135,15 @@ impl Conversation {
             ));
         }
 
-        let tool_specs = if args.model_only {
+        let mut tool_specs = if args.model_only {
             Vec::new()
         } else {
             rust_tool_specs(&args.cwd)
         };
+        if self.inspection {
+            tool_specs.retain(|spec| spec.pointer("/function/name").and_then(Value::as_str)
+                .is_some_and(crate::agent::is_verification_read_tool));
+        }
         self.messages
             .push(json!({ "role": "user", "content": effective_task }));
 
@@ -134,14 +155,17 @@ impl Conversation {
             Some(max) => Box::new(u32::from(true)..=max),
             None => Box::new(u32::from(true)..),
         };
-        // A missing or incomplete report is corrected once, never accepted as success.
-        let mut report_requested = false;
         'steps: for step in step_iter {
+            if tracks_completion {
+                self.refresh_completion_context(hooks)?;
+            }
             if hooks.cancelled() {
                 let err = "Turn cancelled.".to_string();
                 self.recorder
                     .record("run_error", json!({ "message": err }))?;
-                return Err(err);
+                return Err(if tracks_completion {
+                    self.completion_failure("turn_cancelled", &err, hooks)
+                } else { err });
             }
             hooks.note(&format!("thinking (step {}/{})", step, step_max_label));
             if step > u32::from(true) {
@@ -157,7 +181,7 @@ impl Conversation {
             let pending = std::cell::RefCell::new(String::new());
             let mut on_delta = |piece: &str| -> bool {
                 // Do not expose an answer before its delivery report is checked.
-                if report_required {
+                if report_required || tracks_completion {
                     return false;
                 }
                 if !decided.get() {
@@ -244,7 +268,13 @@ impl Conversation {
                             .record("final", json!({ "step": step, "text": content.clone() }))?;
                         return Ok(content);
                     }
-                    let action = action_or_text(&content)?;
+                    let action = match action_or_text(&content) {
+                        Ok(action) => action,
+                        Err(_) if self.inspection && serde_json::from_str::<Value>(&content).is_ok() => {
+                            Action::Final { text: content.clone(), report: None }
+                        }
+                        Err(error) => return Err(error),
+                    };
                     self.recorder.record(
                         "action",
                         json!({ "step": step, "action": action_to_value(&action) }),
@@ -258,8 +288,7 @@ impl Conversation {
                                 match task_contract::DeliveryReport::parse(report) {
                                     Ok(report) => Some(report),
                                     Err(reason) => {
-                                        let can_repair = !report_requested
-                                            && args.max_steps.is_none_or(|max| step < max);
+                                        let can_repair = args.max_steps.is_none_or(|max| step < max);
                                         let instruction = format!(
                                             "{reason}\n\n{}",
                                             task_contract::REPAIR_INSTRUCTION
@@ -275,7 +304,6 @@ impl Conversation {
                                             }),
                                         )?;
                                         if can_repair {
-                                            report_requested = true;
                                             hooks.note(
                                                 "delivery report incomplete; requesting correction",
                                             );
@@ -289,12 +317,21 @@ impl Conversation {
                                             format!("Task contract not satisfied: {reason}");
                                         self.recorder
                                             .record("run_error", json!({ "message": error }))?;
-                                        return Err(error);
+                                        return Err(if tracks_completion {
+                                            self.completion_failure("delivery_report", &error, hooks)
+                                        } else { error });
                                     }
                                 }
                             } else {
                                 None
                             };
+                            if tracks_completion && !self.verify_completion(
+                                args, &text,
+                                serde_json::to_value(&report).map_err(|error| error.to_string())?,
+                                hooks,
+                            )? {
+                                continue 'steps;
+                            }
                             let blocked = report.as_ref().is_some_and(|report| report.is_blocked());
                             let text = if let Some(report) = &report {
                                 let rendered = report.render(&language);
@@ -311,6 +348,12 @@ impl Conversation {
                             } else {
                                 text
                             };
+                            if tracks_completion {
+                                crate::goal_lifecycle::finish_verified_goal(
+                                    &args.cwd, &self.recorder.path(), hooks.goal_event.as_ref(),
+                                    classification_handle.take(),
+                                )?;
+                            }
                             self.recorder
                                 .record("final", json!({ "step": step, "text": text, "taskStatus": if blocked { "blocked" } else { "complete" } }))?;
                             // Persist the user-visible answer (not the raw JSON
@@ -321,30 +364,25 @@ impl Conversation {
                             // When plan mode is on, the final answer IS the plan;
                             // persist it so `/plan-review` can surface it.
                             capture_plan_if_enabled(&args.cwd, &text);
-                            if report_required && !blocked {
-                                // Goal-completion judgement: the goals agent
-                                // reads this final report and closes the active
-                                // goal only when it is a genuine completion.
-                                // Background-only and fail-open, like the
-                                // classification above.
-                                crate::goal_lifecycle::spawn_completion_judgement(
-                                    args.cwd.clone(),
-                                    self.recorder.path(),
-                                    text.clone(),
-                                    hooks.goal_event.clone(),
-                                    classification_handle.take(),
-                                );
-                            }
                             let answer = self.maybe_advisor_review(args, text, hooks)?;
                             let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
                             return Ok(answer);
+                        }
+                        Action::Message { text } => {
+                            self.recorder.record("assistant_message", json!({ "step": step, "text": text }))?;
+                            hooks.trace(&TraceEvent::Message { text: &text });
+                            if let Some(last) = self.messages.last_mut() {
+                                last["content"] = json!(text);
+                            }
                         }
                         Action::Tool { tool, input } => {
                             if hooks.cancelled() {
                                 let err = "Turn cancelled.".to_string();
                                 self.recorder
                                     .record("run_error", json!({ "message": err }))?;
-                                return Err(err);
+                                return Err(if tracks_completion {
+                                    self.completion_failure("turn_cancelled", &err, hooks)
+                                } else { err });
                             }
                             let result = if let Some(reason) = crate::hooks::pretool_block(
                                 &args.cwd,
@@ -419,7 +457,9 @@ impl Conversation {
                                     let err = "Turn cancelled.".to_string();
                                     self.recorder
                                         .record("run_error", json!({ "message": err }))?;
-                                    return Err(err);
+                                    return Err(if tracks_completion {
+                                        self.completion_failure("turn_cancelled", &err, hooks)
+                                    } else { err });
                                 }
                                 if let Some(reason) = crate::hooks::pretool_block(
                                     &args.cwd,
@@ -558,6 +598,11 @@ impl Conversation {
                     }
                     self.recorder
                         .record("run_error", json!({ "message": error }))?;
+                    let error = if tracks_completion {
+                        self.completion_failure("model_request", &error, hooks)
+                    } else {
+                        error
+                    };
                     return Err(error);
                 }
             }
@@ -566,6 +611,8 @@ impl Conversation {
         let err = "max steps exceeded".to_string();
         self.recorder
             .record("run_error", json!({ "message": err }))?;
-        Err(err)
+        Err(if tracks_completion {
+            self.completion_failure("execution_limit", &err, hooks)
+        } else { err })
     }
 }

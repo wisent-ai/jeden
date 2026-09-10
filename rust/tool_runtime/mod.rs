@@ -200,6 +200,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "git_status" => git_status(runtime),
         "git_diff" => git_diff(runtime, input),
         "todo" => todo_tool(runtime, input),
+        "task_evidence" => crate::completion::inspect_evidence(runtime.cwd, input),
         "delegate_task" => delegate_task(runtime, input),
         "git_log" => git_log(runtime, input),
         "git_show" => git_show(runtime, input),

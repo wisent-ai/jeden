@@ -13,7 +13,7 @@ pub(in crate::agent) fn action_or_text(content: &str) -> Result<Action, String> 
 
 pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
     match action {
-        Action::Final { .. } => serde_json::to_value(action).expect("serializable final action"),
+        Action::Final { .. } | Action::Message { .. } => serde_json::to_value(action).expect("serializable prose action"),
         Action::Tool { tool, input } => json!({ "action": "tool", "tool": tool, "input": input }),
         Action::Tools { tools } => {
             json!({ "action": "tools", "tools": tools.iter().map(tool_to_value).collect::<Vec<_>>() })
@@ -78,14 +78,28 @@ pub(in crate::agent) fn run_tool_action(
         interactive: hooks.interactive,
         ask_user: hooks.ask_user.as_deref(),
     };
-    let result = match crate::tool_runtime::execute(&runtime, &action.tool, &action.input) {
-        Ok(result) => result,
-        Err(error) => json!({ "ok": false, "error": error }),
+    let mut result = if args.autonomous && !args.allow_write && !args.allow_command
+        && !crate::agent::is_verification_read_tool(&action.tool) {
+        json!({ "ok": false, "error": "independent inspection may use only read-only observation tools" })
+    } else {
+        match crate::tool_runtime::execute(&runtime, &action.tool, &action.input) {
+            Ok(result) => result,
+            Err(error) => json!({ "ok": false, "error": error }),
+        }
     };
-    recorder.record(
+    let receipt = recorder.record_entry(
         "tool_result",
         json!({ "step": step, "tool": action.tool, "result": result }),
     )?;
+    let reference = json!({
+        "sessionPath": recorder.path(),
+        "eventId": receipt.id,
+    });
+    if let Some(object) = result.as_object_mut() {
+        object.insert("jedenEvidence".into(), reference);
+    } else {
+        result = json!({ "value": result, "jedenEvidence": reference });
+    }
     hooks.trace(&TraceEvent::ToolResult {
         tool: &action.tool,
         result: &result,

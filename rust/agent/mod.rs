@@ -92,3 +92,7 @@ pub(crate) fn record_roadmap_event(
     crate::slash::update_session_pointer(cwd, &path)?;
     Ok(path)
 }
+
+pub(crate) fn is_verification_read_tool(tool: &str) -> bool {
+    approval::is_builtin_read_tool(tool) && tool != "ask_user"
+}

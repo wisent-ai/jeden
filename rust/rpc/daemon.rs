@@ -423,18 +423,14 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     })?;
                 Ok(json!({"sessionId": session_id}))
             }
-            "session/prompt" => {
+            "session/prompt" | "session/completion/continue" => {
                 let session_id = string_field(&request.params, "sessionId")?;
-                let prompt = string_field(&request.params, "prompt")?;
-                let outcome = self
-                    .service
-                    .submit_prompt(
-                        &connection.identity,
-                        session_id,
-                        &request.meta.idempotency_key,
-                        prompt,
-                    )
-                    .map_err(service_error)?;
+                let outcome = if request.method == "session/completion/continue" {
+                    self.service.continue_work(&connection.identity, session_id, &request.meta.idempotency_key)
+                } else {
+                    let prompt = string_field(&request.params, "prompt")?;
+                    self.service.submit_prompt(&connection.identity, session_id, &request.meta.idempotency_key, prompt)
+                }.map_err(service_error)?;
                 Ok(match outcome {
                     SubmitOutcome::Started { request_id } => {
                         json!({"state": "started", "requestId": request_id})
@@ -508,6 +504,22 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     .history(&connection.identity, session_id, limit)
                     .map_err(service_error)?;
                 Ok(json!({"turns": turns, "truncated": truncated}))
+            }
+            "session/completion/get" => {
+                let session_id = string_field(&request.params, "sessionId")?;
+                let completion = self.service.completion(&connection.identity, session_id).map_err(service_error)?;
+                Ok(json!({"sessionId": session_id, "completion": completion}))
+            }
+            "session/completion/control" => {
+                let session_id = string_field(&request.params, "sessionId")?;
+                let task_id = string_field(&request.params, "taskId")?;
+                let action = string_field(&request.params, "action")?;
+                let reason = string_field(&request.params, "reason")?;
+                let revision = request.params.get("revision").and_then(Value::as_u64)
+                    .ok_or_else(|| protocol_error("invalid_request", "revision must be an unsigned integer"))?;
+                let completion = self.service.control_completion(&connection.identity, session_id,
+                    task_id, action, reason, revision).map_err(service_error)?;
+                Ok(json!({"sessionId": session_id, "completion": completion}))
             }
             _ => Err(protocol_error("method_not_found", "unknown session method")),
         }

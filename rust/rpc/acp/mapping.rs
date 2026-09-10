@@ -74,6 +74,16 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
                 terminal: false,
             }
         }
+        SessionEventKind::AssistantMessage { text } => MappedEvent {
+            update: Some(SessionUpdate::AgentMessageChunk(ContentChunk::new(text.into()))),
+            terminal: false,
+        },
+        SessionEventKind::Completion { state } => MappedEvent {
+            update: Some(SessionUpdate::AgentThoughtChunk(ContentChunk::new(
+                format!("Retained tasks: {state}").into(),
+            ))),
+            terminal: false,
+        },
         // Reasoning is a thought; a tool call and its result are one ACP tool
         // call keyed by the tool name, the only identity a turn's trace carries.
         SessionEventKind::ReasoningDelta { text } => MappedEvent {
@@ -138,7 +148,7 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
             update: None,
             terminal: false,
         },
-        SessionEventKind::Result { text } => {
+        SessionEventKind::Result { text, .. } => {
             let update = if *streamed {
                 None
             } else {

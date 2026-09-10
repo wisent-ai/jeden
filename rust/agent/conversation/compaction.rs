@@ -191,8 +191,10 @@ impl Conversation {
         )?;
         let parent_session = self.recorder.path();
         let parent_entry = self.recorder.active_leaf()?;
-        self.recorder = SessionRecorder::child(&args.cwd, parent_session, parent_entry);
+        self.recorder = SessionRecorder::child(&args.cwd, parent_session.clone(), parent_entry);
         self.recorder.ensure()?;
+        crate::completion::inherit(&parent_session, &self.recorder.path())?;
+        self.reconcile_completion = true;
         self.messages = vec![
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),

@@ -5,6 +5,7 @@ mod compaction;
 mod history;
 mod local_exec;
 mod turn;
+mod completion;
 
 pub(super) use action::{
     action_or_text, action_to_value, record_unexecuted_tool_action, run_tool_action,
@@ -16,6 +17,10 @@ pub(super) use action::{
 pub(crate) struct Conversation {
     pub(super) messages: Vec<Value>,
     pub(super) recorder: SessionRecorder,
+    pub(super) manages_completion: bool,
+    pub(super) inspection: bool,
+    pub(super) continuation: bool,
+    pub(super) reconcile_completion: bool,
 }
 
 impl Conversation {
@@ -25,6 +30,10 @@ impl Conversation {
         Ok(Self {
             messages: vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })],
             recorder,
+            manages_completion: true,
+            inspection: false,
+            continuation: false,
+            reconcile_completion: false,
         })
     }
 
@@ -37,6 +46,10 @@ impl Conversation {
                 "content": "You are Jeden in model-only mode. Follow the user request directly and do not call tools."
             })],
             recorder,
+            manages_completion: false,
+            inspection: false,
+            continuation: false,
+            reconcile_completion: false,
         })
     }
 
@@ -44,7 +57,26 @@ impl Conversation {
         let turns = crate::cli::sessions::session_conversation_turns(session_dir)?;
         let messages = history::normalized_history(cwd, turns)?;
         let recorder = SessionRecorder::open(cwd, session_dir)?;
-        Ok(Self { messages, recorder })
+        Ok(Self {
+            messages, recorder,
+            manages_completion: true,
+            inspection: false,
+            continuation: false,
+            reconcile_completion: true,
+        })
+    }
+
+    /// Pursuit owns its stage acceptance and must not recursively start another controller.
+    pub(crate) fn new_stage(cwd: &Path) -> Result<Self, String> {
+        let mut conversation = Self::new(cwd)?;
+        conversation.manages_completion = false;
+        Ok(conversation)
+    }
+
+    fn new_inspection(cwd: &Path) -> Result<Self, String> {
+        let mut conversation = Self::new_stage(cwd)?;
+        conversation.inspection = true;
+        Ok(conversation)
     }
 
     pub(crate) fn session_path(&self) -> PathBuf {
