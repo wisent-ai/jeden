@@ -54,11 +54,12 @@ export const overviewPages = [
         paragraphs: [
           "Prerequisites: a supported platform (<code>aarch64-apple-darwin</code>, <code>x86_64-unknown-linux-gnu</code>, <code>x86_64-pc-windows-msvc</code>) or a Rust toolchain for source builds, a Brama-compatible model endpoint, and a caller-owned signing credential.",
           "Running <code>jeden</code> opens the welcome view. Its first screen can adopt an existing repository in place; the same operation is available as <code>jeden workspace adopt &lt;path&gt;</code>, <code>/setup workspace &lt;path&gt;</code>, and the Jeden Desktop Settings screen. The accepted canonical path becomes the default for the next task unless <code>--cwd</code> is explicit. <code>/setup</code> remains an idempotent wizard for workspace, Brama URL, agent id, default model, and preferences; it writes non-secret router values to <code>~/.jeden/.env</code> at mode <code>0600</code>, while workspace selection uses the atomic user config. <code>WISENT_APP_AGENT_AUTH_SECRET</code> is read from the process environment only — the harness holds no credential store and writes no secret to disk; the bundled launch scripts export it from the Skarbiec item <code>agent:wisent-app</code>, which also owns rotation and revocation. <code>jeden doctor</code> returns a JSON health report and exits non-zero when an active probe is unavailable.",
+          "On macOS, source builds also need Wisent Products and an available Apple Development or Developer ID Application identity. Build <code>jeden</code> and <code>jeden-sandbox-helper</code> together, then run <code>wisent-products signing sign --product jeden target/release/jeden target/release/jeden-sandbox-helper</code>. The helper must stay beside the executable. Signing failures stop installation; there is no ad-hoc fallback. The shared contract is <a href=\"https://stado.wisent.com/docs/signing\">Native macOS code signatures</a>.",
         ],
         commands: [
           {
             label: "Build from source",
-            code: "git clone https://github.com/wisent-ai/jeden.git && cd jeden\ncargo build --locked --release   # or: bin/jeden-rust",
+            code: "git clone https://github.com/wisent-ai/jeden.git && cd jeden\ncargo build --locked --release\n# macOS only, after building:\nwisent-products signing sign --product jeden target/release/jeden target/release/jeden-sandbox-helper",
           },
           {
             label: "Required environment for real model calls",
