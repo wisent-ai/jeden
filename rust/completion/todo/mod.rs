@@ -13,7 +13,11 @@ fn item_text(value: &Value) -> Result<&str, String> {
 }
 
 fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Result<(), String> {
-    let request_id = state.requests.last().ok_or("todo requires a captured user request")?.id.clone();
+    let request = state.requests.iter().rev().find(|request| !request.coverage_verified && !request.paused)
+        .ok_or("todo requires an active captured user request")?;
+    let request_id = request.id.clone();
+    let kind = state.tasks.iter().find(|task| task.request_id == request_id)
+        .map(|task| task.kind).unwrap_or(TaskKind::Work);
     for item in items {
         let title = item_text(item)?;
         if state.tasks.iter().any(|task| task.text == title && !task.status.terminal()) {
@@ -25,7 +29,7 @@ fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Re
             phase: phase.to_string(),
             text: title.to_string(),
             criteria: vec![title.to_string()],
-            kind: TaskKind::Work,
+            kind,
             origin: TaskOrigin::Agent,
             status: TaskStatus::Pending,
             reason: None,
@@ -147,7 +151,6 @@ fn summary(state: &CompletionState) -> Value {
             .push(serde_json::to_value(task).expect("task serializes"));
     }
     let mut output = snapshot_value(state);
-    output["total"] = json!(state.tasks.len());
     output["phases"] = json!(phases);
     output["items"] = json!(state.tasks);
     output["active"] = state.tasks.iter()

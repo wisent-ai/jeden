@@ -319,6 +319,16 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 .split_once(char::is_whitespace)
                 .unwrap_or((trimmed, ""));
             match command {
+                "/todo" if rest.trim() == "continue" => {
+                    handler_conv.lock().continue_work(&run_args, &mut hooks)
+                }
+                "/todo" => {
+                    let session = handler_conv.lock().session_path();
+                    agent::update_last_session_path(&run_args.cwd, &session)?;
+                    crate::completion::cli::execute(
+                        &run_args.cwd, &crate::slash::common::split_args(rest), false, Some(&run_args),
+                    )
+                }
                 "/model" | "/models" | "/switch" => {
                     let next = rest.trim();
                     if matches!(next, "--all" | "-a") {
@@ -508,8 +518,11 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 }
                 "/drop" => {
                     let dir = handler_conv.lock().session_path();
-                    let _ = fs::remove_dir_all(&dir);
-                    handler_conv.lock().reset(&run_args.cwd)?;
+                    if !crate::completion::read_state(&dir)?.complete() {
+                        return Err("Session has retained work; explicitly cancel its requests before dropping it.".into());
+                    }
+                    *handler_conv.lock() = agent::Conversation::new(&run_args.cwd)?;
+                    fs::remove_dir_all(&dir).map_err(|error| error.to_string())?;
                     Ok(format!(
                         "Dropped session {} and started a fresh conversation.",
                         dir.display()

@@ -24,6 +24,6 @@ pub(crate) use operations::{
     capture_request, clear_runtime_blocker, model_context, observed_blocker, operator_control, plan_request,
     snapshot_value,
 };
-pub(crate) use store::{inherit, read as read_state, session_from_artifacts};
+pub(crate) use store::{inherit, migrate_workspace, read as read_state, session_from_artifacts};
 pub(crate) use todo::execute as execute_todo;
 pub(crate) use verification::{apply_review, inspect_evidence, review_evidence};

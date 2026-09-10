@@ -551,9 +551,13 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
         }
     }
     let task = task_parts.join(" ").trim().to_string();
-    let mut conversation = agent::Conversation::new(&args.cwd)?;
-    conversation.load_history(&args.cwd, turns, &dir)?;
     let mut run_args = args.clone();
+    if !args.cwd_explicit {
+        run_args.cwd = crate::completion::cli::workspace(&dir)?;
+    }
+    let mut conversation = agent::Conversation::new(&run_args.cwd)?;
+    conversation.load_history(&run_args.cwd, turns, &dir)?;
+    agent::update_last_session_path(&run_args.cwd, &conversation.session_path())?;
     run_args.allow_write = allow_write;
     run_args.allow_command = allow_command;
     run_args.yolo = yolo;
@@ -563,7 +567,6 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     } else {
         conversation.run_turn(&run_args, &task, &[], &mut hooks)?
     };
-    let _ = agent::update_last_session_path(&args.cwd, &conversation.session_path());
     Ok(format!(
         "[resumed {} prior turn(s) from {}]\n{}\n",
         count,

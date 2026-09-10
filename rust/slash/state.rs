@@ -31,8 +31,9 @@ pub(crate) struct ModeState {
     pub(crate) compact: bool,
     #[serde(default)]
     pub(crate) shake: String,
-    #[serde(default)]
-    pub(crate) todos: Vec<TodoState>,
+    /// Migration input only; live task state belongs to the session completion store.
+    #[serde(rename = "todos", default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) legacy_todos: Vec<TodoState>,
     #[serde(default)]
     pub(crate) branches: Vec<BranchState>,
     #[serde(rename = "activeRoadmapItem", default)]

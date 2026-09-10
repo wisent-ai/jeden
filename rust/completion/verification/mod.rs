@@ -136,7 +136,8 @@ pub(crate) fn apply_review(
         for verdict in review.requests {
             let request = state.requests.iter_mut().find(|request| request.id == verdict.request_id)
                 .expect("request set validated above");
-            request.coverage_verified = verdict.covered;
+            request.coverage_verified = verdict.covered && state.tasks.iter()
+                .filter(|task| task.request_id == request.id).all(|task| task.status.terminal());
             let owned: Vec<_> = state.tasks.iter().filter(|task| task.request_id == request.id).collect();
             if !verdict.covered && owned.iter().all(|task| task.status.terminal()) {
                 let kind = if owned.iter().any(|task| task.kind == TaskKind::Work) {

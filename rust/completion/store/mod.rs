@@ -1,3 +1,6 @@
+mod workspace;
+pub(crate) use workspace::migrate as migrate_workspace;
+
 use super::model::*;
 use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
@@ -102,7 +105,7 @@ fn write_atomic(path: &Path, state: &CompletionState) -> Result<(), String> {
 /// Old todo claims are imported as unverified work, never as completed work.
 /// The old file is retired only after its replacement is durably committed.
 fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
-    let mut state = CompletionState::default();
+    let mut state = legacy_requests(dir)?;
     let path = dir.join("artifacts/todo.json");
     regular_file_or_absent(&path)?;
     let legacy: Value = match fs::read(&path) {
@@ -148,6 +151,43 @@ fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
             paused: false,
             captured_at: crate::agent::now_stamp(),
             planned: true,
+            coverage_verified: false,
+        });
+    }
+    Ok(state)
+}
+
+fn legacy_requests(dir: &Path) -> Result<CompletionState, String> {
+    let mut state = CompletionState::default();
+    let transcript = dir.join("transcript.jsonl");
+    regular_file_or_absent(&transcript)?;
+    if !transcript.exists() {
+        return Ok(state);
+    }
+    let cwd = super::cli::workspace(dir)?;
+    let ledger = crate::cli::sessions::ledger_v2::store::read_events(dir)?;
+    for event in ledger.events {
+        if event.payload.kind() != "user" {
+            continue;
+        }
+        let data = event.payload.data();
+        if data.get("modelOnly").and_then(Value::as_bool) == Some(true)
+            || data.get("completionManaged").and_then(Value::as_bool) == Some(false) {
+            continue;
+        }
+        let prompt = data.get("rawTask").or_else(|| data.get("task"))
+            .or_else(|| data.get("prompt")).or_else(|| data.get("content"))
+            .and_then(Value::as_str).or_else(|| data.as_str())
+            .filter(|prompt| !prompt.trim().is_empty())
+            .ok_or_else(|| format!("legacy user event {} has no recorded request", event.event_id))?;
+        state.requests.push(WorkRequest {
+            id: event.event_id,
+            prompt: prompt.to_string(),
+            cwd: data.get("cwd").and_then(Value::as_str)
+                .map(str::to_string).unwrap_or_else(|| cwd.display().to_string()),
+            paused: false,
+            captured_at: event.timestamp,
+            planned: false,
             coverage_verified: false,
         });
     }

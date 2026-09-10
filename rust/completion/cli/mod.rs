@@ -77,6 +77,9 @@ pub(crate) fn execute(cwd: &Path, arguments: &[String], mut json: bool, run_args
     if !matches!(action, "list" | "add" | "pause" | "resume" | "cancel" | "continue") {
         return Err(format!("{USAGE}\nTask completion requires independent verification; there is no operator done command."));
     }
+    if selected.is_none() {
+        super::migrate_workspace(cwd, None)?;
+    }
     let session = if action == "add" && selected.is_none() && crate::slash::read_mode_state(cwd).last_session_path.is_none() {
         let conversation = crate::agent::Conversation::new(cwd)?;
         let path = conversation.session_path();

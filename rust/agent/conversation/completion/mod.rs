@@ -31,6 +31,7 @@ impl Conversation {
     }
 
     pub(super) fn capture_completion(&mut self, args: &Args, task: &str, hooks: &RunHooks<'_>) -> Result<String, String> {
+        completion::migrate_workspace(&args.cwd, Some(&self.recorder.path()))?;
         let (id, state) = completion::capture_request(&self.recorder.path(), &args.cwd, task)?;
         crate::agent::update_last_session_path(&args.cwd, &self.recorder.path())?;
         self.publish_completion(&state, hooks)?;

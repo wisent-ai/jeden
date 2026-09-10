@@ -84,6 +84,10 @@ pub(crate) fn plan_request(
 
 pub(crate) fn observed_blocker(session: &Path, operation: &str, message: &str) -> Result<CompletionState, String> {
     let (_, state) = store::update(session, None, |state| {
+        if operation == "turn_cancelled"
+            && (state.complete() || state.status() == "paused") {
+            return Ok(());
+        }
         state.blocker = Some(CompletionBlocker {
             operation: operation.to_string(),
             message: message.to_string(),
@@ -126,6 +130,9 @@ pub(crate) fn operator_control(
                 return Err(format!("request is already terminal: {task_id}"));
             }
             request.paused = action == "pause";
+            if action == "cancel" {
+                request.coverage_verified = true;
+            }
             if action == "cancel" && !request.planned {
                 state.tasks.push(WorkTask {
                     id: uuid::Uuid::new_v4().to_string(),
@@ -151,6 +158,10 @@ pub(crate) fn operator_control(
                 .ok_or_else(|| format!("unknown task or request: {task_id}"))?;
             if task.status.terminal() {
                 return Err(format!("task is already terminal: {task_id}"));
+            }
+            if action == "resume" && state.requests.iter()
+                .any(|request| request.id == task.request_id && request.paused) {
+                return Err("the owning request is paused; resume that request first".into());
             }
             task.status = status;
             task.reason = Some(format!("Operator {action}: {reason}"));

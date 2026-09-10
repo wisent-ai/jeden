@@ -9,7 +9,7 @@ use crate::tui::{PickerItem, PickerSpec};
 
 mod browser;
 mod commands;
-mod common;
+pub(crate) mod common;
 mod modes;
 mod plugins;
 mod session;
@@ -50,7 +50,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),
         "/roles" | "/role" => Some(modes::session::handle_roles(context)),
         "/prompt" => Some(crate::agent::system_prompt_checked(context.cwd)),
-        "/todo" => { changed = !matches!(split_head(args).0, "" | "list" | "copy" | "export"); Some(modes::todo::handle_todo(args, &mut state, context)) },
+        "/todo" => Some(modes::todo::handle_todo(args, context)),
         "/roadmap" => Some(
             crate::roadmap::split_command_line(args)
                 .map_err(|error| error.to_string())
@@ -125,17 +125,12 @@ pub(crate) fn activate_roadmap_work(
         state.goal.objective = objective.to_string();
         state.plan.enabled = true;
         state.plan.latest_plan = plan.to_string();
-        state.todos = todos
-            .iter()
-            .map(|(text, status)| state::TodoState {
-                text: text.clone(),
-                status: status.clone(),
-                created_at: crate::agent::now_stamp(),
-            })
-            .collect();
         state.active_roadmap_item = Some(item_id.to_string());
         Ok(())
-    })
+    })?;
+    let request = format!("{objective}\nAcceptance plan:\n{plan}\nRetained tasks:\n{}",
+        todos.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join("\n"));
+    crate::completion::cli::execute(cwd, &["add".into(), request], false, None).map(|_| ())
 }
 
 pub(crate) fn update_session_pointer(cwd: &Path, path: &Path) -> Result<(), String> {
@@ -222,7 +217,7 @@ pub(crate) fn interactive_picker(
         "/fast" => Ok(modes::todo::fast_picker(&state)),
         "/advisor" => Ok(modes::session::advisor_picker(&state, context)),
         "/approval" => Ok(modes::session::approval_picker(&state, &lang)),
-        "/todo" => Ok(modes::todo::todo_picker(&state, &lang)),
+        "/todo" => Ok(modes::todo::todo_picker()),
         "/roadmap" => crate::roadmap::picker(context.cwd).map_err(|error| error.to_string()),
         "/session" | "/sessions" => Ok(modes::session::session_picker(context)),
         "/roles" | "/role" => Ok(modes::session::roles_picker(&state, context)),

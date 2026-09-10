@@ -9,6 +9,7 @@ pub(crate) mod contracts;
 pub(crate) mod gallery;
 pub(crate) mod i18n;
 pub(crate) mod i18n_translations;
+pub(crate) mod invocation;
 pub(crate) mod run;
 pub(crate) mod sessions;
 pub(crate) mod stats;

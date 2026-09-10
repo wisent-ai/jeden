@@ -322,7 +322,7 @@ pub(crate) fn spawn_turn_classification(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
-        let Some(decision) = classify(&LifecycleRequest {
+        let Some(mut decision) = classify(&LifecycleRequest {
             prompt: prompt.clone(),
             session_id,
             turn_index,
@@ -330,6 +330,12 @@ pub(crate) fn spawn_turn_classification(
         }) else {
             return;
         };
+        // Prompt classification can suggest a title, but cannot independently
+        // close retained work or outrank the native acceptance decision.
+        if decision.action == LifecycleAction::FinishGoal
+            && !crate::completion::read_state(&session_dir).is_ok_and(|state| state.complete()) {
+            decision.action = LifecycleAction::ContinueCurrent;
+        }
         let resolved_goal = match decision.action {
             LifecycleAction::StartGoal => Some(resolve_goal_title(&prompt)),
             LifecycleAction::ContinueCurrent | LifecycleAction::FinishGoal => {

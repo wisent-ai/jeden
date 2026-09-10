@@ -98,6 +98,7 @@ impl Conversation {
                 "maxSteps": args.max_steps,
                 "maxTokens": args.max_tokens,
                 "modelOnly": args.model_only,
+                "completionManaged": tracks_completion,
                 "goal": args.goal,
             }),
         )?;

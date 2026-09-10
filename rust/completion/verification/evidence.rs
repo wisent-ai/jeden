@@ -6,6 +6,7 @@ use std::path::Path;
 pub(crate) fn failed(result: &Value) -> bool {
     result.get("ok").and_then(Value::as_bool) == Some(false)
         || result.get("success").and_then(Value::as_bool) == Some(false)
+        || result.get("failed").and_then(Value::as_bool) == Some(true)
         || result.get("error").is_some_and(|error| !error.is_null())
         || result.get("exitCode").and_then(Value::as_i64).is_some_and(|code| code != i64::default())
         || result.get("exit_code").and_then(Value::as_i64).is_some_and(|code| code != i64::default())
