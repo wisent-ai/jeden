@@ -89,9 +89,10 @@ export const operationCommands = [
     invocation: "jeden doctor [--json] [--cwd path]",
     purpose: "Probe the live health of Jeden's configured runtime dependencies and local subsystems.",
     inputs: ["Optional: <code>--cwd</code>. The command always emits its structured doctor report; <code>--json</code> is accepted for CLI consistency."],
-    effect: "Runs Brama, Weles, storage, process, MCP, extensions, LSP, browser, TUI keymap, task, memory, and collaboration probes, then prints a JSON report with per-probe evidence and latency.",
+    effect: "Runs Brama, Weles, storage, process, sandbox, MCP, extensions, LSP, browser, TUI keymap, task, memory, and collaboration probes, then prints a JSON report with per-probe evidence and latency. The <code>sandbox</code> probe reports whether a task can run at all: the helper found beside the executable, its signature verdict, and its enforcement probe.",
     refusals: [
       "The command exits unsuccessfully when any active probe is unavailable; degraded or inactive evidence remains explicit in the report.",
+      "A missing, unsigned, or non-enforcing <code>jeden-sandbox-helper</code> makes the <code>sandbox</code> probe unavailable, naming the helper path checked and the executable it was looked up beside, so a host that would fail every <code>jeden run</code> fails the doctor first.",
       "Storage probe failures and serialization failures are returned as errors instead of a healthy result.",
     ],
   },

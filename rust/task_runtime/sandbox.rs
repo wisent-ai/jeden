@@ -14,6 +14,13 @@ pub(crate) struct TaskSandboxHealth {
     helper: Option<PathBuf>,
 }
 
+impl TaskSandboxHealth {
+    /// The helper this verdict was reached with, when one was found at all.
+    pub(crate) fn helper_path(&self) -> Option<&Path> {
+        self.helper.as_deref()
+    }
+}
+
 // The three helpers below exist for the one platform whose sandbox this module
 // knows how to enforce; `health()` calls them from its `target_os = "macos"` arm
 // only. Without the attribute they are dead code on Linux and Windows, where the
