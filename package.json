@@ -9,7 +9,8 @@
   "scripts": {
     "check": "cargo check",
     "check:rust": "cargo check",
-    "build:rust": "cargo build --release && { if [ \"$(uname -s)\" != Darwin ]; then exit 0; fi; helper=target/release/jeden-sandbox-helper; test -x \"$helper\" || { echo \"sandbox helper is missing or not executable: $helper\" >&2; exit 1; }; /usr/bin/codesign --force --sign \"${JEDEN_CODESIGN_IDENTITY:--}\" \"$helper\" && /usr/bin/codesign --verify --strict \"$helper\"; }",
+    "test:contracts": "cargo test --locked --release --test contracts --no-run && npm run build:rust && cargo test --locked --release --test contracts -- --nocapture",
+    "build:rust": "cargo build --release && { if [ \"$(uname -s)\" != Darwin ]; then exit 0; fi; wisent-products signing sign --product jeden target/release/jeden target/release/jeden-sandbox-helper; }",
     "build:docs": "node web/docs/pages.mjs"
   },
   "dependencies": {

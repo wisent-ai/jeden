@@ -77,20 +77,28 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
         if let Some(previous) = &previous_signature {
             signer.args([
                 "--identifier",
-                previous["identifier"].as_str().ok_or("signing report omitted identifier")?,
+                previous["identifier"]
+                    .as_str()
+                    .ok_or("signing report omitted identifier")?,
                 "--identity",
-                previous["authority"].as_str().ok_or("signing report omitted authority")?,
+                previous["authority"]
+                    .as_str()
+                    .ok_or("signing report omitted authority")?,
             ]);
         } else {
             signer.args(["--product", "jeden"]);
         }
-        let output = signer.arg(&executable).output()
+        let output = signer
+            .arg(&executable)
+            .output()
             .map_err(|error| format!("cannot start stable macOS signing: {error}"))?;
         if !output.status.success() {
             return Err(command_failure("stable macOS signing", &output.stderr));
         }
         if let Some(previous) = previous_signature {
-            let requirement = previous["requirement"].as_str().ok_or("signing report omitted requirement")?;
+            let requirement = previous["requirement"]
+                .as_str()
+                .ok_or("signing report omitted requirement")?;
             let proof = Command::new("/usr/bin/codesign")
                 .args(["--verify", "--strict", "-R"])
                 .arg(format!("={requirement}"))
@@ -98,7 +106,10 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
                 .output()
                 .map_err(|error| format!("cannot verify update identity: {error}"))?;
             if !proof.status.success() {
-                return Err(command_failure("update changed macOS code identity", &proof.stderr));
+                return Err(command_failure(
+                    "update changed macOS code identity",
+                    &proof.stderr,
+                ));
             }
         }
     }

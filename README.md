@@ -105,10 +105,10 @@ Model errors, unavailable verification and explicit execution limits remain inco
 ## Real verification
 
 ```sh
-cargo test --test contracts -- --nocapture
+npm run test:contracts
 ```
 
-The suite uses real CLI/RPC operations and the configured Brama dependency, retaining source revision, binary digest, commands, exit status and saved state under `target/contract-runs`. A failed model journey remains failed, not skipped or counted as passed. Probierz remains an optional runner.
+The suite uses real CLI/RPC operations and the configured Brama dependency, retaining source revision, binary digest, commands, exit status and saved state under `target/contract-runs`. The runner compiles the tests, builds and signs the native product through its normal workflow, then executes the suite without another source change. A failed model journey remains failed, not skipped or counted as passed. Probierz remains an optional runner.
 
 
 ## Primary interfaces

@@ -14,4 +14,7 @@ for argument in "$@"; do
     shift_count=1
   fi
 done
+if [ "$(uname -s)" = Darwin ]; then
+  wisent-products signing sign --product jeden "$WISENT_OUTPUT_DIR/bin/"*
+fi
 for binary in "$WISENT_OUTPUT_DIR"/bin/*; do shasum -a 256 "$binary"; done > "$WISENT_OUTPUT_DIR/evidence/DIGESTS"
