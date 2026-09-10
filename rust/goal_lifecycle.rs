@@ -237,7 +237,6 @@ pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
     parse_decision(response.pointer("/choices/0/message/content")?.as_str()?)
 }
 
-
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
 /// --stdin --json` when the executable is available, otherwise the prompt's
 /// first line trimmed to 100 characters.
@@ -333,7 +332,8 @@ pub(crate) fn spawn_turn_classification(
         // Prompt classification can suggest a title, but cannot independently
         // close retained work or outrank the native acceptance decision.
         if decision.action == LifecycleAction::FinishGoal
-            && !crate::completion::read_state(&session_dir).is_ok_and(|state| state.complete()) {
+            && !crate::completion::read_state(&session_dir).is_ok_and(|state| state.complete())
+        {
             decision.action = LifecycleAction::ContinueCurrent;
         }
         let resolved_goal = match decision.action {
@@ -412,7 +412,9 @@ pub(crate) fn finish_verified_goal(
         return Ok(());
     }
     crate::cli::sessions::append_ledger_entry(
-        session_dir, crate::agent::now_stamp(), "goal_lifecycle",
+        session_dir,
+        crate::agent::now_stamp(),
+        "goal_lifecycle",
         json!({"action": "finishGoal", "judge": "verified_tasks",
             "goal": objective, "completionRevision": completion.revision}),
     )?;

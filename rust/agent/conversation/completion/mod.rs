@@ -10,7 +10,11 @@ impl Conversation {
         self.manages_completion && !args.model_only
     }
 
-    pub(super) fn publish_completion(&mut self, state: &CompletionState, hooks: &RunHooks<'_>) -> Result<(), String> {
+    pub(super) fn publish_completion(
+        &mut self,
+        state: &CompletionState,
+        hooks: &RunHooks<'_>,
+    ) -> Result<(), String> {
         let mut value = completion::snapshot_value(state);
         value["sessionPath"] = json!(self.recorder.path());
         self.recorder.record("completion_state", value.clone())?;
@@ -18,19 +22,34 @@ impl Conversation {
         Ok(())
     }
 
-    pub(super) fn completion_failure(&mut self, operation: &str, error: &str, hooks: &RunHooks<'_>) -> String {
+    pub(super) fn completion_failure(
+        &mut self,
+        operation: &str,
+        error: &str,
+        hooks: &RunHooks<'_>,
+    ) -> String {
         match completion::observed_blocker(&self.recorder.path(), operation, error) {
             Ok(state) => {
                 if let Err(record_error) = self.publish_completion(&state, hooks) {
                     return format!("{error}; recording completion state failed: {record_error}");
                 }
             }
-            Err(record_error) => return format!("{error}; persisting unfinished work failed: {record_error}"),
+            Err(record_error) => {
+                return format!("{error}; persisting unfinished work failed: {record_error}")
+            }
         }
-        format!("Work remains open ({operation}): {error}. Session: {}", self.recorder.path().display())
+        format!(
+            "Work remains open ({operation}): {error}. Session: {}",
+            self.recorder.path().display()
+        )
     }
 
-    pub(super) fn capture_completion(&mut self, args: &Args, task: &str, hooks: &RunHooks<'_>) -> Result<String, String> {
+    pub(super) fn capture_completion(
+        &mut self,
+        args: &Args,
+        task: &str,
+        hooks: &RunHooks<'_>,
+    ) -> Result<String, String> {
         completion::migrate_workspace(&args.cwd, Some(&self.recorder.path()))?;
         let (id, state) = completion::capture_request(&self.recorder.path(), &args.cwd, task)?;
         crate::agent::update_last_session_path(&args.cwd, &self.recorder.path())?;
@@ -38,10 +57,18 @@ impl Conversation {
         Ok(id)
     }
 
-    pub(super) fn prepare_completion(&mut self, args: &Args, hooks: &RunHooks<'_>) -> Result<(), String> {
+    pub(super) fn prepare_completion(
+        &mut self,
+        args: &Args,
+        hooks: &RunHooks<'_>,
+    ) -> Result<(), String> {
         loop {
             let state = completion::read_state(&self.recorder.path())?;
-            let Some(request) = state.requests.iter().find(|request| !request.planned && !request.paused) else {
+            let Some(request) = state
+                .requests
+                .iter()
+                .find(|request| !request.planned && !request.paused)
+            else {
                 break;
             };
             let input = json!({
@@ -51,45 +78,76 @@ impl Conversation {
                 "executionGrants": {"write": args.allow_write, "command": args.allow_command},
             });
             hooks.note("recording acceptance requirements before execution");
-            let (text, inspector) = self.inspect_completion(args, INTAKE, &input, hooks)
+            let (text, inspector) = self
+                .inspect_completion(args, INTAKE, &input, hooks)
                 .map_err(|error| self.completion_failure("task_intake", &error, hooks))?;
-            let plan: IntakePlan = serde_json::from_str(crate::protocol::extract_json_object(&text)?)
-                .map_err(|error| self.completion_failure("task_intake", &format!("invalid task intake: {error}"), hooks))?;
-            let state = completion::plan_request(&self.recorder.path(), state.revision, &request.id, plan)
-                .map_err(|error| self.completion_failure("task_intake", &error, hooks))?;
-            self.recorder.record("completion_review", json!({
-                "stage": "intake", "reviewerSession": inspector, "revision": state.revision,
-            }))?;
+            let plan: IntakePlan = serde_json::from_str(crate::protocol::extract_json_object(
+                &text,
+            )?)
+            .map_err(|error| {
+                self.completion_failure(
+                    "task_intake",
+                    &format!("invalid task intake: {error}"),
+                    hooks,
+                )
+            })?;
+            let state =
+                completion::plan_request(&self.recorder.path(), state.revision, &request.id, plan)
+                    .map_err(|error| self.completion_failure("task_intake", &error, hooks))?;
+            self.recorder.record(
+                "completion_review",
+                json!({
+                    "stage": "intake", "reviewerSession": inspector, "revision": state.revision,
+                }),
+            )?;
             self.publish_completion(&state, hooks)?;
         }
         if self.reconcile_completion {
             self.reconcile_completion = false;
             hooks.note("inspecting retained results before continuing interrupted work");
-            let prior = self.messages.iter().rev()
+            let prior = self
+                .messages
+                .iter()
+                .rev()
                 .find(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
                 .and_then(|message| message.get("content").and_then(Value::as_str))
-                .unwrap_or_default().to_string();
+                .unwrap_or_default()
+                .to_string();
             let _ = self.verify_completion(args, &prior, Value::Null, hooks)?;
         }
         Ok(())
     }
 
-    pub(super) fn refresh_completion_context(&mut self, hooks: &RunHooks<'_>) -> Result<(), String> {
+    pub(super) fn refresh_completion_context(
+        &mut self,
+        hooks: &RunHooks<'_>,
+    ) -> Result<(), String> {
         let state = completion::read_state(&self.recorder.path())?;
-        if !state.actionable() && !state.complete()
-            && matches!(state.status(), "paused" | "blocked") {
+        if !state.actionable()
+            && !state.complete()
+            && matches!(state.status(), "paused" | "blocked")
+        {
             self.publish_completion(&state, hooks)?;
-            return Err(format!("Work remains {}. Session: {}", state.status(), self.recorder.path().display()));
+            return Err(format!(
+                "Work remains {}. Session: {}",
+                state.status(),
+                self.recorder.path().display()
+            ));
         }
         let content = format!("{CONTEXT_PREFIX}\n{}", completion::model_context(&state));
         if let Some(message) = self.messages.iter_mut().find(|message| {
             message.get("role").and_then(Value::as_str) == Some("system")
-                && message.get("content").and_then(Value::as_str)
+                && message
+                    .get("content")
+                    .and_then(Value::as_str)
                     .is_some_and(|content| content.starts_with(CONTEXT_PREFIX))
         }) {
             message["content"] = json!(content);
         } else {
-            self.messages.insert(usize::from(!self.messages.is_empty()), json!({"role": "system", "content": content}));
+            self.messages.insert(
+                usize::from(!self.messages.is_empty()),
+                json!({"role": "system", "content": content}),
+            );
         }
         Ok(())
     }
@@ -114,16 +172,33 @@ impl Conversation {
             "executionGrants": {"write": args.allow_write, "command": args.allow_command},
         });
         hooks.note("independently checking all retained acceptance requirements");
-        let (text, inspector) = self.inspect_completion(args, REVIEW, &input, hooks)
+        let (text, inspector) = self
+            .inspect_completion(args, REVIEW, &input, hooks)
             .map_err(|error| self.completion_failure("acceptance_review", &error, hooks))?;
-        let review: CompletionReview = serde_json::from_str(crate::protocol::extract_json_object(&text)?)
-            .map_err(|error| self.completion_failure("acceptance_review", &format!("invalid acceptance review: {error}"), hooks))?;
-        let reviewed = match completion::apply_review(&self.recorder.path(), &inspector, state.revision, review) {
+        let review: CompletionReview = serde_json::from_str(crate::protocol::extract_json_object(
+            &text,
+        )?)
+        .map_err(|error| {
+            self.completion_failure(
+                "acceptance_review",
+                &format!("invalid acceptance review: {error}"),
+                hooks,
+            )
+        })?;
+        let reviewed = match completion::apply_review(
+            &self.recorder.path(),
+            &inspector,
+            state.revision,
+            review,
+        ) {
             Ok(state) => state,
             Err(error) => {
-                self.recorder.record("completion_rejected", json!({
-                    "stage": "verification", "reason": error, "reviewerSession": inspector,
-                }))?;
+                self.recorder.record(
+                    "completion_rejected",
+                    json!({
+                        "stage": "verification", "reason": error, "reviewerSession": inspector,
+                    }),
+                )?;
                 self.messages.push(json!({"role": "user", "content": format!(
                     "Jeden did not accept completion: {error}. Keep the work open. Do not repeat completed effects. \
                      Inspect and supply the actual missing evidence or perform the unfinished work."
@@ -131,22 +206,36 @@ impl Conversation {
                 return Ok(false);
             }
         };
-        self.recorder.record("completion_review", json!({
-            "stage": "acceptance", "reviewerSession": inspector,
-            "revision": reviewed.revision, "accepted": reviewed.complete(),
-        }))?;
+        self.recorder.record(
+            "completion_review",
+            json!({
+                "stage": "acceptance", "reviewerSession": inspector,
+                "revision": reviewed.revision, "accepted": reviewed.complete(),
+            }),
+        )?;
         self.publish_completion(&reviewed, hooks)?;
         if reviewed.complete() {
             return Ok(true);
         }
-        self.recorder.record("completion_rejected", json!({
-            "stage": "final", "reason": "retained acceptance requirements remain unfinished",
-            "state": completion::snapshot_value(&reviewed),
-        }))?;
+        self.recorder.record(
+            "completion_rejected",
+            json!({
+                "stage": "final", "reason": "retained acceptance requirements remain unfinished",
+                "state": completion::snapshot_value(&reviewed),
+            }),
+        )?;
         if !reviewed.actionable() && matches!(reviewed.status(), "blocked" | "paused") {
-            return Err(format!("Work remains {}. {} Session: {}", reviewed.status(),
-                reviewed.tasks.iter().filter_map(|task| task.reason.as_deref()).collect::<Vec<_>>().join("; "),
-                self.recorder.path().display()));
+            return Err(format!(
+                "Work remains {}. {} Session: {}",
+                reviewed.status(),
+                reviewed
+                    .tasks
+                    .iter()
+                    .filter_map(|task| task.reason.as_deref())
+                    .collect::<Vec<_>>()
+                    .join("; "),
+                self.recorder.path().display()
+            ));
         }
         self.messages.push(json!({"role": "user", "content": format!(
             "Jeden withheld the final answer because work remains. Continue the concrete missing work below, \
@@ -164,10 +253,13 @@ impl Conversation {
         hooks: &RunHooks<'_>,
     ) -> Result<(String, PathBuf), String> {
         let mut inspector = Conversation::new_inspection(&args.cwd)?;
-        inspector.recorder.record("agent_state", json!({
-            "purpose": "completion_inspection", "sourceSession": self.recorder.path(),
-            "allowWrite": false, "allowCommand": false,
-        }))?;
+        inspector.recorder.record(
+            "agent_state",
+            json!({
+                "purpose": "completion_inspection", "sourceSession": self.recorder.path(),
+                "allowWrite": false, "allowCommand": false,
+            }),
+        )?;
         let mut read_args = args.clone();
         read_args.allow_write = false;
         read_args.allow_command = false;
@@ -194,7 +286,11 @@ impl Conversation {
         completion::snapshot(&self.recorder.path())
     }
 
-    pub(crate) fn continue_work(&mut self, args: &Args, hooks: &mut RunHooks<'_>) -> Result<String, String> {
+    pub(crate) fn continue_work(
+        &mut self,
+        args: &Args,
+        hooks: &mut RunHooks<'_>,
+    ) -> Result<String, String> {
         let state = completion::read_state(&self.recorder.path())?;
         if state.complete() {
             return Ok("No retained work remains.".into());

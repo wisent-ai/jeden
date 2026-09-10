@@ -112,15 +112,27 @@ impl Default for CompletionState {
 impl CompletionState {
     pub fn complete(&self) -> bool {
         self.blocker.is_none()
-            && self.requests.iter().all(|request| request.planned && request.coverage_verified && !request.paused)
+            && self
+                .requests
+                .iter()
+                .all(|request| request.planned && request.coverage_verified && !request.paused)
             && self.tasks.iter().all(|task| task.status.terminal())
     }
 
     pub fn actionable(&self) -> bool {
-        self.requests.iter().any(|request| !request.planned && !request.paused)
+        self.requests
+            .iter()
+            .any(|request| !request.planned && !request.paused)
             || self.tasks.iter().any(|task| {
-                self.requests.iter().any(|request| request.id == task.request_id && !request.paused)
-                    && matches!(task.status, TaskStatus::Pending | TaskStatus::InProgress | TaskStatus::VerificationRequested)
+                self.requests
+                    .iter()
+                    .any(|request| request.id == task.request_id && !request.paused)
+                    && matches!(
+                        task.status,
+                        TaskStatus::Pending
+                            | TaskStatus::InProgress
+                            | TaskStatus::VerificationRequested
+                    )
             })
     }
 
@@ -132,19 +144,36 @@ impl CompletionState {
                 _ => "blocked",
             }
         } else if self.complete() {
-            if !self.tasks.is_empty() && self.tasks.iter().all(|task| task.status == TaskStatus::Cancelled) {
+            if !self.tasks.is_empty()
+                && self
+                    .tasks
+                    .iter()
+                    .all(|task| task.status == TaskStatus::Cancelled)
+            {
                 "cancelled"
             } else {
                 "complete"
             }
-        } else if self.requests.iter().any(|request| !request.planned && !request.paused) {
+        } else if self
+            .requests
+            .iter()
+            .any(|request| !request.planned && !request.paused)
+        {
             "planning"
         } else if self.actionable() {
             "working"
-        } else if self.tasks.iter().any(|task| task.status == TaskStatus::Blocked) {
+        } else if self
+            .tasks
+            .iter()
+            .any(|task| task.status == TaskStatus::Blocked)
+        {
             "blocked"
-        } else if self.tasks.iter().any(|task| task.status == TaskStatus::Paused)
-            || self.requests.iter().any(|request| request.paused) {
+        } else if self
+            .tasks
+            .iter()
+            .any(|task| task.status == TaskStatus::Paused)
+            || self.requests.iter().any(|request| request.paused)
+        {
             "paused"
         } else {
             "verification_required"
@@ -153,23 +182,36 @@ impl CompletionState {
 
     pub fn validate(&self) -> Result<(), String> {
         if self.schema_version != SCHEMA_VERSION {
-            return Err(format!("unsupported completion state version: {}", self.schema_version));
+            return Err(format!(
+                "unsupported completion state version: {}",
+                self.schema_version
+            ));
         }
         let mut ids = std::collections::BTreeSet::new();
         for request in &self.requests {
-            if request.id.trim().is_empty() || request.prompt.trim().is_empty() || request.cwd.trim().is_empty()
-                || !ids.insert(request.id.as_str()) {
+            if request.id.trim().is_empty()
+                || request.prompt.trim().is_empty()
+                || request.cwd.trim().is_empty()
+                || !ids.insert(request.id.as_str())
+            {
                 return Err("completion state contains an empty or duplicate request".into());
             }
         }
         ids.clear();
         for task in &self.tasks {
-            if task.id.trim().is_empty() || task.text.trim().is_empty()
-                || task.criteria.is_empty() || task.criteria.iter().any(|item| item.trim().is_empty())
-                || !ids.insert(task.id.as_str()) {
+            if task.id.trim().is_empty()
+                || task.text.trim().is_empty()
+                || task.criteria.is_empty()
+                || task.criteria.iter().any(|item| item.trim().is_empty())
+                || !ids.insert(task.id.as_str())
+            {
                 return Err("completion state contains an invalid or duplicate task".into());
             }
-            if !self.requests.iter().any(|request| request.id == task.request_id) {
+            if !self
+                .requests
+                .iter()
+                .any(|request| request.id == task.request_id)
+            {
                 return Err(format!("task {} references an unknown request", task.id));
             }
             if task.status == TaskStatus::Done && task.verification.is_none() {

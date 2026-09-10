@@ -13,7 +13,10 @@ pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), Stri
         if mode.legacy_todos.is_empty() {
             return Ok(());
         }
-        let session = match destination.map(Path::to_path_buf).or_else(|| mode.last_session_path.clone()) {
+        let session = match destination
+            .map(Path::to_path_buf)
+            .or_else(|| mode.last_session_path.clone())
+        {
             Some(path) => path,
             None => crate::agent::Conversation::new(cwd)?.session_path(),
         };
@@ -23,7 +26,12 @@ pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), Stri
             if state.requests.iter().any(|request| request.id == id) {
                 return Ok(());
             }
-            let items = mode.legacy_todos.iter().map(|item| item.text.as_str()).collect::<Vec<_>>().join("\n");
+            let items = mode
+                .legacy_todos
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>()
+                .join("\n");
             state.requests.push(WorkRequest {
                 id: id.clone(),
                 prompt: format!("Inspect prior results and finish every retained workspace task below. Old status labels were claims, not verification; do not repeat effects already established by evidence.\n{items}"),

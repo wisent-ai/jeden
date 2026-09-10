@@ -1,5 +1,5 @@
-mod turn;
 mod completion;
+mod turn;
 
 use super::types::*;
 use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
@@ -132,7 +132,11 @@ impl AgentSession {
                 .map_err(|_| "conversation lock poisoned".to_string())?;
             let conversation = guard.as_mut().ok_or("session disposed")?;
             conversation.load_history(&session.inner.options.cwd, turns, &source)?;
-            *session.inner.session_path.write().map_err(|_| "session path lock poisoned")? = conversation.session_path();
+            *session
+                .inner
+                .session_path
+                .write()
+                .map_err(|_| "session path lock poisoned")? = conversation.session_path();
         }
         Ok(session)
     }
@@ -195,14 +199,15 @@ impl AgentSession {
     }
 
     pub fn continue_work(&self, request_id: String) -> Result<PromptResult, String> {
-        self.dispatch_prompt(PromptRequest {
-            request_id,
-            prompt: "Continue retained work".into(),
-            goal: None,
-        }, true)
+        self.dispatch_prompt(
+            PromptRequest {
+                request_id,
+                prompt: "Continue retained work".into(),
+                goal: None,
+            },
+            true,
+        )
     }
-
-
 
     pub fn abort(&self, request_id: &str) -> Result<bool, String> {
         let active = self
@@ -228,7 +233,6 @@ impl AgentSession {
         request_ids.sort();
         Ok(request_ids)
     }
-
 
     pub fn dispose(&self) -> Result<(), String> {
         if self.inner.disposed.swap(true, Ordering::AcqRel) {
@@ -277,4 +281,3 @@ fn resolve_session_path(value: &Path) -> PathBuf {
         crate::session_root().join(value)
     }
 }
-

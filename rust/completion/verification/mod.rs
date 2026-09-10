@@ -1,7 +1,7 @@
 mod evidence;
 
-pub(crate) use evidence::{inspect as inspect_evidence, review_evidence};
 use super::{model::*, store};
+pub(crate) use evidence::{inspect as inspect_evidence, review_evidence};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -23,27 +23,44 @@ impl EvidenceIndex {
         let source = canonical(&reference.session_path)?;
         let (receipts, independent) = if source == self.reviewer {
             (&self.reviewer_receipts, true)
-        } else if source == self.parent || self.parent_receipts.get(&reference.event_id)
-            .and_then(|receipt| receipt.get("sessionPath")).and_then(Value::as_str)
-            .is_some_and(|path| canonical(path).is_ok_and(|path| path == source)) {
+        } else if source == self.parent
+            || self
+                .parent_receipts
+                .get(&reference.event_id)
+                .and_then(|receipt| receipt.get("sessionPath"))
+                .and_then(Value::as_str)
+                .is_some_and(|path| canonical(path).is_ok_and(|path| path == source))
+        {
             (&self.parent_receipts, false)
         } else {
-            return Err("verification cited a session outside this execution and its independent review".into());
+            return Err(
+                "verification cited a session outside this execution and its independent review"
+                    .into(),
+            );
         };
-        let receipt = receipts.get(&reference.event_id)
-            .ok_or_else(|| format!("verification cited nonexistent tool evidence: {}", reference.event_id))?;
+        let receipt = receipts.get(&reference.event_id).ok_or_else(|| {
+            format!(
+                "verification cited nonexistent tool evidence: {}",
+                reference.event_id
+            )
+        })?;
         Ok((receipt, independent))
     }
 
     fn observation(&self, reference: &EvidenceReference) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
-        let tool = receipt.get("tool").and_then(Value::as_str).unwrap_or_default();
-        Ok(independent && receipt["failed"] == false
+        let tool = receipt
+            .get("tool")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        Ok(independent
+            && receipt["failed"] == false
             && crate::agent::is_verification_read_tool(tool))
     }
 
     fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
-        self.get(reference).map(|(receipt, _)| receipt["failed"] == true)
+        self.get(reference)
+            .map(|(receipt, _)| receipt["failed"] == true)
     }
 }
 
@@ -63,40 +80,74 @@ pub(crate) fn apply_review(
         return Err("the execution conversation cannot verify its own completion".into());
     }
     let (_, state) = store::update(session, Some(expected_revision), |state| {
-        let expected: BTreeSet<_> = state.tasks.iter()
+        let expected: BTreeSet<_> = state
+            .tasks
+            .iter()
             .filter(|task| !task.status.terminal() && task.status != TaskStatus::Paused)
-            .map(|task| task.id.as_str()).collect();
-        let reported: BTreeSet<_> = review.tasks.iter().map(|task| task.task_id.as_str()).collect();
+            .map(|task| task.id.as_str())
+            .collect();
+        let reported: BTreeSet<_> = review
+            .tasks
+            .iter()
+            .map(|task| task.task_id.as_str())
+            .collect();
         if expected != reported || reported.len() != review.tasks.len() {
             return Err("independent review must cover every open task exactly once".into());
         }
-        let expected_requests: BTreeSet<_> = state.requests.iter()
+        let expected_requests: BTreeSet<_> = state
+            .requests
+            .iter()
             .filter(|request| request.planned && !request.coverage_verified && !request.paused)
-            .map(|request| request.id.as_str()).collect();
-        let reported_requests: BTreeSet<_> = review.requests.iter()
-            .map(|request| request.request_id.as_str()).collect();
-        if expected_requests != reported_requests || reported_requests.len() != review.requests.len() {
-            return Err("independent review must compare every unresolved original user request".into());
+            .map(|request| request.id.as_str())
+            .collect();
+        let reported_requests: BTreeSet<_> = review
+            .requests
+            .iter()
+            .map(|request| request.request_id.as_str())
+            .collect();
+        if expected_requests != reported_requests
+            || reported_requests.len() != review.requests.len()
+        {
+            return Err(
+                "independent review must compare every unresolved original user request".into(),
+            );
         }
         for verdict in &review.tasks {
-            let task = state.tasks.iter().find(|task| task.id == verdict.task_id)
+            let task = state
+                .tasks
+                .iter()
+                .find(|task| task.id == verdict.task_id)
                 .expect("task set validated above");
-            if verdict.explanation.trim().is_empty() || verdict.criteria.len() != task.criteria.len() {
-                return Err(format!("review of {} must explain every acceptance criterion", task.id));
+            if verdict.explanation.trim().is_empty()
+                || verdict.criteria.len() != task.criteria.len()
+            {
+                return Err(format!(
+                    "review of {} must explain every acceptance criterion",
+                    task.id
+                ));
             }
             let mut checked = BTreeSet::new();
             for criterion in &verdict.criteria {
-                if criterion.index >= task.criteria.len() || !checked.insert(criterion.index)
-                    || criterion.explanation.trim().is_empty() {
-                    return Err(format!("review of {} contains an invalid or duplicate criterion", task.id));
+                if criterion.index >= task.criteria.len()
+                    || !checked.insert(criterion.index)
+                    || criterion.explanation.trim().is_empty()
+                {
+                    return Err(format!(
+                        "review of {} contains an invalid or duplicate criterion",
+                        task.id
+                    ));
                 }
                 let mut observed = false;
                 for reference in &criterion.evidence {
                     observed |= index.observation(reference)?;
                 }
-                if verdict.status == ReviewStatus::Done && (!criterion.satisfied
-                    || (task.kind == TaskKind::Work && !observed)) {
-                    return Err(format!("task {} criterion {} has no successful independent observation", task.id, criterion.index));
+                if verdict.status == ReviewStatus::Done
+                    && (!criterion.satisfied || (task.kind == TaskKind::Work && !observed))
+                {
+                    return Err(format!(
+                        "task {} criterion {} has no successful independent observation",
+                        task.id, criterion.index
+                    ));
                 }
             }
             let mut observed_failure = false;
@@ -104,14 +155,24 @@ pub(crate) fn apply_review(
                 observed_failure |= index.failure(reference)?;
             }
             if verdict.status == ReviewStatus::Blocked && !observed_failure {
-                return Err(format!("task {} was called blocked without a recorded failed operation", task.id));
+                return Err(format!(
+                    "task {} was called blocked without a recorded failed operation",
+                    task.id
+                ));
             }
         }
-        if review.requests.iter().any(|request| request.explanation.trim().is_empty()) {
+        if review
+            .requests
+            .iter()
+            .any(|request| request.explanation.trim().is_empty())
+        {
             return Err("request coverage decisions require an explanation".into());
         }
         for verdict in review.tasks {
-            let task = state.tasks.iter_mut().find(|task| task.id == verdict.task_id)
+            let task = state
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == verdict.task_id)
                 .expect("task set validated above");
             task.reason = Some(verdict.explanation.clone());
             task.status = match verdict.status {
@@ -136,11 +197,22 @@ pub(crate) fn apply_review(
             });
         }
         for verdict in review.requests {
-            let request = state.requests.iter_mut().find(|request| request.id == verdict.request_id)
+            let request = state
+                .requests
+                .iter_mut()
+                .find(|request| request.id == verdict.request_id)
                 .expect("request set validated above");
-            request.coverage_verified = verdict.covered && state.tasks.iter()
-                .filter(|task| task.request_id == request.id).all(|task| task.status.terminal());
-            let owned: Vec<_> = state.tasks.iter().filter(|task| task.request_id == request.id).collect();
+            request.coverage_verified = verdict.covered
+                && state
+                    .tasks
+                    .iter()
+                    .filter(|task| task.request_id == request.id)
+                    .all(|task| task.status.terminal());
+            let owned: Vec<_> = state
+                .tasks
+                .iter()
+                .filter(|task| task.request_id == request.id)
+                .collect();
             if !verdict.covered && owned.iter().all(|task| task.status.terminal()) {
                 let kind = if owned.iter().any(|task| task.kind == TaskKind::Work) {
                     TaskKind::Work

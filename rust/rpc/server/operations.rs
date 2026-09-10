@@ -97,12 +97,15 @@ pub(super) fn completion_request(
         let task_id = string_param(params, "taskId").map_err(|error| ("invalid_params", error))?;
         let action = string_param(params, "action").map_err(|error| ("invalid_params", error))?;
         let reason = string_param(params, "reason").map_err(|error| ("invalid_params", error))?;
-        let revision = params.get("revision").and_then(Value::as_u64)
-            .ok_or(("invalid_params", "revision must be an unsigned integer".into()))?;
+        let revision = params.get("revision").and_then(Value::as_u64).ok_or((
+            "invalid_params",
+            "revision must be an unsigned integer".into(),
+        ))?;
         session.control_completion(&task_id, &action, &reason, revision)
     } else {
         session.completion()
-    }.map_err(|error| ("completion_error", error))?;
+    }
+    .map_err(|error| ("completion_error", error))?;
     Ok(json!({"sessionId": params["sessionId"], "completion": completion}))
 }
 

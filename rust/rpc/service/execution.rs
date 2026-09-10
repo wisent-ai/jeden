@@ -11,30 +11,74 @@ impl<B: SessionBackend> SessionService<B> {
         self.submit_work(caller, session_id, idempotency_key, prompt, false)
     }
 
-    pub fn continue_work(self: &Arc<Self>, caller: &TenantPrincipal, session_id: &str,
-        idempotency_key: &str) -> Result<SubmitOutcome, ServiceError> {
-        self.submit_work(caller, session_id, idempotency_key, "Continue retained work", true)
+    pub fn continue_work(
+        self: &Arc<Self>,
+        caller: &TenantPrincipal,
+        session_id: &str,
+        idempotency_key: &str,
+    ) -> Result<SubmitOutcome, ServiceError> {
+        self.submit_work(
+            caller,
+            session_id,
+            idempotency_key,
+            "Continue retained work",
+            true,
+        )
     }
 
-    pub fn completion(&self, caller: &TenantPrincipal, session_id: &str) -> Result<Value, ServiceError> {
+    pub fn completion(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+    ) -> Result<Value, ServiceError> {
         self.authorize_session(caller, session_id)?;
-        self.backend.completion(&caller.tenant, session_id).map_err(ServiceError::Runtime)
-    }
-
-    pub fn add_request(&self, caller: &TenantPrincipal, session_id: &str, prompt: &str) -> Result<Value, ServiceError> {
-        self.authorize_session(caller, session_id)?;
-        self.backend.add_request(&caller.tenant, session_id, prompt).map_err(ServiceError::Runtime)
-    }
-
-    pub fn control_completion(&self, caller: &TenantPrincipal, session_id: &str, task_id: &str,
-        action: &str, reason: &str, revision: u64) -> Result<Value, ServiceError> {
-        self.authorize_session(caller, session_id)?;
-        self.backend.control_completion(&caller.tenant, session_id, task_id, action, reason, revision)
+        self.backend
+            .completion(&caller.tenant, session_id)
             .map_err(ServiceError::Runtime)
     }
 
-    fn submit_work(self: &Arc<Self>, caller: &TenantPrincipal, session_id: &str,
-        idempotency_key: &str, prompt: &str, continuing: bool) -> Result<SubmitOutcome, ServiceError> {
+    pub fn add_request(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Value, ServiceError> {
+        self.authorize_session(caller, session_id)?;
+        self.backend
+            .add_request(&caller.tenant, session_id, prompt)
+            .map_err(ServiceError::Runtime)
+    }
+
+    pub fn control_completion(
+        &self,
+        caller: &TenantPrincipal,
+        session_id: &str,
+        task_id: &str,
+        action: &str,
+        reason: &str,
+        revision: u64,
+    ) -> Result<Value, ServiceError> {
+        self.authorize_session(caller, session_id)?;
+        self.backend
+            .control_completion(
+                &caller.tenant,
+                session_id,
+                task_id,
+                action,
+                reason,
+                revision,
+            )
+            .map_err(ServiceError::Runtime)
+    }
+
+    fn submit_work(
+        self: &Arc<Self>,
+        caller: &TenantPrincipal,
+        session_id: &str,
+        idempotency_key: &str,
+        prompt: &str,
+        continuing: bool,
+    ) -> Result<SubmitOutcome, ServiceError> {
         if prompt.trim().is_empty() {
             return Err(ServiceError::InvalidRequest(
                 "prompt must not be empty".into(),
@@ -42,7 +86,9 @@ impl<B: SessionBackend> SessionService<B> {
         }
         self.authorize_session(caller, session_id)?;
         let request_digest = IdempotencyStore::request_digest(
-            json!({"sessionId": session_id, "prompt": prompt, "continuing": continuing}).to_string().as_bytes(),
+            json!({"sessionId": session_id, "prompt": prompt, "continuing": continuing})
+                .to_string()
+                .as_bytes(),
         );
         let request_id = format!(
             "request-{}-{}",
@@ -107,10 +153,14 @@ impl<B: SessionBackend> SessionService<B> {
                     },
                 );
             });
-            let result =
-                service
-                    .backend
-                    .prompt(&tenant, &session_id, &request_id, &prompt, continuing, emit.clone());
+            let result = service.backend.prompt(
+                &tenant,
+                &session_id,
+                &request_id,
+                &prompt,
+                continuing,
+                emit.clone(),
+            );
             let cached = match result {
                 Ok(value) => value,
                 Err(message) => json!({"error": {"code": "runtime_error", "message": message}}),

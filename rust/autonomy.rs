@@ -67,7 +67,8 @@ impl JedenStageRunner {
         prompt: &str,
     ) -> Result<StageResponse, String> {
         if self.contract_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.contract_reviewer = Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
+            self.contract_reviewer =
+                Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
         }
         let (_, reviewer) = self
             .contract_reviewer
@@ -83,7 +84,8 @@ impl JedenStageRunner {
         prompt: &str,
     ) -> Result<StageResponse, String> {
         if self.acceptance_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.acceptance_reviewer = Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
+            self.acceptance_reviewer =
+                Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
         }
         let (_, reviewer) = self
             .acceptance_reviewer

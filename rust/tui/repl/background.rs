@@ -68,9 +68,12 @@ fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
         )),
         TraceEvent::CompletionState { state } => Some(Message::new(
             "status",
-            format!("Tasks: {} — {} verified, {} open",
+            format!(
+                "Tasks: {} — {} verified, {} open",
                 state["status"].as_str().unwrap_or("unknown"),
-                state["completed"], state["open"]),
+                state["completed"],
+                state["open"]
+            ),
         )),
         TraceEvent::Message { text } => Some(Message::new("assistant", text)),
         TraceEvent::Reasoning { .. } => None,

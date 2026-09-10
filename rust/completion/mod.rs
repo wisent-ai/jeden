@@ -11,18 +11,18 @@ mod store;
 mod todo;
 mod verification;
 
+pub(crate) use cli::command;
 pub use constants::SCHEMA_VERSION;
 pub use model::{
-    CompletionBlocker, CompletionState, EvidenceReference, TaskKind, TaskOrigin,
-    TaskStatus, TaskVerification, WorkRequest, WorkTask, CriterionReview,
+    CompletionBlocker, CompletionState, CriterionReview, EvidenceReference, TaskKind, TaskOrigin,
+    TaskStatus, TaskVerification, WorkRequest, WorkTask,
 };
 pub use operations::snapshot;
-pub(crate) use cli::command;
 
 pub(crate) use model::{CompletionReview, IntakePlan};
 pub(crate) use operations::{
-    capture_request, clear_runtime_blocker, model_context, observed_blocker, operator_control, plan_request,
-    snapshot_value,
+    capture_request, clear_runtime_blocker, model_context, observed_blocker, operator_control,
+    plan_request, snapshot_value,
 };
 pub(crate) use store::{inherit, migrate_workspace, read as read_state, session_from_artifacts};
 pub(crate) use todo::execute as execute_todo;

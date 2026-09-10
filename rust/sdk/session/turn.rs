@@ -1,7 +1,11 @@
 use super::*;
 
 impl AgentSession {
-    pub(super) fn dispatch_prompt(&self, request: PromptRequest, continuing: bool) -> Result<PromptResult, String> {
+    pub(super) fn dispatch_prompt(
+        &self,
+        request: PromptRequest,
+        continuing: bool,
+    ) -> Result<PromptResult, String> {
         if request.request_id.trim().is_empty() {
             return Err("request_id must not be empty".into());
         }
@@ -115,14 +119,20 @@ impl AgentSession {
             trace: Box::new(move |event| {
                 let event = match *event {
                     agent::TraceEvent::CompletionState { state } => {
-                        if let Some(path) = state.get("sessionPath").and_then(serde_json::Value::as_str) {
+                        if let Some(path) =
+                            state.get("sessionPath").and_then(serde_json::Value::as_str)
+                        {
                             if let Ok(mut current) = trace_inner.session_path.write() {
                                 *current = PathBuf::from(path);
                             }
                         }
-                        SessionEventKind::Completion { state: state.clone() }
+                        SessionEventKind::Completion {
+                            state: state.clone(),
+                        }
                     }
-                    agent::TraceEvent::Message { text } => SessionEventKind::AssistantMessage { text: text.to_string() },
+                    agent::TraceEvent::Message { text } => SessionEventKind::AssistantMessage {
+                        text: text.to_string(),
+                    },
                     agent::TraceEvent::ToolCall { tool, input } if policy.tool_call_detail() => {
                         SessionEventKind::ToolCall {
                             tool: tool.to_string(),
@@ -230,18 +240,26 @@ impl AgentSession {
         let result = if continuing {
             conversation.continue_work(&args, &mut hooks)
         } else if request.prompt.split_whitespace().next() == Some("/todo") {
-            let mut parts = shell_words::split(&request.prompt).map_err(|error| error.to_string())?;
+            let mut parts =
+                shell_words::split(&request.prompt).map_err(|error| error.to_string())?;
             parts.remove(usize::default());
             if parts.first().map(String::as_str) == Some("continue") {
                 conversation.continue_work(&args, &mut hooks)
             } else {
-                parts.extend(["--session".into(), conversation.session_path().display().to_string()]);
+                parts.extend([
+                    "--session".into(),
+                    conversation.session_path().display().to_string(),
+                ]);
                 crate::completion::cli::execute(&args.cwd, &parts, false, Some(&args))
             }
         } else {
             conversation.run_turn(&args, &request.prompt, &[], &mut hooks)
         };
-        *self.inner.session_path.write().map_err(|_| "session path lock poisoned")? = conversation.session_path();
+        *self
+            .inner
+            .session_path
+            .write()
+            .map_err(|_| "session path lock poisoned")? = conversation.session_path();
         let text = result?;
         // The filter holds the last unterminated line back until it knows the
         // line is not a fence; the turn is over, so let it out.
@@ -265,7 +283,10 @@ impl AgentSession {
         let completion = conversation.completion_state()?;
         self.inner.emit(SessionEvent {
             request_id: request_id.clone(),
-            event: SessionEventKind::Result { text: text.clone(), completion: completion.clone() },
+            event: SessionEventKind::Result {
+                text: text.clone(),
+                completion: completion.clone(),
+            },
         })?;
         Ok(PromptResult {
             request_id,

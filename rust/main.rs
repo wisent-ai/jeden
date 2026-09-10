@@ -11,8 +11,8 @@ pub mod capability;
 pub mod cas;
 pub mod cli;
 pub mod collab;
-pub mod conformance;
 pub mod completion;
+pub mod conformance;
 pub mod context;
 pub mod control_plane;
 pub mod eval;
@@ -64,7 +64,6 @@ pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 fn version_text() -> String {
     format!("jeden {JEDEN_VERSION}")
 }
-
 
 fn read_json<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
     fs::read_to_string(path)

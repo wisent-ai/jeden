@@ -154,16 +154,27 @@ pub(crate) fn fast_picker(state: &ModeState) -> PickerSpec {
     )
 }
 
-
 pub(crate) fn todo_picker() -> PickerSpec {
-    PickerSpec::new("Retained tasks", vec![
-        PickerItem::action("Show every retained task", "/todo list"),
-        PickerItem::action("Continue unfinished work", "/todo continue"),
-        PickerItem::action("Add a user request", "/todo add ").prefill(),
-        PickerItem::action("Pause a task", "/todo pause <id> --revision <n> --reason ").prefill(),
-        PickerItem::action("Resume a task", "/todo resume <id> --revision <n> --reason ").prefill(),
-        PickerItem::action("Cancel a task", "/todo cancel <id> --revision <n> --reason ").prefill(),
-    ])
+    PickerSpec::new(
+        "Retained tasks",
+        vec![
+            PickerItem::action("Show every retained task", "/todo list"),
+            PickerItem::action("Continue unfinished work", "/todo continue"),
+            PickerItem::action("Add a user request", "/todo add ").prefill(),
+            PickerItem::action("Pause a task", "/todo pause <id> --revision <n> --reason ")
+                .prefill(),
+            PickerItem::action(
+                "Resume a task",
+                "/todo resume <id> --revision <n> --reason ",
+            )
+            .prefill(),
+            PickerItem::action(
+                "Cancel a task",
+                "/todo cancel <id> --revision <n> --reason ",
+            )
+            .prefill(),
+        ],
+    )
 }
 
 pub(crate) fn handle_todo(args: &str, context: &SlashContext<'_>) -> Result<String, String> {

@@ -2,7 +2,11 @@ use super::{model::*, store};
 use serde_json::{json, Value};
 use std::path::Path;
 
-pub(crate) fn capture_request(session: &Path, cwd: &Path, prompt: &str) -> Result<(String, CompletionState), String> {
+pub(crate) fn capture_request(
+    session: &Path,
+    cwd: &Path,
+    prompt: &str,
+) -> Result<(String, CompletionState), String> {
     if prompt.trim().is_empty() {
         return Err("completion request must not be empty".into());
     }
@@ -29,7 +33,10 @@ pub(crate) fn plan_request(
     plan: IntakePlan,
 ) -> Result<CompletionState, String> {
     let (_, state) = store::update(session, Some(revision), |state| {
-        let request = state.requests.iter().find(|request| request.id == request_id)
+        let request = state
+            .requests
+            .iter()
+            .find(|request| request.id == request_id)
             .ok_or("completion intake references an unknown request")?;
         if request.planned {
             return Err("acceptance requirements are already recorded for this request".into());
@@ -41,21 +48,40 @@ pub(crate) fn plan_request(
             return Err("completion intake must account for the full user request".into());
         }
         for cancellation in &plan.cancellations {
-            if cancellation.quote.trim().is_empty() || !request.prompt.contains(&cancellation.quote) {
-                return Err("task cancellation must cite the current user's exact instruction".into());
+            if cancellation.quote.trim().is_empty() || !request.prompt.contains(&cancellation.quote)
+            {
+                return Err(
+                    "task cancellation must cite the current user's exact instruction".into(),
+                );
             }
-            if !state.tasks.iter().any(|task| task.id == cancellation.task_id && !task.status.terminal()) {
-                return Err(format!("cancellation references no open task: {}", cancellation.task_id));
+            if !state
+                .tasks
+                .iter()
+                .any(|task| task.id == cancellation.task_id && !task.status.terminal())
+            {
+                return Err(format!(
+                    "cancellation references no open task: {}",
+                    cancellation.task_id
+                ));
             }
         }
         for item in &plan.tasks {
-            if item.text.trim().is_empty() || item.criteria.is_empty()
-                || item.criteria.iter().any(|criterion| criterion.trim().is_empty()) {
+            if item.text.trim().is_empty()
+                || item.criteria.is_empty()
+                || item
+                    .criteria
+                    .iter()
+                    .any(|criterion| criterion.trim().is_empty())
+            {
                 return Err("every task needs a title and concrete acceptance requirements before execution".into());
             }
         }
         for cancellation in plan.cancellations {
-            if let Some(task) = state.tasks.iter_mut().find(|task| task.id == cancellation.task_id) {
+            if let Some(task) = state
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == cancellation.task_id)
+            {
                 task.status = TaskStatus::Cancelled;
                 task.reason = Some(format!("User request {request_id}: {}", cancellation.quote));
             }
@@ -74,18 +100,25 @@ pub(crate) fn plan_request(
                 verification: None,
             });
         }
-        state.requests.iter_mut().find(|request| request.id == request_id)
-            .expect("request checked above").planned = true;
+        state
+            .requests
+            .iter_mut()
+            .find(|request| request.id == request_id)
+            .expect("request checked above")
+            .planned = true;
         state.blocker = None;
         Ok(())
     })?;
     Ok(state)
 }
 
-pub(crate) fn observed_blocker(session: &Path, operation: &str, message: &str) -> Result<CompletionState, String> {
+pub(crate) fn observed_blocker(
+    session: &Path,
+    operation: &str,
+    message: &str,
+) -> Result<CompletionState, String> {
     let (_, state) = store::update(session, None, |state| {
-        if operation == "turn_cancelled"
-            && (state.complete() || state.status() == "paused") {
+        if operation == "turn_cancelled" && (state.complete() || state.status() == "paused") {
             return Ok(());
         }
         state.blocker = Some(CompletionBlocker {
@@ -102,7 +135,8 @@ pub(crate) fn clear_runtime_blocker(session: &Path) -> Result<CompletionState, S
     store::update(session, None, |state| {
         state.blocker = None;
         Ok(())
-    }).map(|(_, state)| state)
+    })
+    .map(|(_, state)| state)
 }
 
 /// This operation is exposed to operator CLI/RPC clients, never as an agent tool.
@@ -124,7 +158,11 @@ pub(crate) fn operator_control(
         _ => return Err(format!("unsupported operator task action: {action}")),
     };
     let (_, state) = store::update(session, Some(revision), |state| {
-        if let Some(request_index) = state.requests.iter().position(|request| request.id == task_id) {
+        if let Some(request_index) = state
+            .requests
+            .iter()
+            .position(|request| request.id == task_id)
+        {
             let request = &mut state.requests[request_index];
             if request.coverage_verified {
                 return Err(format!("request is already terminal: {task_id}"));
@@ -138,7 +176,12 @@ pub(crate) fn operator_control(
                     id: uuid::Uuid::new_v4().to_string(),
                     request_id: request.id.clone(),
                     phase: "Requests".into(),
-                    text: request.prompt.lines().next().unwrap_or(&request.prompt).to_string(),
+                    text: request
+                        .prompt
+                        .lines()
+                        .next()
+                        .unwrap_or(&request.prompt)
+                        .to_string(),
                     criteria: vec![request.prompt.clone()],
                     kind: TaskKind::Work,
                     origin: TaskOrigin::User,
@@ -148,19 +191,30 @@ pub(crate) fn operator_control(
                 });
                 request.planned = true;
             }
-            for task in state.tasks.iter_mut().filter(|task| task.request_id == task_id && !task.status.terminal()) {
+            for task in state
+                .tasks
+                .iter_mut()
+                .filter(|task| task.request_id == task_id && !task.status.terminal())
+            {
                 task.status = status;
                 task.reason = Some(format!("Operator {action}: {reason}"));
                 task.verification = None;
             }
         } else {
-            let task = state.tasks.iter_mut().find(|task| task.id == task_id)
+            let task = state
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == task_id)
                 .ok_or_else(|| format!("unknown task or request: {task_id}"))?;
             if task.status.terminal() {
                 return Err(format!("task is already terminal: {task_id}"));
             }
-            if action == "resume" && state.requests.iter()
-                .any(|request| request.id == task.request_id && request.paused) {
+            if action == "resume"
+                && state
+                    .requests
+                    .iter()
+                    .any(|request| request.id == task.request_id && request.paused)
+            {
                 return Err("the owning request is paused; resume that request first".into());
             }
             task.status = status;
@@ -169,7 +223,11 @@ pub(crate) fn operator_control(
         }
         state.blocker = None;
         for request in &mut state.requests {
-            let mut owned = state.tasks.iter().filter(|task| task.request_id == request.id).peekable();
+            let mut owned = state
+                .tasks
+                .iter()
+                .filter(|task| task.request_id == request.id)
+                .peekable();
             if owned.peek().is_some() && owned.all(|task| task.status == TaskStatus::Cancelled) {
                 request.coverage_verified = true;
             }
@@ -207,7 +265,11 @@ pub(crate) fn model_context(state: &CompletionState) -> String {
         .filter(|request| !request.coverage_verified)
         .map(|request| json!({"id": request.id, "prompt": request.prompt, "cwd": request.cwd, "paused": request.paused, "planned": request.planned}))
         .collect();
-    let tasks: Vec<_> = state.tasks.iter().filter(|task| !task.status.terminal()).collect();
+    let tasks: Vec<_> = state
+        .tasks
+        .iter()
+        .filter(|task| !task.status.terminal())
+        .collect();
     format!(
         "Jeden owns completion of every retained user request. New questions do not cancel earlier work. \
          Acceptance requirements below were recorded before execution. `todo done` only requests independent verification; \

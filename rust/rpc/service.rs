@@ -1,6 +1,6 @@
 mod backend;
-mod registry;
 mod execution;
+mod registry;
 
 use super::daemon::{BoundedExecutor, Readiness, SubmitError};
 use super::idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};
@@ -71,9 +71,21 @@ pub trait SessionBackend: Send + Sync + 'static {
     ) -> Result<Value, String>;
     fn abort(&self, tenant: &TenantId, session_id: &str, request_id: &str) -> Result<bool, String>;
     fn completion(&self, tenant: &TenantId, session_id: &str) -> Result<Value, String>;
-    fn add_request(&self, tenant: &TenantId, session_id: &str, prompt: &str) -> Result<Value, String>;
-    fn control_completion(&self, tenant: &TenantId, session_id: &str, task_id: &str,
-        action: &str, reason: &str, revision: u64) -> Result<Value, String>;
+    fn add_request(
+        &self,
+        tenant: &TenantId,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Value, String>;
+    fn control_completion(
+        &self,
+        tenant: &TenantId,
+        session_id: &str,
+        task_id: &str,
+        action: &str,
+        reason: &str,
+        revision: u64,
+    ) -> Result<Value, String>;
 }
 
 #[derive(Clone)]
@@ -99,7 +111,6 @@ impl AgentSessionFacade {
             .ok_or_else(|| "access denied".to_string())
     }
 }
-
 
 /// One session this daemon holds: its owner and the ledger directory it writes.
 #[derive(Debug, Clone)]
@@ -158,7 +169,6 @@ pub struct SessionService<B: SessionBackend> {
     next_request: AtomicU64,
 }
 
-
 /// The two `state.json` fields a session row is built from.
 struct SessionState {
     cwd: PathBuf,
@@ -214,8 +224,12 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             ("status".into(), json!({"message": message}), false)
         }
         SessionEventKind::TextDelta { text } => ("textDelta".into(), json!({"text": text}), false),
-        SessionEventKind::Completion { state } => ("completion".into(), json!({"state": state}), false),
-        SessionEventKind::AssistantMessage { text } => ("assistantMessage".into(), json!({"text": text}), false),
+        SessionEventKind::Completion { state } => {
+            ("completion".into(), json!({"state": state}), false)
+        }
+        SessionEventKind::AssistantMessage { text } => {
+            ("assistantMessage".into(), json!({"text": text}), false)
+        }
         SessionEventKind::ReasoningDelta { text } => {
             ("reasoningDelta".into(), json!({"text": text}), false)
         }
@@ -252,7 +266,11 @@ fn map_event(event: SessionEventKind) -> (String, Value, bool) {
             json!({"text": text, "status": status}),
             false,
         ),
-        SessionEventKind::Result { text, completion } => ("result".into(), json!({"text": text, "completion": completion}), true),
+        SessionEventKind::Result { text, completion } => (
+            "result".into(),
+            json!({"text": text, "completion": completion}),
+            true,
+        ),
         SessionEventKind::Error { message } => ("error".into(), json!({"message": message}), true),
     }
 }

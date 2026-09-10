@@ -261,7 +261,8 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     agent::TraceEvent::ToolCall { .. } => policy.tool_call_detail(),
                     agent::TraceEvent::ToolResult { .. } => policy.tool_results,
                     agent::TraceEvent::Reasoning { .. } => policy.reasoning,
-                    agent::TraceEvent::CompletionState { .. } | agent::TraceEvent::Message { .. } => true,
+                    agent::TraceEvent::CompletionState { .. }
+                    | agent::TraceEvent::Message { .. } => true,
                 };
                 if shown {
                     (ctx.trace)(event);
@@ -326,7 +327,10 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     let session = handler_conv.lock().session_path();
                     agent::update_last_session_path(&run_args.cwd, &session)?;
                     crate::completion::cli::execute(
-                        &run_args.cwd, &crate::slash::common::split_args(rest), false, Some(&run_args),
+                        &run_args.cwd,
+                        &crate::slash::common::split_args(rest),
+                        false,
+                        Some(&run_args),
                     )
                 }
                 "/model" | "/models" | "/switch" => {
@@ -539,7 +543,9 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     }
                     let turns = session_conversation_turns(&dir)?;
                     let count = turns.len();
-                    handler_conv.lock().load_history(&run_args.cwd, turns, &dir)?;
+                    handler_conv
+                        .lock()
+                        .load_history(&run_args.cwd, turns, &dir)?;
                     Ok(format!(
                         "Resumed {} into this conversation ({} prior turns loaded).",
                         dir.display(),

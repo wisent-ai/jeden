@@ -77,7 +77,9 @@ impl SessionBackend for AgentSessionFacade {
             session.continue_work(request_id.to_owned())
         } else {
             session.prompt(PromptRequest {
-                request_id: request_id.to_owned(), prompt: prompt.to_owned(), goal: None,
+                request_id: request_id.to_owned(),
+                prompt: prompt.to_owned(),
+                goal: None,
             })
         };
         if let Err(error) = &result {
@@ -99,12 +101,25 @@ impl SessionBackend for AgentSessionFacade {
         self.session(tenant, session_id)?.completion()
     }
 
-    fn add_request(&self, tenant: &TenantId, session_id: &str, prompt: &str) -> Result<Value, String> {
+    fn add_request(
+        &self,
+        tenant: &TenantId,
+        session_id: &str,
+        prompt: &str,
+    ) -> Result<Value, String> {
         self.session(tenant, session_id)?.add_request(prompt)
     }
 
-    fn control_completion(&self, tenant: &TenantId, session_id: &str, task_id: &str,
-        action: &str, reason: &str, revision: u64) -> Result<Value, String> {
-        self.session(tenant, session_id)?.control_completion(task_id, action, reason, revision)
+    fn control_completion(
+        &self,
+        tenant: &TenantId,
+        session_id: &str,
+        task_id: &str,
+        action: &str,
+        reason: &str,
+        revision: u64,
+    ) -> Result<Value, String> {
+        self.session(tenant, session_id)?
+            .control_completion(task_id, action, reason, revision)
     }
 }

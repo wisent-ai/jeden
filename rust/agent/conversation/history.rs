@@ -52,7 +52,12 @@ impl Conversation {
     }
 
     /// Resume the selected source, including its acceptance state and evidence lineage.
-    pub(crate) fn load_history(&mut self, cwd: &Path, turns: Vec<Value>, source: &Path) -> Result<(), String> {
+    pub(crate) fn load_history(
+        &mut self,
+        cwd: &Path,
+        turns: Vec<Value>,
+        source: &Path,
+    ) -> Result<(), String> {
         self.messages = normalized_history(cwd, turns)?;
         let leaf = crate::cli::sessions::session_active_leaf(source)?;
         self.recorder = SessionRecorder::child(cwd, source.to_path_buf(), leaf);

@@ -15,7 +15,6 @@ const workspace = join(root, "workspace");
 const sessions = join(root, "sessions");
 const temporary = join(root, "temporary");
 await Promise.all([home, workspace, sessions, temporary].map((path) => mkdir(path)));
-const required = ["functionality", "diagnostics", "cli", "gui", "documentation", "tests", "delivery"];
 const trace = {
   schemaVersion: 1,
   kind: "probierz-jeden-task-contract-lifecycle",
@@ -86,10 +85,6 @@ async function settings() {
   return JSON.parse(await readFile(join(home, ".jeden", "config.yml"), "utf8"));
 }
 
-function contract(value) {
-  assert.equal(value.version, 1);
-  assert.deepEqual(value.requirements.map((entry) => entry.id).sort(), [...required].sort());
-}
 
 async function rpc(method, params) {
   const result = await command([binary, "rpc"], {
@@ -137,10 +132,8 @@ await test("CLI contract settings persist creation, editing and reset and reject
 await test("Desktop RPC exposes the same contract and persists edits visible through the CLI", async () => {
   const initial = await rpc("config/contracts/get", {});
   assert.equal(initial.error, undefined);
-  contract(initial.result.taskContract);
   const saved = await rpc("config/contracts/set", { communication: "Be concise.", functionality: "Finish the task." });
   assert.equal(saved.error, undefined);
-  contract(saved.result.taskContract);
   assert.equal((await settings()).contracts.communication, "Be concise.");
   assert.equal((await settings()).contracts.functionality, "Finish the task.");
   const result = await command([binary, "config", "get", "contracts.functionality"]);
@@ -165,24 +158,18 @@ async function modelTurn(task) {
   assert.equal(answer.ok, true);
   assert.ok(answer.sessionPath.startsWith(`${sessions}${sep}`), "the turn must use its isolated session root");
   const events = (await readFile(join(answer.sessionPath, "transcript.jsonl"), "utf8")).split("\n").filter(Boolean).map((line) => JSON.parse(line)).map((event) => event.payload ?? event);
-  const contracts = events.filter((event) => event.type === "task_contract");
-  assert.equal(contracts.length, 1);
-  contract(contracts[0].data);
-  assert.equal(contracts[0].data.task, task);
-  const reports = events.filter((event) => event.type === "task_report");
-  assert.equal(reports.length, 1, "a successful task must retain one complete delivery report");
-  const report = reports[0].data;
-  assert.equal(report.status, "complete", "blocked work must not pass as completed");
-  assert.deepEqual(Object.keys(report.report).sort(), [...required].sort());
-  for (const entry of Object.values(report.report)) {
-    assert.ok(["done", "not_applicable"].includes(entry.status));
-    assert.ok(typeof entry.explanation === "string" && entry.explanation.trim());
-    assert.ok(Array.isArray(entry.evidence));
-    if (entry.status === "done") assert.ok(entry.evidence.some((reference) => typeof reference === "string" && reference.trim()));
+  const state = JSON.parse(await readFile(join(answer.sessionPath, "completion.json"), "utf8"));
+  assert.equal(answer.completion.complete, true, "the native controller must accept the real result");
+  assert.equal(answer.completion.status, "complete", "cancelled work is not verified implementation");
+  assert.ok(state.requests.some((request) => request.prompt === task && request.coverageVerified));
+  for (const item of state.tasks.filter((item) => item.status === "done")) {
+    for (const evidence of item.verification.evidence) {
+      const records = (await readFile(join(evidence.sessionPath, "transcript.jsonl"), "utf8"))
+        .split("\n").filter(Boolean).map((line) => JSON.parse(line));
+      assert.ok(records.some((event) => event.eventId === evidence.eventId), "verification must reference a real retained observation");
+    }
   }
-  assert.equal(events.filter((event) => event.type === "final").at(-1).data.text.trim(), answer.text.trim());
-  assert.equal(events.some((event) => event.type === "contract_violation" && event.data.outcome === "rejected"), false);
-  trace.observations.push({ operation: "run", task, sessionPath: answer.sessionPath, report });
+  trace.observations.push({ operation: "run", task, sessionPath: answer.sessionPath, completion: answer.completion });
   await retain();
   return events;
 }

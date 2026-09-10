@@ -42,7 +42,7 @@ Operator-managed and external: the Brama URL and signing credential (Stado/Skarb
 
 1. **Interactive task with approvals.** A Wisent engineer in a project checkout wants a code change executed and reviewed. They run `jeden` and type the task; the agent works through jailed tools, and every file write or shell command pauses for interactive approval unless explicitly enabled. The result is the applied change with visual diffs and a full transcript under `~/.jeden/sessions/`. Constraint: no write or command executes without a grant, and destructive confirmations default to **Cancel**.
 2. **One-shot scripted task.** Automation needs a bounded task without a terminal. It runs `jeden run "<task>"`, optionally with `--allow-write` or `--allow-command`. The result is the final answer on stdout with the session recorded. Constraint: grants are explicit per invocation, and failover never occurs after model output has become visible.
-3. **Continuing prior work.** An engineer wants to inspect or resume earlier work. They use `jeden sessions`, `show`, `export`, or `resume`. The result is a fresh session seeded with the selected history; abandoned history is never deleted.
+3. **Continuing prior work.** `jeden resume <session>` inherits both conversation history and retained requests, then inspects existing results before continuing. `jeden todo list --session <session>` shows the same request, acceptance and verification state without running a model.
 4. **Editor and machine integration.** An editor extension or a CI job needs the same harness programmatically. It uses `jeden acp`, `jeden rpc`, `jeden headless`, or the TypeScript/Python SDKs. The result is protocol-level access to the same run loop; non-terminal output is deterministic text.
 5. **Autonomous outcome pursuit.** An operator has a rough objective but cannot stay present to correct each interpretation. They run `jeden pursue "<objective>"` with explicit execution grants. Pursuit recovers and reviews the finish line; Jeden supplies its Brama-backed conversations and approval-gated tools to the accepted execution stages. The result is a durable contract, verdict, receipt, and stage-session provenance under `<cwd>/.pursuit/runs/`.
 
@@ -61,7 +61,7 @@ Tool schemas are derived from each input contract and sent with the model reques
 
 ## How it works
 
-Jeden is a single local process. A task enters through one interface and one run loop drives it to completion: the loop sends the conversation and the derived tool schemas to Brama, receives either a final answer or tool calls, executes each tool locally under the path jail and the approval policy, appends the outcome to the session ledger, and repeats until the model answers. Nothing but that local process reads the checkout, and inference is reachable only through Brama — Jeden carries no provider API key and no provider SDK.
+Jeden records each original request before model access and its acceptance requirements before execution. The execution agent proposes a result; a separate read-only conversation observes it, and the native controller checks every retained request before allowing a final answer. Unfinished actionable work continues, while genuine failures remain recorded as incomplete. Model access still goes only through Brama.
 
 ```mermaid
 flowchart LR
@@ -85,249 +85,31 @@ The action, tool-call, selector, and guarded-mutation contracts are maintained a
 
 ## Quick start
 
-Prerequisites:
-
-- a supported platform (`aarch64-apple-darwin`, `x86_64-unknown-linux-gnu`, `x86_64-pc-windows-msvc`) or a Rust toolchain for source builds;
-- a Brama-compatible model endpoint and caller-owned signing credential;
-- optional: Wisent Platform Billing URL and token for billing-attributed routing.
-
-From source (the currently documented path):
+Use a configured Brama route and the native product build workflow:
 
 ```sh
-git clone https://github.com/wisent-ai/jeden.git && cd jeden
-cargo build --locked --release   # or: bin/jeden-rust, which rebuilds stale source binaries
+npm run build:rust
+jeden
+jeden run "Read this project's package.json and explain its entry points."
 ```
-On macOS, keep the built and code-signed `jeden-sandbox-helper` beside `jeden`.
-The release pipeline builds and stages both executables, and records both
-digests in its SBOM and provenance. Copying only `jeden` does not provide the
-enforced task sandbox and is refused before a task runs.
 
+The [canonical documentation](https://jeden.wisent.com/docs) owns the full setup, credential, platform, approval, onboarding and operational instructions. The [CLI reference](https://jeden.wisent.com/docs/cli) describes every command and refusal. Keep the signed sandbox helper beside the executable on macOS.
 
-Required environment for real model calls:
+## Retained task completion
+
+`completion.json` in the session directory retains every original request, its workspace, acceptance criteria, task state and independent observation references. A new question, context reset, fork or resume does not erase older work.
+The model's `todo done` requests verification; it cannot approve its own result or remove user-owned obligations. Native checks require full task/request coverage and real evidence references; the independent model still interprets natural-language criteria.
+`jeden todo list`, `add`, `pause`, `resume`, `cancel` and `continue` expose the retained state. Operator controls require the current revision and a reason. Desktop and mobile provide the same operations in the Conversation screen's Tasks panel.
+Model errors, unavailable verification and explicit execution limits remain incomplete. `assistantMessage` carries progress or an interim answer without ending the retained work. See [task commands](https://jeden.wisent.com/docs/cli/todo) and [session recovery](https://jeden.wisent.com/docs/sessions).
+
+## Real verification
 
 ```sh
-WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>
-BRAMA_URL=<brama-model-router-url>
-# Set only when Brama requires its distinct bearer.
-BRAMA_TOKEN=<brama-bearer>
-WISENT_APP_AGENT_ID=wisent-app
+cargo test --test contracts -- --nocapture
 ```
 
-`ENTITLEMENTS_ROUTER_BIN` optionally overrides the local `entitlements-router` executable used by authentication status commands.
+The suite uses real CLI/RPC operations and the configured Brama dependency, retaining source revision, binary digest, commands, exit status and saved state under `target/contract-runs`. A failed model journey remains failed, not skipped or counted as passed. Probierz remains an optional runner.
 
-First run:
-
-```sh
-jeden            # opens the welcome view; run /setup to connect the model router
-```
-
-On a configured Wisent workstation, `bin/jeden-rust` automatically obtains the
-agent signing credential from `agent:wisent-app/value` for interactive sessions
-and `jeden run`; it remains in the process environment only. A deployment that
-requires the optional Brama bearer must inject `BRAMA_TOKEN` separately.
-
-On a configured macOS workstation, `scripts/run-with-stado.sh` obtains the
-signing value and the separate `jeden-model-router/token` bearer from Skarbiec
-and launches the installed Jeden without building it. The reusable VS Code
-task in `scripts/vscode-tasks.json` runs a disk diagnosis in a dedicated
-integrated terminal with `gpt-6-astra`; it does not type into an existing
-terminal's prompt or change the default model.
-
-For a checkout at `~/Documents/CodingProjects/Wisent/jeden`, install the task
-from this repository root when VS Code has no user task file:
-
-```sh
-ln -s "$PWD/scripts/vscode-tasks.json" \
-  "$HOME/Library/Application Support/Code/User/tasks.json"
-```
-
-If that file already exists, keep it and add this task to its `tasks` array
-instead. Choose **Terminal → Run Task… → Jeden: diagnoza dysku bez zmian**.
-VS Code keeps the command and final exit status in the named terminal and
-refuses a second concurrent instance. The task requests paths, sizes, growth
-causes and APFS accounting without deletion, compilation, configuration changes
-or consent prompts. It grants command execution, not a filesystem sandbox;
-these restrictions are part of the diagnosis prompt. Brama refusals remain
-visible as failures rather than switching models or starting a login.
-
-Communication and functionality contracts are user defaults. The CLI and the
-Jeden Desktop Settings screen edit the same values in `~/.jeden/config.yml`;
-project config may override them:
-
-```sh
-jeden config set contracts.communication "Answer in Polish using three plain sentences."
-jeden config set contracts.functionality "Finish the requested behavior before answering."
-jeden config get contracts.communication
-jeden config reset contracts.functionality
-jeden config set contracts.communication none
-```
-
-The communication contract has a built-in default. When it is empty, Jeden
-tells the model to write in plain language — short, ordinary sentences — and to
-give every answer in three parts under their own headings: what was done (in
-the past tense, with real names, paths, commands and numbers), blockers (each
-with the exact error and what was tried, or "none"), and next steps (what the
-user has to do or decide, or what Jeden does next, or "none"). Polish
-conversations get the same contract in Polish. Your own text replaces that
-default; the value `none` turns it off. `jeden run /prompt` shows the contract
-in force, and the RPC result of `config/contracts/get` says which one it is in
-`communicationSource` (`default`, `operator`, or `disabled`) and carries the
-default text in `communicationDefault`, which Jeden Desktop shows under the
-field.
-
-Jeden adds each contract to every new or rebuilt system prompt. The contracts
-supplement the built-in engineering rules and cannot relax tool grants, path
-jails, safety checks, or evidence requirements.
-
-Sessions that Omp runs on this machine get the same contracts. `jeden contracts
-render` prints the task contract and the communication contract in force as
-one text; `jeden contracts install --omp` writes that text into
-`~/.omp/agent/APPEND_SYSTEM.md` between the lines `<!-- jeden contracts: start -->`
-and `<!-- jeden contracts: end -->`, replacing the previous block and leaving
-the rest of the file alone, because Omp appends that file to every system
-prompt; `jeden contracts status --omp` says whether the installed block is
-`current`, `stale`, or `absent` and exits non-zero unless it is current.
-`--file <path>` targets any other file the same way. The Wisent product
-catalog runs the install after every Jeden CLI installation and sweep, so a
-contract that changes with a release reaches Omp without anyone remembering to.
-
-Every ordinary user turn, including a delegated task, carries Jeden's built-in
-task contract, and so does the autonomous execution stage: an autonomous stage
-that may write files or run commands answers with the same report, while the
-read-only planning and review stages keep Pursuit's own output contracts.
-`jeden contracts render` prints that scope, and the RPC contract snapshot the
-Jeden Desktop Settings screen reads carries it as `appliesTo`.
-Completion means durable, reusable product functionality rather
-than a one-off action. Only an assigned implementation task authorizes product
-changes: a question, request to read or explain, or planning request does not.
-Defects related to the assigned task are repaired at their source; diagnostics
-must identify failures; and applicable CLI, GUI, and public documentation
-surfaces must agree. Behavioral tests belong in the product's
-`tests/<area>` tree, exercise a complete lifecycle through the real product and
-real dependencies, and observe the final state. Tests may be created and run
-directly with the product's own tools; Probierz is optional. Every run retains
-its exact source revision, commands, exit statuses, supported reports, traces,
-screenshots and recordings, and actual result.
-
-The model must return a structured report covering exactly `functionality`,
-`diagnostics`, `cli`, `gui`, `documentation`, `tests`, and `delivery`. It must
-explain concretely what happened for every requirement and cite source or
-test evidence for every `done` entry. `not_applicable` is honest when a
-surface truly does not apply; `blocked` names an unresolved prerequisite and
-does not pretend the task is complete. Parsing checks the report's structure,
-not the truth of its claims.
-
-When the configured `--max-steps` budget leaves another model step, Jeden gives
-a missing or invalid report back to the model once for correction. A second
-violation—or a first violation with no remaining step—is refused as an error,
-records a rejected `contract_violation` plus `run_error`, and is never silently
-delivered as a successful final. The terminal, `jeden run`, RPC, headless
-service, and SDKs all
-enter the same run loop and enforce this contract; Jeden Desktop renders the
-same final text and report. `/prompt` shows the active contract. Model-only
-turns and Pursuit stages retain their separate output formats.
-
-RPC `config/contracts/get` and `config/contracts/set` return the editable
-communication and functionality settings plus `taskContract`, a versioned,
-localized, built-in read-only description with `instructions` and
-`requirements`. It is inspectable by clients and shown read-only in Jeden
-Desktop Settings; it is not a third operator-editable contract.
-
-The contract journey lives in
-`tests/contracts/task-contract-lifecycle.probierz.spec.mjs`. With the real Brama
-workload environment configured and `JEDEN_BIN` naming the source-built binary,
-run it from this repository through Probierz:
-
-```sh
-probierz run tui --app jeden \
-  --spec "$PWD/tests/contracts/task-contract-lifecycle.probierz.spec.mjs" \
-  --no-repair PROBIERZ_JOURNEY=task-contract-lifecycle TUI_CMD="$JEDEN_BIN"
-```
-
-It runs the existing operator-contract stories, exercises CLI/RPC persistence,
-and asks the real model to create, edit and remove an isolated file and report
-each operation. A separate no-tool task checks that the report remains required.
-Failures retain the command output, filesystem state and session ledgers; an
-unavailable model is a failed run, not a passing substitute.
-
-The communication mode chooses what Jeden shows of its own work. `normal`
-shows tool names while it works and then the answer with its code; `debug`
-also shows each tool call with its input, each tool result, and the model's
-reasoning when the route streams it; `quiet` shows only the answer. Four
-overrides default to `auto` and follow the mode: `communication.toolCalls`,
-`communication.toolResults`, `communication.reasoning`, and
-`communication.code`, each `auto`, `show`, or `hide`. Hidden code replaces every
-fenced block with `[code hidden: N lines]` and asks the model to answer in
-prose. The mode is read at the start of each turn, so `/settings set
-communication.mode quiet` changes the next turn of a running session; the
-terminal, `jeden rpc`, `jeden headless`, `jeden acp`, and Jeden Desktop honour
-it, and the session transcript records everything regardless.
-
-```sh
-jeden config set communication.mode debug
-jeden config set communication.toolResults hide
-jeden config set communication.code hide
-```
-
-The first-use journey (`/onboarding`) is separate from `/setup` and always runs
-from the definition compiled into the binary, so it works offline. Its first
-action can adopt the current or another existing workspace through the same
-operation as `jeden workspace adopt`; skipping persists nothing and keeps the
-invocation directory usable. The journey still completes only on the first
-successful agent turn. `/onboarding reset` replays the workspace selection and
-guide without deleting the earlier selection, working tree, or session history.
-When `STADO_INTEGRATION_API_URL` is set, the launcher additionally injects
-`JEDEN_STADO_INTEGRATION_TOKEN` from the Skarbiec item
-`jeden-integration-api` through the dedicated `jeden-onboarding-client`
-consumer, which turns on published-bundle reads and funnel events at the
-integration boundary. A missing endpoint, grant file, or item leaves the
-journey offline and never blocks the command.
-
-Inside the terminal, `/setup` is an idempotent wizard for an existing workspace,
-Brama URL, agent id, default model, and preferences. `/setup workspace <path>`
-uses the canonical adoption operation; `/setup validate` shows the selected
-path beside the normal health report. The setup flow never writes secrets to
-disk. Inspect, adopt, and confirm a repository without copying data:
-
-```sh
-jeden workspace discover /path/to/repository
-jeden workspace adopt /path/to/repository
-jeden workspace status
-```
-
-A successful model setup is observable:
-
-```sh
-jeden run "Respond exactly: OK"   # expected output: OK
-```
-
-Probierz owns reproducible Jeden journey execution and quality evidence. The
-`jeden probierz` command forwards arguments to a sibling Probierz source
-checkout, `PROBIERZ_ROOT`, or an installed `probierz` CLI. With no arguments it
-shows the current Jeden evidence status:
-
-```sh
-jeden probierz
-jeden probierz check tui
-jeden probierz run tui --app jeden \
-  --spec packages/tui/specs/jeden-onboarding-first-use.spec.mjs --record
-```
-
-The onboarding journey performs one real signed agent turn and stores its
-source-bound result and analysis in the Probierz evidence store.
-
-`jeden doctor` diagnoses missing prerequisites and degraded services. Stado publishes immutable candidate and stable archives for the supported fleet coordinates, and `jeden update` moves an installed binary along a verified channel; see [Release automation](#release-automation).
-
-Common setup failures and recovery:
-
-- `BRAMA_URL is required` — the Brama endpoint is not configured; run `/setup` or export the variable above, then rerun the command.
-- `WISENT_APP_AGENT_AUTH_SECRET` missing — launch through `bin/jeden-rust` or `scripts/run-with-stado.sh`; both obtain `agent:wisent-app/value` without writing it to disk.
-- Model calls fail with quota exhaustion — the active Weles subscription is in cooldown; check `/subscriptions status` or wait for the `Retry-After` bound while the router selects the next eligible subscription.
-- `configured model <id> does not resolve in the catalog Brama serves this agent` — the model in `~/.jeden/config.yml`, `.jeden/config.json` or `JEDEN_MODEL` is not a route Brama offers this agent id; `jeden doctor` reports it unavailable and lists the catalog size, and `/models` names the routes that do resolve.
-- `traffic can be served, but an active subscription credential could not be redeemed` — Brama's own `/readyz` verdict, reported as degraded with the providers whose credential it could not redeem; the gateway answers, and the subscription behind the route needs re-authorization.
-- Anything else — run `jeden doctor` for per-service health and `/setup validate` for an end-to-end probe; both report what failed and which step to fix first.
-
-Cleanup: uninstalling is deleting the built binary and, optionally, Jeden's state — user-level under `~/.jeden/` (sessions, memory, configuration) and project-level `.jeden/` directories in the checkouts where it was used.
 
 ## Primary interfaces
 
@@ -367,50 +149,16 @@ File mutations return Jeden-native visual diffs and previews. Oversized tool res
 
 ## CLI
 
-```sh
-jeden
-jeden --cwd ../echo
-jeden run "summarize package.json"
-jeden run "create notes.txt" --allow-write
-jeden run "inspect the build" --allow-command
-jeden pursue "replace the rough idea with the observable product result" --yolo
-jeden sessions
-jeden show <session>
-jeden export <session> <output>
-jeden artifacts <session>
-jeden artifact <session> <name> <output>
-jeden resume <session> "continue"
-jeden search-sessions "query"
-jeden recall_conversation --list
-jeden tools --cwd ../echo
-jeden config --cwd .
-jeden doctor --cwd .
-jeden capabilities --json --cwd .
-jeden roadmap list --status planned --priority P1 --json --cwd .
-```
+Use `jeden run` for a concrete task and `jeden pursue` for a rough objective whose contract Pursuit must first establish. Session inspection, configuration and runtime operations are listed in the [complete CLI reference](https://jeden.wisent.com/docs/cli).
 
-Use `run` when the supplied task is already concrete. Use `pursue` when the input is only an intent seed and Pursuit must recover the concrete outcome, boundaries, preferences, evidence, and finish line before Jeden implements it; see [how Pursuit works](https://github.com/wisent-ai/pursuit#how-it-works).
+`jeden todo list --json` reads the current work; `jeden todo continue --allow-write` continues it with the stated grants.
+
 
 ## Interactive terminal views
 
-In a terminal, management commands without arguments open native searchable views instead of printing command syntax. This covers authentication, models, settings, approval policy, sessions, todos, modes, tools, MCP and SSH configuration, usage, memory, browser state, collaboration, jobs, extensions, plugins, and marketplaces. Selecting a row dispatches the same validated slash command that can still be entered directly.
+Management commands open searchable native pickers. Type to filter, use arrows to choose, Enter to execute and Escape to close. Non-terminal use retains direct command arguments.
+`/todo` exposes the retained task operations. `/goal` manages the active goal; Oko can label or start it, but only the native completion controller accepts task completion. Explicit cancellation is not verified implementation.
 
-Picker controls:
-
-- type to filter labels, details, and status badges;
-- `Up` and `Down` move the active row;
-- `Home`, `End`, `PageUp`, and `PageDown` jump through the list;
-- `Ctrl-U` clears the filter;
-- `Enter` executes the selected action;
-- `Esc` closes the current view.
-
-Destructive rows open a confirmation view with **Cancel** selected by default. Move to **Confirm** and press `Enter` to execute. Agent `ask_user` calls use the same terminal-owned event loop: option questions open a picker and open questions accept free text without allowing a worker thread to read terminal input directly.
-
-When stdin is not a terminal, interactive views render as deterministic text lists and direct slash arguments remain available for scripts.
-
-### Goal mode and the Oko lifecycle model
-
-`/goal set <objective>` pins a durable objective that every turn is kept aligned with; `/goal status`, `/goal pause`, `/goal resume`, `/goal budget <n|off>`, and `/goal drop` manage it. `/goal auto on` additionally lets Oko's locally served goal-lifecycle model classify each user prompt in the background (loopback endpoint, `JEDEN_LIFECYCLE_MODEL_URL` override): a prompt that starts a genuinely new durable objective sets the goal automatically, and an explicit user confirmation of completion drops it, mirroring `/goal drop`. Every classified prompt records a `goal_lifecycle` session-ledger event; `startGoal` records its resolved title so historical clients can reconstruct the goal timeline, and sessions driven over `jeden rpc` receive a `goal` session event with the goal title and `active`/`done` status. Classification is fail-open and never blocks or rewrites the current turn: when the service does not answer, Jeden behaves exactly as with `/goal auto off` (the default).
 
 ## Roadmap Registry
 
@@ -485,7 +233,7 @@ that projection instead of reproducing command-directory precedence.
 
 ## Sessions and memory
 
-`jeden export`, `show`, `artifacts`, `artifact`, `search-sessions`, `resume`, and `recall_conversation` inspect or reuse recorded work. Resumed work starts a fresh session seeded with the selected history.
+`jeden resume` inherits recorded history and completion state; without a new prompt it continues unfinished work in the recorded workspace. See the canonical [session and memory contract](https://jeden.wisent.com/docs/sessions).
 
 `workspace discover` validates an existing directory, its existing
 `.jeden/config.json`, Git worktree marker, and the canonical session states that

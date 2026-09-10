@@ -128,8 +128,14 @@ pub(crate) fn activate_roadmap_work(
         state.active_roadmap_item = Some(item_id.to_string());
         Ok(())
     })?;
-    let request = format!("{objective}\nAcceptance plan:\n{plan}\nRetained tasks:\n{}",
-        todos.iter().map(|(text, _)| text.as_str()).collect::<Vec<_>>().join("\n"));
+    let request = format!(
+        "{objective}\nAcceptance plan:\n{plan}\nRetained tasks:\n{}",
+        todos
+            .iter()
+            .map(|(text, _)| text.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
     crate::completion::cli::execute(cwd, &["add".into(), request], false, None).map(|_| ())
 }
 

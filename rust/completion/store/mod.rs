@@ -13,7 +13,10 @@ const LOCK_FILE: &str = "completion.lock";
 fn regular_file_or_absent(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
-        Ok(_) => Err(format!("completion state path is not a regular file: {}", path.display())),
+        Ok(_) => Err(format!(
+            "completion state path is not a regular file: {}",
+            path.display()
+        )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(format!("cannot inspect {}: {error}", path.display())),
     }
@@ -22,7 +25,8 @@ fn regular_file_or_absent(path: &Path) -> Result<(), String> {
 fn session_directory(dir: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(dir)
         .map_err(|error| format!("cannot inspect session {}: {error}", dir.display()))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() || !dir.join("state.json").is_file() {
+    if !metadata.is_dir() || metadata.file_type().is_symlink() || !dir.join("state.json").is_file()
+    {
         return Err(format!("not a durable Jeden session: {}", dir.display()));
     }
     Ok(())
@@ -36,7 +40,12 @@ pub(crate) fn read(dir: &Path) -> Result<CompletionState, String> {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map_err(|error| format!("invalid completion state {}: {error}", file.display()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => legacy_state(dir)?,
-        Err(error) => return Err(format!("cannot read completion state {}: {error}", file.display())),
+        Err(error) => {
+            return Err(format!(
+                "cannot read completion state {}: {error}",
+                file.display()
+            ))
+        }
     };
     state.validate()?;
     Ok(state)
@@ -50,33 +59,51 @@ pub(crate) fn update<T>(
     session_directory(dir)?;
     let lock_path = dir.join(LOCK_FILE);
     regular_file_or_absent(&lock_path)?;
-    let lock = OpenOptions::new().create(true).truncate(false).read(true).write(true)
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
         .open(&lock_path)
-        .map_err(|error| format!("cannot open completion lock {}: {error}", lock_path.display()))?;
-    lock.lock().map_err(|error| format!("cannot lock completion state: {error}"))?;
+        .map_err(|error| {
+            format!(
+                "cannot open completion lock {}: {error}",
+                lock_path.display()
+            )
+        })?;
+    lock.lock()
+        .map_err(|error| format!("cannot lock completion state: {error}"))?;
     let mut state = read(dir)?;
     if let Some(expected) = expected_revision {
         if state.revision != expected {
-            return Err(format!("completion state changed: expected revision {expected}, found {}", state.revision));
+            return Err(format!(
+                "completion state changed: expected revision {expected}, found {}",
+                state.revision
+            ));
         }
     }
     let output = change(&mut state)?;
-    state.revision = state.revision.checked_add(u64::from(true))
+    state.revision = state
+        .revision
+        .checked_add(u64::from(true))
         .ok_or("completion revision overflow")?;
     state.validate()?;
     write_atomic(&dir.join(STATE_FILE), &state)?;
     let legacy = dir.join("artifacts/todo.json");
     if legacy.exists() {
         regular_file_or_absent(&legacy)?;
-        fs::remove_file(&legacy)
-            .map_err(|error| format!("completion state saved but legacy todo retirement failed: {error}"))?;
+        fs::remove_file(&legacy).map_err(|error| {
+            format!("completion state saved but legacy todo retirement failed: {error}")
+        })?;
     }
     Ok((output, state))
 }
 
 fn write_atomic(path: &Path, state: &CompletionState) -> Result<(), String> {
     regular_file_or_absent(path)?;
-    let parent = path.parent().ok_or("completion state has no parent directory")?;
+    let parent = path
+        .parent()
+        .ok_or("completion state has no parent directory")?;
     let staging = parent.join(format!(".completion-{}.new", uuid::Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -92,7 +119,8 @@ fn write_atomic(path: &Path, state: &CompletionState) -> Result<(), String> {
         file.sync_all().map_err(|error| error.to_string())?;
         fs::rename(&staging, path).map_err(|error| error.to_string())?;
         #[cfg(unix)]
-        File::open(parent).and_then(|directory| directory.sync_all())
+        File::open(parent)
+            .and_then(|directory| directory.sync_all())
             .map_err(|error| error.to_string())?;
         Ok(())
     })();
@@ -112,18 +140,33 @@ fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map_err(|error| format!("invalid legacy todo {}: {error}", path.display()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(state),
-        Err(error) => return Err(format!("cannot read legacy todo {}: {error}", path.display())),
+        Err(error) => {
+            return Err(format!(
+                "cannot read legacy todo {}: {error}",
+                path.display()
+            ))
+        }
     };
-    let phases = legacy.get("phases").and_then(Value::as_array)
+    let phases = legacy
+        .get("phases")
+        .and_then(Value::as_array)
         .ok_or("legacy todo has no phases array")?;
     let request_id = "legacy-todo".to_string();
     for phase in phases {
-        let name = phase.get("phase").and_then(Value::as_str).unwrap_or("Tasks");
-        let items = phase.get("items").and_then(Value::as_array)
+        let name = phase
+            .get("phase")
+            .and_then(Value::as_str)
+            .unwrap_or("Tasks");
+        let items = phase
+            .get("items")
+            .and_then(Value::as_array)
             .ok_or("legacy todo phase has no items array")?;
         for (index, item) in items.iter().enumerate() {
-            let text = item.get("text").and_then(Value::as_str)
-                .filter(|text| !text.trim().is_empty()).ok_or("legacy todo task has no text")?;
+            let text = item
+                .get("text")
+                .and_then(Value::as_str)
+                .filter(|text| !text.trim().is_empty())
+                .ok_or("legacy todo task has no text")?;
             state.tasks.push(WorkTask {
                 id: format!("legacy-{}-{index}", state.tasks.len()),
                 request_id: request_id.clone(),
@@ -133,16 +176,22 @@ fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
                 kind: TaskKind::Work,
                 origin: TaskOrigin::User,
                 status: TaskStatus::VerificationRequested,
-                reason: Some("Legacy todo status was an agent claim, not independent verification.".into()),
+                reason: Some(
+                    "Legacy todo status was an agent claim, not independent verification.".into(),
+                ),
                 verification: None,
             });
         }
     }
     if !state.tasks.is_empty() {
         let session_state: Value = serde_json::from_slice(
-            &fs::read(dir.join("state.json")).map_err(|error| format!("cannot read legacy task workspace: {error}"))?
-        ).map_err(|error| format!("invalid legacy task workspace: {error}"))?;
-        let cwd = session_state.get("cwd").and_then(Value::as_str)
+            &fs::read(dir.join("state.json"))
+                .map_err(|error| format!("cannot read legacy task workspace: {error}"))?,
+        )
+        .map_err(|error| format!("invalid legacy task workspace: {error}"))?;
+        let cwd = session_state
+            .get("cwd")
+            .and_then(Value::as_str)
             .ok_or("legacy task session has no workspace")?;
         state.requests.push(WorkRequest {
             id: request_id,
@@ -172,19 +221,32 @@ fn legacy_requests(dir: &Path) -> Result<CompletionState, String> {
         }
         let data = event.payload.data();
         if data.get("modelOnly").and_then(Value::as_bool) == Some(true)
-            || data.get("completionManaged").and_then(Value::as_bool) == Some(false) {
+            || data.get("completionManaged").and_then(Value::as_bool) == Some(false)
+        {
             continue;
         }
-        let prompt = data.get("rawTask").or_else(|| data.get("task"))
-            .or_else(|| data.get("prompt")).or_else(|| data.get("content"))
-            .and_then(Value::as_str).or_else(|| data.as_str())
+        let prompt = data
+            .get("rawTask")
+            .or_else(|| data.get("task"))
+            .or_else(|| data.get("prompt"))
+            .or_else(|| data.get("content"))
+            .and_then(Value::as_str)
+            .or_else(|| data.as_str())
             .filter(|prompt| !prompt.trim().is_empty())
-            .ok_or_else(|| format!("legacy user event {} has no recorded request", event.event_id))?;
+            .ok_or_else(|| {
+                format!(
+                    "legacy user event {} has no recorded request",
+                    event.event_id
+                )
+            })?;
         state.requests.push(WorkRequest {
             id: event.event_id,
             prompt: prompt.to_string(),
-            cwd: data.get("cwd").and_then(Value::as_str)
-                .map(str::to_string).unwrap_or_else(|| cwd.display().to_string()),
+            cwd: data
+                .get("cwd")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| cwd.display().to_string()),
             paused: false,
             captured_at: event.timestamp,
             planned: false,

@@ -291,8 +291,4 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         while connections.join_next().await.is_some() {}
         Ok(())
     }
-
-
 }
-
-

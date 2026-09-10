@@ -2,10 +2,10 @@ use super::*;
 
 mod action;
 mod compaction;
+mod completion;
 mod history;
 mod local_exec;
 mod turn;
-mod completion;
 
 pub(super) use action::{
     action_or_text, action_to_value, record_unexecuted_tool_action, run_tool_action,
@@ -58,7 +58,8 @@ impl Conversation {
         let messages = history::normalized_history(cwd, turns)?;
         let recorder = SessionRecorder::open(cwd, session_dir)?;
         Ok(Self {
-            messages, recorder,
+            messages,
+            recorder,
             manages_completion: true,
             inspection: false,
             continuation: false,

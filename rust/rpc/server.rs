@@ -1,7 +1,7 @@
 mod hosting;
 mod operations;
-pub use hosting::serve_headless_cli;
 use hosting::quick_replies;
+pub use hosting::serve_headless_cli;
 use operations::*;
 
 use super::{
@@ -77,7 +77,6 @@ struct HeadlessIdentityMapping {
     workspaces: Vec<PathBuf>,
 }
 
-
 pub fn serve_stdio() -> Result<(), String> {
     let input = io::BufReader::new(io::stdin());
     serve(input, io::stdout())
@@ -126,7 +125,10 @@ where
                 continue;
             }
         };
-        if matches!(request.method.as_str(), "prompt" | "session/prompt" | "session/completion/continue") {
+        if matches!(
+            request.method.as_str(),
+            "prompt" | "session/prompt" | "session/completion/continue"
+        ) {
             let worker_state = state.clone();
             workers.push(thread::spawn(move || handle_prompt(worker_state, request)));
         } else if let Err(error) = handle_request(&state, request) {
@@ -159,7 +161,6 @@ where
     }
     Ok(())
 }
-
 
 fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), Value> {
     let id = request.id.clone();
@@ -228,7 +229,11 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         .map(str::to_string)
         .unwrap_or_else(|| wire_id(&id));
     let continuing = request.method == "session/completion/continue";
-    let prompt = if continuing { String::new() } else { string_param(&request.params, "prompt")? };
+    let prompt = if continuing {
+        String::new()
+    } else {
+        string_param(&request.params, "prompt")?
+    };
     let goal = request
         .params
         .get("goal")
@@ -275,7 +280,11 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
     let result = if continuing {
         session.continue_work(request_id)
     } else {
-        session.prompt(PromptRequest { request_id, prompt, goal })
+        session.prompt(PromptRequest {
+            request_id,
+            prompt,
+            goal,
+        })
     };
     prompt_done.store(true, Ordering::Release);
     forwarder
@@ -291,4 +300,3 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
             .send(&error_response(id, "prompt_failed", &error)),
     }
 }
-

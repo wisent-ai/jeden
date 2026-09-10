@@ -87,10 +87,14 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
             })
         }
         "message" => {
-            let text = value.get("text").and_then(Value::as_str)
+            let text = value
+                .get("text")
+                .and_then(Value::as_str)
                 .filter(|text| !text.trim().is_empty())
                 .ok_or("message action requires nonempty text")?;
-            Ok(Action::Message { text: text.to_string() })
+            Ok(Action::Message {
+                text: text.to_string(),
+            })
         }
         "tool" => {
             let action = parse_tool_action(&value)?;

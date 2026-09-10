@@ -75,7 +75,9 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
             }
         }
         SessionEventKind::AssistantMessage { text } => MappedEvent {
-            update: Some(SessionUpdate::AgentMessageChunk(ContentChunk::new(text.into()))),
+            update: Some(SessionUpdate::AgentMessageChunk(ContentChunk::new(
+                text.into(),
+            ))),
             terminal: false,
         },
         SessionEventKind::Completion { state } => MappedEvent {
