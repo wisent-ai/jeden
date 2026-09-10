@@ -2,6 +2,10 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 
+mod review;
+
+pub(crate) use review::{CompletionReview, IntakePlan, ReviewStatus};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -225,73 +229,6 @@ impl CompletionState {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct IntakePlan {
-    pub tasks: Vec<PlannedTask>,
-    #[serde(default)]
-    pub cancellations: Vec<UserCancellation>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct PlannedTask {
-    pub text: String,
-    pub criteria: Vec<String>,
-    /// An intake answer that omits the classification is read as work, the
-    /// stricter of the two kinds: a work task is accepted only against an
-    /// independent read-only observation, so a missing `kind` can never make
-    /// completion cheaper than the request asked for. Refusing the whole
-    /// intake instead left the retained request behind a durable blocker
-    /// because one field was absent from an otherwise usable plan.
-    #[serde(default = "work_task")]
-    pub kind: TaskKind,
-}
-
-fn work_task() -> TaskKind {
-    TaskKind::Work
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct UserCancellation {
-    pub task_id: String,
-    pub quote: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct CompletionReview {
-    pub tasks: Vec<TaskReview>,
-    pub requests: Vec<RequestReview>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct TaskReview {
-    pub task_id: String,
-    pub status: ReviewStatus,
-    pub explanation: String,
-    pub evidence: Vec<EvidenceReference>,
-    pub criteria: Vec<CriterionReview>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum ReviewStatus {
-    Done,
-    Continue,
-    Blocked,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub(crate) struct RequestReview {
-    pub request_id: String,
-    pub covered: bool,
-    pub explanation: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
