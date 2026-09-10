@@ -14,18 +14,24 @@ pub(super) const ANSWER_REPAIRS: u32 = 1;
 /// the delivery-report rule of the same event.
 const ANSWER_RULE: &str = "model-answer";
 
+/// The correction one unusable answer is given.
+///
+/// A cut answer needs a shorter answer; an unreadable one almost always
+/// carries a raw quote inside a JSON string, and on 2026-09-10 a model sent
+/// the identical malformed answer twice because the correction quoted serde's
+/// position without naming the rule it had broken. Both shapes are named.
 fn repair_instruction(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> String {
     let budget = match max_tokens {
         Some(tokens) => format!(" of {tokens} tokens"),
         None => String::new(),
     };
-    let opening = if cut_off {
-        "Your previous answer stopped before it was complete"
+    let advice = if cut_off {
+        format!("Your previous answer stopped before it was complete: {refusal}\n\nSend the whole answer again, short enough to finish inside the output budget{budget}.")
     } else {
-        "Your previous answer could not be read as an action"
+        format!("Your previous answer could not be read as an action: {refusal}\n\nEvery quote, backslash and newline inside a JSON string must be escaped (\\\", \\\\, \\n); quoting someone's words inside `text` is the usual cause. Rewrite the answer with those escapes rather than resending the same characters.")
     };
     format!(
-        "{opening}: {refusal}\n\nSend the whole answer again as exactly one complete JSON object of the action protocol, with nothing before or after it, and keep it short enough to finish inside the output budget{budget}."
+        "{advice} Answer with exactly one complete JSON object of the action protocol, with nothing before or after it."
     )
 }
 
