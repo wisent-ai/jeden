@@ -1,0 +1,195 @@
+export const operationCommands = [
+  {
+    path: "update",
+    invocation: "JEDEN_UPDATE_MANIFEST=<https-or-local-dsse-manifest> jeden update",
+    purpose: "Transactionally install a signed Jeden release and verify the activated binary before committing it.",
+    inputs: [
+      "Required environment: <code>JEDEN_UPDATE_MANIFEST</code>, pointing to an HTTPS or local DSSE release manifest.",
+      "Optional environment: <code>JEDEN_UPDATE_CHANNEL</code> (<code>stable</code> by default), <code>JEDEN_UPDATE_TARGET_TRIPLE</code>, and <code>JEDEN_UPDATE_TARGET</code>.",
+    ],
+    effect: "Recovers any prior update journal, verifies the DSSE signature against the embedded channel trust root, checks target/version/digests plus SBOM and provenance, installs atomically, runs post-health, and prints the installed version and digest. Failed health rolls back to the last-known-good binary.",
+    refusals: [
+      "Absent manifest configuration is refused exactly as <code>JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest</code>.",
+      "Channels other than <code>canary</code> or <code>stable</code>, noncanonical or unsigned manifests, mismatched targets/digests/evidence, unsafe archives, downgrade/selection failures, and missing rollback material are refused.",
+    ],
+  },
+  {
+    path: "workspace",
+    invocation: "jeden workspace [status|discover [path]|adopt <path>] [--json]",
+    purpose: "Inspect, validate, or adopt an existing local repository as Jeden's default workspace.",
+    inputs: [
+      "No action defaults to <code>status</code>. <code>discover</code> accepts an optional existing path and otherwise inspects the current directory. <code>adopt</code> requires a path.",
+      "A relative path is resolved from the invocation directory; <code>--json</code> returns the same operation report as a JSON object.",
+      "The supported sources are an existing readable directory and a Git working tree detected by an existing <code>.git</code> directory or worktree file in that path or an ancestor. Jeden session history is associated through each canonical <code>state.json</code> <code>cwd</code>; it is not re-imported.",
+    ],
+    effect: "<code>discover</code> validates without writing. <code>adopt</code> validates the complete source first, then atomically stores its canonical absolute path as <code>workspace.defaultPath</code> in <code>~/.jeden/config.yml</code>. A later interactive, <code>run</code>, or <code>pursue</code> task uses that workspace unless <code>--cwd</code> is explicit; adoption from a running terminal first-use or setup screen also rebases that session before its next agent turn. The result names the accepted path, source kind, repository root, existing sessions accepted or unreadable, and imported/unchanged/conflicting/rejected counts. It never copies, cleans, resets, or writes the repository or its session ledgers.",
+    refusals: [
+      "A missing <code>adopt</code> path is refused with <code>Usage: jeden workspace adopt &lt;path&gt; [--json]</code>; an unknown action prints the complete workspace usage.",
+      "A path containing <code>..</code>, a missing or unreadable path, a non-directory, a malformed existing <code>.jeden/config.json</code>, or a user-config write failure is refused before selection changes.",
+      "If a previously adopted path is unavailable, implicit task startup fails and names <code>--cwd</code> as the explicit override instead of silently changing workspace.",
+    ],
+  },
+  {
+    path: "workspace/status",
+    invocation: "jeden workspace status [--json]",
+    purpose: "Show the currently adopted workspace and the existing sessions associated with it.",
+    inputs: ["No path is accepted. Optional: <code>--json</code> for the structured operation report."],
+    effect: "Reads the user selection and inspects the workspace and canonical session root without mutating either. With no selection it prints a setup command or returns <code>{\"status\":\"not_adopted\"}</code>.",
+    refusals: ["A selected path that no longer resolves, or an invalid stored value, is returned as an actionable workspace error rather than shown as usable."],
+  },
+  {
+    path: "workspace/discover",
+    invocation: "jeden workspace discover [path] [--json]",
+    purpose: "Validate an existing workspace and preview the state Jeden would adopt.",
+    inputs: ["Optional: an existing repository or directory path; the current directory is used when omitted."],
+    effect: "Canonicalizes the path, validates any existing project config, detects the Git root, and reports associated session counts. It writes no configuration and changes no source or ledger file.",
+    refusals: ["The same path, directory, and existing-project-config refusals as <code>workspace adopt</code> apply; no partial state is retained."],
+  },
+  {
+    path: "workspace/adopt",
+    invocation: "jeden workspace adopt <path> [--json]",
+    purpose: "Persist an existing local repository as the default workspace used by the next Jeden task.",
+    inputs: ["Required: one existing readable directory path. Optional: <code>--json</code>."],
+    effect: "Runs the discover validation and only then atomically writes the canonical path to the user configuration. Re-adopting the same canonical path is idempotent and reports one unchanged result without rewriting; matching session ledgers remain where Jeden originally recorded them.",
+    refusals: ["Invalid input or an invalid existing project config is refused before the user configuration changes; write failures return the underlying storage error and never claim adoption."],
+  },
+  {
+    path: "config",
+    invocation: "jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]",
+    purpose: "Inspect and change Jeden's schema-backed user configuration.",
+    inputs: [
+      "No action defaults to <code>list</code>.",
+      "<code>--cwd</code> selects the project layer used when computing effective values; <code>--json</code> selects structured output.",
+      "Use the linked leaf commands for their required key/value inputs.",
+      "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings. An empty communication contract means Jeden's default (plain language, then what was done, blockers, next steps); <code>none</code> turns it off.",
+      "The communication keys are <code>communication.mode</code> (<code>normal</code>, <code>debug</code>, <code>quiet</code>) and the overrides <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, and <code>communication.code</code> (<code>auto</code>, <code>show</code>, <code>hide</code>).",
+    ],
+    effect: "Lists merged effective settings, prints the writable user path, reads one setting, or atomically writes a schema-validated user value/default depending on the selected action. New and rebuilt system prompts include each non-empty operator contract; the built-in task contract remains read-only and is exposed separately as <code>taskContract</code> by RPC contract settings. The next turn of every session honours the communication mode.",
+    refusals: [
+      "Unknown actions are refused with the exact usage line shown above.",
+      "Unknown keys and values that do not match the setting's boolean, finite-number, enum, array, object, or string schema are refused before writing.",
+    ],
+  },
+  {
+    path: "contracts",
+    invocation: "jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]",
+    purpose: "Print Jeden's contracts as one text, and install them into another harness's system prompt.",
+    inputs: [
+      "No action defaults to <code>render</code>, which prints the task contract and the communication contract in force (Jeden's default, the operator's own text, or none) in the conversation language; <code>--cwd</code> selects the project layer and <code>--json</code> wraps the text.",
+      "<code>status</code> and <code>install</code> need a target: <code>--omp</code> is <code>~/.omp/agent/APPEND_SYSTEM.md</code>, the file Omp appends to every system prompt; <code>--file &lt;path&gt;</code> is any other file.",
+    ],
+    effect: "<code>install</code> writes the rendered text between the lines <code>&lt;!-- jeden contracts: start --&gt;</code> and <code>&lt;!-- jeden contracts: end --&gt;</code>, replacing the previous block and leaving the rest of the file alone, through an atomic rename; it prints <code>Installed the Jeden contracts into &lt;path&gt;</code> or <code>&lt;path&gt; already carries the Jeden contracts</code>. <code>status</code> prints <code>current</code>, <code>stale</code>, or <code>absent</code> with the path and exits 0 only when current. The Wisent product catalog runs <code>install --omp</code> after every Jeden CLI installation and sweep.",
+    refusals: [
+      "<code>status</code> and <code>install</code> without a target are refused as <code>contracts install and status require --omp or --file &lt;path&gt;</code>; <code>--file</code> without a path is refused as <code>--file requires a path</code>.",
+      "An unknown action or option is refused with the usage line; a stale or absent block makes <code>status</code> exit 1 and name the install command.",
+    ],
+  },
+  {
+    path: "doctor",
+    invocation: "jeden doctor [--json] [--cwd path]",
+    purpose: "Probe the live health of Jeden's configured runtime dependencies and local subsystems.",
+    inputs: ["Optional: <code>--cwd</code>. The command always emits its structured doctor report; <code>--json</code> is accepted for CLI consistency."],
+    effect: "Runs Brama, Weles, storage, process, MCP, extensions, LSP, browser, TUI keymap, task, memory, and collaboration probes, then prints a JSON report with per-probe evidence and latency.",
+    refusals: [
+      "The command exits unsuccessfully when any active probe is unavailable; degraded or inactive evidence remains explicit in the report.",
+      "Storage probe failures and serialization failures are returned as errors instead of a healthy result.",
+    ],
+  },
+  {
+    path: "conformance",
+    invocation: "jeden conformance [--json] [--cwd path]",
+    purpose: "Evaluate Jeden's canonical completion areas, production scopes, evidence, and UI-honesty contract.",
+    inputs: ["Optional: <code>--cwd</code>. Output is canonical compact JSON; <code>--json</code> is accepted but not required."],
+    effect: "Reads source/inventory evidence, computes every area and production-scope status plus UI-honesty findings, sorts the report deterministically, and prints it without changing product state.",
+    refusals: [
+      "The command exits unsuccessfully when the report's <code>complete</code> field is false, including missing evidence, failed behavior/contracts, incomplete production scopes, or UI-honesty findings.",
+      "Report construction or canonical serialization errors are returned and no passing verdict is emitted.",
+    ],
+  },
+  {
+    path: "probierz",
+    invocation: "jeden probierz [args...]",
+    purpose: "Run Probierz discovery, evidence, and gate commands with the active Jeden executable and model configuration.",
+    inputs: [
+      "Optional: arguments forwarded verbatim to Probierz. With none, Jeden runs <code>probierz status jeden --text</code>.",
+      "<code>PROBIERZ_ROOT</code> may select a source checkout; otherwise a sibling checkout is preferred and then the installed <code>probierz</code> executable.",
+    ],
+    effect: "Sets <code>TUI_CMD</code> to the current Jeden executable when absent, propagates the selected model as <code>JEDEN_MODEL</code> when needed, and lets Probierz own its reports, artifacts, and gate output.",
+    refusals: [
+      "Launch failure is reported with the instruction to set <code>PROBIERZ_ROOT</code> or install the CLI.",
+      "Any non-success Probierz status is returned as <code>Probierz exited with ...</code>; Jeden never converts a failed gate into success.",
+    ],
+  },
+  {
+    path: "capabilities",
+    invocation: "jeden capabilities [--json] [--cwd path]",
+    purpose: "Inspect Jeden's atomic capability-discovery and health snapshot.",
+    inputs: ["Optional: <code>--cwd</code> for project capability discovery and <code>--json</code> for the full versioned descriptor snapshot."],
+    effect: "Discovers tools, slash commands, views, extensions, plugins, MCP servers, skills, agents, rules, and services; prints per-kind availability in text or the complete descriptor, binding, health, diagnostics, and generation data in JSON.",
+    refusals: [
+      "Conflicts and unavailable capabilities are reported as diagnostics and are not exposed as executable.",
+      "JSON serialization failure or a poisoned rebuild lock is returned as an error rather than a partial healthy snapshot.",
+    ],
+  },
+  {
+    path: "completions",
+    invocation: "jeden completions <bash|zsh|fish>",
+    purpose: "Generate a shell-completion program from Jeden's current CLI usage and builtin slash-command registry.",
+    inputs: ["Required: exactly one supported shell name: <code>bash</code>, <code>zsh</code>, or <code>fish</code>."],
+    effect: "Prints the completion script to stdout. The model is derived from the in-repo usage and capability tables so commands, global flags, command flags/actions, and slash words stay aligned.",
+    refusals: ["A missing or unknown shell is refused as <code>unknown shell '&lt;missing-or-value&gt;': usage: jeden completions &lt;bash|zsh|fish&gt;</code>."],
+  },
+  {
+    path: "worktree",
+    invocation: "jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]",
+    purpose: "Inspect or safely clear stale Git worktrees owned by Jeden's task runtime.",
+    inputs: [
+      "No action defaults to <code>list</code>.",
+      "<code>--dry-run</code> previews <code>clear</code>; <code>--json</code> selects structured rows and <code>--cwd</code> selects the repository.",
+    ],
+    effect: "Lists task-record-correlated managed worktrees, or removes only stale worktrees that pass canonical managed-root, checkout, and repository-top safety checks.",
+    refusals: [
+      "Unexpected arguments are refused with <code>usage: jeden worktree [list|clear] [--dry-run] [--json]</code>.",
+      "Clear skips the current checkout, repository root, live/unknown work, and any path outside Jeden-managed workspace roots; it reports the reason instead of removing it.",
+    ],
+  },
+  {
+    path: "token",
+    invocation: "jeden token [--list] [--reveal] [--json]",
+    purpose: "Print the agent's own Brama credential for shell scripting, redacted unless explicitly revealed.",
+    inputs: [
+      "Required environment: non-empty <code>BRAMA_URL</code> and <code>WISENT_APP_AGENT_AUTH_SECRET</code>. <code>WISENT_APP_AGENT_ID</code> is included when configured.",
+      "<code>--reveal</code> prints the bare secret; <code>--list</code> adds Weles accounts to text output; <code>--json</code> returns the structured URL, agent id, and redacted or revealed token.",
+    ],
+    effect: "Reads credentials from process memory and prints them; it does not persist, rotate, or revoke credentials. Default text reveals only the final four characters and length.",
+    refusals: [
+      "Missing router URL is refused as <code>BRAMA_URL is required; configure the Brama model-router service URL</code>.",
+      "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; launch with bin/jeden-rust or scripts/run-with-stado.sh</code>.",
+    ],
+  },
+  {
+    path: "stats",
+    invocation: "jeden stats [--json|--summary|--serve [--port N]]",
+    purpose: "Show local usage, quota, and session totals or serve the same snapshot as a loopback dashboard.",
+    inputs: [
+      "No mode prints the full text snapshot; <code>--json</code> prints structured data and <code>--summary</code> prints one project summary line.",
+      "<code>--serve</code> binds <code>127.0.0.1</code>; <code>--port N</code> selects a <code>u16</code> port, defaulting to 3847 when absent or unparsable.",
+    ],
+    effect: "Reads project/user usage ledgers, platform quota availability, and recent local sessions. Serve mode exposes only <code>/</code> and <code>/api/stats</code> on loopback until stopped.",
+    refusals: [
+      "Serve mode refuses a loopback bind failure as <code>cannot bind 127.0.0.1:&lt;port&gt;: ...</code>.",
+      "Unknown HTTP paths return 404. Unavailable quota is reported in the snapshot rather than represented as available.",
+    ],
+  },
+  {
+    path: "gallery",
+    invocation: "jeden gallery [--theme NAME|--all] [--color]",
+    purpose: "Render the TUI component gallery under the effective theme or every bundled preset.",
+    inputs: [
+      "Optional: <code>--theme NAME</code> for one preset, <code>--all</code> for every preset, and <code>--color</code> to force ANSI color output.",
+      "With no theme option, the currently effective theme is used.",
+    ],
+    effect: "Prints deterministic fixture views for messages, pickers, tables, tabs, confirmations, progress, markdown, diff, QR, and related TUI components. Temporary theme environment changes are restored before return.",
+    refusals: ["An unknown requested theme is refused as <code>unknown theme `NAME`; bundled presets: ...</code>."],
+  },
+];

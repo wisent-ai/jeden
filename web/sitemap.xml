@@ -325,5 +325,40 @@
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
     </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/list</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/add</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/pause</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/resume</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/cancel</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/continue</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
   </urlset>
   

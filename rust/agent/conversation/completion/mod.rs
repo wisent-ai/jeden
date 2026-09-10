@@ -199,7 +199,7 @@ impl Conversation {
         if state.complete() {
             return Ok("No retained work remains.".into());
         }
-        if state.status() == "paused" {
+        if state.status() == "paused" && state.blocker.is_none() {
             return Err("Retained work is paused; resume its tasks before continuing.".into());
         }
         self.continuation = true;
