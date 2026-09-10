@@ -34,7 +34,7 @@ Included capabilities are listed under [Current scope](#current-scope). Explicit
 - Jeden never handles cardholder data; commercial billing is owned by Wisent Platform Billing.
 - Jeden does not define autonomous objective pursuit; [Pursuit](https://github.com/wisent-ai/pursuit) owns intent distillation, outcome contracts, independent reviews, repair loops, validators, and receipts, while Jeden supplies model conversations and tools through the integration interface.
 
-Supported promoted environments: Stado builds `darwin-arm64` and `linux-amd64` from `.wisent-release.json`. Jeden still supports the existing `x86_64-pc-windows-msvc` output, but Stado v1 has no Windows runner coordinate; `scripts/release/package-windows.sh` refuses rather than dropping Windows or substituting different bytes.
+Supported promoted environments: Stado builds `darwin-arm64` and `linux-amd64` from `.wisent-release.json`. The Windows native build remains checked by CI; the release manifest does not declare a Windows fleet runner or pretend another platform produced Windows bytes.
 
 Operator-managed and external: the Brama URL and signing credential (Stado/Skarbiec-managed), Wisent Platform Billing configuration, and MCP server configuration.
 
@@ -94,6 +94,16 @@ jeden run "Read this project's package.json and explain its entry points."
 ```
 
 The [canonical documentation](https://jeden.wisent.com/docs) owns the full setup, credential, platform, approval, onboarding and operational instructions. The [CLI reference](https://jeden.wisent.com/docs/cli) describes every command and refusal. Keep the signed sandbox helper beside the executable on macOS.
+
+On macOS, the native build signs both executables through
+`wisent-products signing sign --product jeden`, using an available Apple
+Development or Developer ID Application identity. An ad-hoc sandbox helper is
+refused. `/rebuild` captures the running identity before compilation and
+verifies the replacement against that identity before resuming the session.
+The release recipe uses `release/stado-build.sh`, signs before writing
+`evidence/DIGESTS`, and uses Stado's real signed build/publication receipt;
+it no longer names the deleted release scripts or their unsigned DSSE wrapper.
+See the shared [macOS signing contract](https://stado.wisent.com/docs/signing).
 
 ## Retained task completion
 
@@ -203,11 +213,11 @@ For model calls, Jeden discovers active Weles subscriptions and their quota snap
 
 ## Release automation
 
-The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and passes that exact value, source directory, output directory, and platform to the checked-in `scripts/release/*` entrypoints; no run number or provider identity participates in the version.
+The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies the source and output directories to `release/stado-build.sh`; no run number or provider identity participates in the release version.
 
-Each supported fleet runner performs a locked release compile and stages the real `jeden` executable with SPDX SBOM, in-toto/SLSA provenance, and a DSSE evidence payload. Stado archives the declared stage mapping, records the source and build receipts, and obtains release signatures from Skarbiec-owned authority before candidate or stable promotion. Stable promotion reconciles the declared runtime without rebuilding bytes.
+The recipe stages `bin/jeden`, the signed Darwin sandbox helper where applicable, and `evidence/DIGESTS`. Stado owns the signed source/build/publication receipts and archives the declared stage mapping. Stable promotion reconciles the published runtime without rebuilding its bytes.
 
-`darwin-arm64` and `linux-amd64` are canonical promoted outputs. The existing MSVC Windows output remains an explicit prerequisite: until Stado has a Windows fleet runner, `scripts/release/package-windows.sh` exits with a refusal and the manifest does not pretend that a Darwin or Linux runner produced Windows bytes.
+`darwin-arm64` and `linux-amd64` are the declared promoted outputs. A compilation gate is not evidence that the model-backed completion journey passed; the real contract run and its result remain separate recorded evidence.
 
 ## Configuration and context
 

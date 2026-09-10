@@ -13,18 +13,16 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["scripts/release/quality-build.sh"]
+          "argv": ["cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
       ],
       "build": {
-        "argv": ["scripts/release/build.sh"]
+        "argv": ["release/stado-build.sh", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "stage": {
-        "stage-darwin-arm64/bin/jeden": "bin/jeden",
-        "stage-darwin-arm64/bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
-        "stage-darwin-arm64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
-        "stage-darwin-arm64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
-        "stage-darwin-arm64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+        "bin/jeden": "bin/jeden",
+        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
+        "evidence/DIGESTS": "evidence/DIGESTS"
       }
     },
     "linux-amd64": {
@@ -32,23 +30,21 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["scripts/release/quality-build.sh"]
+          "argv": ["cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
       ],
       "build": {
-        "argv": ["scripts/release/build.sh"]
+        "argv": ["release/stado-build.sh", "--bin", "jeden"]
       },
       "stage": {
-        "stage-linux-amd64/bin/jeden": "bin/jeden",
-        "stage-linux-amd64/receipts/sbom.spdx.json": "receipts/sbom.spdx.json",
-        "stage-linux-amd64/receipts/provenance.intoto.json": "receipts/provenance.intoto.json",
-        "stage-linux-amd64/receipts/dsse-evidence.json": "receipts/dsse-evidence.json"
+        "bin/jeden": "bin/jeden",
+        "evidence/DIGESTS": "evidence/DIGESTS"
       }
     }
   },
   "runtime": {
-    "binary": "jeden",
-    "launcher": "jeden",
+    "binary": "bin/jeden",
+    "launcher": "bin/jeden",
     "config_schema": 4,
     "state_schema": 2,
     "minimum_stado_version": "0.6.1",
