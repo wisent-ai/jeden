@@ -43,6 +43,19 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .ok_or("cargo metadata omitted target_directory")?;
+    #[cfg(target_os = "macos")]
+    let previous_signature = {
+        let previous = std::env::current_exe()
+            .map_err(|error| format!("cannot identify the running Jeden executable: {error}"))?;
+        let report = Command::new("wisent-products")
+            .args(["signing", "inspect", "--json"])
+            .arg(previous)
+            .output()
+            .map_err(|error| format!("cannot inspect the running code identity: {error}"))?;
+        let reports: Vec<Value> = serde_json::from_slice(&report.stdout)
+            .map_err(|error| format!("cannot read the running code identity: {error}"))?;
+        reports.into_iter().find(|row| row["state"] == "stable")
+    };
 
     let status = Command::new(&cargo)
         .args(["build", "--release", "--manifest-path"])
@@ -57,6 +70,38 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
     let executable = target_dir
         .join("release")
         .join(format!("jeden{}", std::env::consts::EXE_SUFFIX));
+    #[cfg(target_os = "macos")]
+    {
+        let mut signer = Command::new("wisent-products");
+        signer.args(["signing", "sign"]);
+        if let Some(previous) = &previous_signature {
+            signer.args([
+                "--identifier",
+                previous["identifier"].as_str().ok_or("signing report omitted identifier")?,
+                "--identity",
+                previous["authority"].as_str().ok_or("signing report omitted authority")?,
+            ]);
+        } else {
+            signer.args(["--product", "jeden"]);
+        }
+        let output = signer.arg(&executable).output()
+            .map_err(|error| format!("cannot start stable macOS signing: {error}"))?;
+        if !output.status.success() {
+            return Err(command_failure("stable macOS signing", &output.stderr));
+        }
+        if let Some(previous) = previous_signature {
+            let requirement = previous["requirement"].as_str().ok_or("signing report omitted requirement")?;
+            let proof = Command::new("/usr/bin/codesign")
+                .args(["--verify", "--strict", "-R"])
+                .arg(format!("={requirement}"))
+                .arg(&executable)
+                .output()
+                .map_err(|error| format!("cannot verify update identity: {error}"))?;
+            if !proof.status.success() {
+                return Err(command_failure("update changed macOS code identity", &proof.stderr));
+            }
+        }
+    }
     verify_candidate(&executable)?;
     Ok(RelaunchPlan {
         executable,

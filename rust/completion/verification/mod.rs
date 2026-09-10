@@ -23,7 +23,9 @@ impl EvidenceIndex {
         let source = canonical(&reference.session_path)?;
         let (receipts, independent) = if source == self.reviewer {
             (&self.reviewer_receipts, true)
-        } else if source == self.parent {
+        } else if source == self.parent || self.parent_receipts.get(&reference.event_id)
+            .and_then(|receipt| receipt.get("sessionPath")).and_then(Value::as_str)
+            .is_some_and(|path| canonical(path).is_ok_and(|path| path == source)) {
             (&self.parent_receipts, false)
         } else {
             return Err("verification cited a session outside this execution and its independent review".into());

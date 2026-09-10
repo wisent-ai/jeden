@@ -1,7 +1,7 @@
 use crate::cli::sessions::ledger_v2::store::read_events;
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
 pub(crate) fn failed(result: &Value) -> bool {
     result.get("ok").and_then(Value::as_bool) == Some(false)
@@ -14,15 +14,25 @@ pub(crate) fn failed(result: &Value) -> bool {
 }
 
 pub(crate) fn receipts(session: &Path) -> Result<BTreeMap<String, Value>, String> {
-    let ledger = read_events(session)?;
-    if ledger.recovered_truncated_tail {
-        return Err(format!("evidence session has a truncated tail: {}", session.display()));
+    lineage_receipts(session, &mut BTreeSet::new())
+}
+
+fn lineage_receipts(session: &Path, visited: &mut BTreeSet<PathBuf>) -> Result<BTreeMap<String, Value>, String> {
+    let session = std::fs::canonicalize(session).map_err(|error| error.to_string())?;
+    if !visited.insert(session.clone()) {
+        return Err("evidence session lineage contains a cycle".into());
     }
+    let ledger = read_events(&session)?;
     let mut receipts = BTreeMap::new();
     let mut input = Value::Null;
     for event in ledger.events {
         let data = event.payload.data();
         match event.payload.kind() {
+            "lineage" => {
+                let parent = data.get("parentSession").and_then(Value::as_str)
+                    .ok_or("evidence lineage has no parent session")?;
+                receipts.extend(lineage_receipts(Path::new(parent), visited)?);
+            }
             "tool_call" => input = data.get("input").cloned().unwrap_or(Value::Null),
             "tool_result" => {
                 let result = data.get("result").cloned().unwrap_or(Value::Null);
@@ -33,8 +43,10 @@ pub(crate) fn receipts(session: &Path) -> Result<BTreeMap<String, Value>, String
                     "input": input,
                     "result": result,
                     "failed": failed(&result),
+                    "recoveredTruncatedTail": ledger.recovered_truncated_tail,
                     "checksum": event.checksum,
                 }));
+                input = Value::Null;
             }
             _ => {}
         }

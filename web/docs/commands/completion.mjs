@@ -29,7 +29,7 @@ export const completionCommands = [
     invocation: 'jeden todo add "request" [--session <id-or-path>] [--json]',
     purpose: "Record a user request without executing it or inventing its acceptance result.",
     inputs: [selection, "Required: nonempty request text. When no active session exists, a new durable session is created."],
-    effect: "Appends an unplanned request and preserves every earlier request. It does not call a model. Continue later to record the acceptance criteria independently and execute the request.",
+    effect: "Appends an unplanned request and preserves every earlier request. It does not call a model. Desktop and mobile expose Add without running in their Tasks panels. Continue later to record acceptance criteria independently and execute the request.",
     refusals: ["Missing text returns the todo usage. Storage failures are reported without claiming the request was completed."],
   },
   ...[

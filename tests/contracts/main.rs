@@ -74,16 +74,40 @@ impl Home {
             "--reason", "Isolated product journey", "--json"])
     }
     fn rpc(&self, requests: &[Value]) -> Vec<Value> {
+        fs::write(self.root.join("evidence").join(format!("rpc-input-{}.json", self.sequence.get())),
+            serde_json::to_vec_pretty(requests).unwrap()).unwrap();
         let mut child = self.command().arg("rpc").stdin(Stdio::piped())
             .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let mut input = child.stdin.take().unwrap();
-        for request in requests { writeln!(input, "{request}").unwrap(); }
+        let mut output_stream = BufReader::new(child.stdout.take().unwrap());
+        let mut frames = Vec::new();
+        let mut transcript = String::new();
+        for request in requests {
+            writeln!(input, "{request}").unwrap();
+            input.flush().unwrap();
+            loop {
+                let mut line = String::new();
+                assert!(output_stream.read_line(&mut line).unwrap() > usize::default(), "RPC closed before answering {request}");
+                let frame: Value = serde_json::from_str(&line).unwrap();
+                let answered = frame["id"] == request["id"];
+                transcript.push_str(&line);
+                frames.push(frame);
+                if answered { break; }
+            }
+        }
         writeln!(input, "{}", json!({"id":"shutdown", "method":"shutdown", "params":{}})).unwrap();
         drop(input);
-        let output = child.wait_with_output().unwrap();
+        for line in output_stream.lines() {
+            let line = line.unwrap();
+            frames.push(serde_json::from_str(&line).unwrap());
+            transcript.push_str(&line);
+            transcript.push('\n');
+        }
+        let mut output = child.wait_with_output().unwrap();
+        output.stdout = transcript.into_bytes();
         self.record(&["rpc"], &output);
         assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
-        String::from_utf8(output.stdout).unwrap().lines().map(|line| serde_json::from_str(line).unwrap()).collect()
+        frames
     }
     fn config(&self) -> Value {
         serde_json::from_slice(&fs::read(self.root.join("home/.jeden/config.yml")).unwrap()).unwrap()
@@ -218,5 +242,29 @@ fn task_contract_delivery_observes_real_files_and_retains_results_on_resume() {
     home.ok(&["resume", home.session().to_str().unwrap()]);
     assert_eq!(home.state()["requests"], before);
     assert_eq!(fs::metadata(home.workspace().join("alpha.txt")).unwrap().modified().unwrap(), modification);
+    home.passed();
+}
+
+#[test]
+fn graphical_clients_queue_requests_without_running_a_model() {
+    let home = Home::new("queued-rpc");
+    let options = json!({"cwd": home.workspace(), "allowWrite": true, "allowCommand": false});
+    let frames = home.rpc(&[
+        json!({"id":"new", "method":"session/new", "params":{"options":options}}),
+        json!({"id":"add-mobile", "method":"session/completion/add", "params":{"sessionId":"session-1", "prompt":"Create queued.txt containing QUEUED."}}),
+        json!({"id":"add-desktop", "method":"session/prompt", "params":{"sessionId":"session-1", "requestId":"desktop-add", "prompt":"/todo add \"Explain the queued work without cancelling it.\""}}),
+        json!({"id":"empty", "method":"session/completion/add", "params":{"sessionId":"session-1", "prompt":""}}),
+        json!({"id":"state", "method":"session/completion/get", "params":{"sessionId":"session-1"}}),
+    ]);
+    let source = frames.iter().find(|frame| frame["id"] == "new").unwrap()["result"]["sessionPath"].as_str().unwrap();
+    let saved: Value = serde_json::from_slice(&fs::read(PathBuf::from(source).join("completion.json")).unwrap()).unwrap();
+    let prompts = saved["requests"].as_array().unwrap().iter().map(|request| request["prompt"].as_str().unwrap()).collect::<Vec<_>>();
+    assert_eq!(prompts, ["Create queued.txt containing QUEUED.", "Explain the queued work without cancelling it."]);
+    assert!(saved["requests"].as_array().unwrap().iter().all(|request| request["planned"] == false));
+    assert!(!home.workspace().join("queued.txt").exists());
+    let refused = frames.iter().find(|frame| frame["id"] == "empty").unwrap();
+    assert_eq!(refused["error"]["code"], "invalid_params");
+    let state = frames.iter().find(|frame| frame["id"] == "state").unwrap();
+    assert_eq!(state["result"]["completion"]["complete"], false);
     home.passed();
 }

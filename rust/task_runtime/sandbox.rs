@@ -39,6 +39,7 @@ fn signed(path: &Path) -> Result<(), String> {
     let output = Command::new("/usr/bin/codesign")
         .arg("--verify")
         .arg("--strict")
+        .args(["-R", "=anchor apple generic"])
         .arg(path)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
