@@ -24,33 +24,75 @@ pub struct ToolAction {
     pub input: Value,
 }
 
+/// Prefix of every refusal for an answer that stopped before it was whole.
+///
+/// A cut-off answer used to reach the caller as serde's own `EOF while parsing
+/// a string at line 1 column 1440`, a column in text nobody can see. On
+/// 2026-09-10 that sentence ended a whole assignment, because the answer it
+/// described was one truncated intake plan. The prefix lets a turn recognise
+/// the shape of the failure and say what happened to the answer.
+pub const INCOMPLETE_ANSWER: &str = "model answer stopped mid-JSON";
+
+/// Prefix of every refusal for content that carries no JSON object at all.
+/// Prose is a legitimate answer, so this refusal is not a failure everywhere.
+pub const NON_JSON_ANSWER: &str = "model returned non-json content";
+
+pub fn is_incomplete_answer(message: &str) -> bool {
+    message.starts_with(INCOMPLETE_ANSWER)
+}
+
+fn non_json(raw: &str) -> String {
+    format!(
+        "{NON_JSON_ANSWER}: {}",
+        raw.chars().take(200).collect::<String>()
+    )
+}
+
+/// The first complete JSON object in `text`, or why there is none.
+///
+/// The scan tracks strings and escapes, so a brace inside a string value never
+/// closes an object, and an answer that ends mid-object is reported as
+/// truncated instead of being sliced at its last brace - which is how a cut
+/// answer used to arrive at serde as an unterminated string.
 pub fn extract_json_object(text: &str) -> Result<&str, String> {
     let raw = text.trim();
     if raw.is_empty() {
         return Err("model returned empty content".into());
     }
-    if raw.starts_with('{') && raw.ends_with('}') {
-        return Ok(raw);
+    let Some(start) = raw.find('{') else {
+        return Err(non_json(raw));
+    };
+    let mut depth = usize::default();
+    let mut in_string = false;
+    let mut escaped = false;
+    for (offset, character) in raw[start..].char_indices() {
+        if in_string {
+            match character {
+                _ if escaped => escaped = false,
+                '\\' => escaped = true,
+                '"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match character {
+            '"' => in_string = true,
+            '{' | '[' => depth += usize::from(true),
+            '}' | ']' => {
+                depth = depth.saturating_sub(usize::from(true));
+                if depth == usize::default() {
+                    return Ok(&raw[start..start + offset + character.len_utf8()]);
+                }
+            }
+            _ => {}
+        }
     }
-    let start = raw.find('{').ok_or_else(|| {
-        format!(
-            "model returned non-json content: {}",
-            raw.chars().take(200).collect::<String>()
-        )
-    })?;
-    let end = raw.rfind('}').ok_or_else(|| {
-        format!(
-            "model returned non-json content: {}",
-            raw.chars().take(200).collect::<String>()
-        )
-    })?;
-    if end <= start {
-        return Err(format!(
-            "model returned non-json content: {}",
-            raw.chars().take(200).collect::<String>()
-        ));
-    }
-    Ok(&raw[start..=end])
+    let bytes = raw.len() - start;
+    Err(if in_string {
+        format!("{INCOMPLETE_ANSWER} after {bytes} bytes: a JSON string is never closed")
+    } else {
+        format!("{INCOMPLETE_ANSWER} after {bytes} bytes: {depth} bracket(s) are never closed")
+    })
 }
 
 fn parse_tool_action(value: &Value) -> Result<ToolAction, String> {
@@ -71,7 +113,8 @@ fn parse_tool_action(value: &Value) -> Result<ToolAction, String> {
 
 pub fn parse_action(text: &str) -> Result<Action, String> {
     let json_text = extract_json_object(text)?;
-    let value: Value = serde_json::from_str(json_text).map_err(|e| e.to_string())?;
+    let value: Value = serde_json::from_str(json_text)
+        .map_err(|error| format!("model answer is not valid JSON: {error}"))?;
     if !value.is_object() {
         return Err("action must be a JSON object".into());
     }

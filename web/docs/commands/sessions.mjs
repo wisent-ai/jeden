@@ -15,6 +15,7 @@ export const sessionCommands = [
       "Model work fails closed when required router configuration or credentials are absent, and write or command tools remain approval-gated unless their tier was granted.",
       "On macOS, a missing task sandbox helper is reported as <code>jeden-sandbox-helper is not installed beside the Jeden executable; build and code-sign it or set JEDEN_TASK_SANDBOX_HELPER</code>. Install the complete release, keeping its signed <code>jeden-sandbox-helper</code> beside <code>jeden</code>; the release SBOM and provenance identify both executables.",
       "A non-rate-limit HTTP failure from Brama includes its status, the requested API path, and the quoted response body. An empty quoted body means that the upstream server supplied no error detail; it is not a model answer. The CLI and RPC report the same failure.",
+      "An answer that arrives cut off or unreadable is not a failed invocation: the exact refusal goes back to the model once in the same turn, recorded as a <code>contract_violation</code> with <code>rule</code> <code>model-answer</code>. A second unusable answer ends the invocation and names what happened to the answer, for example <code>model answer stopped mid-JSON after 191 bytes: a JSON string is never closed; the answer was cut off by the output budget of 48 tokens</code>, and the retained request stays open.",
     ],
   },
   {

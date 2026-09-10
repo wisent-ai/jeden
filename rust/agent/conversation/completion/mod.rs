@@ -1,7 +1,9 @@
 use super::super::*;
-use crate::completion::{self, CompletionReview, CompletionState, IntakePlan};
+use crate::completion::{self, CompletionReview, CompletionState};
 
-const INTAKE: &str = include_str!("../../../completion/prompts/intake.txt");
+mod inspection;
+mod intake;
+
 const REVIEW: &str = include_str!("../../../completion/prompts/review.txt");
 const CONTEXT_PREFIX: &str = "[Jeden completion authority]";
 
@@ -62,46 +64,7 @@ impl Conversation {
         args: &Args,
         hooks: &RunHooks<'_>,
     ) -> Result<(), String> {
-        loop {
-            let state = completion::read_state(&self.recorder.path())?;
-            let Some(request) = state
-                .requests
-                .iter()
-                .find(|request| !request.planned && !request.paused)
-            else {
-                break;
-            };
-            let input = json!({
-                "request": request,
-                "retainedTasks": state.tasks,
-                "workspace": args.cwd,
-                "executionGrants": {"write": args.allow_write, "command": args.allow_command},
-            });
-            hooks.note("recording acceptance requirements before execution");
-            let (text, inspector) = self
-                .inspect_completion(args, INTAKE, &input, hooks)
-                .map_err(|error| self.completion_failure("task_intake", &error, hooks))?;
-            let plan: IntakePlan = serde_json::from_str(crate::protocol::extract_json_object(
-                &text,
-            )?)
-            .map_err(|error| {
-                self.completion_failure(
-                    "task_intake",
-                    &format!("invalid task intake: {error}"),
-                    hooks,
-                )
-            })?;
-            let state =
-                completion::plan_request(&self.recorder.path(), state.revision, &request.id, plan)
-                    .map_err(|error| self.completion_failure("task_intake", &error, hooks))?;
-            self.recorder.record(
-                "completion_review",
-                json!({
-                    "stage": "intake", "reviewerSession": inspector, "revision": state.revision,
-                }),
-            )?;
-            self.publish_completion(&state, hooks)?;
-        }
+        self.plan_pending_requests(args, hooks)?;
         if self.reconcile_completion {
             self.reconcile_completion = false;
             hooks.note("inspecting retained results before continuing interrupted work");
@@ -172,19 +135,19 @@ impl Conversation {
             "executionGrants": {"write": args.allow_write, "command": args.allow_command},
         });
         hooks.note("independently checking all retained acceptance requirements");
-        let (text, inspector) = self
-            .inspect_completion(args, REVIEW, &input, hooks)
-            .map_err(|error| self.completion_failure("acceptance_review", &error, hooks))?;
-        let review: CompletionReview = serde_json::from_str(crate::protocol::extract_json_object(
-            &text,
-        )?)
-        .map_err(|error| {
-            self.completion_failure(
-                "acceptance_review",
-                &format!("invalid acceptance review: {error}"),
-                hooks,
-            )
-        })?;
+        let (review, inspector) = self.corrected_inspection(
+            args,
+            "acceptance_review",
+            REVIEW,
+            &input,
+            hooks,
+            &mut |text| {
+                crate::protocol::extract_json_object(text).and_then(|object| {
+                    serde_json::from_str::<CompletionReview>(object)
+                        .map_err(|error| format!("invalid acceptance review: {error}"))
+                })
+            },
+        )?;
         let reviewed = match completion::apply_review(
             &self.recorder.path(),
             &inspector,
@@ -243,43 +206,6 @@ impl Conversation {
             completion::model_context(&reviewed)
         )}));
         Ok(false)
-    }
-
-    fn inspect_completion(
-        &self,
-        args: &Args,
-        instruction: &str,
-        input: &Value,
-        hooks: &RunHooks<'_>,
-    ) -> Result<(String, PathBuf), String> {
-        let mut inspector = Conversation::new_inspection(&args.cwd)?;
-        inspector.recorder.record(
-            "agent_state",
-            json!({
-                "purpose": "completion_inspection", "sourceSession": self.recorder.path(),
-                "allowWrite": false, "allowCommand": false,
-            }),
-        )?;
-        let mut read_args = args.clone();
-        read_args.allow_write = false;
-        read_args.allow_command = false;
-        read_args.yolo = false;
-        read_args.model_only = false;
-        read_args.autonomous = true;
-        read_args.goal = None;
-        let mut read_hooks = RunHooks {
-            cancel: hooks.cancel.clone(),
-            interactive: false,
-            progress: Box::new(|message| hooks.note(message)),
-            stream: Box::new(|_| {}),
-            trace: Box::new(|event| hooks.trace(event)),
-            ask_user: None,
-            approve: Box::new(|_, _| false),
-            goal_event: None,
-        };
-        let prompt = format!("{instruction}\n\nNative controller input:\n{input}");
-        let text = inspector.run_turn(&read_args, &prompt, &[], &mut read_hooks)?;
-        Ok((text, inspector.session_path()))
     }
 
     pub(crate) fn completion_state(&self) -> Result<Value, String> {

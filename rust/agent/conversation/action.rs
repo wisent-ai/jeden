@@ -3,7 +3,7 @@ use super::*;
 pub(in crate::agent) fn action_or_text(content: &str) -> Result<Action, String> {
     match extract_json_object(content) {
         Ok(_) => parse_action(content),
-        Err(error) if error.starts_with("model returned non-json content") => Ok(Action::Final {
+        Err(error) if error.starts_with(crate::protocol::NON_JSON_ANSWER) => Ok(Action::Final {
             text: content.to_string(),
             report: None,
         }),

@@ -240,7 +240,18 @@ pub(crate) struct IntakePlan {
 pub(crate) struct PlannedTask {
     pub text: String,
     pub criteria: Vec<String>,
+    /// An intake answer that omits the classification is read as work, the
+    /// stricter of the two kinds: a work task is accepted only against an
+    /// independent read-only observation, so a missing `kind` can never make
+    /// completion cheaper than the request asked for. Refusing the whole
+    /// intake instead left the retained request behind a durable blocker
+    /// because one field was absent from an otherwise usable plan.
+    #[serde(default = "work_task")]
     pub kind: TaskKind,
+}
+
+fn work_task() -> TaskKind {
+    TaskKind::Work
 }
 
 #[derive(Debug, Deserialize)]

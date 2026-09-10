@@ -1,4 +1,6 @@
-//! Routing through the real `jeden` binary against the real Brama gateway.
+//! Real turns through the real `jeden` binary against the real Brama gateway:
+//! which route answers a signed agent, and what a turn does with an answer
+//! that arrives unusable.
 //!
 //! Jeden signs every model request as its agent identity, which asks Brama's
 //! entitlements router for a subscription. When every subscription bound to
@@ -6,16 +8,19 @@
 //! and the same request, presented with the caller's own bearer, is answered
 //! from the alias route table. On 2026-09-06 that refusal stopped every Weles
 //! browser run on the dedicated host while the bearer beside it was being
-//! served, so the fallback is part of the contract and is measured here.
+//! served, so the alias answer is part of the contract and is measured here.
+//! On 2026-09-10 a provider truncated one intake answer mid-string and a whole
+//! retained assignment ended as `Work remains open (task_intake): EOF while
+//! parsing a string at line 1 column 1440`, so what a turn does with an
+//! unusable answer is measured here too.
 //!
 //! A turn needs the environment the binary needs: `BRAMA_URL`, `BRAMA_TOKEN`,
-//! `WISENT_APP_AGENT_ID`, `WISENT_APP_AGENT_AUTH_SECRET`, `JEDEN_MODEL`.
-//! The binary resolves the two credentials itself, asking Stado for
-//! `agent:wisent-app/value` and `jeden-model-router/token` when the
-//! environment does not carry them; a missing one fails the test by name
-//! instead of skipping it.
+//! `WISENT_APP_AGENT_ID`, `WISENT_APP_AGENT_AUTH_SECRET`, `JEDEN_MODEL`. The
+//! binary resolves the two credentials from Stado when the environment does
+//! not carry them; a missing one fails the test by name instead of skipping.
 //!
-//! Run: `cargo test --test routing -- --nocapture`
+//! Run: `cargo test --test routing -- --nocapture`. Runs keep home, sessions
+//! and workspace under this checkout's ignored `target/turn-runs`.
 
 use serde_json::Value;
 use std::fs;
@@ -46,7 +51,9 @@ impl Turn {
             );
             env.push((name.to_string(), value));
         }
-        let root = std::env::temp_dir().join(format!("jeden-routing-{tag}-{}", std::process::id()));
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("target/turn-runs")
+            .join(format!("{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
         fs::create_dir_all(root.join("home")).expect("create isolated home");
         fs::create_dir_all(root.join("sessions")).expect("create isolated session root");
@@ -54,18 +61,24 @@ impl Turn {
         Self { root, env }
     }
 
-    /// One `jeden run --model-only` turn, exactly the call Weles makes for a
-    /// browser step, with `overrides` applied last so a case can corrupt one
-    /// credential without touching the others.
-    fn run(&self, prompt: &str, overrides: &[(&str, &str)]) -> (bool, String, String) {
+    fn command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jeden"));
         command
             .env("HOME", self.root.join("home"))
             .env("JEDEN_SESSION_ROOT", self.root.join("sessions"))
+            .env_remove("JEDEN_LANGUAGE")
             .current_dir(self.root.join("workspace"));
         for (name, value) in &self.env {
             command.env(name, value);
         }
+        command
+    }
+
+    /// One `jeden run --model-only` turn, exactly the call Weles makes for a
+    /// browser step, with `overrides` applied last so a case can corrupt one
+    /// credential without touching the others.
+    fn run(&self, prompt: &str, overrides: &[(&str, &str)]) -> (bool, String, String) {
+        let mut command = self.command();
         for (name, value) in overrides {
             command.env(name, value);
         }
@@ -89,11 +102,64 @@ impl Turn {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     }
+
+    /// One complete `jeden run` turn - tools, contract and all - so a case sees
+    /// what the turn does with the answer, not only whether a route answered.
+    fn task(&self, args: &[&str]) -> (bool, String) {
+        let output = self
+            .command()
+            .args(args)
+            .output()
+            .expect("run the jeden binary");
+        let reported = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        fs::write(self.root.join("run-output.txt"), &reported).expect("retain the run output");
+        (output.status.success(), reported)
+    }
+
+    /// Every event of every session this run created, oldest first.
+    fn events(&self) -> Vec<Value> {
+        let mut sessions: Vec<PathBuf> = fs::read_dir(self.root.join("sessions"))
+            .expect("read the isolated session root")
+            .map(|entry| entry.expect("session directory entry").path())
+            .collect();
+        sessions.sort();
+        let mut events = Vec::new();
+        for session in sessions {
+            let Ok(text) = fs::read_to_string(session.join("transcript.jsonl")) else {
+                continue;
+            };
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                events.push(serde_json::from_str(line).expect("a recorded session event"));
+            }
+        }
+        assert!(!events.is_empty(), "the run recorded no session events");
+        events
+    }
+
+    /// Recorded corrections for one rule of the shared `contract_violation`.
+    fn corrections(&self, rule: &str) -> Vec<Value> {
+        self.events()
+            .iter()
+            .filter(|event| {
+                event.pointer("/payload/type").and_then(Value::as_str) == Some("contract_violation")
+            })
+            .map(|event| event["payload"]["data"].clone())
+            .filter(|data| data.get("rule").and_then(Value::as_str) == Some(rule))
+            .collect()
+    }
+}
+
+fn field<'a>(data: &'a Value, name: &str) -> &'a str {
+    data.get(name).and_then(Value::as_str).unwrap_or_default()
 }
 
 #[test]
 fn a_signed_agent_turn_is_answered_even_when_its_subscriptions_are_gone() {
-    let turn = Turn::new("subscription-fallback");
+    let turn = Turn::new("subscription-alias");
     let (ok, stdout, stderr) = turn.run("Reply with the single word ready.", &[]);
     assert!(
         ok,
@@ -107,13 +173,10 @@ fn a_signed_agent_turn_is_answered_even_when_its_subscriptions_are_gone() {
         Some(true),
         "envelope reports a failed turn: {envelope}"
     );
-    let text = envelope
-        .get("text")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_string();
-    assert!(!text.is_empty(), "the model answered nothing: {envelope}");
+    assert!(
+        !field(&envelope, "text").trim().is_empty(),
+        "the model answered nothing: {envelope}"
+    );
 }
 
 #[test]
@@ -137,5 +200,55 @@ fn a_bad_agent_signature_is_refused_and_never_downgraded() {
             || reported.contains("unauthorized")
             || reported.contains("authorization_error"),
         "the refusal did not carry the gateway's own status: {reported}"
+    );
+}
+
+/// An output budget too small for a complete answer is the deterministic shape
+/// of a cut-off answer: the gateway itself reports it incomplete. The turn must
+/// ask once for a whole answer, then refuse by naming the budget.
+#[test]
+fn an_answer_cut_off_by_the_output_budget_is_asked_for_again_before_the_turn_stops() {
+    let turn = Turn::new("output-budget");
+    let model = std::env::var("JEDEN_MODEL").unwrap_or_default();
+    let (ok, reported) = turn.task(&[
+        "run",
+        "Report the absolute path of the workspace directory this turn runs in.",
+        "--json",
+        "--model",
+        &model,
+        "--max-tokens",
+        "48",
+        "--max-steps",
+        "6",
+    ]);
+    let corrections = turn.corrections("model-answer");
+    assert!(
+        corrections
+            .iter()
+            .any(|data| field(data, "outcome") == "requested"),
+        "the first cut-off answer ended the turn instead of being asked again: {reported}"
+    );
+    assert!(
+        !ok,
+        "a turn whose every answer was cut off reported success: {reported}"
+    );
+    assert!(
+        reported.contains("cut off by the output budget of 48 tokens"),
+        "the refusal did not name the budget that cut the answer: {reported}"
+    );
+    assert!(
+        !reported.contains("EOF while parsing"),
+        "the refusal still quotes a JSON parser column: {reported}"
+    );
+    let last = corrections.last().expect("a recorded answer correction");
+    assert_eq!(
+        field(last, "outcome"),
+        "rejected",
+        "the exhausted correction budget was not recorded: {last}"
+    );
+    assert_eq!(
+        last.get("cutOff").and_then(Value::as_bool),
+        Some(true),
+        "the correction does not say the answer was cut off: {last}"
     );
 }
