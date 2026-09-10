@@ -1,5 +1,5 @@
-//! What this product says about git worktrees, driven through the real
-//! `jeden` binary.
+//! What a workspace allows: no git worktree, and no tool write into the
+//! workspace's own Jeden state directory.
 //!
 //! The operator's rule is "MA BYC NIEMOZLIWE UZYCIE WORKTREES. ZERO
 //! SUBAGENTOW NA OSOBNYCH WORKTREES". Two things follow, and both are
@@ -11,14 +11,50 @@
 //!   job workspace, and every strategy it does advertise is one the platform
 //!   layer can actually return.
 //!
-//! The second one is the reason this file exists. A capability list that
+//! That second one is the reason this file exists. A capability list that
 //! nothing implements reads as true to every consumer, and it stayed wrong
 //! for as long as nobody compared it against the code underneath.
+//!
+//! The boundary cases below drive the real tool registry against a real
+//! directory on this filesystem. They were written after a turn wrote both
+//! files of its assignment into `.jeden/` and reported the work done, and
+//! after another turn was refused an absolute in-workspace path, guessed a
+//! relative form and created a directory nobody asked for.
 
+use jeden::tool_runtime::runtime_ops::{ArtifactSink, CancellationToken, OperationContext};
+use jeden::tool_runtime::{execute, ToolRuntime};
+use serde_json::json;
+use std::fs;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 fn jeden() -> Command {
     Command::new(env!("CARGO_BIN_EXE_jeden"))
+}
+
+/// One isolated workspace under this checkout's ignored build directory.
+fn workspace(area: &str) -> PathBuf {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/workspace-runs")
+        .join(format!("{area}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create the isolated workspace");
+    root
+}
+
+fn runtime(cwd: &Path) -> ToolRuntime<'_> {
+    ToolRuntime {
+        cwd,
+        artifact_dir: None,
+        operation: OperationContext::new(
+            CancellationToken::new(),
+            ArtifactSink::new(cwd.join(".artifacts")),
+        ),
+        allow_write: true,
+        allow_command: false,
+        interactive: false,
+        ask_user: None,
+    }
 }
 
 /// Every value `WorkspacePlatform::isolate` can return, across both
@@ -101,4 +137,63 @@ fn listing_worktrees_still_works_and_claims_no_creation() {
         !text.contains("git worktree add"),
         "the listing does not describe a creation path this product lacks: {text}"
     );
+}
+
+#[test]
+fn no_tool_may_change_the_workspace_state_directory() {
+    let root = workspace("state-directory");
+    fs::create_dir_all(root.join(".jeden")).expect("create the state directory");
+    fs::write(root.join(".jeden/mode-state.json"), "{}").expect("seed the mode state");
+    let refusal = execute(
+        &runtime(&root),
+        "write_file",
+        &json!({"path": ".jeden/probe.txt", "content": "PROBE"}),
+    )
+    .expect_err("a write into the state directory is refused");
+    assert!(
+        refusal.contains("no tool may change it"),
+        "the refusal does not say the state directory is not writable: {refusal}"
+    );
+    assert!(!root.join(".jeden/probe.txt").exists());
+    let read = execute(
+        &runtime(&root),
+        "read_file",
+        &json!({"path": ".jeden/mode-state.json"}),
+    )
+    .expect("reading the state directory stays allowed");
+    assert_eq!(read["content"], "{}");
+}
+
+#[test]
+fn an_absolute_path_inside_the_workspace_writes_the_file_it_names() {
+    let root = workspace("absolute-path");
+    let target = root.join("alpha.txt");
+    let written = execute(
+        &runtime(&root),
+        "write_file",
+        &json!({"path": target.to_string_lossy(), "content": "ALPHA"}),
+    )
+    .expect("an absolute path inside the workspace names a file inside it");
+    assert_eq!(written["ok"], true);
+    assert_eq!(fs::read(&target).expect("the named file"), b"ALPHA");
+    assert_eq!(
+        fs::read_dir(&root)
+            .expect("read the workspace")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .count(),
+        usize::default(),
+        "the write invented a directory the path never named"
+    );
+    let refusal = execute(
+        &runtime(&root),
+        "write_file",
+        &json!({"path": "/etc/jeden-probe.txt", "content": "ALPHA"}),
+    )
+    .expect_err("a path outside the workspace is refused");
+    assert!(
+        refusal.contains("outside this workspace") && refusal.contains(&root.display().to_string()),
+        "the refusal does not name the root paths are taken from: {refusal}"
+    );
+    assert!(!Path::new("/etc/jeden-probe.txt").exists());
 }

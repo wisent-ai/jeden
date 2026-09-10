@@ -39,7 +39,50 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
             eprintln!("jeden: {variable} is unavailable: {said}");
         }
     }
-    runtime::model_router_config(config, args)
+    let mut router = runtime::model_router_config(config, args);
+    if let Some(unread) = catalog_left_unread(&router) {
+        eprintln!(
+            "jeden: the Brama catalog could not be read ({unread}); continuing with the configured route `{}`",
+            router.model
+        );
+        router.config_error = None;
+    }
+    router
+}
+
+/// The catalog read that left the catalog unread rather than answering about
+/// the configured model.
+///
+/// Discovery is how a model name becomes a readable refusal; it is not the
+/// authority on whether a route works, because the gateway that serves the
+/// request is. On 2026-09-10 three retained assignments ended at
+/// `Work remains open (task_intake): Brama transport error ...` because one
+/// `GET /v1/models` timed out while chat calls in the same minute were being
+/// served. A configured route now reaches the gateway and the request itself
+/// answers. The prefixes below are `BramaError`'s own sentences, the only
+/// shape of that failure which survives into `ChatConfig`; an explicit
+/// refusal (`"retryable": false`), a missing model or any other configuration
+/// error still stops the run here.
+fn catalog_left_unread(router: &ChatConfig) -> Option<&str> {
+    let error = router.config_error.as_deref()?;
+    if router.model.trim().is_empty() || error.contains("\"retryable\":false") {
+        return None;
+    }
+    let unread = error.starts_with("Brama transport error")
+        || error.starts_with("Brama rate limited the request")
+        || http_status(error).is_some_and(|status| (500..600).contains(&status));
+    unread.then_some(error)
+}
+
+/// The HTTP status a `BramaError::Http` sentence carries, if it is one.
+fn http_status(error: &str) -> Option<u16> {
+    error
+        .strip_prefix("Brama returned HTTP ")?
+        .split(':')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 pub(crate) use runtime::now_stamp;

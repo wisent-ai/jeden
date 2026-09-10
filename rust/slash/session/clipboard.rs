@@ -28,7 +28,7 @@ fn clipboard_candidates() -> Vec<(&'static str, Vec<&'static str>)> {
     }
 }
 
-pub(super) fn write_clipboard(payload: &str) -> Result<String, String> {
+pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
     let mut last_error = "no clipboard command was attempted".to_string();
     for (command, args) in clipboard_candidates() {
         match Command::new(command)

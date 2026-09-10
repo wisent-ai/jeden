@@ -1,19 +1,12 @@
 //! Real turns through the real `jeden` binary against the real Brama gateway:
 //! which route answers a signed agent, what a turn does with an answer that
-//! arrives unusable, and where a turn is allowed to write.
+//! arrives unusable, and what an unreadable catalog is allowed to decide.
 //!
-//! Jeden signs every model request as its agent identity, which asks Brama's
-//! entitlements router for a subscription. When every subscription bound to
-//! that agent is unavailable, Brama refuses with `subscription_unavailable`
-//! and the same request, presented with the caller's own bearer, is answered
-//! from the alias route table. On 2026-09-06 that refusal stopped every Weles
-//! browser run on the dedicated host while the bearer beside it was being
-//! served, so the alias answer is part of the contract and is measured here.
-//! On 2026-09-10 a provider truncated one intake answer mid-string and a whole
-//! retained assignment ended as `Work remains open (task_intake): EOF while
-//! parsing a string at line 1 column 1440`, and another run wrote both files
-//! of its assignment into the workspace's own `.jeden` state directory and
-//! reported the work done, so both are measured here too.
+//! Each case here was written after a real run lost its work to the shape it
+//! measures: a subscription refusal that stopped every Weles browser run on
+//! the dedicated host, a truncated intake answer that ended a whole retained
+//! assignment, and a `GET /v1/models` timeout that ended an assignment before
+//! its request ever reached the gateway.
 //!
 //! A turn needs the environment the binary needs: `BRAMA_URL`, `BRAMA_TOKEN`,
 //! `WISENT_APP_AGENT_ID`, `WISENT_APP_AGENT_AUTH_SECRET`, `JEDEN_MODEL`. The
@@ -141,19 +134,14 @@ impl Turn {
         events
     }
 
-    /// The recorded payloads of one event kind, oldest first.
-    fn payloads(&self, kind: &str) -> Vec<Value> {
-        self.events()
-            .iter()
-            .filter(|event| event.pointer("/payload/type").and_then(Value::as_str) == Some(kind))
-            .map(|event| event["payload"]["data"].clone())
-            .collect()
-    }
-
     /// Recorded corrections for one rule of the shared `contract_violation`.
     fn corrections(&self, rule: &str) -> Vec<Value> {
-        self.payloads("contract_violation")
-            .into_iter()
+        self.events()
+            .iter()
+            .filter(|event| {
+                event.pointer("/payload/type").and_then(Value::as_str) == Some("contract_violation")
+            })
+            .map(|event| event["payload"]["data"].clone())
             .filter(|data| data.get("rule").and_then(Value::as_str) == Some(rule))
             .collect()
     }
@@ -259,42 +247,30 @@ fn an_answer_cut_off_by_the_output_budget_is_asked_for_again_before_the_turn_sto
     );
 }
 
-/// A turn told to put its file in the harness's own state directory must be
-/// refused there and told so in words, and the file never appears.
+/// Discovery turns a model name into a readable refusal; it is not the
+/// authority on whether a route works. A gateway whose catalog cannot be read
+/// must not end the run before the operator's request reaches it.
 #[test]
-fn a_write_into_the_workspace_state_directory_is_refused_with_the_reason() {
-    let turn = Turn::new("state-directory");
-    let model = std::env::var("JEDEN_MODEL").unwrap_or_default();
-    let (_, reported) = turn.task(&[
-        "run",
-        "Write a file at .jeden/probe.txt containing exactly PROBE. Write nothing anywhere else, \
-         then report what happened.",
-        "--model",
-        &model,
-        "--allow-write",
-        "--max-steps",
-        "4",
-    ]);
-    assert!(
-        turn.payloads("tool_call")
-            .iter()
-            .any(|data| field(&data["input"], "path").contains(".jeden")),
-        "no write reached the state directory, so this case proved nothing: {reported}"
+fn an_unreadable_catalog_does_not_decide_the_run() {
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").expect("reserve a port");
+    let endpoint = format!("http://{}", closed.local_addr().expect("the reserved port"));
+    drop(closed);
+    let turn = Turn::new("unread-catalog");
+    let (ok, stdout, stderr) = turn.run(
+        "Reply with the single word ready.",
+        &[("BRAMA_URL", &endpoint)],
     );
-    let refusals: Vec<String> = turn
-        .payloads("tool_result")
-        .iter()
-        .filter(|data| data["result"].get("ok").and_then(Value::as_bool) == Some(false))
-        .map(|data| field(&data["result"], "error").to_string())
-        .collect();
+    let reported = format!("{stdout}{stderr}");
     assert!(
-        refusals
-            .iter()
-            .any(|refusal| refusal.contains("no tool may change it")),
-        "the state directory accepted a write or refused it without a reason: {refusals:?}"
+        !ok,
+        "a turn without any gateway reported success: {reported}"
     );
     assert!(
-        !turn.root.join("workspace/.jeden/probe.txt").exists(),
-        "the file landed in the state directory anyway"
+        reported.contains("the Brama catalog could not be read"),
+        "the unread catalog was not reported: {reported}"
+    );
+    assert!(
+        reported.contains("/v1/chat/completions"),
+        "the run stopped at discovery instead of the request it was asked to make: {reported}"
     );
 }

@@ -2,6 +2,7 @@
 
 pub(crate) mod auth;
 pub(crate) mod billing;
+pub(crate) mod clipboard;
 pub(crate) mod commands;
 pub(crate) mod completions;
 pub(crate) mod config;

@@ -35,6 +35,7 @@ pub(crate) fn usage() -> String {
         "  jeden export <session-id-or-path> [output.json]\n",
         "  jeden artifacts <session-id-or-path>\n",
         "  jeden artifact <session-id-or-path> <name> [output]\n",
+        "  jeden copy <text> | jeden copy - [--json] — hand an exact payload to the operator's clipboard\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
         "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
         "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",

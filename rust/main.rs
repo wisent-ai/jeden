@@ -227,6 +227,7 @@ pub fn main() -> ExitCode {
         "sessions" => Ok(list_sessions(
             args.positionals.first().and_then(|s| s.parse().ok()),
         )),
+        "copy" => cli::clipboard::copy_command(&args),
         "show" => args
             .positionals
             .first()

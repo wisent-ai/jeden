@@ -53,12 +53,21 @@ impl Conversation {
             .max_steps
             .map(|m| m.to_string())
             .unwrap_or_else(|| "unbounded".to_string());
-        let step_iter: Box<dyn Iterator<Item = u32>> = match args.max_steps {
+        let mut step_iter: Box<dyn Iterator<Item = u32>> = match args.max_steps {
             Some(max) => Box::new(u32::from(true)..=max),
             None => Box::new(u32::from(true)..),
         };
         let mut repairs = u32::default();
-        'steps: for step in step_iter {
+        let mut recoveries = u32::default();
+        // A model call that never produced an answer is not a step of this
+        // turn's work: it is the transport failing. Advancing the step counter
+        // on it spent an operator's whole budget on a flapping gateway and
+        // ended the assignment with `max steps exceeded`, a sentence about the
+        // budget rather than about the connection that kept dropping. The step
+        // now advances only once an answer has been read, and the separate
+        // recovery budget in `failure.rs` ends the turn with the real failure.
+        let mut current = step_iter.next();
+        'steps: while let Some(step) = current {
             if tracks_completion {
                 self.refresh_completion_context(hooks)?;
             }
@@ -87,11 +96,13 @@ impl Conversation {
                         failure,
                         &mut prepared,
                         &mut repairs,
+                        &mut recoveries,
                         hooks,
                     )?;
                     continue 'steps;
                 }
             };
+            current = step_iter.next();
             let content = self.record_step(args, step, streaming, &mut prepared)?;
             if args.model_only {
                 self.messages

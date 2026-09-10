@@ -4,7 +4,18 @@
 
 use super::super::*;
 
+/// How many model calls a turn may lose to the transport before it stops.
+///
+/// A recovery costs the operator nothing but latency, so a flapping link is
+/// worth riding out; an unreachable one is not worth an unbounded wait. Six
+/// is the smallest budget that survived every gateway wobble observed on this
+/// fleet — a dropped stream on the loopback forward comes in ones and twos —
+/// while still ending a turn against a dead endpoint in under a dozen calls,
+/// and it is separate from `--max-steps`, which bounds the work itself.
+const MAX_STREAM_RECOVERIES: u32 = 6;
+
 impl Conversation {
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn recover_stream_failure(
         &mut self,
         args: &Args,
@@ -12,6 +23,7 @@ impl Conversation {
         failure: crate::model_router::StreamFailure,
         prepared: &mut super::prompt::Prepared,
         repairs: &mut u32,
+        recoveries: &mut u32,
         hooks: &mut RunHooks,
     ) -> Result<(), String> {
         let router = &mut prepared.router;
@@ -20,6 +32,20 @@ impl Conversation {
                 "model_route_result",
                 json!({ "step": step, "result": result }),
             )?;
+        }
+        *recoveries += u32::from(true);
+        if *recoveries > MAX_STREAM_RECOVERIES {
+            let error = format!(
+                "the model stream failed {} times without an answer; last failure: {}",
+                *recoveries, failure.message
+            );
+            self.recorder
+                .record("run_error", json!({ "message": &error }))?;
+            return Err(if prepared.tracks_completion {
+                self.completion_failure("model_request", &error, hooks)
+            } else {
+                error
+            });
         }
         let error = failure.message;
         let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow
