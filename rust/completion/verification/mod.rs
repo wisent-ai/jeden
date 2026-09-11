@@ -1,4 +1,5 @@
 mod evidence;
+mod paths;
 
 use super::{model::*, store};
 pub(crate) use evidence::{inspect as inspect_evidence, review_evidence};
@@ -56,6 +57,11 @@ impl EvidenceIndex {
         Ok(independent
             && receipt["failed"] == false
             && crate::agent::is_verification_read_tool(tool))
+    }
+
+    /// Where an accepted observation actually happened.
+    fn places(&self, reference: &EvidenceReference) -> Result<BTreeSet<String>, String> {
+        self.get(reference).map(|(receipt, _)| paths::touched(receipt))
     }
 
     fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
@@ -138,8 +144,12 @@ pub(crate) fn apply_review(
                     ));
                 }
                 let mut observed = false;
+                let mut places = BTreeSet::new();
                 for reference in &criterion.evidence {
-                    observed |= index.observation(reference)?;
+                    if index.observation(reference)? {
+                        observed = true;
+                        places.extend(index.places(reference)?);
+                    }
                 }
                 if verdict.status == ReviewStatus::Done
                     && (!criterion.satisfied || (task.kind == TaskKind::Work && !observed))
@@ -148,6 +158,23 @@ pub(crate) fn apply_review(
                         "task {} criterion {} has no successful independent observation",
                         task.id, criterion.index
                     ));
+                }
+                // Reading the criterion's prose is the reviewer's judgement.
+                // The place it names is not a judgement, so a verdict that
+                // rests on work done somewhere else is refused here.
+                if verdict.status == ReviewStatus::Done && task.kind == TaskKind::Work {
+                    let wanted = paths::named(&task.criteria[criterion.index]);
+                    let workspace = state
+                        .requests
+                        .iter()
+                        .find(|request| request.id == task.request_id)
+                        .map_or_else(|| PathBuf::from("."), |request| PathBuf::from(&request.cwd));
+                    if let Some(place) = paths::unmatched(&wanted, &places, &workspace) {
+                        return Err(format!(
+                            "task {} criterion {} names {place}, and no accepted observation happened there",
+                            task.id, criterion.index
+                        ));
+                    }
                 }
             }
             let mut observed_failure = false;
