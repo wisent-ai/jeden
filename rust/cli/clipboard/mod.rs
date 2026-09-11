@@ -14,13 +14,18 @@
 
 use std::io::{IsTerminal, Read};
 
-use crate::slash::write_clipboard;
+use crate::slash::{read_clipboard, same_payload, write_clipboard};
 use crate::Args;
 
 /// The payload the operator asked for: the argument list, or stdin when the
 /// single positional is `-`.
 fn payload(args: &Args) -> Result<String, String> {
-    let positionals: Vec<&str> = args.positionals.iter().map(String::as_str).collect();
+    let positionals: Vec<&str> = args
+        .positionals
+        .iter()
+        .map(String::as_str)
+        .filter(|word| *word != "--check")
+        .collect();
     match positionals.as_slice() {
         [] => Err(
             "copy requires the text to hand over, or - to read the payload from stdin".to_string(),
@@ -41,7 +46,7 @@ fn payload(args: &Args) -> Result<String, String> {
     }
 }
 
-/// `jeden copy <text> | jeden copy - [--json]`
+/// `jeden copy <text> | jeden copy - [--check] [--json]`
 pub(crate) fn copy_command(args: &Args) -> Result<String, String> {
     let payload = payload(args)?;
     if payload.trim().is_empty() {
@@ -50,17 +55,53 @@ pub(crate) fn copy_command(args: &Args) -> Result<String, String> {
                 .to_string(),
         );
     }
+    if args.positionals.iter().any(|word| word == "--check") {
+        return check_command(&payload, args.json);
+    }
     let command = write_clipboard(&payload)?;
     let bytes = payload.len();
     if args.json {
         return serde_json::to_string(&serde_json::json!({
             "copied": bytes,
             "command": command,
+            "verified": true,
         }))
         .map(|line| line + "\n")
         .map_err(|error| error.to_string());
     }
     Ok(format!(
-        "copied {bytes} bytes to the clipboard with {command}\n"
+        "copied {bytes} bytes to the clipboard with {command}, and read them back to confirm\n"
+    ))
+}
+
+/// `jeden copy - --check`: whether the clipboard still holds this payload.
+///
+/// A clipboard is shared with everything else on the machine, so a hand-off
+/// confirmed at the time of copying can be gone by the time it is pasted - a
+/// clipboard manager, another copy, another agent. This is how a caller asks
+/// again, without writing anything.
+fn check_command(payload: &str, json: bool) -> Result<String, String> {
+    let (found, reader) = read_clipboard()?;
+    let holds = same_payload(&found, payload);
+    if json {
+        return serde_json::to_string(&serde_json::json!({
+            "holds": holds,
+            "reader": reader,
+            "expected": payload.len(),
+            "found": found.len(),
+        }))
+        .map(|line| line + "\n")
+        .map_err(|error| error.to_string());
+    }
+    if holds {
+        return Ok(format!(
+            "the clipboard still holds the {} byte payload, read with {reader}\n",
+            payload.len()
+        ));
+    }
+    let first = found.lines().next().unwrap_or("").trim();
+    Err(format!(
+        "the clipboard no longer holds the payload: {reader} reads {} bytes beginning {first:?}. Copy it again.",
+        found.len()
     ))
 }

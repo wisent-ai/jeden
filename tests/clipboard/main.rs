@@ -277,3 +277,70 @@ fn nothing_to_copy_is_refused_instead_of_wiping_the_clipboard() {
         );
     }
 }
+
+/// The defect this pair defends: on 2026-09-11 a hand-off was reported as
+/// copied, the operator pasted, and the clipboard held an unrelated 488 bytes.
+/// Reporting a copy is a claim about the clipboard, so the product has to read
+/// it back, and a caller has to be able to ask again later.
+#[test]
+fn a_copy_is_confirmed_by_reading_the_clipboard_back() {
+    let _serialised = clipboard_lock();
+    let Some(tools) = tools() else {
+        return refuses_without_a_writer();
+    };
+    let restored = Restored::new(tools);
+
+    let payload = handoff();
+    let output = copy_stdin(&payload, &[]);
+    let said = String::from_utf8_lossy(&output.stdout).to_string();
+
+    assert!(output.status.success(), "jeden copy - succeeded: {said}");
+    assert!(
+        said.contains("read them back to confirm"),
+        "a copy reports the confirmation, not just the call: {said}"
+    );
+    assert_eq!(body(&read_clipboard(&restored.tools)), payload);
+
+    let checked = copy_stdin(&payload, &["--check"]);
+    assert!(
+        checked.status.success(),
+        "the same payload still on the clipboard is a passing check: {}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&checked.stdout).contains("still holds"),
+        "the check says what it found"
+    );
+}
+
+#[test]
+fn a_clipboard_replaced_after_the_copy_fails_the_check() {
+    let _serialised = clipboard_lock();
+    let Some(tools) = tools() else {
+        return refuses_without_a_writer();
+    };
+    let restored = Restored::new(tools);
+
+    let payload = handoff();
+    assert!(copy_stdin(&payload, &[]).status.success(), "the copy lands");
+    // What happened on the operator's machine: something else copied after the
+    // hand-off, and nothing said so.
+    write_clipboard(&restored.tools, "Hey Lukasz, Julien,");
+
+    let checked = copy_stdin(&payload, &["--check"]);
+    let said = String::from_utf8_lossy(&checked.stderr).to_string();
+
+    assert!(
+        !checked.status.success(),
+        "a replaced clipboard is not a hand-off"
+    );
+    assert!(
+        said.contains("no longer holds the payload") && said.contains("Copy it again"),
+        "the refusal names what is there instead and what to do: {said}"
+    );
+    assert_eq!(
+        body(&read_clipboard(&restored.tools)),
+        "Hey Lukasz, Julien,",
+        "a check writes nothing"
+    );
+}

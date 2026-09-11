@@ -35,7 +35,7 @@ pub(crate) fn usage() -> String {
         "  jeden export <session-id-or-path> [output.json]\n",
         "  jeden artifacts <session-id-or-path>\n",
         "  jeden artifact <session-id-or-path> <name> [output]\n",
-        "  jeden copy <text> | jeden copy - [--json] — hand an exact payload to the operator's clipboard\n",
+        "  jeden copy <text> | jeden copy - [--check] [--json] — hand an exact payload to the operator's clipboard, read back to confirm; --check asks later whether it is still there\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]\n",
         "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
         "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",
@@ -68,7 +68,7 @@ pub(crate) fn usage() -> String {
         "  /todo [list|add|pause|resume|cancel|continue]  manage retained session work\n",
         "  /roadmap              open the native roadmap picker\n",
         "  /memory [stats|view|enqueue|rebuild|clear]\n",
-        "  /copy <text>           copy text to clipboard if pbcopy exists\n",
+        "  /copy <text>           copy text to the clipboard and read it back to confirm\n",
         "  /collab [status|start|share|sync|stop]\n",
         "  /join <relay-file-url-or-path>\n",
         "  /leave\n",
@@ -184,6 +184,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "contracts"
                             | "workspace"
                             | "todo"
+                            | "copy"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())

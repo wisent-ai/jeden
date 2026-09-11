@@ -18,7 +18,7 @@ mod state;
 mod validate;
 
 pub(crate) use plugins::ops::{installed_plugin_command_dirs, installed_plugin_hook_configs};
-pub(crate) use session::clipboard::write_clipboard;
+pub(crate) use session::clipboard::{read_clipboard, same_payload, write_clipboard};
 
 #[derive(Debug, Clone)]
 pub struct SlashContext<'a> {
