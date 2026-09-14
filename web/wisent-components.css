@@ -4,7 +4,7 @@
   --wisent-color-white: #ffffff;
   --wisent-color-almost-black: #111111;
   --wisent-color-ink: #2d3130;
-  --wisent-color-forest: #273329;
+  --wisent-color-forest: #273328;
   --wisent-color-secondary-text: #59605d;
   --wisent-color-muted-text: #8b9290;
   --wisent-color-border: #dee4e2;
@@ -17,15 +17,35 @@
   --wisent-color-brand400: #bae6bd;
   --wisent-color-brand: #9ecca0;
   --wisent-color-brand500: #9ecca0;
-  --wisent-color-brand-hover: #8dbb8f;
+  --wisent-color-brand-hover: #769978;
   --wisent-color-brand600: #769978;
   --wisent-color-brand-link: #769978;
   --wisent-color-brand700: #4f6650;
   --wisent-color-brand800: #3b4c3c;
-  --wisent-color-brand900: #273329;
-  --wisent-color-success: #15803d;
-  --wisent-color-warning: #b45309;
-  --wisent-color-danger: #b91c1c;
+  --wisent-color-brand900: #273328;
+  --wisent-color-success: #007032;
+  --wisent-color-warning: #a43e00;
+  --wisent-color-danger: #d43328;
+  --wisent-color-gray700: #424846;
+  --wisent-color-gray900: #191c1b;
+  --wisent-color-gray950: #121212;
+  --wisent-color-bone: #f4f4f4;
+  --wisent-dark-canvas: #191c1b;
+  --wisent-dark-canvas-muted: #2d3130;
+  --wisent-dark-surface: #2d3130;
+  --wisent-dark-surface-raised: #424846;
+  --wisent-dark-border: #424846;
+  --wisent-dark-border-strong: #59605d;
+  --wisent-dark-ink: #f8fdfb;
+  --wisent-dark-secondary-text: #c1c8c6;
+  --wisent-dark-muted-text: #a6adaa;
+  --wisent-dark-brand: #9ecca0;
+  --wisent-dark-brand-strong: #c5ffc8;
+  --wisent-dark-brand-soft: #273328;
+  --wisent-dark-success: #17b26a;
+  --wisent-dark-warning: #ffc88b;
+  --wisent-dark-danger: #ff7961;
+  --wisent-dark-info: #bae6bd;
   --wisent-font-sans: 'Hubot Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --wisent-font-expanded: 'Hubot Sans Expanded', 'Hubot Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   --wisent-font-mono: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -46,8 +66,88 @@
   --wisent-radius-2xl: 22px;
   --wisent-shadow-surface: 0 4px 12px rgba(10, 13, 18, 0.04);
   --wisent-shadow-raised: 0 12px 30px rgba(10, 13, 18, 0.08);
+  --wisent-shadow-control: 0 1px 2px rgba(10, 13, 18, 0.05);
+  --wisent-shadow-toast: -1px 4px 4px rgba(10, 13, 18, 0.04);
   --wisent-motion-fast: 150ms;
   --wisent-motion-standard: 180ms;
+}
+
+/* Waiting, drawn as the content that is coming.
+ *
+ * This stylesheet is importable on its own — `@wisent-ai/components/skeleton.css`
+ * — so an application can adopt the shared loading contract without taking the
+ * whole component library or its fonts. Every token it reads carries a literal
+ * fallback for exactly that reason, and the four values worth changing per
+ * application are named:
+ *
+ *   --wisent-skeleton-base     the resting fill
+ *   --wisent-skeleton-sweep    the travelling highlight
+ *   --wisent-skeleton-surface  the card's panel
+ *   --wisent-skeleton-border   the card's edge and the table's header rule
+ *
+ * The last two exist because the first two are not enough: a dark application
+ * that set only base and sweep still got a white card with a light border, and
+ * had to override `--wisent-color-white` — a token that is not about skeletons
+ * — to fix it. Four named variables, and no application reaches past them.
+ * `scripts/build.mjs` fails this package's build if a spinner returns here, and
+ * a forked copy is outside that check.
+ */
+
+/* One shimmer, one class. A standalone skeleton and the label of a control whose
+ * own action is in flight are the same visual state, so they share a definition
+ * rather than two that drift. A control keeps its box, its icon and its
+ * accessible name; only the label text is stood in for, so nothing moves on
+ * settle. */
+.wisent-skeleton,
+.wisent-busy-label {
+  animation: wisent-skeleton-sweep 1400ms ease-in-out infinite;
+  background-color: var(--wisent-skeleton-base, var(--wisent-color-canvas-muted, #ecf2f0));
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--wisent-skeleton-sweep, color-mix(in srgb, var(--wisent-color-white, #ffffff) 78%, transparent)) 50%,
+    transparent 100%
+  );
+  background-repeat: no-repeat;
+  background-size: 220% 100%;
+  border-radius: var(--wisent-radius-sm, 6px);
+  box-sizing: border-box;
+  display: block;
+  flex: 0 0 auto;
+}
+
+.wisent-busy-label {
+  color: transparent;
+}
+
+.wisent-skeleton--line { width: 100%; height: 0.75em; min-height: 10px; }
+.wisent-skeleton--heading { width: 100%; height: 1.15em; min-height: 16px; }
+.wisent-skeleton--block { width: 100%; height: 100%; border-radius: var(--wisent-radius-lg, 12px); }
+.wisent-skeleton--circle { width: 36px; height: 36px; border-radius: 999px; }
+.wisent-skeleton--pill { width: 80px; height: 22px; border-radius: 999px; }
+
+@keyframes wisent-skeleton-sweep {
+  from { background-position: -120% 0; }
+  to { background-position: 220% 0; }
+}
+
+/* Loading state announced once, by the region, not by every bar inside it. */
+.wisent-skeleton-group { display: grid; gap: var(--wisent-space-md, 8px); font-family: var(--wisent-font-sans, inherit); }
+.wisent-skeleton-text { gap: var(--wisent-space-md, 8px); }
+.wisent-skeleton-card { gap: var(--wisent-space-lg, 12px); box-sizing: border-box; border: 1px solid var(--wisent-skeleton-border, var(--wisent-color-border, #dee4e2)); border-radius: var(--wisent-radius-xl, 16px); padding: var(--wisent-space-xl, 16px); background: var(--wisent-skeleton-surface, var(--wisent-color-white, #ffffff)); }
+.wisent-skeleton-list { gap: var(--wisent-space-xl, 16px); }
+.wisent-skeleton-list__row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--wisent-space-lg, 12px); }
+.wisent-skeleton-list__row--flush { grid-template-columns: minmax(0, 1fr); }
+.wisent-skeleton-list__copy { display: grid; gap: var(--wisent-space-md, 8px); }
+.wisent-skeleton-table { gap: var(--wisent-space-lg, 12px); }
+.wisent-skeleton-table__row { display: grid; grid-template-columns: repeat(var(--wisent-skeleton-columns, 4), minmax(0, 1fr)); align-items: center; gap: var(--wisent-space-xl, 16px); }
+.wisent-skeleton-table__row--header { padding-bottom: var(--wisent-space-md, 8px); border-bottom: 1px solid var(--wisent-skeleton-border, var(--wisent-color-border, #dee4e2)); }
+
+.wisent-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  .wisent-skeleton,
+  .wisent-busy-label { animation: none; background-image: none; }
 }
 
 @font-face {
@@ -359,7 +459,7 @@
 
 .wisent-metric-card__icon {
   align-items: center;
-  background: var(--wisent-color-brand100);
+  background: color-mix(in srgb, currentColor 12%, transparent);
   border-radius: var(--wisent-radius-md);
   color: var(--wisent-color-brand600);
   display: flex;
@@ -367,6 +467,12 @@
   justify-content: center;
   width: 30px;
 }
+
+.wisent-metric-card--neutral .wisent-metric-card__icon { color: var(--wisent-color-secondary-text); }
+.wisent-metric-card--brand .wisent-metric-card__icon { color: var(--wisent-color-brand600); }
+.wisent-metric-card--success .wisent-metric-card__icon { color: var(--wisent-color-success); }
+.wisent-metric-card--warning .wisent-metric-card__icon { color: var(--wisent-color-warning); }
+.wisent-metric-card--danger .wisent-metric-card__icon { color: var(--wisent-color-danger); }
 
 .wisent-metric-card__title {
   color: var(--wisent-color-muted-text);
@@ -391,13 +497,12 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  .wisent-panel,
-  .wisent-metric-card,
-  .wisent-button--secondary {
-    background: #242927;
-    color: #f8fdfb;
-  }
+:where(html:not([data-wisent-appearance="light"])) .wisent-panel, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card, :where(html:not([data-wisent-appearance="light"])) .wisent-button--secondary { background: var(--wisent-dark-surface);
+    color: var(--wisent-dark-ink); }
 }
+:where([data-wisent-appearance="dark"]) .wisent-panel, :where([data-wisent-appearance="dark"]) .wisent-metric-card, :where([data-wisent-appearance="dark"]) .wisent-button--secondary { background: var(--wisent-dark-surface);
+    color: var(--wisent-dark-ink); }
+
 
 /* ---------------------------------------------------------------------------
    Documentation layout — the canonical convention resurrected from
@@ -464,9 +569,48 @@
 .wisent-docs__pagination { display: flex; justify-content: space-between; gap: 24px; border-top: 1px solid var(--wisent-color-border); margin-top: 26px; padding-top: 26px; }
 .wisent-docs__pagination a { color: var(--wisent-color-forest); font-size: 13px; font-weight: 700; text-decoration: none; transition: color var(--wisent-motion-fast) ease; }
 .wisent-docs__pagination a:hover { color: var(--wisent-color-brand600); text-decoration: underline; text-underline-offset: 4px; }
+.wisent-docs-table-wrap { margin: 18px 0 24px; overflow-x: auto; }
+.wisent-docs-table-wrap .wisent-docs-table { margin: 0; }
+.wisent-docs__sections .wisent-docs-links { display: grid; gap: 10px; margin: 18px 0 24px; padding-left: 0; list-style: none; }
+.wisent-docs__sections .wisent-docs-links li { margin: 0; padding-left: 0; }
+.wisent-docs-links span { color: var(--wisent-color-secondary-text); }
+
+/* The shell around a product surface and around its documentation: a flat
+   header and footer on the canvas, the brand, the surface they belong to, and
+   the places a reader goes from here. This was hand-copied into seven
+   generated landing sites, where it arrived with a per-product accent hex, a
+   blurred glow and a forked dark palette; the pattern lives here now, on the
+   tokens, and dark comes from the OS or the document. */
+.wisent-docs-header { border-bottom: 1px solid var(--wisent-color-border); background: var(--wisent-color-background); }
+.wisent-docs-header__inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 auto; max-width: 1180px; padding: 16px 32px; }
+.wisent-docs-brand { display: inline-flex; align-items: center; gap: 12px; color: var(--wisent-color-almost-black); font-size: 15px; text-decoration: none; }
+.wisent-docs-brand__divider { width: 1px; height: 18px; flex: 0 0 auto; background: var(--wisent-color-border-strong); }
+.wisent-docs-brand__surface { color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-mono); font-size: 13px; }
+.wisent-docs-shell-nav { display: flex; align-items: center; gap: 4px; }
+.wisent-docs-shell-nav__link { border-radius: 8px; padding: 6px 10px; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 500; text-decoration: none; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-docs-shell-nav__link:hover { background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); }
+.wisent-docs-shell-nav__link[aria-current="page"] { color: var(--wisent-color-forest); font-weight: 600; }
+.wisent-docs-brand:focus-visible, .wisent-docs-shell-nav__link:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: 2px; }
+.wisent-docs-footer { border-top: 1px solid var(--wisent-color-border); background: var(--wisent-color-background); }
+.wisent-docs-shell { display: flex; min-height: 100svh; flex-direction: column; background: var(--wisent-color-background); color: var(--wisent-color-ink); }
+.wisent-docs-shell__main { flex: 1 0 auto; display: grid; gap: var(--wisent-space-3xl); padding: var(--wisent-space-4xl) 0; }
+.wisent-docs-footer__inner { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0 auto; max-width: 1180px; padding: 28px 32px; }
+.wisent-docs-footer__note { margin: 0; color: var(--wisent-color-secondary-text); font-size: 13px; }
+
+/* The search field over one surface's documentation, four sites deep in
+   private stylesheets before it landed here. Flat, tokens only. */
+.wisent-docs-search { position: relative; max-width: 1180px; margin: 0 auto; padding: 32px 32px 0; font-family: var(--wisent-font-sans); }
+.wisent-docs-search__label { display: block; margin-bottom: 8px; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 600; letter-spacing: .16em; text-transform: uppercase; }
+.wisent-docs-search__input { box-sizing: border-box; width: 100%; border: 1px solid var(--wisent-color-border-strong); border-radius: 8px; background: var(--wisent-color-white); padding: 11px 12px; color: var(--wisent-color-ink); font: inherit; font-size: 14px; }
+.wisent-docs-search__input:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: 2px; }
+.wisent-docs-search__results { position: absolute; z-index: 20; right: 32px; left: 32px; margin-top: 6px; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-white); padding: 6px; }
+.wisent-docs-search__hit, .wisent-docs-search__empty { display: flex; gap: 12px; border-radius: 6px; padding: 11px 12px; color: var(--wisent-color-secondary-text); font-size: 13px; text-decoration: none; }
+.wisent-docs-search__hit:hover { background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); }
+.wisent-docs-search__page { flex: 0 0 144px; color: var(--wisent-color-almost-black); font-weight: 600; }
+.wisent-docs-search__text { min-width: 0; }
 
 @media (prefers-reduced-motion: reduce) {
-  .wisent-docs-nav__item, .wisent-docs-nav__group-label, .wisent-docs-nav__group-label::after, .wisent-docs__source, .wisent-docs__breadcrumb a, .wisent-docs__anchor, .wisent-docs-code__copy, .wisent-docs__pagination a { transition: none; }
+  .wisent-docs-nav__item, .wisent-docs-nav__group-label, .wisent-docs-nav__group-label::after, .wisent-docs__source, .wisent-docs__breadcrumb a, .wisent-docs__anchor, .wisent-docs-code__copy, .wisent-docs__pagination a, .wisent-docs-shell-nav__link { transition: none; }
 }
 
 @media (max-width: 900px) {
@@ -475,6 +619,9 @@
   .wisent-docs-nav--desktop, .wisent-docs__label, .wisent-docs__source { display: none; }
   .wisent-docs__mobile { display: block; border: 1px solid var(--wisent-color-border); border-radius: 8px; background: var(--wisent-color-canvas-muted); padding: 4px 8px; }
   .wisent-docs__mobile-toggle { padding: 8px; font-size: 14px; font-weight: 600; color: var(--wisent-color-ink); cursor: pointer; }
+  .wisent-docs-header__inner, .wisent-docs-footer__inner { flex-wrap: wrap; gap: 12px; padding: 14px 20px; }
+  .wisent-docs-search { padding: 24px 20px 0; }
+  .wisent-docs-search__results { right: 20px; left: 20px; }
 }
 
 /* ---------------------------------------------------------------------------
@@ -578,12 +725,12 @@
 .wisent-sidebar-nav { box-sizing: border-box; display: flex; min-height: 0; flex-direction: column; color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
 .wisent-sidebar-nav__title { margin: 0 0 var(--wisent-space-lg); padding: 0 var(--wisent-space-lg); color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
 .wisent-sidebar-nav__items { display: flex; flex-direction: column; gap: var(--wisent-space-xs); }
-.wisent-sidebar-nav__item, .wisent-sidebar-nav__group > summary { box-sizing: border-box; display: flex; min-height: 36px; align-items: center; gap: var(--wisent-space-md); border-radius: var(--wisent-radius-md); padding: 7px 10px 7px calc(10px + var(--wisent-nav-depth, 0) * 12px); color: var(--wisent-color-secondary-text); font-size: 13px; font-weight: 500; text-decoration: none; cursor: pointer; list-style: none; }
-.wisent-sidebar-nav__item:hover, .wisent-sidebar-nav__group > summary:hover { background: color-mix(in srgb, var(--wisent-color-canvas-muted) 60%, transparent); color: var(--wisent-color-ink); }
-.wisent-sidebar-nav__item--active { background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); font-weight: 600; }
+.wisent-sidebar-nav__item, .wisent-sidebar-nav__group > summary { box-sizing: border-box; display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: var(--wisent-space-md); border-radius: var(--wisent-radius-md); padding: var(--wisent-space-md) var(--wisent-space-md) var(--wisent-space-md) calc(var(--wisent-space-lg) + var(--wisent-nav-depth, 0) * var(--wisent-space-lg)); color: var(--wisent-color-gray700); font-family: var(--wisent-font-sans); font-size: 16px; font-weight: 500; line-height: 24px; text-decoration: none; cursor: pointer; list-style: none; }
+.wisent-sidebar-nav__item:hover, .wisent-sidebar-nav__group > summary:hover { background: color-mix(in srgb, var(--wisent-color-bone) 60%, transparent); }
+.wisent-sidebar-nav__item--active { background: var(--wisent-color-bone); color: var(--wisent-color-brand700); }
 .wisent-sidebar-nav__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wisent-sidebar-nav__icon { display: inline-flex; width: 18px; align-items: center; justify-content: center; }
-.wisent-sidebar-nav__badge { margin-left: auto; border-radius: 999px; padding: 2px 6px; background: var(--wisent-color-brand100); color: var(--wisent-color-brand700); font-family: var(--wisent-font-mono); font-size: 10px; }
+.wisent-sidebar-nav__icon { display: inline-flex; width: 20px; height: 20px; flex: 0 0 20px; align-items: center; justify-content: center; }
+.wisent-sidebar-nav__badge { margin-left: auto; border-radius: var(--wisent-radius-sm); padding: 1px var(--wisent-space-sm); background: var(--wisent-color-canvas-muted); color: var(--wisent-color-brand600); font-family: var(--wisent-font-sans); font-size: 12px; font-weight: 500; line-height: 18px; }
 .wisent-sidebar-nav__children { margin-left: var(--wisent-space-xl); }
 .wisent-sidebar-nav__footer { margin-top: auto; padding-top: var(--wisent-space-xl); }
 .wisent-sidebar-nav--compact .wisent-sidebar-nav__label, .wisent-sidebar-nav--compact .wisent-sidebar-nav__title, .wisent-sidebar-nav--compact .wisent-sidebar-nav__badge { display: none; }
@@ -591,12 +738,12 @@
 
 .wisent-side-menu { box-sizing: border-box; display: flex; flex-direction: column; min-height: 100%; gap: var(--wisent-space-xl); border-right: 1px solid var(--wisent-color-border); padding: var(--wisent-space-xl); background: var(--wisent-color-white); }
 .wisent-side-menu--compact { width: 72px; }
-.wisent-side-menu--standard { width: 248px; }
+.wisent-side-menu--standard { width: 296px; }
 .wisent-side-menu--wide { width: 320px; }
 .wisent-side-menu__header, .wisent-side-menu__footer { flex: 0 0 auto; }
 .wisent-side-menu__footer { margin-top: auto; }
 
-.wisent-app-shell { --wisent-app-sidebar: 248px; box-sizing: border-box; display: grid; min-height: 100dvh; grid-template-columns: var(--wisent-app-sidebar) minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "topbar topbar topbar" "sidebar main aside"; background: var(--wisent-color-background); color: var(--wisent-color-ink); }
+.wisent-app-shell { --wisent-app-sidebar: 296px; box-sizing: border-box; display: grid; min-height: 100dvh; grid-template-columns: var(--wisent-app-sidebar) minmax(0, 1fr) auto; grid-template-rows: auto minmax(0, 1fr); grid-template-areas: "topbar topbar topbar" "sidebar main aside"; background: var(--wisent-color-background); color: var(--wisent-color-ink); }
 .wisent-app-shell__topbar { grid-area: topbar; }
 .wisent-app-shell__sidebar { grid-area: sidebar; min-height: 0; }
 .wisent-app-shell__main { grid-area: main; min-width: 0; padding: var(--wisent-space-4xl); }
@@ -679,40 +826,10 @@
 .wisent-tooltip--bottom .wisent-tooltip__content { left: 50%; top: calc(100% + 8px); transform: translate(-50%, 4px); }
 .wisent-tooltip:hover .wisent-tooltip__content, .wisent-tooltip:focus-within .wisent-tooltip__content { opacity: 1; transform: translate(-50%, 0); }
 
-/* One shimmer, used by standalone skeletons and by the label of a control
- * whose own action is in flight. A control keeps its box and its accessible
- * name; only the label text is stood in for, so nothing moves on settle. */
-.wisent-skeleton,
-.wisent-button[aria-busy="true"] .wisent-button__label,
-.wisent-action[aria-busy="true"] .wisent-action__label,
-.wisent-oauth-button[aria-busy="true"] .wisent-oauth-button__label { display: block; box-sizing: border-box; flex: 0 0 auto; border-radius: var(--wisent-radius-sm); background-color: var(--wisent-color-canvas-muted); background-image: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--wisent-color-white) 78%, transparent) 50%, transparent 100%); background-repeat: no-repeat; background-size: 220% 100%; animation: wisent-skeleton-sweep 1400ms ease-in-out infinite; }
-.wisent-button[aria-busy="true"] .wisent-button__label,
-.wisent-action[aria-busy="true"] .wisent-action__label,
-.wisent-oauth-button[aria-busy="true"] .wisent-oauth-button__label { color: transparent; }
-.wisent-skeleton--line { width: 100%; height: 0.75em; min-height: 10px; }
-.wisent-skeleton--heading { width: 100%; height: 1.15em; min-height: 16px; border-radius: var(--wisent-radius-sm); }
-.wisent-skeleton--block { width: 100%; height: 100%; border-radius: var(--wisent-radius-lg); }
-.wisent-skeleton--circle { width: 36px; height: 36px; border-radius: 999px; }
-.wisent-skeleton--pill { width: 80px; height: 22px; border-radius: 999px; }
-
-@keyframes wisent-skeleton-sweep {
-  from { background-position: -120% 0; }
-  to { background-position: 220% 0; }
-}
-
-/* Loading state announced once, by the region, not by every bar inside it. */
-.wisent-skeleton-group { display: grid; gap: var(--wisent-space-md); font-family: var(--wisent-font-sans); }
-.wisent-skeleton-text { gap: var(--wisent-space-md); }
-.wisent-skeleton-card { gap: var(--wisent-space-lg); box-sizing: border-box; border: 1px solid var(--wisent-color-border); border-radius: var(--wisent-radius-xl); padding: var(--wisent-space-xl); background: var(--wisent-color-white); }
-.wisent-skeleton-list { gap: var(--wisent-space-xl); }
-.wisent-skeleton-list__row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--wisent-space-lg); }
-.wisent-skeleton-list__row--flush { grid-template-columns: minmax(0, 1fr); }
-.wisent-skeleton-list__copy { display: grid; gap: var(--wisent-space-md); }
-.wisent-skeleton-table { gap: var(--wisent-space-lg); }
-.wisent-skeleton-table__row { display: grid; grid-template-columns: repeat(var(--wisent-skeleton-columns, 4), minmax(0, 1fr)); align-items: center; gap: var(--wisent-space-xl); }
-.wisent-skeleton-table__row--header { padding-bottom: var(--wisent-space-md); border-bottom: 1px solid var(--wisent-color-border); }
-
-.wisent-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+/* The skeleton and busy-label shimmer live in src/skeleton.css so an
+ * application can import them alone; build.mjs concatenates that file ahead of
+ * this one into dist/styles.css. The controls below opt in by putting
+ * `wisent-busy-label` on their own label span when loading. */
 
 .wisent-avatar { position: relative; display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; overflow: visible; border-radius: 999px; background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 600; }
 .wisent-avatar--small { width: 24px; height: 24px; }
@@ -764,10 +881,581 @@
   .wisent-capability-model__header { display: grid; }
 }
 
+/* === shell === */
+/* The application shell at the designer's own values. Every number below is
+   either a token, the Figma node 47:24441 exact spec, the Sonner rules Wisent
+   App wrote into its `globals.css`, or a Swift `WisentAppLayout` constant, so
+   the two runtimes measure the same. */
+
+.wisent-type-screen-title { font-family: var(--wisent-font-expanded); font-size: 14px; font-weight: 600; line-height: 20px; letter-spacing: -.01em; }
+.wisent-type-section { font-family: var(--wisent-font-expanded); font-size: 15px; font-weight: 600; line-height: 22px; letter-spacing: -.01em; }
+.wisent-type-panel-title { font-family: var(--wisent-font-expanded); font-size: 13px; font-weight: 600; line-height: 18px; }
+.wisent-type-metric { font-family: var(--wisent-font-expanded); font-size: 21px; font-weight: 600; line-height: 26px; font-variant-numeric: tabular-nums; }
+.wisent-type-body { font-family: var(--wisent-font-sans); font-size: 12px; font-weight: 400; line-height: 18px; }
+.wisent-type-body-strong { font-family: var(--wisent-font-sans); font-size: 12px; font-weight: 500; line-height: 18px; }
+.wisent-type-caption { font-family: var(--wisent-font-sans); font-size: 11px; font-weight: 400; line-height: 16px; }
+.wisent-type-identifier { font-family: var(--wisent-font-mono); font-size: 11px; font-weight: 400; line-height: 16px; }
+
+.wisent-app-layout { --wisent-app-layout-sidebar: 296px; --wisent-app-layout-inspector: 320px; --wisent-app-layout-context: 44px; box-sizing: border-box; display: grid; min-width: 1000px; min-height: 700px; grid-template-columns: var(--wisent-app-layout-sidebar) minmax(0, 1fr) var(--wisent-app-layout-inspector); grid-template-rows: var(--wisent-app-layout-context) minmax(0, 1fr); grid-template-areas: "sidebar context context" "sidebar main inspector"; background: var(--wisent-color-background); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-app-layout__sidebar { grid-area: sidebar; min-width: 0; min-height: 0; overflow: auto; }
+.wisent-app-layout__context { grid-area: context; min-width: 0; }
+.wisent-app-layout__main { grid-area: main; display: flex; min-width: 0; min-height: 0; flex-direction: column; overflow: auto; }
+.wisent-app-layout__inspector { grid-area: inspector; min-width: 0; min-height: 0; overflow: auto; border-left: 1px solid var(--wisent-color-border); background: var(--wisent-color-white); }
+
+.wisent-navigation { box-sizing: border-box; display: flex; min-height: 0; flex-direction: column; padding-top: var(--wisent-space-xl); color: var(--wisent-color-gray700); font-family: var(--wisent-font-sans); }
+.wisent-navigation__sections { display: flex; min-height: 0; flex-direction: column; gap: var(--wisent-space-2xl); }
+.wisent-navigation__section { display: flex; min-height: 0; flex-direction: column; gap: var(--wisent-space-xs); }
+.wisent-navigation__section-title { margin: 0; padding: 0 var(--wisent-space-2xl) var(--wisent-space-xs) var(--wisent-space-lg); color: var(--wisent-dark-muted-text); font-size: 14px; font-weight: 500; line-height: 20px; }
+.wisent-navigation__items { display: flex; flex-direction: column; gap: var(--wisent-space-xs); }
+.wisent-navigation__item { box-sizing: border-box; display: flex; min-height: 36px; align-items: center; justify-content: space-between; gap: var(--wisent-space-md); border-radius: var(--wisent-radius-md); padding: var(--wisent-space-md) var(--wisent-space-md) var(--wisent-space-md) var(--wisent-space-lg); color: var(--wisent-color-gray700); font-size: 16px; font-weight: 500; line-height: 24px; text-decoration: none; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-navigation__item:hover { background: color-mix(in srgb, var(--wisent-color-bone) 60%, transparent); }
+.wisent-navigation__item--active { background: var(--wisent-color-bone); color: var(--wisent-color-brand700); }
+.wisent-navigation__item:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: -2px; }
+.wisent-navigation__lead { display: flex; min-width: 0; align-items: center; gap: var(--wisent-space-md); }
+.wisent-navigation__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-navigation__avatar { display: inline-flex; width: 24px; height: 24px; flex: 0 0 24px; align-items: center; justify-content: center; overflow: hidden; border: 1.25px solid var(--wisent-color-border); border-radius: 999px; background: var(--wisent-color-canvas-muted); }
+.wisent-navigation__avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
+.wisent-navigation__trail { display: flex; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-xs); }
+.wisent-navigation__badge { border-radius: var(--wisent-radius-sm); padding: 1px var(--wisent-space-sm); background: var(--wisent-color-canvas-muted); color: var(--wisent-color-brand600); font-size: 12px; font-weight: 500; line-height: 18px; }
+.wisent-navigation__icon { display: inline-flex; width: 20px; height: 20px; flex: 0 0 20px; align-items: center; justify-content: center; }
+.wisent-navigation__footer { margin-top: auto; padding-top: var(--wisent-space-2xl); }
+
+.wisent-create-action { box-sizing: border-box; display: flex; width: 100%; align-items: center; justify-content: flex-start; gap: var(--wisent-space-sm); border: 1px solid var(--wisent-color-canvas-muted); border-radius: var(--wisent-radius-md); padding: var(--wisent-space-sm) var(--wisent-space-sm) var(--wisent-space-sm) var(--wisent-space-lg); background: var(--wisent-color-white); color: var(--wisent-color-almost-black); font-family: var(--wisent-font-sans); font-size: 14px; font-weight: 500; line-height: 20px; text-align: left; text-decoration: none; box-shadow: var(--wisent-shadow-control); cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease; }
+.wisent-create-action:hover { border-color: var(--wisent-color-border); background: var(--wisent-color-background); }
+.wisent-create-action:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: 2px; }
+.wisent-create-action__icon { display: inline-flex; width: 20px; height: 20px; flex: 0 0 20px; align-items: center; justify-content: center; }
+.wisent-create-action__label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-create-action__badge { margin-left: auto; border-radius: var(--wisent-radius-sm); padding: var(--wisent-space-xxs) var(--wisent-space-sm); background: var(--wisent-color-brand); color: var(--wisent-color-forest); font-size: 12px; font-weight: 500; line-height: 18px; }
+
+.wisent-context-bar { box-sizing: border-box; display: flex; height: 44px; align-items: center; gap: var(--wisent-space-lg); border-bottom: 1px solid var(--wisent-color-border); padding: 0 var(--wisent-space-3xl); background: var(--wisent-color-background); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-context-bar__identity { display: flex; min-width: 0; align-items: center; gap: var(--wisent-space-md); }
+.wisent-context-bar__title { margin: 0; overflow: hidden; color: var(--wisent-color-ink); text-overflow: ellipsis; white-space: nowrap; }
+.wisent-context-bar__eyebrow { border-radius: var(--wisent-radius-sm); padding: 1px var(--wisent-space-sm); background: var(--wisent-color-canvas-muted); color: var(--wisent-color-brand700); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .06em; line-height: 16px; text-transform: uppercase; white-space: nowrap; }
+.wisent-context-bar__detail { margin-left: auto; overflow: hidden; color: var(--wisent-color-muted-text); text-overflow: ellipsis; white-space: nowrap; }
+.wisent-context-bar__actions { display: flex; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); }
+.wisent-context-bar__detail + .wisent-context-bar__actions { margin-left: 0; }
+.wisent-context-bar__identity + .wisent-context-bar__actions { margin-left: auto; }
+
+.wisent-screen { box-sizing: border-box; display: grid; min-height: 0; flex: 1 1 auto; grid-template-rows: auto minmax(0, 1fr); background: var(--wisent-color-background); }
+.wisent-screen__page { box-sizing: border-box; display: grid; width: 100%; max-width: 1120px; min-height: 0; align-content: start; gap: var(--wisent-space-3xl); margin-inline: auto; overflow: auto; padding: var(--wisent-space-3xl); }
+
+.wisent-status-chip { display: inline-flex; align-items: center; gap: var(--wisent-space-xs); border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 999px; padding: 2px var(--wisent-space-md); background: color-mix(in srgb, currentColor 10%, transparent); color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .04em; line-height: 14px; text-transform: uppercase; }
+.wisent-status-chip--neutral { color: var(--wisent-color-secondary-text); }
+.wisent-status-chip--brand { color: var(--wisent-color-brand600); }
+.wisent-status-chip--success { color: var(--wisent-color-success); }
+.wisent-status-chip--warning { color: var(--wisent-color-warning); }
+.wisent-status-chip--danger { color: var(--wisent-color-danger); }
+
+.wisent-queue-row { box-sizing: border-box; display: flex; align-items: center; gap: var(--wisent-space-lg); padding: var(--wisent-space-lg) var(--wisent-space-xl); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-queue-row + .wisent-queue-row { border-top: 1px solid var(--wisent-color-border); }
+.wisent-queue-row__copy { display: grid; min-width: 0; gap: var(--wisent-space-xs); }
+.wisent-queue-row__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-queue-row__detail { overflow: hidden; color: var(--wisent-color-secondary-text); text-overflow: ellipsis; white-space: nowrap; }
+.wisent-queue-row__status { margin-left: auto; flex: 0 0 auto; }
+.wisent-queue-row__trailing { display: flex; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); color: var(--wisent-color-muted-text); }
+.wisent-queue-row__status + .wisent-queue-row__trailing { margin-left: 0; }
+.wisent-queue-row__copy + .wisent-queue-row__trailing { margin-left: auto; }
+
+.wisent-signal-strip { box-sizing: border-box; display: flex; flex-wrap: wrap; overflow: hidden; border: 1px solid var(--wisent-color-border); border-radius: var(--wisent-radius-xl); background: var(--wisent-color-white); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); box-shadow: var(--wisent-shadow-surface); }
+.wisent-signal-strip__signal { display: grid; min-width: 140px; flex: 1 1 0; gap: var(--wisent-space-md); padding: var(--wisent-space-xl); }
+.wisent-signal-strip__signal + .wisent-signal-strip__signal { border-left: 1px solid var(--wisent-color-border); }
+.wisent-signal-strip__label { color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 9px; font-weight: 600; letter-spacing: .6px; line-height: 12px; text-transform: uppercase; }
+.wisent-signal-strip__reading { display: flex; min-width: 0; align-items: center; gap: var(--wisent-space-md); }
+.wisent-signal-strip__dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 999px; background: var(--wisent-color-muted-text); }
+.wisent-signal-strip__dot--brand { background: var(--wisent-color-brand600); }
+.wisent-signal-strip__dot--success { background: var(--wisent-color-success); }
+.wisent-signal-strip__dot--warning { background: var(--wisent-color-warning); }
+.wisent-signal-strip__dot--danger { background: var(--wisent-color-danger); }
+.wisent-signal-strip__value { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.wisent-section-box { display: grid; gap: var(--wisent-space-lg); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-section-box__header { display: flex; align-items: baseline; gap: var(--wisent-space-lg); }
+.wisent-section-box__title { margin: 0; min-width: 0; }
+.wisent-section-box__actions { display: flex; margin-left: auto; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); }
+.wisent-section-box__body { display: grid; min-width: 0; gap: var(--wisent-space-lg); }
+
+.wisent-alert-panel { position: relative; box-sizing: border-box; display: flex; align-items: flex-start; gap: var(--wisent-space-xl); overflow: hidden; border: 1px solid color-mix(in srgb, currentColor 32%, transparent); border-radius: var(--wisent-radius-lg); padding: var(--wisent-space-2xl); background: color-mix(in srgb, currentColor 5%, var(--wisent-color-white)); color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-sans); box-shadow: var(--wisent-shadow-surface); }
+.wisent-alert-panel::before { content: ""; position: absolute; top: var(--wisent-space-xs); bottom: var(--wisent-space-xs); left: 1px; width: 3.5px; border-radius: 2px; background: currentColor; }
+.wisent-alert-panel--neutral { color: var(--wisent-color-secondary-text); }
+.wisent-alert-panel--brand { color: var(--wisent-color-brand700); }
+.wisent-alert-panel--success { color: var(--wisent-color-success); }
+.wisent-alert-panel--warning { color: var(--wisent-color-warning); }
+.wisent-alert-panel--danger { color: var(--wisent-color-danger); }
+.wisent-alert-panel__copy { display: grid; min-width: 0; gap: var(--wisent-space-md); }
+.wisent-alert-panel__title { color: currentColor; font-family: var(--wisent-font-expanded); font-size: 14px; font-weight: 600; line-height: 20px; }
+.wisent-alert-panel__detail { margin: 0; color: var(--wisent-color-secondary-text); -webkit-user-select: text; user-select: text; }
+.wisent-alert-panel__actions { display: flex; margin-left: auto; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); }
+
+.wisent-mutation-bar { box-sizing: border-box; display: flex; align-items: center; gap: var(--wisent-space-lg); border-radius: var(--wisent-radius-sm); padding: var(--wisent-space-lg) var(--wisent-space-xl); background: color-mix(in srgb, var(--wisent-color-secondary-text) 7%, transparent); color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-sans); }
+.wisent-mutation-bar__message { min-width: 0; -webkit-user-select: text; user-select: text; }
+.wisent-mutation-bar__actions { display: flex; margin-left: auto; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); }
+
+.wisent-toast-region { position: fixed; z-index: 1100; display: flex; max-width: 100%; flex-direction: column; gap: var(--wisent-space-lg); margin: 0; padding: var(--wisent-space-xl); list-style: none; pointer-events: none; }
+.wisent-toast-region > * { pointer-events: auto; }
+.wisent-toast-region--top-left { top: 0; left: 0; }
+.wisent-toast-region--top-center { top: 0; left: 50%; transform: translateX(-50%); }
+.wisent-toast-region--top-right { top: 0; right: 0; }
+.wisent-toast-region--bottom-left { bottom: 0; left: 0; }
+.wisent-toast-region--bottom-center { bottom: 0; left: 50%; transform: translateX(-50%); }
+.wisent-toast-region--bottom-right { bottom: 0; right: 0; }
+
+.wisent-toast { position: relative; box-sizing: border-box; display: grid; width: min(100%, 400px); align-items: start; grid-template-columns: 24px minmax(0, 1fr); gap: var(--wisent-space-lg); overflow: hidden; border: 1px solid var(--wisent-color-subtle-border); border-radius: var(--wisent-radius-xl); padding: var(--wisent-space-xl) var(--wisent-space-xl) calc(var(--wisent-space-3xl) + var(--wisent-space-xs)); background: var(--wisent-color-white); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); box-shadow: var(--wisent-shadow-toast); }
+.wisent-toast__icon { display: inline-flex; width: 24px; height: 24px; flex-shrink: 0; align-items: center; justify-content: center; padding: var(--wisent-space-xxs); background: var(--wisent-color-bone); color: var(--wisent-color-secondary-text); }
+.wisent-toast__icon:empty { background: transparent; }
+.wisent-toast__icon > * { width: 20px; height: 20px; }
+.wisent-toast--brand .wisent-toast__icon { color: var(--wisent-color-brand600); }
+.wisent-toast--success .wisent-toast__icon { color: var(--wisent-color-success); }
+.wisent-toast--warning .wisent-toast__icon { color: var(--wisent-color-warning); }
+.wisent-toast--danger .wisent-toast__icon { color: var(--wisent-color-danger); }
+.wisent-toast__content { display: grid; min-width: 0; gap: var(--wisent-space-xs); padding-bottom: var(--wisent-space-lg); }
+.wisent-toast__title { margin: var(--wisent-space-xs) 0 0; color: var(--wisent-color-ink); font-size: 14px; font-weight: 600; line-height: 20px; }
+.wisent-toast__description { margin: 0; color: var(--wisent-color-secondary-text); font-size: 14px; font-weight: 400; line-height: 20px; }
+.wisent-toast__action { display: flex; align-items: center; gap: var(--wisent-space-md); padding-top: var(--wisent-space-xs); }
+.wisent-toast__close { appearance: none; position: absolute; top: 7px; right: 7px; display: flex; width: 36px; height: 36px; align-items: center; justify-content: center; border: 0; border-radius: var(--wisent-radius-md); padding: 0; background: transparent; color: var(--wisent-color-border-strong); font-family: var(--wisent-font-sans); font-size: 20px; line-height: 20px; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-toast__close:hover { background: var(--wisent-color-bone); color: var(--wisent-color-secondary-text); }
+.wisent-toast__close:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: -2px; }
+.wisent-toast__progress { position: absolute; bottom: var(--wisent-space-lg); left: calc(var(--wisent-space-xl) + 24px + var(--wisent-space-lg)); right: var(--wisent-space-xl); height: 4px; overflow: hidden; border-radius: 999px; background: var(--wisent-color-bone); pointer-events: none; }
+.wisent-toast__progress-fill { display: block; height: 100%; border-radius: inherit; background: var(--wisent-color-border); transform: scaleX(1); transform-origin: left; animation: wisent-toast-progress var(--wisent-toast-duration, 7s) cubic-bezier(.33, 1, .68, 1) forwards; }
+.wisent-toast__progress--determinate .wisent-toast__progress-fill { animation: none; transform: scaleX(var(--wisent-toast-progress, 0)); transition: transform var(--wisent-motion-standard) ease; }
+
+@keyframes wisent-toast-progress {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (max-width: 1000px) {
+  .wisent-app-layout { min-width: 0; min-height: 0; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto var(--wisent-app-layout-context) minmax(0, 1fr) auto; grid-template-areas: "sidebar" "context" "main" "inspector"; }
+  .wisent-app-layout__inspector { border-top: 1px solid var(--wisent-color-border); border-left: 0; }
+  .wisent-screen__page { padding: var(--wisent-space-xl); }
+  .wisent-toast-region { width: 100%; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wisent-action, .wisent-project-card, .wisent-app-badge { transition: none; }
-  .wisent-skeleton,
-  .wisent-button[aria-busy="true"] .wisent-button__label,
-  .wisent-action[aria-busy="true"] .wisent-action__label,
-  .wisent-oauth-button[aria-busy="true"] .wisent-oauth-button__label { animation: none; background-image: none; }
+  .wisent-navigation__item, .wisent-create-action, .wisent-toast__close { transition: none; }
+  .wisent-toast__progress-fill { animation: none; transform: scaleX(1); transition: none; }
 }
+
+/* ---------------------------------------------------------------------------
+   === data === The screen a product is actually made of: a table, a filter
+   rail, a form, a menu. Every block names the Figma node its values come from,
+   or the SwiftUI type in Sources/WisentDesignSystem/WisentAppShell.swift whose
+   name it shares. Controls are 40 px medium and 34 px small, the same box as
+   .wisent-button and .wisent-field, so a field, a select and a button in one
+   toolbar line up without a caller adjusting anything.
+--------------------------------------------------------------------------- */
+
+/* Figma `Table` Wisent Web App 535:34232: radius 12, 1 px #eeeeee frame,
+   0 1px 2px rgba(10,13,18,.05). Header cell 535:34236 is 44 px with 12/16
+   padding and a bottom rule; body cell 535:34239 is 16/16 padding over the same
+   rule. Compact rows are SwiftUI's WisentAppLayout.tableRowHeight, 28 px. */
+.wisent-table-frame { box-sizing: border-box; overflow: hidden; border: 1px solid var(--wisent-color-subtle-border); border-radius: var(--wisent-radius-lg); background: var(--wisent-color-white); box-shadow: var(--wisent-shadow-control); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-table-frame__busy { padding: var(--wisent-space-xl); }
+.wisent-table-frame__table { width: 100%; border-collapse: collapse; table-layout: auto; }
+.wisent-table-frame__caption { caption-side: top; border-bottom: 1px solid var(--wisent-color-subtle-border); padding: var(--wisent-space-lg) var(--wisent-space-xl); color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .12em; text-align: left; text-transform: uppercase; }
+.wisent-table-frame__column--select { width: 44px; }
+.wisent-table-frame__head { border-bottom: 1px solid var(--wisent-color-border); background: var(--wisent-color-bone); color: var(--wisent-color-secondary-text); font-size: 12px; font-weight: 600; line-height: 18px; text-align: left; white-space: nowrap; }
+.wisent-table-frame__cell { border-bottom: 1px solid var(--wisent-color-subtle-border); font-size: 14px; font-weight: 400; line-height: 20px; vertical-align: middle; }
+.wisent-table-frame__row:last-child .wisent-table-frame__cell { border-bottom: 0; }
+.wisent-table-frame__cell--start { text-align: left; }
+.wisent-table-frame__cell--center { text-align: center; }
+.wisent-table-frame__cell--end { text-align: right; font-variant-numeric: tabular-nums; }
+.wisent-table-frame__select .wisent-checkbox__copy { display: none; }
+.wisent-table-frame__row--selected { background: var(--wisent-color-brand50); }
+.wisent-table-frame__empty { padding: var(--wisent-space-4xl) var(--wisent-space-xl); font-size: 14px; text-align: center; }
+.wisent-table-frame--standard .wisent-table-frame__head { height: 44px; padding: var(--wisent-space-lg) var(--wisent-space-xl); }
+.wisent-table-frame--standard .wisent-table-frame__cell { padding: var(--wisent-space-xl); }
+.wisent-table-frame--compact .wisent-table-frame__head { height: 28px; padding: var(--wisent-space-xs) var(--wisent-space-lg); }
+.wisent-table-frame--compact .wisent-table-frame__cell { height: 28px; padding: var(--wisent-space-xs) var(--wisent-space-lg); font-size: 13px; }
+.wisent-table-frame .wisent-table-frame__cell--select, .wisent-table-frame .wisent-table-frame__head--select { width: 44px; padding-right: 0; }
+
+/* The 36 px navigation row of wisent-app/figma-navigation-exact-specs.txt,
+   generalized to any record: 8 px radius, 8/12 padding, active on bone. */
+.wisent-list-row { box-sizing: border-box; display: flex; width: 100%; min-height: 36px; align-items: center; gap: var(--wisent-space-lg); border: 0; border-radius: var(--wisent-radius-md); padding: var(--wisent-space-md) var(--wisent-space-lg); background: transparent; color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); font-size: 14px; text-align: left; text-decoration: none; }
+.wisent-list-row--interactive { cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-list-row--interactive:hover { background: color-mix(in srgb, var(--wisent-color-bone) 70%, transparent); }
+.wisent-list-row--active { background: var(--wisent-color-bone); color: var(--wisent-color-brand700); font-weight: 600; }
+.wisent-list-row:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: 2px; }
+.wisent-list-row__leading { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; color: var(--wisent-color-secondary-text); }
+.wisent-list-row__copy { display: grid; min-width: 0; gap: 2px; }
+.wisent-list-row__title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-list-row__detail { color: var(--wisent-color-muted-text); font-size: 12px; line-height: 18px; }
+.wisent-list-row__trailing { display: inline-flex; flex: 0 0 auto; align-items: center; gap: var(--wisent-space-md); margin-left: auto; color: var(--wisent-color-muted-text); font-size: 12px; }
+
+/* Figma `Select` Wisent Web App 415:23609, node I535:23283;7953:158179: the
+   Input box is 40 px tall, 8/12 padding, radius 8, white on a 1 px border with
+   0 1px 2px rgba(10,13,18,.05); its focused sibling 684:33865 takes the
+   brand-link border. Identical to .wisent-field by construction. */
+.wisent-select, .wisent-textarea { display: grid; gap: var(--wisent-space-xs); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-select__label, .wisent-textarea__label { font-size: 12px; font-weight: 600; }
+.wisent-select__control, .wisent-textarea__control { display: flex; align-items: center; gap: var(--wisent-space-md); border: 1px solid var(--wisent-color-border-strong); border-radius: var(--wisent-radius-md); background: var(--wisent-color-white); box-shadow: var(--wisent-shadow-control); }
+.wisent-select--medium .wisent-select__control { min-height: 40px; padding: 7px 11px; }
+.wisent-select--small .wisent-select__control { min-height: 34px; padding: 5px 9px; }
+.wisent-select__control:focus-within, .wisent-textarea__control:focus-within { border-color: var(--wisent-color-brand-link); outline: 2px solid var(--wisent-color-brand-link); outline-offset: 2px; }
+.wisent-select__input { appearance: none; min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.wisent-select--disabled, .wisent-textarea--disabled { cursor: not-allowed; opacity: .5; }
+.wisent-select__input:disabled, .wisent-textarea__input:disabled { cursor: not-allowed; }
+.wisent-select__leading { display: inline-flex; flex: 0 0 auto; color: var(--wisent-color-muted-text); }
+.wisent-select__message, .wisent-textarea__message { color: var(--wisent-color-muted-text); font-size: 11px; }
+.wisent-select__control::after, .wisent-pagination__chevron { display: block; width: 16px; height: 16px; flex: 0 0 auto; background: currentColor; -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8l4 4 4-4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M6 8l4 4 4-4' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
+.wisent-select__control::after { content: ""; color: var(--wisent-color-muted-text); }
+
+.wisent-textarea__control { align-items: stretch; padding: 7px 11px; }
+.wisent-textarea__input { width: 100%; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; resize: vertical; }
+
+/* Figma `_Toggle base` Wisent Web App 158:17318 (on) and 158:17326 (off):
+   a 36×18 track at radius 9999 with a 16 px knob and 1 px of inset. */
+.wisent-switch { display: inline-grid; grid-template-columns: auto minmax(0, 1fr); align-items: start; gap: 0 var(--wisent-space-lg); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); cursor: pointer; }
+.wisent-switch__input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+.wisent-switch__track { display: inline-flex; grid-row: 1 / span 2; width: 36px; height: 18px; align-items: center; justify-content: flex-start; border-radius: 999px; padding: 1px; background: var(--wisent-color-subtle-border); transition: background-color var(--wisent-motion-fast) ease; }
+.wisent-switch__knob { display: block; width: 16px; height: 16px; border-radius: 999px; background: var(--wisent-color-white); box-shadow: var(--wisent-shadow-control); transition: transform var(--wisent-motion-fast) ease; }
+.wisent-switch__input:checked + .wisent-switch__track { background: var(--wisent-color-brand); }
+.wisent-switch__input:checked + .wisent-switch__track .wisent-switch__knob { background: var(--wisent-color-brand50); transform: translateX(18px); }
+.wisent-switch__input:focus-visible + .wisent-switch__track { outline: 2px solid var(--wisent-color-brand-link); outline-offset: 2px; }
+.wisent-switch--disabled { cursor: not-allowed; opacity: .5; }
+.wisent-switch__copy { display: grid; gap: 2px; }
+.wisent-switch__label { font-size: 13px; font-weight: 600; }
+.wisent-switch__description { color: var(--wisent-color-muted-text); font-size: 11px; line-height: 16px; }
+
+/* Figma `Tabs` Wisent Web App 1612:45297: a 44 px rail at radius 12 holding
+   36 px tabs at radius 8, 8/12 padding, the current one filled brand-700. */
+.wisent-tabs { box-sizing: border-box; display: flex; flex-wrap: wrap; gap: var(--wisent-space-xs); border: 1px solid var(--wisent-color-subtle-border); border-radius: var(--wisent-radius-lg); padding: var(--wisent-space-xs); background: var(--wisent-color-bone); font-family: var(--wisent-font-sans); }
+.wisent-tabs__tab { box-sizing: border-box; display: inline-flex; min-height: 36px; align-items: center; gap: var(--wisent-space-md); border: 0; border-radius: var(--wisent-radius-md); padding: var(--wisent-space-md) var(--wisent-space-lg); background: transparent; color: var(--wisent-color-muted-text); font-family: inherit; font-size: 14px; font-weight: 600; line-height: 20px; text-decoration: none; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-tabs__tab:hover { color: var(--wisent-color-ink); }
+.wisent-tabs__tab--active { background: var(--wisent-color-brand700); color: var(--wisent-color-white); box-shadow: var(--wisent-shadow-control); }
+.wisent-tabs__tab:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: 2px; }
+.wisent-tabs__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-tabs__badge { display: inline-flex; min-width: 20px; align-items: center; justify-content: center; border-radius: var(--wisent-radius-sm); padding: 1px 6px 2px; background: var(--wisent-color-subtle-border); color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-mono); font-size: 12px; font-weight: 500; line-height: 18px; }
+.wisent-tabs__tab--active .wisent-tabs__badge { background: color-mix(in srgb, var(--wisent-color-brand-link) 50%, transparent); color: var(--wisent-color-white); }
+
+/* Figma `Menu items wrapper` Wisent Web App 651:37446: a flat white sheet on a
+   1 px hairline at radius 12, 6 px of inset, 40 px rows that highlight on bone
+   at radius 8. Anchored, never portalled. */
+.wisent-menu { position: relative; display: inline-flex; font-family: var(--wisent-font-sans); }
+.wisent-menu__trigger { appearance: none; display: inline-flex; align-items: center; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; cursor: pointer; }
+.wisent-menu__trigger:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: 2px; }
+.wisent-menu__list { position: absolute; z-index: 30; top: calc(100% + var(--wisent-space-sm)); display: grid; min-width: 240px; gap: var(--wisent-space-xxs); border: 1px solid var(--wisent-color-subtle-border); border-radius: var(--wisent-radius-lg); padding: var(--wisent-space-sm); background: var(--wisent-color-white); box-shadow: var(--wisent-shadow-raised); }
+.wisent-menu__list--start { left: 0; }
+.wisent-menu__list--end { right: 0; }
+.wisent-menu__item { box-sizing: border-box; display: flex; min-height: 40px; align-items: center; gap: var(--wisent-space-md); border: 0; border-radius: var(--wisent-radius-md); padding: var(--wisent-space-md); background: transparent; color: var(--wisent-color-secondary-text); font-family: inherit; font-size: 14px; line-height: 20px; text-align: left; text-decoration: none; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-menu__item:hover { background: var(--wisent-color-bone); color: var(--wisent-color-ink); }
+.wisent-menu__item:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: -2px; }
+.wisent-menu__item--neutral { color: var(--wisent-color-secondary-text); }
+.wisent-menu__item--brand { color: var(--wisent-color-brand700); }
+.wisent-menu__item--danger { color: var(--wisent-color-danger); }
+.wisent-menu__item[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
+.wisent-menu__item[aria-disabled="true"]:hover { background: transparent; }
+.wisent-menu__icon { color: var(--wisent-color-muted-text); }
+.wisent-menu__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* SwiftUI WisentFacet / WisentFacetGroup / WisentFacetRail, at the rail width
+   the native side uses: WisentAppLayout.facetRailWidth, 168 px. */
+.wisent-facet-rail { box-sizing: border-box; display: flex; width: 168px; min-height: 0; flex: 0 0 168px; flex-direction: column; border-right: 1px solid var(--wisent-color-border); background: var(--wisent-color-background); font-family: var(--wisent-font-sans); }
+.wisent-facet-rail__groups { display: grid; align-content: start; gap: var(--wisent-space-2xl); overflow-y: auto; padding: var(--wisent-space-xl) 0; }
+.wisent-facet-rail__footer { display: grid; gap: var(--wisent-space-xs); border-top: 1px solid var(--wisent-color-border); padding: var(--wisent-space-xl); }
+.wisent-facet-rail__footer-title { color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.wisent-facet-rail__footer-detail { color: var(--wisent-color-secondary-text); font-family: var(--wisent-font-mono); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+.wisent-facet-group__title { margin: 0 0 var(--wisent-space-xs); padding: 0 var(--wisent-space-xl); color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; }
+.wisent-facet-group__items { display: grid; gap: 1px; padding: 0 var(--wisent-space-md); }
+.wisent-facet { box-sizing: border-box; display: flex; width: 100%; align-items: center; gap: var(--wisent-space-md); border: 1px solid transparent; border-radius: var(--wisent-radius-sm); padding: 5px var(--wisent-space-lg); background: transparent; color: var(--wisent-color-secondary-text); font-family: inherit; font-size: 12px; text-align: left; text-decoration: none; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-facet:hover { color: var(--wisent-color-ink); }
+.wisent-facet--selected { border-color: var(--wisent-color-border); background: var(--wisent-color-white); color: var(--wisent-color-ink); font-weight: 600; }
+.wisent-facet:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: 1px; }
+.wisent-facet__dot { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 999px; background: currentColor; }
+.wisent-facet__dot--brand { background: var(--wisent-color-brand700); }
+.wisent-facet__dot--success { background: var(--wisent-color-success); }
+.wisent-facet__dot--warning { background: var(--wisent-color-warning); }
+.wisent-facet__dot--danger { background: var(--wisent-color-danger); }
+.wisent-facet__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-facet__count { margin-left: auto; color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* SwiftUI WisentCounterRow: the count monospaced with tabular figures, so a
+   column of them holds its position while the numbers change. */
+.wisent-counter-row { display: flex; align-items: baseline; justify-content: space-between; gap: var(--wisent-space-lg); border-bottom: 1px solid var(--wisent-color-subtle-border); padding: var(--wisent-space-md) 0; color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); font-size: 13px; }
+.wisent-counter-row:last-child { border-bottom: 0; }
+.wisent-counter-row__label { min-width: 0; color: var(--wisent-color-secondary-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wisent-counter-row__count { flex: 0 0 auto; font-family: var(--wisent-font-mono); font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.wisent-counter-row--neutral .wisent-counter-row__count { color: var(--wisent-color-ink); }
+.wisent-counter-row--brand .wisent-counter-row__count { color: var(--wisent-color-brand700); }
+.wisent-counter-row--success .wisent-counter-row__count { color: var(--wisent-color-success); }
+.wisent-counter-row--warning .wisent-counter-row__count { color: var(--wisent-color-warning); }
+.wisent-counter-row--danger .wisent-counter-row__count { color: var(--wisent-color-danger); }
+
+/* SwiftUI WisentField, the inspector's unit: label over value, value selectable. */
+.wisent-key-value { display: grid; gap: var(--wisent-space-xl); margin: 0; color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); }
+.wisent-key-value--1 { grid-template-columns: minmax(0, 1fr); }
+.wisent-key-value--2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wisent-key-value--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wisent-key-value__pair { display: grid; min-width: 0; gap: var(--wisent-space-xs); }
+.wisent-key-value__label { color: var(--wisent-color-muted-text); font-family: var(--wisent-font-mono); font-size: 10px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+.wisent-key-value__value { margin: 0; font-size: 14px; line-height: 20px; overflow-wrap: anywhere; }
+.wisent-key-value__value--mono { font-family: var(--wisent-font-mono); font-size: 13px; }
+
+/* Figma `Pagination button group` Wisent Web App 535:32614: one bordered group
+   at radius 8, 40 px cells, 44 px arrows, the current page filled. */
+.wisent-pagination { display: flex; justify-content: center; font-family: var(--wisent-font-sans); }
+.wisent-pagination__group { display: inline-flex; overflow: hidden; align-items: stretch; border: 1px solid var(--wisent-color-subtle-border); border-radius: var(--wisent-radius-md); background: var(--wisent-color-white); }
+.wisent-pagination__page, .wisent-pagination__step, .wisent-pagination__gap { box-sizing: border-box; display: inline-flex; min-width: 40px; height: 40px; align-items: center; justify-content: center; border: 0; border-left: 1px solid var(--wisent-color-subtle-border); background: transparent; color: var(--wisent-color-muted-text); font-family: inherit; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-decoration: none; }
+.wisent-pagination__group > :first-child { border-left: 0; }
+.wisent-pagination__page, .wisent-pagination__step { cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease; }
+.wisent-pagination__page:hover, .wisent-pagination__step:hover:not(:disabled) { background: var(--wisent-color-bone); color: var(--wisent-color-ink); }
+.wisent-pagination__page--current { background: var(--wisent-color-subtle-border); color: var(--wisent-color-ink); }
+.wisent-pagination__page:focus-visible, .wisent-pagination__step:focus-visible { outline: 2px solid var(--wisent-color-brand-link); outline-offset: -2px; }
+.wisent-pagination__step { min-width: 44px; }
+.wisent-pagination__step:disabled { cursor: not-allowed; opacity: .5; }
+.wisent-pagination__step--previous .wisent-pagination__chevron { transform: rotate(90deg); }
+.wisent-pagination__step--next .wisent-pagination__chevron { transform: rotate(-90deg); }
+
+/* Dark appearance for the data section, written once as a scheme query like the
+   block below it. The build derives the [data-wisent-appearance] scopes with
+   `:where()`, so every rule here keeps the specificity of its light
+   counterpart — which means a light state rule has to be restated at the same
+   selector shape to be overridden, not at a looser one. No comments inside the
+   block; the build refuses one. */
+@media (prefers-color-scheme: dark) {
+:where(html:not([data-wisent-appearance="light"])) .wisent-table-frame, :where(html:not([data-wisent-appearance="light"])) .wisent-menu__list, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__group { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-table-frame__head { border-bottom-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-table-frame__cell, :where(html:not([data-wisent-appearance="light"])) .wisent-table-frame__caption, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__page, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__step, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__gap, :where(html:not([data-wisent-appearance="light"])) .wisent-facet-rail__footer { border-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-table-frame__row--selected { background: var(--wisent-dark-brand-soft); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-select__control, :where(html:not([data-wisent-appearance="light"])) .wisent-textarea__control { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-switch__track { background: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-switch__knob { background: var(--wisent-dark-surface-raised); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-tabs { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-tabs__badge { background: var(--wisent-dark-border); color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-tabs__tab--active { background: var(--wisent-dark-brand); color: var(--wisent-dark-brand-soft); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-tabs__tab--active .wisent-tabs__badge { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet-rail { border-right-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet--selected { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-list-row--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-menu__item:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__page--current { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-list-row--interactive:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 70%, transparent); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-pagination__page:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-pagination__step:hover:not(:disabled) { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-list-row, :where(html:not([data-wisent-appearance="light"])) .wisent-select, :where(html:not([data-wisent-appearance="light"])) .wisent-textarea, :where(html:not([data-wisent-appearance="light"])) .wisent-switch, :where(html:not([data-wisent-appearance="light"])) .wisent-key-value, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row--neutral .wisent-counter-row__count { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-tabs__tab:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-facet:hover { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-list-row__leading, :where(html:not([data-wisent-appearance="light"])) .wisent-facet, :where(html:not([data-wisent-appearance="light"])) .wisent-menu__item, :where(html:not([data-wisent-appearance="light"])) .wisent-menu__item--neutral, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row__label, :where(html:not([data-wisent-appearance="light"])) .wisent-facet-rail__footer-detail { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-table-frame__caption, :where(html:not([data-wisent-appearance="light"])) .wisent-list-row__detail, :where(html:not([data-wisent-appearance="light"])) .wisent-list-row__trailing, :where(html:not([data-wisent-appearance="light"])) .wisent-select__leading, :where(html:not([data-wisent-appearance="light"])) .wisent-select__message, :where(html:not([data-wisent-appearance="light"])) .wisent-textarea__message, :where(html:not([data-wisent-appearance="light"])) .wisent-select__control::after, :where(html:not([data-wisent-appearance="light"])) .wisent-switch__description, :where(html:not([data-wisent-appearance="light"])) .wisent-tabs__tab, :where(html:not([data-wisent-appearance="light"])) .wisent-menu__icon, :where(html:not([data-wisent-appearance="light"])) .wisent-facet-group__title, :where(html:not([data-wisent-appearance="light"])) .wisent-facet-rail__footer-title, :where(html:not([data-wisent-appearance="light"])) .wisent-facet__count, :where(html:not([data-wisent-appearance="light"])) .wisent-key-value__label { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-menu__item--brand, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row--brand .wisent-counter-row__count { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-counter-row--success .wisent-counter-row__count { color: var(--wisent-dark-success); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-counter-row--warning .wisent-counter-row__count { color: var(--wisent-dark-warning); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-menu__item--danger, :where(html:not([data-wisent-appearance="light"])) .wisent-counter-row--danger .wisent-counter-row__count { color: var(--wisent-dark-danger); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet__dot--brand { background: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet__dot--success { background: var(--wisent-dark-success); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet__dot--warning { background: var(--wisent-dark-warning); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-facet__dot--danger { background: var(--wisent-dark-danger); }
+}
+:where([data-wisent-appearance="dark"]) .wisent-table-frame, :where([data-wisent-appearance="dark"]) .wisent-menu__list, :where([data-wisent-appearance="dark"]) .wisent-pagination__group { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-table-frame__head { border-bottom-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-table-frame__cell, :where([data-wisent-appearance="dark"]) .wisent-table-frame__caption, :where([data-wisent-appearance="dark"]) .wisent-counter-row, :where([data-wisent-appearance="dark"]) .wisent-pagination__page, :where([data-wisent-appearance="dark"]) .wisent-pagination__step, :where([data-wisent-appearance="dark"]) .wisent-pagination__gap, :where([data-wisent-appearance="dark"]) .wisent-facet-rail__footer { border-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-table-frame__row--selected { background: var(--wisent-dark-brand-soft); }
+:where([data-wisent-appearance="dark"]) .wisent-select__control, :where([data-wisent-appearance="dark"]) .wisent-textarea__control { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); }
+:where([data-wisent-appearance="dark"]) .wisent-switch__track { background: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-switch__knob { background: var(--wisent-dark-surface-raised); }
+:where([data-wisent-appearance="dark"]) .wisent-tabs { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-tabs__badge { background: var(--wisent-dark-border); color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-tabs__tab--active { background: var(--wisent-dark-brand); color: var(--wisent-dark-brand-soft); }
+:where([data-wisent-appearance="dark"]) .wisent-tabs__tab--active .wisent-tabs__badge { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-facet-rail { border-right-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas); }
+:where([data-wisent-appearance="dark"]) .wisent-facet--selected { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-list-row--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-menu__item:hover, :where([data-wisent-appearance="dark"]) .wisent-pagination__page--current { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-list-row--interactive:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 70%, transparent); }
+:where([data-wisent-appearance="dark"]) .wisent-pagination__page:hover, :where([data-wisent-appearance="dark"]) .wisent-pagination__step:hover:not(:disabled) { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-list-row, :where([data-wisent-appearance="dark"]) .wisent-select, :where([data-wisent-appearance="dark"]) .wisent-textarea, :where([data-wisent-appearance="dark"]) .wisent-switch, :where([data-wisent-appearance="dark"]) .wisent-key-value, :where([data-wisent-appearance="dark"]) .wisent-counter-row, :where([data-wisent-appearance="dark"]) .wisent-counter-row--neutral .wisent-counter-row__count { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-tabs__tab:hover, :where([data-wisent-appearance="dark"]) .wisent-facet:hover { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-list-row__leading, :where([data-wisent-appearance="dark"]) .wisent-facet, :where([data-wisent-appearance="dark"]) .wisent-menu__item, :where([data-wisent-appearance="dark"]) .wisent-menu__item--neutral, :where([data-wisent-appearance="dark"]) .wisent-counter-row__label, :where([data-wisent-appearance="dark"]) .wisent-facet-rail__footer-detail { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-table-frame__caption, :where([data-wisent-appearance="dark"]) .wisent-list-row__detail, :where([data-wisent-appearance="dark"]) .wisent-list-row__trailing, :where([data-wisent-appearance="dark"]) .wisent-select__leading, :where([data-wisent-appearance="dark"]) .wisent-select__message, :where([data-wisent-appearance="dark"]) .wisent-textarea__message, :where([data-wisent-appearance="dark"]) .wisent-select__control::after, :where([data-wisent-appearance="dark"]) .wisent-switch__description, :where([data-wisent-appearance="dark"]) .wisent-tabs__tab, :where([data-wisent-appearance="dark"]) .wisent-menu__icon, :where([data-wisent-appearance="dark"]) .wisent-facet-group__title, :where([data-wisent-appearance="dark"]) .wisent-facet-rail__footer-title, :where([data-wisent-appearance="dark"]) .wisent-facet__count, :where([data-wisent-appearance="dark"]) .wisent-key-value__label { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-menu__item--brand, :where([data-wisent-appearance="dark"]) .wisent-counter-row--brand .wisent-counter-row__count { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-counter-row--success .wisent-counter-row__count { color: var(--wisent-dark-success); }
+:where([data-wisent-appearance="dark"]) .wisent-counter-row--warning .wisent-counter-row__count { color: var(--wisent-dark-warning); }
+:where([data-wisent-appearance="dark"]) .wisent-menu__item--danger, :where([data-wisent-appearance="dark"]) .wisent-counter-row--danger .wisent-counter-row__count { color: var(--wisent-dark-danger); }
+:where([data-wisent-appearance="dark"]) .wisent-facet__dot--brand { background: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-facet__dot--success { background: var(--wisent-dark-success); }
+:where([data-wisent-appearance="dark"]) .wisent-facet__dot--warning { background: var(--wisent-dark-warning); }
+:where([data-wisent-appearance="dark"]) .wisent-facet__dot--danger { background: var(--wisent-dark-danger); }
+
+
+@media (prefers-reduced-motion: reduce) {
+  .wisent-list-row--interactive, .wisent-switch__track, .wisent-switch__knob, .wisent-tabs__tab, .wisent-menu__item, .wisent-facet, .wisent-pagination__page, .wisent-pagination__step { transition: none; }
+}
+
+/* Dark appearance for every component that paints a light surface. Written
+   once as a scheme query; the build derives the [data-wisent-appearance]
+   scopes from it, so a product that is dark whatever the OS says gets the
+   same rules. Tokens only: the dark ramp is the SwiftUI side's. */
+@media (prefers-color-scheme: dark) {
+:where(html:not([data-wisent-appearance="light"])) .wisent-surface, :where(html:not([data-wisent-appearance="light"])) .wisent-surface--flat, :where(html:not([data-wisent-appearance="light"])) .wisent-surface--raised, :where(html:not([data-wisent-appearance="light"])) .wisent-app-badge, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card, :where(html:not([data-wisent-appearance="light"])) .wisent-chat, :where(html:not([data-wisent-appearance="light"])) .wisent-empty-state, :where(html:not([data-wisent-appearance="light"])) .wisent-modal, :where(html:not([data-wisent-appearance="light"])) .wisent-status-panel, :where(html:not([data-wisent-appearance="light"])) .wisent-toast, :where(html:not([data-wisent-appearance="light"])) .wisent-side-menu, :where(html:not([data-wisent-appearance="light"])) .wisent-app-shell__aside, :where(html:not([data-wisent-appearance="light"])) .wisent-topbar--light { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-surface--muted, :where(html:not([data-wisent-appearance="light"])) .wisent-chat__body, :where(html:not([data-wisent-appearance="light"])) .wisent-avatar, :where(html:not([data-wisent-appearance="light"])) .wisent-empty-state__icon, :where(html:not([data-wisent-appearance="light"])) .wisent-action--badge, :where(html:not([data-wisent-appearance="light"])) .wisent-navigation__avatar, :where(html:not([data-wisent-appearance="light"])) .wisent-navigation__badge, :where(html:not([data-wisent-appearance="light"])) .wisent-context-bar__eyebrow { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-chat__message--user .wisent-chat__body { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-app-shell, :where(html:not([data-wisent-appearance="light"])) .wisent-screen, :where(html:not([data-wisent-appearance="light"])) .wisent-context-bar, :where(html:not([data-wisent-appearance="light"])) .wisent-navigation, :where(html:not([data-wisent-appearance="light"])) .wisent-create-action:hover { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-context-bar, :where(html:not([data-wisent-appearance="light"])) .wisent-chat__header, :where(html:not([data-wisent-appearance="light"])) .wisent-chat__composer, :where(html:not([data-wisent-appearance="light"])) .wisent-modal > header, :where(html:not([data-wisent-appearance="light"])) .wisent-modal__actions, :where(html:not([data-wisent-appearance="light"])) .wisent-side-menu { border-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-navigation, :where(html:not([data-wisent-appearance="light"])) .wisent-navigation__item { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-navigation__item:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 60%, transparent); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-navigation__item--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-navigation__badge { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-create-action { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-action--default { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-action--default:hover:not(:disabled), :where(html:not([data-wisent-appearance="light"])) .wisent-action--quiet:hover:not(:disabled), :where(html:not([data-wisent-appearance="light"])) .wisent-action--badge:hover:not(:disabled) { background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-action--quiet { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-action--hero { background: var(--wisent-dark-brand-strong); color: var(--wisent-dark-canvas); box-shadow: inset 0 -2px 0 var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-action--hero:hover:not(:disabled) { background: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-field__control, :where(html:not([data-wisent-appearance="light"])) .wisent-checkbox__box { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-field__label, :where(html:not([data-wisent-appearance="light"])) .wisent-modal > header h2, :where(html:not([data-wisent-appearance="light"])) .wisent-empty-state h2 { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-field__message, :where(html:not([data-wisent-appearance="light"])) .wisent-field__leading, :where(html:not([data-wisent-appearance="light"])) .wisent-field__trailing, :where(html:not([data-wisent-appearance="light"])) .wisent-modal > header p, :where(html:not([data-wisent-appearance="light"])) .wisent-modal__close, :where(html:not([data-wisent-appearance="light"])) .wisent-empty-state p, :where(html:not([data-wisent-appearance="light"])) .wisent-chat__label, :where(html:not([data-wisent-appearance="light"])) .wisent-context-bar__detail, :where(html:not([data-wisent-appearance="light"])) .wisent-toast__icon { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-avatar__status { border-color: var(--wisent-dark-surface); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-toast__icon, :where(html:not([data-wisent-appearance="light"])) .wisent-toast__progress, :where(html:not([data-wisent-appearance="light"])) .wisent-toast__close:hover { background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-toast__progress-fill { background: var(--wisent-dark-border-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-toast__close { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-alert-panel { background: color-mix(in srgb, currentColor 8%, var(--wisent-dark-surface)); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-mutation-bar { background: color-mix(in srgb, var(--wisent-dark-secondary-text) 12%, transparent); color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-status-chip { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-status-chip--brand { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-modal-backdrop { background: rgba(0, 0, 0, .62); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-icon--muted, :where(html:not([data-wisent-appearance="light"])) .wisent-badge--neutral { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-icon--brand, :where(html:not([data-wisent-appearance="light"])) .wisent-badge--brand { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-icon--success, :where(html:not([data-wisent-appearance="light"])) .wisent-badge--success, :where(html:not([data-wisent-appearance="light"])) .wisent-status-chip--success, :where(html:not([data-wisent-appearance="light"])) .wisent-alert-panel--success { color: var(--wisent-dark-success); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-icon--warning, :where(html:not([data-wisent-appearance="light"])) .wisent-badge--warning, :where(html:not([data-wisent-appearance="light"])) .wisent-status-chip--warning, :where(html:not([data-wisent-appearance="light"])) .wisent-alert-panel--warning { color: var(--wisent-dark-warning); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-icon--danger, :where(html:not([data-wisent-appearance="light"])) .wisent-badge--danger, :where(html:not([data-wisent-appearance="light"])) .wisent-status-chip--danger, :where(html:not([data-wisent-appearance="light"])) .wisent-alert-panel--danger { color: var(--wisent-dark-danger); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-page-header, :where(html:not([data-wisent-appearance="light"])) .wisent-page-header__title, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card dd, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card__value, :where(html:not([data-wisent-appearance="light"])) .wisent-panel, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card, :where(html:not([data-wisent-appearance="light"])) .wisent-section-box__title, :where(html:not([data-wisent-appearance="light"])) .wisent-screen__page, :where(html:not([data-wisent-appearance="light"])) .wisent-queue-row__title { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-page-header__description, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card p, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card dt, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card__detail, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card__title, :where(html:not([data-wisent-appearance="light"])) .wisent-queue-row__detail, :where(html:not([data-wisent-appearance="light"])) .wisent-section-box__detail { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-page-header__eyebrow, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card__eyebrow, :where(html:not([data-wisent-appearance="light"])) .wisent-project-card__action, :where(html:not([data-wisent-appearance="light"])) .wisent-button--quiet { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-page-header__icon { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-metric-card__icon, :where(html:not([data-wisent-appearance="light"])) .wisent-metric-card--brand .wisent-metric-card__icon { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-metric-card--neutral .wisent-metric-card__icon { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-metric-card--success .wisent-metric-card__icon { color: var(--wisent-dark-success); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-metric-card--warning .wisent-metric-card__icon { color: var(--wisent-dark-warning); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-metric-card--danger .wisent-metric-card__icon { color: var(--wisent-dark-danger); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__signal + .wisent-signal-strip__signal { border-left-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__label, :where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot { background: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot--brand { background: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot--success { background: var(--wisent-dark-success); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot--warning { background: var(--wisent-dark-warning); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-signal-strip__dot--danger { background: var(--wisent-dark-danger); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-divider { background: var(--wisent-dark-border); border-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-button--secondary { border-color: var(--wisent-dark-border-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-header, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-footer { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-shell { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-brand { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-brand__divider { background: var(--wisent-dark-border-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-brand__surface, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-footer__note, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-shell-nav__link, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-links span { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-shell-nav__link:hover { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-shell-nav__link[aria-current="page"] { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__label, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__version, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__breadcrumb, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__anchor, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-table caption { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-nav__item, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-nav__group-label, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__source, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__lede, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-callout p { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-nav__item:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-nav__group-label:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 60%, transparent); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-nav__item--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__source, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections section, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__pagination, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__mobile { border-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__source:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__breadcrumb a:hover { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__main h1, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections h2, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections p, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections li, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-callout strong, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-table th { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__kicker, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections li::marker, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__pagination a { color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections p a, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections li a { color: var(--wisent-dark-brand); text-decoration-color: var(--wisent-dark-border-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections p a:hover, :where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections li a:hover { color: var(--wisent-dark-brand-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__sections code { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-code { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-code__title { border-bottom-color: var(--wisent-dark-border); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-code__copy { border-color: var(--wisent-dark-border-strong); color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-code__copy:hover { border-color: var(--wisent-dark-brand); background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-code pre code { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-callout { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-callout--tip { border-color: var(--wisent-dark-brand); background: var(--wisent-dark-brand-soft); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-table th, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-table td { border-bottom-color: var(--wisent-dark-border); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-table th { border-bottom-color: var(--wisent-dark-border-strong); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-steps li::before { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__mobile { background: var(--wisent-dark-canvas-muted); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs__mobile-toggle { color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__label { color: var(--wisent-dark-muted-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__input, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__results { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__hit, :where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__empty { color: var(--wisent-dark-secondary-text); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__hit:hover { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where(html:not([data-wisent-appearance="light"])) .wisent-docs-search__page { color: var(--wisent-dark-ink); }
+}
+:where([data-wisent-appearance="dark"]) .wisent-surface, :where([data-wisent-appearance="dark"]) .wisent-surface--flat, :where([data-wisent-appearance="dark"]) .wisent-surface--raised, :where([data-wisent-appearance="dark"]) .wisent-app-badge, :where([data-wisent-appearance="dark"]) .wisent-project-card, :where([data-wisent-appearance="dark"]) .wisent-chat, :where([data-wisent-appearance="dark"]) .wisent-empty-state, :where([data-wisent-appearance="dark"]) .wisent-modal, :where([data-wisent-appearance="dark"]) .wisent-status-panel, :where([data-wisent-appearance="dark"]) .wisent-toast, :where([data-wisent-appearance="dark"]) .wisent-side-menu, :where([data-wisent-appearance="dark"]) .wisent-app-shell__aside, :where([data-wisent-appearance="dark"]) .wisent-topbar--light { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-surface--muted, :where([data-wisent-appearance="dark"]) .wisent-chat__body, :where([data-wisent-appearance="dark"]) .wisent-avatar, :where([data-wisent-appearance="dark"]) .wisent-empty-state__icon, :where([data-wisent-appearance="dark"]) .wisent-action--badge, :where([data-wisent-appearance="dark"]) .wisent-navigation__avatar, :where([data-wisent-appearance="dark"]) .wisent-navigation__badge, :where([data-wisent-appearance="dark"]) .wisent-context-bar__eyebrow { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-chat__message--user .wisent-chat__body { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-app-shell, :where([data-wisent-appearance="dark"]) .wisent-screen, :where([data-wisent-appearance="dark"]) .wisent-context-bar, :where([data-wisent-appearance="dark"]) .wisent-navigation, :where([data-wisent-appearance="dark"]) .wisent-create-action:hover { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-context-bar, :where([data-wisent-appearance="dark"]) .wisent-chat__header, :where([data-wisent-appearance="dark"]) .wisent-chat__composer, :where([data-wisent-appearance="dark"]) .wisent-modal > header, :where([data-wisent-appearance="dark"]) .wisent-modal__actions, :where([data-wisent-appearance="dark"]) .wisent-side-menu { border-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-navigation, :where([data-wisent-appearance="dark"]) .wisent-navigation__item { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-navigation__item:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 60%, transparent); }
+:where([data-wisent-appearance="dark"]) .wisent-navigation__item--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-navigation__badge { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-create-action { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-action--default { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-action--default:hover:not(:disabled), :where([data-wisent-appearance="dark"]) .wisent-action--quiet:hover:not(:disabled), :where([data-wisent-appearance="dark"]) .wisent-action--badge:hover:not(:disabled) { background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-action--quiet { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-action--hero { background: var(--wisent-dark-brand-strong); color: var(--wisent-dark-canvas); box-shadow: inset 0 -2px 0 var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-action--hero:hover:not(:disabled) { background: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-field__control, :where([data-wisent-appearance="dark"]) .wisent-checkbox__box { border-color: var(--wisent-dark-border-strong); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-field__label, :where([data-wisent-appearance="dark"]) .wisent-modal > header h2, :where([data-wisent-appearance="dark"]) .wisent-empty-state h2 { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-field__message, :where([data-wisent-appearance="dark"]) .wisent-field__leading, :where([data-wisent-appearance="dark"]) .wisent-field__trailing, :where([data-wisent-appearance="dark"]) .wisent-modal > header p, :where([data-wisent-appearance="dark"]) .wisent-modal__close, :where([data-wisent-appearance="dark"]) .wisent-empty-state p, :where([data-wisent-appearance="dark"]) .wisent-chat__label, :where([data-wisent-appearance="dark"]) .wisent-context-bar__detail, :where([data-wisent-appearance="dark"]) .wisent-toast__icon { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-avatar__status { border-color: var(--wisent-dark-surface); }
+:where([data-wisent-appearance="dark"]) .wisent-toast__icon, :where([data-wisent-appearance="dark"]) .wisent-toast__progress, :where([data-wisent-appearance="dark"]) .wisent-toast__close:hover { background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-toast__progress-fill { background: var(--wisent-dark-border-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-toast__close { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-alert-panel { background: color-mix(in srgb, currentColor 8%, var(--wisent-dark-surface)); }
+:where([data-wisent-appearance="dark"]) .wisent-mutation-bar { background: color-mix(in srgb, var(--wisent-dark-secondary-text) 12%, transparent); color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-status-chip { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-status-chip--brand { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-modal-backdrop { background: rgba(0, 0, 0, .62); }
+:where([data-wisent-appearance="dark"]) .wisent-icon--muted, :where([data-wisent-appearance="dark"]) .wisent-badge--neutral { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-icon--brand, :where([data-wisent-appearance="dark"]) .wisent-badge--brand { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-icon--success, :where([data-wisent-appearance="dark"]) .wisent-badge--success, :where([data-wisent-appearance="dark"]) .wisent-status-chip--success, :where([data-wisent-appearance="dark"]) .wisent-alert-panel--success { color: var(--wisent-dark-success); }
+:where([data-wisent-appearance="dark"]) .wisent-icon--warning, :where([data-wisent-appearance="dark"]) .wisent-badge--warning, :where([data-wisent-appearance="dark"]) .wisent-status-chip--warning, :where([data-wisent-appearance="dark"]) .wisent-alert-panel--warning { color: var(--wisent-dark-warning); }
+:where([data-wisent-appearance="dark"]) .wisent-icon--danger, :where([data-wisent-appearance="dark"]) .wisent-badge--danger, :where([data-wisent-appearance="dark"]) .wisent-status-chip--danger, :where([data-wisent-appearance="dark"]) .wisent-alert-panel--danger { color: var(--wisent-dark-danger); }
+:where([data-wisent-appearance="dark"]) .wisent-page-header, :where([data-wisent-appearance="dark"]) .wisent-page-header__title, :where([data-wisent-appearance="dark"]) .wisent-project-card, :where([data-wisent-appearance="dark"]) .wisent-project-card dd, :where([data-wisent-appearance="dark"]) .wisent-metric-card__value, :where([data-wisent-appearance="dark"]) .wisent-panel, :where([data-wisent-appearance="dark"]) .wisent-metric-card, :where([data-wisent-appearance="dark"]) .wisent-section-box__title, :where([data-wisent-appearance="dark"]) .wisent-screen__page, :where([data-wisent-appearance="dark"]) .wisent-queue-row__title { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-page-header__description, :where([data-wisent-appearance="dark"]) .wisent-project-card p, :where([data-wisent-appearance="dark"]) .wisent-project-card dt, :where([data-wisent-appearance="dark"]) .wisent-metric-card__detail, :where([data-wisent-appearance="dark"]) .wisent-metric-card__title, :where([data-wisent-appearance="dark"]) .wisent-queue-row__detail, :where([data-wisent-appearance="dark"]) .wisent-section-box__detail { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-page-header__eyebrow, :where([data-wisent-appearance="dark"]) .wisent-project-card__eyebrow, :where([data-wisent-appearance="dark"]) .wisent-project-card__action, :where([data-wisent-appearance="dark"]) .wisent-button--quiet { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-page-header__icon { background: var(--wisent-dark-brand-soft); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-metric-card__icon, :where([data-wisent-appearance="dark"]) .wisent-metric-card--brand .wisent-metric-card__icon { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-metric-card--neutral .wisent-metric-card__icon { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-metric-card--success .wisent-metric-card__icon { color: var(--wisent-dark-success); }
+:where([data-wisent-appearance="dark"]) .wisent-metric-card--warning .wisent-metric-card__icon { color: var(--wisent-dark-warning); }
+:where([data-wisent-appearance="dark"]) .wisent-metric-card--danger .wisent-metric-card__icon { color: var(--wisent-dark-danger); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__signal + .wisent-signal-strip__signal { border-left-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__label, :where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot { background: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot--brand { background: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot--success { background: var(--wisent-dark-success); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot--warning { background: var(--wisent-dark-warning); }
+:where([data-wisent-appearance="dark"]) .wisent-signal-strip__dot--danger { background: var(--wisent-dark-danger); }
+:where([data-wisent-appearance="dark"]) .wisent-divider { background: var(--wisent-dark-border); border-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-button--secondary { border-color: var(--wisent-dark-border-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-docs { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-header, :where([data-wisent-appearance="dark"]) .wisent-docs-footer { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-shell { background: var(--wisent-dark-canvas); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-brand { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-brand__divider { background: var(--wisent-dark-border-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-brand__surface, :where([data-wisent-appearance="dark"]) .wisent-docs-footer__note, :where([data-wisent-appearance="dark"]) .wisent-docs-shell-nav__link, :where([data-wisent-appearance="dark"]) .wisent-docs-links span { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-shell-nav__link:hover { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-shell-nav__link[aria-current="page"] { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__label, :where([data-wisent-appearance="dark"]) .wisent-docs__version, :where([data-wisent-appearance="dark"]) .wisent-docs__breadcrumb, :where([data-wisent-appearance="dark"]) .wisent-docs__anchor, :where([data-wisent-appearance="dark"]) .wisent-docs-table caption { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-nav__item, :where([data-wisent-appearance="dark"]) .wisent-docs-nav__group-label, :where([data-wisent-appearance="dark"]) .wisent-docs__source, :where([data-wisent-appearance="dark"]) .wisent-docs__lede, :where([data-wisent-appearance="dark"]) .wisent-docs-callout p { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-nav__item:hover, :where([data-wisent-appearance="dark"]) .wisent-docs-nav__group-label:hover { background: color-mix(in srgb, var(--wisent-dark-canvas-muted) 60%, transparent); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-nav__item--active { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__source, :where([data-wisent-appearance="dark"]) .wisent-docs__sections section, :where([data-wisent-appearance="dark"]) .wisent-docs__pagination, :where([data-wisent-appearance="dark"]) .wisent-docs__mobile { border-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__source:hover, :where([data-wisent-appearance="dark"]) .wisent-docs__breadcrumb a:hover { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__main h1, :where([data-wisent-appearance="dark"]) .wisent-docs__sections h2, :where([data-wisent-appearance="dark"]) .wisent-docs__sections p, :where([data-wisent-appearance="dark"]) .wisent-docs__sections li, :where([data-wisent-appearance="dark"]) .wisent-docs-callout strong, :where([data-wisent-appearance="dark"]) .wisent-docs-table th { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__kicker, :where([data-wisent-appearance="dark"]) .wisent-docs__sections li::marker, :where([data-wisent-appearance="dark"]) .wisent-docs__pagination a { color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__sections p a, :where([data-wisent-appearance="dark"]) .wisent-docs__sections li a { color: var(--wisent-dark-brand); text-decoration-color: var(--wisent-dark-border-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__sections p a:hover, :where([data-wisent-appearance="dark"]) .wisent-docs__sections li a:hover { color: var(--wisent-dark-brand-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__sections code { border-color: var(--wisent-dark-border); background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-code { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-code__title { border-bottom-color: var(--wisent-dark-border); background: var(--wisent-dark-surface-raised); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-code__copy { border-color: var(--wisent-dark-border-strong); color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-code__copy:hover { border-color: var(--wisent-dark-brand); background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-code pre code { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-callout { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-callout--tip { border-color: var(--wisent-dark-brand); background: var(--wisent-dark-brand-soft); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-table th, :where([data-wisent-appearance="dark"]) .wisent-docs-table td { border-bottom-color: var(--wisent-dark-border); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-table th { border-bottom-color: var(--wisent-dark-border-strong); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-steps li::before { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__mobile { background: var(--wisent-dark-canvas-muted); }
+:where([data-wisent-appearance="dark"]) .wisent-docs__mobile-toggle { color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-search__label { color: var(--wisent-dark-muted-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-search__input, :where([data-wisent-appearance="dark"]) .wisent-docs-search__results { border-color: var(--wisent-dark-border); background: var(--wisent-dark-surface); color: var(--wisent-dark-ink); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-search__hit, :where([data-wisent-appearance="dark"]) .wisent-docs-search__empty { color: var(--wisent-dark-secondary-text); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-search__hit:hover { background: var(--wisent-dark-canvas-muted); color: var(--wisent-dark-brand); }
+:where([data-wisent-appearance="dark"]) .wisent-docs-search__page { color: var(--wisent-dark-ink); }
+
