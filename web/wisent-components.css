@@ -64,10 +64,11 @@
   --wisent-radius-lg: 12px;
   --wisent-radius-xl: 16px;
   --wisent-radius-2xl: 22px;
-  --wisent-shadow-surface: 0 4px 12px rgba(10, 13, 18, 0.04);
-  --wisent-shadow-raised: 0 12px 30px rgba(10, 13, 18, 0.08);
+  --wisent-shadow-surface: 0 1px 2px rgba(10, 13, 18, 0.05);
+  --wisent-shadow-raised: 0 20px 24px -4px rgba(10, 13, 18, 0.08);
   --wisent-shadow-control: 0 1px 2px rgba(10, 13, 18, 0.05);
-  --wisent-shadow-toast: -1px 4px 4px rgba(10, 13, 18, 0.04);
+  --wisent-shadow-glass: 0 12px 15px rgba(0, 0, 0, 0.06);
+  --wisent-shadow-toast: 0 8px 12px rgba(33, 33, 33, 0.04);
   --wisent-motion-fast: 150ms;
   --wisent-motion-standard: 180ms;
   --wisent-type-display-2xl-size: 72px;
@@ -722,37 +723,69 @@
 .wisent-divider--horizontal { width: 100%; height: 1px; }
 .wisent-divider--vertical { align-self: stretch; width: 1px; min-height: 1em; }
 
-.wisent-action { appearance: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: var(--wisent-space-md); border: 1px solid transparent; border-radius: var(--wisent-radius-md); font-family: var(--wisent-font-sans); font-weight: 600; line-height: 1; text-decoration: none; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease, transform var(--wisent-motion-fast) ease; }
-.wisent-action--small { min-height: 32px; padding: 6px 10px; font-size: 12px; }
-.wisent-action--medium { min-height: 40px; padding: 8px 16px; font-size: 14px; }
-.wisent-action--large { min-height: 48px; padding: 12px 22px; font-size: 16px; }
-.wisent-action--compact { width: 34px; height: 34px; padding: 7px; }
-.wisent-action--default { background: var(--wisent-color-white); border-color: var(--wisent-color-border-strong); color: var(--wisent-color-ink); }
+/* WisentAction, as Wisent Web draws ButtonDefault, ButtonHero, BadgeButton,
+ * BadgeButtonSmall and Badge App (figma/files/wisent-web-iyYN8q8Z/components.json):
+ * 38 px high, 6 px above and below, 12 px before the label and 6 px after
+ * the trailing icon, a 6 px gap, a 12 px corner, Hubot Sans Medium 14/20.
+ * The default and hero buttons are glass: #d6d6d6 at 10 % (30 % for hero)
+ * under a white highlight, a gradient stroke #f2f2f2 → #818181 → #ffffff,
+ * an 18 px backdrop blur and the design's 0 12 15 shadow; the default
+ * button's label is Gray 950, the hero's is white. Badge buttons are the
+ * same glass at 30 %, 32 and 28 px high, 4 px above and below, 10 px each
+ * side. Badge App is 28 px square, 4 px padding, an 8 px corner. */
+.wisent-action { appearance: none; box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: var(--wisent-space-sm); border: 1px solid transparent; border-radius: var(--wisent-radius-lg); font-family: var(--wisent-font-sans); font-size: var(--wisent-type-text-sm-size); font-weight: 500; line-height: var(--wisent-type-text-sm-line-height); text-decoration: none; cursor: pointer; transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease, color var(--wisent-motion-fast) ease, transform var(--wisent-motion-fast) ease; }
+.wisent-action--small { min-height: 28px; padding: var(--wisent-space-xs) 10px; }
+.wisent-action--medium { min-height: 38px; padding: var(--wisent-space-sm) var(--wisent-space-lg); }
+.wisent-action--large { min-height: 38px; padding: var(--wisent-space-sm) var(--wisent-space-lg); }
+.wisent-action--medium:has(> .wisent-action__icon:last-child), .wisent-action--large:has(> .wisent-action__icon:last-child) { padding-right: var(--wisent-space-sm); }
+.wisent-action--compact { width: 28px; height: 28px; padding: var(--wisent-space-xs); border-radius: var(--wisent-radius-md); }
+.wisent-action--default, .wisent-action--hero, .wisent-action--badge {
+  background:
+    linear-gradient(110deg, rgba(255, 255, 255, 0.2) 0%, rgba(255, 255, 255, 0) 0.01%, rgba(255, 255, 255, 0) 25.2%, rgba(255, 255, 255, 0.2) 30.4%, rgba(255, 255, 255, 0.2) 47.9%, rgba(255, 255, 255, 0) 54%, rgba(255, 255, 255, 0) 68.7%, rgba(255, 255, 255, 0.2) 75.1%, rgba(255, 255, 255, 0.2) 89.6%, rgba(255, 255, 255, 0) 99.3%) padding-box,
+    linear-gradient(rgba(214, 214, 214, 0.1), rgba(214, 214, 214, 0.1)) padding-box,
+    linear-gradient(180deg, #f2f2f2 0%, #818181 41.4%, #ffffff 100%) border-box;
+  color: var(--wisent-color-gray950);
+  box-shadow: var(--wisent-shadow-glass);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+}
+.wisent-action--hero { background: linear-gradient(rgba(214, 214, 214, 0.3), rgba(214, 214, 214, 0.3)) padding-box, linear-gradient(180deg, #f2f2f2 0%, #818181 41.4%, #ffffff 100%) border-box; color: var(--wisent-color-white); }
+.wisent-action--badge { background: linear-gradient(rgba(214, 214, 214, 0.3), rgba(214, 214, 214, 0.3)) padding-box, linear-gradient(180deg, #f2f2f2 0%, #b2b2b2 41.4%, #ffffff 100%) border-box; }
 .wisent-action--primary { background: var(--wisent-color-brand); border-color: var(--wisent-color-brand600); color: var(--wisent-color-forest); }
-.wisent-action--hero { background: var(--wisent-color-almost-black); color: var(--wisent-color-brand100); box-shadow: inset 0 -2px 0 var(--wisent-color-brand700); }
 .wisent-action--quiet { background: transparent; color: var(--wisent-color-secondary-text); }
-.wisent-action--badge { border-radius: 999px; background: var(--wisent-color-canvas-muted); color: var(--wisent-color-forest); }
 .wisent-action:hover:not(:disabled) { transform: translateY(-1px); }
-.wisent-action--default:hover:not(:disabled), .wisent-action--quiet:hover:not(:disabled), .wisent-action--badge:hover:not(:disabled) { background: var(--wisent-color-canvas-muted); }
+.wisent-action--default:hover:not(:disabled) { color: var(--wisent-color-gray700); }
+.wisent-action--hero:hover:not(:disabled) { color: var(--wisent-color-bone); }
+.wisent-action--quiet:hover:not(:disabled) { background: var(--wisent-color-canvas-muted); }
 .wisent-action--primary:hover:not(:disabled) { background: var(--wisent-color-brand-hover); }
-.wisent-action--hero:hover:not(:disabled) { background: var(--wisent-color-forest); }
 .wisent-action:focus-visible { outline: 2px solid var(--wisent-color-brand600); outline-offset: 2px; }
 .wisent-action:disabled, .wisent-action[aria-disabled="true"] { cursor: not-allowed; opacity: .5; }
+/* The trailing icon sits in a 26 px square with an 8 px corner and the
+ * design's 0 1 2 shadow: black under the hero's white label, Gray 950
+ * otherwise. */
 .wisent-action__icon { display: inline-flex; width: 1.1em; height: 1.1em; align-items: center; justify-content: center; }
+.wisent-action--default > .wisent-action__icon:last-child, .wisent-action--hero > .wisent-action__icon:last-child { width: 26px; height: 26px; border-radius: var(--wisent-radius-md); background: var(--wisent-color-gray950); color: var(--wisent-color-white); box-shadow: var(--wisent-shadow-control); }
+.wisent-action--hero > .wisent-action__icon:last-child { background: var(--wisent-color-almost-black); }
 .wisent-action__badge { min-width: 18px; border-radius: 999px; padding: 2px 5px; background: color-mix(in srgb, currentColor 12%, transparent); font-family: var(--wisent-font-mono); font-size: var(--wisent-type-text-xs-size); }
 
 .wisent-app-badge { box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: center; gap: var(--wisent-space-lg); min-width: 0; border: 1px solid var(--wisent-color-border); border-radius: var(--wisent-radius-lg); padding: 10px 12px; background: var(--wisent-color-white); color: var(--wisent-color-ink); font-family: var(--wisent-font-sans); transition: background-color var(--wisent-motion-fast) ease, border-color var(--wisent-motion-fast) ease; }
 .wisent-app-badge:hover, .wisent-app-badge--active { border-color: var(--wisent-color-brand400); background: var(--wisent-color-brand50); }
 .wisent-app-badge--compact { padding: 6px 8px; }
-.wisent-app-badge__icon { display: inline-flex; width: 32px; height: 32px; align-items: center; justify-content: center; border-radius: var(--wisent-radius-md); background: var(--wisent-color-canvas-muted); }
+/* Figma Badge App: 28 px square, 4 px padding, an 8 px corner. */
+.wisent-app-badge__icon { box-sizing: border-box; display: inline-flex; width: 28px; height: 28px; align-items: center; justify-content: center; padding: var(--wisent-space-xs); border-radius: var(--wisent-radius-md); background: var(--wisent-color-canvas-muted); }
 .wisent-app-badge__copy { display: grid; min-width: 0; gap: 2px; }
 .wisent-app-badge__copy strong, .wisent-app-badge__copy span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wisent-app-badge__copy strong { font-size: var(--wisent-type-text-sm-size); }
 .wisent-app-badge__copy span, .wisent-app-badge__status { color: var(--wisent-color-muted-text); font-size: var(--wisent-type-text-xs-size); }
 
-.wisent-topbar { box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; min-height: 64px; gap: var(--wisent-space-3xl); padding: 0 var(--wisent-space-3xl); border-bottom: 1px solid var(--wisent-color-border); font-family: var(--wisent-font-sans); }
-.wisent-topbar--light { background: var(--wisent-color-white); color: var(--wisent-color-ink); }
-.wisent-topbar--dark { background: var(--wisent-color-almost-black); border-color: var(--wisent-color-forest); color: var(--wisent-color-white); }
+/* Figma TopBar (figma/files/wisent-web-iyYN8q8Z/components.json): 72 px
+ * high, 16 px around and 24 px before the brand, a 64 px gap, a 16 px
+ * corner, glass — white at 40 % over the page, a Gray 300 stroke at 20 %,
+ * an inner highlight 0 -1 18 white at 50 % — and its dark state the same
+ * bar over Grayscale 950. The page sets the bar 48 px from the top. */
+.wisent-topbar { box-sizing: border-box; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; min-height: 72px; gap: 64px; padding: var(--wisent-space-xl) var(--wisent-space-xl) var(--wisent-space-xl) var(--wisent-space-3xl); border: 1px solid color-mix(in srgb, var(--wisent-color-muted-text) 20%, transparent); border-radius: var(--wisent-radius-xl); box-shadow: inset 0 -1px 18px rgba(255, 255, 255, 0.5); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); font-family: var(--wisent-font-sans); }
+.wisent-topbar--light { background: color-mix(in srgb, var(--wisent-color-white) 40%, transparent); color: var(--wisent-color-gray950); }
+.wisent-topbar--dark { background: color-mix(in srgb, var(--wisent-color-almost-black) 40%, transparent); border-color: color-mix(in srgb, var(--wisent-color-forest) 40%, transparent); color: var(--wisent-color-white); }
 .wisent-topbar__brand { color: inherit; font-family: var(--wisent-font-expanded); font-weight: 600; text-decoration: none; }
 .wisent-topbar__nav, .wisent-topbar__actions { display: flex; align-items: center; gap: var(--wisent-space-xl); }
 .wisent-topbar__nav { justify-content: center; }
@@ -774,9 +807,10 @@
 .wisent-sidebar-nav--compact .wisent-sidebar-nav__label, .wisent-sidebar-nav--compact .wisent-sidebar-nav__title, .wisent-sidebar-nav--compact .wisent-sidebar-nav__badge { display: none; }
 .wisent-sidebar-nav--compact .wisent-sidebar-nav__item { justify-content: center; padding-inline: 8px; }
 
-.wisent-side-menu { box-sizing: border-box; display: flex; flex-direction: column; min-height: 100%; gap: var(--wisent-space-xl); border-right: 1px solid var(--wisent-color-border); padding: var(--wisent-space-xl); background: var(--wisent-color-white); }
+/* Figma SideMenuContainer: 240 px wide, 8 px each side, a 24 px gap. */
+.wisent-side-menu { box-sizing: border-box; display: flex; flex-direction: column; min-height: 100%; gap: var(--wisent-space-3xl); border-right: 1px solid var(--wisent-color-border); padding: 0 var(--wisent-space-md); background: var(--wisent-color-white); }
 .wisent-side-menu--compact { width: 72px; }
-.wisent-side-menu--standard { width: 296px; }
+.wisent-side-menu--standard { width: 240px; }
 .wisent-side-menu--wide { width: 320px; }
 .wisent-side-menu__header, .wisent-side-menu__footer { flex: 0 0 auto; }
 .wisent-side-menu__footer { margin-top: auto; }
