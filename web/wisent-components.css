@@ -1,6 +1,6 @@
 :root {
-  --wisent-color-background: #f8fdfb;
-  --wisent-color-canvas-muted: #ecf2f0;
+  --wisent-color-background: #fafafa;
+  --wisent-color-canvas-muted: #eaece9;
   --wisent-color-white: #ffffff;
   --wisent-color-almost-black: #111111;
   --wisent-color-ink: #2d3130;
@@ -36,7 +36,7 @@
   --wisent-dark-surface-raised: #424846;
   --wisent-dark-border: #424846;
   --wisent-dark-border-strong: #59605d;
-  --wisent-dark-ink: #f8fdfb;
+  --wisent-dark-ink: #fafafa;
   --wisent-dark-secondary-text: #c1c8c6;
   --wisent-dark-muted-text: #a6adaa;
   --wisent-dark-brand: #9ecca0;
