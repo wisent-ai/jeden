@@ -37,6 +37,26 @@ fn the_same_criterion_is_met_at_the_root_itself() {
 }
 
 #[test]
+fn a_nested_copy_of_the_named_path_is_not_the_named_path() {
+    let criterion = "`workspace/alpha.txt` holds the payload.";
+    let nested = workspace().join("workspace/workspace").join("alpha.txt");
+    let observed = touched(&wrote(&nested.display().to_string(), "five"));
+    assert_eq!(
+        unmatched(&named(criterion), &observed, &workspace()),
+        Some("workspace/alpha.txt".to_owned()),
+        "a path ending in the same parts one directory deeper is a different place"
+    );
+}
+
+#[test]
+fn the_path_of_several_parts_is_met_where_the_request_recorded_it() {
+    let criterion = "`workspace/alpha.txt` holds the payload.";
+    let named_place = workspace().join("workspace/alpha.txt");
+    let observed = touched(&wrote(&named_place.display().to_string(), "five"));
+    assert_eq!(unmatched(&named(criterion), &observed, &workspace()), None);
+}
+
+#[test]
 fn a_path_of_several_parts_is_met_from_another_root() {
     let criterion = "`rust/completion/verification/paths.rs` carries the rule.";
     let observed = touched(&json!({
@@ -90,6 +110,32 @@ fn a_directory_criterion_is_met_by_a_file_inside_it() {
         "input": {"file_path": "tests/contracts/cases/completion.rs"}
     }));
     assert_eq!(unmatched(&named(criterion), &observed, &workspace()), None);
+}
+
+#[test]
+fn a_run_workspace_named_without_a_trailing_slash_is_still_a_place() {
+    // The real contract journey wrote its criterion this way on 2026-09-11,
+    // and demanding an observation at the directory itself refused a file
+    // that had landed inside it.
+    let criterion = format!(
+        "The file exists in {} with the exact contents ALPHA.",
+        workspace().display()
+    );
+    let observed = touched(&wrote(
+        &workspace().join("alpha.txt").display().to_string(),
+        "five",
+    ));
+    assert_eq!(unmatched(&named(&criterion), &observed, &workspace()), None);
+}
+
+#[test]
+fn a_file_criterion_stays_strict_when_the_place_is_a_directory() {
+    let criterion = "alpha.txt in the workspace root contains ALPHA.";
+    let observed = touched(&wrote("sub/alpha.txt", "five"));
+    assert_eq!(
+        unmatched(&named(criterion), &observed, &workspace()),
+        Some("alpha.txt".to_owned())
+    );
 }
 
 #[test]

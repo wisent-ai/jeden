@@ -149,15 +149,39 @@ fn names_file(word: &str) -> bool {
             .any(|character| character.is_ascii_alphabetic())
 }
 
+/// Whether the last part of a path spells a file rather than a place.
+fn last_part_is_a_file(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(names_file)
+}
+
 fn same_place(wanted: &str, observed: &str, workspace: &Path) -> bool {
-    let directory = wanted.ends_with('/');
+    let trailing_slash = wanted.ends_with('/');
     let wanted = wanted.trim_end_matches('/');
     let here = anchored(wanted, workspace);
     let there = anchored(observed, workspace);
+    // A criterion names a file only when its last part spells one. Everything
+    // else it names is a place, and work done inside that place is work done
+    // there: `in <run>/workspace` is met by the file written under it.
+    let directory = trailing_slash || !last_part_is_a_file(wanted) || here.is_dir();
     if inside(&there, &here, directory) {
         return true;
     }
     let spelled_from_a_root = Path::new(wanted).components().count() > 1;
+    // The same file is spelled from different roots inside a receipt, so a
+    // path of several parts may be met by an observation whose own path ends
+    // with those parts — but only outside the workspace the request recorded.
+    // Inside it, a nested copy of the same name is exactly the mistake this
+    // rule exists for: `workspace/alpha.txt` must not be met by a write to
+    // `workspace/workspace/alpha.txt` one directory further down.
+    if there.starts_with(lexical(workspace)) {
+        return match (std::fs::canonicalize(&here), std::fs::canonicalize(&there)) {
+            (Ok(here), Ok(there)) => inside(&there, &here, directory),
+            _ => false,
+        };
+    }
     if spelled_from_a_root && inside(Path::new(observed), Path::new(wanted), directory) {
         return true;
     }
