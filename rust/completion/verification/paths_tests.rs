@@ -139,6 +139,64 @@ fn a_file_criterion_stays_strict_when_the_place_is_a_directory() {
 }
 
 #[test]
+fn a_place_quoted_at_the_end_of_a_sentence_keeps_no_punctuation() {
+    // The real journey of 2026-09-15 recorded this criterion and the rule read
+    // the place as ``scratch/` ``, which nothing could ever match, so the run
+    // spent its budget on a place that did not exist.
+    let criterion = "A copy already sits in `scratch/`.";
+    assert_eq!(
+        named(criterion).into_iter().collect::<Vec<_>>(),
+        vec!["scratch/".to_owned()]
+    );
+    let observed = touched(&wrote("scratch/alpha.txt", "five"));
+    assert_eq!(unmatched(&named(criterion), &observed, &workspace()), None);
+}
+
+#[test]
+fn a_hidden_directory_keeps_its_leading_dot() {
+    let criterion = "The state lives in `.jeden/probe.txt`.";
+    assert_eq!(
+        named(criterion).into_iter().collect::<Vec<_>>(),
+        vec![".jeden/probe.txt".to_owned()]
+    );
+}
+
+#[test]
+fn prose_with_a_slash_in_it_names_no_place() {
+    let criterion = "The answer explains the input/output split and the CLI/GUI parity.";
+    assert!(
+        named(criterion).is_empty(),
+        "prose is not a place: {:?}",
+        named(criterion)
+    );
+}
+
+#[test]
+fn a_place_the_sentence_only_mentions_does_not_have_to_be_observed() {
+    // The criterion a real intake wrote on 2026-09-15. `scratch/` is where the
+    // old copy sits; the root is what the request asks for, and demanding both
+    // left the run refusing its own finished work.
+    let criterion =
+        "alpha.txt in the workspace root contains exactly ALPHA; a copy already sits in `scratch/`.";
+    let observed = touched(&wrote(
+        &workspace().join("alpha.txt").display().to_string(),
+        "five",
+    ));
+    assert_eq!(unmatched(&named(criterion), &observed, &workspace()), None);
+}
+
+#[test]
+fn a_verdict_anchored_at_no_named_place_is_still_refused() {
+    let criterion =
+        "alpha.txt in the workspace root contains exactly ALPHA; a copy already sits in `scratch/`.";
+    let observed = touched(&wrote("elsewhere/alpha.txt", "five"));
+    assert_eq!(
+        unmatched(&named(criterion), &observed, &workspace()),
+        Some("alpha.txt".to_owned())
+    );
+}
+
+#[test]
 fn prose_versions_and_hosts_name_no_place() {
     let criterion = "jeden 0.1.1 answered through brama.wisent.com at 127.0.0.1 in 1.5 seconds.";
     assert!(

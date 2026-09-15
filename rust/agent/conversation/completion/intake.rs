@@ -51,8 +51,9 @@ impl Conversation {
                 &mut |text| {
                     crate::protocol::extract_json_object(text)
                         .and_then(|object| {
-                            serde_json::from_str::<IntakePlan>(object)
-                                .map_err(|error| format!("invalid task intake: {error}"))
+                            serde_json::from_str::<IntakePlan>(object).map_err(|error| {
+                                completion::unreadable("task intake", object, &error)
+                            })
                         })
                         .and_then(|plan| {
                             completion::plan_request(&session, revision, &request_id, plan)

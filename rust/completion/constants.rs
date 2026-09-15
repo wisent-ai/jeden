@@ -13,3 +13,14 @@ pub(crate) const EVIDENCE_PREVIEW_CHARS: usize = 2048;
 /// asks for a budget wide enough to carry every task, criterion and evidence
 /// reference of a retained request instead of inheriting a provider default.
 pub(crate) const INSPECTION_OUTPUT_TOKENS: u32 = 16_384;
+/// The budget a cut-off inspection is asked again with, and the reason the
+/// single correction is worth spending. An answer that did not fit in
+/// `INSPECTION_OUTPUT_TOKENS` cannot fit in it when the refusal is quoted back
+/// as well: on 2026-09-15 two real journeys ended as `Work remains open
+/// (acceptance_review)` after being cut at 2387 and then 4850 bytes, with the
+/// files written and the review unread.
+pub(crate) const INSPECTION_RETRY_OUTPUT_TOKENS: u32 = 2 * INSPECTION_OUTPUT_TOKENS;
+/// How much of an unreadable model answer a refusal quotes on each side of the
+/// parser's position. Wide enough to show the object that failed, short enough
+/// to stay one readable sentence in a session ledger and a terminal.
+pub(crate) const REFUSAL_EXCERPT_CHARS: usize = 120;

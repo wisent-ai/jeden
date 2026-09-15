@@ -143,8 +143,9 @@ impl Conversation {
             hooks,
             &mut |text| {
                 crate::protocol::extract_json_object(text).and_then(|object| {
-                    serde_json::from_str::<CompletionReview>(object)
-                        .map_err(|error| format!("invalid acceptance review: {error}"))
+                    serde_json::from_str::<CompletionReview>(object).map_err(|error| {
+                        completion::unreadable("acceptance review", object, &error)
+                    })
                 })
             },
         )?;

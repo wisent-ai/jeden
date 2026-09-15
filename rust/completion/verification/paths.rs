@@ -40,20 +40,31 @@ pub(super) fn touched(receipt: &Value) -> BTreeSet<String> {
     found
 }
 
-/// The first named path no observation touched, in its original spelling.
+/// The place a verdict is missing, when no observation happened at any place
+/// the criterion names.
+///
+/// One criterion sentence may name several places, and only one of them is
+/// what it asks for: a real journey wrote "the workspace root must hold
+/// alpha.txt; a copy already sits in `scratch/`", where `scratch/` is context
+/// and the root is the requirement. Demanding every named place made that
+/// criterion impossible and burned the run, so a verdict needs an observation
+/// at one of them; whether the rest of the sentence holds stays with the
+/// reviewer's prose, which is the half a controller cannot decide.
 pub(super) fn unmatched(
     wanted: &BTreeSet<String>,
     touched: &BTreeSet<String>,
     workspace: &Path,
 ) -> Option<String> {
-    wanted
-        .iter()
-        .find(|place| {
-            !touched
+    if wanted.is_empty()
+        || wanted.iter().any(|place| {
+            touched
                 .iter()
                 .any(|observed| same_place(place, observed, workspace))
         })
-        .cloned()
+    {
+        return None;
+    }
+    wanted.iter().next().cloned()
 }
 
 fn collect(value: &Value, found: &mut BTreeSet<String>) {
@@ -66,9 +77,15 @@ fn collect(value: &Value, found: &mut BTreeSet<String>) {
 }
 
 /// One word read as a path, or nothing when it is prose, a version or a host.
+///
+/// The end is trimmed of wrappers and sentence dots together, because they
+/// arrive interleaved: a criterion writing ``scratch/`.`` at the end of a
+/// sentence once produced the place `scratch/\``, which no observation could
+/// ever match. A leading dot is kept: `.jeden/probe.txt` is a real path.
 fn token(word: &str) -> Option<String> {
-    let word = word.trim_matches(|character| WRAPPERS.contains(&character));
-    let word = word.trim_end_matches('.');
+    let word = word
+        .trim_start_matches(|character| WRAPPERS.contains(&character))
+        .trim_end_matches(|character: char| WRAPPERS.contains(&character) || character == '.');
     let word = match word.split_once("://") {
         Some((_, rest)) => rest.find('/').map(|cut| &rest[cut..])?,
         None => word,
@@ -82,7 +99,7 @@ fn token(word: &str) -> Option<String> {
     if trimmed.is_empty() {
         return None;
     }
-    if !trimmed.contains('/') && !names_file(trimmed) {
+    if !recognisable(trimmed, directory) {
         return None;
     }
     Some(if directory {
@@ -90,6 +107,20 @@ fn token(word: &str) -> Option<String> {
     } else {
         trimmed.to_owned()
     })
+}
+
+/// A slash alone does not name a place: prose writes `input/output`, `and/or`
+/// and `CLI/GUI`, and reading those as paths refuses a verdict over a place
+/// nobody could observe. A place is recognisable when the operator anchored it,
+/// when they wrote it as a directory with a trailing slash, or when one of its
+/// segments names a file.
+fn recognisable(word: &str, directory: bool) -> bool {
+    directory
+        || word.starts_with('/')
+        || word.starts_with("~/")
+        || word.starts_with("./")
+        || word.starts_with("../")
+        || word.split('/').any(names_file)
 }
 
 /// `jeden.wisent.com/docs/cli` is a page under `/docs/cli`, not a directory

@@ -4,7 +4,7 @@ use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 
 mod review;
 
-pub(crate) use review::{CompletionReview, IntakePlan, ReviewStatus};
+pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -39,7 +39,9 @@ pub enum TaskKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// A model answer names evidence in this shape, so an extra field it echoes is
+// ignored here for the same reason as in `review.rs`.
+#[serde(rename_all = "camelCase")]
 pub struct EvidenceReference {
     pub session_path: String,
     pub event_id: String,
@@ -232,7 +234,9 @@ impl CompletionState {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// Read from a verifier's answer as well as from the state, so extra fields a
+// model echoes are ignored; every field below is still required.
+#[serde(rename_all = "camelCase")]
 pub struct CriterionReview {
     pub index: usize,
     pub satisfied: bool,

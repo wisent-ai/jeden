@@ -8,6 +8,12 @@
 //! inspection's own to repair, so it is quoted back to a new inspection once.
 //! The second refusal is recorded and stops the turn: a correction, never a
 //! retry loop.
+//!
+//! One refusal cannot be repaired by wording alone. An answer the output
+//! budget cut mid-JSON was already longer than the budget allows, and the
+//! correction adds the refusal to what it must say, so that single correction
+//! is asked with `INSPECTION_RETRY_OUTPUT_TOKENS` and with the shortest form
+//! of the answer named in the instruction.
 
 use super::super::*;
 
@@ -18,6 +24,7 @@ impl Conversation {
         instruction: &str,
         input: &Value,
         hooks: &RunHooks<'_>,
+        budget: u32,
     ) -> Result<(String, PathBuf), String> {
         let mut inspector = Conversation::new_inspection(&args.cwd)?;
         inspector.recorder.record(
@@ -34,12 +41,7 @@ impl Conversation {
         read_args.model_only = false;
         read_args.autonomous = true;
         read_args.goal = None;
-        read_args.max_tokens = Some(
-            read_args
-                .max_tokens
-                .unwrap_or(crate::completion::INSPECTION_OUTPUT_TOKENS)
-                .max(crate::completion::INSPECTION_OUTPUT_TOKENS),
-        );
+        read_args.max_tokens = Some(read_args.max_tokens.unwrap_or(budget).max(budget));
         let mut read_hooks = RunHooks {
             cancel: hooks.cancel.clone(),
             interactive: false,
@@ -75,13 +77,24 @@ impl Conversation {
         loop {
             let asked = match &correction {
                 None => instruction.to_string(),
+                Some(refusal) if cut_off(refusal) => format!(
+                    "{instruction}\n\nThe previous answer was refused: {refusal}\n\
+                     Return only the corrected JSON object, complete and closed, \
+                     and keep every explanation to one sentence so it fits."
+                ),
                 Some(refusal) => format!(
                     "{instruction}\n\nThe previous answer was refused: {refusal}\n\
                      Return only the corrected JSON object, complete and closed."
                 ),
             };
+            let budget = match &correction {
+                Some(refusal) if cut_off(refusal) => {
+                    crate::completion::INSPECTION_RETRY_OUTPUT_TOKENS
+                }
+                _ => crate::completion::INSPECTION_OUTPUT_TOKENS,
+            };
             let (text, inspector) = self
-                .inspect_completion(args, &asked, input, hooks)
+                .inspect_completion(args, &asked, input, hooks, budget)
                 .map_err(|error| self.completion_failure(stage, &error, hooks))?;
             let refusal = match accept(&text) {
                 Ok(value) => return Ok((value, inspector)),
@@ -100,3 +113,13 @@ impl Conversation {
         }
     }
 }
+
+/// True for the one refusal that more words cannot repair: the answer ran past
+/// the output budget and stopped mid-JSON.
+fn cut_off(refusal: &str) -> bool {
+    refusal.contains(crate::protocol::INCOMPLETE_ANSWER)
+}
+
+#[cfg(test)]
+#[path = "inspection_tests.rs"]
+mod tests;

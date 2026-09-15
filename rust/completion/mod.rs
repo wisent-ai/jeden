@@ -12,7 +12,7 @@ mod todo;
 mod verification;
 
 pub(crate) use cli::command;
-pub(crate) use constants::INSPECTION_OUTPUT_TOKENS;
+pub(crate) use constants::{INSPECTION_OUTPUT_TOKENS, INSPECTION_RETRY_OUTPUT_TOKENS};
 pub use constants::SCHEMA_VERSION;
 pub use model::{
     CompletionBlocker, CompletionState, CriterionReview, EvidenceReference, TaskKind, TaskOrigin,
@@ -20,7 +20,7 @@ pub use model::{
 };
 pub use operations::snapshot;
 
-pub(crate) use model::{CompletionReview, IntakePlan};
+pub(crate) use model::{unreadable, CompletionReview, IntakePlan};
 pub(crate) use operations::{
     capture_request, clear_runtime_blocker, model_context, observed_blocker, operator_control,
     plan_request, snapshot_value,
