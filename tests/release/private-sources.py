@@ -74,8 +74,12 @@ def story():
                    GIT_TERMINAL_PROMPT="0", GIT_CONFIG_NOSYSTEM="1",
                    GIT_CONFIG_GLOBAL=os.devnull,
                    WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR=str(inputs))
+        # Release workers may have only the system PATH. Cargo must still be
+        # found in the configured Cargo home, without shell startup files.
+        worker_env = {**env, "PATH": os.defpath}
+        trace["worker_path"] = worker_env["PATH"]
         metadata = json.loads(command([*wrapper, "metadata", "--locked", "--offline",
-                                       "--format-version=1"], env).stdout)
+                                       "--format-version=1"], worker_env).stdout)
         actual = {package["name"]: package for package in metadata["packages"]
                   if package["source"] and package["source"].startswith("git+")}
         expected = {package["name"]: package for package in receipt["provenance"]["packages"]}
@@ -83,6 +87,10 @@ def story():
         for name, package in actual.items():
             assert package["source"] == expected[name]["source"]
             assert inputs / "sources" in Path(package["manifest_path"]).parents, package
+        missing_toolchain = {**worker_env, "CARGO_HOME": str(work / "missing-cargo-home")}
+        missing_cargo = command([*wrapper, "metadata", "--locked", "--offline",
+                                 "--format-version=1"], missing_toolchain, expected=1)
+        assert "Cargo is unavailable on PATH and at " in missing_cargo.stderr
         # The ordinary product target cache avoids copying a checkout or changing
         # the installed binary; only the release helper is built and executed.
         command([*wrapper, "build", "--locked", "--offline", "--release",

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -27,6 +28,18 @@ def digest(path):
 def run(argv, capture=False):
     return subprocess.run(argv, cwd=ROOT, check=True, text=True,
                           stdout=subprocess.PIPE if capture else None)
+
+
+def cargo_program():
+    program = shutil.which("cargo")
+    if program:
+        return program
+    home = Path(os.environ.get("CARGO_HOME") or Path.home() / ".cargo").expanduser()
+    program = home / "bin" / "cargo"
+    if program.is_file() and os.access(program, os.X_OK):
+        return str(program.absolute())
+    raise ValueError("Cargo is unavailable on PATH and at " + str(program)
+                     + "; provision the Rust toolchain in CARGO_HOME before building")
 
 
 def source_config(sources):
@@ -61,11 +74,12 @@ def export(output):
         raise ValueError("private source output must be inside " + str(build))
     output.parent.mkdir(parents=True, exist_ok=True)
     lock_digest = digest(ROOT / "Cargo.lock")
+    program = cargo_program()
     with tempfile.TemporaryDirectory(prefix="cargo-input-", dir=build) as work:
         work = Path(work)
         vendor = work / "vendor"
-        run(["cargo", "vendor", "--locked", "--versioned-dirs", "--quiet", str(vendor)])
-        metadata = json.loads(run(["cargo", "metadata", "--locked", "--offline",
+        run([program, "vendor", "--locked", "--versioned-dirs", "--quiet", str(vendor)])
+        metadata = json.loads(run([program, "metadata", "--locked", "--offline",
                                    "--format-version=1"], capture=True).stdout)
         packages = sorted((package for package in metadata["packages"]
                            if (package["source"] or "").startswith("git+")),
@@ -122,7 +136,7 @@ def cargo(arguments):
     if configuration.read_text() != expected:
         raise ValueError("private Cargo source configuration does not match its provenance")
     directory = "source.private-cargo-sources.directory=" + json.dumps(str(root / "sources"))
-    return subprocess.run(["cargo", "--config", str(configuration), "--config", directory,
+    return subprocess.run([cargo_program(), "--config", str(configuration), "--config", directory,
                            *arguments], cwd=ROOT).returncode
 
 
