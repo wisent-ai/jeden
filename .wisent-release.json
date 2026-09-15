@@ -10,6 +10,10 @@
   "platforms": {
     "darwin-arm64": {
       "runner_platform": "darwin-arm64",
+      "secret_env": {
+        "WISENT_CODESIGN_CERTIFICATE_PEM": "desktop-signing-apple-development#certificate",
+        "WISENT_CODESIGN_PRIVATE_KEY_PEM": "desktop-signing-apple-development#private_key"
+      },
       "quality": [
         {
           "name": "release-compile",
@@ -21,8 +25,7 @@
       },
       "stage": {
         "bin/jeden": "bin/jeden",
-        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
-        "evidence/DIGESTS": "evidence/DIGESTS"
+        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper"
       }
     },
     "linux-amd64": {
@@ -37,21 +40,12 @@
         "argv": ["release/stado-build.sh", "--bin", "jeden"]
       },
       "stage": {
-        "bin/jeden": "bin/jeden",
-        "evidence/DIGESTS": "evidence/DIGESTS"
+        "bin/jeden": "bin/jeden"
       }
     }
   },
-  "runtime": {
-    "binary": "bin/jeden",
-    "launcher": "bin/jeden",
-    "config_schema": 4,
-    "state_schema": 2,
-    "minimum_stado_version": "0.6.1",
-    "rollback_compatible_with": []
-  },
   "promotion": {
     "channels": ["candidate", "stable"],
-    "reconcile": true
+    "reconcile": false
   }
 }

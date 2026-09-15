@@ -2,7 +2,9 @@
 set -euo pipefail
 : "${WISENT_SOURCE_DIR:?WISENT_SOURCE_DIR is required}"
 : "${WISENT_OUTPUT_DIR:?WISENT_OUTPUT_DIR is required}"
-mkdir -p "$WISENT_OUTPUT_DIR/bin" "$WISENT_OUTPUT_DIR/evidence"
+# The release worker and product installer sign the declared native stage
+# before packaging or installation; a PATH-selected signer is not required.
+mkdir -p "$WISENT_OUTPUT_DIR/bin"
 cd "$WISENT_SOURCE_DIR"
 cargo build --release --locked "$@"
 shift_count=0
@@ -14,7 +16,3 @@ for argument in "$@"; do
     shift_count=1
   fi
 done
-if [ "$(uname -s)" = Darwin ]; then
-  wisent-products signing sign --product jeden "$WISENT_OUTPUT_DIR/bin/"*
-fi
-for binary in "$WISENT_OUTPUT_DIR"/bin/*; do shasum -a 256 "$binary"; done > "$WISENT_OUTPUT_DIR/evidence/DIGESTS"

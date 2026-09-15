@@ -100,9 +100,10 @@ On macOS, the native build signs both executables through
 Development or Developer ID Application identity. An ad-hoc sandbox helper is
 refused. `/rebuild` captures the running identity before compilation and
 verifies the replacement against that identity before resuming the session.
-The release recipe uses `release/stado-build.sh`, signs before writing
-`evidence/DIGESTS`, and uses Stado's real signed build/publication receipt;
-it no longer names the deleted release scripts or their unsigned DSSE wrapper.
+The release recipe uses `release/stado-build.sh` to build and stage both
+executables. Stado's pinned signer, or Wisent Products during local installation,
+signs the declared native stage before archiving or installing it. Stado's signed
+build and publication receipts describe those final bytes.
 See the shared [macOS signing contract](https://stado.wisent.com/docs/signing).
 
 ## Retained task completion
@@ -215,7 +216,9 @@ For model calls, Jeden discovers active Weles subscriptions and their quota snap
 
 The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies the source and output directories to `release/stado-build.sh`; no run number or provider identity participates in the release version.
 
-The recipe stages `bin/jeden`, the signed Darwin sandbox helper where applicable, and `evidence/DIGESTS`. Stado owns the signed source/build/publication receipts and archives the declared stage mapping. Stable promotion reconciles the published runtime without rebuilding its bytes.
+The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
+
+Jeden is a command-line package, not a fleet service. Publication therefore does not start a daemon or claim a host has installed the package. A consumer must install `bin/jeden` and `bin/jeden-sandbox-helper` from the same Darwin archive and keep them together; installing only the primary executable leaves sandboxed runs unavailable.
 
 `darwin-arm64` and `linux-amd64` are the declared promoted outputs. A compilation gate is not evidence that the model-backed completion journey passed; the real contract run and its result remain separate recorded evidence.
 
