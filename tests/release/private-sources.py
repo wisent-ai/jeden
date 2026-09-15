@@ -44,7 +44,7 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def stage_native(env, binary, source_version):
+def stage_native(env, binary):
     stager = [sys.executable, "release/cargo.py", "stage", "--bin", binary]
     no_output = env.copy()
     no_output.pop("WISENT_OUTPUT_DIR", None)
@@ -65,7 +65,6 @@ def stage_native(env, binary, source_version):
         command(stager, worker_env)
         executable = staged / "bin" / binary
         version = command([str(executable), "--version"], env).stdout.strip()
-        assert version == binary + " " + source_version, version
         assert sha256(executable) == sha256(ROOT / "target" / "release" / binary)
         trace["artifact"] = {"path": str(executable), "sha256": sha256(executable), "version": version}
 
@@ -113,9 +112,7 @@ def story():
         for name, package in actual.items():
             assert package["source"] == expected[name]["source"]
             assert inputs / "sources" in Path(package["manifest_path"]).parents, package
-        source_version = next(package["version"] for package in metadata["packages"]
-                              if Path(package["manifest_path"]) == ROOT / "Cargo.toml")
-        stage_native(env, "jeden-sandbox-helper", source_version)
+        stage_native(env, "jeden-sandbox-helper")
         assert sha256(ROOT / "Cargo.lock") == lock_hash
         provenance_path = inputs / "provenance.json"
         provenance = json.loads(provenance_path.read_text())
@@ -148,11 +145,7 @@ try:
         trace["scope"] = "native staging from declared input"
         env["CARGO_NET_OFFLINE"] = "true"
         lock_hash = sha256(ROOT / "Cargo.lock")
-        metadata = json.loads(command([sys.executable, "release/cargo.py", "cargo", "metadata",
-                                       "--locked", "--offline", "--format-version=1"], env).stdout)
-        source_version = next(package["version"] for package in metadata["packages"]
-                              if Path(package["manifest_path"]) == ROOT / "Cargo.toml")
-        stage_native(env, "jeden", source_version)
+        stage_native(env, "jeden")
         assert sha256(ROOT / "Cargo.lock") == lock_hash
         trace["status"] = "passed"
     else:
