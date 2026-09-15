@@ -115,6 +115,58 @@ fn tama_registry_end_to_end() {
         println!("real registry not present at {}, skipped", real.display());
     }
 
+    // 4. The shape that refused every write on this machine on 2026-09-15:
+    // a registration whose command is a path relative to the registry's own
+    // home (`shared-hooks/<file>`), run from a workspace that has no such
+    // directory. Resolved against the registry, the guard runs and answers;
+    // unresolvable, the turn is told which hook could not start.
+    let beside = cwd.join("relative-registry.json");
+    fs::write(
+        &beside,
+        r#"{"version":1,"events":{
+            "pre_tool_use:write":{"blocking":true,"hooks":[
+                {"id":"guard","type":"command","command":"shared-hooks/guard.sh"}]}
+        }}"#,
+    )
+    .expect("write relative registry");
+    let guard = cwd.join("guard.sh");
+    fs::write(&guard, "#!/bin/sh\nexit 0\n").expect("write guard");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&guard, fs::Permissions::from_mode(0o755)).expect("make guard runnable");
+    }
+    env::set_var("JEDEN_TAMA_REGISTRY", &beside);
+    assert_eq!(
+        jeden::hooks::pretool_block(&cwd, "write_file", &json!({}), false, &transcript),
+        None,
+        "a guard found beside its registry runs and approves"
+    );
+
+    let absent = cwd.join("absent-registry.json");
+    fs::write(
+        &absent,
+        r#"{"version":1,"events":{
+            "pre_tool_use:write":{"blocking":true,"hooks":[
+                {"id":"gone","type":"command","command":"shared-hooks/gone.sh"}]}
+        }}"#,
+    )
+    .expect("write absent registry");
+    env::set_var("JEDEN_TAMA_REGISTRY", &absent);
+    let reason = jeden::hooks::pretool_block(&cwd, "write_file", &json!({}), false, &transcript)
+        .expect("a registered guard that cannot start still refuses");
+    assert!(reason.contains("TAMA_HOOK_INFRASTRUCTURE"), "{reason}");
+    assert!(reason.contains("gone"), "{reason}");
+    assert!(
+        !reason.contains("No such file or directory"),
+        "the shell's message must not be what the turn reads: {reason}"
+    );
+    let describe = jeden::hooks::describe_hooks(&cwd);
+    assert!(
+        describe.contains("Registrations with no executable here:"),
+        "/hooks names the broken registration:\n{describe}"
+    );
+
     env::remove_var("JEDEN_TAMA_REGISTRY");
     let _ = fs::remove_dir_all(&home);
     let _ = fs::remove_dir_all(&cwd);

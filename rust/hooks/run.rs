@@ -127,7 +127,17 @@ pub fn fire_event(
     // hooks. The registry lives with the operator's other user-level config,
     // so it is trusted like user hooks and not gated on `allow_project`.
     for tama in super::tama::load_event_hooks(cwd, event, tool) {
-        let outcome = run_hook_with_timeout(cwd, &tama.hook, payload, tama.timeout);
+        // A registration whose file this machine does not have never reaches
+        // `sh`: spawning it answers `No such file or directory`, which reads
+        // like a verdict on the tool rather than a broken hook install.
+        let outcome = match tama.unrunnable {
+            Some(reason) => HookOutcome {
+                exit_code: super::tama::BLOCK_EXIT,
+                stdout: String::new(),
+                stderr: reason,
+            },
+            None => run_hook_with_timeout(cwd, &tama.hook, payload, tama.timeout),
+        };
         outcomes.push(super::tama::normalize_outcome(
             event,
             tama.blocking,
