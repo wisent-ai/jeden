@@ -111,14 +111,8 @@ impl Conversation {
                     .record("final", json!({ "step": step, "text": content.clone() }))?;
                 return Ok(content);
             }
-            let action = match action_or_text(&content) {
+            let action = match action_or_text(&content, self.inspection) {
                 Ok(action) => action,
-                Err(_) if self.inspection && serde_json::from_str::<Value>(&content).is_ok() => {
-                    Action::Final {
-                        text: content.clone(),
-                        report: None,
-                    }
-                }
                 Err(refusal) => {
                     // The answer is not an action this run can execute. Keep it
                     // in the history so the model reads what it sent, ask once

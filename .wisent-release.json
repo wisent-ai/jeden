@@ -16,6 +16,10 @@
       },
       "quality": [
         {
+          "name": "inspection-framing",
+          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+        },
+        {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
@@ -32,6 +36,10 @@
       "runner_platform": "linux-amd64",
       "quality": [
         {
+          "name": "inspection-framing",
+          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+        },
+        {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
@@ -46,8 +54,8 @@
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/eb4065b18419201737054544363c6f5f079ea358079a624e8af6c6f31d01d64c/private-cargo-sources.tar.gz",
-      "sha256": "eb4065b18419201737054544363c6f5f079ea358079a624e8af6c6f31d01d64c",
+      "uri": "stado://sources/jeden/private-cargo-sources/5d804716bd3c8f404ee0d1fe534149908036e0f78b3d6bfee078fe969f3b062a/private-cargo-sources.tar.gz",
+      "sha256": "5d804716bd3c8f404ee0d1fe534149908036e0f78b3d6bfee078fe969f3b062a",
       "mount": "private-cargo-sources",
       "extract": true
     }

@@ -1,8 +1,16 @@
 use super::*;
 
-pub(in crate::agent) fn action_or_text(content: &str) -> Result<Action, String> {
+pub(in crate::agent) fn action_or_text(content: &str, inspection: bool) -> Result<Action, String> {
     match extract_json_object(content) {
-        Ok(_) => parse_action(content),
+        Ok(object) => match parse_action(object) {
+            Err(_) if inspection && serde_json::from_str::<Value>(object).is_ok() => {
+                Ok(Action::Final {
+                    text: object.to_string(),
+                    report: None,
+                })
+            }
+            result => result,
+        },
         Err(error) if error.starts_with(crate::protocol::NON_JSON_ANSWER) => Ok(Action::Final {
             text: content.to_string(),
             report: None,
@@ -111,3 +119,7 @@ pub(in crate::agent) fn run_tool_action(
     });
     Ok(result)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/contracts/inspection.rs"]
+mod tests;
