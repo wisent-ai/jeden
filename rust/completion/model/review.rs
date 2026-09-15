@@ -63,8 +63,11 @@ pub(crate) struct CompletionReview {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaskReview {
-    #[serde(alias = "id", alias = "task", alias = "task_id")]
-    pub task_id: String,
+    /// Absent when a verifier answered about the only open task without
+    /// repeating its identifier; the controller binds that one case and
+    /// refuses every ambiguous one by name.
+    #[serde(default, alias = "id", alias = "task", alias = "task_id")]
+    pub task_id: Option<String>,
     pub status: ReviewStatus,
     pub explanation: String,
     #[serde(default)]

@@ -34,24 +34,23 @@ fn a_verdict_that_echoes_a_field_is_still_read() {
     let review: CompletionReview =
         serde_json::from_str(&verdict()).expect("the verdict is readable");
     assert_eq!(review.tasks.len(), review.requests.len());
-    assert_eq!(review.tasks[0].task_id, "0075b831");
+    assert_eq!(review.tasks[0].task_id.as_deref(), Some("0075b831"));
     assert_eq!(review.tasks[0].status, ReviewStatus::Done);
     assert!(review.requests[0].covered);
     assert_eq!(review.tasks[0].criteria.len(), review.tasks.len());
 }
 
 #[test]
-fn a_verdict_that_names_no_task_at_all_is_still_refused() {
+fn a_verdict_that_names_no_task_is_read_without_one() {
     // `taskId`, `task_id`, `task` and `id` are the same identifier under
     // different spellings and are all read. A verdict that names the task
-    // nowhere cannot be applied to one, however complete the rest looks.
+    // nowhere is still read, and the controller either binds it to the only
+    // open task or refuses it by name; the answer shape no longer decides.
     let nameless = verdict().replace("\"taskId\"", "\"about\"");
-    let error = serde_json::from_str::<CompletionReview>(&nameless)
-        .expect_err("a verdict that names no task cannot be applied");
-    assert!(
-        error.to_string().contains("taskId"),
-        "the refusal names the missing field: {error}"
-    );
+    let review: CompletionReview =
+        serde_json::from_str(&nameless).expect("the rest of the verdict is usable");
+    assert_eq!(review.tasks[0].task_id, None);
+    assert_eq!(review.tasks[0].status, ReviewStatus::Done);
 }
 
 #[test]
@@ -59,7 +58,7 @@ fn a_verdict_that_names_the_task_as_id_is_still_read() {
     let renamed = verdict().replace("\"taskId\"", "\"id\"");
     let review: CompletionReview =
         serde_json::from_str(&renamed).expect("an identifier is an identifier");
-    assert_eq!(review.tasks[0].task_id, "0075b831");
+    assert_eq!(review.tasks[0].task_id.as_deref(), Some("0075b831"));
 }
 
 #[test]

@@ -92,10 +92,33 @@ pub(crate) fn apply_review(
             .filter(|task| !task.status.terminal() && task.status != TaskStatus::Paused)
             .map(|task| task.id.as_str())
             .collect();
+        // A verifier that answers about the only open task and does not repeat
+        // its identifier has still answered about it. Real reviews omitted
+        // `taskId` on 2026-09-15 and left finished work unverified, so the one
+        // unambiguous case is bound here; with more than one task open the
+        // verdict must say which, and the refusal lists the identifiers.
+        let mut review = review;
+        let verdicts = review.tasks.len();
+        for verdict in &mut review.tasks {
+            if verdict.task_id.is_none() {
+                if verdicts == expected.len() && verdicts == usize::from(true) {
+                    verdict.task_id = expected.iter().next().map(|id| (*id).to_owned());
+                } else {
+                    return Err(format!(
+                        "a verdict names no task; taskId must be one of {}",
+                        expected
+                            .iter()
+                            .copied()
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+            }
+        }
         let reported: BTreeSet<_> = review
             .tasks
             .iter()
-            .map(|task| task.task_id.as_str())
+            .filter_map(|task| task.task_id.as_deref())
             .collect();
         if expected != reported || reported.len() != review.tasks.len() {
             return Err("independent review must cover every open task exactly once".into());
@@ -122,7 +145,7 @@ pub(crate) fn apply_review(
             let task = state
                 .tasks
                 .iter()
-                .find(|task| task.id == verdict.task_id)
+                .find(|task| Some(task.id.as_str()) == verdict.task_id.as_deref())
                 .expect("task set validated above");
             if verdict.explanation.trim().is_empty()
                 || verdict.criteria.len() != task.criteria.len()
@@ -199,7 +222,7 @@ pub(crate) fn apply_review(
             let task = state
                 .tasks
                 .iter_mut()
-                .find(|task| task.id == verdict.task_id)
+                .find(|task| Some(task.id.as_str()) == verdict.task_id.as_deref())
                 .expect("task set validated above");
             task.reason = Some(verdict.explanation.clone());
             task.status = match verdict.status {
