@@ -6,7 +6,7 @@ set -euo pipefail
 # before packaging or installation; a PATH-selected signer is not required.
 mkdir -p "$WISENT_OUTPUT_DIR/bin"
 cd "$WISENT_SOURCE_DIR"
-cargo build --release --locked "$@"
+python3 release/cargo.py cargo build --release --locked "$@"
 shift_count=0
 for argument in "$@"; do
   if [ "$shift_count" -eq 1 ]; then

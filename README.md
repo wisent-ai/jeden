@@ -218,6 +218,12 @@ The exact release version is the SemVer in `Cargo.toml`. Stado reads it through 
 
 The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
 
+Release builders receive the locked private Git crates as the `private-cargo-sources` immutable input, without a GitHub credential or a sibling checkout. After changing `Cargo.lock`, run `python3 release/cargo.py export .wisent-output/private-cargo-sources.tar.gz`, publish the returned archive with `stado storage put <input.uri> <archive> --if-absent`, and put the returned `input` object under `.wisent-release.json` → `inputs.private-cargo-sources`. The exporter uses Cargo's real vendoring/checksums and includes only Git-source crates, not registry packages or repository history.
+
+Both release quality and build commands use `python3 release/cargo.py cargo ...`. Stado supplies `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`; a missing input or one from a different `Cargo.lock` is refused before Cargo runs. Cargo source replacement preserves `--locked` and verifies the vendored files. Public dependencies still use the ordinary Cargo registry. The exporter and release wrapper require Python 3.9 or newer.
+
+Run `python3 tests/release/private-sources.py` on a Rust/Python 3.12 development host to export the real locked crates, verify Cargo consumes the exported paths offline, build and execute the helper, and check missing-input, lockfile-mismatch and missing-package refusals. Each run retains its source revision, patch, command output, exit codes and helper hash under `.wisent-output/release-tests/`. This build-boundary check does not qualify a signed sandbox or a model-backed task.
+
 Jeden is a command-line package, not a fleet service. Publication therefore does not start a daemon or claim a host has installed the package. A consumer must install `bin/jeden` and `bin/jeden-sandbox-helper` from the same Darwin archive and keep them together; installing only the primary executable leaves sandboxed runs unavailable.
 
 `darwin-arm64` and `linux-amd64` are the declared promoted outputs. A compilation gate is not evidence that the model-backed completion journey passed; the real contract run and its result remain separate recorded evidence.

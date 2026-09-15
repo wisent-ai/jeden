@@ -17,7 +17,7 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
       ],
       "build": {
@@ -33,7 +33,7 @@
       "quality": [
         {
           "name": "release-compile",
-          "argv": ["cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         }
       ],
       "build": {
@@ -42,6 +42,14 @@
       "stage": {
         "bin/jeden": "bin/jeden"
       }
+    }
+  },
+  "inputs": {
+    "private-cargo-sources": {
+      "uri": "stado://sources/jeden/private-cargo-sources/3d304a6b7ed321aa1a60bfdb475dddc3b818eda041d4159141beba1d783ef6a1/private-cargo-sources.tar.gz",
+      "sha256": "3d304a6b7ed321aa1a60bfdb475dddc3b818eda041d4159141beba1d783ef6a1",
+      "mount": "private-cargo-sources",
+      "extract": true
     }
   },
   "promotion": {
