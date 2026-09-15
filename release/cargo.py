@@ -140,6 +140,28 @@ def cargo(arguments):
                            *arguments], cwd=ROOT).returncode
 
 
+def stage(binaries):
+    configured = os.environ.get("WISENT_OUTPUT_DIR", "").strip()
+    if not configured:
+        raise ValueError("WISENT_OUTPUT_DIR is required for native staging")
+    output = Path(configured).resolve() / "bin"
+    target = ROOT / "target"
+    arguments = ["build", "--release", "--locked", "--target-dir", str(target)]
+    for binary in binaries:
+        arguments.extend(["--bin", binary])
+    print("native stage: Python " + sys.executable, file=sys.stderr, flush=True)
+    status = cargo(arguments)
+    if status:
+        return status
+    output.mkdir(parents=True, exist_ok=True)
+    for binary in binaries:
+        destination = output / binary
+        shutil.copyfile(target / "release" / binary, destination)
+        destination.chmod(0o755)
+        print("native stage: " + str(destination), file=sys.stderr, flush=True)
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     actions = parser.add_subparsers(dest="action", required=True)
@@ -147,10 +169,14 @@ def main():
     exporter.add_argument("output", type=Path, help="archive path under .wisent-output")
     consumer = actions.add_parser("cargo", help="run Cargo with the declared private source input")
     consumer.add_argument("arguments", nargs=argparse.REMAINDER)
+    stager = actions.add_parser("stage", help="build and stage native binaries for the release worker")
+    stager.add_argument("--bin", dest="binaries", action="append", required=True)
     args = parser.parse_args()
     if args.action == "export":
         export(args.output)
         return 0
+    if args.action == "stage":
+        return stage(args.binaries)
     if not args.arguments:
         parser.error("cargo requires a Cargo command")
     return cargo(args.arguments)

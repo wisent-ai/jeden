@@ -22,14 +22,19 @@
         {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+        },
+        {
+          "name": "native-stage",
+          "argv": ["python3", "tests/release/private-sources.py", "--stage"]
         }
       ],
       "build": {
-        "argv": ["release/stado-build.sh", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "stage": {
         "bin/jeden": "bin/jeden",
-        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper"
+        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
+        "release-tests": "evidence/release-tests"
       }
     },
     "linux-amd64": {
@@ -42,20 +47,25 @@
         {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+        },
+        {
+          "name": "native-stage",
+          "argv": ["python3", "tests/release/private-sources.py", "--stage"]
         }
       ],
       "build": {
-        "argv": ["release/stado-build.sh", "--bin", "jeden"]
+        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden"]
       },
       "stage": {
-        "bin/jeden": "bin/jeden"
+        "bin/jeden": "bin/jeden",
+        "release-tests": "evidence/release-tests"
       }
     }
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/5d804716bd3c8f404ee0d1fe534149908036e0f78b3d6bfee078fe969f3b062a/private-cargo-sources.tar.gz",
-      "sha256": "5d804716bd3c8f404ee0d1fe534149908036e0f78b3d6bfee078fe969f3b062a",
+      "uri": "stado://sources/jeden/private-cargo-sources/a2aba86f511898761f38dbfd86a8bb46b0963382ad98466537e303bbbfa7be89/private-cargo-sources.tar.gz",
+      "sha256": "a2aba86f511898761f38dbfd86a8bb46b0963382ad98466537e303bbbfa7be89",
       "mount": "private-cargo-sources",
       "extract": true
     }

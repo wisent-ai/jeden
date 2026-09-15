@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build and run the real helper from exported private crates while offline."""
+import argparse
 import hashlib
 import json
 import os
@@ -43,12 +44,37 @@ def sha256(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def stage_native(env, binary, source_version):
+    stager = [sys.executable, "release/cargo.py", "stage", "--bin", binary]
+    no_output = env.copy()
+    no_output.pop("WISENT_OUTPUT_DIR", None)
+    refused = command(stager, no_output, expected=1)
+    assert "WISENT_OUTPUT_DIR is required for native staging" in refused.stderr
+    with tempfile.TemporaryDirectory(prefix="stage-", dir=REPORT) as work:
+        work = Path(work)
+        staged = work / "staged native"
+        worker_env = {**env, "PATH": os.defpath, "WISENT_OUTPUT_DIR": str(staged)}
+        trace["worker_path"] = worker_env["PATH"]
+        refused = command(stager, {**worker_env, "WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR": ""}, expected=1)
+        assert "WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR is required" in refused.stderr
+        assert not staged.exists()
+        missing_toolchain = {**worker_env, "PATH": "", "CARGO_HOME": str(work / "missing-cargo-home")}
+        refused = command(stager, missing_toolchain, expected=1)
+        assert "Cargo is unavailable on PATH and at " in refused.stderr
+        assert not staged.exists()
+        command(stager, worker_env)
+        executable = staged / "bin" / binary
+        version = command([str(executable), "--version"], env).stdout.strip()
+        assert version == binary + " " + source_version, version
+        assert sha256(executable) == sha256(ROOT / "target" / "release" / binary)
+        trace["artifact"] = {"path": str(executable), "sha256": sha256(executable), "version": version}
+
+
 def story():
     env = os.environ.copy()
     env.pop("WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR", None)
+    env.pop("WISENT_OUTPUT_DIR", None)
     env.update(GIT_TERMINAL_PROMPT="0", GCM_INTERACTIVE="never")
-    trace["source_revision"] = command(["git", "rev-parse", "HEAD"], env).stdout.strip()
-    (REPORT / "source.patch").write_text(command(["git", "diff", "--binary", "HEAD"], env).stdout)
     lock_hash = sha256(ROOT / "Cargo.lock")
     wrapper = [sys.executable, "release/cargo.py", "cargo"]
     refused = command([*wrapper, "build", "--locked", "--offline"], env, expected=1)
@@ -87,18 +113,9 @@ def story():
         for name, package in actual.items():
             assert package["source"] == expected[name]["source"]
             assert inputs / "sources" in Path(package["manifest_path"]).parents, package
-        missing_toolchain = {**worker_env, "CARGO_HOME": str(work / "missing-cargo-home")}
-        missing_cargo = command([*wrapper, "metadata", "--locked", "--offline",
-                                 "--format-version=1"], missing_toolchain, expected=1)
-        assert "Cargo is unavailable on PATH and at " in missing_cargo.stderr
-        # The ordinary product target cache avoids copying a checkout or changing
-        # the installed binary; only the release helper is built and executed.
-        command([*wrapper, "build", "--locked", "--offline", "--release",
-                 "--bin", "jeden-sandbox-helper"], env)
-        helper = ROOT / "target" / "release" / "jeden-sandbox-helper"
-        version = command([str(helper), "--version"], env).stdout.strip()
-        assert version.startswith("jeden-sandbox-helper "), version
-        trace["artifact"] = {"path": str(helper), "sha256": sha256(helper), "version": version}
+        source_version = next(package["version"] for package in metadata["packages"]
+                              if Path(package["manifest_path"]) == ROOT / "Cargo.toml")
+        stage_native(env, "jeden-sandbox-helper", source_version)
         assert sha256(ROOT / "Cargo.lock") == lock_hash
         provenance_path = inputs / "provenance.json"
         provenance = json.loads(provenance_path.read_text())
@@ -118,7 +135,29 @@ def story():
 
 
 try:
-    story()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--stage", action="store_true",
+                        help="qualify native CLI staging from the release worker's declared input")
+    args = parser.parse_args()
+    env = os.environ.copy()
+    revision = env.get("WISENT_SOURCE_COMMIT")
+    trace["source_revision"] = revision or command(["git", "rev-parse", "HEAD"], env).stdout.strip()
+    if not revision:
+        (REPORT / "source.patch").write_text(command(["git", "diff", "--binary", "HEAD"], env).stdout)
+    if args.stage:
+        trace["scope"] = "native staging from declared input"
+        env["CARGO_NET_OFFLINE"] = "true"
+        lock_hash = sha256(ROOT / "Cargo.lock")
+        metadata = json.loads(command([sys.executable, "release/cargo.py", "cargo", "metadata",
+                                       "--locked", "--offline", "--format-version=1"], env).stdout)
+        source_version = next(package["version"] for package in metadata["packages"]
+                              if Path(package["manifest_path"]) == ROOT / "Cargo.toml")
+        stage_native(env, "jeden", source_version)
+        assert sha256(ROOT / "Cargo.lock") == lock_hash
+        trace["status"] = "passed"
+    else:
+        trace["scope"] = "private source export and native helper staging"
+        story()
 except Exception as error:
     trace["error"] = str(error)
     print(str(error), file=sys.stderr)

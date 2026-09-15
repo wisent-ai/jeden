@@ -100,8 +100,9 @@ On macOS, the native build signs both executables through
 Development or Developer ID Application identity. An ad-hoc sandbox helper is
 refused. `/rebuild` captures the running identity before compilation and
 verifies the replacement against that identity before resuming the session.
-The release recipe uses `release/stado-build.sh` to build and stage both
-executables. Stado's pinned signer, or Wisent Products during local installation,
+The release recipe uses `python3 release/cargo.py stage --bin jeden --bin
+jeden-sandbox-helper` to build and stage both executables. Stado's pinned signer,
+or Wisent Products during local installation,
 signs the declared native stage before archiving or installing it. Stado's signed
 build and publication receipts describe those final bytes.
 See the shared [macOS signing contract](https://stado.wisent.com/docs/signing).
@@ -214,17 +215,19 @@ For model calls, Jeden discovers active Weles subscriptions and their quota snap
 
 ## Release automation
 
-The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies the source and output directories to `release/stado-build.sh`; no run number or provider identity participates in the release version.
+The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies `WISENT_OUTPUT_DIR` to `python3 release/cargo.py stage`; no run number or provider identity participates in the release version.
 
 The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
 
 Release builders receive the locked private Git crates as the `private-cargo-sources` immutable input, without a GitHub credential or a sibling checkout. After changing `Cargo.lock`, run `python3 release/cargo.py export .wisent-output/private-cargo-sources.tar.gz`, publish the returned archive with `stado storage put <input.uri> <archive> --if-absent`, and put the returned `input` object under `.wisent-release.json` → `inputs.private-cargo-sources`. The exporter uses Cargo's real vendoring/checksums and includes only Git-source crates, not registry packages or repository history.
 
-Both release quality and build commands use `python3 release/cargo.py cargo ...`. Stado supplies `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`; a missing input or one from a different `Cargo.lock` is refused before Cargo runs. Cargo source replacement preserves `--locked` and verifies the vendored files. Public dependencies still use the ordinary Cargo registry. The exporter and release wrapper require Python 3.9 or newer.
+Release quality uses `python3 release/cargo.py cargo ...`; the build uses `python3 release/cargo.py stage --bin jeden` and also selects `--bin jeden-sandbox-helper` on Darwin. Stado resolves Python directly for both commands, without a shell selecting a second interpreter. Staging prints the actual interpreter, builds in the source's `target` directory and copies only successful build outputs into `WISENT_OUTPUT_DIR/bin`. Missing `WISENT_OUTPUT_DIR` is refused before compilation. Stado supplies `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`; a missing input or one from a different `Cargo.lock` is refused before Cargo runs. Cargo source replacement preserves `--locked` and verifies the vendored files. Public dependencies still use the ordinary Cargo registry. The exporter and release wrapper require Python 3.9 or newer.
 
 The wrapper finds Cargo on `PATH`, then in `$CARGO_HOME/bin` (default `$HOME/.cargo/bin`). It preserves the Cargo proxy's executable name, so Rustup still selects the Rust toolchain. A service does not need to load shell startup files. If neither location contains an executable, the refusal names the missing Cargo path and asks for toolchain provisioning; it does not install tools or change the host's environment.
 
-Run `python3 tests/release/private-sources.py` on a Rust/Python 3.12 development host to export the real locked crates, verify Cargo consumes the exported paths offline with a service-style `PATH`, build and execute the helper, and check missing-toolchain, missing-input, lockfile-mismatch and missing-package refusals. Each run retains its source revision, patch, command output, exit codes and helper hash under `.wisent-output/release-tests/`. This build-boundary check does not qualify a signed sandbox or a model-backed task.
+Run `python3 tests/release/private-sources.py` on a Rust/Python 3.12 development host to export the real locked crates, verify Cargo consumes the exported paths offline with a service-style `PATH`, stage and execute the helper, and check missing-output, missing-toolchain, missing-input, lockfile-mismatch and missing-package refusals. Each run retains its source revision, patch, command output, exit codes and staged helper hash under `.wisent-output/release-tests/`. This build-boundary check does not qualify a signed sandbox or a model-backed task.
+
+The release recipe also runs `python3 tests/release/private-sources.py --stage` on each native platform. This mode consumes the worker's already-declared input, builds and executes the staged `jeden` CLI, checks staging refusals, and records `WISENT_SOURCE_COMMIT`. It does not export private sources or require GitHub credentials. Its reports travel in the archive under `evidence/release-tests/`.
 
 Jeden is a command-line package, not a fleet service. Publication therefore does not start a daemon or claim a host has installed the package. A consumer must install `bin/jeden` and `bin/jeden-sandbox-helper` from the same Darwin archive and keep them together; installing only the primary executable leaves sandboxed runs unavailable.
 
