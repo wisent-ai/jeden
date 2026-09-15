@@ -6,7 +6,7 @@ pub(super) fn built_in_tools() -> Vec<ToolInfo> {
         ToolInfo::new("read", "Unified bounded reader routing local selectors, artifact://, mcp://, HTTP(S), archive entries, SQLite rows, notebooks, documents, and text files"),
         ToolInfo::new("read_file", "Read a UTF-8 text file under cwd, capped at 512KB unless a selector narrows output; returns sha256, snapshot path#TAG, visual numbered lines, content; selectors support ranges, comma ranges, raw, and conflicts"),
         ToolInfo::new("read_binary_file", "Read one binary file under cwd as base64, capped at 512KB"),
-        ToolInfo::new("read_image", "Read one PNG, JPEG, GIF, or WebP image under cwd as base64 with mime type and dimensions, capped at 512KB"),
+        ToolInfo::new("read_image", "Visually inspect a PNG, JPEG, GIF, or WebP image under cwd. Complete image bytes are attached to the next model request; no separate OCR tool is needed. Reads are capped at 512KB."),
         ToolInfo::new("read_archive", "List archive entries or read one entry from .zip, .tar, .tar.gz, or .tgz under cwd as text, binary base64, document text, or image metadata; text/document entries support line ranges"),
         ToolInfo::new("read_document", "Extract readable text from one document under cwd; supports text, HTML, JSON, CSV/TSV, XML/RSS/Atom, notebooks, and basic PDF text streams; supports line ranges; capped at 512KB output"),
         ToolInfo::new("read_sqlite", "Read a SQLite database under cwd: list tables, inspect a table, fetch one row by primary key, or run a read-only SELECT/WITH query"),

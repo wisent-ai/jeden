@@ -8,7 +8,7 @@ pub(in crate::agent) fn rust_tool_specs(cwd: &Path) -> Vec<Value> {
         tool_spec("read_binary_file", "Read one binary file under cwd as base64", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
         tool_spec("read_document", "Extract readable text from one document under cwd with optional line range", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}, "range": {"type": "string"}}), vec!["path"]),
         tool_spec("read_archive", "List archive entries or read one entry from .zip, .tar, .tar.gz, or .tgz under cwd", json!({"path": {"type": "string"}, "entry": {"type": "string"}, "mode": {"type": "string"}, "maxBytes": {"type": "number"}, "range": {"type": "string"}}), vec!["path"]),
-        tool_spec("read_image", "Read one PNG, JPEG, GIF, or WebP image under cwd as base64 with mime type and dimensions", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
+        tool_spec("read_image", "Visually inspect a PNG, JPEG, GIF, or WebP image under cwd. Complete image bytes are attached to the next model request; no separate OCR tool is needed. Reads are capped at 512KB.", json!({"path": {"type": "string"}, "maxBytes": {"type": "number"}}), vec!["path"]),
         tool_spec("read_sqlite", "Read a SQLite database under cwd: list tables, inspect a table, fetch one row, or run a read-only SELECT/WITH query", json!({"path": {"type": "string"}, "table": {"type": "string"}, "key": {"type": "string"}, "query": {"type": "string"}, "limit": {"type": "number"}, "offset": {"type": "number"}, "where": {"type": "string"}, "order": {"type": "string"}}), vec!["path"]),
         tool_spec("search_text", "Search one file for a literal string", json!({"path": {"type": "string"}, "query": {"type": "string"}, "caseSensitive": {"type": "boolean"}}), vec!["path", "query"]),
         tool_spec("search_files", "Recursively search text files under cwd for a literal string", json!({"path": {"type": "string"}, "paths": {"type": "array", "items": {"type": "string"}}, "query": {"type": "string"}, "hidden": {"type": "boolean"}, "gitignore": {"type": "boolean"}, "caseSensitive": {"type": "boolean"}, "limit": {"type": "number"}, "skip": {"type": "number"}}), vec!["query"]),
@@ -221,5 +221,11 @@ pub(in crate::agent) fn prepare_outbound_messages(
     }
     let config = crate::load_config(cwd);
     let outbound = crate::context::prepare_model_messages(cwd, &config, messages)?;
-    crate::model_router::with_attachments(outbound, attachments)
+    let mut outbound = crate::model_router::with_attachments(outbound, attachments)?;
+    super::tool_images::attach(&mut outbound)?;
+    Ok(outbound)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/image_read/native.rs"]
+mod image_read_tests;

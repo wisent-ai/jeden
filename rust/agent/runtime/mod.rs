@@ -6,6 +6,8 @@ mod recorder;
 mod routing;
 pub(crate) mod specs;
 pub(crate) mod task_contract;
+#[path = "media/tool_images.rs"]
+mod tool_images;
 
 pub(crate) use recorder::now_stamp;
 pub(in crate::agent) use recorder::SessionRecorder;

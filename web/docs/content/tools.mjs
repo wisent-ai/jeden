@@ -32,6 +32,20 @@ export const toolPages = [
         ],
       },
       {
+        title: "Reading images",
+        paragraphs: [
+          "<code>read_image</code> reads a PNG, JPEG, GIF or WebP inside the workspace and supplies its pixels to the next model request as an image, not as encoded text. The model must support image input. No separate OCR process, command grant or write grant is required.",
+          "The same transport handles image results in a batch and preserves supporting text and input attachments. Image metadata stays in the text result; the original tool receipt retains the encoded bytes. Only the provider-bound copy gains image parts, so recorded conversation messages remain text-valued.",
+          "The reader accepts at most 512 KB. A truncated result is refused before the model request and identifies the incomplete image. Use a complete image within the reader's size limit; a partial PNG is not a readable image.",
+        ],
+        commands: [
+          {
+            label: "Inspect an image within a read-only workspace",
+            code: 'jeden run "Use read_image on screenshot.png and describe the visible headings" --cwd ./screenshots --json',
+          },
+        ],
+      },
+      {
         title: "Approvals and grants",
         paragraphs: [
           "Every file write or shell command pauses for interactive approval unless explicitly enabled, and destructive confirmations default to <strong>Cancel</strong>. In one-shot mode, grants are explicit per invocation. Project hooks in <code>.jeden/hooks.json</code> run only with <code>--allow-command</code>, so a cloned repository cannot silently execute shell.",

@@ -20,6 +20,10 @@
           "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
         },
         {
+          "name": "native-image-read",
+          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+        },
+        {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
@@ -45,6 +49,10 @@
           "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
         },
         {
+          "name": "native-image-read",
+          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+        },
+        {
           "name": "release-compile",
           "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
@@ -64,8 +72,8 @@
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/baf78ade36d4985dac4a0d0aedf91d4bb31172424c8930da692855d7da42dd31/private-cargo-sources.tar.gz",
-      "sha256": "baf78ade36d4985dac4a0d0aedf91d4bb31172424c8930da692855d7da42dd31",
+      "uri": "stado://sources/jeden/private-cargo-sources/16aabde6fde60e9f2efce83a7e65ad1ee30b5be0ee8c03739da2cc299519ae71/private-cargo-sources.tar.gz",
+      "sha256": "16aabde6fde60e9f2efce83a7e65ad1ee30b5be0ee8c03739da2cc299519ae71",
       "mount": "private-cargo-sources",
       "extract": true
     }
