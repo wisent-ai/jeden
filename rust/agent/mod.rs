@@ -18,6 +18,7 @@ mod conversation;
 pub(crate) mod credential;
 mod hooks;
 mod runtime;
+mod stream;
 mod state;
 
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
@@ -40,6 +41,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
         }
     }
     let mut router = runtime::model_router_config(config, args);
+    stream::apply_stream_policy(&mut router, &args.cwd);
     if let Some(unread) = catalog_left_unread(&router) {
         eprintln!(
             "jeden: the Brama catalog could not be read ({unread}); continuing with the configured route `{}`",
