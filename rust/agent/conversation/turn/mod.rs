@@ -29,14 +29,26 @@ impl Conversation {
         } else {
             None
         };
-        let mut prepared = self.prepare_turn(
-            args,
-            task,
-            continuing,
-            tracks_completion,
-            completion_request,
-            hooks,
-        )?;
+        let mut prepared = self
+            .prepare_turn(
+                args,
+                task,
+                continuing,
+                tracks_completion,
+                completion_request,
+                hooks,
+            )
+            .map_err(|error| {
+                match self.recorder.record(
+                    "run_error",
+                    json!({ "operation": "prepare_turn", "message": error }),
+                ) {
+                    Ok(()) => error,
+                    Err(record_error) => {
+                        format!("{error}; recording startup failure failed: {record_error}")
+                    }
+                }
+            })?;
         let mut tool_specs = if args.model_only {
             Vec::new()
         } else {
