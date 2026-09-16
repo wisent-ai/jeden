@@ -113,5 +113,25 @@ fn graphical_clients_queue_requests_without_running_a_model() {
     assert_eq!(refused["error"]["code"], "invalid_params");
     let state = frames.iter().find(|frame| frame["id"] == "state").unwrap();
     assert_eq!(state["result"]["completion"]["complete"], false);
+    let reopened = home.rpc(&[
+        json!({"id":"open", "method":"session/open", "params":{"session":source, "options":options}}),
+        json!({"id":"retained", "method":"session/completion/get", "params":{"sessionId":"session-1"}}),
+        json!({"id":"add-after-reopen", "method":"session/completion/add", "params":{"sessionId":"session-1", "prompt":"Keep the reopened conversation in its original ledger."}}),
+        json!({"id":"missing", "method":"session/open", "params":{"session":home.root.join("missing-session"), "options":options}}),
+    ]);
+    let opened = reopened.iter().find(|frame| frame["id"] == "open").unwrap();
+    assert_eq!(opened["result"]["sessionPath"], source);
+    let retained = reopened.iter().find(|frame| frame["id"] == "retained").unwrap();
+    assert_eq!(retained["result"]["completion"]["requests"], saved["requests"]);
+    assert_eq!(retained["result"]["completion"]["revision"], saved["revision"]);
+    let updated: Value = serde_json::from_slice(
+        &fs::read(PathBuf::from(source).join("completion.json")).unwrap(),
+    ).unwrap();
+    assert_eq!(updated["requests"][0], saved["requests"][0]);
+    assert_eq!(updated["requests"][1], saved["requests"][1]);
+    assert_eq!(updated["requests"][2]["prompt"], "Keep the reopened conversation in its original ledger.");
+    assert!(!home.root.join("missing-session").exists());
+    let missing = reopened.iter().find(|frame| frame["id"] == "missing").unwrap();
+    assert_eq!(missing["error"]["code"], "session_error");
     home.passed();
 }

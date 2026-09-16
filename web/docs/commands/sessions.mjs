@@ -1,5 +1,21 @@
 export const sessionCommands = [
   {
+    path: "import-omp",
+    invocation: "jeden import-omp --plan <sessions.json> [--refresh] [--json]",
+    purpose: "Preserve OMP conversation history and interrupted requests in native Jeden ledgers without executing work.",
+    inputs: [
+      "Required: a JSON plan with a sessions array. Each entry supplies sessionFile, cwd and terminalName. The source header and plan must identify the same existing workspace.",
+      "The destination is the normal Jeden session root, or JEDEN_SESSION_ROOT when explicitly set. --refresh replaces only a never-adopted, unchanged native import; it never rewrites an already-used native conversation.",
+      "Jeden Desktop exposes File → Import OMP Sessions. Enter the absolute plan path on the Stado-selected host. The window reports each imported path and each refusal; it does not start agents or transfer execution ownership.",
+    ],
+    effect: "Returns JSON with imported, existing, sessions and failures. Each successful row names sourceSession, sourcePath, sessionPath, cwd, title and interrupted. The full source file is retained at artifacts/omp-source.jsonl. The active source branch becomes a native context snapshot; unanswered requests enter the native retained-work store. Import does not stop OMP, start a model, or transfer execution ownership. A copied history is not a completed migration. Inspect failures even when the command exits successfully: per-source failures do not discard other successful imports.",
+    refusals: [
+      "Unreadable plans, empty plans and invalid plan shapes fail the command. Unreadable sources, malformed JSON records, missing ancestors, cyclic ancestry and workspace mismatches are returned per source.",
+      "A source changed during import is refused, leaving its original history intact. A changed source from an earlier import requires --refresh. Adopted imports, child sessions and changed native retained work refuse refresh.",
+      "A concurrent import refuses its migration lock. Interrupted replacement publication is recovered before the next import attempts that source.",
+    ],
+  },
+  {
     path: "run",
     invocation: 'jeden run "task" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]',
     purpose: "Run one concrete agent task through a durable Jeden conversation.",
@@ -42,9 +58,11 @@ export const sessionCommands = [
     inputs: [
       "No command-specific positional input or option is required.",
       "Clients send one JSON request per line with an <code>id</code>, <code>method</code>, and optional <code>params</code> object.",
+      "<code>session/open</code> takes <code>{session,options?}</code> and reopens the existing ledger in place. Its returned <code>sessionPath</code> remains the source path; retained request identities and revisions are preserved. A missing <code>state.json</code> is refused as <code>session not found</code> rather than creating another conversation.",
       "<code>session/completion/get</code> takes <code>{sessionId}</code>; <code>session/completion/control</code> takes <code>{sessionId,taskId,action,reason,revision}</code>, with action pause, resume or cancel. Both return <code>{sessionId,completion}</code>. Task IDs may also name an original request.",
       "<code>session/completion/continue</code> takes <code>{sessionId,requestId}</code> and uses the ordinary prompt response and event stream without capturing a new user request. Events <code>completion {state}</code> and <code>assistantMessage {text}</code> are nonterminal; <code>result</code> includes text and the completion snapshot.",
       "<code>session/completion/add</code> takes <code>{sessionId,prompt}</code> and returns <code>{sessionId,completion}</code> without running a model. Native <code>/todo</code> commands sent through session/prompt also operate on that selected session rather than becoming model instructions.",
+      "session/import-omp takes {planPath,refresh?} and returns the same report as import-omp without invoking a model or terminating a source process.",
     ],
     effect: "Keeps an in-process session map, emits one-line JSON responses and interaction events, and creates normal Jeden session state for requests that start or resume work. User-facing session prompts use the same structured task-report contract as CLI/TUI, headless, and the SDKs; accepted <code>task_report</code> events carry version, complete-or-blocked status, the seven-area report, and its rendered human text. The <code>config/contracts/get</code> and <code>config/contracts/set</code> results include the two editable user contract settings plus a localized, versioned, built-in read-only <code>taskContract</code> with instructions and requirement descriptors. <code>config/communication/get</code> and <code>config/communication/set</code> return the resolved <code>effective</code> communication policy. Session events include <code>toolCall</code>, <code>toolResult</code>, and <code>reasoningDelta</code> only when that policy shows them. RPC opens no listener.",
     refusals: [

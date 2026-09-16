@@ -44,7 +44,7 @@ pub(super) fn create_session(
         .map_err(|error| ("invalid_params", error.to_string()))?;
     let session = if resume {
         let source = string_param(&params, "session").map_err(|error| ("invalid_params", error))?;
-        AgentSession::resume(options, source).map_err(|error| ("session_error", error))?
+        AgentSession::resume_in_place(options, source).map_err(|error| ("session_error", error))?
     } else {
         AgentSession::new(options).map_err(|error| ("session_error", error))?
     };
