@@ -122,6 +122,7 @@ impl AgentSession {
         if !source.exists() {
             return Err(format!("session not found: {}", source.display()));
         }
+        crate::session_import::mark_adopted(&source)?;
         let turns = session_conversation_turns(&source)?;
         let session = Self::new(options)?;
         {
@@ -153,6 +154,7 @@ impl AgentSession {
         if !source.join("state.json").is_file() {
             return Err(format!("session not found: {}", source.display()));
         }
+        crate::session_import::mark_adopted(&source)?;
         let conversation = agent::Conversation::open(&options.cwd, &source)?;
         Ok(Self::from_conversation(options, conversation))
     }

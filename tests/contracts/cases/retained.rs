@@ -135,3 +135,54 @@ fn graphical_clients_queue_requests_without_running_a_model() {
     assert_eq!(missing["error"]["code"], "session_error");
     home.passed();
 }
+
+#[test]
+fn omp_import_preserves_history_refreshes_and_protects_adopted_work() {
+    let home = Home::new("omp-import");
+    let source = home.root.join("source.jsonl");
+    let plan = home.root.join("plan.json");
+    let records = [
+        json!({"type":"session","id":"import-journey","cwd":home.workspace()}),
+        json!({"type":"message","id":"user","parentId":null,"message":{"role":"user","content":"Keep this interrupted request."}}),
+        json!({"type":"message","id":"tool","parentId":"user","message":{"role":"assistant","content":[{"type":"toolCall","name":"read","arguments":{"path":"notes.txt"}}]}}),
+    ];
+    let mut bytes = records.iter().map(Value::to_string).collect::<Vec<_>>().join("\n") + "\n";
+    fs::write(&source, &bytes).unwrap();
+    fs::write(&plan, json!({"sessions":[{"sessionFile":source,"cwd":home.workspace(),"terminalName":"Interrupted work"}]}).to_string()).unwrap();
+    let imported = home.value(&["import-omp", "--plan", plan.to_str().unwrap(), "--json"]);
+    assert_eq!(imported["failures"], json!([]));
+    assert_eq!(imported["imported"], 1);
+    let destination = PathBuf::from(imported["sessions"][0]["sessionPath"].as_str().unwrap());
+    assert_eq!(fs::read(destination.join("artifacts/omp-source.jsonl")).unwrap(), bytes.as_bytes());
+    let ledger = fs::read(destination.join("transcript.jsonl")).unwrap();
+    let event: Value = serde_json::from_slice(&ledger).unwrap();
+    assert_eq!(event["payload"]["data"]["messages"][0]["content"], "Keep this interrupted request.");
+    let state: Value = serde_json::from_slice(&fs::read(destination.join("completion.json")).unwrap()).unwrap();
+    assert_eq!(state["requests"][0]["prompt"], "Keep this interrupted request.");
+    let repeated = home.value(&["import-omp", "--plan", plan.to_str().unwrap(), "--json"]);
+    assert_eq!(repeated["existing"], 1);
+    assert_eq!(fs::read(destination.join("transcript.jsonl")).unwrap(), ledger);
+    bytes.push_str(&json!({"type":"message","id":"next","parentId":"tool","message":{"role":"user","content":"Retain this additional request too."}}).to_string());
+    bytes.push('\n');
+    fs::write(&source, &bytes).unwrap();
+    let changed = home.value(&["import-omp", "--plan", plan.to_str().unwrap(), "--json"]);
+    assert_eq!(changed["failures"][0]["error"], "source changed since import; use --refresh only for a never-adopted import");
+    assert_eq!(fs::read(destination.join("transcript.jsonl")).unwrap(), ledger);
+    let refreshed = home.value(&["import-omp", "--plan", plan.to_str().unwrap(), "--refresh", "--json"]);
+    assert_eq!(refreshed["failures"], json!([]));
+    assert_eq!(fs::read(destination.join("artifacts/omp-source.jsonl")).unwrap(), bytes.as_bytes());
+    let state: Value = serde_json::from_slice(&fs::read(destination.join("completion.json")).unwrap()).unwrap();
+    assert_eq!(state["requests"][1]["prompt"], "Retain this additional request too.");
+    let frames = home.rpc(&[
+        json!({"id":"open","method":"session/open","params":{"session":destination,"options":{"cwd":home.workspace()}}}),
+        json!({"id":"refresh","method":"session/import-omp","params":{"planPath":plan,"refresh":true}}),
+    ]);
+    let opened = frames.iter().find(|f| f["id"] == "open").unwrap();
+    assert_eq!(opened["result"]["sessionPath"], destination.to_str().unwrap());
+    let refused = frames.iter().find(|f| f["id"] == "refresh").unwrap();
+    assert_eq!(refused["result"]["failures"][0]["error"], "native session has been adopted; refusing import refresh");
+    let after: Value = serde_json::from_slice(&fs::read(destination.join("completion.json")).unwrap()).unwrap();
+    assert_eq!(after["requests"], state["requests"]);
+    assert_eq!(fs::read(&source).unwrap(), bytes.as_bytes());
+    home.passed();
+}

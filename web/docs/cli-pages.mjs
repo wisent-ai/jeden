@@ -52,7 +52,7 @@ const commands = [
 
 const groups = [
   ["Run and automation", ["run", "pursue", "rpc", "headless", "acp", "collab-relay"]],
-  ["Sessions and artifacts", ["sessions", "show", "export", "artifacts", "artifact", "search-sessions", "resume", "recall_conversation"]],
+  ["Sessions and artifacts", ["sessions", "import-omp", "show", "export", "artifacts", "artifact", "search-sessions", "resume", "recall_conversation"]],
   ["Runtime and operations", ["tools", "update", "doctor", "conformance", "probierz", "capabilities", "token", "stats", "gallery", "copy"]],
   ["Configuration", ["workspace", "workspace/status", "workspace/discover", "workspace/adopt", "config", "config/list", "config/path", "config/get", "config/set", "config/reset", "contracts"]],
   ["Shell completions", ["completions", "completions/bash", "completions/zsh", "completions/fish"]],

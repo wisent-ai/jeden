@@ -31,6 +31,7 @@ pub mod roadmap;
 pub mod routing;
 pub mod rpc;
 pub mod sdk;
+mod session_import;
 pub mod slash;
 pub mod task_runtime;
 pub mod telemetry;
@@ -224,6 +225,7 @@ pub fn main() -> ExitCode {
                 .unwrap_or_else(|| "127.0.0.1:8877".to_string());
             collab::serve(&addr).map(|_| String::new())
         }
+        "import-omp" => session_import::command(&args),
         "sessions" => Ok(list_sessions(
             args.positionals.first().and_then(|s| s.parse().ok()),
         )),
