@@ -41,18 +41,71 @@ fn helper_candidates() -> Vec<PathBuf> {
     candidates
 }
 
+/// Health checks must fail closed without holding agent startup indefinitely.
+#[cfg(target_os = "macos")]
+fn health_output(command: &mut Command) -> Result<std::process::Output, String> {
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    let stderr = child.stderr.take();
+    let reader = std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        if let Some(mut stderr) = stderr {
+            stderr.read_to_end(&mut bytes)?;
+        }
+        Ok::<_, std::io::Error>(bytes)
+    });
+    let started = Instant::now();
+    let timeout = Duration::from_secs(30);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            result => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(match result {
+                    Err(error) => format!("cannot wait for health check: {error}"),
+                    _ => format!(
+                        "health check timed out after {} seconds; sandbox remains unavailable",
+                        timeout.as_secs()
+                    ),
+                });
+            }
+        }
+    };
+    let stderr = reader
+        .join()
+        .map_err(|_| "health check stderr reader failed")?
+        .map_err(|error| error.to_string())?;
+    Ok(std::process::Output {
+        status,
+        stdout: Vec::new(),
+        stderr,
+    })
+}
+
 #[cfg(target_os = "macos")]
 fn signed(path: &Path) -> Result<(), String> {
-    let output = Command::new("/usr/bin/codesign")
-        .arg("--verify")
-        .arg("--strict")
-        .args(["-R", "=anchor apple generic"])
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("cannot run codesign verification: {error}"))?;
+    let output = health_output(
+        Command::new("/usr/bin/codesign")
+            .arg("--verify")
+            .arg("--strict")
+            .args(["-R", "=anchor apple generic"])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    )
+    .map_err(|error| {
+        format!(
+            "cannot run codesign verification for {}: {error}",
+            path.display()
+        )
+    })?;
     if output.status.success() {
         Ok(())
     } else {
@@ -67,13 +120,19 @@ fn signed(path: &Path) -> Result<(), String> {
 
 #[cfg(target_os = "macos")]
 fn enforcement_probe(path: &Path) -> Result<(), String> {
-    let output = Command::new(path)
-        .arg("--probe")
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| format!("cannot launch sandbox enforcement probe: {error}"))?;
+    let output = health_output(
+        Command::new(path)
+            .arg("--probe")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped()),
+    )
+    .map_err(|error| {
+        format!(
+            "cannot launch sandbox enforcement probe for {}: {error}",
+            path.display()
+        )
+    })?;
     if output.status.success() {
         Ok(())
     } else {
@@ -113,7 +172,7 @@ pub(crate) fn health() -> TaskSandboxHealth {
             return TaskSandboxHealth {
                 enforced: false,
                 backend: "macos-seatbelt-helper",
-                detail: format!("helper signature is invalid: {error}"),
+                detail: format!("helper signature verification failed: {error}"),
                 helper: Some(helper),
             };
         }
