@@ -4,7 +4,49 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
+/// The harness a transcript was written by. The name is what the on-disk
+/// layout is keyed on (`omp-<sha>`, `artifacts/omp-source.jsonl`, snapshot
+/// reason `omp-import`), so a second harness adds a variant and a reader here
+/// and nothing else changes.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Format {
+    Omp,
+}
+
+impl Format {
+    pub(crate) fn name(self) -> &'static str {
+        match self { Format::Omp => "omp" }
+    }
+
+    pub(crate) const SUPPORTED: &'static str = "omp";
+}
+
+/// Which harness wrote this file, read from its content and never from its
+/// name: an OMP transcript is JSONL with one `{"type":"session"}` header that
+/// carries the session id and its workspace. A file that is none of the
+/// formats answers `None`, which a directory scan skips and an explicit path
+/// refuses.
+pub(crate) fn detect(path: &Path) -> Option<Format> {
+    let file = File::open(path).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = String::new();
+    // OMP rewrites a fixed-width `title` record at the top of the file and
+    // keeps the `session` header right after it, so the header is within the
+    // first few records; a file whose first records are not JSON is not ours.
+    for _ in 0..8 {
+        line.clear();
+        if reader.read_line(&mut line).ok()? == 0 { return None; }
+        if line.trim().is_empty() { continue; }
+        let value: Value = serde_json::from_str(&line).ok()?;
+        if value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string() {
+            return Some(Format::Omp);
+        }
+    }
+    None
+}
+
 pub(super) struct Source {
+    pub format: Format,
     pub id: String,
     pub title: String,
     pub cwd: String,
@@ -15,6 +57,14 @@ pub(super) struct Source {
 /// Index offsets, not tool-result bodies. Replay only the current branch; keep
 /// the entire original file separately so compaction never destroys provenance.
 pub(super) fn read(path: &Path) -> Result<Source, String> {
+    match detect(path) {
+        Some(Format::Omp) => read_omp(path),
+        None => Err(format!("{}: not a transcript of a supported harness (supported: {})",
+            path.display(), Format::SUPPORTED)),
+    }
+}
+
+fn read_omp(path: &Path) -> Result<Source, String> {
     let file = File::open(path).map_err(|e| e.to_string())?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
@@ -56,7 +106,7 @@ pub(super) fn read(path: &Path) -> Result<Source, String> {
         chain.push(*offset);
         leaf = parent.clone();
     }
-    let mut source = Source { id, cwd, title, messages: Vec::new(), pending: Vec::new() };
+    let mut source = Source { format: Format::Omp, id, cwd, title, messages: Vec::new(), pending: Vec::new() };
     let mut message_offsets = HashMap::new();
     for offset in chain.into_iter().rev() {
         reader.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;

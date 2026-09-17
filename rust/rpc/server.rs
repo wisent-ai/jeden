@@ -178,10 +178,7 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "workspace/status" => workspace_status(),
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),
-        "session/import-omp" => string_param(&request.params, "planPath")
-            .and_then(|path| crate::session_import::import_plan(Path::new(&path),
-                request.params.get("refresh").and_then(Value::as_bool).unwrap_or(false)))
-            .map_err(|error| ("import_error", error)),
+        "session/import" => import_sessions(&request.params),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),

@@ -1,69 +1,101 @@
 mod source;
 mod replacement;
 
-use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PlanEntry {
-    session_file: PathBuf,
-    cwd: PathBuf,
-    terminal_name: String,
-}
-#[derive(Deserialize)]
-struct Plan { sessions: Vec<PlanEntry> }
+pub(crate) use source::Format;
 
+/// `jeden import <path>... [--refresh] [--json]`: each path is a transcript
+/// another harness wrote, or a directory to scan for them. Which harness is
+/// read from the file, never from the command. A one-format command with a
+/// plan file lived here once and was refused by the operator; this is the
+/// general surface that replaced it.
 pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
-    let refresh = args.positionals.last().map(String::as_str) == Some("--refresh");
-    let arguments = &args.positionals[..args.positionals.len() - usize::from(refresh)];
-    if arguments.len() != 2 || arguments[0] != "--plan" {
-        return Err("Usage: jeden import-omp --plan <sessions.json> [--refresh] [--json]".into());
+    let refresh = args.positionals.iter().any(|argument| argument == "--refresh");
+    let paths: Vec<PathBuf> = args.positionals.iter()
+        .filter(|argument| *argument != "--refresh")
+        .map(PathBuf::from).collect();
+    if paths.is_empty() {
+        return Err("Usage: jeden import <path>... [--refresh] [--json]".into());
     }
-    let result = import_plan(Path::new(&arguments[1]), refresh)?;
+    let result = import_paths(&paths, refresh)?;
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
 }
 
-/// Import does not stop OMP or execute work. The desktop adopts these ledgers
-/// only after source ownership has been handed over, never while both can write.
-pub(crate) fn import_plan(path: &Path, refresh: bool) -> Result<Value, String> {
-    let plan: Plan = serde_json::from_slice(&fs::read(path)
-        .map_err(|e| format!("cannot read plan {}: {e}", path.display()))?)
-        .map_err(|e| format!("invalid plan {}: {e}", path.display()))?;
-    if plan.sessions.is_empty() { return Err("migration plan contains no sessions".into()); }
+/// Import does not stop the other harness or execute work. The desktop adopts
+/// these ledgers only after source ownership has been handed over, never while
+/// both can write.
+pub(crate) fn import_paths(paths: &[PathBuf], refresh: bool) -> Result<Value, String> {
     let root = crate::session_root();
     fs::create_dir_all(&root).map_err(|e| e.to_string())?;
-    let lock_path = root.with_extension("omp-import.lock");
+    let lock_path = root.with_extension("import.lock");
     let lock = OpenOptions::new().create(true).truncate(false).write(true).open(&lock_path)
-        .map_err(|e| format!("cannot open migration lock {}: {e}", lock_path.display()))?;
-    lock.try_lock().map_err(|e| format!("another OMP import holds {}: {e}", lock_path.display()))?;
+        .map_err(|e| format!("cannot open import lock {}: {e}", lock_path.display()))?;
+    lock.try_lock().map_err(|e| format!("another import holds {}: {e}", lock_path.display()))?;
     let mut sessions = Vec::new();
     let mut failures = Vec::new();
     let mut existing = 0;
-    for entry in plan.sessions {
-        match import_entry(&root, &entry, refresh) {
+    let mut sources = Vec::new();
+    for path in paths {
+        match collect(path, &mut sources) {
+            Ok(()) => {}
+            Err(error) => failures.push(json!({"sourcePath":path,"error":error})),
+        }
+    }
+    if sources.is_empty() && failures.is_empty() {
+        let named: Vec<String> = paths.iter().map(|path| path.display().to_string()).collect();
+        return Err(format!("no sessions to import under {}", named.join(", ")));
+    }
+    for source_path in sources {
+        match import_source(&root, &source_path, refresh) {
             Ok((record, was_existing)) => { existing += usize::from(was_existing); sessions.push(record); }
-            Err(error) => failures.push(json!({"sourcePath":entry.session_file,"error":error})),
+            Err(error) => failures.push(json!({"sourcePath":source_path,"error":error})),
         }
     }
     Ok(json!({"imported":sessions.len()-existing, "existing":existing,
         "sessions":sessions, "failures":failures}))
 }
 
-fn import_entry(root: &Path, entry: &PlanEntry, refresh: bool) -> Result<(Value, bool), String> {
-    let source_path = fs::canonicalize(&entry.session_file)
-        .map_err(|e| format!("cannot open source {}: {e}", entry.session_file.display()))?;
+/// A file named outright must be a transcript; a directory is walked and only
+/// the transcripts inside it count, because a session root also holds locks,
+/// state files and other harnesses' leftovers.
+fn collect(path: &Path, sources: &mut Vec<PathBuf>) -> Result<(), String> {
+    let metadata = fs::metadata(path).map_err(|e| format!("cannot open source {}: {e}", path.display()))?;
+    if metadata.is_dir() {
+        let mut entries: Vec<PathBuf> = fs::read_dir(path).map_err(|e| e.to_string())?
+            .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+            .collect::<Result<_, _>>()?;
+        entries.sort();
+        for entry in entries {
+            if entry.is_dir() {
+                collect(&entry, sources)?;
+            } else if source::detect(&entry).is_some() {
+                sources.push(entry);
+            }
+        }
+        return Ok(());
+    }
+    if source::detect(path).is_none() {
+        return Err(format!("{}: not a transcript of a supported harness (supported: {})",
+            path.display(), Format::SUPPORTED));
+    }
+    sources.push(path.to_path_buf());
+    Ok(())
+}
+
+fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool), String> {
+    let source_path = fs::canonicalize(path)
+        .map_err(|e| format!("cannot open source {}: {e}", path.display()))?;
     let before = fs::metadata(&source_path).map_err(|e| e.to_string())?;
     let source = source::read(&source_path)?;
-    let cwd = fs::canonicalize(&entry.cwd).map_err(|e| format!("workspace unavailable: {e}"))?;
-    if !cwd.is_dir() { return Err(format!("workspace is not a directory: {}", cwd.display())); }
-    let declared = fs::canonicalize(&source.cwd).map_err(|e| format!("source workspace unavailable: {e}"))?;
-    if cwd != declared { return Err(format!("plan workspace {} differs from source {}", cwd.display(), declared.display())); }
-    let id = format!("omp-{}", hex::encode(Sha256::digest(source.id.as_bytes())));
+    let format = source.format.name();
+    let cwd = fs::canonicalize(&source.cwd).map_err(|e| format!("source workspace unavailable: {e}"))?;
+    if !cwd.is_dir() { return Err(format!("source workspace is not a directory: {}", cwd.display())); }
+    let id = format!("{format}-{}", hex::encode(Sha256::digest(source.id.as_bytes())));
     let destination = root.join(&id);
     replacement::recover(root, &destination, &id)?;
     let manifest = destination.join("import.json");
@@ -76,7 +108,7 @@ fn import_entry(root: &Path, entry: &PlanEntry, refresh: bool) -> Result<(Value,
         if !refresh {
             return Err("source changed since import; use --refresh only for a never-adopted import".into());
         }
-        replacement::verify_unadopted(root, &destination)?;
+        replacement::verify_unadopted(root, &destination, source.format)?;
     } else if destination.exists() {
         return Err(format!("incomplete migration at {}; source is intact", destination.display()));
     }
@@ -84,7 +116,7 @@ fn import_entry(root: &Path, entry: &PlanEntry, refresh: bool) -> Result<(Value,
     if staging.exists() { fs::remove_dir_all(&staging).map_err(|e| e.to_string())?; }
     fs::create_dir_all(staging.join("artifacts")).map_err(|e| e.to_string())?;
     let result = (|| {
-        let provenance = staging.join("artifacts/omp-source.jsonl");
+        let provenance = staging.join(format!("artifacts/{format}-source.jsonl"));
         fs::copy(&source_path, &provenance).map_err(|e| format!("source snapshot failed: {e}"))?;
         File::open(&provenance).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
         let after = fs::metadata(&source_path).map_err(|e| e.to_string())?;
@@ -96,18 +128,17 @@ fn import_entry(root: &Path, entry: &PlanEntry, refresh: bool) -> Result<(Value,
             "version":crate::cli::sessions::SESSION_LEDGER_VERSION,"id":id,
             "cwd":cwd,"startedAt":timestamp,"activeLeaf":null,"lineage":null}))?;
         crate::cli::sessions::append_ledger_entry(&staging, timestamp.clone(), "context_snapshot",
-            json!({"reason":"omp-import", "messages":source.messages}))?;
+            json!({"reason":format!("{format}-import"), "messages":source.messages}))?;
         for request in &source.pending {
             crate::completion::capture_request(&staging, &cwd, request)?;
         }
-        let title = if source.title.is_empty() { &entry.terminal_name } else { &source.title };
-        let record = json!({"sourceSession":source.id,"sourcePath":source_path,
-            "sessionPath":destination,"cwd":cwd,"title":title,
+        let record = json!({"format":format,"sourceSession":source.id,"sourcePath":source_path,
+            "sessionPath":destination,"cwd":cwd,"title":source.title,
             "interrupted":!source.pending.is_empty(),"sourceBytes":before.len(),
             "sourceModified":modified(&before)?,"importedAt":timestamp});
         write_json(&staging.join("import.json"), &record)?;
         File::open(&staging).and_then(|f| f.sync_all()).map_err(|e| e.to_string())?;
-        replacement::publish(root, &staging, &destination, &id)?;
+        replacement::publish(root, &staging, &destination, &id, source.format)?;
         Ok((record, false))
     })();
     if result.is_err() && staging.exists() {
@@ -130,7 +161,7 @@ pub(crate) fn mark_adopted(source: &Path) -> Result<(), String> {
     if !source.join("import.json").exists() { return Ok(()); }
     let root = source.parent().ok_or("import has no parent directory")?;
     let lock = OpenOptions::new().create(true).truncate(false).write(true)
-        .open(root.with_extension("omp-import.lock")).map_err(|e| e.to_string())?;
+        .open(root.with_extension("import.lock")).map_err(|e| e.to_string())?;
     lock.lock().map_err(|e| format!("cannot claim imported session: {e}"))?;
     File::create(source.join("adopted")).and_then(|f| f.sync_all())
         .map_err(|e| format!("cannot record import ownership: {e}"))

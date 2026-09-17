@@ -31,7 +31,7 @@ pub(crate) fn usage() -> String {
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
         "  jeden sessions [limit]\n",
-        "  jeden import-omp --plan <sessions.json> [--refresh] [--json] — preserve OMP sessions in native ledgers without executing work\n",
+        "  jeden import <path>... [--refresh] [--json] — preserve sessions of another harness in native ledgers without executing work\n",
         "  jeden show <session-id-or-path>\n",
         "  jeden export <session-id-or-path> [output.json]\n",
         "  jeden artifacts <session-id-or-path>\n",
@@ -184,7 +184,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "gallery"
                             | "contracts"
                             | "workspace"
-                            | "import-omp"
+                            | "import"
                             | "todo"
                             | "copy"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>

@@ -4,21 +4,22 @@ use std::path::Path;
 
 /// Only a never-executed import can be refreshed. Any native turn, captured
 /// extra request, task planning, or child ledger makes replacement unsafe.
-pub(super) fn verify_unadopted(root: &Path, destination: &Path) -> Result<(), String> {
+pub(super) fn verify_unadopted(root: &Path, destination: &Path, format: super::Format) -> Result<(), String> {
     if destination.join("adopted").exists() {
         return Err("native session has been adopted; refusing import refresh".into());
     }
     let snapshot = crate::cli::sessions::read_session_value(&destination.display().to_string())?;
     let events = snapshot["events"].as_array().ok_or("native ledger has no events")?;
+    let reason = format!("{}-import", format.name());
     if events.len() != 1 || events[0]["type"] != "context_snapshot"
-        || events[0].pointer("/data/reason").and_then(Value::as_str) != Some("omp-import") {
+        || events[0].pointer("/data/reason").and_then(Value::as_str) != Some(reason.as_str()) {
         return Err("native session has been used; refusing import refresh".into());
     }
     let completion_path = destination.join("completion.json");
     if completion_path.exists() {
         let state: Value = serde_json::from_slice(&fs::read(&completion_path).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
-        let source = super::source::read(&destination.join("artifacts/omp-source.jsonl"))?;
+        let source = super::source::read(&destination.join(format!("artifacts/{}-source.jsonl", format.name())))?;
         let requests = state["requests"].as_array().ok_or("native requests are invalid")?;
         if requests.len() != source.pending.len()
             || requests.iter().zip(&source.pending).any(|(request, prompt)|
@@ -53,10 +54,10 @@ pub(super) fn recover(root: &Path, destination: &Path, id: &str) -> Result<(), S
     Ok(())
 }
 
-pub(super) fn publish(root: &Path, staging: &Path, destination: &Path, id: &str) -> Result<(), String> {
+pub(super) fn publish(root: &Path, staging: &Path, destination: &Path, id: &str, format: super::Format) -> Result<(), String> {
     let backup = root.join(format!(".previous-{id}"));
     if destination.exists() {
-        verify_unadopted(root, destination)?;
+        verify_unadopted(root, destination, format)?;
         if backup.exists() { fs::remove_dir_all(&backup).map_err(|e| e.to_string())?; }
         fs::rename(destination, &backup).map_err(|e| e.to_string())?;
     }
