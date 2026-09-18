@@ -72,12 +72,46 @@
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/f429ae5c8a6502e356b882563d569c44915481b9eb9d2d77cb3e2f2329658b5b/private-cargo-sources.tar.gz",
-      "sha256": "f429ae5c8a6502e356b882563d569c44915481b9eb9d2d77cb3e2f2329658b5b",
+      "uri": "stado://sources/jeden/private-cargo-sources/c497f3aaaca9e5a55ed1705dbca77822a99008c0b28174137bd4360865e30e6a/private-cargo-sources.tar.gz",
+      "sha256": "c497f3aaaca9e5a55ed1705dbca77822a99008c0b28174137bd4360865e30e6a",
       "mount": "private-cargo-sources",
       "extract": true
     }
   },
+  "deliveries": [
+    {
+      "name": "macbook-jeden",
+      "platform": "darwin-arm64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "required": true,
+      "secret_env": {},
+      "target": "lukasz-macbook"
+    },
+    {
+      "name": "macbook-sandbox-helper",
+      "platform": "darwin-arm64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "required": true,
+      "secret_env": {},
+      "target": "lukasz-macbook"
+    },
+    {
+      "name": "mini-jeden",
+      "platform": "darwin-arm64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "required": true,
+      "secret_env": {},
+      "target": "charless-mac-mini"
+    },
+    {
+      "name": "mini-sandbox-helper",
+      "platform": "darwin-arm64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "required": true,
+      "secret_env": {},
+      "target": "charless-mac-mini"
+    }
+  ],
   "promotion": {
     "channels": ["candidate", "stable"],
     "reconcile": false
