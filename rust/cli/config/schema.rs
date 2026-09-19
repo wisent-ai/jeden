@@ -5,12 +5,32 @@ use std::path::Path;
 
 use super::communication::{CommunicationMode, DisplayPolicy, Visibility};
 use super::{
-    config_set_value, config_value_at, merged_config_value, parse_config_literal,
-    read_user_writable_config, write_user_config,
+    config_remove_value, config_set_value, config_value_at, merged_config_value,
+    parse_config_literal, read_user_writable_config, write_user_config,
 };
 use crate::tui::{PickerItem, PickerSpec};
 use crate::user_config_path;
 use crate::Args;
+
+/// The value that follows the user's own messages instead of pinning one
+/// language.
+const UI_LANGUAGE_AUTO: &str = "auto";
+
+/// `auto` plus every pinnable language, built from the one declaration in
+/// [`super::UI_LANGUAGE_CODES`]. The schema used to carry its own copy of
+/// all sixty-five codes, so a language added to the pinnable set appeared
+/// in `config set` and not in `config list`, or the other way round.
+const UI_LANGUAGE_CHOICES: [&str; super::UI_LANGUAGE_CODES.len() + 1] = ui_language_choices();
+
+const fn ui_language_choices() -> [&'static str; super::UI_LANGUAGE_CODES.len() + 1] {
+    let mut choices = [UI_LANGUAGE_AUTO; super::UI_LANGUAGE_CODES.len() + 1];
+    let mut index = 1;
+    while index < choices.len() {
+        choices[index] = super::UI_LANGUAGE_CODES[index - 1];
+        index += 1;
+    }
+    choices
+}
 
 #[derive(Clone, Copy)]
 pub(crate) struct SettingSpec {
@@ -189,13 +209,7 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         typ: "enum",
         description: "Conversation language: auto follows the user's messages; an ISO 639 code pins the answer language (65 languages as in wisent-app).",
         default_json: "\"auto\"",
-        enum_values: &[
-            "auto", "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "dv", "dz",
-            "el", "en", "es", "et", "fa", "fi", "fo", "fr", "he", "hr", "hu", "hy", "id", "is",
-            "it", "ja", "ka", "kk", "kl", "km", "ko", "ky", "lo", "lt", "lv", "mk", "mn", "ms",
-            "my", "ne", "nl", "no", "pl", "ps", "pt", "ro", "ru", "si", "sk", "sl", "so", "sq",
-            "sr", "sv", "tg", "th", "tk", "tr", "uk", "uz", "vi", "zh",
-        ],
+        enum_values: &UI_LANGUAGE_CHOICES,
     },
     SettingSpec {
         key: "ui.theme",
@@ -621,8 +635,28 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
                 format!("Reset {key} to schema default in {}\n", path.display())
             })
         }
+        "unset" => {
+            let key = rest.first().ok_or("config unset requires a key")?;
+            let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+            let mut config = read_user_writable_config();
+            let removed = config_remove_value(&mut config, key)?;
+            let path = write_user_config(&config)?;
+            let default_value = setting_default(spec);
+            Ok(if args.json {
+                serde_json::to_string_pretty(&json!({"key": key, "removed": removed, "value": default_value, "type": spec.typ, "description": spec.description, "path": path})).map_err(|error| error.to_string())? + "\n"
+            } else if removed {
+                format!(
+                    "Removed {key} from {}; it reads {} again\n",
+                    path.display(),
+                    default_value
+                )
+            } else {
+                format!("{key} was not written in {}\n", path.display())
+            })
+        }
         _ => Err(
-            "Usage: jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json]"
+            "Usage: jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] \
+             [--json]"
                 .into(),
         ),
     }

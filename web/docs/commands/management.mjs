@@ -63,6 +63,14 @@ export const managementCommands = [
     effect: "Sets the nested user key to the schema default, atomically writes the user config, and prints the reset result. Resetting <code>contracts.communication</code> returns to Jeden's default communication contract; resetting <code>contracts.functionality</code> stores an empty string, which adds no extra prompt instruction; resetting <code>communication.mode</code> returns to <code>normal</code> and resetting an override returns it to <code>auto</code>.",
     refusals: ["Missing input is refused as <code>config reset requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
   },
+  {
+    path: "config/unset",
+    invocation: "jeden config unset <key> [--json]",
+    purpose: "Remove one setting from the user configuration, so the file says nothing about it again.",
+    inputs: ["Required: an exact schema key. Optional: <code>--json</code> for the key, whether anything was removed, the value it reads now, type, description, and path."],
+    effect: "Deletes the nested user key and any object the deletion leaves empty, atomically writes the user config, and reports the schema default the key reads again. This is the difference from <code>config reset</code>, which writes the default into the file: after <code>unset</code> the key is absent, so a later change of the schema default applies. Removing a key that was never written is reported as <code>&lt;key&gt; was not written in &lt;path&gt;</code> and is not an error.",
+    refusals: ["Missing input is refused as <code>config unset requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
+  },
 
   // Completion leaves.
   ...["bash", "zsh", "fish"].map((shell) => ({

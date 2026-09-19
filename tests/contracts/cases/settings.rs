@@ -45,6 +45,49 @@ fn operator_contracts_are_written_read_and_reset_through_the_cli() {
     home.passed();
 }
 
+/// A setting written into the file can leave it again, and the pinnable
+/// languages `config set` accepts are the ones `config list` advertises —
+/// the schema used to carry its own copy of all sixty-five codes.
+#[test]
+fn a_written_setting_can_be_removed_and_the_language_set_has_one_source() {
+    let home = Home::new("settings-unset");
+    home.ok(&["config", "set", "ui.language", "pl"]);
+    assert_eq!(home.config()["ui"]["language"], "pl");
+
+    let removed = home.ok(&["config", "unset", "ui.language", "--json"]);
+    let removed: serde_json::Value = serde_json::from_slice(&removed.stdout).unwrap();
+    assert_eq!(removed["removed"], json!(true));
+    assert_eq!(removed["value"], "auto");
+    // The object the setting lived in goes with it: the file says nothing
+    // about the language again, which `config reset` cannot do.
+    assert_eq!(home.config().get("ui"), None);
+    let again = home.ok(&["config", "unset", "ui.language", "--json"]);
+    let again: serde_json::Value = serde_json::from_slice(&again.stdout).unwrap();
+    assert_eq!(again["removed"], json!(false));
+
+    let listed = home.ok(&["config", "list", "--json"]);
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let advertised: Vec<String> = listed["ui.language"]["enum"]
+        .as_array()
+        .expect("the listing advertises the choices")
+        .iter()
+        .map(|value| value.as_str().unwrap().to_owned())
+        .collect();
+    assert!(advertised.len() > 2, "{advertised:?}");
+
+    let refused = home.run(&["config", "set", "ui.language", "nosuchlanguage"]);
+    assert!(!refused.status.success());
+    let sentence = String::from_utf8(refused.stderr).unwrap();
+    // Every advertised choice is accepted, and the refusal names the same
+    // set: one declaration behind both, not a schema copy beside a parser.
+    for choice in &advertised {
+        assert!(sentence.contains(choice.as_str()), "{choice}: {sentence}");
+        home.ok(&["config", "set", "ui.language", choice]);
+    }
+    home.ok(&["config", "unset", "ui.language"]);
+    home.passed();
+}
+
 #[test]
 fn operator_contracts_are_served_through_rpc_for_jeden_desktop() {
     let home = Home::new("settings-rpc");

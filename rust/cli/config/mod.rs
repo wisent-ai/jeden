@@ -429,6 +429,64 @@ pub(crate) fn config_set_value(value: &mut Value, key: &str, next: Value) -> Res
     Ok(())
 }
 
+/// Remove one declared key from a config document, and any object the
+/// removal leaves empty.
+///
+/// `config reset` writes the schema default, which is not the same thing:
+/// the file keeps saying something about the key. A key that was never in
+/// the file has no way back to absent without this, which is what a test —
+/// or an operator undoing an experiment — needs. Returns whether anything
+/// was there to remove.
+pub(crate) fn config_remove_value(value: &mut Value, key: &str) -> Result<bool, String> {
+    let parts = key
+        .split('.')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    let Some((last, prefix)) = parts.split_last() else {
+        return Err("config key is required".into());
+    };
+    let mut current = &mut *value;
+    for part in prefix {
+        let Some(next) = current.get_mut(*part) else {
+            return Ok(false);
+        };
+        current = next;
+    }
+    let Some(object) = current.as_object_mut() else {
+        return Ok(false);
+    };
+    let removed = object.remove(*last).is_some();
+    if removed {
+        prune_empty_objects(value, &parts[..parts.len() - 1]);
+    }
+    Ok(removed)
+}
+
+/// Drop the objects the removal emptied, outermost last, so a file does not
+/// keep `"ui": {}` after its only setting is gone.
+fn prune_empty_objects(value: &mut Value, prefix: &[&str]) {
+    for depth in (0..prefix.len()).rev() {
+        let mut current = &mut *value;
+        for part in &prefix[..depth] {
+            let Some(next) = current.get_mut(*part) else {
+                return;
+            };
+            current = next;
+        }
+        let Some(object) = current.as_object_mut() else {
+            return;
+        };
+        let empty = object
+            .get(prefix[depth])
+            .and_then(Value::as_object)
+            .is_some_and(serde_json::Map::is_empty);
+        if !empty {
+            return;
+        }
+        object.remove(prefix[depth]);
+    }
+}
+
 pub(crate) fn parse_config_literal(raw: &str) -> Value {
     let trimmed = raw.trim();
     if trimmed.eq_ignore_ascii_case("true") {
