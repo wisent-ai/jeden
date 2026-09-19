@@ -31,6 +31,13 @@ pub(crate) const COMMUNICATION_CODE_KEY: &str = "communication.code";
 
 pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
     SettingSpec {
+        key: "model",
+        typ: "string",
+        description: "The model route turns run on, as Brama advertises it; /setup records it here, and JEDEN_MODEL or --model overrides it for one run. Empty means no model is selected.",
+        default_json: "\"\"",
+        enum_values: &[],
+    },
+    SettingSpec {
         key: "tools.approvalMode",
         typ: "enum",
         description: "Default approval policy for tool execution.",

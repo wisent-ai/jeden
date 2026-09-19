@@ -78,6 +78,39 @@ fn an_unreadable_answer_is_quoted_back_with_its_refusal() {
 }
 
 #[test]
+fn a_request_verdict_filed_under_tasks_is_read_as_a_request_verdict() {
+    // Returned by a real verifier on 2026-09-18: the request entry as the
+    // last element of `tasks`, with no `requests` array at all.
+    let misfiled = json!({
+        "tasks": [
+            serde_json::from_str::<serde_json::Value>(&verdict()).unwrap()["tasks"][0],
+            {"requestId": "5a8f0d21", "covered": false, "explanation": "token.txt was not observed"}
+        ]
+    })
+    .to_string();
+    let review: CompletionReview =
+        serde_json::from_str(&misfiled).expect("a request verdict is a request verdict anywhere");
+    assert_eq!(review.tasks.len(), 1);
+    assert_eq!(review.requests.len(), 1);
+    assert!(!review.requests[0].covered);
+}
+
+#[test]
+fn a_requests_array_nested_in_a_task_is_read_beside_it() {
+    // The other shape from the same day: `requests` written inside the task
+    // object instead of next to `tasks`.
+    let mut nested: serde_json::Value = serde_json::from_str(&verdict()).unwrap();
+    let requests = nested["requests"].take();
+    nested["tasks"][0]["requests"] = requests;
+    nested.as_object_mut().unwrap().remove("requests");
+    let review: CompletionReview =
+        serde_json::from_str(&nested.to_string()).expect("the nested array is still the requests");
+    assert_eq!(review.tasks.len(), 1);
+    assert_eq!(review.requests.len(), 1);
+    assert!(review.requests[0].covered);
+}
+
+#[test]
 fn an_intake_plan_also_tolerates_an_echoed_field() {
     let plan: IntakePlan = serde_json::from_str(
         &json!({"tasks": [{

@@ -2,9 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 
+mod operator;
 mod review;
 
-pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus};
+pub use operator::{OperatorAnswer, OperatorRequest};
+pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus, TaskReview};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -36,6 +38,7 @@ pub enum TaskOrigin {
 pub enum TaskKind {
     Work,
     Answer,
+    Defect,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,10 +69,16 @@ pub struct WorkTask {
     pub text: String,
     pub criteria: Vec<String>,
     pub kind: TaskKind,
+    #[serde(default)]
+    pub defect_of: Option<String>,
     pub origin: TaskOrigin,
     pub status: TaskStatus,
     pub reason: Option<String>,
     pub verification: Option<TaskVerification>,
+    /// What the operator has to supply for a blocked task, when the block is
+    /// theirs to lift; absent for every other task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub operator_request: Option<OperatorRequest>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -143,7 +152,12 @@ impl CompletionState {
     }
 
     pub fn status(&self) -> &'static str {
-        if let Some(blocker) = &self.blocker {
+        // Nothing moves until the operator answers, whatever else stopped
+        // the last turn: a broken review or a step limit beside an open ask
+        // is still a session waiting on them, and the word must say so.
+        if self.tasks.iter().any(WorkTask::waits_for_operator) {
+            "waiting_for_operator"
+        } else if let Some(blocker) = &self.blocker {
             match blocker.operation.as_str() {
                 "execution_limit" => "paused",
                 "turn_cancelled" => "interrupted",
@@ -222,6 +236,16 @@ impl CompletionState {
             }
             if task.status == TaskStatus::Done && task.verification.is_none() {
                 return Err(format!("task {} has no independent verification", task.id));
+            }
+            if let Some(target) = &task.defect_of {
+                if task.kind != TaskKind::Defect || target == &task.id
+                    || !self.tasks.iter().any(|item| &item.id == target)
+                        && !self.requests.iter().any(|item| &item.id == target)
+                {
+                    return Err(format!("task {} has an invalid defect target: {target}", task.id));
+                }
+            } else if task.kind == TaskKind::Defect {
+                return Err(format!("defect {} has no original task or request", task.id));
             }
         }
         for request in self.requests.iter().filter(|request| request.planned) {

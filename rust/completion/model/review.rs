@@ -39,6 +39,8 @@ pub(crate) struct PlannedTask {
     /// because one field was absent from an otherwise usable plan.
     #[serde(default = "work_task")]
     pub kind: TaskKind,
+    pub defect_of: Option<String>,
+    pub defect_quote: Option<String>,
 }
 
 fn work_task() -> TaskKind {
@@ -53,11 +55,57 @@ pub(crate) struct UserCancellation {
     pub quote: String,
 }
 
+/// The two arrays a review returns. A request verdict the verifier filed
+/// inside `tasks` is still a request verdict: on 2026-09-18 one model put
+/// `{"requestId":…,"covered":…}` as the last element of `tasks` in four
+/// reviews out of ten, and each was refused as `missing field status` on
+/// a task that was never a task. An entry naming a request and its
+/// coverage is unambiguous wherever it sits, so it is read as one; every
+/// field it needs is still required.
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "RawReview")]
 pub(crate) struct CompletionReview {
     pub tasks: Vec<TaskReview>,
     pub requests: Vec<RequestReview>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawReview {
+    tasks: Vec<serde_json::Value>,
+    #[serde(default)]
+    requests: Vec<RequestReview>,
+}
+
+impl TryFrom<RawReview> for CompletionReview {
+    type Error = String;
+
+    fn try_from(raw: RawReview) -> Result<Self, String> {
+        let mut review = Self {
+            tasks: Vec::with_capacity(raw.tasks.len()),
+            requests: raw.requests,
+        };
+        for mut entry in raw.tasks {
+            // The same confusion the other way round: a `requests` array
+            // written inside the last task instead of beside `tasks`.
+            if let Some(nested) = entry
+                .get_mut("requests")
+                .filter(|value| value.is_array())
+                .map(serde_json::Value::take)
+            {
+                let nested: Vec<RequestReview> =
+                    serde_json::from_value(nested).map_err(|error| error.to_string())?;
+                review.requests.extend(nested);
+            }
+            let names_request = entry.get("requestId").is_some() && entry.get("covered").is_some();
+            if names_request {
+                review.requests.push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
+            } else {
+                review.tasks.push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
+            }
+        }
+        Ok(review)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -81,6 +129,12 @@ pub(crate) struct TaskReview {
     /// `criteria``, with the work done and the review unread.
     #[serde(default)]
     pub criteria: Vec<CriterionReview>,
+    /// For a `blocked` verdict: the exact value or decision only the operator
+    /// holds, in one sentence, and where it goes. Absent when the block is a
+    /// dependency nobody has to be asked about. Recorded on the task as its
+    /// request to the operator and answered through `jeden todo answer`.
+    #[serde(default, alias = "operator_request", alias = "operatorRequest")]
+    pub ask: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

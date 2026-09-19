@@ -3,7 +3,7 @@ use crate::Args;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-pub(crate) const USAGE: &str = "jeden todo [list|add <request>|pause <id>|resume <id>|cancel <id>|continue] [--session <id-or-path>] [--revision <n> --reason <text>] [--json]";
+pub(crate) const USAGE: &str = "jeden todo [list|add <request>|pause <id>|resume <id>|cancel <id>|defect <id>|answer <id> --text <answer>|continue] [--session <id-or-path>] [--revision <n> --reason <text>] [--json]";
 
 pub(crate) fn workspace(session: &Path) -> Result<PathBuf, String> {
     let bytes = std::fs::read(session.join("state.json"))
@@ -57,6 +57,9 @@ pub(crate) fn render(state: &CompletionState) -> String {
             .iter()
             .filter(|task| task.request_id == request.id)
         {
+            if let Some(original) = &task.defect_of {
+                lines.push(format!("  Defect of {original}; repair requires fresh independent verification"));
+            }
             lines.push(format!(
                 "  {} [{}] {}",
                 task.id,
@@ -71,6 +74,18 @@ pub(crate) fn render(state: &CompletionState) -> String {
             }
             if let Some(reason) = &task.reason {
                 lines.push(format!("    {reason}"));
+            }
+            if let Some(request) = &task.operator_request {
+                match &request.answer {
+                    Some(answer) => lines.push(format!(
+                        "    Asked of you: {}\n    Your answer ({}): {}",
+                        request.ask, answer.answered_at, answer.text
+                    )),
+                    None => lines.push(format!(
+                        "    Waiting on you: {}\n    Answer with: jeden todo answer {} --text <answer> --revision {}",
+                        request.ask, task.id, state.revision
+                    )),
+                }
             }
             if let Some(verification) = &task.verification {
                 for evidence in &verification.evidence {
@@ -98,6 +113,7 @@ pub(crate) fn execute(
     let mut selected = None;
     let mut revision = None;
     let mut reason = None;
+    let mut text = None;
     let mut words = Vec::new();
     let mut arguments = arguments.iter();
     while let Some(argument) = arguments.next() {
@@ -127,6 +143,14 @@ pub(crate) fn execute(
                         .as_str(),
                 )
             }
+            "--text" => {
+                text = Some(
+                    arguments
+                        .next()
+                        .ok_or("--text requires the answer")?
+                        .as_str(),
+                )
+            }
             "--json" => json = true,
             "--help" => return Ok(USAGE.into()),
             flag if flag.starts_with("--") => return Err(format!("unknown todo option: {flag}")),
@@ -139,7 +163,7 @@ pub(crate) fn execute(
         .unwrap_or(("list", &[]));
     if !matches!(
         action,
-        "list" | "add" | "pause" | "resume" | "cancel" | "continue"
+        "list" | "add" | "pause" | "resume" | "cancel" | "defect" | "answer" | "continue"
     ) {
         return Err(format!("{USAGE}\nTask completion requires independent verification; there is no operator done command."));
     }
@@ -165,7 +189,7 @@ pub(crate) fn execute(
             let request = remaining.join(" ");
             operations::capture_request(&session, &workspace(&session)?, &request)?.1
         }
-        "pause" | "resume" | "cancel" => {
+        "pause" | "resume" | "cancel" | "defect" => {
             let [task_id] = remaining else {
                 return Err(USAGE.into());
             };
@@ -175,6 +199,18 @@ pub(crate) fn execute(
                 action,
                 reason.ok_or("task control requires --reason")?,
                 revision.ok_or("task control requires --revision")?,
+            )?
+        }
+        "answer" => {
+            let [task_id] = remaining else {
+                return Err(USAGE.into());
+            };
+            operations::operator_control(
+                &session,
+                task_id,
+                action,
+                text.ok_or("answer requires --text with what the task asked for")?,
+                revision.ok_or("answer requires --revision")?,
             )?
         }
         "continue" if remaining.is_empty() => {

@@ -26,6 +26,11 @@
       <priority>0.7</priority>
     </url>
   <url>
+      <loc>https://jeden.wisent.com/docs/cli/import</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
       <loc>https://jeden.wisent.com/docs/cli/run</loc>
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
@@ -357,6 +362,16 @@
     </url>
   <url>
       <loc>https://jeden.wisent.com/docs/cli/todo/cancel</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/defect</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/todo/answer</loc>
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
     </url>

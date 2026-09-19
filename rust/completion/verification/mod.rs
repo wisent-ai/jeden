@@ -1,3 +1,4 @@
+mod asks;
 mod evidence;
 mod paths;
 
@@ -64,9 +65,26 @@ impl EvidenceIndex {
         self.get(reference).map(|(receipt, _)| paths::touched(receipt))
     }
 
+    /// A failed operation of the execution itself. The reviewer's own
+    /// failed lookups do not count: on 2026-09-18 a review cited its own
+    /// `task_evidence` miss on a made-up id as the failed operation behind a
+    /// block, when the task was waiting on a value only the operator held
+    /// and should have asked for it.
     fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
         self.get(reference)
-            .map(|(receipt, _)| receipt["failed"] == true)
+            .map(|(receipt, independent)| !independent && receipt["failed"] == true)
+    }
+
+    /// An execution failure recorded after the given unix stamp: the one
+    /// kind of failure that can follow an operator's answer.
+    fn failure_after(&self, reference: &EvidenceReference, stamp: &str) -> Result<bool, String> {
+        let (receipt, independent) = self.get(reference)?;
+        let after = receipt["timestamp"]
+            .as_str()
+            .and_then(|at| at.parse::<u64>().ok())
+            .zip(stamp.parse::<u64>().ok())
+            .is_some_and(|(at, since)| at >= since);
+        Ok(!independent && receipt["failed"] == true && after)
     }
 }
 
@@ -175,7 +193,7 @@ pub(crate) fn apply_review(
                     }
                 }
                 if verdict.status == ReviewStatus::Done
-                    && (!criterion.satisfied || (task.kind == TaskKind::Work && !observed))
+                    && (!criterion.satisfied || (task.kind != TaskKind::Answer && !observed))
                 {
                     return Err(format!(
                         "task {} criterion {} has no successful independent observation",
@@ -185,7 +203,7 @@ pub(crate) fn apply_review(
                 // Reading the criterion's prose is the reviewer's judgement.
                 // The place it names is not a judgement, so a verdict that
                 // rests on work done somewhere else is refused here.
-                if verdict.status == ReviewStatus::Done && task.kind == TaskKind::Work {
+                if verdict.status == ReviewStatus::Done && task.kind != TaskKind::Answer {
                     let wanted = paths::named(&task.criteria[criterion.index]);
                     let workspace = state
                         .requests
@@ -201,15 +219,19 @@ pub(crate) fn apply_review(
                 }
             }
             let mut observed_failure = false;
+            let mut failed_since_answer = false;
+            let answered_at = task
+                .operator_request
+                .as_ref()
+                .and_then(|request| request.answer.as_ref())
+                .map(|answer| answer.answered_at.as_str());
             for reference in &verdict.evidence {
                 observed_failure |= index.failure(reference)?;
+                if let Some(stamp) = answered_at {
+                    failed_since_answer |= index.failure_after(reference, stamp)?;
+                }
             }
-            if verdict.status == ReviewStatus::Blocked && !observed_failure {
-                return Err(format!(
-                    "task {} was called blocked without a recorded failed operation",
-                    task.id
-                ));
-            }
+            asks::check(task, verdict, observed_failure, failed_since_answer)?;
         }
         if review
             .requests
@@ -230,6 +252,7 @@ pub(crate) fn apply_review(
                 ReviewStatus::Continue => TaskStatus::Pending,
                 ReviewStatus::Blocked => TaskStatus::Blocked,
             };
+            asks::record(task, &verdict);
             let mut references = verdict.evidence;
             for criterion in &verdict.criteria {
                 for reference in &criterion.evidence {
@@ -264,7 +287,7 @@ pub(crate) fn apply_review(
                 .filter(|task| task.request_id == request.id)
                 .collect();
             if !verdict.covered && owned.iter().all(|task| task.status.terminal()) {
-                let kind = if owned.iter().any(|task| task.kind == TaskKind::Work) {
+                let kind = if owned.iter().any(|task| task.kind != TaskKind::Answer) {
                     TaskKind::Work
                 } else {
                     TaskKind::Answer
@@ -279,10 +302,12 @@ pub(crate) fn apply_review(
                     text: verdict.explanation.clone(),
                     criteria: vec![verdict.explanation],
                     kind,
+                    defect_of: None,
                     origin: TaskOrigin::User,
                     status: TaskStatus::Pending,
                     reason: None,
                     verification: None,
+                    operator_request: None,
                 });
             }
         }

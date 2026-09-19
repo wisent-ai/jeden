@@ -38,7 +38,7 @@ pub(crate) fn read(dir: &Path) -> Result<CompletionState, String> {
     session_directory(dir)?;
     let file = dir.join(STATE_FILE);
     regular_file_or_absent(&file)?;
-    let state = match fs::read(&file) {
+    let mut state: CompletionState = match fs::read(&file) {
         Ok(bytes) => serde_json::from_slice(&bytes)
             .map_err(|error| format!("invalid completion state {}: {error}", file.display()))?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => legacy_state(dir)?,
@@ -49,6 +49,9 @@ pub(crate) fn read(dir: &Path) -> Result<CompletionState, String> {
             ))
         }
     };
+    if state.schema_version == super::constants::PRE_DEFECT_SCHEMA_VERSION {
+        state.schema_version = super::constants::SCHEMA_VERSION;
+    }
     state.validate()?;
     Ok(state)
 }
@@ -176,12 +179,14 @@ fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
                 text: text.to_string(),
                 criteria: vec![text.to_string()],
                 kind: TaskKind::Work,
+                defect_of: None,
                 origin: TaskOrigin::User,
                 status: TaskStatus::VerificationRequested,
                 reason: Some(
                     "Legacy todo status was an agent claim, not independent verification.".into(),
                 ),
                 verification: None,
+                operator_request: None,
             });
         }
     }

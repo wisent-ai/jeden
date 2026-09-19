@@ -26,7 +26,7 @@ pub(crate) fn usage() -> String {
         "  jeden --version | -V\n",
         "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
-        "  jeden todo [list|add|pause|resume|cancel|continue] [--session id] [--revision n --reason text] [--json]\n",
+        "  jeden todo [list|add|pause|resume|cancel|defect|answer|continue] [--session id] [--revision n --reason text|--text answer] [--json]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",

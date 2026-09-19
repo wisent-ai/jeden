@@ -7,6 +7,18 @@ mod intake;
 const REVIEW: &str = include_str!("../../../completion/prompts/review.txt");
 const CONTEXT_PREFIX: &str = "[Jeden completion authority]";
 
+/// The open asks joined into the stop message, or nothing when the stop is
+/// not waiting on the operator; ends with a space so it sits before the
+/// session path.
+fn asks_sentence(state: &CompletionState) -> String {
+    let asks = state.open_asks();
+    if asks.is_empty() {
+        String::new()
+    } else {
+        format!("{} ", asks.join(" "))
+    }
+}
+
 impl Conversation {
     pub(super) fn tracks_completion(&self, args: &Args) -> bool {
         self.manages_completion && !args.model_only
@@ -88,12 +100,13 @@ impl Conversation {
         let state = completion::read_state(&self.recorder.path())?;
         if !state.actionable()
             && !state.complete()
-            && matches!(state.status(), "paused" | "blocked")
+            && matches!(state.status(), "paused" | "blocked" | "waiting_for_operator")
         {
             self.publish_completion(&state, hooks)?;
             return Err(format!(
-                "Work remains {}. Session: {}",
+                "Work remains {}. {}Session: {}",
                 state.status(),
+                asks_sentence(&state),
                 self.recorder.path().display()
             ));
         }
@@ -188,9 +201,11 @@ impl Conversation {
                 "state": completion::snapshot_value(&reviewed),
             }),
         )?;
-        if !reviewed.actionable() && matches!(reviewed.status(), "blocked" | "paused") {
+        if !reviewed.actionable()
+            && matches!(reviewed.status(), "blocked" | "paused" | "waiting_for_operator")
+        {
             return Err(format!(
-                "Work remains {}. {} Session: {}",
+                "Work remains {}. {} {}Session: {}",
                 reviewed.status(),
                 reviewed
                     .tasks
@@ -198,6 +213,7 @@ impl Conversation {
                     .filter_map(|task| task.reason.as_deref())
                     .collect::<Vec<_>>()
                     .join("; "),
+                asks_sentence(&reviewed),
                 self.recorder.path().display()
             ));
         }
@@ -227,6 +243,22 @@ impl Conversation {
         }
         self.continuation = true;
         self.reconcile_completion = true;
-        self.run_turn(args, "Continue every retained unfinished task. Inspect prior effects before retrying anything.", &[], hooks)
+        // The operator's answers are their words to the work, so they go in
+        // the message the model reads as the user's, not only in the state
+        // it may or may not consult. On 2026-09-18 a model given the answer
+        // only through the state blocked again on "no allowed source".
+        let mut prompt = String::from(
+            "Continue every retained unfinished task. Inspect prior effects before retrying anything.",
+        );
+        for (task, request, answer) in state.tasks.iter().filter_map(|task| {
+            let request = task.operator_request.as_ref()?;
+            Some((task, request, request.answer.as_ref()?))
+        }) {
+            prompt.push_str(&format!(
+                "\nFor task {} you asked: {} The user answered: {} That answer is the user's input; use it as given.",
+                task.id, request.ask, answer.text
+            ));
+        }
+        self.run_turn(args, &prompt, &[], hooks)
     }
 }

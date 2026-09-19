@@ -19,7 +19,11 @@ const ANSWER_RULE: &str = "model-answer";
 /// A cut answer needs a shorter answer; an unreadable one almost always
 /// carries a raw quote inside a JSON string, and on 2026-09-10 a model sent
 /// the identical malformed answer twice because the correction quoted serde's
-/// position without naming the rule it had broken. Both shapes are named.
+/// position without naming the rule it had broken. An answer the provider
+/// finished normally yet left with open brackets is a third shape: on
+/// 2026-09-18 a reviewer closed the criteria array and went straight to
+/// `requests` without closing the task and the tasks array, three runs in a
+/// row, and each time was told to be shorter. All three shapes are named.
 fn repair_instruction(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> String {
     let budget = match max_tokens {
         Some(tokens) => format!(" of {tokens} tokens"),
@@ -27,6 +31,8 @@ fn repair_instruction(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> 
     };
     let advice = if cut_off {
         format!("Your previous answer stopped before it was complete: {refusal}\n\nSend the whole answer again, short enough to finish inside the output budget{budget}.")
+    } else if crate::protocol::is_incomplete_answer(refusal) {
+        format!("Your previous answer ended with brackets still open: {refusal}\n\nThe provider finished the answer, so it is not too long; an object or array was closed too early or not at all. Check the nesting of every array and object, and close the outer object last.")
     } else {
         format!("Your previous answer could not be read as an action: {refusal}\n\nEvery quote, backslash and newline inside a JSON string must be escaped (\\\", \\\\, \\n); quoting someone's words inside `text` is the usual cause. Rewrite the answer with those escapes rather than resending the same characters.")
     };
@@ -74,8 +80,9 @@ impl Conversation {
         hooks: &RunHooks<'_>,
     ) -> Result<Option<String>, String> {
         let repairable = *repairs < ANSWER_REPAIRS && args.max_steps.is_none_or(|max| step < max);
-        let cut_off =
-            crate::protocol::is_incomplete_answer(refusal) || is_incomplete_output_error(refusal);
+        // Only the provider knows whether it stopped for length; an answer
+        // it finished normally with brackets open is malformed, not cut.
+        let cut_off = is_incomplete_output_error(refusal);
         let instruction = repair_instruction(refusal, cut_off, args.max_tokens);
         self.recorder.record(
             task_contract::VIOLATION_EVENT,

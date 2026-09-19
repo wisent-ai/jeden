@@ -1,6 +1,8 @@
 //! Persisted completion protocol values, not operator-tunable execution limits.
 
-pub const SCHEMA_VERSION: u32 = 1;
+/// Version two retains typed defects; older writers must refuse rather than drop them.
+pub const SCHEMA_VERSION: u32 = 2;
+pub(crate) const PRE_DEFECT_SCHEMA_VERSION: u32 = 1;
 /// No native mutation has been committed before the first revision.
 pub(crate) const INITIAL_REVISION: u64 = 0;
 /// HTTP responses at or above this protocol boundary are failures, not evidence of success.

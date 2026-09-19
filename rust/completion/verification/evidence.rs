@@ -55,6 +55,7 @@ fn lineage_receipts(
                     json!({
                         "sessionPath": session,
                         "eventId": event.event_id,
+                        "timestamp": event.timestamp,
                         "tool": data.get("tool"),
                         "input": input,
                         "result": result,

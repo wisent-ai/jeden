@@ -31,7 +31,7 @@ fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Re
         .tasks
         .iter()
         .find(|task| task.request_id == request_id)
-        .map(|task| task.kind)
+        .map(|task| if task.kind == TaskKind::Answer { TaskKind::Answer } else { TaskKind::Work })
         .unwrap_or(TaskKind::Work);
     for item in items {
         let title = item_text(item)?;
@@ -49,10 +49,12 @@ fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Re
             text: title.to_string(),
             criteria: vec![title.to_string()],
             kind,
+            defect_of: None,
             origin: TaskOrigin::Agent,
             status: TaskStatus::Pending,
             reason: None,
             verification: None,
+            operator_request: None,
         });
     }
     Ok(())

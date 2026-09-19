@@ -1,30 +1,12 @@
+mod answers;
+mod defects;
+mod requests;
+pub(crate) use requests::capture_request;
+
 use super::{model::*, store};
 use serde_json::{json, Value};
 use std::path::Path;
 
-pub(crate) fn capture_request(
-    session: &Path,
-    cwd: &Path,
-    prompt: &str,
-) -> Result<(String, CompletionState), String> {
-    if prompt.trim().is_empty() {
-        return Err("completion request must not be empty".into());
-    }
-    store::update(session, None, |state| {
-        let id = uuid::Uuid::new_v4().to_string();
-        state.requests.push(WorkRequest {
-            id: id.clone(),
-            prompt: prompt.to_string(),
-            cwd: cwd.display().to_string(),
-            paused: false,
-            captured_at: crate::agent::now_stamp(),
-            planned: false,
-            coverage_verified: false,
-        });
-        state.blocker = None;
-        Ok(id)
-    })
-}
 
 pub(crate) fn plan_request(
     session: &Path,
@@ -66,6 +48,12 @@ pub(crate) fn plan_request(
             }
         }
         for item in &plan.tasks {
+            if (item.kind == TaskKind::Defect) != item.defect_of.is_some()
+                || item.kind == TaskKind::Defect && !item.defect_quote.as_ref()
+                    .is_some_and(|quote| !quote.trim().is_empty() && request.prompt.contains(quote))
+            {
+                return Err("a defect requires its original task id and an exact quote from the current user's defect report".into());
+            }
             if item.text.trim().is_empty()
                 || item.criteria.is_empty()
                 || item
@@ -87,6 +75,12 @@ pub(crate) fn plan_request(
             }
         }
         for item in plan.tasks {
+            let (defect_of, status) = if let Some(target) = item.defect_of {
+                let (original, _, status) = defects::reopen_target(state, &target, &item.text)?;
+                (Some(original), status)
+            } else {
+                (None, TaskStatus::Pending)
+            };
             state.tasks.push(WorkTask {
                 id: uuid::Uuid::new_v4().to_string(),
                 request_id: request_id.to_string(),
@@ -94,10 +88,12 @@ pub(crate) fn plan_request(
                 text: item.text,
                 criteria: item.criteria,
                 kind: item.kind,
+                defect_of,
                 origin: TaskOrigin::User,
-                status: TaskStatus::Pending,
+                status,
                 reason: None,
                 verification: None,
+                operator_request: None,
             });
         }
         state
@@ -151,6 +147,12 @@ pub(crate) fn operator_control(
     if reason.trim().is_empty() {
         return Err("task control requires a nonempty operator reason".into());
     }
+    if action == "defect" {
+        return defects::report(session, task_id, reason, revision);
+    }
+    if action == "answer" {
+        return answers::record(session, task_id, reason, revision);
+    }
     let status = match action {
         "cancel" => TaskStatus::Cancelled,
         "pause" => TaskStatus::Paused,
@@ -184,10 +186,12 @@ pub(crate) fn operator_control(
                         .to_string(),
                     criteria: vec![request.prompt.clone()],
                     kind: TaskKind::Work,
+                    defect_of: None,
                     origin: TaskOrigin::User,
                     status: TaskStatus::Cancelled,
                     reason: Some(format!("Operator cancel: {reason}")),
                     verification: None,
+                    operator_request: None,
                 });
                 request.planned = true;
             }
@@ -275,6 +279,8 @@ pub(crate) fn model_context(state: &CompletionState) -> String {
          Acceptance requirements below were recorded before execution. `todo done` only requests independent verification; \
          it does not complete a task. Do not repeat effects already proven by the session. \
          Use a message action for progress or an answer that does not finish the retained work. \
+         A task with an operatorRequest waits on the operator: an unanswered ask is theirs to answer, not yours to work around; \
+         an answered one carries their answer, so use it and do not ask again. \
          A final action is a completion proposal and will be checked against ALL open requests.\n{}",
         json!({"requests": requests, "tasks": tasks, "blocker": state.blocker})
     )

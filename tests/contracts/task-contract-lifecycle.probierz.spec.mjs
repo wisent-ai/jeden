@@ -23,15 +23,19 @@ const trace = { suite, status: "failed", sourceRevision: null, commands: [], bin
 process.once("exit", () => writeFileSync(tracePath, JSON.stringify(trace, null, 2)));
 console.log(`Contract runner evidence: ${root}`);
 
-async function command(argv) {
-  const entry = { argv, cwd: repository, startedAt: new Date().toISOString(), stdout: "", stderr: "" };
+async function command(argv, { sensitive = false } = {}) {
+  const entry = { argv, cwd: repository, startedAt: new Date().toISOString(), stdout: sensitive ? "[credential output withheld]" : "", stderr: "" };
+  let stdout = "";
   trace.commands.push(entry);
   await writeFile(tracePath, JSON.stringify(trace, null, 2));
   return new Promise((resolveCommand, reject) => {
     const child = spawn(argv[0], argv.slice(1), {
       cwd: repository, env: process.env, stdio: ["ignore", "pipe", "pipe"],
     });
-    child.stdout.on("data", (chunk) => { entry.stdout += chunk.toString(); });
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+      if (!sensitive) entry.stdout = stdout;
+    });
     child.stderr.on("data", (chunk) => { entry.stderr += chunk.toString(); process.stderr.write(chunk); });
     child.on("error", (error) => {
       entry.error = error.message;
@@ -40,7 +44,7 @@ async function command(argv) {
     child.on("close", async (code, signal) => {
       Object.assign(entry, { exitCode: code, signal, completedAt: new Date().toISOString() });
       await writeFile(tracePath, JSON.stringify(trace, null, 2));
-      resolveCommand(entry);
+      resolveCommand({ ...entry, stdout });
     });
   });
 }
@@ -79,7 +83,27 @@ try {
   for (const path of [...products, tests[0].executable]) {
     trace.binaries.push({ path, sha256: await digest(path) });
   }
-  const result = await command([tests[0].executable, "--nocapture"]);
+  // Resolve credentials before the journeys isolate HOME. Use the product's
+  // normal credential interface, not copies of the operator's vault or config.
+  const credentials = await command([products[0], "token", "--reveal", "--json"], { sensitive: true });
+  succeeded(credentials);
+  const identity = JSON.parse(credentials.stdout);
+  process.env.WISENT_APP_AGENT_AUTH_SECRET = identity.token;
+  process.env.BRAMA_URL = identity.bramaUrl;
+  if (identity.agentId) process.env.WISENT_APP_AGENT_ID = identity.agentId;
+  if (!process.env.BRAMA_TOKEN) {
+    const bearer = await command(["stado", "secrets", "get", "jeden-model-router", "--field", "token"], { sensitive: true });
+    if (bearer.exitCode === 0) process.env.BRAMA_TOKEN = bearer.stdout.trim();
+  }
+  // The isolated homes carry no configuration, so the model the operator's
+  // own configuration selects here is passed the way the credentials are.
+  if (!process.env.JEDEN_MODEL) {
+    const model = await command([products[0], "config", "get", "model"]);
+    succeeded(model);
+    assert.ok(model.stdout.trim(), "jeden config get model returned no model; run /setup or set JEDEN_MODEL");
+    process.env.JEDEN_MODEL = model.stdout.trim();
+  }
+  const result = await command([tests[0].executable, ...process.argv.slice(3), "--nocapture"]);
   process.stdout.write(result.stdout);
   succeeded(result);
   trace.status = "passed";
