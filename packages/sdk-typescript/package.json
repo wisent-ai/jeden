@@ -16,8 +16,13 @@
     "dist/example"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "generate:protocol": "node scripts/protocol-keys.mjs",
+    "build": "npm run generate:protocol && tsc -p tsconfig.json",
+    "typecheck": "npm run generate:protocol && tsc -p tsconfig.json --noEmit",
+    "test": "node ../../tests/protocol/envelope-keys.mjs",
     "example": "npm run build && node dist/example/session_client.js"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

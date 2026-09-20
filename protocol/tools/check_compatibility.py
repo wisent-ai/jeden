@@ -16,6 +16,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+# The contract this tool checks the schema against, written out a second time
+# on purpose. Every other reader of the protocol — the TypeScript SDK's
+# generated `protocol-keys.ts`, the Rust SDK — takes its field names from
+# `protocol/schema/v1/envelope.schema.json`, because a name written twice
+# drifts. A gate is the exception: one that read its expectation out of the
+# document under test would pass no matter what the document said.
 PROTOCOL_ID = "jeden.session.v1"
 KINDS = ("request", "response", "event", "error")
 REQUIRED_FIELDS = {

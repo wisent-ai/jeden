@@ -9,15 +9,24 @@ import {
   type ResponseEnvelope,
 } from "./types.js";
 
-const REQUEST_KEYS = ["type", "id", "method", "params", "meta"] as const;
-const META_KEYS = ["protocolVersion", "idempotencyKey", "deadline", "traceId"] as const;
-const RESPONSE_KEYS = ["type", "id", "result"] as const;
-const EVENT_KEYS = [
-  "type", "sessionId", "streamId", "sequence", "cursor", "eventId",
-  "requestId", "kind", "payload",
-] as const;
-const ERROR_ENVELOPE_KEYS = ["type", "id", "error"] as const;
-const ERROR_KEYS = ["code", "message", "retryable", "details"] as const;
+// The envelope's field names live in protocol/schema/v1/envelope.schema.json
+// and nowhere else; `scripts/protocol-keys.mjs` reads them out of it.
+import {
+  ERROR_BODY_KEYS,
+  ERROR_BODY_REQUIRED,
+  ERROR_ENVELOPE_KEYS,
+  ERROR_ENVELOPE_REQUIRED,
+  EVENT_KEYS,
+  EVENT_REQUIRED,
+  REPLAY_PARAMS_KEYS,
+  REPLAY_PARAMS_REQUIRED,
+  REQUEST_KEYS,
+  REQUEST_META_KEYS,
+  REQUEST_META_REQUIRED,
+  REQUEST_REQUIRED,
+  RESPONSE_KEYS,
+  RESPONSE_REQUIRED,
+} from "./protocol-keys.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
@@ -50,7 +59,7 @@ function isOptionalNonEmptyString(value: Record<string, unknown>, key: string): 
 }
 
 function isReplayParams(value: unknown): boolean {
-  if (!isRecord(value) || !hasExactRequiredKeys(value, ["sessionId", "cursor", "limit"], ["sessionId"])) return false;
+  if (!isRecord(value) || !hasExactRequiredKeys(value, REPLAY_PARAMS_KEYS, REPLAY_PARAMS_REQUIRED)) return false;
   return isNonEmptyString(value.sessionId)
     && (!hasOwn(value, "cursor") || isNonEmptyString(value.cursor))
     && (!hasOwn(value, "limit")
@@ -75,12 +84,12 @@ function isJsonValueInternal(value: unknown, ancestors: WeakSet<object>): value 
 }
 
 export function isRequestEnvelope(value: unknown): value is RequestEnvelope {
-  if (!isRecord(value) || !hasExactRequiredKeys(value, REQUEST_KEYS, REQUEST_KEYS)) return false;
+  if (!isRecord(value) || !hasExactRequiredKeys(value, REQUEST_KEYS, REQUEST_REQUIRED)) return false;
   if (value.type !== "request" || !isNonEmptyString(value.id) || !isNonEmptyString(value.method)) return false;
   if (!isJsonValue(value.params) || !isRecord(value.meta)) return false;
   if (value.method === "session.replay" && !isReplayParams(value.params)) return false;
   const meta = value.meta;
-  return hasExactRequiredKeys(meta, META_KEYS, ["protocolVersion", "idempotencyKey"])
+  return hasExactRequiredKeys(meta, REQUEST_META_KEYS, REQUEST_META_REQUIRED)
     && meta.protocolVersion === PROTOCOL_VERSION
     && isNonEmptyString(meta.idempotencyKey)
     && isOptionalNonEmptyString(meta, "deadline")
@@ -89,18 +98,14 @@ export function isRequestEnvelope(value: unknown): value is RequestEnvelope {
 
 export function isResponseEnvelope(value: unknown): value is ResponseEnvelope {
   return isRecord(value)
-    && hasExactRequiredKeys(value, RESPONSE_KEYS, RESPONSE_KEYS)
+    && hasExactRequiredKeys(value, RESPONSE_KEYS, RESPONSE_REQUIRED)
     && value.type === "response"
     && isNonEmptyString(value.id)
     && isJsonValue(value.result);
 }
 
 export function isEventEnvelope(value: unknown): value is EventEnvelope {
-  if (!isRecord(value) || !hasExactRequiredKeys(
-    value,
-    EVENT_KEYS,
-    ["type", "sessionId", "streamId", "sequence", "cursor", "eventId", "kind", "payload"],
-  )) return false;
+  if (!isRecord(value) || !hasExactRequiredKeys(value, EVENT_KEYS, EVENT_REQUIRED)) return false;
   return value.type === "event"
     && isNonEmptyString(value.sessionId)
     && isNonEmptyString(value.streamId)
@@ -115,10 +120,10 @@ export function isEventEnvelope(value: unknown): value is EventEnvelope {
 }
 
 export function isErrorEnvelope(value: unknown): value is ErrorEnvelope {
-  if (!isRecord(value) || !hasExactRequiredKeys(value, ERROR_ENVELOPE_KEYS, ["type", "error"])) return false;
+  if (!isRecord(value) || !hasExactRequiredKeys(value, ERROR_ENVELOPE_KEYS, ERROR_ENVELOPE_REQUIRED)) return false;
   if (value.type !== "error" || (hasOwn(value, "id") && !isNonEmptyString(value.id)) || !isRecord(value.error)) return false;
   const error = value.error;
-  return hasExactRequiredKeys(error, ERROR_KEYS, ERROR_KEYS)
+  return hasExactRequiredKeys(error, ERROR_BODY_KEYS, ERROR_BODY_REQUIRED)
     && typeof error.code === "string"
     && typeof error.message === "string"
     && typeof error.retryable === "boolean"

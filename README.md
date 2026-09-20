@@ -293,6 +293,25 @@ jeden tools --cwd .
 
 The complete native action, tool-call, selector, and anchored-patch contract is documented at [jeden.wisent.com/docs/tools](https://jeden.wisent.com/docs/tools).
 
+### Session envelope
+
+`protocol/schema/v1/envelope.schema.json` is the `jeden.session.v1` envelope,
+and it is the only place a field name is written. The TypeScript SDK's
+validators read their allowed and required keys from
+`packages/sdk-typescript/src/protocol-keys.ts`, which
+`packages/sdk-typescript/scripts/protocol-keys.mjs` generates out of that
+schema — `npm run generate:protocol` inside the package, and `npm run build`
+does it first. `node tests/protocol/envelope-keys.mjs` is the gate: it fails
+when the generated module has drifted from the schema, then drives the built
+validators over `protocol/schema/v1/golden/envelopes.json` and over the
+refusals the schema demands — an unknown field, a request without its
+idempotency key, an event without its cursor, an error body without
+`retryable`.
+
+`protocol/tools/check_compatibility.py` states the same field lists a second
+time on purpose: it is the gate that checks the schema itself, and a gate
+that reads its expectation out of the document under test always passes.
+
 ## Operational model
 
 | Concern | Contract |
