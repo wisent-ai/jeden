@@ -24,9 +24,11 @@ pub(crate) enum CommunicationMode {
 }
 
 impl CommunicationMode {
-    pub(crate) const VALUES: &'static [&'static str] = &["normal", "debug", "quiet"];
+    /// Every mode, in the order the settings schema advertises them.
+    pub(crate) const ALL: [Self; 3] = [Self::Normal, Self::Debug, Self::Quiet];
 
-    pub(crate) fn as_str(self) -> &'static str {
+    /// The one place each mode's name is written.
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Normal => "normal",
             Self::Debug => "debug",
@@ -34,13 +36,18 @@ impl CommunicationMode {
         }
     }
 
+    /// The names, for the settings schema and for a refusal that lists
+    /// them. This used to be a fourth copy of the three words, beside
+    /// `as_str`, `parse` and the schema's own list.
+    pub(crate) const VALUES: [&'static str; 3] = [
+        Self::Normal.as_str(),
+        Self::Debug.as_str(),
+        Self::Quiet.as_str(),
+    ];
+
     pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "normal" => Some(Self::Normal),
-            "debug" => Some(Self::Debug),
-            "quiet" => Some(Self::Quiet),
-            _ => None,
-        }
+        let wanted = value.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|mode| mode.as_str() == wanted)
     }
 }
 
@@ -64,17 +71,28 @@ pub(crate) enum Visibility {
 }
 
 impl Visibility {
-    pub(crate) const VALUES: &'static [&'static str] = &["auto", "show", "hide"];
+    /// Every override, `auto` first because it is the default.
+    pub(crate) const ALL: [Self; 3] = [Self::Auto, Self::Show, Self::Hide];
 
-    pub(crate) fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "auto" => Some(Self::Auto),
-            "show" => Some(Self::Show),
-            "hide" => Some(Self::Hide),
-            _ => None,
+    /// The one place each override's name is written.
+    pub(crate) const fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Show => "show",
+            Self::Hide => "hide",
         }
     }
 
+    pub(crate) const VALUES: [&'static str; 3] = [
+        Self::Auto.as_str(),
+        Self::Show.as_str(),
+        Self::Hide.as_str(),
+    ];
+
+    pub(crate) fn parse(value: &str) -> Option<Self> {
+        let wanted = value.trim().to_ascii_lowercase();
+        Self::ALL.into_iter().find(|item| item.as_str() == wanted)
+    }
     fn resolve(self, mode_default: bool) -> bool {
         match self {
             Self::Auto => mode_default,
