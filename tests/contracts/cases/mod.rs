@@ -2,6 +2,7 @@
 
 mod answers;
 mod completion;
+mod config_layers;
 mod defects;
 mod retained;
 mod settings;

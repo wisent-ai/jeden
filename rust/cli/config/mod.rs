@@ -361,9 +361,22 @@ fn project_config_layer_paths(cwd: &Path) -> Vec<PathBuf> {
     vec![config_path(cwd)]
 }
 
+/// User layers first, then the project's own file.
+///
+/// In the home directory the project layer resolves to
+/// `~/.jeden/config.json`, which is also the legacy user layer, and applying
+/// it twice put the older file last: `jeden config set model …` wrote
+/// `~/.jeden/config.yml`, `jeden config get model` still answered with the
+/// legacy value, and a run started in the home directory used a model route
+/// Brama no longer serves. One file is one layer, in its user position, so
+/// the current file keeps overriding it.
 fn config_layer_paths(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = global_config_layer_paths();
-    paths.extend(project_config_layer_paths(cwd));
+    for path in project_config_layer_paths(cwd) {
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
     paths
 }
 
@@ -569,6 +582,15 @@ pub(crate) fn read_user_writable_config() -> Value {
     }
 }
 
+/// Write the user's own configuration, and stop the superseded file from
+/// disagreeing with it.
+///
+/// `~/.jeden/config.json` is the layer this file replaced. Leaving a key in
+/// both is a second source of truth: `jeden config set model …` wrote the
+/// new route here while the old file kept answering with a model route
+/// Brama no longer serves. Every key written here is therefore removed from
+/// the legacy file, and a legacy file left with nothing but its schema
+/// version is deleted.
 pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
     let path = user_config_path();
     if path.exists() {
@@ -579,8 +601,35 @@ pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
         .as_object_mut()
         .ok_or_else(|| "config root must be an object".to_string())?;
     object.insert("schemaVersion".into(), json!(CONFIG_SCHEMA_VERSION));
+    let written = object.clone();
     migrations::write_json_atomic(&path, &versioned)?;
+    retire_legacy_keys(&written)?;
     Ok(path)
+}
+
+/// Drop from the legacy user file every key the current one now carries.
+fn retire_legacy_keys(written: &serde_json::Map<String, Value>) -> Result<(), String> {
+    let legacy = legacy_user_config_path();
+    let Value::Object(mut remaining) = read_config_value(&legacy) else {
+        return Ok(());
+    };
+    if remaining.is_empty() {
+        return Ok(());
+    }
+    let before = remaining.len();
+    remaining.retain(|key, _| !written.contains_key(key));
+    if remaining.len() == before {
+        return Ok(());
+    }
+    if remaining
+        .keys()
+        .all(|key| key == "schemaVersion" || key == "version")
+    {
+        return fs::remove_file(&legacy).map_err(|error| {
+            format!("cannot remove the superseded {}: {error}", legacy.display())
+        });
+    }
+    migrations::write_json_atomic(&legacy, &Value::Object(remaining))
 }
 
 pub(crate) fn load_config(cwd: &Path) -> Config {
