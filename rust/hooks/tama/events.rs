@@ -102,7 +102,9 @@ pub fn normalize_outcome(event: &str, blocking: bool, outcome: HookOutcome) -> H
             exit_code: BLOCK_EXIT,
             ..outcome
         }
-    } else if !blocking && event == "PreToolUse" && (outcome.exit_code == BLOCK_EXIT || block_verdict)
+    } else if !blocking
+        && event == crate::hooks::event::PRE_TOOL_USE
+        && (outcome.exit_code == BLOCK_EXIT || block_verdict)
     {
         HookOutcome {
             exit_code: PASS_EXIT,

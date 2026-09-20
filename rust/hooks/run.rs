@@ -4,6 +4,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use super::event;
+
 use super::{
     hook_matches, parse_event_hooks, project_hooks_path, prompt_context, read_config,
     resolve_trusted_hooks, user_hooks_path, Hook, HookOutcome, HOOK_TIMEOUT,
@@ -172,8 +174,8 @@ pub fn pretool_block(
     transcript_path: &Path,
 ) -> Option<String> {
     let payload = json!({
-        "event": "PreToolUse",
-        "hook_event_name": "PreToolUse",
+        "event": event::PRE_TOOL_USE,
+        "hook_event_name": event::PRE_TOOL_USE,
         "tool": tool,
         "tool_name": tool,
         "input": input,
@@ -181,33 +183,34 @@ pub fn pretool_block(
         "cwd": cwd,
         "transcript_path": transcript_path,
     });
-    let outcomes = fire_event(cwd, "PreToolUse", tool, &payload, allow_project);
+    let outcomes = fire_event(cwd, event::PRE_TOOL_USE, tool, &payload, allow_project);
     super::pretool_block_decision(&outcomes)
 }
 
 /// Fire `PostToolUse` for `tool` (best-effort; outcomes are ignored).
 pub fn posttool(cwd: &Path, tool: &str, result: &Value, allow_project: bool) {
-    let payload = json!({ "event": "PostToolUse", "tool": tool, "result": result, "cwd": cwd });
-    let _ = fire_event(cwd, "PostToolUse", tool, &payload, allow_project);
+    let payload =
+        json!({ "event": event::POST_TOOL_USE, "tool": tool, "result": result, "cwd": cwd });
+    let _ = fire_event(cwd, event::POST_TOOL_USE, tool, &payload, allow_project);
 }
 
 /// Fire `UserPromptSubmit`; returns injected context (joined hook stdout).
 pub fn user_prompt_submit(cwd: &Path, prompt: &str, allow_project: bool) -> String {
-    let payload = json!({ "event": "UserPromptSubmit", "prompt": prompt, "cwd": cwd });
-    let outcomes = fire_event(cwd, "UserPromptSubmit", "", &payload, allow_project);
+    let payload = json!({ "event": event::USER_PROMPT_SUBMIT, "prompt": prompt, "cwd": cwd });
+    let outcomes = fire_event(cwd, event::USER_PROMPT_SUBMIT, "", &payload, allow_project);
     prompt_context(&outcomes)
 }
 
 /// Fire `SessionStart` at the beginning of a session; returns joined hook
 /// stdout (a banner/context line the caller may surface).
 pub fn session_start(cwd: &Path, allow_project: bool) -> String {
-    let payload = json!({ "event": "SessionStart", "cwd": cwd });
-    let outcomes = fire_event(cwd, "SessionStart", "", &payload, allow_project);
+    let payload = json!({ "event": event::SESSION_START, "cwd": cwd });
+    let outcomes = fire_event(cwd, event::SESSION_START, "", &payload, allow_project);
     prompt_context(&outcomes)
 }
 
 /// Fire `Stop` at the end of a session (best-effort side effects).
 pub fn session_stop(cwd: &Path, allow_project: bool) {
-    let payload = json!({ "event": "Stop", "cwd": cwd });
-    let _ = fire_event(cwd, "Stop", "", &payload, allow_project);
+    let payload = json!({ "event": event::STOP, "cwd": cwd });
+    let _ = fire_event(cwd, event::STOP, "", &payload, allow_project);
 }

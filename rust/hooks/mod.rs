@@ -228,6 +228,34 @@ pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
         .join("\n")
 }
 
+/// The events this runtime fires, each name written once.
+///
+/// They were typed again at every call site — the payload, the
+/// `fire_event` argument, the Tama mapping and `/hooks` — so a rename
+/// reached some of them and not others, and a hook configured for the
+/// missed spelling never ran.
+pub mod event {
+    /// A session begins, including after a compaction.
+    pub const SESSION_START: &str = "SessionStart";
+    /// The operator submitted a prompt.
+    pub const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";
+    /// Before a tool runs; this is the one that can refuse.
+    pub const PRE_TOOL_USE: &str = "PreToolUse";
+    /// After a tool ran, with its result.
+    pub const POST_TOOL_USE: &str = "PostToolUse";
+    /// The agent is about to stop answering.
+    pub const STOP: &str = "Stop";
+
+    /// Every event, in the order `/hooks` lists them.
+    pub const ALL: [&str; 5] = [
+        SESSION_START,
+        USER_PROMPT_SUBMIT,
+        PRE_TOOL_USE,
+        POST_TOOL_USE,
+        STOP,
+    ];
+}
+
 /// Human summary of configured hooks (for `/hooks`), split by trust origin,
 /// plus the resolved Tama registry source when one is active.
 /// Only lists the events the runtime actually fires.
@@ -236,13 +264,7 @@ pub fn describe_hooks(cwd: &Path) -> String {
     let user = user_hooks_path()
         .map(|p| read_config(&p))
         .unwrap_or(Value::Null);
-    let events = [
-        "SessionStart",
-        "UserPromptSubmit",
-        "PreToolUse",
-        "PostToolUse",
-        "Stop",
-    ];
+    let events = event::ALL;
     let mut lines = Vec::new();
     for (label, config) in [
         ("User (~/.jeden/hooks.json, always trusted)", &user),

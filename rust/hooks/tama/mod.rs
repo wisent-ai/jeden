@@ -82,14 +82,16 @@ fn explicit_path(raw: &str) -> Option<PathBuf> {
 /// Unknown events yield `None` and are ignored.
 pub(crate) fn map_event(tama_event: &str) -> Option<(&'static str, String)> {
     match tama_event {
-        "user_prompt_submit" => Some(("UserPromptSubmit", String::new())),
-        "stop" => Some(("Stop", String::new())),
-        "session_start" | "session_start:compact" => Some(("SessionStart", String::new())),
+        "user_prompt_submit" => Some((crate::hooks::event::USER_PROMPT_SUBMIT, String::new())),
+        "stop" => Some((crate::hooks::event::STOP, String::new())),
+        "session_start" | "session_start:compact" => {
+            Some((crate::hooks::event::SESSION_START, String::new()))
+        }
         _ => {
             let (kind, tool) = tama_event.split_once(':')?;
             let event = match kind {
-                "pre_tool_use" => "PreToolUse",
-                "post_tool_use" => "PostToolUse",
+                "pre_tool_use" => crate::hooks::event::PRE_TOOL_USE,
+                "post_tool_use" => crate::hooks::event::POST_TOOL_USE,
                 _ => return None,
             };
             Some((event, tool_matcher(tool)))
