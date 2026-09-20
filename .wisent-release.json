@@ -110,6 +110,14 @@
       "required": true,
       "secret_env": {},
       "target": "charless-mac-mini"
+    },
+    {
+      "name": "rtx-jeden",
+      "platform": "linux-amd64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "required": true,
+      "secret_env": {},
+      "target": "ubuntu-server-rtx-pro-6000"
     }
   ],
   "promotion": {
