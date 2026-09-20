@@ -253,14 +253,22 @@ fn default_true() -> bool {
     true
 }
 
-/// Languages offered by wisent-app (src/locales) — the same set is pinnable here.
-pub(crate) const UI_LANGUAGE_CODES: &[&str] = &[
-    "am", "ar", "az", "be", "bg", "bn", "bs", "ca", "cs", "da", "de", "dv", "dz", "el", "en", "es",
-    "et", "fa", "fi", "fo", "fr", "he", "hr", "hu", "hy", "id", "is", "it", "ja", "ka", "kk", "kl",
-    "km", "ko", "ky", "lo", "lt", "lv", "mk", "mn", "ms", "my", "ne", "nl", "no", "pl", "ps", "pt",
-    "ro", "ru", "si", "sk", "sl", "so", "sq", "sr", "sv", "tg", "th", "tk", "tr", "uk", "uz", "vi",
-    "zh",
-];
+/// Languages offered by wisent-app (src/locales) — the same set is pinnable
+/// here. Declared in `ui-languages.json` beside this module, so the parser
+/// and the settings schema read one list and neither can drift from it.
+pub(crate) fn ui_language_codes() -> &'static [String] {
+    static DECLARED: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let document: serde_json::Value = serde_json::from_str(include_str!("ui-languages.json"))
+            .expect("ui-languages.json beside this module is valid JSON");
+        document["words"]
+            .as_array()
+            .expect("ui-languages.json declares a words array")
+            .iter()
+            .filter_map(|code| code.as_str().map(str::to_owned))
+            .collect()
+    });
+    &DECLARED
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -275,7 +283,9 @@ impl Default for UiLanguage {
 impl UiLanguage {
     fn parse(value: &str) -> Option<Self> {
         let value = value.trim().to_ascii_lowercase();
-        if value == "auto" || UI_LANGUAGE_CODES.contains(&value.as_str()) {
+        if value == schema::UI_LANGUAGE_AUTO
+            || ui_language_codes().iter().any(|code| *code == value)
+        {
             Some(Self(value))
         } else {
             None

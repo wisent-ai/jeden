@@ -14,22 +14,26 @@ use crate::Args;
 
 /// The value that follows the user's own messages instead of pinning one
 /// language.
-const UI_LANGUAGE_AUTO: &str = "auto";
+pub(crate) const UI_LANGUAGE_AUTO: &str = "auto";
 
-/// `auto` plus every pinnable language, built from the one declaration in
-/// [`super::UI_LANGUAGE_CODES`]. The schema used to carry its own copy of
-/// all sixty-five codes, so a language added to the pinnable set appeared
-/// in `config set` and not in `config list`, or the other way round.
-const UI_LANGUAGE_CHOICES: [&str; super::UI_LANGUAGE_CODES.len() + 1] = ui_language_choices();
-
-const fn ui_language_choices() -> [&'static str; super::UI_LANGUAGE_CODES.len() + 1] {
-    let mut choices = [UI_LANGUAGE_AUTO; super::UI_LANGUAGE_CODES.len() + 1];
-    let mut index = 1;
-    while index < choices.len() {
-        choices[index] = super::UI_LANGUAGE_CODES[index - 1];
-        index += 1;
-    }
-    choices
+/// `auto` plus every pinnable language, from the declaration the parser
+/// reads. The schema used to carry its own copy of all sixty-five codes,
+/// so a language added to the pinnable set appeared in `config set` and
+/// not in `config list`, or the other way round.
+///
+/// The declaration is read at first use and kept for the process, because
+/// a `SettingSpec` names its choices as `&'static [&'static str]`.
+fn ui_language_choices() -> &'static [&'static str] {
+    static CHOICES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
+        let mut choices = vec![UI_LANGUAGE_AUTO];
+        choices.extend(
+            super::ui_language_codes()
+                .iter()
+                .map(|code| code.as_str() as &'static str),
+        );
+        choices
+    });
+    &CHOICES
 }
 
 #[derive(Clone, Copy)]
@@ -49,7 +53,17 @@ pub(crate) const COMMUNICATION_TOOL_RESULTS_KEY: &str = "communication.toolResul
 pub(crate) const COMMUNICATION_REASONING_KEY: &str = "communication.reasoning";
 pub(crate) const COMMUNICATION_CODE_KEY: &str = "communication.code";
 
-pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
+/// The settings this CLI has, and what each one accepts.
+///
+/// Built at first use rather than as a `const`, because one entry's
+/// choices come from a declaration read at run time — the pinnable
+/// languages — and a const cannot read a file.
+pub(crate) fn settings_schema() -> &'static [SettingSpec] {
+    &SETTINGS_SCHEMA
+}
+
+static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyLock::new(|| {
+    vec![
     SettingSpec {
         key: "model",
         typ: "string",
@@ -209,7 +223,7 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
         typ: "enum",
         description: "Conversation language: auto follows the user's messages; an ISO 639 code pins the answer language (65 languages as in wisent-app).",
         default_json: "\"auto\"",
-        enum_values: &UI_LANGUAGE_CHOICES,
+        enum_values: ui_language_choices(),
     },
     SettingSpec {
         key: "ui.theme",
@@ -228,7 +242,8 @@ pub(crate) const SETTINGS_SCHEMA: &[SettingSpec] = &[
             "custom",
         ],
     },
-];
+    ]
+});
 
 fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
     SETTINGS_SCHEMA.iter().find(|spec| spec.key == key)
@@ -317,7 +332,7 @@ fn setting_metadata(spec: &SettingSpec, value: Value) -> Value {
 fn config_list_json(cwd: &Path) -> Value {
     let config = merged_config_value(cwd);
     let mut out = serde_json::Map::new();
-    for spec in SETTINGS_SCHEMA {
+    for spec in settings_schema() {
         out.insert(
             spec.key.to_string(),
             setting_metadata(spec, effective_setting_value(&config, spec)),
@@ -334,7 +349,7 @@ fn config_list_text(cwd: &Path) -> String {
         format!("Config: {}", user_config_path().display()),
     ];
     let mut current_group = "";
-    for spec in SETTINGS_SCHEMA {
+    for spec in settings_schema() {
         let group = spec.key.split('.').next().unwrap_or("settings");
         if group != current_group {
             current_group = group;
@@ -399,7 +414,7 @@ fn grouped_setting_rows(
 pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
     let (config, mut rows) = (merged_config_value(cwd), Vec::new());
     let lang = crate::cli::i18n::lang_code(cwd);
-    for spec in SETTINGS_SCHEMA {
+    for spec in settings_schema() {
         let (current, default) = (
             effective_setting_value(&config, spec),
             setting_default(spec),
