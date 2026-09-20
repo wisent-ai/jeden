@@ -1,6 +1,6 @@
 [package]
 name = "jeden"
-version = "0.1.16"
+version = "0.1.17"
 edition = "2021"
 license-file = "LICENSE"
 [lib]
@@ -72,3 +72,6 @@ tree-sitter-typescript = "0.23"
 tar = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 ignore = "0.4"
+
+[target."cfg(target_os = \"linux\")".dependencies]
+libc = "0.2"

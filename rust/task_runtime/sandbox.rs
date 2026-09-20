@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 // Only the macOS helpers below spawn anything with piped output; `command()`
 // hands its `Command` back to the caller to run.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 use std::process::Stdio;
 
 #[derive(Clone, Debug)]
@@ -25,7 +25,7 @@ impl TaskSandboxHealth {
 // knows how to enforce; `health()` calls them from its `target_os = "macos"` arm
 // only. Without the attribute they are dead code on Linux and Windows, where the
 // gate compiles with `-D warnings` and refused the build.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn helper_candidates() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
     if let Some(configured) = env::var_os("JEDEN_TASK_SANDBOX_HELPER") {
@@ -42,7 +42,7 @@ fn helper_candidates() -> Vec<PathBuf> {
 }
 
 /// Health checks must fail closed without holding agent startup indefinitely.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn health_output(command: &mut Command) -> Result<std::process::Output, String> {
     use std::io::Read;
     use std::time::{Duration, Instant};
@@ -88,6 +88,10 @@ fn health_output(command: &mut Command) -> Result<std::process::Output, String> 
     })
 }
 
+/// macOS only: Linux has no notion of a signed executable here, and the
+/// Landlock confinement the helper applies needs no privilege to be trusted
+/// with — the kernel enforces it on the process that asks, and the probe
+/// below is what proves it did.
 #[cfg(target_os = "macos")]
 fn signed(path: &Path) -> Result<(), String> {
     let output = health_output(
@@ -118,7 +122,7 @@ fn signed(path: &Path) -> Result<(), String> {
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "linux"))]
 fn enforcement_probe(path: &Path) -> Result<(), String> {
     let output = health_output(
         Command::new(path)
@@ -146,32 +150,38 @@ fn enforcement_probe(path: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn health() -> TaskSandboxHealth {
-    // Exactly one of these two blocks survives `cfg`, so each is this function's
-    // tail expression on the platform that keeps it — which is why neither says
-    // `return`.
-    #[cfg(not(target_os = "macos"))]
+    // Exactly one of these blocks survives `cfg`, so each is this function's
+    // tail expression on the platform that keeps it — which is why none says
+    // `return` except where it refuses early.
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
     {
         TaskSandboxHealth {
             enforced: false,
             backend: "task-platform-sandbox",
-            detail: "a signed task sandbox helper is currently implemented only for macOS".into(),
+            detail: "a task sandbox helper is implemented for macOS and Linux only".into(),
             helper: None,
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
     {
+        let backend = if cfg!(target_os = "macos") {
+            "macos-seatbelt-helper"
+        } else {
+            "linux-landlock-helper"
+        };
         let Some(helper) = helper_candidates().into_iter().find(|path| path.is_file()) else {
             return TaskSandboxHealth {
                 enforced: false,
-                backend: "macos-seatbelt-helper",
-                detail: "jeden-sandbox-helper is not installed beside the Jeden executable; build and code-sign it or set JEDEN_TASK_SANDBOX_HELPER".into(),
+                backend,
+                detail: "jeden-sandbox-helper is not installed beside the Jeden executable; install it from the same release archive or set JEDEN_TASK_SANDBOX_HELPER".into(),
                 helper: None,
             };
         };
+        #[cfg(target_os = "macos")]
         if let Err(error) = signed(&helper) {
             return TaskSandboxHealth {
                 enforced: false,
-                backend: "macos-seatbelt-helper",
+                backend,
                 detail: format!("helper signature verification failed: {error}"),
                 helper: Some(helper),
             };
@@ -179,16 +189,16 @@ pub(crate) fn health() -> TaskSandboxHealth {
         if let Err(error) = enforcement_probe(&helper) {
             return TaskSandboxHealth {
                 enforced: false,
-                backend: "macos-seatbelt-helper",
+                backend,
                 detail: format!("helper did not enforce its probe profile: {error}"),
                 helper: Some(helper),
             };
         }
         TaskSandboxHealth {
             enforced: true,
-            backend: "macos-seatbelt-helper",
+            backend,
             detail: format!(
-                "signed helper enforced a deny-write Seatbelt probe ({})",
+                "the helper enforced a deny-write probe ({})",
                 helper.display()
             ),
             helper: Some(helper),
@@ -216,6 +226,15 @@ fn task_read_roots(program: &Path, requested: &[PathBuf]) -> Vec<PathBuf> {
         "/private/var/db",
         "/private/var/folders",
         "/dev",
+        // Linux carries its system files elsewhere; `add_existing` drops
+        // whichever of these the running platform does not have.
+        "/etc",
+        "/lib",
+        "/lib64",
+        "/proc",
+        "/run",
+        "/tmp",
+        "/var",
     ] {
         add_existing(&mut roots, path);
     }

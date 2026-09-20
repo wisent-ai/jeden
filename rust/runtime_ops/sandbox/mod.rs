@@ -67,6 +67,10 @@ pub fn command(program: &OsStr, grant: &ExecutionGrant) -> Result<Command, Grant
         {
             return macos::command(program, grant).map_err(GrantError::SandboxUnavailable);
         }
+        #[cfg(target_os = "linux")]
+        {
+            return linux::command(program, grant).map_err(GrantError::SandboxUnavailable);
+        }
     }
     Ok(Command::new(program))
 }

@@ -62,18 +62,19 @@
         }
       ],
       "build": {
-        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden"]
+        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "stage": {
         "bin/jeden": "bin/jeden",
+        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
         "release-tests": "evidence/release-tests"
       }
     }
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/1f90819f0367cf3e7deca9554b26ee71a791891708c7f02769586909b873c0d1/private-cargo-sources.tar.gz",
-      "sha256": "1f90819f0367cf3e7deca9554b26ee71a791891708c7f02769586909b873c0d1",
+      "uri": "stado://sources/jeden/private-cargo-sources/92ac911eaff3369f27b826af25dfa268477006adca8b509705cdaf545a96b9c9/private-cargo-sources.tar.gz",
+      "sha256": "92ac911eaff3369f27b826af25dfa268477006adca8b509705cdaf545a96b9c9",
       "mount": "private-cargo-sources",
       "extract": true
     }
@@ -115,6 +116,14 @@
       "name": "rtx-jeden",
       "platform": "linux-amd64",
       "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "required": true,
+      "secret_env": {},
+      "target": "ubuntu-server-rtx-pro-6000"
+    },
+    {
+      "name": "rtx-sandbox-helper",
+      "platform": "linux-amd64",
+      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
       "required": true,
       "secret_env": {},
       "target": "ubuntu-server-rtx-pro-6000"
