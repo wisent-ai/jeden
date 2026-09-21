@@ -31,8 +31,8 @@ use read::{
     read_file, read_image, read_sqlite,
 };
 use session::{
-    ask_user, list_artifacts, memory_tool, read_artifact, recall_conversation, save_artifact,
-    todo_tool,
+    ask_user, context_tool, list_artifacts, memory_tool, read_artifact, recall_conversation,
+    save_artifact, todo_tool,
 };
 
 #[derive(Clone, Debug)]
@@ -211,6 +211,7 @@ pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<V
         "read_artifact" => read_artifact(runtime, input),
         "recall_conversation" => recall_conversation(runtime, input),
         "memory" => memory_tool(runtime, input),
+        "context_recommend" => context_tool(runtime, input),
         "ask_user" => ask_user(runtime, input),
         "mcp_list_tools" => mcp_list_tools(runtime, input),
         "mcp_call_tool" => mcp_call_tool(runtime, input),

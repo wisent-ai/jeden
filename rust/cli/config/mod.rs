@@ -161,6 +161,8 @@ pub(crate) struct ContextConfig {
     pub(crate) max_bytes: usize,
     #[serde(rename = "maxTokens", default = "default_context_max_tokens")]
     pub(crate) max_tokens: usize,
+    #[serde(default)]
+    pub(crate) advisor: AdvisorConfig,
 }
 
 impl Default for ContextConfig {
@@ -168,6 +170,50 @@ impl Default for ContextConfig {
         Self {
             max_bytes: default_context_max_bytes(),
             max_tokens: default_context_max_tokens(),
+            advisor: AdvisorConfig::default(),
+        }
+    }
+}
+
+/// What the context advisor reads and how much of it reaches a prompt. The
+/// source list, the roots and the endpoints are declarations rather than
+/// code so a machine's corpus is the operator's, not the binary's.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct AdvisorConfig {
+    #[serde(default = "default_true")]
+    pub(crate) enabled: bool,
+    #[serde(default = "default_advisor_limit")]
+    pub(crate) limit: usize,
+    #[serde(rename = "maxChars", default = "default_advisor_max_chars")]
+    pub(crate) max_chars: usize,
+    #[serde(rename = "timeoutMs", default = "default_advisor_timeout_ms")]
+    pub(crate) timeout_ms: u64,
+    #[serde(default = "default_advisor_sources")]
+    pub(crate) sources: String,
+    /// Colon-separated `path` or `path@depth` entries. Empty means the
+    /// project and the operator's own Jeden instruction directory.
+    #[serde(default)]
+    pub(crate) roots: String,
+    #[serde(rename = "docExtensions", default = "default_advisor_doc_extensions")]
+    pub(crate) doc_extensions: String,
+    #[serde(rename = "groundTruthUrl", default)]
+    pub(crate) ground_truth_url: String,
+    #[serde(rename = "transcriptLakeBin", default)]
+    pub(crate) transcript_lake_bin: String,
+}
+
+impl Default for AdvisorConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            limit: default_advisor_limit(),
+            max_chars: default_advisor_max_chars(),
+            timeout_ms: default_advisor_timeout_ms(),
+            sources: default_advisor_sources(),
+            roots: String::new(),
+            doc_extensions: default_advisor_doc_extensions(),
+            ground_truth_url: String::new(),
+            transcript_lake_bin: String::new(),
         }
     }
 }
@@ -178,6 +224,26 @@ fn default_context_max_bytes() -> usize {
 
 fn default_context_max_tokens() -> usize {
     32_768
+}
+
+fn default_advisor_limit() -> usize {
+    crate::context::advisor::DEFAULT_LIMIT
+}
+
+fn default_advisor_max_chars() -> usize {
+    crate::context::advisor::DEFAULT_MAX_CHARS
+}
+
+fn default_advisor_timeout_ms() -> u64 {
+    crate::context::advisor::DEFAULT_TIMEOUT_MS
+}
+
+fn default_advisor_sources() -> String {
+    crate::context::advisor::DEFAULT_SOURCES.to_string()
+}
+
+fn default_advisor_doc_extensions() -> String {
+    crate::context::advisor::DEFAULT_DOC_EXTENSIONS.to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

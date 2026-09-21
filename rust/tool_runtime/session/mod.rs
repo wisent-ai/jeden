@@ -5,9 +5,11 @@ use std::io::{self, Write};
 use super::shared::{sha256_hex, string_input, u64_input, MAX_READ_BYTES};
 use super::ToolRuntime;
 
+mod context;
 mod memory;
 mod todo;
 
+pub(crate) use context::context_tool;
 pub(crate) use memory::memory_tool;
 pub(crate) use todo::todo_tool;
 

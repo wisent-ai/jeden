@@ -1,3 +1,4 @@
+mod context;
 mod hosting;
 mod operations;
 use hosting::quick_replies;
@@ -175,6 +176,8 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "config/contracts/set" => set_contract_settings(&request.params),
         "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
         "config/communication/set" => set_communication_settings(&request.params),
+        "context/recommend" => context::recommend(&request.params),
+        "context/sources" => context::sources(&request.params),
         "workspace/status" => workspace_status(),
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),

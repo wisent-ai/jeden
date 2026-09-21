@@ -1,3 +1,4 @@
+pub(crate) mod advisor;
 pub(crate) mod discovery;
 mod rules;
 mod secrets;

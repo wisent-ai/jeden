@@ -49,6 +49,7 @@ pub(super) fn built_in_tools() -> Vec<ToolInfo> {
         ToolInfo::new("todo", "Manage the current session todo list with init, append, start, done, drop, rm, and view operations; supports phased lists"),
         ToolInfo::new("delegate_task", "Run a focused subtask through the bounded durable TaskScheduler and return its typed child-session result"),
         ToolInfo::new("memory", "Remember and recall durable scoped notes across Jeden sessions"),
+        ToolInfo::new("context_recommend", "Recommend what to read for a task from documentation, memory, transcripts and the ground-truth index"),
         ToolInfo::new("mcp_list_tools", "List tools from a configured stdio MCP server"),
         ToolInfo::new("mcp_call_tool", "Call one tool on a configured stdio MCP server"),
         ToolInfo::new("mcp_list_resources", "List resources from a configured stdio MCP server"),

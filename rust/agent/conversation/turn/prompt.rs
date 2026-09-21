@@ -90,6 +90,18 @@ impl Conversation {
                 effective_task.push_str("\n\n[Active extension rules and skills]\n");
                 effective_task.push_str(&sections.join("\n\n"));
             }
+            // The point of the advisor: the turn starts with the locators it
+            // would otherwise search for. Recommendations are ranked matches,
+            // never verified answers, and a source that cannot answer says so
+            // in the same block rather than shortening it silently.
+            if !continuing {
+                if let Some(advice) =
+                    crate::context::advisor::advice_for_prompt(&args.cwd, &config, task)
+                {
+                    effective_task.push_str("\n\n");
+                    effective_task.push_str(advice.trim_end());
+                }
+            }
         }
         if report_required {
             effective_task.push_str("\n\n");

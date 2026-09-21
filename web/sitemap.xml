@@ -16,6 +16,11 @@
       <priority>0.7</priority>
     </url>
   <url>
+      <loc>https://jeden.wisent.com/docs/context</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
       <loc>https://jeden.wisent.com/docs/tools</loc>
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
@@ -221,6 +226,11 @@
       <priority>0.7</priority>
     </url>
   <url>
+      <loc>https://jeden.wisent.com/docs/cli/config/unset</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
       <loc>https://jeden.wisent.com/docs/cli/completions/bash</loc>
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
@@ -377,6 +387,36 @@
     </url>
   <url>
       <loc>https://jeden.wisent.com/docs/cli/todo/continue</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context/recommend</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context/prompt</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context/sources</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context/install</loc>
+      <changefreq>weekly</changefreq>
+      <priority>0.7</priority>
+    </url>
+  <url>
+      <loc>https://jeden.wisent.com/docs/cli/context/installed</loc>
       <changefreq>weekly</changefreq>
       <priority>0.7</priority>
     </url>

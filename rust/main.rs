@@ -256,6 +256,7 @@ pub fn main() -> ExitCode {
         "config" => config_command(&args),
         "workspace" => workspace_command(&args),
         "contracts" => cli::contracts::command(&args),
+        "context" => cli::context::command(&args),
         "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),
         "probierz" => probierz::command(&args),

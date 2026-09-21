@@ -10,6 +10,7 @@
     "check": "cargo check",
     "check:rust": "cargo check",
     "test:contracts": "node tests/contracts/task-contract-lifecycle.probierz.spec.mjs contracts",
+    "test:context": "node tests/contracts/task-contract-lifecycle.probierz.spec.mjs context",
     "test:routing": "node tests/contracts/task-contract-lifecycle.probierz.spec.mjs routing",
     "build:rust": "cargo build --release && { if [ \"$(uname -s)\" != Darwin ]; then exit 0; fi; wisent-products signing sign --product jeden target/release/jeden target/release/jeden-sandbox-helper; }",
     "build:docs": "node web/docs/pages.mjs"

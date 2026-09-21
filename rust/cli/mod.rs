@@ -6,6 +6,7 @@ pub(crate) mod clipboard;
 pub(crate) mod commands;
 pub(crate) mod completions;
 pub(crate) mod config;
+pub(crate) mod context;
 pub(crate) mod contracts;
 pub(crate) mod gallery;
 pub(crate) mod i18n;

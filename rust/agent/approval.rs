@@ -54,6 +54,9 @@ pub(super) fn is_builtin_read_tool(tool: &str) -> bool {
             | "list_artifacts"
             | "read_artifact"
             | "task_evidence"
+            // Reads documentation, recalls memory, and asks a search index;
+            // the same work the turn prologue already does unapproved.
+            | "context_recommend"
             | "ask_user"
     )
 }

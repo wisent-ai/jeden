@@ -40,6 +40,9 @@ pub(crate) fn usage() -> String {
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] [--json] [--cwd path]\n",
         "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
         "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",
+        "  jeden context [recommend] \"<task>\" [--limit n] [--source list] [--timeout-ms n] [--json] [--cwd path]\n",
+        "  jeden context sources [--json] [--cwd path] — what each context source is and whether it answers\n",
+        "  jeden context install|installed [--omp|--file <path>] [--json] — the same advisor as an Omp tool\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
         "  jeden probierz [args...] — run Probierz discovery, evidence, and gate commands for Jeden\n",
@@ -183,6 +186,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "stats"
                             | "gallery"
                             | "contracts"
+                            | "context"
                             | "workspace"
                             | "import"
                             | "todo"

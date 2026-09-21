@@ -8,6 +8,7 @@
  */
 import { cliPages } from "./cli-pages.mjs";
 import { overviewPages } from "./content/overview.mjs";
+import { contextPages } from "./content/context.mjs";
 import { sessionPages } from "./content/sessions.mjs";
 import { toolPages } from "./content/tools.mjs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
@@ -28,6 +29,7 @@ export const sourceLabel = "Harness source";
 export const nav = [
   { label: "Overview", href: "/docs" },
   { label: "Sessions", href: "/docs/sessions" },
+  { label: "Context", href: "/docs/context" },
   { label: "Tools", href: "/docs/tools" },
   { label: "CLI", href: "/docs/cli" },
 ];
@@ -35,6 +37,7 @@ export const nav = [
 export const pages = [
   ...overviewPages,
   ...sessionPages,
+  ...contextPages,
   ...toolPages,
   ...cliPages,
 ];

@@ -553,6 +553,21 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                     ))
                 }
                 "/context" => {
+                    let task = rest.trim();
+                    if !task.is_empty() {
+                        // `/context <task>` asks the advisor; bare `/context`
+                        // stays the window report it has always been.
+                        let cwd = handler_cwd.lock().clone();
+                        let config = crate::load_config(&cwd);
+                        let settings = crate::context::advisor::settings(&cwd, &config);
+                        let request =
+                            crate::context::advisor::Request::from_settings(task, &settings);
+                        let advice =
+                            crate::context::advisor::recommend(&cwd, &config, &request);
+                        return Ok(tui::CommandOutcome::text(
+                            crate::context::advisor::render_text(&advice),
+                        ));
+                    }
                     let conv = handler_conv.lock();
                     Ok(format!(
                         "Live conversation: {} message(s), ~{} tokens.{}",

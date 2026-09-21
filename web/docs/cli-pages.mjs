@@ -2,6 +2,7 @@ import { sessionCommands } from "./commands/sessions.mjs";
 import { operationCommands } from "./commands/operations.mjs";
 import { managementCommands } from "./commands/management.mjs";
 import { completionCommands } from "./commands/completion.mjs";
+import { contextCommands } from "./commands/context.mjs";
 const ORIGIN = "https://jeden.wisent.com";
 
 function commandPage({ path, invocation, purpose, inputs, effect, refusals }) {
@@ -48,16 +49,18 @@ const commands = [
   ...operationCommands,
   ...managementCommands,
   ...completionCommands,
+  ...contextCommands,
 ];
 
 const groups = [
   ["Run and automation", ["run", "pursue", "rpc", "headless", "acp", "collab-relay"]],
   ["Sessions and artifacts", ["sessions", "import", "show", "export", "artifacts", "artifact", "search-sessions", "resume", "recall_conversation"]],
   ["Runtime and operations", ["tools", "update", "doctor", "conformance", "probierz", "capabilities", "token", "stats", "gallery", "copy"]],
-  ["Configuration", ["workspace", "workspace/status", "workspace/discover", "workspace/adopt", "config", "config/list", "config/path", "config/get", "config/set", "config/reset", "contracts"]],
+  ["Configuration", ["workspace", "workspace/status", "workspace/discover", "workspace/adopt", "config", "config/list", "config/path", "config/get", "config/set", "config/reset", "config/unset", "contracts"]],
   ["Shell completions", ["completions", "completions/bash", "completions/zsh", "completions/fish"]],
   ["Retained tasks", completionCommands.map((command) => command.path)],
   ["Managed worktrees", ["worktree", "worktree/list", "worktree/clear"]],
+  ["Context advisor", contextCommands.map((command) => command.path)],
   ["Roadmap", [
     "roadmap", "roadmap/list", "roadmap/show", "roadmap/add", "roadmap/drop", "roadmap/start", "roadmap/implemented", "roadmap/block", "roadmap/pass", "roadmap/status", "roadmap/depends", "roadmap/undepends", "roadmap/graph", "roadmap/acceptance", "roadmap/acceptance/list", "roadmap/acceptance/add", "roadmap/acceptance/evidence", "roadmap/check", "roadmap/work",
   ]],

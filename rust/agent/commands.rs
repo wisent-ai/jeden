@@ -98,6 +98,14 @@ fn run_session_command(
         "/checkpoint" if rest.trim() == "list" => conversation.list_checkpoints(),
         "/checkpoint" => conversation.checkpoint(rest),
         "/rewind" => conversation.rewind(rest),
+        "/context" if !rest.trim().is_empty() => {
+            let config = crate::load_config(&args.cwd);
+            let settings = crate::context::advisor::settings(&args.cwd, &config);
+            let request = crate::context::advisor::Request::from_settings(rest.trim(), &settings);
+            Ok(crate::context::advisor::render_text(
+                &crate::context::advisor::recommend(&args.cwd, &config, &request),
+            ))
+        }
         "/context" => Ok(format!(
             "Loaded conversation: {} message(s), ~{} tokens (from {}).",
             conversation.turn_len(),
