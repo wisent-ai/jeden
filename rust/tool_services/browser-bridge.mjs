@@ -164,23 +164,21 @@ const evaluate = async (client, expression, awaitPromise = true) => {
   return result.result?.value;
 };
 const jsString = value => JSON.stringify(String(value));
-const waitReady = async (client, timeout) => {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+// A page loads when it loads and an element appears when the page renders it;
+// the turn's own cancellation is what ends a wait that should not continue.
+const waitReady = async client => {
+  for (;;) {
     const ready = await evaluate(client, "document.readyState");
     if (ready === "complete" || ready === "interactive") return;
     await sleep(50);
   }
-  throw new Error(`page readiness timed out after ${timeout}ms`);
 };
-const waitSelector = async (client, selector, timeout) => {
-  const deadline = Date.now() + timeout;
-  while (Date.now() < deadline) {
+const waitSelector = async (client, selector) => {
+  for (;;) {
     const found = await evaluate(client, `Boolean(document.querySelector(${jsString(selector)}))`);
     if (found) return;
     await sleep(50);
   }
-  throw new Error(`selector ${selector} timed out after ${timeout}ms`);
 };
 const pageSnapshotExpression = `(() => {
   const visible = element => {
@@ -241,7 +239,7 @@ const handlePageAction = async (action, input, state) => {
   try {
     await client.send("Page.enable");
     await client.send("Runtime.enable");
-    const timeout = Math.max(1, Math.min(Number(input.timeout ?? 30000), 60000));
+
     let value;
     switch (action) {
       case "navigate":
@@ -249,7 +247,7 @@ const handlePageAction = async (action, input, state) => {
         const url = String(input.url ?? "").trim();
         if (!url) throw new Error("url is required");
         await client.send("Page.navigate", { url });
-        await waitReady(client, timeout);
+        await waitReady(client);
         value = { url: await evaluate(client, "location.href"), title: await evaluate(client, "document.title") };
         break;
       }
@@ -289,8 +287,8 @@ const handlePageAction = async (action, input, state) => {
         break;
       }
       case "wait": {
-        if (input.selector) await waitSelector(client, String(input.selector), timeout);
-        else await sleep(Math.max(0, Math.min(Number(input.ms ?? input.milliseconds ?? 250), timeout)));
+        if (input.selector) await waitSelector(client, String(input.selector));
+        else await sleep(Math.max(0, Number(input.ms ?? input.milliseconds ?? 250)));
         value = true;
         break;
       }

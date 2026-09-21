@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::sync::{LazyLock, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use crate::tool_runtime::shared::{jail_path, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
@@ -42,6 +42,8 @@ fn executable_exists(name: &str) -> bool {
         .map(|paths| env::split_paths(&paths).any(|path| path.join(name).is_file()))
         .unwrap_or(false)
 }
+/// Whether a language server on `PATH` answers `--version`. The program's own
+/// exit is the verdict; a slow machine is not a missing server.
 fn probe_server(name: &str) -> bool {
     if !executable_exists(name) {
         return false;
@@ -55,17 +57,9 @@ fn probe_server(name: &str) -> bool {
     else {
         return false;
     };
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
+    match child.wait() {
+        Ok(status) => status.success(),
+        Err(_) => false,
     }
 }
 
