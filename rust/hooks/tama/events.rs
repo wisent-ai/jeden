@@ -77,7 +77,7 @@ pub fn load_event_hooks(cwd: &Path, event: &str, tool: &str) -> Vec<TamaHook> {
 /// Adapt a Tama hook outcome to jeden's decision contract. jeden blocks on
 /// exit code 2 or stdout JSON `{"decision":"block"}` (see
 /// `pretool_block_decision`); a Tama `blocking` event treats any failure
-/// (non-zero exit, spawn/timeout error) as a block, with an explicit JSON
+/// (non-zero exit, spawn error) as a block, with an explicit JSON
 /// `{"decision":"approve"}` overriding. Non-blocking events only record
 /// outcomes, so their block signals are scrubbed before they can reach jeden's
 /// decision path (only `PreToolUse` outcomes feed it).

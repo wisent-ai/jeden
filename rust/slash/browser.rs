@@ -42,7 +42,7 @@ fn browser_option_value(key: &str, value: &str) -> Value {
     if value == "false" {
         return json!(false);
     }
-    if matches!(key, "slowMo" | "timeout") {
+    if key == "slowMo" {
         if let Ok(number) = value.parse::<f64>() {
             return json!(number);
         }
@@ -135,7 +135,7 @@ fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value), String> {
             );
         } else if matches!(
             raw_key,
-            "args" | "channel" | "devtools" | "executablePath" | "slowMo" | "timeout"
+            "args" | "channel" | "devtools" | "executablePath" | "slowMo"
         ) {
             insert_nested_object(
                 &mut launch,

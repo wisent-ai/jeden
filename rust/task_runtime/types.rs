@@ -146,7 +146,6 @@ pub enum TaskError {
     Capacity { running: usize, limit: usize },
     RecursionDenied { agent: String, depth: u32 },
     Cancelled(String),
-    Timeout(String),
     Conflict(String),
     Process(String),
 }
@@ -158,7 +157,6 @@ impl std::fmt::Display for TaskError {
             | Self::Invalid(v)
             | Self::NotFound(v)
             | Self::Cancelled(v)
-            | Self::Timeout(v)
             | Self::Conflict(v)
             | Self::Process(v) => f.write_str(v),
             Self::Capacity { running, limit } => {

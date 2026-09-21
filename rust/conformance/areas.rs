@@ -153,7 +153,7 @@ pub(crate) static COMPLETION_AREAS: [CompletionArea; 38] = [
         title: "Wprowadzić extension loader i event bus",
         phase: "Wave 4C",
         owner: "extensions",
-        acceptance: "Wersjonowany worker ABI negocjuje capabilities, izoluje crash, respektuje deadline i cancellation oraz publikuje typowane eventy.",
+        acceptance: "Wersjonowany worker ABI negocjuje capabilities, izoluje crash, respektuje anulowanie przez operatora oraz publikuje typowane eventy.",
     },
     CompletionArea {
         id: "aktywacja-wszystkich-plugin-capabilities",

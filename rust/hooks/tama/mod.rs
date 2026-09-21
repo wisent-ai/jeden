@@ -7,7 +7,8 @@
 //! Registry shape: a `version` number, a `managedBy` name, and an `events`
 //! object keyed by claude-style event names such as `pre_tool_use:bash`. Each
 //! event carries a `blocking` flag and a `hooks` array, and each entry there
-//! carries `id`, `type`, `command` and its own `timeout` in seconds.
+//! carries `id`, `type` and `command`. A per-entry interval, if the registry
+//! declares one, is the dispatcher's own data: jeden lets a guard finish.
 //!
 //! Source precedence: env `JEDEN_TAMA_REGISTRY` (path; empty string disables)
 //! > config key `hooks.tamaRegistry` (path; empty disables) > auto-discovery of
@@ -31,7 +32,7 @@ pub(crate) const BLOCK_EXIT: i32 = 2;
 const PASS_EXIT: i32 = 0;
 
 /// One registry hook resolved for a jeden event: the jeden-shaped `Hook`
-/// (matcher + command) plus the entry's own timeout and blocking flag.
+/// (matcher + command) plus the entry's blocking flag.
 ///
 /// `unrunnable` carries the reason when the registration names an executable
 /// this machine does not have. The hook still counts — a registered guard that
