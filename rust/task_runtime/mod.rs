@@ -78,8 +78,9 @@ pub fn registered_task_tools() -> Vec<TaskToolDescriptor> {
         },
         TaskToolDescriptor {
             name: "job",
-            description: "Poll, list, cancel, deliver, merge, or inspect task scheduler health",
-            input: json!({"type":"object","properties":{"op":{"type":"string"},"id":{"type":"string"},"waitMs":{"type":"number"}},"required":["op"]}),
+            description:
+                "Poll one job until it finishes, or list, cancel, deliver, merge, or inspect task scheduler health",
+            input: json!({"type":"object","properties":{"op":{"type":"string"},"id":{"type":"string"}},"required":["op"]}),
         },
         TaskToolDescriptor {
             name: "irc",

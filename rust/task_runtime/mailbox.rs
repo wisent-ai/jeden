@@ -3,7 +3,7 @@ use super::{atomic_json, next_sequence, now_millis};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Clone, Debug)]
 pub struct Mailbox {
@@ -115,13 +115,14 @@ impl Mailbox {
         }
         Ok(messages)
     }
+    /// Wait for a message. What ends this is a message arriving — the peer
+    /// answering is the event this call is about — or the operator cancelling
+    /// the turn that made it.
     pub fn wait(
         &self,
         agent: &str,
         correlation: Option<&str>,
-        timeout: Duration,
     ) -> Result<Vec<MailMessage>, TaskError> {
-        let deadline = Instant::now() + timeout;
         loop {
             let found = self
                 .inbox(agent, true)?
@@ -134,11 +135,6 @@ impl Mailbox {
                 .collect::<Vec<_>>();
             if !found.is_empty() {
                 return Ok(found);
-            }
-            if Instant::now() >= deadline {
-                return Err(TaskError::Timeout(format!(
-                    "mailbox wait timed out for {agent}"
-                )));
             }
             thread::sleep(Duration::from_millis(50));
         }

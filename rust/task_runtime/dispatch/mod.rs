@@ -14,7 +14,6 @@ use super::{default_store, limits_from_config};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
-use std::time::Duration;
 
 pub fn execute_delegate(
     cwd: &Path,
@@ -37,17 +36,7 @@ pub fn execute_delegate(
             .filter(|value| !value.is_empty());
     }
     let job = scheduler.spawn(request)?;
-    let job = scheduler.poll(
-        &job.id,
-        Duration::from_millis(scheduler.limits.wait_budget_ms),
-    )?;
-    if !job.status.terminal() {
-        let _ = scheduler.cancel(&job.id);
-        return Err(TaskError::Timeout(format!(
-            "delegated job exceeded its wait budget: {}",
-            job.id
-        )));
-    }
+    let job = scheduler.poll(&job.id)?;
     let stdout = bounded_text(&job.stdout, scheduler.limits.max_output_bytes)?;
     let stderr = bounded_text(&job.stderr, scheduler.limits.max_output_bytes)?;
     let delegated =
@@ -69,10 +58,7 @@ pub(super) fn execute_task(scheduler: &TaskScheduler, input: &Value) -> Result<V
     let wait = input.get("wait").and_then(Value::as_bool).unwrap_or(false);
     let job = scheduler.spawn(request)?;
     if wait {
-        Ok(json!(scheduler.poll(
-            &job.id,
-            Duration::from_millis(scheduler.limits.wait_budget_ms)
-        )?))
+        Ok(json!(scheduler.poll(&job.id)?))
     } else {
         Ok(json!(job))
     }
@@ -91,16 +77,7 @@ pub(super) fn execute_job(scheduler: &TaskScheduler, input: &Value) -> Result<Va
     };
     match op {
         "list" => Ok(json!(scheduler.list()?)),
-        "poll" => Ok(json!(scheduler.poll(
-            id()?,
-            Duration::from_millis(
-                input
-                    .get("waitMs")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-                    .min(scheduler.limits.wait_budget_ms)
-            )
-        )?)),
+        "poll" => Ok(json!(scheduler.poll(id()?)?)),
         "cancel" => Ok(json!({"cancelled":scheduler.cancel(id()?)?})),
         "deliver" => Ok(json!(scheduler.deliver(id()?)?)),
         "merge" => Ok(json!(scheduler.merge(id()?)?)),
@@ -139,13 +116,6 @@ pub(super) fn execute_irc(scheduler: &TaskScheduler, input: &Value) -> Result<Va
         "wait" => Ok(json!(mailbox.wait(
             text("agent")?,
             input.get("correlationId").and_then(Value::as_str),
-            Duration::from_millis(
-                input
-                    .get("timeoutMs")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(scheduler.limits.wait_budget_ms)
-                    .min(scheduler.limits.wait_budget_ms)
-            )
         )?)),
         "wake" => Ok(json!({"pending":mailbox.wake_pending(text("agent")?)?})),
         _ => Err(TaskError::Invalid(format!("unknown irc op: {op}"))),

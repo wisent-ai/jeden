@@ -15,18 +15,20 @@ use crate::task_runtime::workspace::IsolatedWorkspace;
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// How often a waiting caller re-reads a job record. Short enough that a
 /// finished job is reported promptly, long enough not to spin a core.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 impl TaskScheduler {
-    pub fn poll(&self, id: &str, wait: Duration) -> Result<JobRecord, TaskError> {
-        let deadline = Instant::now() + wait;
+    /// Wait for a job to reach a terminal status. A job that is still running
+    /// is still doing the work it was given; `list` reports what is in flight
+    /// and `cancel` is what ends one early.
+    pub fn poll(&self, id: &str) -> Result<JobRecord, TaskError> {
         loop {
             let job = self.get(id)?;
-            if job.status.terminal() || Instant::now() >= deadline {
+            if job.status.terminal() {
                 return Ok(job);
             }
             thread::sleep(POLL_INTERVAL);
@@ -138,13 +140,7 @@ impl TaskScheduler {
                 wave.push((task.id, job.id));
             }
             for (task_id, job_id) in wave {
-                let job = self.poll(&job_id, Duration::from_millis(self.limits.wait_budget_ms))?;
-                if !job.status.terminal() {
-                    self.cancel(&job_id)?;
-                    return Err(TaskError::Timeout(format!(
-                        "batch task exceeded its wait budget: {task_id}"
-                    )));
-                }
+                let job = self.poll(&job_id)?;
                 completed.insert(task_id);
                 results.push(job);
             }

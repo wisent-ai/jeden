@@ -142,13 +142,13 @@ pub(crate) fn capability_descriptors(
             "eval_session" => vec![(
                 "eval_session",
                 "Evaluate code in a persistent bounded Python or JavaScript kernel",
-                json!({"type":"object","properties":{"language":{"type":"string","enum":["python","javascript"]},"code":{"type":"string"},"reset":{"type":"boolean"},"timeoutMs":{"type":"number"}},"required":["language","code"]}),
+                json!({"type":"object","properties":{"language":{"type":"string","enum":["python","javascript"]},"code":{"type":"string"},"reset":{"type":"boolean"}},"required":["language","code"]}),
             )],
             "pty_session" => vec![
                 (
                     "pty_session",
                     "Send input to a persistent bounded pseudo-terminal shell",
-                    json!({"type":"object","properties":{"input":{"type":"string"},"reset":{"type":"boolean"},"timeoutMs":{"type":"number"}},"required":["input"]}),
+                    json!({"type":"object","properties":{"input":{"type":"string"},"reset":{"type":"boolean"}},"required":["input"]}),
                 ),
                 (
                     "pty_resize",
