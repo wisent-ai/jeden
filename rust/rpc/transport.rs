@@ -14,7 +14,6 @@ pub const PROTOCOL_VERSION: &str = "jeden.session.v1";
 pub struct RequestMetaV1 {
     pub protocol_version: String,
     pub idempotency_key: String,
-    pub deadline_unix_millis: Option<u64>,
     pub trace_id: String,
 }
 

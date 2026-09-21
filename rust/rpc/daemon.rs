@@ -18,7 +18,7 @@ use tokio::task::JoinSet;
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 type Job = Box<dyn FnOnce() + Send + 'static>;
 const STARTING: u8 = 0;
@@ -138,7 +138,10 @@ impl BoundedExecutor {
         result
     }
 
-    pub fn drain(&self, timeout: Duration) -> Result<(), String> {
+    /// Stop accepting work and wait for what is already running. A shutdown
+    /// that abandons an operation mid-write is the failure this avoids, so
+    /// the wait ends when the last operation ends.
+    pub fn drain(&self) -> Result<(), String> {
         let prior =
             self.inner
                 .state
@@ -146,23 +149,17 @@ impl BoundedExecutor {
         if prior.is_err() && self.inner.state.load(Ordering::Acquire) != DRAINING {
             return Ok(());
         }
-        let deadline = Instant::now() + timeout;
         let mut guard = self
             .inner
             .idle_lock
             .lock()
             .map_err(|_| "executor idle lock poisoned")?;
         while self.inner.queued_and_running.load(Ordering::Acquire) != 0 {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err("graceful drain timed out with active operations".into());
-            }
-            let waited = self
+            guard = self
                 .inner
                 .idle
-                .wait_timeout(guard, remaining)
+                .wait(guard)
                 .map_err(|_| "executor idle lock poisoned")?;
-            guard = waited.0;
         }
         self.inner
             .sender
@@ -201,9 +198,6 @@ impl Drop for BoundedExecutor {
 #[derive(Debug, Clone)]
 pub struct HeadlessConfig {
     pub max_frame_bytes: usize,
-    pub read_timeout: Duration,
-    pub write_timeout: Duration,
-    pub drain_timeout: Duration,
     pub max_connections: usize,
     pub reconnect_key: Vec<u8>,
     pub reconnect_ttl: Duration,
@@ -213,9 +207,6 @@ impl Default for HeadlessConfig {
     fn default() -> Self {
         Self {
             max_frame_bytes: 1024 * 1024,
-            read_timeout: Duration::from_secs(30),
-            write_timeout: Duration::from_secs(10),
-            drain_timeout: Duration::from_secs(30),
             max_connections: 128,
             reconnect_key: vec![0; 32],
             reconnect_ttl: Duration::from_secs(300),
@@ -275,7 +266,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     connections.spawn(async move {
                         let _permit = match permit {
                             Ok(permit) => permit,
-                            Err(_) => { reject_overloaded(stream, daemon.config.write_timeout).await; return; }
+                            Err(_) => { reject_overloaded(stream).await; return; }
                         };
                         let _ = daemon.serve_connection(stream).await;
                     });
@@ -283,8 +274,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             }
         }
         let service = self.service.clone();
-        let drain_timeout = self.config.drain_timeout;
-        tokio::task::spawn_blocking(move || service.drain(drain_timeout))
+        tokio::task::spawn_blocking(move || service.drain())
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| format!("graceful drain failed: {error:?}"))?;

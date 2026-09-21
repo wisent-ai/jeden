@@ -15,14 +15,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 "protocolVersion must be jeden.session.v1",
             )
         })?;
-        if let Some(deadline) = request.meta.deadline_unix_millis {
-            if now_unix_millis() >= deadline {
-                return Err(protocol_error(
-                    "deadline_exceeded",
-                    "request deadline has elapsed",
-                ));
-            }
-        }
+
         match request.method.as_str() {
             "health/readiness" | "readiness" => {
                 Ok(json!({"state": format!("{:?}", self.service.readiness()).to_lowercase()}))
@@ -267,11 +260,4 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
-}
-fn now_unix_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
 }

@@ -3,31 +3,24 @@ use super::*;
 impl<B: SessionBackend> HeadlessDaemon<B> {
     pub(super) async fn serve_connection(&self, mut stream: TcpStream) -> Result<(), String> {
         let mut record_prefix = [0_u8; 3];
-        tokio::time::timeout(self.config.read_timeout, async {
-            loop {
-                let prefix_len = stream
-                    .peek(&mut record_prefix)
-                    .await
-                    .map_err(|error| format!("TLS preface read failed: {error}"))?;
-                if prefix_len == 0 {
-                    return Err("connection closed before TLS preface".to_string());
-                }
-                if prefix_len >= record_prefix.len() {
-                    return Ok(());
-                }
-                tokio::task::yield_now().await;
+        loop {
+            let prefix_len = stream
+                .peek(&mut record_prefix)
+                .await
+                .map_err(|error| format!("TLS preface read failed: {error}"))?;
+            if prefix_len == 0 {
+                return Err("connection closed before TLS preface".to_string());
             }
-        })
-        .await
-        .map_err(|_| "TLS preface deadline exceeded".to_string())??;
+            if prefix_len >= record_prefix.len() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
         if record_prefix[0] != 0x16 || record_prefix[1] != 0x03 {
             let _ = stream.shutdown().await;
             return Err("plaintext or malformed TLS preface rejected".into());
         }
-        let (stream, verified) =
-            tokio::time::timeout(self.config.read_timeout, self.tls.accept(stream))
-                .await
-                .map_err(|_| "TLS handshake deadline exceeded".to_string())??;
+        let (stream, verified) = self.tls.accept(stream).await?;
         let identity = self
             .directory
             .resolve(&verified)
@@ -39,12 +32,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         let (reader, mut writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
         loop {
-            let frame = match read_async_frame(
-                &mut reader,
-                self.config.max_frame_bytes,
-                self.config.read_timeout,
-            )
-            .await
+            let frame = match read_async_frame(&mut reader, self.config.max_frame_bytes).await
             {
                 Ok(Some(frame)) => frame,
                 Ok(None) => return Ok(()),
@@ -58,7 +46,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                             details: json!({}),
                         },
                     );
-                    write_async_frame(&mut writer, &response, self.config.write_timeout).await?;
+                    write_async_frame(&mut writer, &response).await?;
                     return Ok(());
                 }
             };
@@ -74,7 +62,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                             details: json!({}),
                         },
                     );
-                    write_async_frame(&mut writer, &response, self.config.write_timeout).await?;
+                    write_async_frame(&mut writer, &response).await?;
                     continue;
                 }
             };
@@ -83,11 +71,11 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 Ok(result) => json!({"id": id, "result": result}),
                 Err(error) => wire_error(id, error),
             };
-            write_async_frame(&mut writer, &response, self.config.write_timeout).await?;
+            write_async_frame(&mut writer, &response).await?;
         }
     }
 }
-pub(super) async fn reject_overloaded(mut stream: TcpStream, timeout: Duration) {
+pub(super) async fn reject_overloaded(mut stream: TcpStream) {
     let response = wire_error(
         Value::Null,
         ErrorV1 {
@@ -97,19 +85,21 @@ pub(super) async fn reject_overloaded(mut stream: TcpStream, timeout: Duration) 
             details: json!({"retryAfterMillis": 100}),
         },
     );
-    let _ = write_async_frame(&mut stream, &response, timeout).await;
+    let _ = write_async_frame(&mut stream, &response).await;
     let _ = stream.shutdown().await;
 }
 
+/// Read one newline-delimited frame. The peer sends it, or closes; a client
+/// that is slow is still a client, and the frame limit is what protects the
+/// process here.
 async fn read_async_frame<R: tokio::io::AsyncBufRead + Unpin>(
     reader: &mut R,
     max: usize,
-    deadline: Duration,
 ) -> Result<Option<Vec<u8>>, String> {
     let mut frame = Vec::new();
-    let bytes = tokio::time::timeout(deadline, reader.read_until(b'\n', &mut frame))
+    let bytes = reader
+        .read_until(b'\n', &mut frame)
         .await
-        .map_err(|_| "frame read deadline exceeded".to_string())?
         .map_err(|error| error.to_string())?;
     if bytes == 0 {
         return Ok(None);
@@ -129,12 +119,11 @@ async fn read_async_frame<R: tokio::io::AsyncBufRead + Unpin>(
 async fn write_async_frame<W: tokio::io::AsyncWrite + Unpin>(
     writer: &mut W,
     value: &Value,
-    deadline: Duration,
 ) -> Result<(), String> {
     let mut encoded = serde_json::to_vec(value).map_err(|error| error.to_string())?;
     encoded.push(b'\n');
-    tokio::time::timeout(deadline, writer.write_all(&encoded))
+    writer
+        .write_all(&encoded)
         .await
-        .map_err(|_| "frame write deadline exceeded".to_string())?
         .map_err(|error| error.to_string())
 }

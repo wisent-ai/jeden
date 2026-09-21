@@ -266,7 +266,7 @@ impl<B: SessionBackend> SessionService<B> {
         self.executor.readiness()
     }
 
-    pub fn drain(&self, timeout: Duration) -> Result<(), ServiceError> {
-        self.executor.drain(timeout).map_err(ServiceError::Runtime)
+    pub fn drain(&self) -> Result<(), ServiceError> {
+        self.executor.drain().map_err(ServiceError::Runtime)
     }
 }

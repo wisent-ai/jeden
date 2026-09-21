@@ -75,7 +75,6 @@ pub enum ContractError {
     Unavailable { status: u16 },
     Malformed(String),
     Oversize,
-    Timeout,
     ExpiredOperation,
     Cancelled,
 }

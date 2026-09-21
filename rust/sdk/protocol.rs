@@ -37,8 +37,7 @@ enum ErrorTag {
 pub struct RequestMeta {
     pub protocol_version: String,
     pub idempotency_key: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deadline: Option<String>,
+
     #[serde(skip_serializing_if = "Option::is_none")]
     pub trace_id: Option<String>,
 }
@@ -48,7 +47,7 @@ impl RequestMeta {
         Self {
             protocol_version: PROTOCOL_VERSION.to_owned(),
             idempotency_key: idempotency_key.into(),
-            deadline: None,
+
             trace_id: None,
         }
     }
@@ -61,9 +60,7 @@ impl RequestMeta {
             ));
         }
         require_non_empty("meta.idempotencyKey", &self.idempotency_key)?;
-        if let Some(deadline) = &self.deadline {
-            require_non_empty("meta.deadline", deadline)?;
-        }
+
         if let Some(trace_id) = &self.trace_id {
             require_non_empty("meta.traceId", trace_id)?;
         }
