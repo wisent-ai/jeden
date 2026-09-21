@@ -238,14 +238,21 @@ impl CompletionState {
                 return Err(format!("task {} has no independent verification", task.id));
             }
             if let Some(target) = &task.defect_of {
-                if task.kind != TaskKind::Defect || target == &task.id
+                if task.kind != TaskKind::Defect
+                    || target == &task.id
                     || !self.tasks.iter().any(|item| &item.id == target)
                         && !self.requests.iter().any(|item| &item.id == target)
                 {
-                    return Err(format!("task {} has an invalid defect target: {target}", task.id));
+                    return Err(format!(
+                        "task {} has an invalid defect target: {target}",
+                        task.id
+                    ));
                 }
             } else if task.kind == TaskKind::Defect {
-                return Err(format!("defect {} has no original task or request", task.id));
+                return Err(format!(
+                    "defect {} has no original task or request",
+                    task.id
+                ));
             }
         }
         for request in self.requests.iter().filter(|request| request.planned) {

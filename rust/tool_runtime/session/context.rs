@@ -1,12 +1,11 @@
 //! The `context_recommend` tool: the advisor as something the model can ask
 //! again mid-task, after the automatic advisory that opened the turn.
 
-use std::time::Duration;
 
 use serde_json::{json, Value};
 
 use crate::context::advisor;
-use crate::tool_runtime::shared::{string_input, u64_input};
+use crate::tool_runtime::shared::string_input;
 use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn context_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -36,8 +35,6 @@ pub(crate) fn context_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     if request.sources.is_empty() {
         return Err("no source selected: context.advisor.sources resolved to nothing".into());
     }
-    let timeout_ms = u64_input(input, "timeoutMs", settings.timeout_ms);
-    request.timeout = Duration::from_millis(advisor::bounded_timeout_ms(timeout_ms));
     let advice = advisor::recommend(runtime.cwd, &config, &request);
     let value = serde_json::to_value(&advice).map_err(|error| error.to_string())?;
     Ok(json!({

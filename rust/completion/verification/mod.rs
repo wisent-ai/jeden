@@ -62,7 +62,8 @@ impl EvidenceIndex {
 
     /// Where an accepted observation actually happened.
     fn places(&self, reference: &EvidenceReference) -> Result<BTreeSet<String>, String> {
-        self.get(reference).map(|(receipt, _)| paths::touched(receipt))
+        self.get(reference)
+            .map(|(receipt, _)| paths::touched(receipt))
     }
 
     /// A failed operation of the execution itself. The reviewer's own
@@ -124,11 +125,7 @@ pub(crate) fn apply_review(
                 } else {
                     return Err(format!(
                         "a verdict names no task; taskId must be one of {}",
-                        expected
-                            .iter()
-                            .copied()
-                            .collect::<Vec<_>>()
-                            .join(", ")
+                        expected.iter().copied().collect::<Vec<_>>().join(", ")
                     ));
                 }
             }

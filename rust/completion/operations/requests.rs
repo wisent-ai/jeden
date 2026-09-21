@@ -1,4 +1,7 @@
-use super::super::{model::{CompletionState, WorkRequest}, store};
+use super::super::{
+    model::{CompletionState, WorkRequest},
+    store,
+};
 use std::path::Path;
 
 pub(crate) fn capture_request(

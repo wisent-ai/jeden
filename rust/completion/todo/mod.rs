@@ -31,7 +31,13 @@ fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Re
         .tasks
         .iter()
         .find(|task| task.request_id == request_id)
-        .map(|task| if task.kind == TaskKind::Answer { TaskKind::Answer } else { TaskKind::Work })
+        .map(|task| {
+            if task.kind == TaskKind::Answer {
+                TaskKind::Answer
+            } else {
+                TaskKind::Work
+            }
+        })
         .unwrap_or(TaskKind::Work);
     for item in items {
         let title = item_text(item)?;

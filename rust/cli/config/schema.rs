@@ -156,24 +156,10 @@ static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyL
         enum_values: &[],
     },
     SettingSpec {
-        key: "context.advisor.timeoutMs",
-        typ: "number",
-        description: "Deadline for each context source, in milliseconds.",
-        default_json: "3000",
-        enum_values: &[],
-    },
-    SettingSpec {
-        key: "context.advisor.promptTimeoutMs",
-        typ: "number",
-        description: "Deadline for each source when the block is built automatically for a turn, in milliseconds. Shorter than the interactive one because every turn pays it.",
-        default_json: "1000",
-        enum_values: &[],
-    },
-    SettingSpec {
         key: "context.advisor.sources",
         typ: "string",
-        description: "Context sources consulted on every run: any comma-separated subset of files, ground-truth, memory, transcripts, or all. Sources run concurrently and each is bounded by context.advisor.timeoutMs.",
-        default_json: "\"all\"",
+        description: "Context sources consulted on every run: any comma-separated subset of files, ground-truth, memory, transcripts, or all. Sources run concurrently and each runs to completion, so a slow source is time the turn pays.",
+        default_json: "\"files,memory\"",
         enum_values: &[],
     },
     SettingSpec {

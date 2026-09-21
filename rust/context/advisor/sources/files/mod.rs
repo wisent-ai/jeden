@@ -33,7 +33,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             ),
         };
     }
-    let corpus = Corpus::read(settings, started + request.timeout);
+    let corpus = Corpus::read(settings);
     if corpus.sections.is_empty() {
         return SourceOutcome {
             hits: Vec::new(),
@@ -98,7 +98,7 @@ fn detail(corpus: &Corpus) -> String {
         corpus.existing_roots.len()
     );
     if corpus.truncated {
-        detail.push_str("; the walk stopped at its deadline or cap, so this is a partial corpus");
+        detail.push_str("; the walk stopped at its cap, so this is a partial corpus");
     }
     if !corpus.missing_roots.is_empty() {
         detail.push_str(&format!(
@@ -113,10 +113,7 @@ fn detail(corpus: &Corpus) -> String {
 /// they actually carry.
 pub(crate) fn probe(settings: &Settings) -> Value {
     let started = Instant::now();
-    let corpus = Corpus::read(
-        settings,
-        started + std::time::Duration::from_millis(settings.timeout_ms),
-    );
+    let corpus = Corpus::read(settings);
     let status = if corpus.sections.is_empty() {
         SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {

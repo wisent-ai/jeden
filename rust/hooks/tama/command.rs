@@ -23,7 +23,10 @@ pub(super) enum EntryCommand {
     /// A command line this process can run as written.
     Runnable(String),
     /// A registration whose executable is absent, and the paths tried for it.
-    Missing { written: String, tried: Vec<PathBuf> },
+    Missing {
+        written: String,
+        tried: Vec<PathBuf>,
+    },
 }
 
 pub(super) fn entry_command(

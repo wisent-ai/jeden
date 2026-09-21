@@ -100,7 +100,10 @@ impl Conversation {
         let state = completion::read_state(&self.recorder.path())?;
         if !state.actionable()
             && !state.complete()
-            && matches!(state.status(), "paused" | "blocked" | "waiting_for_operator")
+            && matches!(
+                state.status(),
+                "paused" | "blocked" | "waiting_for_operator"
+            )
         {
             self.publish_completion(&state, hooks)?;
             return Err(format!(
@@ -202,7 +205,10 @@ impl Conversation {
             }),
         )?;
         if !reviewed.actionable()
-            && matches!(reviewed.status(), "blocked" | "paused" | "waiting_for_operator")
+            && matches!(
+                reviewed.status(),
+                "blocked" | "paused" | "waiting_for_operator"
+            )
         {
             return Err(format!(
                 "Work remains {}. {} {}Session: {}",

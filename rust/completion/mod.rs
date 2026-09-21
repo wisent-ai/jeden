@@ -12,8 +12,8 @@ mod todo;
 mod verification;
 
 pub(crate) use cli::command;
-pub(crate) use constants::{INSPECTION_OUTPUT_TOKENS, INSPECTION_RETRY_OUTPUT_TOKENS};
 pub use constants::SCHEMA_VERSION;
+pub(crate) use constants::{INSPECTION_OUTPUT_TOKENS, INSPECTION_RETRY_OUTPUT_TOKENS};
 pub use model::{
     CompletionBlocker, CompletionState, CriterionReview, EvidenceReference, TaskKind, TaskOrigin,
     TaskStatus, TaskVerification, WorkRequest, WorkTask,

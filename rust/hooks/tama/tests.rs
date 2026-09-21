@@ -168,7 +168,8 @@ fn the_catalog_source_names_the_file() {
     let script = elsewhere.join("guard.py");
     std::fs::write(&script, "#!/usr/bin/env python3\n").expect("write guard");
 
-    let entry = json!({"id": "guard", "type": "command", "command": "shared-hooks/guard.py --json"});
+    let entry =
+        json!({"id": "guard", "type": "command", "command": "shared-hooks/guard.py --json"});
     let catalog = json!({"agentHooks": [{"id": "guard", "source": script.to_string_lossy()}]});
     match resolved(&entry, &registry, &catalog) {
         EntryCommand::Runnable(command) => {

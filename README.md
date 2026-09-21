@@ -275,16 +275,15 @@ short list is never mistaken for a complete one.
 
 Before its first model call, every turn receives the top recommendations as a
 `[Context recommendations]` block, recorded in the session's own `user` event.
-`context.advisor.sources` defaults to `all`: the sources run concurrently, so
-a turn waits for the slowest rather than for their sum, and each is cut off by
-a deadline — `context.advisor.promptTimeoutMs` (1 s) for the automatic block
-every turn pays for, `context.advisor.timeoutMs` (3 s) for a command someone is
-waiting on. A source that misses its deadline says so in the same answer; on a
-large Transcript Lake archive that is the usual outcome for `transcripts`, and
-`--timeout-ms 20000` is how you actually read it. `jeden context prompt
-"<task>"` prints exactly what the next turn would receive, `jeden context
-sources` reports what each source is and whether it answers now, and
-`context.advisor.enabled false` switches the block off.
+`context.advisor.sources` defaults to `files,memory`, the two that answer from
+local state; `--source all` adds the archive and the index. Sources run
+concurrently and nothing cuts one short: there is no deadline setting and no
+`--timeout-ms` flag, because a guessed interval reports nothing and explains
+nothing. Measured here, one archive search took 30 s against 1 s for the two
+local sources, so choosing the source set is the decision that replaces that
+guess. `jeden context prompt "<task>"` prints exactly what the next turn would
+receive, `jeden context sources` reports what each source is and whether it
+answers now, and `context.advisor.enabled false` switches the block off.
 
 `jeden context install --omp` renders the same advisor into
 `~/.omp/agent/tools/jeden_context.ts`, Omp's own documented custom-tool

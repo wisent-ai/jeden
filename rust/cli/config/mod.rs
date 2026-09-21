@@ -186,13 +186,6 @@ pub(crate) struct AdvisorConfig {
     pub(crate) limit: usize,
     #[serde(rename = "maxChars", default = "default_advisor_max_chars")]
     pub(crate) max_chars: usize,
-    #[serde(rename = "timeoutMs", default = "default_advisor_timeout_ms")]
-    pub(crate) timeout_ms: u64,
-    #[serde(
-        rename = "promptTimeoutMs",
-        default = "default_advisor_prompt_timeout_ms"
-    )]
-    pub(crate) prompt_timeout_ms: u64,
     #[serde(default = "default_advisor_sources")]
     pub(crate) sources: String,
     /// Colon-separated `path` or `path@depth` entries. Empty means the
@@ -213,8 +206,6 @@ impl Default for AdvisorConfig {
             enabled: true,
             limit: default_advisor_limit(),
             max_chars: default_advisor_max_chars(),
-            timeout_ms: default_advisor_timeout_ms(),
-            prompt_timeout_ms: default_advisor_prompt_timeout_ms(),
             sources: default_advisor_sources(),
             roots: String::new(),
             file_extensions: default_advisor_file_extensions(),
@@ -240,9 +231,6 @@ fn default_advisor_max_chars() -> usize {
     crate::context::advisor::DEFAULT_MAX_CHARS
 }
 
-fn default_advisor_timeout_ms() -> u64 {
-    crate::context::advisor::DEFAULT_TIMEOUT_MS
-}
 
 fn default_advisor_sources() -> String {
     crate::context::advisor::DEFAULT_SOURCES.to_string()
@@ -252,9 +240,6 @@ fn default_advisor_file_extensions() -> String {
     crate::context::advisor::DEFAULT_FILE_EXTENSIONS.to_string()
 }
 
-fn default_advisor_prompt_timeout_ms() -> u64 {
-    crate::context::advisor::DEFAULT_PROMPT_TIMEOUT_MS
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct RulesConfig {

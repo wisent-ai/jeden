@@ -17,7 +17,7 @@ mod sources;
 mod text;
 
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -26,7 +26,7 @@ use crate::cli::config::Config;
 
 pub(crate) use render::{availability_word, prompt_section, probe_value, render_text};
 pub(crate) use settings::{
-    bounded_limit, bounded_timeout_ms, parse_sources, settings, unknown_sources, Settings,
+    bounded_limit, parse_sources, settings, unknown_sources, Settings,
 };
 use sources::{files, ground_truth, memory, transcripts};
 
@@ -37,15 +37,11 @@ pub(crate) const SOURCES: &[&str] = &["files", "ground-truth", "memory", "transc
 
 pub(crate) const DEFAULT_LIMIT: usize = 6;
 pub(crate) const DEFAULT_MAX_CHARS: usize = 6_000;
-pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 3_000;
-/// The deadline the automatic per-turn block uses. Shorter than the one a
-/// person waiting at a prompt accepts, because every turn pays it: the local
-/// sources finish inside it and a slow archive reports that it did not.
-pub(crate) const DEFAULT_PROMPT_TIMEOUT_MS: u64 = 1_000;
-/// Every source answers unless the operator narrows them. Sources run
-/// concurrently and each one is bounded by the same deadline, so a turn
-/// waits for the slowest source rather than for their sum.
-pub(crate) const DEFAULT_SOURCES: &str = "all";
+/// What every run consults. The archive and the network index are not in it
+/// because nothing cuts a source short any more: one Transcript Lake search
+/// measured 30 s on this archive against 1 s for the two local sources, and a
+/// turn pays whatever it asks for. `--source all` asks for the rest.
+pub(crate) const DEFAULT_SOURCES: &str = "files,memory";
 /// Which file types the walk reads. Empty means every readable text file —
 /// code, configuration and prose alike; a list narrows it.
 pub(crate) const DEFAULT_FILE_EXTENSIONS: &str = "";
@@ -138,7 +134,6 @@ pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) limit: usize,
     pub(crate) sources: Vec<String>,
-    pub(crate) timeout: Duration,
 }
 
 impl Request {
@@ -147,7 +142,6 @@ impl Request {
             query: query.trim().to_string(),
             limit: settings.limit,
             sources: settings.sources.clone(),
-            timeout: Duration::from_millis(settings.timeout_ms),
         }
     }
 }
@@ -282,8 +276,7 @@ pub(crate) fn advice_for_prompt(cwd: &Path, config: &Config, task: &str) -> Opti
     if !settings.enabled || settings.sources.is_empty() {
         return None;
     }
-    let mut request = Request::from_settings(task, &settings);
-    request.timeout = Duration::from_millis(settings.prompt_timeout_ms);
+    let request = Request::from_settings(task, &settings);
     if request.query.is_empty() {
         return None;
     }

@@ -29,12 +29,13 @@ pub(super) fn record(
         if task.status.terminal() {
             return Err(format!("task is already terminal: {task_id}"));
         }
-        let request = task
-            .operator_request
-            .as_mut()
-            .ok_or_else(|| format!("task {task_id} asks nothing of the operator; resume it with a reason instead"))?;
+        let request = task.operator_request.as_mut().ok_or_else(|| {
+            format!("task {task_id} asks nothing of the operator; resume it with a reason instead")
+        })?;
         if request.answer.is_some() {
-            return Err(format!("task {task_id} already holds an answer to its request"));
+            return Err(format!(
+                "task {task_id} already holds an answer to its request"
+            ));
         }
         request.answer = Some(OperatorAnswer {
             answered_at: crate::agent::now_stamp(),

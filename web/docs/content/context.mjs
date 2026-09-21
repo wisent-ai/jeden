@@ -41,16 +41,16 @@ export const contextPages = [
         ],
       },
       {
-        title: "Every source answers, and each one is bounded",
+        title: "Every source answers, and each one runs to completion",
         paragraphs: [
-          "<code>context.advisor.sources</code> defaults to <code>all</code>: nothing is left out of a search because it happened to be slow. The sources run concurrently, so a turn waits for the slowest one rather than for their sum, and each one is cut off by a deadline.",
-          "There are two deadlines because the two callers are different. <code>context.advisor.promptTimeoutMs</code> (1 s) bounds the block a turn builds automatically, because every turn pays it. <code>context.advisor.timeoutMs</code> (3 s) bounds a command a person is waiting on, and <code>--timeout-ms</code> overrides it for one call. A source that misses its deadline says so in the same answer instead of shortening it silently: on a large Transcript Lake archive the search takes seconds, so the automatic block usually reports <code>timed out after 1000 ms</code> for <code>transcripts</code> and <code>jeden context recommend \"…\" --source transcripts --timeout-ms 20000</code> is how you actually read it.",
+          "<code>context.advisor.sources</code> defaults to <code>files,memory</code>, the two that answer from local state, and the sources run concurrently, so a turn waits for the slowest rather than for their sum. <code>--source all</code> adds the archive and the ground-truth index to one call.",
+          "Nothing cuts a source short. There is no deadline setting and no <code>--timeout-ms</code> flag, because a guessed interval reports nothing and explains nothing: a search that takes ten seconds takes ten seconds and answers. On a large Transcript Lake archive that search is measured in seconds, and that is what a turn with <code>transcripts</code> selected pays. Choosing which sources a run consults is therefore the decision that replaces the guess a deadline used to make: measured here, one archive search took 30 s against 1 s for the two local sources.",
           "An unknown source name is refused rather than dropped: <code>unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts</code>. A narrowed answer is never the result of a typo.",
         ],
         commands: [
           {
-            label: "Ask every source, and give the archive room",
-            code: 'jeden context recommend "why did the release agent quarantine that host" --limit 8\njeden context recommend "why did the release agent quarantine that host" --source transcripts --timeout-ms 20000',
+            label: "Ask every source, or only the fast ones",
+            code: 'jeden context recommend "why did the release agent quarantine that host" --limit 8\njeden context recommend "why did the release agent quarantine that host" --source files,memory',
           },
         ],
       },
@@ -58,7 +58,7 @@ export const contextPages = [
         title: "Reading a short list",
         paragraphs: [
           "Every answer carries a state for every source it consulted: <code>available</code> or <code>unavailable</code>, the observed reason, how much was considered, how much was returned, and how long it took. A list that is short because a source refused therefore looks different from a list that is short because nothing matched.",
-          "The files source also says when its own walk was cut: a root nobody sized cannot stall a turn, so the walk stops at its deadline or its cap and the detail then reads <em>the walk stopped at its deadline or cap, so this is a partial corpus</em>.",
+          "The files source also says when its own walk was cut: a root larger than the caps allow produces a partial corpus, and the detail then reads <em>the walk stopped at its cap, so this is a partial corpus</em>.",
           "<code>jeden context sources</code> asks the same question with no query: which roots exist and how many chunks they hold, how many active memories the store carries, which runtime partitions the archive holds, and whether the ground-truth endpoint answers its health route. A configured endpoint nobody serves reports the URL it could not reach, not silence.",
         ],
         commands: [
@@ -91,7 +91,7 @@ export const contextPages = [
         paragraphs: [
           "<strong>CLI:</strong> <code>jeden context recommend</code>, <code>prompt</code>, <code>sources</code>, <code>install</code>, <code>installed</code>. A bare first word is the task, so <code>jeden context \"why does signing fail\"</code> works.",
           "<strong>Interactive:</strong> <code>/context &lt;task&gt;</code> renders the same recommendations; bare <code>/context</code> keeps reporting the live window size.",
-          "<strong>Agent tool:</strong> <code>context_recommend</code> takes <code>query</code>, and optionally <code>limit</code>, <code>sources</code> and <code>timeoutMs</code>. It is a read-tier tool, because it does what the prologue already does unapproved.",
+          "<strong>Agent tool:</strong> <code>context_recommend</code> takes <code>query</code>, and optionally <code>limit</code>, <code>sources</code>. It is a read-tier tool, because it does what the prologue already does unapproved.",
           "<strong>RPC and Jeden Desktop:</strong> <code>context/recommend</code> and <code>context/sources</code> answer the same objects the CLI prints with <code>--json</code>. Desktop's Context screen is that RPC, not a parsed command line.",
         ],
       },
@@ -99,8 +99,8 @@ export const contextPages = [
         title: "Configuration",
         paragraphs: [
           "Every key below is in <code>jeden config list</code> and can be set per user in <code>~/.jeden/config.yml</code> or per project in <code>&lt;cwd&gt;/.jeden/config.json</code>.",
-          "<code>context.advisor.enabled</code> (default <code>true</code>) appends the block to every task prompt. <code>context.advisor.limit</code> (default <code>6</code>) is how many recommendations one answer carries. <code>context.advisor.maxChars</code> (default <code>6000</code>) is the injected block's budget. <code>context.advisor.timeoutMs</code> (default <code>3000</code>) and <code>context.advisor.promptTimeoutMs</code> (default <code>1000</code>) are the per-source deadlines for a command and for the automatic block.",
-          "<code>context.advisor.sources</code> (default <code>all</code>) selects the sources every run consults. <code>context.advisor.roots</code> (default empty, meaning the project and <code>~/.jeden</code>) declares the roots the files source walks. <code>context.advisor.fileExtensions</code> (default empty, meaning every readable text file) narrows it to named extensions. <code>context.advisor.groundTruthUrl</code> and <code>context.advisor.transcriptLakeBin</code> point the two external sources somewhere other than their defaults.",
+          "<code>context.advisor.enabled</code> (default <code>true</code>) appends the block to every task prompt. <code>context.advisor.limit</code> (default <code>6</code>) is how many recommendations one answer carries. <code>context.advisor.maxChars</code> (default <code>6000</code>) is the injected block's budget. There is no deadline setting: every source runs to completion.",
+          "<code>context.advisor.sources</code> (default <code>files,memory</code>) selects the sources every run consults. <code>context.advisor.roots</code> (default empty, meaning the project and <code>~/.jeden</code>) declares the roots the files source walks. <code>context.advisor.fileExtensions</code> (default empty, meaning every readable text file) narrows it to named extensions. <code>context.advisor.groundTruthUrl</code> and <code>context.advisor.transcriptLakeBin</code> point the two external sources somewhere other than their defaults.",
         ],
         commands: [
           {

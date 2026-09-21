@@ -1,7 +1,7 @@
 const sources =
-  "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>all</code>.";
+  "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>files,memory</code>.";
 const bounds =
-  "<code>--limit</code> caps the recommendations returned and <code>--timeout-ms</code> replaces <code>context.advisor.timeoutMs</code> as each source's deadline; the automatic per-turn block uses <code>context.advisor.promptTimeoutMs</code> instead. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
+  "<code>--limit</code> caps the recommendations returned. Nothing cuts a source short: every source runs to completion. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
 const target =
   "<code>--omp</code> resolves <code>~/.omp/agent/tools/jeden_context.ts</code>, Omp's own documented custom-tool directory. <code>--file &lt;path&gt;</code> addresses any other location. One of the two is required.";
 const unknownSource =
@@ -11,7 +11,7 @@ export const contextCommands = [
   {
     path: "context",
     invocation:
-      'jeden context [recommend] "<task>" [--limit n] [--source list] [--timeout-ms n] [--json] [--cwd path]',
+      'jeden context [recommend] "<task>" [--limit n] [--source list] [--json] [--cwd path]',
     purpose: "Ask the context advisor what to read for a task instead of searching for it.",
     inputs: [
       "A bare first word is taken as the task, so the verb may be omitted: <code>jeden context \"why does signing fail\"</code> is <code>jeden context recommend</code>.",
@@ -29,7 +29,7 @@ export const contextCommands = [
   {
     path: "context/recommend",
     invocation:
-      'jeden context recommend "<task>" [--limit n] [--source list] [--timeout-ms n] [--json] [--cwd path]',
+      'jeden context recommend "<task>" [--limit n] [--source list] [--json] [--cwd path]',
     purpose: "Return ranked locators for a task, with the state of every source that answered.",
     inputs: [sources, bounds, "<code>--json</code> returns the authoritative object."],
     effect:
@@ -38,7 +38,7 @@ export const contextCommands = [
       unknownSource,
       "A missing task is refused as <code>context recommend requires a task</code>.",
       "A resolved source list that is empty is refused as <code>no source selected: context.advisor.sources resolved to nothing</code>.",
-      "A source that cannot answer never fails the command: it is reported as <code>unavailable</code> with its reason, such as <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code> or <code>timed out after 1000 ms</code>.",
+      "A source that cannot answer never fails the command: it is reported as <code>unavailable</code> with its reason, such as <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code> or <code>exited with exit status: 1</code>.",
     ],
   },
   {

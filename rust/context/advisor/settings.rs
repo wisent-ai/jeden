@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use super::{
     sources::files, DEFAULT_FILE_EXTENSIONS, DEFAULT_LIMIT, DEFAULT_MAX_CHARS, DEFAULT_SOURCES,
-    DEFAULT_TIMEOUT_MS, SOURCES,
+    SOURCES,
 };
 use crate::cli::config::{AdvisorConfig, Config};
 
@@ -18,8 +18,6 @@ pub(crate) struct Settings {
     pub(crate) enabled: bool,
     pub(crate) limit: usize,
     pub(crate) max_chars: usize,
-    pub(crate) timeout_ms: u64,
-    pub(crate) prompt_timeout_ms: u64,
     pub(crate) sources: Vec<String>,
     pub(crate) roots: Vec<DocRoot>,
     pub(crate) file_extensions: Vec<String>,
@@ -45,8 +43,6 @@ pub(crate) fn settings(cwd: &Path, config: &Config) -> Settings {
         enabled: advisor.enabled,
         limit: bounded_limit(advisor.limit),
         max_chars: bounded_max_chars(advisor.max_chars),
-        timeout_ms: bounded_timeout_ms(advisor.timeout_ms),
-        prompt_timeout_ms: bounded_timeout_ms(advisor.prompt_timeout_ms),
         sources: parse_sources(&advisor.sources),
         roots: parse_roots(&advisor.roots, cwd),
         file_extensions: parse_extensions(&advisor.file_extensions),
@@ -81,16 +77,6 @@ pub(crate) fn bounded_max_chars(max_chars: usize) -> usize {
         DEFAULT_MAX_CHARS
     } else {
         max_chars.clamp(MIN, MAX)
-    }
-}
-
-pub(crate) fn bounded_timeout_ms(timeout_ms: u64) -> u64 {
-    const MIN: u64 = 100;
-    const MAX: u64 = 120_000;
-    if timeout_ms == 0 {
-        DEFAULT_TIMEOUT_MS
-    } else {
-        timeout_ms.clamp(MIN, MAX)
     }
 }
 

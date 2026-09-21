@@ -40,12 +40,24 @@ pub(super) fn import_sessions(params: &Value) -> Result<Value, (&'static str, St
     let paths: Vec<PathBuf> = params
         .get("paths")
         .and_then(Value::as_array)
-        .map(|paths| paths.iter().filter_map(Value::as_str).map(PathBuf::from).collect())
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(Value::as_str)
+                .map(PathBuf::from)
+                .collect()
+        })
         .unwrap_or_default();
     if paths.is_empty() {
-        return Err(("invalid_params", "paths must be a non-empty array of strings".into()));
+        return Err((
+            "invalid_params",
+            "paths must be a non-empty array of strings".into(),
+        ));
     }
-    let refresh = params.get("refresh").and_then(Value::as_bool).unwrap_or(false);
+    let refresh = params
+        .get("refresh")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     crate::session_import::import_paths(&paths, refresh).map_err(|error| ("import_error", error))
 }
 pub(super) fn create_session(

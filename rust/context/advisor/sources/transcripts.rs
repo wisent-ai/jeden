@@ -12,7 +12,7 @@ use std::time::Instant;
 
 use serde_json::{json, Value};
 
-use crate::context::advisor::text::{bounded_output, matched_terms, snippet};
+use crate::context::advisor::text::{command_output, matched_terms, snippet};
 use crate::context::advisor::{
     probe_value, Recommendation, Request, Settings, SourceOutcome, SourceStatus,
 };
@@ -29,7 +29,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
         .arg("--limit")
         .arg(request.limit.to_string())
         .arg("--json");
-    let text = match bounded_output(command, request.timeout) {
+    let text = match command_output(command) {
         Ok(text) => text,
         Err(error) => {
             return SourceOutcome {
@@ -109,7 +109,7 @@ pub(crate) fn probe(settings: &Settings) -> Value {
     let started = Instant::now();
     let mut command = Command::new(&settings.transcript_lake_bin);
     command.arg("status").arg("--json");
-    let status = match bounded_output(command, std::time::Duration::from_millis(settings.timeout_ms))
+    let status = match command_output(command)
     {
         Ok(text) => match json_tail(&text) {
             Some(document) => {

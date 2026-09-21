@@ -7,13 +7,13 @@
 //! its meaning starts; every other file is cut into bounded line windows,
 //! because a thousand-line source file is not one answer.
 //!
-//! The walk is bounded three ways: the depth each root declares, the caps
-//! below, and the deadline the caller passes. A root nobody sized cannot
-//! stall a turn; it can only produce a short corpus that says it was cut.
+//! The walk is bounded two ways: the depth each root declares and the caps
+//! below. Nothing cuts it by the clock — a root that holds more than the caps
+//! allow produces a short corpus that says it was cut.
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Instant;
+
 
 use ignore::WalkBuilder;
 
@@ -62,13 +62,13 @@ pub(super) struct Corpus {
     pub(super) files: usize,
     pub(super) existing_roots: Vec<String>,
     pub(super) missing_roots: Vec<String>,
-    /// True when a cap or the deadline stopped the walk before the roots ran
-    /// out, so a short answer is never reported as an exhaustive one.
+    /// True when a cap stopped the walk before the roots ran out, so a short
+    /// answer is never reported as an exhaustive one.
     pub(super) truncated: bool,
 }
 
 impl Corpus {
-    pub(super) fn read(settings: &Settings, deadline: Instant) -> Self {
+    pub(super) fn read(settings: &Settings) -> Self {
         let mut corpus = Self {
             sections: Vec::new(),
             files: usize::default(),
@@ -79,7 +79,7 @@ impl Corpus {
         for root in &settings.roots {
             if root.path.exists() {
                 corpus.existing_roots.push(root.path.display().to_string());
-                corpus.collect_root(&root.path, root.depth, settings, deadline);
+                corpus.collect_root(&root.path, root.depth, settings);
             } else {
                 corpus.missing_roots.push(root.path.display().to_string());
             }
@@ -96,23 +96,13 @@ impl Corpus {
         }
     }
 
-    fn collect_root(
-        &mut self,
-        root: &Path,
-        depth: usize,
-        settings: &Settings,
-        deadline: Instant,
-    ) {
+    fn collect_root(&mut self, root: &Path, depth: usize, settings: &Settings) {
         let walk = WalkBuilder::new(root)
             .max_depth(Some(depth))
             .follow_links(false)
             .build();
         for entry in walk.flatten() {
             if self.files >= MAX_FILES || self.sections.len() >= MAX_CHUNKS {
-                self.truncated = true;
-                return;
-            }
-            if Instant::now() >= deadline {
                 self.truncated = true;
                 return;
             }

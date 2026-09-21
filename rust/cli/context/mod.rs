@@ -6,7 +6,6 @@
 
 mod omp;
 
-use std::time::Duration;
 
 use serde_json::json;
 
@@ -15,7 +14,7 @@ use crate::Args;
 
 const USAGE: &str = concat!(
     "Usage:\n",
-    "  jeden context recommend \"<task>\" [--limit n] [--source list] [--timeout-ms n] [--json] [--cwd path]\n",
+    "  jeden context recommend \"<task>\" [--limit n] [--source list] [--json] [--cwd path]\n",
     "  jeden context prompt \"<task>\" [--json] [--cwd path]\n",
     "  jeden context sources [--json] [--cwd path]\n",
     "  jeden context install [--omp|--file <path>] [--json]\n",
@@ -27,7 +26,6 @@ struct Options {
     query: String,
     limit: Option<usize>,
     sources: Option<String>,
-    timeout_ms: Option<u64>,
 }
 
 /// Flags may appear before or after the task text; the task is whatever is
@@ -37,7 +35,6 @@ fn options(rest: &[String]) -> Result<Options, String> {
         query: String::new(),
         limit: None,
         sources: None,
-        timeout_ms: None,
     };
     let mut words: Vec<String> = Vec::new();
     let mut iter = rest.iter();
@@ -53,14 +50,6 @@ fn options(rest: &[String]) -> Result<Options, String> {
             }
             "--source" | "--sources" => {
                 options.sources = Some(iter.next().ok_or("--source requires a list")?.clone());
-            }
-            "--timeout-ms" => {
-                let value = iter.next().ok_or("--timeout-ms requires a number")?;
-                options.timeout_ms = Some(
-                    value
-                        .parse()
-                        .map_err(|_| format!("--timeout-ms must be a number, not {value}"))?,
-                );
             }
             other if other.starts_with("--") => {
                 return Err(format!("unknown context option: {other}\n{USAGE}"))
@@ -148,9 +137,6 @@ fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
             ));
         }
         request.sources = advisor::parse_sources(declared);
-    }
-    if let Some(timeout_ms) = options.timeout_ms {
-        request.timeout = Duration::from_millis(advisor::bounded_timeout_ms(timeout_ms));
     }
     if request.sources.is_empty() {
         return Err("no source selected: context.advisor.sources resolved to nothing".to_string());

@@ -18,8 +18,8 @@ mod conversation;
 pub(crate) mod credential;
 mod hooks;
 mod runtime;
-mod stream;
 mod state;
+mod stream;
 
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;

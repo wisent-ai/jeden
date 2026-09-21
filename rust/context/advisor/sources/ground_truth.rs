@@ -6,7 +6,7 @@
 //! endpoint is configured, that is reported as the configuration it is, not
 //! as an empty result.
 
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use serde_json::{json, Value};
 
@@ -29,7 +29,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
         };
     }
     let url = format!("{}/search", settings.ground_truth_url);
-    let response = match client(request.timeout) {
+    let response = match client() {
         Ok(client) => client
             .get(&url)
             .query(&[
@@ -149,7 +149,7 @@ pub(crate) fn probe(settings: &Settings) -> Value {
         SourceStatus::unavailable("ground-truth", NO_ENDPOINT, started)
     } else {
         let url = format!("{}/health", settings.ground_truth_url);
-        match client(Duration::from_millis(settings.timeout_ms))
+        match client()
             .and_then(|client| client.get(&url).send().map_err(|error| error.to_string()))
         {
             Ok(response) if response.status().is_success() => SourceStatus::available(
@@ -180,9 +180,8 @@ pub(crate) fn probe(settings: &Settings) -> Value {
     )
 }
 
-fn client(timeout: Duration) -> Result<reqwest::blocking::Client, String> {
+fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
-        .timeout(timeout)
         .build()
         .map_err(|error| format!("HTTP client could not be built: {error}"))
 }

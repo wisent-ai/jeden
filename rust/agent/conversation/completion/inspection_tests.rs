@@ -19,7 +19,9 @@ fn a_refusal_about_the_verdict_itself_is_not_a_budget_problem() {
     assert!(!cut_off(
         "task a77469d1 criterion 0 names scratch/, and no accepted observation happened there"
     ));
-    assert!(!cut_off("invalid acceptance review: missing field `taskId`"));
+    assert!(!cut_off(
+        "invalid acceptance review: missing field `taskId`"
+    ));
     assert!(!cut_off(
         "independent review must cover every open task exactly once"
     ));

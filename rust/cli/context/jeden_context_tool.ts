@@ -27,21 +27,14 @@ const factory: CustomToolFactory = (pi) => {
         .string()
         .optional()
         .describe(
-          "Comma-separated subset of docs, ground-truth, memory, transcripts, or all",
+          "Comma-separated subset of files, ground-truth, memory, transcripts, or all",
         ),
-      timeoutMs: pi.zod
-        .number()
-        .int()
-        .positive()
-        .optional()
-        .describe("Per-source deadline in milliseconds"),
     }),
 
     async execute(_toolCallId, params, onUpdate, _ctx, signal) {
       const argv = ["context", "recommend", params.query, "--json"];
       if (params.limit !== undefined) argv.push("--limit", String(params.limit));
       if (params.sources !== undefined) argv.push("--source", params.sources);
-      if (params.timeoutMs !== undefined) argv.push("--timeout-ms", String(params.timeoutMs));
 
       onUpdate?.({
         content: [{ type: "text", text: `Asking Jeden for context on: ${params.query}` }],

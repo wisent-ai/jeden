@@ -5,7 +5,6 @@
 //! question, answering the object the CLI prints with `--json`.
 
 use std::path::PathBuf;
-use std::time::Duration;
 
 use serde_json::{json, Value};
 
@@ -50,9 +49,6 @@ pub(super) fn recommend(params: &Value) -> Result<Value, (&'static str, String)>
             ));
         }
         request.sources = advisor::parse_sources(declared);
-    }
-    if let Some(timeout_ms) = params.get("timeoutMs").and_then(Value::as_u64) {
-        request.timeout = Duration::from_millis(advisor::bounded_timeout_ms(timeout_ms));
     }
     if request.sources.is_empty() {
         return Err((

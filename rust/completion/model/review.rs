@@ -99,9 +99,13 @@ impl TryFrom<RawReview> for CompletionReview {
             }
             let names_request = entry.get("requestId").is_some() && entry.get("covered").is_some();
             if names_request {
-                review.requests.push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
+                review
+                    .requests
+                    .push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
             } else {
-                review.tasks.push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
+                review
+                    .tasks
+                    .push(serde_json::from_value(entry).map_err(|error| error.to_string())?);
             }
         }
         Ok(review)

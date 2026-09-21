@@ -16,9 +16,6 @@ const OFFICE_SECTION: &str = "notes/fleet.md:10-12";
 /// The seeded source file is six lines, so its first chunk is the whole file.
 const CODE_CHUNK: &str = "src/lease.rs:1-6";
 const SEEDED_SECTIONS: u64 = 3;
-/// Long enough for a refused local connection, short enough that a case
-/// cannot hang on it.
-const PROBE_TIMEOUT_MS: u64 = 1_500;
 
 #[test]
 fn a_recommendation_names_the_section_to_read() {
@@ -184,7 +181,6 @@ fn a_configured_but_unreachable_index_says_so() {
     workspace.configure(serde_json::json!({
         "sources": "ground-truth",
         "groundTruthUrl": "http://127.0.0.1:1",
-        "timeoutMs": PROBE_TIMEOUT_MS,
     }));
     let report = workspace.run(&["context", "sources", "--json"]).json();
     let ground_truth = source(&report, "ground-truth");

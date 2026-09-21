@@ -11,10 +11,15 @@ fn original_target(state: &CompletionState, target: &str) -> Result<String, Stri
         }
         match state.tasks.iter().find(|task| task.id == current) {
             Some(task) if task.status == TaskStatus::Cancelled => {
-                return Err(format!("cancelled task cannot be reopened by a defect: {current}"));
+                return Err(format!(
+                    "cancelled task cannot be reopened by a defect: {current}"
+                ));
             }
             Some(task) if task.kind == TaskKind::Defect => {
-                current = task.defect_of.as_deref().ok_or("defect has no original target")?;
+                current = task
+                    .defect_of
+                    .as_deref()
+                    .ok_or("defect has no original target")?;
             }
             _ => return Ok(current.to_owned()),
         }
@@ -29,31 +34,48 @@ pub(super) fn reopen_target(
     reason: &str,
 ) -> Result<(String, String, TaskStatus), String> {
     let target = original_target(state, target)?;
-    let request_index = state.requests.iter().position(|request| request.id == target);
+    let request_index = state
+        .requests
+        .iter()
+        .position(|request| request.id == target);
     let task_index = state.tasks.iter().position(|task| task.id == target);
     let owner = if let Some(index) = request_index {
         if state.requests[index].planned
-            && state.tasks.iter().filter(|task| task.request_id == target)
+            && state
+                .tasks
+                .iter()
+                .filter(|task| task.request_id == target)
                 .all(|task| task.status == TaskStatus::Cancelled)
         {
-            return Err(format!("cancelled request cannot be reopened by a defect: {target}"));
+            return Err(format!(
+                "cancelled request cannot be reopened by a defect: {target}"
+            ));
         }
         index
     } else if let Some(index) = task_index {
-        state.requests.iter().position(|request| request.id == state.tasks[index].request_id)
+        state
+            .requests
+            .iter()
+            .position(|request| request.id == state.tasks[index].request_id)
             .ok_or("defect target has no owning request")?
     } else {
         return Err(format!("unknown task or request: {target}"));
     };
     let paused = state.requests[owner].paused
         || task_index.is_some_and(|index| state.tasks[index].status == TaskStatus::Paused);
-    let status = if paused { TaskStatus::Paused } else { TaskStatus::Pending };
+    let status = if paused {
+        TaskStatus::Paused
+    } else {
+        TaskStatus::Pending
+    };
     let request_id = state.requests[owner].id.clone();
     for (index, task) in state.tasks.iter_mut().enumerate() {
         if (task_index == Some(index) || (request_index.is_some() && task.request_id == request_id))
             && task.status != TaskStatus::Cancelled
         {
-            if task.status != TaskStatus::Paused { task.status = status; }
+            if task.status != TaskStatus::Paused {
+                task.status = status;
+            }
             task.verification = None;
             task.reason = Some(format!("Reopened by defect: {reason}"));
         }
@@ -73,8 +95,10 @@ pub(super) fn report(
     let (_, state) = store::update(session, Some(revision), |state| {
         let original = original_target(state, target)?;
         if state.tasks.iter().any(|task| {
-            task.kind == TaskKind::Defect && !task.status.terminal()
-                && task.defect_of.as_deref() == Some(original.as_str()) && task.text == reason
+            task.kind == TaskKind::Defect
+                && !task.status.terminal()
+                && task.defect_of.as_deref() == Some(original.as_str())
+                && task.text == reason
         }) {
             return Err(format!("the same defect is already open for {original}"));
         }

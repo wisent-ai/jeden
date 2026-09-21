@@ -7,7 +7,6 @@ use super::{model::*, store};
 use serde_json::{json, Value};
 use std::path::Path;
 
-
 pub(crate) fn plan_request(
     session: &Path,
     revision: u64,
@@ -49,8 +48,10 @@ pub(crate) fn plan_request(
         }
         for item in &plan.tasks {
             if (item.kind == TaskKind::Defect) != item.defect_of.is_some()
-                || item.kind == TaskKind::Defect && !item.defect_quote.as_ref()
-                    .is_some_and(|quote| !quote.trim().is_empty() && request.prompt.contains(quote))
+                || item.kind == TaskKind::Defect
+                    && !item.defect_quote.as_ref().is_some_and(|quote| {
+                        !quote.trim().is_empty() && request.prompt.contains(quote)
+                    })
             {
                 return Err("a defect requires its original task id and an exact quote from the current user's defect report".into());
             }

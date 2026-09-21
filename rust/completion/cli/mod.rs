@@ -58,7 +58,9 @@ pub(crate) fn render(state: &CompletionState) -> String {
             .filter(|task| task.request_id == request.id)
         {
             if let Some(original) = &task.defect_of {
-                lines.push(format!("  Defect of {original}; repair requires fresh independent verification"));
+                lines.push(format!(
+                    "  Defect of {original}; repair requires fresh independent verification"
+                ));
             }
             lines.push(format!(
                 "  {} [{}] {}",

@@ -8,11 +8,7 @@
 //! from the corpus it just read, so "the" and "jak" fall out by measurement
 //! rather than by opinion.
 
-use std::io::Read;
 use std::process::{Command, Stdio};
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 /// Searchable words of a query: lowercase, three characters or more, in first
 /// occurrence order, bounded so a pasted paragraph cannot become a thousand
@@ -111,58 +107,28 @@ pub(crate) fn matched_terms(haystack: &str, terms: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Run `command`, returning its stdout, killing it when `timeout` passes.
-/// Both pipes are drained on their own threads: a child that fills one while
-/// this thread waits on the other never finishes, and that is a hang rather
-/// than a timeout.
-pub(crate) fn bounded_output(mut command: Command, timeout: Duration) -> Result<String, String> {
-    const POLL: Duration = Duration::from_millis(10);
-    const COLLECT: Duration = Duration::from_millis(500);
-    let mut child = command
+/// Run `command` to completion and return its stdout.
+///
+/// Nothing here cuts the work short. A search that takes ten seconds takes
+/// ten seconds and answers; a guessed interval would have reported nothing
+/// and told the reader nothing about why. A failure is the command's own
+/// failure, with the first line it wrote to stderr.
+pub(crate) fn command_output(mut command: Command) -> Result<String, String> {
+    let output = command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .spawn()
+        .output()
         .map_err(|error| error.to_string())?;
-    let out_pipe: Box<dyn Read + Send> = Box::new(child.stdout.take().ok_or("no stdout pipe")?);
-    let err_pipe: Box<dyn Read + Send> = Box::new(child.stderr.take().ok_or("no stderr pipe")?);
-    let (out_tx, out_rx) = mpsc::channel();
-    let (err_tx, err_rx) = mpsc::channel();
-    for (mut pipe, sender) in [(out_pipe, out_tx), (err_pipe, err_tx)] {
-        thread::spawn(move || {
-            let mut text = String::new();
-            let _ = pipe.read_to_string(&mut text);
-            let _ = sender.send(text);
-        });
-    }
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => {
-                if started.elapsed() >= timeout {
-                    // Kill and report at once: waiting for the pipes of a
-                    // process that already missed its deadline spends the
-                    // deadline twice, and every turn pays this one.
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(format!("timed out after {} ms", timeout.as_millis()));
-                }
-                thread::sleep(POLL);
-            }
-            Err(error) => return Err(error.to_string()),
-        }
-    };
-    let stdout = out_rx.recv_timeout(COLLECT).unwrap_or_default();
-    let stderr = err_rx.recv_timeout(COLLECT).unwrap_or_default();
-    if !status.success() {
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = stderr
             .lines()
             .map(str::trim)
             .find(|line| !line.is_empty())
             .unwrap_or("no stderr")
             .to_string();
-        return Err(format!("exited with {status}: {detail}"));
+        return Err(format!("exited with {}: {detail}", output.status));
     }
-    Ok(stdout)
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
