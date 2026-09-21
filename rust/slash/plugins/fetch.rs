@@ -151,8 +151,7 @@ pub(crate) fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
 /// `reqwest::blocking::get`, which builds a client carrying the library's own
 /// thirty seconds. The claim is now true.
 fn http_get_text(url: &str) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
+    let client = crate::net::blocking_builder()
         .build()
         .map_err(|e| e.to_string())?;
     let response = client.get(url).send().map_err(|e| e.to_string())?;

@@ -1,7 +1,6 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use hmac::{Hmac, Mac};
 use rand::Rng;
-use reqwest::blocking::Client;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -351,8 +350,7 @@ pub fn chat_completion(
     }
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let (ts, body_hash, sig) = hmac_headers(&body_text, &config.agent_id, &config.secret)?;
-    let client = Client::builder()
-        .timeout(None)
+    let client = crate::net::blocking_builder()
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
     let response = client
@@ -985,7 +983,7 @@ fn spawn_openai_stream_adapter(
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
         .spawn(move || {
-            let client = match Client::builder().timeout(None).build() {
+            let client = match crate::net::blocking_builder().build() {
                 Ok(client) => client,
                 Err(error) => {
                     let _ = sender.send(WireMessage::Network(

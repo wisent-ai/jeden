@@ -336,8 +336,7 @@ pub(crate) fn fetch_readable_url(
         return Err("fetch_readable_url requires http(s) URL".into());
     }
     let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(None)
+    let client = crate::net::blocking_builder()
         .build()
         .map_err(|e| e.to_string())?;
     let response = client.get(&url).send().map_err(|e| e.to_string())?;

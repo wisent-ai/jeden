@@ -249,8 +249,7 @@ impl McpClient {
             .filter(|url| url.starts_with("http://") || url.starts_with("https://"))
             .ok_or("streamable HTTP MCP server.url must be an http(s) URL")?
             .to_string();
-        let client = HttpClient::builder()
-            .timeout(None)
+        let client = crate::net::blocking_builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| format!("failed to create MCP HTTP client: {error}"))?;

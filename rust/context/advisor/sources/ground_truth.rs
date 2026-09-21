@@ -181,8 +181,7 @@ pub(crate) fn probe(settings: &Settings) -> Value {
 }
 
 fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(None)
+    crate::net::blocking_builder()
         .build()
         .map_err(|error| format!("HTTP client could not be built: {error}"))
 }

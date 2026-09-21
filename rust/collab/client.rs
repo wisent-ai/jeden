@@ -4,8 +4,7 @@ use serde_json::Value;
 /// connection ends; `reqwest`'s own thirty-second default is turned off,
 /// because a library's guess is still a guess.
 fn client() -> Result<reqwest::blocking::Client, String> {
-    reqwest::blocking::Client::builder()
-        .timeout(None)
+    crate::net::blocking_builder()
         .build()
         .map_err(|e| e.to_string())
 }

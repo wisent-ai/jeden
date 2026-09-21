@@ -151,8 +151,7 @@ impl MediaRouterClient {
             );
         }
         origin.set_path("/");
-        let client = Client::builder()
-            .timeout(None)
+        let client = crate::net::blocking_builder()
             .build()
             .map_err(|error| format!("failed to initialize media-router client: {error}"))?;
         Ok(Self {

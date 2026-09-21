@@ -22,6 +22,7 @@ pub mod marketplace;
 pub mod mcp;
 pub mod memory;
 pub mod model_router;
+pub mod net;
 pub mod onboarding;
 pub mod probierz;
 pub mod protocol;

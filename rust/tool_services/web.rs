@@ -3,7 +3,7 @@ use super::types::{
     bounded_json, check_operation, nonempty, HealthDescriptor, ServiceError, ServiceResult,
 };
 use crate::tool_runtime::runtime_ops::OperationContext;
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::Response;
 use serde_json::{json, Value};
 use std::path::Path;
 use url::Url;
@@ -167,8 +167,7 @@ fn send_provider(
     }
     let socket = crate::tool_runtime::runtime_ops::network::pinned_socket(&target)
         .map_err(|e| ServiceError::PermissionDenied(e.to_string()))?;
-    let client = Client::builder()
-        .timeout(None)
+    let client = crate::net::blocking_builder()
         .redirect(reqwest::redirect::Policy::none())
         .resolve(&target.host, socket)
         .build()
