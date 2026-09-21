@@ -57,16 +57,23 @@ pub(super) fn informative_terms(terms: &[Term]) -> Vec<String> {
 }
 
 /// Weighted term hits, with a title or path hit worth more than a body hit,
-/// scaled by how much of the query the chunk covers and damped by its length
-/// so a long file cannot win by repetition alone. A stem hit counts for half:
-/// `routingu` should find `routing`, but an exact match is still the better
-/// answer.
+/// scaled by how much of the query's *weight* the chunk covers and damped by
+/// its length so a long file cannot win by repetition alone. A stem hit
+/// counts for half: `routingu` should find `routing`, but an exact match is
+/// still the better answer.
+///
+/// Coverage is measured in weight rather than in term count for a reason a
+/// query exposes immediately: "jak dziala interleave rekomendacji" has one
+/// word that identifies a function and three that appear everywhere, and
+/// counting terms would rank three common words above the one rare one.
 pub(super) fn score_section(section: &Section, terms: &[Term]) -> f64 {
     const STEM_WEIGHT: f64 = 0.5;
     const LENGTH_SCALE: f64 = 2_000.0;
     let mut total = NO_MATCH;
-    let mut covered = usize::default();
+    let mut covered_weight = NO_MATCH;
+    let mut query_weight = NO_MATCH;
     for term in terms {
+        query_weight += term.weight;
         let exact = hits(section, &term.word);
         let approximate = if term.stem == term.word {
             NO_MATCH
@@ -74,14 +81,14 @@ pub(super) fn score_section(section: &Section, terms: &[Term]) -> f64 {
             STEM_WEIGHT * hits(section, &term.stem)
         };
         if exact + approximate > NO_MATCH {
-            covered += 1;
+            covered_weight += term.weight;
             total += term.weight * (exact + approximate);
         }
     }
-    if covered == usize::default() {
+    if covered_weight <= NO_MATCH || query_weight <= NO_MATCH {
         return NO_MATCH;
     }
-    let coverage = covered as f64 / terms.len() as f64;
+    let coverage = covered_weight / query_weight;
     let length_norm = 1.0 + (section.body.len() as f64 / LENGTH_SCALE);
     total * coverage / length_norm
 }
