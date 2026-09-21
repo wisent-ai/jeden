@@ -29,10 +29,7 @@ pub(crate) fn read_any(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         let (server, uri) = rest
             .split_once('/')
             .ok_or("mcp URI requires mcp://server/resource-uri")?;
-        return super::custom::mcp_read_resource(
-            runtime,
-            &json!({"server":server,"uri":uri,"timeoutMs":u64_input(input,"timeoutMs",30_000)}),
-        );
+        return super::custom::mcp_read_resource(runtime, &json!({"server":server,"uri":uri}));
     }
     if path.starts_with("http://") || path.starts_with("https://") {
         let mut routed = input.clone();

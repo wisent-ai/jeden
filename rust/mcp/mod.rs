@@ -185,7 +185,7 @@ impl ServerConnection {
         self.retry_after = Some(Instant::now() + delay);
     }
 
-    fn connect(&mut self, cwd: &Path, timeout_ms: u64, force: bool) -> Result<(), String> {
+    fn connect(&mut self, cwd: &Path, force: bool) -> Result<(), String> {
         if self.client.as_mut().map(McpClient::is_alive) == Some(true) && !force {
             return Ok(());
         }
@@ -211,27 +211,27 @@ impl ServerConnection {
         self.state = ConnectionState::Connecting;
         let result: Result<(), String> = (|| {
             let mut client = McpClient::start(&self.config, cwd)?;
-            let initialize = client.initialize(timeout_ms)?;
+            let initialize = client.initialize()?;
             let capabilities = initialize
                 .get("capabilities")
                 .and_then(Value::as_object)
                 .ok_or("MCP initialize capabilities must be an object")?;
             let tools = if capabilities.contains_key("tools") {
-                let value = client.request("tools/list", json!({}), timeout_ms)?;
+                let value = client.request("tools/list", json!({}))?;
                 validate_tools(&value)?;
                 value
             } else {
                 json!({"tools": []})
             };
             let resources = if capabilities.contains_key("resources") {
-                let value = client.request("resources/list", json!({}), timeout_ms)?;
+                let value = client.request("resources/list", json!({}))?;
                 validate_resources(&value)?;
                 value
             } else {
                 json!({"resources": []})
             };
             let prompts = if capabilities.contains_key("prompts") {
-                let value = client.request("prompts/list", json!({}), timeout_ms)?;
+                let value = client.request("prompts/list", json!({}))?;
                 validate_prompts(&value)?;
                 value
             } else {
@@ -259,19 +259,13 @@ impl ServerConnection {
         }
     }
 
-    fn request(
-        &mut self,
-        cwd: &Path,
-        method: &str,
-        params: Value,
-        timeout_ms: u64,
-    ) -> Result<Value, String> {
-        self.connect(cwd, timeout_ms, false)?;
+    fn request(&mut self, cwd: &Path, method: &str, params: Value) -> Result<Value, String> {
+        self.connect(cwd, false)?;
         let first = self
             .client
             .as_mut()
             .ok_or("MCP connection unavailable")?
-            .request(method, params.clone(), timeout_ms);
+            .request(method, params.clone());
         let result = match first {
             Ok(value) => Ok(value),
             Err(error) => {
@@ -288,12 +282,12 @@ impl ServerConnection {
                     return Err(error);
                 }
                 self.record_failure(error);
-                self.connect(cwd, timeout_ms, false)?;
+                self.connect(cwd, false)?;
                 let retry = self
                     .client
                     .as_mut()
                     .ok_or("MCP connection unavailable")?
-                    .request(method, params, timeout_ms);
+                    .request(method, params);
                 if let Err(error) = &retry {
                     let dead = self
                         .client
@@ -316,7 +310,7 @@ impl ServerConnection {
             .as_mut()
             .map(McpClient::take_notifications)
             .unwrap_or_default();
-        self.process_notifications(cwd, notifications, timeout_ms)?;
+        self.process_notifications(cwd, notifications)?;
         Ok(result)
     }
 
@@ -324,7 +318,6 @@ impl ServerConnection {
         &mut self,
         _cwd: &Path,
         notifications: Vec<Value>,
-        timeout_ms: u64,
     ) -> Result<(), String> {
         let mut tools_changed = false;
         let mut resources_changed = false;
@@ -346,17 +339,17 @@ impl ServerConnection {
         }
         let client = self.client.as_mut().ok_or("MCP connection unavailable")?;
         if tools_changed {
-            let value = client.request("tools/list", json!({}), timeout_ms)?;
+            let value = client.request("tools/list", json!({}))?;
             validate_tools(&value)?;
             self.tools = value;
         }
         if resources_changed {
-            let value = client.request("resources/list", json!({}), timeout_ms)?;
+            let value = client.request("resources/list", json!({}))?;
             validate_resources(&value)?;
             self.resources = value;
         }
         if prompts_changed {
-            let value = client.request("prompts/list", json!({}), timeout_ms)?;
+            let value = client.request("prompts/list", json!({}))?;
             validate_prompts(&value)?;
             self.prompts = value;
         }
@@ -493,9 +486,9 @@ fn validate_prompts(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub fn list_tools(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Value, String> {
+pub fn list_tools(cwd: &Path, server_name: &str) -> Result<Value, String> {
     with_connection(cwd, server_name, |connection| {
-        let value = connection.request(cwd, "tools/list", json!({}), timeout_ms)?;
+        let value = connection.request(cwd, "tools/list", json!({}))?;
         validate_tools(&value)?;
         connection.tools = value.clone();
         Ok(value)
@@ -507,7 +500,6 @@ pub fn call_tool(
     server_name: &str,
     tool_name: &str,
     args: Value,
-    timeout_ms: u64,
 ) -> Result<Value, String> {
     if tool_name.is_empty() {
         return Err("toolName is required".into());
@@ -520,7 +512,6 @@ pub fn call_tool(
             cwd,
             "tools/call",
             json!({"name": tool_name, "arguments": args}),
-            timeout_ms,
         )?;
         if !value.is_object() {
             return Err("MCP tools/call result must be an object".into());
@@ -529,26 +520,21 @@ pub fn call_tool(
     })
 }
 
-pub fn list_resources(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Value, String> {
+pub fn list_resources(cwd: &Path, server_name: &str) -> Result<Value, String> {
     with_connection(cwd, server_name, |connection| {
-        let value = connection.request(cwd, "resources/list", json!({}), timeout_ms)?;
+        let value = connection.request(cwd, "resources/list", json!({}))?;
         validate_resources(&value)?;
         connection.resources = value.clone();
         Ok(value)
     })
 }
 
-pub fn read_resource(
-    cwd: &Path,
-    server_name: &str,
-    uri: &str,
-    timeout_ms: u64,
-) -> Result<Value, String> {
+pub fn read_resource(cwd: &Path, server_name: &str, uri: &str) -> Result<Value, String> {
     if uri.is_empty() {
         return Err("uri is required".into());
     }
     with_connection(cwd, server_name, |connection| {
-        let value = connection.request(cwd, "resources/read", json!({"uri": uri}), timeout_ms)?;
+        let value = connection.request(cwd, "resources/read", json!({"uri": uri}))?;
         if !value.is_object() {
             return Err("MCP resources/read result must be an object".into());
         }
@@ -556,22 +542,18 @@ pub fn read_resource(
     })
 }
 
-pub fn list_prompts(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Value, String> {
+pub fn list_prompts(cwd: &Path, server_name: &str) -> Result<Value, String> {
     with_connection(cwd, server_name, |connection| {
-        let value = connection.request(cwd, "prompts/list", json!({}), timeout_ms)?;
+        let value = connection.request(cwd, "prompts/list", json!({}))?;
         validate_prompts(&value)?;
         connection.prompts = value.clone();
         Ok(value)
     })
 }
 
-pub fn server_capabilities(
-    cwd: &Path,
-    server_name: &str,
-    timeout_ms: u64,
-) -> Result<Value, String> {
+pub fn server_capabilities(cwd: &Path, server_name: &str) -> Result<Value, String> {
     with_connection(cwd, server_name, |connection| {
-        connection.connect(cwd, timeout_ms, false)?;
+        connection.connect(cwd, false)?;
         Ok(connection.initialize.clone())
     })
 }
@@ -581,7 +563,6 @@ pub fn get_prompt(
     server_name: &str,
     name: &str,
     args: Value,
-    timeout_ms: u64,
 ) -> Result<Value, String> {
     if name.is_empty() {
         return Err("name is required".into());
@@ -594,7 +575,6 @@ pub fn get_prompt(
             cwd,
             "prompts/get",
             json!({"name": name, "arguments": args}),
-            timeout_ms,
         )?;
         if !value.is_object() {
             return Err("MCP prompts/get result must be an object".into());
@@ -610,7 +590,6 @@ type Handshakes = Vec<(String, ServerConnection, Result<(), String>)>;
 fn connect_parallel(
     pending: Vec<(String, ServerConnection)>,
     cwd: &Path,
-    timeout_ms: u64,
     force: bool,
 ) -> Result<Handshakes, String> {
     if pending.is_empty() {
@@ -635,7 +614,7 @@ fn connect_parallel(
                         let Some((name, mut connection)) = item else {
                             break;
                         };
-                        let result = connection.connect(cwd, timeout_ms, force);
+                        let result = connection.connect(cwd, force);
                         completed.push((name, connection, result));
                     }
                     Ok::<_, String>(completed)
@@ -654,7 +633,7 @@ fn connect_parallel(
     })
 }
 
-pub fn live_tools(cwd: &Path, timeout_ms: u64) -> Result<Vec<(String, Value)>, String> {
+pub fn live_tools(cwd: &Path) -> Result<Vec<(String, Value)>, String> {
     let key = session_key(cwd);
     let pending = {
         let mut managers = managers()?;
@@ -673,8 +652,7 @@ pub fn live_tools(cwd: &Path, timeout_ms: u64) -> Result<Vec<(String, Value)>, S
             };
             match notifications {
                 Ok(notifications) => {
-                    if let Err(error) =
-                        connection.process_notifications(cwd, notifications, timeout_ms)
+                    if let Err(error) = connection.process_notifications(cwd, notifications)
                     {
                         connection.record_failure(error);
                     }
@@ -704,7 +682,7 @@ pub fn live_tools(cwd: &Path, timeout_ms: u64) -> Result<Vec<(String, Value)>, S
             })
             .collect::<Vec<_>>()
     };
-    let results = connect_parallel(pending, cwd, timeout_ms, false)?;
+    let results = connect_parallel(pending, cwd, false)?;
     let mut startup_errors = Vec::new();
     let mut managers = managers()?;
     let manager = managers.entry(key).or_default();
@@ -738,13 +716,13 @@ pub fn live_tools(cwd: &Path, timeout_ms: u64) -> Result<Vec<(String, Value)>, S
     Ok(tools)
 }
 
-pub fn refresh_all(cwd: &Path, timeout_ms: u64) -> Result<Value, String> {
+pub fn refresh_all(cwd: &Path) -> Result<Value, String> {
     let configs = configured_servers(cwd)?;
     let pending = configs
         .into_iter()
         .map(|(name, config)| (name, ServerConnection::new(config)))
         .collect();
-    let results = connect_parallel(pending, cwd, timeout_ms, true)?;
+    let results = connect_parallel(pending, cwd, true)?;
     let key = session_key(cwd);
     let mut managers = managers()?;
     let manager = managers.entry(key).or_default();
@@ -764,14 +742,14 @@ pub fn refresh_all(cwd: &Path, timeout_ms: u64) -> Result<Value, String> {
     Ok(Value::Object(status))
 }
 
-pub fn reconnect(cwd: &Path, server_name: &str, timeout_ms: u64) -> Result<Value, String> {
+pub fn reconnect(cwd: &Path, server_name: &str) -> Result<Value, String> {
     let config = configured_server(cwd, server_name)?;
     with_connection(cwd, server_name, |connection| {
         connection.disconnect();
         connection.config = config;
         connection.failures = 0;
         connection.retry_after = None;
-        connection.connect(cwd, timeout_ms, true)?;
+        connection.connect(cwd, true)?;
         crate::capability::invalidate();
         Ok(
             json!({"server": server_name, "state": connection.state.as_str(), "tools": connection.tools.get("tools").and_then(Value::as_array).map_or(0, Vec::len)}),
@@ -814,7 +792,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
             sandbox.backend, sandbox.detail
         )))];
     }
-    let discovery_error = live_tools(cwd, 30_000).err();
+    let discovery_error = live_tools(cwd).err();
     let key = session_key(cwd);
     let Ok(mut managers) = managers() else {
         return vec![CapabilityDescriptor::new(

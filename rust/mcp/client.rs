@@ -7,7 +7,6 @@ use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
 
 use super::{resolve_server_cwd, string_field, MAX_STDERR_BYTES, MCP_PROTOCOL_VERSION};
 
@@ -251,7 +250,6 @@ impl McpClient {
             .ok_or("streamable HTTP MCP server.url must be an http(s) URL")?
             .to_string();
         let client = HttpClient::builder()
-            .connect_timeout(Duration::from_secs(10))
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| format!("failed to create MCP HTTP client: {error}"))?;
@@ -261,7 +259,7 @@ impl McpClient {
             session_id: None,
         })
     }
-    fn send(&mut self, message: &Value, timeout_ms: u64) -> Result<Vec<Value>, String> {
+    fn send(&mut self, message: &Value) -> Result<Vec<Value>, String> {
         match &mut self.transport {
             Transport::Stdio(transport) => {
                 let encoded = encode_message(message)?;
@@ -279,22 +277,16 @@ impl McpClient {
                 let Some(expected_id) = message.get("id").and_then(Value::as_u64) else {
                     return Ok(Vec::new());
                 };
-                let wait = Duration::from_millis(timeout_ms.clamp(1_000, 120_000));
-                let deadline = std::time::Instant::now() + wait;
+                // The server answers, or its transport closes. Nothing here
+                // guesses how long a tool call on the other side may take:
+                // a `list` that reads a repository and a `call` that runs a
+                // build are the same wait to this loop.
                 let mut messages = Vec::new();
                 loop {
-                    let remaining = deadline
-                        .checked_duration_since(std::time::Instant::now())
-                        .ok_or_else(|| format!("MCP request exceeded {timeout_ms}ms wait"))?;
-                    let response = match transport.responses.recv_timeout(remaining) {
+                    let response = match transport.responses.recv() {
                         Ok(Ok(response)) => response,
                         Ok(Err(error)) => return Err(error),
-                        Err(mpsc::RecvTimeoutError::Timeout) => {
-                            return Err(format!("MCP request exceeded {timeout_ms}ms wait"))
-                        }
-                        Err(mpsc::RecvTimeoutError::Disconnected) => {
-                            return Err("MCP stdio transport closed".into())
-                        }
+                        Err(mpsc::RecvError) => return Err("MCP stdio transport closed".into()),
                     };
                     let complete = response.get("id").and_then(Value::as_u64) == Some(expected_id);
                     messages.push(response);
@@ -307,7 +299,6 @@ impl McpClient {
                 let mut request = transport
                     .client
                     .post(&transport.url)
-                    .timeout(Duration::from_millis(timeout_ms.clamp(1_000, 120_000)))
                     .header(CONTENT_TYPE, "application/json")
                     .header(ACCEPT, "application/json, text/event-stream")
                     .json(message);
@@ -373,12 +364,7 @@ impl McpClient {
         }
     }
 
-    pub(super) fn request(
-        &mut self,
-        method: &str,
-        params: Value,
-        timeout_ms: u64,
-    ) -> Result<Value, String> {
+    pub(super) fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;
         self.next_id = self
             .next_id
@@ -386,7 +372,7 @@ impl McpClient {
             .ok_or("MCP request id exhausted")?;
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         loop {
-            let messages = self.send(&message, timeout_ms)?;
+            let messages = self.send(&message)?;
             for response in messages {
                 if response.get("method").is_some()
                     && response.get("id").is_none()
@@ -422,9 +408,9 @@ impl McpClient {
         }
     }
 
-    fn notify(&mut self, method: &str, params: Value, timeout_ms: u64) -> Result<(), String> {
+    fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
         let message = json!({"jsonrpc": "2.0", "method": method, "params": params});
-        for response in self.send(&message, timeout_ms)? {
+        for response in self.send(&message)? {
             if response.get("method").is_some() && response.get("id").is_none() {
                 if self.notifications.len() >= MAX_NOTIFICATIONS {
                     return Err("MCP notification queue limit exceeded".into());
@@ -435,7 +421,7 @@ impl McpClient {
         Ok(())
     }
 
-    pub(super) fn initialize(&mut self, timeout_ms: u64) -> Result<Value, String> {
+    pub(super) fn initialize(&mut self) -> Result<Value, String> {
         let init = self.request(
             "initialize",
             json!({
@@ -443,7 +429,6 @@ impl McpClient {
                 "capabilities": {},
                 "clientInfo": {"name": "jeden", "version": crate::JEDEN_VERSION},
             }),
-            timeout_ms,
         )?;
         if !init.is_object()
             || init
@@ -457,7 +442,7 @@ impl McpClient {
         {
             return Err("MCP initialize result has invalid schema".into());
         }
-        self.notify("notifications/initialized", json!({}), timeout_ms)?;
+        self.notify("notifications/initialized", json!({}))?;
         Ok(init)
     }
 
@@ -514,7 +499,6 @@ impl McpClient {
                         .client
                         .delete(&transport.url)
                         .header(MCP_SESSION_ID, session_id)
-                        .timeout(Duration::from_secs(2))
                         .send();
                 }
             }

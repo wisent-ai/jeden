@@ -18,7 +18,7 @@ pub(crate) fn native_mcp_tool_name(server_name: &str, tool_name: &str) -> String
 }
 
 pub fn native_mcp_tool_target(cwd: &Path, native_name: &str) -> Option<(String, String)> {
-    crate::mcp::live_tools(cwd, 30_000)
+    crate::mcp::live_tools(cwd)
         .ok()?
         .into_iter()
         .find_map(|(server_name, tool)| {

@@ -358,19 +358,13 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("fetch_url requires http(s) URL".into());
     }
-    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
     let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
-    let request_deadline = runtime
-        .operation
-        .effective_deadline(Duration::from_millis(timeout_ms));
     if runtime.operation.cancellation().is_cancelled() {
         return Err("fetch_url cancelled".into());
     }
-    if std::time::Instant::now() >= request_deadline {
-        return Err("fetch_url timed out".into());
-    }
+    // The server answers or the connection ends; a cancelled turn still stops
+    // this read at the next chunk.
     let client = reqwest::blocking::Client::builder()
-        .timeout(request_deadline.saturating_duration_since(std::time::Instant::now()))
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(&url).send().map_err(|e| e.to_string())?;
@@ -393,9 +387,6 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     loop {
         if runtime.operation.cancellation().is_cancelled() {
             return Err("fetch_url cancelled".into());
-        }
-        if std::time::Instant::now() >= request_deadline {
-            return Err("fetch_url timed out".into());
         }
         let count = response.read(&mut buffer).map_err(|e| e.to_string())?;
         if count == 0 {

@@ -313,9 +313,9 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             let (server, _) = split_head(rest);
             if server.is_empty() { return Err(format!("Usage: /mcp {} <server>", verb)); }
             let result = match verb {
-                "tools" | "test" => mcp::list_tools(context.cwd, server, u64::MAX),
-                "resources" => mcp::list_resources(context.cwd, server, u64::MAX),
-                "prompts" => mcp::list_prompts(context.cwd, server, u64::MAX),
+                "tools" | "test" => mcp::list_tools(context.cwd, server),
+                "resources" => mcp::list_resources(context.cwd, server),
+                "prompts" => mcp::list_prompts(context.cwd, server),
                 _ => unreachable!(),
             }?;
             serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
@@ -323,7 +323,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
         "notifications" => {
             let (server, _) = split_head(rest);
             if server.is_empty() { return Err("Usage: /mcp notifications <server>".into()); }
-            let init = mcp::server_capabilities(context.cwd, server, u64::MAX)?;
+            let init = mcp::server_capabilities(context.cwd, server)?;
             let capabilities = init.get("capabilities").cloned().unwrap_or_else(|| json!({}));
             Ok(format!(
                 "MCP notification capabilities for {} (live persistent connection):\n{}",
@@ -332,7 +332,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             ))
         },
         "reload" => {
-            let status = mcp::refresh_all(context.cwd, u64::MAX)?;
+            let status = mcp::refresh_all(context.cwd)?;
             Ok(format!(
                 "Reloaded MCP config and refreshed live connections:\n{}",
                 serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?
@@ -341,7 +341,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
         "reconnect" => {
             let (server, _) = split_head(rest);
             if server.is_empty() { return Err("Usage: /mcp reconnect <server>".into()); }
-            let status = mcp::reconnect(context.cwd, server, u64::MAX)
+            let status = mcp::reconnect(context.cwd, server)
                 .map_err(|error| format!("Reconnect to {server} failed: {error}"))?;
             Ok(format!(
                 "Reconnected MCP server {server}:\n{}",
