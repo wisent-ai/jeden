@@ -337,6 +337,7 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     // The server answers or the connection ends; a cancelled turn still stops
     // this read at the next chunk.
     let client = reqwest::blocking::Client::builder()
+        .timeout(None)
         .build()
         .map_err(|e| e.to_string())?;
     let mut response = client.get(&url).send().map_err(|e| e.to_string())?;

@@ -152,9 +152,7 @@ impl MediaRouterClient {
         }
         origin.set_path("/");
         let client = Client::builder()
-            .connect_timeout(Duration::from_secs(
-                "10".parse().expect("valid media-router connect timeout"),
-            ))
+            .timeout(None)
             .build()
             .map_err(|error| format!("failed to initialize media-router client: {error}"))?;
         Ok(Self {

@@ -95,16 +95,7 @@ fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
         max_attempts,
         base_delay: duration_setting(retry, "baseDelayMs", defaults.base_delay.as_millis() as u64)?,
         max_delay: duration_setting(retry, "maxDelayMs", defaults.max_delay.as_millis() as u64)?,
-        first_event_timeout: duration_setting(
-            retry,
-            "firstEventTimeoutMs",
-            defaults.first_event_timeout.as_millis() as u64,
-        )?,
-        idle_timeout: duration_setting(
-            retry,
-            "idleTimeoutMs",
-            defaults.idle_timeout.as_millis() as u64,
-        )?,
+
         jitter_ratio,
     })
 }

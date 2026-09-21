@@ -81,7 +81,7 @@ static ENDPOINT: LazyLock<Option<Endpoint>> = LazyLock::new(|| {
         return None;
     }
     let base = url[..Position::BeforePath].to_string();
-    let client = reqwest::blocking::Client::builder().build().ok()?;
+    let client = reqwest::blocking::Client::builder().timeout(None).build().ok()?;
     let models: Value = client
         .get(format!("{base}/v1/models"))
         .send()
@@ -216,7 +216,7 @@ pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
         "stream": false,
         "chat_template_kwargs": { "enable_thinking": false },
     });
-    let client = reqwest::blocking::Client::builder().build().ok()?;
+    let client = reqwest::blocking::Client::builder().timeout(None).build().ok()?;
     let response: Value = client
         .post(&endpoint.completions_url)
         .json(&body)

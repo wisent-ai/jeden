@@ -41,11 +41,12 @@ fn helper_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-/// Health checks must fail closed without holding agent startup indefinitely.
+/// Health checks fail closed: the verifier's own verdict is the answer, and
+/// nothing here decides on its behalf that a slow machine is an unsigned
+/// binary.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn health_output(command: &mut Command) -> Result<std::process::Output, String> {
     use std::io::Read;
-    use std::time::{Duration, Instant};
 
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let stderr = child.stderr.take();
@@ -56,27 +57,9 @@ fn health_output(command: &mut Command) -> Result<std::process::Output, String> 
         }
         Ok::<_, std::io::Error>(bytes)
     });
-    let started = Instant::now();
-    let timeout = Duration::from_secs(30);
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < timeout => {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            result => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(match result {
-                    Err(error) => format!("cannot wait for health check: {error}"),
-                    _ => format!(
-                        "health check timed out after {} seconds; sandbox remains unavailable",
-                        timeout.as_secs()
-                    ),
-                });
-            }
-        }
-    };
+    let status = child
+        .wait()
+        .map_err(|error| format!("cannot wait for health check: {error}"))?;
     let stderr = reader
         .join()
         .map_err(|_| "health check stderr reader failed")?

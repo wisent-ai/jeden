@@ -337,6 +337,7 @@ pub(crate) fn fetch_readable_url(
     }
     let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
     let client = reqwest::blocking::Client::builder()
+        .timeout(None)
         .build()
         .map_err(|e| e.to_string())?;
     let response = client.get(&url).send().map_err(|e| e.to_string())?;

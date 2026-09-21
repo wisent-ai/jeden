@@ -46,7 +46,9 @@ fn slow_gateway() -> String {
 fn serve(mut stream: TcpStream) -> bool {
     let mut reader = BufReader::new(stream.try_clone().expect("clone the socket"));
     let mut request = String::new();
-    reader.read_line(&mut request).expect("read the request line");
+    reader
+        .read_line(&mut request)
+        .expect("read the request line");
     let mut length = 0usize;
     loop {
         let mut header = String::new();
@@ -105,13 +107,10 @@ impl Turn {
         Self { root }
     }
 
-    /// The operator's own choice of bound, written where a workspace keeps it.
-    fn bound(&self, milliseconds: u64) {
+    /// A workspace configuration document, written where a workspace keeps it.
+    fn write_config(&self, document: &str) {
         let directory = self.root.join("workspace/.jeden");
         std::fs::create_dir_all(&directory).expect("create the workspace config directory");
-        let document = format!(
-            "{{\"modelRouting\":{{\"retry\":{{\"firstEventTimeoutMs\":{milliseconds},\"maxAttempts\":1}}}}}}"
-        );
         std::fs::write(directory.join("config.json"), document)
             .expect("write the workspace config");
     }
@@ -119,7 +118,13 @@ impl Turn {
     fn run(&self, url: &str) -> (bool, String, Duration) {
         let started = Instant::now();
         let output = Command::new(env!("CARGO_BIN_EXE_jeden"))
-            .args(["run", "say the word", "--model-only", "--model", "slow/route"])
+            .args([
+                "run",
+                "say the word",
+                "--model-only",
+                "--model",
+                "slow/route",
+            ])
             .env("HOME", self.root.join("home"))
             .env("JEDEN_SESSION_ROOT", self.root.join("sessions"))
             .env("JEDEN_TAMA_REGISTRY", "")
@@ -158,24 +163,23 @@ fn a_route_that_thinks_past_the_old_bound_still_answers() {
     );
 }
 
-/// An operator who names the bound keeps it: the same gateway, a bound below
-/// its thinking time, and the refusal names the phase that expired.
+/// A stream that is quiet is not a stream that failed: nothing in the router
+/// ends one for taking too long any more, so the only bound left is the
+/// operator cancelling the turn.
 #[test]
-fn a_bound_the_operator_sets_is_the_bound() {
+fn no_setting_can_cut_a_route_that_is_still_thinking() {
     let url = slow_gateway();
     let turn = Turn::new("configured");
-    turn.bound(2_000);
+    turn.write_config(
+        "{\"modelRouting\":{\"retry\":{\"firstEventTimeoutMs\":2000,\"maxAttempts\":1}}}",
+    );
     let (succeeded, text, elapsed) = turn.run(&url);
     assert!(
-        !succeeded,
-        "a bound the operator set must still expire: {text}"
+        succeeded && text.contains(ANSWER),
+        "a setting that no longer exists cut the answer short after {elapsed:?}: {text}"
     );
     assert!(
-        text.contains("first-event timeout"),
-        "the refusal must name the phase that expired: {text}"
-    );
-    assert!(
-        elapsed < THINKING,
-        "the turn waited {elapsed:?}, past the bound it was given: {text}"
+        elapsed >= THINKING,
+        "the turn returned in {elapsed:?}, before the gateway said anything: {text}"
     );
 }

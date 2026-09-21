@@ -38,8 +38,6 @@ pub struct RetryPolicy {
     pub max_attempts: usize,
     pub base_delay: Duration,
     pub max_delay: Duration,
-    pub first_event_timeout: Duration,
-    pub idle_timeout: Duration,
     pub jitter_ratio: f64,
 }
 
@@ -49,8 +47,6 @@ impl Default for RetryPolicy {
             max_attempts: 3,
             base_delay: Duration::from_secs(2),
             max_delay: Duration::from_secs(8),
-            first_event_timeout: Duration::from_secs(30),
-            idle_timeout: Duration::from_secs(45),
             jitter_ratio: 0.2,
         }
     }
@@ -84,7 +80,6 @@ pub enum RouteResult {
 #[serde(rename_all = "camelCase")]
 pub enum StreamErrorClass {
     Cancelled,
-    Timeout,
     TransientHttp,
     Network,
     ContextOverflow,
@@ -357,6 +352,7 @@ pub fn chat_completion(
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let (ts, body_hash, sig) = hmac_headers(&body_text, &config.agent_id, &config.secret)?;
     let client = Client::builder()
+        .timeout(None)
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
     let response = client
@@ -761,8 +757,7 @@ impl AttemptError {
     fn is_transient(&self) -> bool {
         matches!(
             self.class,
-            StreamErrorClass::Timeout
-                | StreamErrorClass::TransientHttp
+            StreamErrorClass::TransientHttp
                 | StreamErrorClass::Network
                 | StreamErrorClass::EmptyResponse
         )
@@ -879,29 +874,18 @@ fn streaming_attempt(
     spawn_openai_stream_adapter(config, body_text, sender)?;
 
     let mut state = OpenAiStreamState::default();
-    let first_deadline = Instant::now() + config.retry.first_event_timeout;
-    let mut idle_deadline = first_deadline;
-    let mut first_event_seen = false;
     let mut content_type = String::new();
     loop {
-        let deadline = if first_event_seen {
-            idle_deadline
-        } else {
-            first_deadline
-        };
-        let message = recv_until(&receiver, deadline, cancelled).map_err(|class| AttemptError {
+        let message = recv_until(&receiver, cancelled).map_err(|class| AttemptError {
             class,
             message: match class {
                 StreamErrorClass::Cancelled => "Turn cancelled.".into(),
                 StreamErrorClass::Network => "model stream adapter disconnected".into(),
-                StreamErrorClass::Timeout if first_event_seen => "model stream idle timeout".into(),
-                StreamErrorClass::Timeout => "model stream first-event timeout".into(),
                 _ => "model stream receive failure".into(),
             },
             retry_after: None,
             visible_output: state.visible_output,
         })?;
-        idle_deadline = Instant::now() + config.retry.idle_timeout;
         match message {
             WireMessage::Headers {
                 status,
@@ -910,7 +894,7 @@ fn streaming_attempt(
             } => {
                 content_type = kind;
                 if !(200..300).contains(&status) {
-                    let body = match recv_until(&receiver, idle_deadline, cancelled) {
+                    let body = match recv_until(&receiver, cancelled) {
                         Ok(WireMessage::FullBody(Ok(body))) => body,
                         Ok(WireMessage::FullBody(Err(error))) | Ok(WireMessage::Network(error)) => {
                             error
@@ -953,7 +937,6 @@ fn streaming_attempt(
                     .push_line(&line)
                     .map_err(|message| malformed(message, state.visible_output))?
                 {
-                    first_event_seen = true;
                     if state.apply_payload(&payload, on_delta, on_reasoning)? {
                         return state.finish();
                     }
@@ -1002,7 +985,7 @@ fn spawn_openai_stream_adapter(
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
         .spawn(move || {
-            let client = match Client::builder().build() {
+            let client = match Client::builder().timeout(None).build() {
                 Ok(client) => client,
                 Err(error) => {
                     let _ = sender.send(WireMessage::Network(
@@ -1348,23 +1331,19 @@ fn is_context_overflow_body(body: &str) -> bool {
         || lower.contains("tokens exceed")
 }
 
+/// Take the next message from the stream adapter. It arrives, the adapter
+/// disconnects, or the operator cancels the turn; a model that is still
+/// thinking is not one of those, which is what the old first-event and idle
+/// deadlines used to report it as.
 fn recv_until(
     receiver: &Receiver<WireMessage>,
-    deadline: Instant,
     cancelled: &dyn Fn() -> bool,
 ) -> Result<WireMessage, StreamErrorClass> {
     loop {
         if cancelled() {
             return Err(StreamErrorClass::Cancelled);
         }
-        let now = Instant::now();
-        if now >= deadline {
-            return Err(StreamErrorClass::Timeout);
-        }
-        let wait = deadline
-            .saturating_duration_since(now)
-            .min(Duration::from_millis(25));
-        match receiver.recv_timeout(wait) {
+        match receiver.recv_timeout(Duration::from_millis(25)) {
             Ok(message) => return Ok(message),
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Err(StreamErrorClass::Network),

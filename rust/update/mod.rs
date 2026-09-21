@@ -194,7 +194,7 @@ fn github_release_asset_request(
 fn fetch(location: &str, limit: usize) -> Result<Vec<u8>, String> {
     if location.starts_with("https://") {
         let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
+            .timeout(None)
             .build()
             .map_err(|error| error.to_string())?;
         let mut request = client.get(location);

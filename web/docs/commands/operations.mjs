@@ -94,7 +94,7 @@ export const operationCommands = [
     refusals: [
       "The command exits unsuccessfully when any active probe is unavailable; degraded or inactive evidence remains explicit in the report.",
       "A missing, unsigned, or non-enforcing <code>jeden-sandbox-helper</code> makes the <code>sandbox</code> probe unavailable, naming the helper path checked and the executable it was looked up beside, so a host that would fail every <code>jeden run</code> fails the doctor first.",
-      "Signature verification and the helper enforcement probe each have a 30-second subprocess deadline. A timeout reports <code>health check timed out after 30 seconds; sandbox remains unavailable</code>, together with the failed operation and helper path. It is not an invalid-signature verdict: the verifier did not finish. The sandbox stays unavailable; neither agent execution nor a successful standalone helper probe overrides the missing verification. This deadline does not bound the whole doctor command or its other probes.",
+      "Signature verification and the helper enforcement probe each run to completion: the verifier's own verdict is the answer, and a slow machine is never reported as an invalid signature. A probe that fails reports the failed operation and the helper path, and the sandbox stays unavailable; neither agent execution nor a successful standalone helper probe overrides missing verification.",
       "Storage probe failures and serialization failures are returned as errors instead of a healthy result.",
     ],
   },

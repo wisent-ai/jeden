@@ -168,6 +168,7 @@ fn send_provider(
     let socket = crate::tool_runtime::runtime_ops::network::pinned_socket(&target)
         .map_err(|e| ServiceError::PermissionDenied(e.to_string()))?;
     let client = Client::builder()
+        .timeout(None)
         .redirect(reqwest::redirect::Policy::none())
         .resolve(&target.host, socket)
         .build()

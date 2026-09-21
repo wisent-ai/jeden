@@ -250,6 +250,7 @@ impl McpClient {
             .ok_or("streamable HTTP MCP server.url must be an http(s) URL")?
             .to_string();
         let client = HttpClient::builder()
+            .timeout(None)
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|error| format!("failed to create MCP HTTP client: {error}"))?;

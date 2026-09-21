@@ -91,7 +91,10 @@ impl ReqwestTransport {
     /// The control-plane client. A call ends when the control plane answers
     /// or the connection does; no interval here decides that for it.
     pub fn production() -> Arc<dyn ControlPlaneTransport> {
-        let client = Client::builder().build().unwrap_or_else(|_| Client::new());
+        let client = Client::builder()
+            .timeout(None)
+            .build()
+            .unwrap_or_else(|_| Client::new());
         Arc::new(Self { client })
     }
 }

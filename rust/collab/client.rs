@@ -1,9 +1,11 @@
 use serde_json::Value;
 
 /// The relay client. A request runs until the relay answers or the
-/// connection ends; nothing here guesses how long that may take.
+/// connection ends; `reqwest`'s own thirty-second default is turned off,
+/// because a library's guess is still a guess.
 fn client() -> Result<reqwest::blocking::Client, String> {
     reqwest::blocking::Client::builder()
+        .timeout(None)
         .build()
         .map_err(|e| e.to_string())
 }
