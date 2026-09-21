@@ -145,9 +145,17 @@ pub(crate) fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
     run_git(&args, None).map(|_| ())
 }
 
-/// Fetch one HTTP(S) text body. No client-side deadline is configured.
+/// Fetch one HTTP(S) text body.
+///
+/// The comment here used to claim no client-side deadline while calling
+/// `reqwest::blocking::get`, which builds a client carrying the library's own
+/// thirty seconds. The claim is now true.
 fn http_get_text(url: &str) -> Result<String, String> {
-    let response = reqwest::blocking::get(url).map_err(|e| e.to_string())?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(None)
+        .build()
+        .map_err(|e| e.to_string())?;
+    let response = client.get(url).send().map_err(|e| e.to_string())?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("GET {url} failed: {status}"));

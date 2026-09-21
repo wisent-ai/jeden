@@ -2,11 +2,9 @@ use crate::sdk::{ApprovalRequest, ElicitationRequest, InteractionHandler};
 use serde_json::json;
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
 
 use super::server::JsonWriter;
 
-const INTERACTION_TIMEOUT: Duration = Duration::from_secs(300);
 
 enum PendingInteraction {
     Elicitation(mpsc::SyncSender<Result<String, String>>),
@@ -111,8 +109,8 @@ impl InteractionHandler for RpcInteractionBridge {
             return Err(error);
         }
         let result = receiver
-            .recv_timeout(INTERACTION_TIMEOUT)
-            .map_err(|_| "elicitation timed out".to_string());
+            .recv()
+            .map_err(|_| "elicitation channel closed".to_string());
         self.remove_pending(&request.token);
         result?
     }
@@ -128,8 +126,8 @@ impl InteractionHandler for RpcInteractionBridge {
             return Err(error);
         }
         let result = receiver
-            .recv_timeout(INTERACTION_TIMEOUT)
-            .map_err(|_| "approval timed out".to_string());
+            .recv()
+            .map_err(|_| "approval channel closed".to_string());
         self.remove_pending(&request.token);
         result?
     }
