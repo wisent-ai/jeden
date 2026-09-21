@@ -1,10 +1,10 @@
 //! Shared text work: which words of a query are searchable, how a snippet is
-//! cut, and how a source process is run under a deadline.
+//! cut, and how a source process is run to completion.
 //!
 //! There is deliberately no list of words to ignore. A hand-written stop list
 //! is a classifier nobody declared, and it is also unnecessary: the documents
 //! themselves say which words carry information, because a word that occurs
-//! in most of the corpus separates nothing. `docs::weights` computes that
+//! in most of the corpus separates nothing. `files::weights` computes that
 //! from the corpus it just read, so "the" and "jak" fall out by measurement
 //! rather than by opinion.
 

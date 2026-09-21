@@ -19,7 +19,6 @@ mod events;
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 use super::Hook;
 
@@ -42,7 +41,6 @@ const PASS_EXIT: i32 = 0;
 pub struct TamaHook {
     pub id: String,
     pub hook: Hook,
-    pub timeout: Duration,
     pub blocking: bool,
     pub unrunnable: Option<String>,
 }

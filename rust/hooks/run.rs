@@ -2,30 +2,21 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use super::event;
 
 use super::{
     hook_matches, parse_event_hooks, project_hooks_path, prompt_context, read_config,
-    resolve_trusted_hooks, user_hooks_path, Hook, HookOutcome, HOOK_TIMEOUT,
+    resolve_trusted_hooks, user_hooks_path, Hook, HookOutcome,
 };
 
-/// Run one hook command via `sh -c`, feeding `payload` JSON on stdin, capped by
-/// `HOOK_TIMEOUT`. A spawn/timeout failure surfaces as a non-zero outcome
-/// rather than aborting the turn.
+/// Run one hook command via `sh -c`, feeding `payload` JSON on stdin. A hook
+/// decides when it has finished deciding: a guard that reads a transcript or
+/// asks a model takes as long as that takes, and killing it turns a verdict
+/// nobody saw into an allowed action. A spawn failure surfaces as a non-zero
+/// outcome rather than aborting the turn.
 pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
-    run_hook_with_timeout(cwd, hook, payload, HOOK_TIMEOUT)
-}
-
-/// `run_hook` with an explicit timeout (Tama registry entries carry their own
-/// per-hook `timeout` seconds).
-pub fn run_hook_with_timeout(
-    cwd: &Path,
-    hook: &Hook,
-    payload: &Value,
-    timeout: Duration,
-) -> HookOutcome {
     let child = Command::new("sh")
         .arg("-c")
         .arg(&hook.command)
@@ -55,22 +46,10 @@ pub fn run_hook_with_timeout(
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(payload.to_string().as_bytes());
     }
-    let started = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
-            Ok(None) => {
-                if started.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return HookOutcome {
-                        exit_code: -1,
-                        stdout: String::new(),
-                        stderr: "hook timed out".into(),
-                    };
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => {
                 return HookOutcome {
                     exit_code: -1,
@@ -138,7 +117,7 @@ pub fn fire_event(
                 stdout: String::new(),
                 stderr: reason,
             },
-            None => run_hook_with_timeout(cwd, &tama.hook, payload, tama.timeout),
+            None => run_hook(cwd, &tama.hook, payload),
         };
         outcomes.push(super::tama::normalize_outcome(
             event,

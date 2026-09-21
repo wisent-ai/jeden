@@ -4,8 +4,8 @@
 //! Transcript Lake owns the masked canonical archive, so this module runs its
 //! command rather than reading its files: one owner, one reader, and the
 //! masking stays applied. The scan is seconds slow on a 16 GB archive, which
-//! is why `transcripts` is opt-in for the automatic advisory and always
-//! bounded by the configured deadline.
+//! is why `transcripts` is opt-in for the automatic advisory: the source
+//! selection, not a deadline, is what decides whether a turn pays for it.
 
 use std::process::Command;
 use std::time::Instant;

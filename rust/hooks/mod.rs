@@ -21,7 +21,6 @@ use regex::Regex;
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 #[path = "../extensions/mod.rs"]
 mod extensions;
@@ -58,7 +57,7 @@ pub struct HookOutcome {
     pub stderr: String,
 }
 
-pub(crate) const HOOK_TIMEOUT: Duration = Duration::from_secs(30);
+
 
 pub(crate) fn project_hooks_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/hooks.json")

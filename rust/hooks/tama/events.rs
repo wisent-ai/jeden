@@ -3,11 +3,10 @@
 
 use serde_json::Value;
 use std::path::Path;
-use std::time::Duration;
 
 use super::command::{entry_command, unrunnable_reason, EntryCommand};
 use super::{map_event, registry_path, TamaHook, BLOCK_EXIT, PASS_EXIT};
-use crate::hooks::{hook_matches, parse_hook_json, read_config, Hook, HookOutcome, HOOK_TIMEOUT};
+use crate::hooks::{hook_matches, parse_hook_json, read_config, Hook, HookOutcome};
 
 /// Registry hooks for jeden `event` (`PreToolUse`, `UserPromptSubmit`, …),
 /// filtered to `tool` (empty = no tool filter). Empty vec when no registry.
@@ -58,12 +57,7 @@ pub fn load_event_hooks(cwd: &Path, event: &str, tool: &str) -> Vec<TamaHook> {
             if !tool.is_empty() && !hook_matches(&hook, tool) {
                 continue;
             }
-            let timeout = entry
-                .get("timeout")
-                .and_then(Value::as_u64)
-                .filter(|secs| *secs > 0)
-                .map(Duration::from_secs)
-                .unwrap_or(HOOK_TIMEOUT);
+
             let blocking = entry
                 .get("blocking")
                 .and_then(Value::as_bool)
@@ -71,7 +65,7 @@ pub fn load_event_hooks(cwd: &Path, event: &str, tool: &str) -> Vec<TamaHook> {
             out.push(TamaHook {
                 id,
                 hook,
-                timeout,
+
                 blocking,
                 unrunnable,
             });
