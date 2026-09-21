@@ -6,7 +6,7 @@ export const contextPages = [
     meta: {
       htmlTitle: "Context — Jeden documentation",
       description:
-        "Jeden's context advisor — what an agent should read before it searches, from documentation, memory, transcripts and the Wisent ground-truth index, with every source's state reported.",
+        "Jeden's context advisor — what an agent should read before it searches, from every readable file, its own memory, the transcript archive and the Wisent ground-truth index, with every source's state reported.",
       ogTitle: "Context — Jeden documentation",
       ogDescription:
         "Ranked context recommendations with exact locators, injected into every turn and callable from the CLI, the agent tool set, Jeden Desktop and an Omp session.",
@@ -34,22 +34,23 @@ export const contextPages = [
       {
         title: "The four sources, and who owns each",
         paragraphs: [
-          "<strong>docs</strong> reads documentation files under the declared roots and ranks their heading sections. A section, not a file, is the unit: the locator is <code>path:first-last</code>, so the answer can be read directly. Roots are declared in <code>context.advisor.roots</code> as colon-separated <code>path</code> or <code>path@depth</code> entries and default to the project plus <code>~/.jeden</code>; <code>context.advisor.docExtensions</code> decides which file types count.",
+          "<strong>files</strong> reads everything readable under the declared roots — documentation, source code, configuration, manifests — and ranks it in chunks. Markdown is cut at its headings, because that is where its meaning starts; every other file is cut into forty-line windows titled by the window's first line at column zero, which in source is the declaration the rest of the window belongs to. The locator is <code>path:first-last</code>, so the answer can be read directly. Roots are declared in <code>context.advisor.roots</code> as colon-separated <code>path</code> or <code>path@depth</code> entries and default to the project plus <code>~/.jeden</code>. A file with a zero byte in its head is not text and is skipped, a file over 256 KB is skipped, and <code>.gitignore</code> is respected.",
           "<strong>memory</strong> recalls what earlier sessions wrote down for this working directory. The store and its ranking belong to Jeden's memory subsystem — <code>~/.jeden/memory.sqlite3</code>, scope <code>repo:&lt;cwd&gt;</code> — and the locator is <code>memory:&lt;id&gt;</code>. An empty store is reported as an empty store, not as a missing match.",
           "<strong>transcripts</strong> asks Transcript Lake, which owns the masked canonical archive of every recorded agent session. The advisor runs that product's own <code>search</code> command rather than reading its files, so the masking stays applied; the locator is <code>session:&lt;id&gt;</code>, which <code>jeden show</code> and the <code>recall_conversation</code> tool read.",
           "<strong>ground-truth</strong> asks the Wisent ground-truth index, which owns cited answers across the organization's repositories. The locator is the citation it returns — <code>repo/path@commit:first-last</code>. The endpoint comes from <code>context.advisor.groundTruthUrl</code>, or from <code>WISENT_GROUND_TRUTH_API</code> or <code>GROUND_TRUTH_API</code> when that is empty; <code>jeden context sources</code> reports which of the three it used.",
         ],
       },
       {
-        title: "Why two sources are opt-in",
+        title: "Every source answers, and each one is bounded",
         paragraphs: [
-          "<code>context.advisor.sources</code> defaults to <code>docs,memory</code>: the two that answer from local state in milliseconds. The archive scan takes seconds on a large lake and the ground-truth index is a network call, and a session start must not pay either. Both are one flag away — <code>--source all</code>, or add them to the setting — and each source is bounded by <code>context.advisor.timeoutMs</code> whichever way it is reached.",
-          "An unknown source name is refused rather than dropped: <code>unknown source(s): nonsense. Known sources: docs, ground-truth, memory, transcripts</code>. A narrowed answer is never the result of a typo.",
+          "<code>context.advisor.sources</code> defaults to <code>all</code>: nothing is left out of a search because it happened to be slow. The sources run concurrently, so a turn waits for the slowest one rather than for their sum, and each one is cut off by a deadline.",
+          "There are two deadlines because the two callers are different. <code>context.advisor.promptTimeoutMs</code> (1 s) bounds the block a turn builds automatically, because every turn pays it. <code>context.advisor.timeoutMs</code> (3 s) bounds a command a person is waiting on, and <code>--timeout-ms</code> overrides it for one call. A source that misses its deadline says so in the same answer instead of shortening it silently: on a large Transcript Lake archive the search takes seconds, so the automatic block usually reports <code>timed out after 1000 ms</code> for <code>transcripts</code> and <code>jeden context recommend \"…\" --source transcripts --timeout-ms 20000</code> is how you actually read it.",
+          "An unknown source name is refused rather than dropped: <code>unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts</code>. A narrowed answer is never the result of a typo.",
         ],
         commands: [
           {
-            label: "Ask every source once",
-            code: 'jeden context recommend "why did the release agent quarantine that host" --source all --limit 8',
+            label: "Ask every source, and give the archive room",
+            code: 'jeden context recommend "why did the release agent quarantine that host" --limit 8\njeden context recommend "why did the release agent quarantine that host" --source transcripts --timeout-ms 20000',
           },
         ],
       },
@@ -57,7 +58,8 @@ export const contextPages = [
         title: "Reading a short list",
         paragraphs: [
           "Every answer carries a state for every source it consulted: <code>available</code> or <code>unavailable</code>, the observed reason, how much was considered, how much was returned, and how long it took. A list that is short because a source refused therefore looks different from a list that is short because nothing matched.",
-          "<code>jeden context sources</code> asks the same question with no query: which roots exist and how many sections they hold, how many active memories the store carries, which runtime partitions the archive holds, and whether the ground-truth endpoint answers its health route. A configured endpoint nobody serves reports the URL it could not reach, not silence.",
+          "The files source also says when its own walk was cut: a root nobody sized cannot stall a turn, so the walk stops at its deadline or its cap and the detail then reads <em>the walk stopped at its deadline or cap, so this is a partial corpus</em>.",
+          "<code>jeden context sources</code> asks the same question with no query: which roots exist and how many chunks they hold, how many active memories the store carries, which runtime partitions the archive holds, and whether the ground-truth endpoint answers its health route. A configured endpoint nobody serves reports the URL it could not reach, not silence.",
         ],
         commands: [
           { label: "The state of every source", code: "jeden context sources\njeden context sources --json" },
@@ -66,7 +68,7 @@ export const contextPages = [
       {
         title: "How a recommendation is ranked",
         paragraphs: [
-          "The docs source weighs each query word by how rare it is in the corpus it just read, so a word that occurs in nearly every section contributes nearly nothing and no list of words to ignore exists anywhere in the product. A hit in a heading or a path outweighs a hit in a body; covering more of the query outweighs repeating one word; a long section is damped so length alone cannot win.",
+          "The files source weighs each query word by how rare it is in the corpus it just read, so a word that occurs in nearly every chunk contributes nearly nothing and no list of words to ignore exists anywhere in the product. A hit in a heading, a declaration or a path outweighs a hit in a body; covering more of the query outweighs repeating one word; a long chunk is damped so length alone cannot win.",
           "A word also matches its own stem, so <code>routingu</code> finds <code>routing</code> and <code>signing</code> finds <code>signed</code>, at half the weight of an exact hit. Matching is lexical: a question asked in one language does not reach a document written in another unless they share words, and product names usually are those shared words.",
           "The other three sources rank with their own engines — the memory store's index, Transcript Lake's query, the ground-truth index's score — because each owns its own corpus. Scores are therefore comparable inside a source and not across sources, so the answer interleaves them in a fixed order instead of sorting one list by number.",
         ],
@@ -97,13 +99,13 @@ export const contextPages = [
         title: "Configuration",
         paragraphs: [
           "Every key below is in <code>jeden config list</code> and can be set per user in <code>~/.jeden/config.yml</code> or per project in <code>&lt;cwd&gt;/.jeden/config.json</code>.",
-          "<code>context.advisor.enabled</code> (default <code>true</code>) appends the block to every task prompt. <code>context.advisor.limit</code> (default <code>6</code>) is how many recommendations one answer carries. <code>context.advisor.maxChars</code> (default <code>6000</code>) is the injected block's budget. <code>context.advisor.timeoutMs</code> (default <code>3000</code>) is each source's deadline.",
-          "<code>context.advisor.sources</code> (default <code>docs,memory</code>) selects the sources every run consults. <code>context.advisor.roots</code> (default empty, meaning the project and <code>~/.jeden</code>) declares the documentation roots. <code>context.advisor.docExtensions</code> (default <code>md,mdx,markdown</code>) declares which files are documentation. <code>context.advisor.groundTruthUrl</code> and <code>context.advisor.transcriptLakeBin</code> point the two external sources somewhere other than their defaults.",
+          "<code>context.advisor.enabled</code> (default <code>true</code>) appends the block to every task prompt. <code>context.advisor.limit</code> (default <code>6</code>) is how many recommendations one answer carries. <code>context.advisor.maxChars</code> (default <code>6000</code>) is the injected block's budget. <code>context.advisor.timeoutMs</code> (default <code>3000</code>) and <code>context.advisor.promptTimeoutMs</code> (default <code>1000</code>) are the per-source deadlines for a command and for the automatic block.",
+          "<code>context.advisor.sources</code> (default <code>all</code>) selects the sources every run consults. <code>context.advisor.roots</code> (default empty, meaning the project and <code>~/.jeden</code>) declares the roots the files source walks. <code>context.advisor.fileExtensions</code> (default empty, meaning every readable text file) narrows it to named extensions. <code>context.advisor.groundTruthUrl</code> and <code>context.advisor.transcriptLakeBin</code> point the two external sources somewhere other than their defaults.",
         ],
         commands: [
           {
             label: "Declare a wider corpus",
-            code: 'jeden config set context.advisor.roots ".@6:~@1:~/agents@1"\njeden config set context.advisor.sources "docs,memory,transcripts"\njeden context sources',
+            code: 'jeden config set context.advisor.roots ".@6:~@1:~/agents@1"\njeden config set context.advisor.fileExtensions "md,rs,ts,swift"\njeden context sources',
           },
         ],
       },

@@ -1,11 +1,11 @@
 const sources =
-  "<code>--source</code> takes any comma-separated subset of <code>docs</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>docs,memory</code>.";
+  "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>all</code>.";
 const bounds =
-  "<code>--limit</code> caps the recommendations returned and <code>--timeout-ms</code> replaces <code>context.advisor.timeoutMs</code> as each source's deadline. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
+  "<code>--limit</code> caps the recommendations returned and <code>--timeout-ms</code> replaces <code>context.advisor.timeoutMs</code> as each source's deadline; the automatic per-turn block uses <code>context.advisor.promptTimeoutMs</code> instead. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
 const target =
   "<code>--omp</code> resolves <code>~/.omp/agent/tools/jeden_context.ts</code>, Omp's own documented custom-tool directory. <code>--file &lt;path&gt;</code> addresses any other location. One of the two is required.";
 const unknownSource =
-  "An unknown source is refused as <code>unknown source(s): &lt;name&gt;. Known sources: docs, ground-truth, memory, transcripts</code>; a typo never narrows the answer silently.";
+  "An unknown source is refused as <code>unknown source(s): &lt;name&gt;. Known sources: files, ground-truth, memory, transcripts</code>; a typo never narrows the answer silently.";
 
 export const contextCommands = [
   {
@@ -33,12 +33,12 @@ export const contextCommands = [
     purpose: "Return ranked locators for a task, with the state of every source that answered.",
     inputs: [sources, bounds, "<code>--json</code> returns the authoritative object."],
     effect:
-      "Each recommendation carries <code>source</code>, <code>title</code>, <code>locator</code>, <code>score</code>, <code>matched</code> and <code>snippet</code>. Locators are <code>path:first-last</code> for documentation, <code>memory:&lt;id&gt;</code> for a recalled memory, <code>session:&lt;id&gt;</code> for a transcript, and <code>repo/path@commit:first-last</code> for a ground-truth citation. The <code>sources</code> array carries <code>available</code>, the observed <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> for each source, so a short list can be told apart from a refused one.",
+      "Each recommendation carries <code>source</code>, <code>title</code>, <code>locator</code>, <code>score</code>, <code>matched</code> and <code>snippet</code>. Locators are <code>path:first-last</code> for a file chunk, <code>memory:&lt;id&gt;</code> for a recalled memory, <code>session:&lt;id&gt;</code> for a transcript, and <code>repo/path@commit:first-last</code> for a ground-truth citation. The <code>sources</code> array carries <code>available</code>, the observed <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> for each source, so a short list can be told apart from a refused one.",
     refusals: [
       unknownSource,
       "A missing task is refused as <code>context recommend requires a task</code>.",
       "A resolved source list that is empty is refused as <code>no source selected: context.advisor.sources resolved to nothing</code>.",
-      "A source that cannot answer never fails the command: it is reported as <code>unavailable</code> with its reason, such as <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code> or <code>timed out after 3000 ms</code>.",
+      "A source that cannot answer never fails the command: it is reported as <code>unavailable</code> with its reason, such as <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code> or <code>timed out after 1000 ms</code>.",
     ],
   },
   {
@@ -66,7 +66,7 @@ export const contextCommands = [
       "<code>--json</code> returns <code>settings</code> (every resolved advisor setting), <code>selected</code> (the sources every run consults) and <code>sources</code> (one probe per source).",
     ],
     effect:
-      "Each probe carries the shared <code>available</code>, <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> fields plus what only that source has: the documentation roots, their extensions and which roots exist or are missing; the memory store path; the Transcript Lake command; and the ground-truth endpoint with the <code>origin</code> that supplied it — the configuration key, an environment variable name, or <code>unset</code>.",
+      "Each probe carries the shared <code>available</code>, <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> fields plus what only that source has: the walked roots, their declared extensions, which roots exist or are missing, the file count and whether the walk was cut short; the memory store path; the Transcript Lake command; and the ground-truth endpoint with the <code>origin</code> that supplied it — the configuration key, an environment variable name, or <code>unset</code>.",
     refusals: [
       "Extra arguments return the usage block.",
       "An unconfigured ground-truth endpoint is reported, not an error: <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code>. A configured endpoint nobody serves reports the URL it could not reach.",

@@ -1,5 +1,6 @@
-//! The documentation source: documentation files under the declared roots,
-//! cut into heading sections and ranked against the query.
+//! The files source: everything readable under the declared roots —
+//! documentation, source code, configuration and manifests — cut into chunks
+//! and ranked against the query.
 
 mod corpus;
 mod rank;
@@ -11,7 +12,7 @@ use serde_json::{json, Value};
 
 use crate::context::advisor::text::{matched_terms, snippet};
 use crate::context::advisor::{
-    probe_value, Recommendation, Settings, SourceOutcome, SourceStatus,
+    probe_value, Recommendation, Request, Settings, SourceOutcome, SourceStatus,
 };
 use corpus::Corpus;
 use rank::NO_MATCH;
@@ -20,30 +21,30 @@ pub(crate) const DEFAULT_DEPTH: usize = 6;
 const SNIPPET_LINES: usize = 3;
 const SNIPPET_CHARS: usize = 420;
 
-pub(crate) fn search(settings: &Settings, terms: &[String], limit: usize) -> SourceOutcome {
+pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -> SourceOutcome {
     let started = Instant::now();
     if settings.roots.is_empty() {
         return SourceOutcome {
             hits: Vec::new(),
             status: SourceStatus::unavailable(
-                "docs",
-                "no documentation root is declared in context.advisor.roots",
+                "files",
+                "no root is declared in context.advisor.roots",
                 started,
             ),
         };
     }
-    let corpus = Corpus::read(settings);
+    let corpus = Corpus::read(settings, started + request.timeout);
     if corpus.sections.is_empty() {
         return SourceOutcome {
             hits: Vec::new(),
-            status: SourceStatus::unavailable("docs", corpus.empty_detail(), started),
+            status: SourceStatus::unavailable("files", corpus.empty_detail(), started),
         };
     }
-    let weights = rank::weights(&corpus.sections, terms);
-    let informative = rank::informative_terms(terms, &weights);
+    let weighed = rank::weigh(&corpus.sections, terms);
+    let informative = rank::informative_terms(&weighed);
     let mut scored: Vec<(f64, Recommendation)> = Vec::new();
     for section in &corpus.sections {
-        let score = rank::score_section(section, terms, &weights);
+        let score = rank::score_section(section, &weighed);
         if score <= NO_MATCH {
             continue;
         }
@@ -56,7 +57,7 @@ pub(crate) fn search(settings: &Settings, terms: &[String], limit: usize) -> Sou
         scored.push((
             score,
             Recommendation {
-                source: "docs".to_string(),
+                source: "files".to_string(),
                 title: section.title.clone(),
                 locator: format!(
                     "{}:{}-{}",
@@ -78,40 +79,50 @@ pub(crate) fn search(settings: &Settings, terms: &[String], limit: usize) -> Sou
             .then_with(|| left.1.locator.cmp(&right.1.locator))
     });
     let considered = corpus.sections.len();
-    let hits: Vec<Recommendation> = scored.into_iter().map(|(_, hit)| hit).take(limit).collect();
+    let hits: Vec<Recommendation> = scored
+        .into_iter()
+        .map(|(_, hit)| hit)
+        .take(request.limit)
+        .collect();
+    SourceOutcome {
+        status: SourceStatus::available("files", detail(&corpus), considered, hits.len(), started),
+        hits,
+    }
+}
+
+fn detail(corpus: &Corpus) -> String {
     let mut detail = format!(
-        "read {} section(s) from {} file(s) under {} root(s)",
-        considered,
+        "read {} chunk(s) from {} file(s) under {} root(s)",
+        corpus.sections.len(),
         corpus.files,
         corpus.existing_roots.len()
     );
+    if corpus.truncated {
+        detail.push_str("; the walk stopped at its deadline or cap, so this is a partial corpus");
+    }
     if !corpus.missing_roots.is_empty() {
         detail.push_str(&format!(
             "; missing root(s): {}",
             corpus.missing_roots.join(", ")
         ));
     }
-    SourceOutcome {
-        status: SourceStatus::available("docs", detail, considered, hits.len(), started),
-        hits,
-    }
+    detail
 }
 
-/// What the source is, without a query: which roots exist and how much
-/// documentation they actually carry.
+/// What the source is, without a query: which roots exist and how much text
+/// they actually carry.
 pub(crate) fn probe(settings: &Settings) -> Value {
     let started = Instant::now();
-    let corpus = Corpus::read(settings);
+    let corpus = Corpus::read(
+        settings,
+        started + std::time::Duration::from_millis(settings.timeout_ms),
+    );
     let status = if corpus.sections.is_empty() {
-        SourceStatus::unavailable("docs", corpus.empty_detail(), started)
+        SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {
         SourceStatus::available(
-            "docs",
-            format!(
-                "{} section(s) in {} file(s)",
-                corpus.sections.len(),
-                corpus.files
-            ),
+            "files",
+            detail(&corpus),
             corpus.sections.len(),
             usize::default(),
             started,
@@ -121,10 +132,11 @@ pub(crate) fn probe(settings: &Settings) -> Value {
         &status,
         vec![
             ("roots", json!(settings.roots)),
-            ("extensions", json!(settings.doc_extensions)),
+            ("extensions", json!(settings.file_extensions)),
             ("existingRoots", json!(corpus.existing_roots)),
             ("missingRoots", json!(corpus.missing_roots)),
             ("files", json!(corpus.files)),
+            ("truncated", json!(corpus.truncated)),
         ],
     )
 }

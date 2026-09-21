@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use super::{
-    sources::docs, DEFAULT_DOC_EXTENSIONS, DEFAULT_LIMIT, DEFAULT_MAX_CHARS, DEFAULT_SOURCES,
+    sources::files, DEFAULT_FILE_EXTENSIONS, DEFAULT_LIMIT, DEFAULT_MAX_CHARS, DEFAULT_SOURCES,
     DEFAULT_TIMEOUT_MS, SOURCES,
 };
 use crate::cli::config::{AdvisorConfig, Config};
@@ -19,9 +19,10 @@ pub(crate) struct Settings {
     pub(crate) limit: usize,
     pub(crate) max_chars: usize,
     pub(crate) timeout_ms: u64,
+    pub(crate) prompt_timeout_ms: u64,
     pub(crate) sources: Vec<String>,
     pub(crate) roots: Vec<DocRoot>,
-    pub(crate) doc_extensions: Vec<String>,
+    pub(crate) file_extensions: Vec<String>,
     /// Empty when no ground-truth endpoint is configured anywhere.
     pub(crate) ground_truth_url: String,
     pub(crate) ground_truth_origin: String,
@@ -45,9 +46,10 @@ pub(crate) fn settings(cwd: &Path, config: &Config) -> Settings {
         limit: bounded_limit(advisor.limit),
         max_chars: bounded_max_chars(advisor.max_chars),
         timeout_ms: bounded_timeout_ms(advisor.timeout_ms),
+        prompt_timeout_ms: bounded_timeout_ms(advisor.prompt_timeout_ms),
         sources: parse_sources(&advisor.sources),
         roots: parse_roots(&advisor.roots, cwd),
-        doc_extensions: parse_extensions(&advisor.doc_extensions),
+        file_extensions: parse_extensions(&advisor.file_extensions),
         ground_truth_url,
         ground_truth_origin,
         transcript_lake_bin: declared_or(&advisor.transcript_lake_bin, "transcript-lake"),
@@ -146,12 +148,13 @@ fn canonical_source(part: &str) -> String {
     }
 }
 
-/// Declared documentation extensions, without their dots and lowercased, so
-/// `.MD` and `md` are the same declaration.
+/// Declared file extensions, without their dots and lowercased, so `.MD` and
+/// `md` are the same declaration. Empty means every readable text file, and
+/// that is the default: an agent that may not read code is an agent that
+/// still has to search for it.
 fn parse_extensions(raw: &str) -> Vec<String> {
-    let raw = raw.trim();
-    let declared = if raw.is_empty() {
-        DEFAULT_DOC_EXTENSIONS
+    let declared = if raw.trim().is_empty() {
+        DEFAULT_FILE_EXTENSIONS
     } else {
         raw
     };
@@ -163,6 +166,25 @@ fn parse_extensions(raw: &str) -> Vec<String> {
         }
     }
     out
+}
+
+impl Settings {
+    /// Whether the walk reads this path at all. With no declared extension
+    /// every file is a candidate, and a file without an extension — a
+    /// `Makefile`, a `Dockerfile` — is read too.
+    pub(crate) fn reads_extension(&self, path: &Path) -> bool {
+        if self.file_extensions.is_empty() {
+            return true;
+        }
+        let Some(found) = path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .map(|extension| extension.to_ascii_lowercase())
+        else {
+            return false;
+        };
+        self.file_extensions.iter().any(|declared| *declared == found)
+    }
 }
 
 /// Names in `raw` that are not sources, so an operator typo is refused rather
@@ -219,9 +241,9 @@ fn split_root_depth(entry: &str) -> (&str, usize) {
         Some((path, depth))
             if !depth.is_empty() && depth.chars().all(|character| character.is_ascii_digit()) =>
         {
-            (path, depth.parse().unwrap_or(docs::DEFAULT_DEPTH))
+            (path, depth.parse().unwrap_or(files::DEFAULT_DEPTH))
         }
-        _ => (entry, docs::DEFAULT_DEPTH),
+        _ => (entry, files::DEFAULT_DEPTH),
     }
 }
 

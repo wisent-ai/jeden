@@ -141,6 +141,9 @@ pub(crate) fn bounded_output(mut command: Command, timeout: Duration) -> Result<
             Ok(Some(status)) => break status,
             Ok(None) => {
                 if started.elapsed() >= timeout {
+                    // Kill and report at once: waiting for the pipes of a
+                    // process that already missed its deadline spends the
+                    // deadline twice, and every turn pays this one.
                     let _ = child.kill();
                     let _ = child.wait();
                     return Err(format!("timed out after {} ms", timeout.as_millis()));

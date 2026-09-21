@@ -259,26 +259,32 @@ that projection instead of reproducing command-directory precedence.
 
 The files above are what is always true here. What is relevant to the request
 that just arrived is a different question, and `jeden context` answers it with
-locators rather than prose: `path:first-last` for a documentation section,
+locators rather than prose: `path:first-last` for a chunk of a file,
 `memory:<id>` for a recalled memory, `session:<id>` for a transcript, and
 `repo/path@commit:first-last` for a ground-truth citation.
 
-Four sources answer, each owned where it belongs: `docs` reads documentation
-under the declared roots and ranks heading sections, `memory` recalls what
-earlier sessions in this workspace wrote down, `transcripts` runs Transcript
-Lake's own search over the masked archive, and `ground-truth` asks the Wisent
-cross-repository index for cited chunks. Every answer reports each source's
-state — available or unavailable, with the observed reason — so a short list is
-never mistaken for a complete one.
+Four sources answer, each owned where it belongs. `files` reads everything
+readable under the declared roots — documentation, source code, configuration,
+manifests — cutting Markdown at its headings and every other file into
+forty-line windows titled by the declaration they open with. `memory` recalls
+what earlier sessions in this workspace wrote down. `transcripts` runs
+Transcript Lake's own search over the masked archive. `ground-truth` asks the
+Wisent cross-repository index for cited chunks. Every answer reports each
+source's state — available or unavailable, with the observed reason — so a
+short list is never mistaken for a complete one.
 
 Before its first model call, every turn receives the top recommendations as a
 `[Context recommendations]` block, recorded in the session's own `user` event.
-`context.advisor.sources` defaults to `docs,memory`, the two that answer from
-local state in milliseconds; the archive scan and the network index are one
-flag away with `--source all`. `jeden context prompt "<task>"` prints exactly
-what the next turn would receive, `jeden context sources` reports what each
-source is and whether it answers now, and `context.advisor.enabled false`
-switches the block off.
+`context.advisor.sources` defaults to `all`: the sources run concurrently, so
+a turn waits for the slowest rather than for their sum, and each is cut off by
+a deadline — `context.advisor.promptTimeoutMs` (1 s) for the automatic block
+every turn pays for, `context.advisor.timeoutMs` (3 s) for a command someone is
+waiting on. A source that misses its deadline says so in the same answer; on a
+large Transcript Lake archive that is the usual outcome for `transcripts`, and
+`--timeout-ms 20000` is how you actually read it. `jeden context prompt
+"<task>"` prints exactly what the next turn would receive, `jeden context
+sources` reports what each source is and whether it answers now, and
+`context.advisor.enabled false` switches the block off.
 
 `jeden context install --omp` renders the same advisor into
 `~/.omp/agent/tools/jeden_context.ts`, Omp's own documented custom-tool

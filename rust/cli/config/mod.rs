@@ -188,14 +188,19 @@ pub(crate) struct AdvisorConfig {
     pub(crate) max_chars: usize,
     #[serde(rename = "timeoutMs", default = "default_advisor_timeout_ms")]
     pub(crate) timeout_ms: u64,
+    #[serde(
+        rename = "promptTimeoutMs",
+        default = "default_advisor_prompt_timeout_ms"
+    )]
+    pub(crate) prompt_timeout_ms: u64,
     #[serde(default = "default_advisor_sources")]
     pub(crate) sources: String,
     /// Colon-separated `path` or `path@depth` entries. Empty means the
     /// project and the operator's own Jeden instruction directory.
     #[serde(default)]
     pub(crate) roots: String,
-    #[serde(rename = "docExtensions", default = "default_advisor_doc_extensions")]
-    pub(crate) doc_extensions: String,
+    #[serde(rename = "fileExtensions", default = "default_advisor_file_extensions")]
+    pub(crate) file_extensions: String,
     #[serde(rename = "groundTruthUrl", default)]
     pub(crate) ground_truth_url: String,
     #[serde(rename = "transcriptLakeBin", default)]
@@ -209,9 +214,10 @@ impl Default for AdvisorConfig {
             limit: default_advisor_limit(),
             max_chars: default_advisor_max_chars(),
             timeout_ms: default_advisor_timeout_ms(),
+            prompt_timeout_ms: default_advisor_prompt_timeout_ms(),
             sources: default_advisor_sources(),
             roots: String::new(),
-            doc_extensions: default_advisor_doc_extensions(),
+            file_extensions: default_advisor_file_extensions(),
             ground_truth_url: String::new(),
             transcript_lake_bin: String::new(),
         }
@@ -242,8 +248,12 @@ fn default_advisor_sources() -> String {
     crate::context::advisor::DEFAULT_SOURCES.to_string()
 }
 
-fn default_advisor_doc_extensions() -> String {
-    crate::context::advisor::DEFAULT_DOC_EXTENSIONS.to_string()
+fn default_advisor_file_extensions() -> String {
+    crate::context::advisor::DEFAULT_FILE_EXTENSIONS.to_string()
+}
+
+fn default_advisor_prompt_timeout_ms() -> u64 {
+    crate::context::advisor::DEFAULT_PROMPT_TIMEOUT_MS
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

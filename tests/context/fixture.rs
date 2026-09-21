@@ -19,7 +19,13 @@ impl Workspace {
             .join("target/context-runs")
             .join(format!("{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&root);
-        for directory in ["home", "sessions", "workspace/notes", "workspace/.jeden"] {
+        for directory in [
+            "home",
+            "sessions",
+            "workspace/notes",
+            "workspace/src",
+            "workspace/.jeden",
+        ] {
             fs::create_dir_all(root.join(directory)).expect("create the isolated directory");
         }
         let workspace = Self { root };
@@ -39,15 +45,23 @@ impl Workspace {
         self.root.join(relative)
     }
 
-    /// A small documentation corpus with one section that answers a question
-    /// and one that does not, so a recommendation can be wrong in a visible
-    /// way rather than trivially right.
+    /// A small corpus with one prose section that answers a question, one
+    /// that does not, a source file, and a file that is not text at all, so
+    /// a recommendation can be wrong in a visible way rather than trivially
+    /// right.
     fn seed_corpus(&self) {
         fs::write(
             self.cwd().join("notes/fleet.md"),
             "# Fleet notes\n\nIntroduction with no answer in it.\n\n## Lease renewal\n\nA lease is renewed with `stado lease renew --target mini`.\nAn expired lease is refused with `lease expired`.\n\n## Colour of the office\n\nThe office is painted grey.\n",
         )
-        .expect("seed the documentation corpus");
+        .expect("seed the prose corpus");
+        fs::write(
+            self.cwd().join("src/lease.rs"),
+            "use std::time::Instant;\n\nfn renew_lease(target: &str, deadline: Instant) -> bool {\n    // A renewal past its deadline is refused rather than extended.\n    Instant::now() < deadline && !target.is_empty()\n}\n",
+        )
+        .expect("seed the source corpus");
+        fs::write(self.cwd().join("src/lease.bin"), b"lease\0renewal\0binary")
+            .expect("seed a file that is not text");
     }
 
     /// The project configuration a case wants, written where Jeden reads a

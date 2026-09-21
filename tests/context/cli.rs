@@ -13,6 +13,8 @@ use serde_json::Value;
 /// test: a recommendation must name a section, not a file.
 const LEASE_SECTION: &str = "notes/fleet.md:5-9";
 const OFFICE_SECTION: &str = "notes/fleet.md:10-12";
+/// The seeded source file is six lines, so its first chunk is the whole file.
+const CODE_CHUNK: &str = "src/lease.rs:1-6";
 const SEEDED_SECTIONS: u64 = 3;
 /// Long enough for a refused local connection, short enough that a case
 /// cannot hang on it.
@@ -21,7 +23,7 @@ const PROBE_TIMEOUT_MS: u64 = 1_500;
 #[test]
 fn a_recommendation_names_the_section_to_read() {
     let workspace = Workspace::new("recommend");
-    workspace.configure(serde_json::json!({"sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
     let run = workspace.run(&["context", "recommend", "lease renewal", "--json"]);
     assert!(
         run.success,
@@ -33,7 +35,7 @@ fn a_recommendation_names_the_section_to_read() {
         .as_array()
         .and_then(|hits| hits.first().cloned())
         .expect("the seeded corpus produces at least one recommendation");
-    assert_eq!(first["source"], "docs");
+    assert_eq!(first["source"], "files");
     assert_eq!(
         first["locator"], LEASE_SECTION,
         "the locator must name the lease section's own line range, not the file: {}",
@@ -53,19 +55,81 @@ fn a_recommendation_names_the_section_to_read() {
         matched.contains(&"lease".to_string()) && matched.contains(&"renewal".to_string()),
         "both query terms matched the section, so both must be reported: {matched:?}"
     );
-    let docs = source(&advice, "docs");
-    assert_eq!(docs["available"], true);
+    let files = source(&advice, "files");
+    assert_eq!(files["available"], true);
     assert!(
-        docs["considered"].as_u64().unwrap_or_default() >= SEEDED_SECTIONS,
+        files["considered"].as_u64().unwrap_or_default() >= SEEDED_SECTIONS,
         "the seeded file holds three sections: {}",
-        docs["considered"]
+        files["considered"]
+    );
+}
+
+#[test]
+fn source_code_is_part_of_the_corpus() {
+    let workspace = Workspace::new("code");
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
+    let advice = workspace
+        .run(&["context", "recommend", "renew_lease deadline", "--json"])
+        .json();
+    let code = advice["recommendations"]
+        .as_array()
+        .and_then(|hits| {
+            hits.iter()
+                .find(|hit| {
+                    hit["locator"]
+                        .as_str()
+                        .unwrap_or_default()
+                        .starts_with("src/lease.rs:")
+                })
+                .cloned()
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "the seeded source file must be recommended: {}",
+                advice["recommendations"]
+            )
+        });
+    assert_eq!(code["source"], "files");
+    assert_eq!(
+        code["locator"], CODE_CHUNK,
+        "a code chunk names its own line window: {}",
+        code["locator"]
+    );
+    assert!(
+        code["snippet"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("fn renew_lease(target: &str, deadline: Instant)"),
+        "the snippet must carry the matching declaration: {}",
+        code["snippet"]
+    );
+}
+
+#[test]
+fn a_binary_file_is_not_recommended() {
+    let workspace = Workspace::new("binary");
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
+    let advice = workspace
+        .run(&["context", "recommend", "lease renewal", "--json"])
+        .json();
+    let locators: Vec<String> = advice["recommendations"]
+        .as_array()
+        .map(|hits| {
+            hits.iter()
+                .filter_map(|hit| hit["locator"].as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(
+        !locators.iter().any(|locator| locator.contains("lease.bin")),
+        "a file with a zero byte is not text and must not be recommended: {locators:?}"
     );
 }
 
 #[test]
 fn an_answer_off_the_query_is_not_recommended() {
     let workspace = Workspace::new("off-query");
-    workspace.configure(serde_json::json!({"sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
     let advice = workspace
         .run(&["context", "recommend", "lease renewal", "--json"])
         .json();
@@ -86,7 +150,7 @@ fn an_answer_off_the_query_is_not_recommended() {
 #[test]
 fn every_source_reports_its_own_state() {
     let workspace = Workspace::new("sources");
-    workspace.configure(serde_json::json!({"sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
     let report = workspace.run(&["context", "sources", "--json"]).json();
     let rows = report["sources"]
         .as_array()
@@ -102,7 +166,7 @@ fn every_source_reports_its_own_state() {
             "every source owes an observed state: {row}"
         );
     }
-    assert_eq!(source(&report, "docs")["available"], true);
+    assert_eq!(source(&report, "files")["available"], true);
     let ground_truth = source(&report, "ground-truth");
     assert_eq!(ground_truth["available"], false);
     assert_eq!(
@@ -155,7 +219,7 @@ fn an_unknown_source_is_refused_by_name() {
     assert!(!run.success, "an unknown source must refuse: {}", run.stdout);
     assert!(
         run.stderr.contains(
-            "unknown source(s): nonsense. Known sources: docs, ground-truth, memory, transcripts"
+            "unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts"
         ),
         "the refusal must name the mistake and the choices: {}",
         run.stderr

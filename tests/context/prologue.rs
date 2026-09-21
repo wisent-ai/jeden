@@ -13,7 +13,7 @@ use serde_json::Value;
 #[test]
 fn the_block_a_turn_appends_carries_the_locator() {
     let workspace = Workspace::new("prologue-block");
-    workspace.configure(serde_json::json!({"sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
     let run = workspace.run(&["context", "prompt", "lease renewal"]);
     assert!(run.success, "prompt failed: {}", run.stderr);
     assert!(
@@ -36,7 +36,7 @@ fn the_block_a_turn_appends_carries_the_locator() {
 #[test]
 fn switching_the_advisor_off_removes_the_block() {
     let workspace = Workspace::new("prologue-off");
-    workspace.configure(serde_json::json!({"enabled": false, "sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"enabled": false, "sources": "files", "roots": "."}));
     let run = workspace.run(&["context", "prompt", "lease renewal", "--json"]);
     assert!(run.success, "prompt failed: {}", run.stderr);
     let report = run.json();
@@ -58,7 +58,7 @@ fn switching_the_advisor_off_removes_the_block() {
 #[test]
 fn a_recorded_turn_carries_the_advisory() {
     let workspace = Workspace::new("prologue-turn");
-    workspace.configure(serde_json::json!({"sources": "docs", "roots": "."}));
+    workspace.configure(serde_json::json!({"sources": "files", "roots": "."}));
     // Intake plans the retained request before the turn itself runs, and it
     // spends a step doing it, so a one-step budget ends the run before the
     // prologue this case measures. Three leaves the turn its own step.

@@ -28,23 +28,27 @@ pub(crate) use render::{availability_word, prompt_section, probe_value, render_t
 pub(crate) use settings::{
     bounded_limit, bounded_timeout_ms, parse_sources, settings, unknown_sources, Settings,
 };
-use sources::{docs, ground_truth, memory, transcripts};
+use sources::{files, ground_truth, memory, transcripts};
 
 /// Source order is the presentation order: local and cited sources first,
 /// scans last. Interleaving walks this list, so it decides which source wins
 /// a tie for the first recommendation.
-pub(crate) const SOURCES: &[&str] = &["docs", "ground-truth", "memory", "transcripts"];
+pub(crate) const SOURCES: &[&str] = &["files", "ground-truth", "memory", "transcripts"];
 
 pub(crate) const DEFAULT_LIMIT: usize = 6;
 pub(crate) const DEFAULT_MAX_CHARS: usize = 6_000;
 pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 3_000;
-/// Sources consulted when nothing narrows them: the two that answer from
-/// local state in milliseconds. The archive scan and the network index are
-/// opt-in because they are seconds slow, and a session start must not be.
-pub(crate) const DEFAULT_SOURCES: &str = "docs,memory";
-/// Documentation file types the walk reads. Operator configuration, because
-/// which extensions carry documentation differs per repository.
-pub(crate) const DEFAULT_DOC_EXTENSIONS: &str = "md,mdx,markdown";
+/// The deadline the automatic per-turn block uses. Shorter than the one a
+/// person waiting at a prompt accepts, because every turn pays it: the local
+/// sources finish inside it and a slow archive reports that it did not.
+pub(crate) const DEFAULT_PROMPT_TIMEOUT_MS: u64 = 1_000;
+/// Every source answers unless the operator narrows them. Sources run
+/// concurrently and each one is bounded by the same deadline, so a turn
+/// waits for the slowest source rather than for their sum.
+pub(crate) const DEFAULT_SOURCES: &str = "all";
+/// Which file types the walk reads. Empty means every readable text file —
+/// code, configuration and prose alike; a list narrows it.
+pub(crate) const DEFAULT_FILE_EXTENSIONS: &str = "";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -149,37 +153,45 @@ impl Request {
 }
 
 /// Ask every requested source and interleave what they found.
+///
+/// Sources run on their own threads because they are independent and
+/// unevenly slow: the archive scan takes seconds while memory answers in
+/// milliseconds, and a turn should wait for the slowest one rather than for
+/// all of them in a row.
 pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advice {
     let settings = settings(cwd, config);
     let terms = text::terms(&request.query);
-    let mut statuses = Vec::new();
-    let mut per_source: Vec<Vec<Recommendation>> = Vec::new();
-    for source in SOURCES {
-        if !request.sources.iter().any(|want| want == source) {
-            continue;
-        }
-        let started = Instant::now();
-        let outcome = if terms.is_empty() {
-            SourceOutcome {
-                hits: Vec::new(),
-                status: SourceStatus::unavailable(
-                    source,
-                    "the query carries no searchable word of three characters or more",
-                    started,
-                ),
-            }
-        } else {
-            match *source {
-                "docs" => docs::search(&settings, &terms, request.limit),
-                "memory" => memory::search(cwd, &terms, &request.query, request.limit),
-                "transcripts" => transcripts::search(&settings, request, &terms),
-                "ground-truth" => ground_truth::search(&settings, request, &terms),
-                other => SourceOutcome {
+    let selected: Vec<&&str> = SOURCES
+        .iter()
+        .filter(|source| request.sources.iter().any(|want| want == *source))
+        .collect();
+    let outcomes: Vec<SourceOutcome> = std::thread::scope(|scope| {
+        let handles: Vec<_> = selected
+            .iter()
+            .map(|source| {
+                let source = **source;
+                let settings = &settings;
+                let terms = &terms;
+                scope.spawn(move || ask(source, cwd, settings, request, terms))
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle.join().unwrap_or_else(|_| SourceOutcome {
                     hits: Vec::new(),
-                    status: SourceStatus::unavailable(other, "no such source", started),
-                },
-            }
-        };
+                    status: SourceStatus::unavailable(
+                        "unknown",
+                        "the source thread ended without an answer",
+                        Instant::now(),
+                    ),
+                })
+            })
+            .collect()
+    });
+    let mut statuses = Vec::with_capacity(outcomes.len());
+    let mut per_source = Vec::with_capacity(outcomes.len());
+    for outcome in outcomes {
         statuses.push(outcome.status);
         per_source.push(outcome.hits);
     }
@@ -188,6 +200,36 @@ pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advic
         limit: request.limit,
         recommendations: interleave(per_source, request.limit),
         sources: statuses,
+    }
+}
+
+fn ask(
+    source: &str,
+    cwd: &Path,
+    settings: &Settings,
+    request: &Request,
+    terms: &[String],
+) -> SourceOutcome {
+    let started = Instant::now();
+    if terms.is_empty() {
+        return SourceOutcome {
+            hits: Vec::new(),
+            status: SourceStatus::unavailable(
+                source,
+                "the query carries no searchable word of three characters or more",
+                started,
+            ),
+        };
+    }
+    match source {
+        "files" => files::search(settings, request, terms),
+        "memory" => memory::search(cwd, terms, &request.query, request.limit),
+        "transcripts" => transcripts::search(settings, request, terms),
+        "ground-truth" => ground_truth::search(settings, request, terms),
+        other => SourceOutcome {
+            hits: Vec::new(),
+            status: SourceStatus::unavailable(other, "no such source", started),
+        },
     }
 }
 
@@ -220,7 +262,7 @@ fn interleave(per_source: Vec<Vec<Recommendation>>, limit: usize) -> Vec<Recomme
 pub(crate) fn sources_report(cwd: &Path, config: &Config) -> Value {
     let settings = settings(cwd, config);
     let probes = vec![
-        docs::probe(&settings),
+        files::probe(&settings),
         ground_truth::probe(&settings),
         memory::probe(),
         transcripts::probe(&settings),
@@ -240,7 +282,8 @@ pub(crate) fn advice_for_prompt(cwd: &Path, config: &Config, task: &str) -> Opti
     if !settings.enabled || settings.sources.is_empty() {
         return None;
     }
-    let request = Request::from_settings(task, &settings);
+    let mut request = Request::from_settings(task, &settings);
+    request.timeout = Duration::from_millis(settings.prompt_timeout_ms);
     if request.query.is_empty() {
         return None;
     }
