@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime, UNIX_EPOCH};
 use url::{Position, Url};
 
 /// Model label recorded in ledger events; also the served-id fallback when
@@ -25,8 +25,6 @@ pub const LIFECYCLE_MODEL_LABEL: &str = "oko-goal-lifecycle-v1";
 const SYSTEM_PROMPT: &str = include_str!("goal_lifecycle_prompt.txt");
 
 const DEFAULT_COMPLETIONS_URL: &str = "http://127.0.0.1:11439/v1/chat/completions";
-const PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
-const CLASSIFY_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LifecycleAction {
@@ -83,10 +81,7 @@ static ENDPOINT: LazyLock<Option<Endpoint>> = LazyLock::new(|| {
         return None;
     }
     let base = url[..Position::BeforePath].to_string();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(PROBE_TIMEOUT)
-        .build()
-        .ok()?;
+    let client = reqwest::blocking::Client::builder().build().ok()?;
     let models: Value = client
         .get(format!("{base}/v1/models"))
         .send()
@@ -205,7 +200,7 @@ fn parse_decision(content: &str) -> Option<LifecycleDecision> {
 }
 
 /// Classify one user prompt. Any failure — service down, non-loopback URL,
-/// timeout, malformed reply — yields `None` and the turn proceeds unchanged.
+/// malformed reply — yields `None` and the turn proceeds unchanged.
 pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
     let endpoint = endpoint()?;
     let envelope =
@@ -221,10 +216,7 @@ pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
         "stream": false,
         "chat_template_kwargs": { "enable_thinking": false },
     });
-    let client = reqwest::blocking::Client::builder()
-        .timeout(CLASSIFY_TIMEOUT)
-        .build()
-        .ok()?;
+    let client = reqwest::blocking::Client::builder().build().ok()?;
     let response: Value = client
         .post(&endpoint.completions_url)
         .json(&body)

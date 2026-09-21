@@ -2,7 +2,6 @@ use reqwest::blocking::Client;
 use std::collections::BTreeMap;
 use std::io::Read;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Clone)]
 pub enum SecretRef {
@@ -89,12 +88,10 @@ pub struct ReqwestTransport {
     client: Client,
 }
 impl ReqwestTransport {
+    /// The control-plane client. A call ends when the control plane answers
+    /// or the connection does; no interval here decides that for it.
     pub fn production() -> Arc<dyn ControlPlaneTransport> {
-        let client = Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(20))
-            .build()
-            .unwrap_or_else(|_| Client::new());
+        let client = Client::builder().build().unwrap_or_else(|_| Client::new());
         Arc::new(Self { client })
     }
 }
@@ -123,9 +120,9 @@ impl ControlPlaneTransport for ReqwestTransport {
         }
         // `reqwest::Error`'s own Display stops at "error sending request for
         // url (...)", which names the destination and withholds the reason. The
-        // cause chain underneath distinguishes a refused connect from a timeout
-        // from a closed connection, and without it every one of them reads as
-        // the network being down.
+        // cause chain underneath distinguishes a refused connect from a closed
+        // connection, and without it every one of them reads as the network
+        // being down.
         let response = builder.send().map_err(describe_reqwest)?;
         if response
             .content_length()

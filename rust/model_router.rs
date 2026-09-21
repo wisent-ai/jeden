@@ -357,7 +357,6 @@ pub fn chat_completion(
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let (ts, body_hash, sig) = hmac_headers(&body_text, &config.agent_id, &config.secret)?;
     let client = Client::builder()
-        .timeout(Duration::from_secs(120))
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
     let response = client
@@ -1003,7 +1002,7 @@ fn spawn_openai_stream_adapter(
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
         .spawn(move || {
-            let client = match Client::builder().timeout(Duration::from_secs(300)).build() {
+            let client = match Client::builder().build() {
                 Ok(client) => client,
                 Err(error) => {
                     let _ = sender.send(WireMessage::Network(
