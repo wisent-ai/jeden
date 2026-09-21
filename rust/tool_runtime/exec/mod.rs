@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
-use std::time::Duration;
+
 
 use super::runtime_ops::{
     kernel::{self, KernelLanguage},
@@ -23,18 +23,10 @@ pub(crate) fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         return Err("run_command requires --allow-command".into());
     }
     let command = string_input(input, "command").ok_or("run_command requires command")?;
-    let timeout_ms = u64_input(input, "timeoutMs", 30_000).min(120_000);
     let mut managed = ManagedCommand::new("sh", runtime.cwd);
     managed.args = vec![OsString::from("-c"), OsString::from(&command)];
-    let result = ProcessManager.run(
-        &runtime.operation,
-        managed,
-        Duration::from_millis(timeout_ms),
-    )?;
-    Ok(process_result_json(
-        result,
-        json!({"command": command, "timeoutMs": timeout_ms}),
-    ))
+    let result = ProcessManager.run(&runtime.operation, managed)?;
+    Ok(process_result_json(result, json!({"command": command})))
 }
 
 pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -57,7 +49,7 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
+
     let mut managed = ManagedCommand::new(&command, runtime.cwd);
     managed.args = args.iter().map(OsString::from).collect();
     managed.stdin = string_input(input, "stdin").map(String::into_bytes);
@@ -77,26 +69,20 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             managed.env.push((OsString::from(key), value));
         }
     }
-    let result = ProcessManager.run(
-        &runtime.operation,
-        managed,
-        Duration::from_millis(timeout_ms),
-    )?;
+    let result = ProcessManager.run(&runtime.operation, managed)?;
     Ok(process_result_json(
         result,
-        json!({"command": command, "args": args, "timeoutMs": timeout_ms}),
+        json!({"command": command, "args": args}),
     ))
 }
 
 fn process_result_json(result: ManagedProcessResult, mut base: Value) -> Value {
-    let timed_out = result.reason == TerminationReason::TimedOut;
     let cancelled = result.reason == TerminationReason::Cancelled;
     let completed = result.reason == TerminationReason::Completed;
     let object = base
         .as_object_mut()
         .expect("process result base must be an object");
     object.insert("ok".into(), json!(completed && result.status.success()));
-    object.insert("timedOut".into(), json!(timed_out));
     object.insert("cancelled".into(), json!(cancelled));
     object.insert("code".into(), json!(result.status.code()));
     object.insert("stdout".into(), json!(result.stdout.text));
@@ -155,7 +141,6 @@ fn eval_with_language(
         return Err(format!("{tool} requires --allow-command"));
     }
     let code = string_input(input, "code").ok_or_else(|| format!("{tool} requires code"))?;
-    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
     let reset = bool_input(input, "reset", false);
     let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
     let result = kernel::evaluate(
@@ -165,12 +150,9 @@ fn eval_with_language(
         language,
         &code,
         reset,
-        Duration::from_millis(timeout_ms),
     )?;
     Ok(json!({
         "ok": result.ok,
-        "timeoutMs": timeout_ms,
-        "timedOut": result.timed_out,
         "cancelled": result.cancelled,
         "code": Value::Null,
         "stdout": result.stdout.text,
@@ -203,22 +185,12 @@ pub(crate) fn pty_session(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let command = string_input(input, "input")
         .or_else(|| string_input(input, "command"))
         .ok_or("pty_session requires input")?;
-    let timeout_ms = u64_input(input, "timeoutMs", 30_000).clamp(1_000, 120_000);
     let reset = bool_input(input, "reset", false);
     let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
-    let result = pty::execute(
-        &runtime.operation,
-        scope,
-        runtime.cwd,
-        &command,
-        reset,
-        Duration::from_millis(timeout_ms),
-    )?;
+    let result = pty::execute(&runtime.operation, scope, runtime.cwd, &command, reset)?;
     Ok(json!({
         "ok": result.ok,
         "command": command,
-        "timeoutMs": timeout_ms,
-        "timedOut": result.timed_out,
         "cancelled": result.cancelled,
         "code": result.code,
         "stdout": result.output.text,
@@ -288,7 +260,7 @@ pub(crate) fn run_package_script(
     if scripts.get(&script).and_then(Value::as_str).is_none() {
         return Err(format!("unknown package script: {script}"));
     }
-    let mut payload = json!({"command": "npm", "args": ["run", script], "timeoutMs": u64_input(input, "timeoutMs", 60_000).clamp(1_000, 180_000)});
+    let mut payload = json!({"command": "npm", "args": ["run", script]});
     if let Some(env) = input.get("env") {
         payload["env"] = env.clone();
     }
@@ -298,7 +270,7 @@ pub(crate) fn run_package_script(
 pub(crate) fn git_status(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
     run_read_process(
         runtime,
-        &json!({"command": "git", "args": ["status", "--short"], "timeoutMs": 30_000}),
+        &json!({"command": "git", "args": ["status", "--short"]}),
     )
 }
 
@@ -310,7 +282,7 @@ pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
     }
     run_read_process(
         runtime,
-        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+        &json!({"command": "git", "args": args}),
     )
 }
 
@@ -329,7 +301,7 @@ pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value,
     }
     run_read_process(
         runtime,
-        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+        &json!({"command": "git", "args": args}),
     )
 }
 
@@ -349,7 +321,7 @@ pub(crate) fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
     }
     run_read_process(
         runtime,
-        &json!({"command": "git", "args": args, "timeoutMs": 30_000}),
+        &json!({"command": "git", "args": args}),
     )
 }
 

@@ -9,7 +9,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use url::Url;
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
@@ -171,21 +170,7 @@ impl SshService {
         let mut args = common;
         args.push(host.target);
         args.push(remote);
-        let output = process::run(
-            "ssh",
-            context,
-            &self.cwd,
-            "ssh",
-            &args,
-            stdin,
-            Duration::from_secs(
-                input
-                    .get("timeoutSeconds")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(60)
-                    .clamp(1, 300),
-            ),
-        )?;
+        let output = process::run("ssh", context, &self.cwd, "ssh", &args, stdin)?;
         bounded_json(
             context,
             "ssh",
@@ -226,15 +211,7 @@ impl SshService {
         if needs_connect {
             let mut connect = args.clone();
             connect.extend(["-MNf".into(), host.target.clone()]);
-            process::run(
-                "ssh",
-                context,
-                &self.cwd,
-                "ssh",
-                &connect,
-                None,
-                Duration::from_secs(20),
-            )?;
+            process::run("ssh", context, &self.cwd, "ssh", &connect, None)?;
             self.connected.lock().insert(key);
         }
         Ok(args)

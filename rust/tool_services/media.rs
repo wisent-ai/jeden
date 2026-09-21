@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 const MAX_INPUT_IMAGE: usize = 20 * 1024 * 1024;
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -183,7 +183,7 @@ impl MediaRouterClient {
         let response = self
             .client
             .post(self.endpoint(path)?)
-            .timeout(timeout(context))
+
             .bearer_auth(&self.token)
             .json(body)
             .send()
@@ -207,7 +207,7 @@ impl MediaRouterClient {
         let response = self
             .client
             .get(self.endpoint(&format!("media/{job_id}"))?)
-            .timeout(timeout(context))
+
             .bearer_auth(&self.token)
             .send()
             .map_err(|error| backend_error("media-router", error))?;
@@ -231,7 +231,7 @@ impl MediaRouterClient {
         let response = self
             .client
             .get(self.endpoint(&format!("media/{job_id}/content"))?)
-            .timeout(timeout(context))
+
             .bearer_auth(&self.token)
             .send()
             .map_err(|error| backend_error("media-router", error))?;
@@ -511,17 +511,10 @@ impl MediaService {
         job_id: &str,
         context: &OperationContext<'_>,
     ) -> ServiceResult<()> {
-        let local_deadline = Instant::now()
-            + Duration::from_secs("120".parse().expect("valid media polling timeout"));
-        let deadline = context
-            .deadline()
-            .unwrap_or(local_deadline)
-            .min(local_deadline);
+        // The router reports the job as completed, failed or cancelled; those
+        // are the ends of this wait. A cancelled turn stops it too.
         loop {
             check_operation(context)?;
-            if Instant::now() >= deadline {
-                return Err(ServiceError::DeadlineExceeded);
-            }
             let status = self.router()?.status(job_id, context)?;
             if status.job_id != job_id {
                 return Err(ServiceError::Protocol {
@@ -671,17 +664,7 @@ fn backend_error(service: &'static str, error: reqwest::Error) -> ServiceError {
     }
 }
 
-fn timeout(context: &OperationContext<'_>) -> Duration {
-    context
-        .deadline()
-        .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
-        .unwrap_or(Duration::from_secs(
-            "90".parse().expect("valid media request timeout"),
-        ))
-        .min(Duration::from_secs(
-            "120".parse().expect("valid maximum media request timeout"),
-        ))
-}
+
 fn image_metadata(bytes: &[u8]) -> ServiceResult<(&'static str, u32, u32)> {
     if bytes.len() >= 24 && &bytes[..8] == b"\x89PNG\r\n\x1a\n" {
         return Ok((

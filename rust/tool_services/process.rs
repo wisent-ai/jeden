@@ -5,7 +5,7 @@ use crate::tool_runtime::runtime_ops::{
 use serde_json::Value;
 use std::ffi::OsString;
 use std::path::Path;
-use std::time::Duration;
+
 
 pub(crate) fn run(
     service: &'static str,
@@ -14,7 +14,6 @@ pub(crate) fn run(
     program: &str,
     args: &[String],
     stdin: Option<Vec<u8>>,
-    timeout: Duration,
 ) -> ServiceResult<String> {
     check_operation(context)?;
     let mut command = ManagedCommand::new(program, cwd);
@@ -22,11 +21,10 @@ pub(crate) fn run(
     command.stdin = stdin;
     command.preserve_descendants = service == "browser";
     let result = ProcessManager
-        .run(context, command, timeout)
+        .run(context, command)
         .map_err(|detail| ServiceError::Backend { service, detail })?;
     match result.reason {
         TerminationReason::Cancelled => return Err(ServiceError::Cancelled),
-        TerminationReason::TimedOut => return Err(ServiceError::DeadlineExceeded),
         TerminationReason::Completed => {}
     }
     if !result.status.success() {
@@ -50,9 +48,8 @@ pub(crate) fn run_json(
     program: &str,
     args: &[String],
     stdin: Option<Vec<u8>>,
-    timeout: Duration,
 ) -> ServiceResult<Value> {
-    let output = run(service, context, cwd, program, args, stdin, timeout)?;
+    let output = run(service, context, cwd, program, args, stdin)?;
     serde_json::from_str(&output).map_err(|error| ServiceError::Protocol {
         service,
         detail: format!("invalid JSON response: {error}"),

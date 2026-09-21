@@ -182,12 +182,6 @@ fn operation_ready(
     if operation.cancellation().is_cancelled() {
         return Err("pending action cancelled".into());
     }
-    if operation
-        .deadline()
-        .is_some_and(|deadline| std::time::Instant::now() >= deadline)
-    {
-        return Err("pending action deadline exceeded".into());
-    }
     Ok(())
 }
 

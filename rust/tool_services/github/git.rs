@@ -22,7 +22,6 @@ use super::super::types::{bounded_json, nonempty, ServiceError, ServiceResult};
 use super::GithubService;
 use crate::tool_runtime::runtime_ops::OperationContext;
 use serde_json::{json, Value};
-use std::time::Duration;
 
 /// Refusal for the retired creation action, naming what to do instead.
 const ADD_REFUSED: &str = "worktree add is not available: this machine holds one checkout per \
@@ -65,15 +64,7 @@ impl GithubService {
                 ))
             }
         }
-        let text = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "git",
-            &args,
-            None,
-            Duration::from_secs(30),
-        )?;
+        let text = process::run("github", context, &self.cwd, "git", &args, None)?;
         bounded_json(context, "github", &json!({"ok":true,"output":text}))
     }
 
@@ -105,7 +96,6 @@ impl GithubService {
             "git",
             &["status".into(), "--porcelain".into()],
             None,
-            Duration::from_secs(10),
         )?;
         if !status.trim().is_empty() {
             return Err(ServiceError::PermissionDenied(
@@ -119,7 +109,6 @@ impl GithubService {
             "git",
             &["branch".into(), "--show-current".into()],
             None,
-            Duration::from_secs(10),
         )?
         .trim()
         .to_string();
@@ -161,7 +150,6 @@ impl GithubService {
                 "--porcelain".into(),
             ],
             None,
-            Duration::from_secs(120),
         )?;
         bounded_json(
             context,

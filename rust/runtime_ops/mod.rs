@@ -184,7 +184,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
-use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
@@ -225,7 +224,6 @@ pub struct OperationContext<'a> {
     turn_id: Option<String>,
     parent_operation_id: Option<String>,
     cancellation: CancellationToken,
-    deadline: Option<Instant>,
     progress: ProgressSink<'a>,
     artifacts: ArtifactSink,
     output_limits: OutputLimits,
@@ -242,7 +240,6 @@ impl std::fmt::Debug for OperationContext<'_> {
         formatter
             .debug_struct("OperationContext")
             .field("cancelled", &self.cancellation.is_cancelled())
-            .field("deadline", &self.deadline)
             .field("artifacts", &self.artifacts)
             .field("output_limits", &self.output_limits)
             .field("operation_id", &self.operation_id)
@@ -269,7 +266,6 @@ impl<'a> OperationContext<'a> {
             turn_id: None,
             parent_operation_id: None,
             cancellation,
-            deadline: None,
             progress: Arc::new(|_| {}),
             artifacts,
             output_limits: OutputLimits::default(),
@@ -345,7 +341,6 @@ impl<'a> OperationContext<'a> {
             turn_id: self.turn_id.clone(),
             parent_operation_id: Some(self.operation_id.clone()),
             cancellation: self.cancellation.clone(),
-            deadline: self.deadline,
             progress: self.progress.clone(),
             artifacts: self.artifacts.clone().with_grant(grant.clone()),
             output_limits: self.output_limits,
@@ -356,10 +351,6 @@ impl<'a> OperationContext<'a> {
             telemetry_policy: self.telemetry_policy,
             telemetry,
         })
-    }
-    pub fn with_deadline(mut self, deadline: Instant) -> Self {
-        self.deadline = Some(deadline);
-        self
     }
     pub fn with_progress(mut self, progress: ProgressSink<'a>) -> Self {
         self.progress = progress;
@@ -383,13 +374,6 @@ impl<'a> OperationContext<'a> {
     }
     pub fn cancellation(&self) -> &CancellationToken {
         &self.cancellation
-    }
-    pub fn deadline(&self) -> Option<Instant> {
-        self.deadline
-    }
-    pub fn effective_deadline(&self, timeout: Duration) -> Instant {
-        let local = Instant::now() + timeout;
-        self.deadline.map_or(local, |parent| parent.min(local))
     }
     pub fn progress(&self, event: OperationProgress) {
         (self.progress)(event)

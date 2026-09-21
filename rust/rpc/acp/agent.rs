@@ -3,17 +3,17 @@ use crate::sdk::{
     AgentSession, ApprovalRequest as JedenApprovalRequest, ElicitationRequest, InteractionHandler,
     PromptRequest as JedenPromptRequest, SessionOptions,
 };
-use crate::tool_runtime::runtime_ops::{ArtifactSink, CancellationToken, OperationContext};
+use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::{v1::*, ProtocolVersion};
 use agent_client_protocol::{Agent, Client, ConnectionTo, Dispatch, Responder};
 use futures::executor::block_on;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 static NEXT_PROMPT: AtomicU64 = AtomicU64::new(1);
 
@@ -228,18 +228,6 @@ impl AcpState {
 
         let cancellation = responder.cancellation();
         let operation_token = CancellationToken::new();
-        let mut operation = OperationContext::new(
-            operation_token.clone(),
-            ArtifactSink::new(
-                Path::new(&session_id)
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join("acp-artifacts"),
-            ),
-        );
-        if let Some(deadline) = deadline_from_meta(request.meta.as_ref()) {
-            operation = operation.with_deadline(deadline);
-        }
         let input_supported = self
             .client_capabilities
             .lock()
@@ -247,13 +235,13 @@ impl AcpState {
             .elicitation
             .as_ref()
             .is_some_and(|capability| capability.form.is_some());
-        let operation_deadline = operation.deadline();
+
         session
             .set_interaction_handler(Some(Arc::new(AcpInteraction {
                 session_id: session_id.clone(),
                 client: client.clone(),
                 cancellation: operation_token.clone(),
-                deadline: operation_deadline,
+
                 input_supported,
             })))
             .map_err(super::internal)?;
@@ -266,7 +254,7 @@ impl AcpState {
             let forward_client = client.clone();
             let forward_cancellation = cancellation.clone();
             let forward_operation_token = operation_token.clone();
-            let forward_deadline = operation_deadline;
+
             let prompt_done = Arc::new(AtomicBool::new(false));
             let forward_done = Arc::clone(&prompt_done);
             let forwarder = thread::spawn(move || {
@@ -275,7 +263,7 @@ impl AcpState {
                 loop {
                     if !cancellation_sent
                         && (forward_cancellation.is_cancelled()
-                            || operation_expired(&forward_operation_token, forward_deadline))
+                            || operation_expired(&forward_operation_token))
                     {
                         forward_operation_token.cancel();
                         let _ = forward_session.abort(&forward_request_id);
@@ -319,7 +307,7 @@ impl AcpState {
             }
 
             if cancellation.is_cancelled()
-                || operation_expired(&operation_token, operation_deadline)
+                || operation_expired(&operation_token)
                 || result
                     .as_ref()
                     .err()
@@ -433,24 +421,14 @@ fn validate_workspace(
     Ok(())
 }
 
-fn deadline_from_meta(meta: Option<&Meta>) -> Option<Instant> {
-    let meta = meta?;
-    let millis = meta
-        .get("timeoutMs")
-        .and_then(Value::as_u64)
-        .or_else(|| meta.get("deadlineMs").and_then(Value::as_u64))?;
-    Some(Instant::now() + Duration::from_millis(millis))
-}
-
-fn operation_expired(cancellation: &CancellationToken, deadline: Option<Instant>) -> bool {
-    cancellation.is_cancelled() || deadline.is_some_and(|deadline| Instant::now() >= deadline)
+fn operation_expired(cancellation: &CancellationToken) -> bool {
+    cancellation.is_cancelled()
 }
 
 struct AcpInteraction {
     session_id: String,
     client: ConnectionTo<Client>,
     cancellation: CancellationToken,
-    deadline: Option<Instant>,
     input_supported: bool,
 }
 
@@ -458,12 +436,6 @@ impl AcpInteraction {
     fn ready(&self) -> Result<(), String> {
         if self.cancellation.is_cancelled() {
             return Err("ACP interaction cancelled".into());
-        }
-        if self
-            .deadline
-            .is_some_and(|deadline| Instant::now() >= deadline)
-        {
-            return Err("ACP interaction deadline exceeded".into());
         }
         Ok(())
     }

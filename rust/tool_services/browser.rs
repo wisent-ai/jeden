@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 #[cfg(unix)]
 unsafe extern "C" {
@@ -220,7 +219,6 @@ impl BrowserService {
                     detail: e.to_string(),
                 })?,
             ),
-            Duration::from_secs(60),
         )?;
         if self.bridge.is_none() {
             if let Some(pid) = response.get("browserPid").and_then(Value::as_u64) {

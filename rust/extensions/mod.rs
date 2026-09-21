@@ -10,7 +10,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::{mpsc, Arc, LazyLock, RwLock};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use crate::capability::{
     CapabilityDescriptor as RegistryDescriptor, CapabilityHealth, CapabilityKind, CapabilityPolicy,
@@ -18,8 +18,7 @@ use crate::capability::{
 };
 
 const ABI_VERSION: u32 = 1;
-const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(15);
-const INVOCATION_TIMEOUT: Duration = Duration::from_secs(60);
+
 const MAX_EXTENSION_FILES: usize = 256;
 const MAX_DESCRIPTOR_BYTES: usize = 2 * 1024 * 1024;
 const HOST: &str = include_str!("host.mjs");
@@ -455,14 +454,13 @@ fn node_supports_typescript(node: &str) -> bool {
 }
 
 // These parameters are the extension host's invocation contract: mode,
-// generation, timeout, env, sources, both authorization flags, and the
-// borrowed operation context. Nothing in scope owns that set together.
+// generation, env, sources, both authorization flags, and the borrowed
+// operation context. Nothing in scope owns that set together.
 #[allow(clippy::too_many_arguments)]
 fn run_host(
     cwd: &Path,
     mode: &str,
     generation: u64,
-    timeout: Duration,
     envs: &[(&str, String)],
     source_paths: &[PathBuf],
     allow_write: bool,
@@ -510,17 +508,6 @@ fn run_host(
     let grant = secured.execution_grant();
     if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
         return Err("extension operation cancelled".into());
-    }
-    let timeout = operation
-        .and_then(|context| {
-            context
-                .deadline()
-                .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
-        })
-        .map(|remaining| remaining.min(timeout))
-        .unwrap_or(timeout);
-    if timeout.is_zero() {
-        return Err("extension operation deadline exceeded".into());
     }
     let node = env::var("JEDEN_NODE").unwrap_or_else(|_| "node".into());
     if !grant.permits_program(std::ffi::OsStr::new(&node)) {
@@ -580,10 +567,6 @@ fn run_host(
         .env("JEDEN_EXTENSION_CWD", &canonical_cwd)
         .env("JEDEN_EXTENSION_GENERATION", generation.to_string())
         .env(
-            "JEDEN_EXTENSION_TIMEOUT_MS",
-            timeout.as_millis().saturating_sub(250).max(1).to_string(),
-        )
-        .env(
             "JEDEN_EXTENSION_ALLOW_WRITE",
             if allow_write { "1" } else { "0" },
         )
@@ -639,7 +622,6 @@ fn run_host(
         bytes
     });
     drop(progress_tx);
-    let started = Instant::now();
     let status = loop {
         while let Ok((stream, bytes, total_bytes)) = progress_rx.try_recv() {
             if let Some(context) = operation {
@@ -659,16 +641,6 @@ fn run_host(
         }
         if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
             break status;
-        }
-        if started.elapsed() >= timeout {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
-            return Err(format!(
-                "extension host timed out after {} seconds",
-                timeout.as_secs()
-            ));
         }
         std::thread::sleep(Duration::from_millis(20));
     };
@@ -783,7 +755,7 @@ fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Reg
         cwd,
         "discover",
         generation,
-        DISCOVERY_TIMEOUT,
+
         &[("JEDEN_EXTENSION_FILES", files)],
         &sources.modules,
         false,
@@ -1331,7 +1303,7 @@ pub(crate) fn execute_tool(
         cwd,
         "execute_tool",
         registry.generation,
-        INVOCATION_TIMEOUT,
+
         &[
             (
                 "JEDEN_EXTENSION_SOURCE",
@@ -1371,7 +1343,7 @@ pub(crate) fn fire_hooks(
             cwd,
             "fire_hook",
             registry.generation,
-            INVOCATION_TIMEOUT,
+
             &[
                 (
                     "JEDEN_EXTENSION_SOURCE",

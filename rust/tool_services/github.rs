@@ -5,7 +5,6 @@ use super::types::{
 use crate::tool_runtime::runtime_ops::OperationContext;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
 mod git;
 
@@ -211,15 +210,7 @@ impl GithubService {
         self.run_gh(context, args)
     }
     fn run_gh(&self, context: &OperationContext<'_>, args: Vec<String>) -> ServiceResult<Value> {
-        let output = process::run(
-            "github",
-            context,
-            &self.cwd,
-            "gh",
-            &args,
-            None,
-            Duration::from_secs(60),
-        )?;
+        let output = process::run("github", context, &self.cwd, "gh", &args, None)?;
         let value =
             serde_json::from_str(&output).unwrap_or_else(|_| json!({"ok":true,"output":output}));
         bounded_json(context, "github", &value)

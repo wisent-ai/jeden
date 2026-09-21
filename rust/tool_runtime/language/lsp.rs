@@ -183,25 +183,19 @@ fn file_uri(path: &Path) -> Result<String, String> {
         .map_err(|_| "cannot convert path to LSP URI".into())
 }
 
+/// Wait for the server's answer to one request. The loop still wakes often
+/// enough to notice a cancelled turn; what it no longer does is decide that
+/// a server indexing a large repository has failed.
 fn await_response(
     runtime: &ToolRuntime<'_>,
     client: &mut LspClient,
     id: u64,
-    timeout: Duration,
 ) -> Result<Value, String> {
-    let deadline = runtime.operation.effective_deadline(timeout);
     loop {
         if runtime.operation.cancellation().is_cancelled() {
             return Err("LSP request cancelled".into());
         }
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        if remaining.is_zero() {
-            return Err("LSP request timed out".into());
-        }
-        match client
-            .messages
-            .recv_timeout(remaining.min(Duration::from_millis(50)))
-        {
+        match client.messages.recv_timeout(Duration::from_millis(50)) {
             Ok(Ok(message)) if message.get("id").and_then(Value::as_u64) == Some(id) => {
                 if let Some(error) = message.get("error") {
                     return Err(format!("LSP error: {error}"));
@@ -243,7 +237,7 @@ fn start(runtime: &ToolRuntime<'_>, program: &str, args: &[String]) -> Result<Ls
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"processId":std::process::id(),"rootUri":root_uri(runtime.cwd)?,"capabilities":{"textDocument":{"publishDiagnostics":{},"definition":{},"references":{},"rename":{},"codeAction":{},"formatting":{}}}}}),
     )?;
-    let _ = await_response(runtime, &mut client, id, Duration::from_secs(20))?;
+    let _ = await_response(runtime, &mut client, id)?;
     send(
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),
@@ -365,11 +359,6 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
     )?;
-    let result = await_response(
-        runtime,
-        client,
-        id,
-        Duration::from_millis(u64_input(input, "timeoutMs", 20_000).clamp(100, 120_000)),
-    )?;
+    let result = await_response(runtime, client, id)?;
     Ok(json!({"ok":true,"action":action,"path":label,"server":program,"result":result}))
 }

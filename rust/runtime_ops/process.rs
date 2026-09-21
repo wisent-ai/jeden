@@ -52,7 +52,6 @@ impl ManagedCommand {
 pub enum TerminationReason {
     Completed,
     Cancelled,
-    TimedOut,
 }
 
 #[derive(Debug)]
@@ -71,7 +70,6 @@ impl ProcessManager {
         &self,
         context: &OperationContext<'_>,
         command: ManagedCommand,
-        timeout: Duration,
     ) -> Result<ManagedProcessResult, String> {
         let grant = context.execution_grant();
         super::SecureRuntime::detect()
@@ -164,12 +162,10 @@ impl ProcessManager {
         };
         let preserve_descendants = command.preserve_descendants;
         if command.stdio == ManagedStdio::InheritedForeground {
-            let deadline = context.effective_deadline(timeout);
             let (_progress_tx, progress_rx) = mpsc::channel();
             let (status, reason) = wait_owned_process(
                 &mut child,
                 process_tree.as_mut(),
-                deadline,
                 context,
                 &progress_rx,
                 preserve_descendants,
@@ -190,7 +186,6 @@ impl ProcessManager {
             .take()
             .ok_or("managed process stderr unavailable")?;
         let stdin = child.stdin.take();
-        let deadline = context.effective_deadline(timeout);
         let limits = context.output_limits();
         let artifacts = context.artifacts().clone();
         let (progress_tx, progress_rx) = mpsc::channel();
@@ -215,7 +210,6 @@ impl ProcessManager {
             let (status, reason) = wait_owned_process(
                 &mut child,
                 process_tree.as_mut(),
-                deadline,
                 context,
                 &progress_rx,
                 preserve_descendants,
@@ -281,10 +275,12 @@ fn drain_progress(context: &OperationContext<'_>, progress: &Receiver<OperationP
     }
 }
 
+/// Wait for the child to finish. The only thing that ends this early is the
+/// operator cancelling the turn: a command that is still running is still
+/// doing the work it was asked to do, whatever a clock says about it.
 fn wait_owned_process(
     child: &mut Child,
     process_tree: &mut dyn ProcessTree,
-    deadline: Instant,
     context: &OperationContext<'_>,
     progress: &Receiver<OperationProgress>,
     preserve_descendants: bool,
@@ -302,9 +298,6 @@ fn wait_owned_process(
         }
         if context.cancellation().is_cancelled() {
             return terminate(child, process_tree, TerminationReason::Cancelled);
-        }
-        if Instant::now() >= deadline {
-            return terminate(child, process_tree, TerminationReason::TimedOut);
         }
         thread::sleep(POLL_INTERVAL);
     }

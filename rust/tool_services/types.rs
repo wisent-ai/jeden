@@ -58,7 +58,6 @@ pub enum ServiceError {
     InvalidInput(String),
     PermissionDenied(String),
     Cancelled,
-    DeadlineExceeded,
     Backend {
         service: &'static str,
         detail: String,
@@ -80,7 +79,6 @@ impl fmt::Display for ServiceError {
             Self::InvalidInput(v) => write!(f, "invalid input: {v}"),
             Self::PermissionDenied(v) => write!(f, "permission denied: {v}"),
             Self::Cancelled => f.write_str("operation cancelled"),
-            Self::DeadlineExceeded => f.write_str("operation deadline exceeded"),
             Self::Backend { service, detail } => write!(f, "{service} backend failed: {detail}"),
             Self::Protocol { service, detail } => write!(f, "{service} protocol error: {detail}"),
             Self::OutputLimit { limit } => write!(f, "output exceeded {limit} bytes"),
@@ -100,12 +98,6 @@ pub type ServiceResult<T> = Result<T, ServiceError>;
 pub fn check_operation(context: &OperationContext<'_>) -> ServiceResult<()> {
     if context.cancellation().is_cancelled() {
         return Err(ServiceError::Cancelled);
-    }
-    if context
-        .deadline()
-        .is_some_and(|deadline| std::time::Instant::now() >= deadline)
-    {
-        return Err(ServiceError::DeadlineExceeded);
     }
     Ok(())
 }

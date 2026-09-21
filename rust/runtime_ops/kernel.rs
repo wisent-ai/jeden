@@ -50,7 +50,6 @@ struct KernelKey {
 
 pub struct KernelResult {
     pub ok: bool,
-    pub timed_out: bool,
     pub cancelled: bool,
     pub reset: bool,
     pub stdout: OutputCapture,
@@ -67,7 +66,6 @@ pub fn evaluate(
     language: KernelLanguage,
     code: &str,
     reset: bool,
-    timeout: Duration,
 ) -> Result<KernelResult, String> {
     let child = super::untrusted_child(
         context,
@@ -122,7 +120,7 @@ pub fn evaluate(
     } else {
         KernelProcess::spawn(language, &canonical_cwd, grant)?
     };
-    let outcome = kernel.evaluate(context, code, timeout, reset);
+    let outcome = kernel.evaluate(context, code, reset);
     match outcome {
         Ok((result, healthy)) => {
             if healthy {
@@ -151,7 +149,7 @@ pub fn probe(language: KernelLanguage, cwd: &Path) -> Result<(), String> {
     )?;
     let artifacts = std::env::temp_dir().join("jeden-kernel-probe-artifacts");
     let context = OperationContext::new(CancellationToken::new(), ArtifactSink::new(artifacts));
-    let result = kernel.evaluate(&context, "1", Duration::from_secs(2), true);
+    let result = kernel.evaluate(&context, "1", true);
     kernel.terminate();
     let (result, _) = result?;
     if result.ok {
@@ -262,11 +260,10 @@ impl KernelProcess {
         &mut self,
         context: &OperationContext<'_>,
         code: &str,
-        timeout: Duration,
         reset: bool,
     ) -> Result<(KernelResult, bool), String> {
         self.sequence = self.sequence.wrapping_add(1);
-        let request = json!({"id": self.sequence, "code": code, "timeoutMs": timeout.as_millis().min(u64::MAX as u128) as u64});
+        let request = json!({"id": self.sequence, "code": code});
         serde_json::to_writer(&mut self.stdin, &request).map_err(|error| error.to_string())?;
         self.stdin
             .write_all(b"\n")
@@ -287,7 +284,6 @@ impl KernelProcess {
             context.output_limits(),
             context.artifacts().clone(),
         );
-        let deadline = context.effective_deadline(timeout);
         let mut display_mime = None;
         let mut progress_total = 0u64;
         loop {
@@ -297,7 +293,6 @@ impl KernelProcess {
                 return Ok((
                     finish_kernel(
                         false,
-                        false,
                         true,
                         reset,
                         stdout,
@@ -305,23 +300,6 @@ impl KernelProcess {
                         display,
                         display_mime,
                         Some("kernel evaluation cancelled".into()),
-                    )?,
-                    false,
-                ));
-            }
-            if Instant::now() >= deadline {
-                self.interrupt();
-                return Ok((
-                    finish_kernel(
-                        false,
-                        true,
-                        false,
-                        reset,
-                        stdout,
-                        stderr,
-                        display,
-                        display_mime,
-                        Some("kernel evaluation timed out".into()),
                     )?,
                     false,
                 ));
@@ -368,7 +346,6 @@ impl KernelProcess {
                         return Ok((
                             finish_kernel(
                                 ok,
-                                false,
                                 false,
                                 reset,
                                 stdout,
@@ -451,12 +428,11 @@ fn drain_kernel_stderr(
         }
     }
 }
-// Four termination flags and three capture buffers, assembled by the poll loop
-// that owns them; this call is the first place they become one value.
+// Three termination flags and three capture buffers, assembled by the poll
+// loop that owns them; this call is the first place they become one value.
 #[allow(clippy::too_many_arguments)]
 fn finish_kernel(
     ok: bool,
-    timed_out: bool,
     cancelled: bool,
     reset: bool,
     stdout: BoundedOutput,
@@ -467,7 +443,6 @@ fn finish_kernel(
 ) -> Result<KernelResult, String> {
     Ok(KernelResult {
         ok,
-        timed_out,
         cancelled,
         reset,
         stdout: stdout.finish().map_err(|e| e.to_string())?,

@@ -71,7 +71,6 @@ impl Error for PtyError {}
 
 pub struct PtyResult {
     pub ok: bool,
-    pub timed_out: bool,
     pub cancelled: bool,
     pub reset: bool,
     pub code: Option<i32>,
@@ -85,7 +84,6 @@ pub fn execute(
     cwd: &Path,
     input: &str,
     reset: bool,
-    timeout: Duration,
 ) -> Result<PtyResult, String> {
     let child = super::untrusted_child(context, format!("{}:pty", context.operation_id()))
         .map_err(|error| error.to_string())?;
@@ -126,7 +124,7 @@ pub fn execute(
     } else {
         spawn_registered(&mut registry, &canonical_cwd)?
     };
-    let result = session.execute(context, input, reset, timeout);
+    let result = session.execute(context, input, reset);
     match result {
         Ok((result, healthy)) => {
             if healthy {
@@ -264,7 +262,7 @@ impl PtyProcess {
         session
             .write_all(startup)
             .map_err(|error| error.to_string())?;
-        wait_for_bytes(session.as_mut(), ready_marker, Duration::from_secs(2))?;
+        wait_for_bytes(session.as_mut(), ready_marker)?;
         drain(session.as_mut());
         Ok(Self {
             session,
@@ -287,7 +285,6 @@ impl PtyProcess {
         context: &OperationContext<'_>,
         input: &str,
         reset: bool,
-        timeout: Duration,
     ) -> Result<(PtyResult, bool), String> {
         self.sequence = self.sequence.wrapping_add(1);
         let frame = native().command_frame(input, self.session.process_id(), self.sequence);
@@ -297,7 +294,6 @@ impl PtyProcess {
             .map_err(|error| error.to_string())?;
         let mut output =
             BoundedOutput::new("pty", context.output_limits(), context.artifacts().clone());
-        let deadline = context.effective_deadline(timeout);
         let mut pending = Vec::with_capacity(marker.len() + 8192);
         let mut progress_total = 0u64;
         loop {
@@ -308,25 +304,7 @@ impl PtyProcess {
                 return Ok((
                     PtyResult {
                         ok: false,
-                        timed_out: false,
                         cancelled: true,
-                        reset,
-                        code: None,
-                        output: output.finish().map_err(|e| e.to_string())?,
-                        session,
-                    },
-                    false,
-                ));
-            }
-            if Instant::now() >= deadline {
-                let _ = self.session.signal(ProcessSignal::Interrupt);
-                let mut session = self.metadata.clone();
-                session.state = PtySessionState::Ended;
-                return Ok((
-                    PtyResult {
-                        ok: false,
-                        timed_out: true,
-                        cancelled: false,
                         reset,
                         code: None,
                         output: output.finish().map_err(|e| e.to_string())?,
@@ -354,7 +332,6 @@ impl PtyProcess {
                         return Ok((
                             PtyResult {
                                 ok: code == Some(0),
-                                timed_out: false,
                                 cancelled: false,
                                 reset,
                                 code,
@@ -406,14 +383,12 @@ impl PtyProcess {
     }
 }
 
-fn wait_for_bytes(
-    session: &mut dyn PtySession,
-    marker: &[u8],
-    timeout: Duration,
-) -> Result<(), String> {
-    let deadline = Instant::now() + timeout;
+/// Read until the startup marker arrives. The shell prints it once it is
+/// ready; a shell that never prints it has failed, and its exit ends the
+/// read below with an error rather than a guess.
+fn wait_for_bytes(session: &mut dyn PtySession, marker: &[u8]) -> Result<(), String> {
     let mut pending = Vec::with_capacity(4096);
-    while Instant::now() < deadline {
+    loop {
         let mut buffer = [0u8; 4096];
         match session.read_available(&mut buffer) {
             Ok(count) if count > 0 => {
@@ -430,7 +405,6 @@ fn wait_for_bytes(
             Err(error) => return Err(error.to_string()),
         }
     }
-    Err("PTY shell did not complete startup handshake".into())
 }
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack

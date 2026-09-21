@@ -6,7 +6,6 @@ use crate::tool_runtime::runtime_ops::OperationContext;
 use reqwest::blocking::{Client, Response};
 use serde_json::{json, Value};
 use std::path::Path;
-use std::time::Duration;
 use url::Url;
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[(
@@ -168,13 +167,7 @@ fn send_provider(
     }
     let socket = crate::tool_runtime::runtime_ops::network::pinned_socket(&target)
         .map_err(|e| ServiceError::PermissionDenied(e.to_string()))?;
-    let timeout = context
-        .deadline()
-        .and_then(|d| d.checked_duration_since(std::time::Instant::now()))
-        .unwrap_or(Duration::from_secs(20))
-        .min(Duration::from_secs(30));
     let client = Client::builder()
-        .timeout(timeout)
         .redirect(reqwest::redirect::Policy::none())
         .resolve(&target.host, socket)
         .build()

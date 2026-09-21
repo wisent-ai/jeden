@@ -9,10 +9,9 @@ const mode = process.env.JEDEN_EXTENSION_MODE || 'discover';
 const cwd = resolve(process.env.JEDEN_EXTENSION_CWD || '.');
 const artifactRoot = process.env.JEDEN_EXTENSION_ARTIFACT_DIR ? resolve(process.env.JEDEN_EXTENSION_ARTIFACT_DIR) : null;
 const allowWrite = process.env.JEDEN_EXTENSION_ALLOW_WRITE === '1';
+// The host is aborted when the session cancels it, which arrives as a
+// signal; nothing here ends an extension because an interval elapsed.
 const abortController = new AbortController();
-const timeoutMs = Math.max(1, Number(process.env.JEDEN_EXTENSION_TIMEOUT_MS || '60000'));
-const abortTimer = setTimeout(() => abortController.abort(new Error('extension operation timed out')), timeoutMs);
-abortTimer.unref();
 process.once('SIGTERM', () => abortController.abort(new Error('extension operation cancelled')));
 process.once('SIGINT', () => abortController.abort(new Error('extension operation cancelled')));
 const allowedEvents = Object.freeze({

@@ -10,7 +10,7 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const MAX_DAP_FRAME: usize = 8 * 1024 * 1024;
 pub(crate) const TOOLS: &[(&str, &str)] = &[
@@ -241,14 +241,10 @@ fn wait_response(
     context: &OperationContext<'_>,
     request_seq: u64,
 ) -> ServiceResult<Value> {
-    let deadline = context
-        .deadline()
-        .unwrap_or_else(|| Instant::now() + Duration::from_secs(60));
+    // The adapter answers this request or its connection ends; a cancelled
+    // turn stops the wait at the next poll.
     loop {
         check_operation(context)?;
-        if Instant::now() >= deadline {
-            return Err(ServiceError::DeadlineExceeded);
-        }
         match rx.recv_timeout(Duration::from_millis(20)) {
             Ok(Ok(value))
                 if value.get("type").and_then(Value::as_str) == Some("response")

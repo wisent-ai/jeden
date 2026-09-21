@@ -16,13 +16,6 @@ fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
     if runtime.operation.cancellation().is_cancelled() {
         return Err("search cancelled".into());
     }
-    if runtime
-        .operation
-        .deadline()
-        .is_some_and(|deadline| std::time::Instant::now() >= deadline)
-    {
-        return Err("search deadline exceeded".into());
-    }
     Ok(())
 }
 

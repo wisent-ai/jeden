@@ -4,7 +4,6 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::Duration;
 
 use crate::tool_runtime::runtime_ops::{
     ManagedCommand, OperationContext, ProcessManager, TerminationReason,
@@ -12,7 +11,6 @@ use crate::tool_runtime::runtime_ops::{
 
 use super::super::EditorState;
 
-const EXTERNAL_EDITOR_TIMEOUT: Duration = Duration::from_secs(24 * 60 * 60);
 static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,11 +109,10 @@ fn external_editor_with(
     managed.args = command.args;
     managed.args.push(temporary.path().as_os_str().to_owned());
     managed.inherit_stdio_for_foreground();
-    let result = ProcessManager.run(operation, managed, EXTERNAL_EDITOR_TIMEOUT)?;
+    let result = ProcessManager.run(operation, managed)?;
     if result.reason != TerminationReason::Completed {
         return Err(match result.reason {
             TerminationReason::Cancelled => "external editor cancelled".into(),
-            TerminationReason::TimedOut => "external editor timed out".into(),
             TerminationReason::Completed => unreachable!(),
         });
     }
