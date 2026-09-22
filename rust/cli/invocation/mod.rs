@@ -16,6 +16,7 @@ pub(crate) struct Args {
     pub(crate) json: bool,
     pub(crate) resume_session: Option<PathBuf>,
     pub(crate) autonomous: bool,
+    pub(crate) pursuit_request: Option<crate::autonomy::requests::Mode>,
     pub(crate) positionals: Vec<String>,
 }
 
@@ -26,6 +27,9 @@ pub(crate) fn usage() -> String {
         "  jeden --version | -V\n",
         "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden pursue --request-file JSON [--allow-write] [--allow-command] --json\n",
+        "  jeden pursue --status REQUEST_ID --json\n",
+        "  jeden pursue --resume-run REQUEST_ID --json\n",
         "  jeden todo [list|add|pause|resume|cancel|defect|answer|continue] [--session id] [--revision n --reason text|--text answer] [--json]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
@@ -140,6 +144,23 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     };
     while let Some(arg) = rest.next() {
         match arg.as_str() {
+            "--request-file" | "--status" | "--resume-run" if args.command == "pursue" => {
+                if args.pursuit_request.is_some() {
+                    return Err(
+                        "pursue request, status and resume modes are mutually exclusive".into(),
+                    );
+                }
+                let value = rest
+                    .next()
+                    .ok_or_else(|| format!("{arg} requires a value"))?;
+                args.pursuit_request = Some(match arg.as_str() {
+                    "--request-file" => {
+                        crate::autonomy::requests::Mode::Submit(PathBuf::from(value))
+                    }
+                    "--status" => crate::autonomy::requests::Mode::Status(value),
+                    _ => crate::autonomy::requests::Mode::Resume(value),
+                });
+            }
             "--cwd" => {
                 args.cwd = PathBuf::from(rest.next().ok_or("--cwd requires a value")?);
                 args.cwd_explicit = true;
@@ -199,7 +220,13 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             other => args.positionals.push(other.to_string()),
         }
     }
-    if matches!(args.command.as_str(), "run" | "pursue") && args.positionals.is_empty() {
+    if args.pursuit_request.is_some() && !args.positionals.is_empty() {
+        return Err("a machine pursuit request cannot also contain a positional objective".into());
+    }
+    if matches!(args.command.as_str(), "run" | "pursue")
+        && args.positionals.is_empty()
+        && args.pursuit_request.is_none()
+    {
         return Err(format!("{} requires a task", args.command));
     }
     if args.command == "interactive" && !args.positionals.is_empty() {

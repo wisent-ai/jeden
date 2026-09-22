@@ -3,6 +3,8 @@
 //! agent syntax (Rules block, action protocol, tool registry) never goes
 //! through this table and stays English always.
 
+mod translations;
+
 use std::path::Path;
 
 use super::config::{load_config, ui_language};
@@ -115,7 +117,7 @@ static STRINGS: &[(&str, &str, &str)] = &[
 ];
 
 /// Look up `key` for `lang`: hand-written rows first, then the generated
-/// overlay in `i18n_translations`, then the English row; a key missing even
+/// overlay in `i18n::translations`, then the English row; a key missing even
 /// from English yields the key itself. Unknown languages (including `auto`)
 /// fall back to English. This never panics.
 pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
@@ -123,7 +125,7 @@ pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
         .iter()
         .find(|(row_lang, row_key, _)| *row_lang == lang && *row_key == key)
         .or_else(|| {
-            super::i18n_translations::GENERATED_TRANSLATIONS
+            translations::GENERATED_TRANSLATIONS
                 .iter()
                 .find(|(row_lang, row_key, _)| *row_lang == lang && *row_key == key)
         })

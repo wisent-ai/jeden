@@ -28,3 +28,17 @@ web/wisent-components.css
 # read by people and by every registry this package is published to. Moving
 # any of them into a sub-folder breaks the tool that names the path.
 .
+
+# The published site's own root. A browser and the host read each of these by
+# the exact path it is served from: /favicon.svg, /robots.txt, /og-image.png
+# and /og-image.svg from the page metadata, /styles.css and /script.js from
+# index.html, and vercel.json by the platform that deploys it. Moving one into
+# a sub-folder changes the URL and breaks the reader that names it.
+web/favicon.svg
+web/index.html
+web/og-image.png
+web/og-image.svg
+web/robots.txt
+web/script.js
+web/styles.css
+web/vercel.json

@@ -6,7 +6,6 @@
 
 mod omp;
 
-
 use serde_json::json;
 
 use crate::context::advisor;
@@ -109,10 +108,10 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
         None if !settings.enabled => {
             Ok("The context advisor is off: context.advisor.enabled is false.\n".to_string())
         }
-        None if settings.sources.is_empty() => {
-            Ok("No context source is selected: context.advisor.sources resolved to nothing.\n"
-                .to_string())
-        }
+        None if settings.sources.is_empty() => Ok(
+            "No context source is selected: context.advisor.sources resolved to nothing.\n"
+                .to_string(),
+        ),
         None => Ok("No source had anything to recommend for this task.\n".to_string()),
     }
 }
@@ -143,9 +142,9 @@ fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
     }
     let advice = advisor::recommend(&args.cwd, &crate::load_config(&args.cwd), &request);
     if args.json {
-        return Ok(serde_json::to_string_pretty(&advice)
-            .map_err(|error| error.to_string())?
-            + "\n");
+        return Ok(
+            serde_json::to_string_pretty(&advice).map_err(|error| error.to_string())? + "\n",
+        );
     }
     Ok(advisor::render_text(&advice))
 }
@@ -156,7 +155,9 @@ fn sources(args: &Args, rest: &[String]) -> Result<String, String> {
     }
     let report = advisor::sources_report(&args.cwd, &crate::load_config(&args.cwd));
     if args.json {
-        return Ok(serde_json::to_string_pretty(&report).map_err(|error| error.to_string())? + "\n");
+        return Ok(
+            serde_json::to_string_pretty(&report).map_err(|error| error.to_string())? + "\n",
+        );
     }
     let mut out = String::new();
     let selected = report

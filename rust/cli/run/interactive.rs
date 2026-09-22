@@ -562,8 +562,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                         let settings = crate::context::advisor::settings(&cwd, &config);
                         let request =
                             crate::context::advisor::Request::from_settings(task, &settings);
-                        let advice =
-                            crate::context::advisor::recommend(&cwd, &config, &request);
+                        let advice = crate::context::advisor::recommend(&cwd, &config, &request);
                         return Ok(tui::CommandOutcome::text(
                             crate::context::advisor::render_text(&advice),
                         ));

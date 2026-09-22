@@ -231,7 +231,6 @@ fn default_advisor_max_chars() -> usize {
     crate::context::advisor::DEFAULT_MAX_CHARS
 }
 
-
 fn default_advisor_sources() -> String {
     crate::context::advisor::DEFAULT_SOURCES.to_string()
 }
@@ -239,7 +238,6 @@ fn default_advisor_sources() -> String {
 fn default_advisor_file_extensions() -> String {
     crate::context::advisor::DEFAULT_FILE_EXTENSIONS.to_string()
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct RulesConfig {
