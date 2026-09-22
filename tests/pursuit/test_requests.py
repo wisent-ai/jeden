@@ -19,20 +19,30 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class DurableRequests(unittest.TestCase):
     def setUp(self):
-        self.root = ROOT / "target/pursuit-runs" / uuid4().hex
+        output = os.environ.get("WISENT_OUTPUT_DIR")
+        evidence = Path(output) / "pursuit-tests" if output else ROOT / "target/pursuit-runs"
+        self.root = evidence / uuid4().hex
         self.root.mkdir(parents=True, mode=0o700)
         self.report = {"journey": self.id(), "state": "failed", "commands": []}
         self.addCleanup(self.retain)
-        self.binary = shutil.which(os.environ.get("JEDEN_TEST_BINARY", "jeden"))
+        candidate = str(Path(output) / "bin/jeden") if output else "jeden"
+        self.binary = shutil.which(os.environ.get("JEDEN_TEST_BINARY", candidate))
         self.assertIsNotNone(self.binary, "The real Jeden candidate is unavailable")
         self.binary = str(Path(self.binary).resolve())
         self.report["binary"] = self.binary
         with open(self.binary, "rb") as executable:
             self.report["binary_sha256"] = hashlib.file_digest(executable, "sha256").hexdigest()
         self.report["candidate_source_revision"] = os.environ.get("WISENT_SOURCE_COMMIT")
-        revision = self.command(["git", "rev-parse", "HEAD"], env=os.environ)
-        self.assertEqual(revision.returncode, os.EX_OK, revision.stderr)
-        self.report["checkout_revision"] = revision.stdout.strip()
+        if os.environ.get("WISENT_SOURCE_DIR"):
+            self.assertEqual(Path(os.environ["WISENT_SOURCE_DIR"]).resolve(), ROOT)
+            self.report["source_kind"] = "archive"
+            self.report["source_sha256"] = os.environ.get("WISENT_SOURCE_SHA256")
+            self.report["checkout_revision"] = self.report["candidate_source_revision"]
+        else:
+            revision = self.command(["git", "rev-parse", "HEAD"], env=os.environ)
+            self.assertEqual(revision.returncode, os.EX_OK, revision.stderr)
+            self.report["source_kind"] = "checkout"
+            self.report["checkout_revision"] = revision.stdout.strip()
         self.env = {**os.environ, "HOME": str(self.root / "home"),
                     "JEDEN_SESSION_ROOT": str(self.root / "sessions"),
                     "JEDEN_PURSUIT_STATE_ROOT": str(self.root / "requests")}
@@ -40,13 +50,13 @@ class DurableRequests(unittest.TestCase):
         Path(self.env["HOME"]).mkdir(mode=0o700)
         self.cli("--version")
         self.identity = "request-" + uuid4().hex
-        # A real missing checkout prevents external work even if a regression
-        # admits the authority request that the first case expects to refuse.
+        # An existing non-checkout exercises a real repository refusal before
+        # inference or any external mutation. It is not a copied source tree.
         self.request = {
             "schema_version": 1, "request_id": self.identity,
             "initiative_id": self.identity,
             "objective": "Inspect the declared repository without modifying it.",
-            "cwd": str(ROOT.resolve()), "evidence_refs": [str(Path(__file__).resolve())],
+            "cwd": str(self.root.resolve()), "evidence_refs": [str(Path(__file__).resolve())],
             "budget_usd": "1", "allow_write": False, "allow_command": False,
             "repositories": ["wisent-ai/unavailable-" + uuid4().hex],
         }
@@ -83,6 +93,7 @@ class DurableRequests(unittest.TestCase):
     def passed(self):
         # The build producer supplies provenance; the checkout cannot identify
         # the source of a different executable found on PATH.
+        self.assertRegex(self.report["candidate_source_revision"] or "", r"^[0-9a-f]{40}$")
         self.assertEqual(self.report["candidate_source_revision"],
                          self.report["checkout_revision"],
                          "Candidate source binding is absent or differs from this journey revision")
@@ -103,7 +114,8 @@ class DurableRequests(unittest.TestCase):
     def test_blocked_request_survives_reopen_and_rejects_rebinding(self):
         blocked = self.response(self.submit())
         self.assertEqual(blocked["state"], "blocked", blocked)
-        self.assertIn(self.request["repositories"][0], blocked["error"])
+        self.assertIsNone(blocked["run_id"])
+        self.assertEqual(blocked["source_revisions"], {})
         before = self.saved()
         self.assertEqual(before["request"], self.request)
         self.assertEqual(before["response"]["state"], "blocked")
@@ -121,7 +133,7 @@ class DurableRequests(unittest.TestCase):
         self.assertEqual(resumed["state"], "blocked")
         self.assertEqual(self.saved()["request"], before["request"])
         self.assertFalse((self.root / "requests" / self.identity / "inference.sqlite3").exists(),
-                         "A missing declared checkout must refuse before inference")
+                         "A non-checkout must refuse before inference")
         self.report["persisted_request"] = self.saved()["request"]
         self.passed()
 

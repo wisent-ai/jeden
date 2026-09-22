@@ -35,10 +35,17 @@
       "build": {
         "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
+      "tests": [
+        {
+          "name": "pursuit-durable-refusals",
+          "argv": ["python3", "-m", "unittest", "discover", "-s", "tests/pursuit", "-p", "test_requests.py", "-v"]
+        }
+      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
-        "release-tests": "evidence/release-tests"
+        "release-tests": "evidence/release-tests",
+        "pursuit-tests": "evidence/pursuit-tests"
       }
     },
     "linux-amd64": {
@@ -64,10 +71,17 @@
       "build": {
         "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
+      "tests": [
+        {
+          "name": "pursuit-durable-refusals",
+          "argv": ["python3", "-m", "unittest", "discover", "-s", "tests/pursuit", "-p", "test_requests.py", "-v"]
+        }
+      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
-        "release-tests": "evidence/release-tests"
+        "release-tests": "evidence/release-tests",
+        "pursuit-tests": "evidence/pursuit-tests"
       }
     }
   },
