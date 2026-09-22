@@ -51,37 +51,10 @@ pub struct IsolatedRunV1 {
     pub environment: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct RouteEvidenceV1 {
-    pub served_route: String,
-    pub decision: serde_json::Value,
-}
+mod execution;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CaseExecutionV1 {
-    pub route: RouteEvidenceV1,
-    pub terminal_reason: TerminalReasonV1,
-    pub tool_stats: ToolStatsV1,
-    pub usage: UsageMetricsV1,
-    pub retries: u32,
-    pub failovers: u32,
-    pub memory_reads: u32,
-    pub memory_writes: u32,
-    #[serde(default)]
-    pub actions: BTreeSet<String>,
-    #[serde(default)]
-    pub hard_violations: Vec<String>,
-}
+pub use execution::{CaseExecutionV1, CaseExecutor, RouteEvidenceV1};
 
-pub trait CaseExecutor {
-    fn execute(
-        &mut self,
-        case: &EvalCaseV1,
-        isolated: &IsolatedRunV1,
-    ) -> Result<CaseExecutionV1, String>;
-}
 
 pub struct EvalRunner {
     pub(super) config: RunnerConfigV1,
