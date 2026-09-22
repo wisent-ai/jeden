@@ -1,4 +1,3 @@
-use super::super::platform::PtySession;
 use super::super::{OperationContext, OutputCapture};
 use std::collections::HashMap;
 use std::error::Error;

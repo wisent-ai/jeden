@@ -40,7 +40,7 @@ pub enum EditorAction {
 }
 
 impl EditorAction {
-    pub(super) const fn action_id(self) -> &'static str {
+    pub(crate) const fn action_id(self) -> &'static str {
         match self {
             Self::MoveLeft => "editor.move-left",
             Self::MoveRight => "editor.move-right",
