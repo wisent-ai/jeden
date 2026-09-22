@@ -28,7 +28,6 @@ const CREATE_RULESET_VERSION: libc::c_int = 1;
 /// a right a kernel does not implement is refused outright, which would
 /// turn a working confinement into no confinement at all.
 const EXECUTE: u64 = 1;
-const WRITE_FILE: u64 = 1 << 1;
 const READ_FILE: u64 = 1 << 2;
 const READ_DIR: u64 = 1 << 3;
 const ABI1_ALL: u64 = (1 << 13) - 1;
