@@ -558,12 +558,7 @@ pub fn server_capabilities(cwd: &Path, server_name: &str) -> Result<Value, Strin
     })
 }
 
-pub fn get_prompt(
-    cwd: &Path,
-    server_name: &str,
-    name: &str,
-    args: Value,
-) -> Result<Value, String> {
+pub fn get_prompt(cwd: &Path, server_name: &str, name: &str, args: Value) -> Result<Value, String> {
     if name.is_empty() {
         return Err("name is required".into());
     }
@@ -571,11 +566,8 @@ pub fn get_prompt(
         return Err("MCP prompt arguments must be an object".into());
     }
     with_connection(cwd, server_name, |connection| {
-        let value = connection.request(
-            cwd,
-            "prompts/get",
-            json!({"name": name, "arguments": args}),
-        )?;
+        let value =
+            connection.request(cwd, "prompts/get", json!({"name": name, "arguments": args}))?;
         if !value.is_object() {
             return Err("MCP prompts/get result must be an object".into());
         }
@@ -652,8 +644,7 @@ pub fn live_tools(cwd: &Path) -> Result<Vec<(String, Value)>, String> {
             };
             match notifications {
                 Ok(notifications) => {
-                    if let Err(error) = connection.process_notifications(cwd, notifications)
-                    {
+                    if let Err(error) = connection.process_notifications(cwd, notifications) {
                         connection.record_failure(error);
                     }
                 }
