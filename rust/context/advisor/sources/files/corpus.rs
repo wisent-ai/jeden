@@ -14,7 +14,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-
 use ignore::WalkBuilder;
 
 use crate::context::advisor::Settings;
@@ -148,7 +147,13 @@ impl Corpus {
             let number = index + 1;
             if line.starts_with('#') {
                 if !body.trim().is_empty() {
-                    self.push(path, &title, first_line, last_line, std::mem::take(&mut body));
+                    self.push(
+                        path,
+                        &title,
+                        first_line,
+                        last_line,
+                        std::mem::take(&mut body),
+                    );
                 }
                 title = line.trim_start_matches('#').trim().to_string();
                 if title.is_empty() {
@@ -186,11 +191,24 @@ impl Corpus {
             }
             let first_line = index * CHUNK_LINES + 1;
             let last_line = first_line + window.len() - 1;
-            self.push(path, &window_title(path, window), first_line, last_line, body);
+            self.push(
+                path,
+                &window_title(path, window),
+                first_line,
+                last_line,
+                body,
+            );
         }
     }
 
-    fn push(&mut self, path: &Path, title: &str, first_line: usize, last_line: usize, body: String) {
+    fn push(
+        &mut self,
+        path: &Path,
+        title: &str,
+        first_line: usize,
+        last_line: usize,
+        body: String,
+    ) {
         self.sections.push(Section {
             lower_body: body.to_lowercase(),
             lower_title: title.to_lowercase(),

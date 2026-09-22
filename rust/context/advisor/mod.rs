@@ -24,10 +24,8 @@ use serde_json::{json, Value};
 
 use crate::cli::config::Config;
 
-pub(crate) use render::{availability_word, prompt_section, probe_value, render_text};
-pub(crate) use settings::{
-    bounded_limit, parse_sources, settings, unknown_sources, Settings,
-};
+pub(crate) use render::{availability_word, probe_value, prompt_section, render_text};
+pub(crate) use settings::{bounded_limit, parse_sources, settings, unknown_sources, Settings};
 use sources::{files, ground_truth, memory, transcripts};
 
 /// Source order is the presentation order: local and cited sources first,

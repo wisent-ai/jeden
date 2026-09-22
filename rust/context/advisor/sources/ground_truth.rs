@@ -123,7 +123,10 @@ fn citation(result: &Value, terms: &[String]) -> Recommendation {
         .and_then(Value::as_i64)
         .unwrap_or_default();
     let content = string_at(result, "content", "");
-    let heading = result.get("heading").and_then(Value::as_str).unwrap_or(path);
+    let heading = result
+        .get("heading")
+        .and_then(Value::as_str)
+        .unwrap_or(path);
     Recommendation {
         source: "ground-truth".to_string(),
         title: heading.to_string(),
@@ -149,8 +152,7 @@ pub(crate) fn probe(settings: &Settings) -> Value {
         SourceStatus::unavailable("ground-truth", NO_ENDPOINT, started)
     } else {
         let url = format!("{}/health", settings.ground_truth_url);
-        match client()
-            .and_then(|client| client.get(&url).send().map_err(|error| error.to_string()))
+        match client().and_then(|client| client.get(&url).send().map_err(|error| error.to_string()))
         {
             Ok(response) if response.status().is_success() => SourceStatus::available(
                 "ground-truth",

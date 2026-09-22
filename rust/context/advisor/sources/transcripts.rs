@@ -109,8 +109,7 @@ pub(crate) fn probe(settings: &Settings) -> Value {
     let started = Instant::now();
     let mut command = Command::new(&settings.transcript_lake_bin);
     command.arg("status").arg("--json");
-    let status = match command_output(command)
-    {
+    let status = match command_output(command) {
         Ok(text) => match json_tail(&text) {
             Some(document) => {
                 let partitions = document

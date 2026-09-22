@@ -100,9 +100,7 @@ pub(crate) fn matched_terms(haystack: &str, terms: &[String]) -> Vec<String> {
     let lower = haystack.to_lowercase();
     terms
         .iter()
-        .filter(|term| {
-            lower.contains(term.as_str()) || lower.contains(stem(term).as_str())
-        })
+        .filter(|term| lower.contains(term.as_str()) || lower.contains(stem(term).as_str()))
         .cloned()
         .collect()
 }

@@ -24,12 +24,7 @@ fn scope(cwd: &Path) -> MemoryScope {
     }
 }
 
-pub(crate) fn search(
-    cwd: &Path,
-    terms: &[String],
-    query: &str,
-    limit: usize,
-) -> SourceOutcome {
+pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) -> SourceOutcome {
     let started = Instant::now();
     let store = match MemoryStore::open(MemoryStore::default_path()) {
         Ok(store) => store,
@@ -116,11 +111,9 @@ pub(crate) fn probe() -> Value {
                     )
                 }
             }
-            Err(error) => SourceStatus::unavailable(
-                "memory",
-                format!("health read failed: {error}"),
-                started,
-            ),
+            Err(error) => {
+                SourceStatus::unavailable("memory", format!("health read failed: {error}"), started)
+            }
         },
         Err(error) => SourceStatus::unavailable(
             "memory",
