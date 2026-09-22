@@ -3,13 +3,19 @@ dispatches, and the slash commands the capability registry declares."""
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 from .arms import match_arm_patterns
-from .source import ONE, Source
+from .source import ONE, Source, SurfaceError
 
 DISPATCH_FILE = pathlib.PurePosixPath("rust/main.rs")
-REGISTRY_FILE = pathlib.PurePosixPath("rust/capability/mod.rs")
+# The builtin slash commands are a declaration the binary compiles in with
+# `include_str!` (rust/capability/builtin/mod.rs), not Rust source: the split
+# of the capability registry moved them there, and every version check since
+# failed with "expected exactly one builtin slash registry, found 0" because
+# this reader still searched rust/capability/mod.rs for a function body.
+REGISTRY_FILE = pathlib.PurePosixPath("rust/capability/builtin/builtin-slash-commands.json")
 
 def cli_commands(root: pathlib.Path) -> list:
     """Every command name the binary dispatches, from rust/main.rs."""
@@ -33,23 +39,24 @@ def cli_commands(root: pathlib.Path) -> list:
 
 
 def slash_commands(root: pathlib.Path) -> list:
-    """Every builtin slash command and alias, from the capability registry."""
-    source = Source(root / REGISTRY_FILE, str(REGISTRY_FILE))
-    anchor = source.sole_anchor(
-        r"fn\s+builtin_slash_specs\s*\(\s*\)[^{]*(?=\{)", "builtin slash registry"
-    )
-    body = anchor.end()
-    stop = source.balanced_end(body, "{", "}")
+    """Every builtin slash command and alias, from the catalogue the binary
+    compiles in."""
+    path = root / REGISTRY_FILE
+    try:
+        catalogue = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise SurfaceError(f"{REGISTRY_FILE}: cannot read the slash catalogue: {error}") from error
+    if not isinstance(catalogue, list):
+        raise SurfaceError(f"{REGISTRY_FILE}: the slash catalogue is not a list")
     names = []
-    for field in source.anchors(r"\bname\s*:\s*(?=\")"):
-        if body <= field.start() < stop:
-            names.append(source.literal_at(field.end()))
-    for field in source.anchors(r"\baliases\s*:\s*&\s*(?=\[)"):
-        if body <= field.start() < stop:
-            bracket = field.end()
-            names.extend(
-                source.literals_within(bracket, source.balanced_end(bracket, "[", "]"))
-            )
+    for entry in catalogue:
+        if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+            raise SurfaceError(f"{REGISTRY_FILE}: an entry carries no name: {entry!r}")
+        names.append(entry["name"])
+        aliases = entry.get("aliases", [])
+        if not isinstance(aliases, list) or not all(isinstance(alias, str) for alias in aliases):
+            raise SurfaceError(f"{REGISTRY_FILE}: {entry['name']} carries malformed aliases")
+        names.extend(aliases)
     kept = {name for name in names if name}
     if not kept:
         raise SurfaceError(f"{REGISTRY_FILE}: slash registry yielded no names")
