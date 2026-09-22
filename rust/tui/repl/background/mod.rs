@@ -1,3 +1,5 @@
+//! Running one turn on a worker thread while the terminal keeps drawing.
+
 use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -6,124 +8,21 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
-use super::super::render::{busy_editor_lines, place_editor_cursor};
-use super::super::{
+use crate::agent::TraceEvent;
+use crate::tui::render::{busy_editor_lines, place_editor_cursor};
+use crate::tui::{
     default_columns, stdout_supports_color, CommandOutcome, DeliveryAction, EditorAction,
     EditorState, FollowUpQueue, Message, TurnCtx,
 };
+
 use super::questions::prompt_user_question;
-use super::{message_block, skeleton_bar, ReplRenderer};
-use crate::agent::TraceEvent;
-/// Worker→render-loop message during a background turn.
-enum TurnMsg {
-    /// Status line beside the skeleton ("thinking…", "tool: read_file").
-    Note(String),
-    /// A chunk of live assistant text.
-    Delta(String),
-    /// A chunk of the model's reasoning; shown live, committed when the
-    /// model moves on to a tool call or its answer.
-    Reasoning(String),
-    /// A tool call or tool result, committed to the scrollback as it happens.
-    Trace(Message),
-    /// Approval request for a gated tool; the main loop prompts and replies.
-    Approve {
-        tool: String,
-        detail: String,
-        reply: mpsc::Sender<bool>,
-    },
-    AskUser {
-        question: String,
-        options: Vec<String>,
-        reply: mpsc::Sender<Result<String, String>>,
-    },
-}
+use super::{message_block, ReplRenderer};
 
-const TOOL_INPUT_PREVIEW: usize = 320;
-const TOOL_RESULT_PREVIEW: usize = 640;
+mod events;
+mod live;
 
-/// One line of compact JSON, cut at `limit` characters.
-fn compact_preview(value: &serde_json::Value, limit: usize) -> String {
-    let text = match value {
-        serde_json::Value::String(text) => text.clone(),
-        other => other.to_string(),
-    };
-    let text = text.replace(['\r', '\n'], " ");
-    match text.char_indices().nth(limit) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text,
-    }
-}
-
-/// The scrollback line for one trace event, or none for reasoning, which is
-/// accumulated instead.
-fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
-    match *event {
-        TraceEvent::ToolCall { tool, input } => Some(Message::new(
-            "tool",
-            format!("→ {tool} {}", compact_preview(input, TOOL_INPUT_PREVIEW)),
-        )),
-        TraceEvent::ToolResult { tool, result } => Some(Message::new(
-            "tool",
-            format!("← {tool} {}", compact_preview(result, TOOL_RESULT_PREVIEW)),
-        )),
-        TraceEvent::CompletionState { state } => Some(Message::new(
-            "status",
-            format!(
-                "Tasks: {} — {} verified, {} open",
-                state["status"].as_str().unwrap_or("unknown"),
-                state["completed"],
-                state["open"]
-            ),
-        )),
-        TraceEvent::Message { text } => Some(Message::new("assistant", text)),
-        TraceEvent::Reasoning { .. } => None,
-    }
-}
-
-/// Prompt the user (in the live region) to approve one gated tool. Blocks on a
-/// keystroke: `y` allows, anything else (incl. Esc) denies. Returns the choice.
-fn prompt_tool_approval(
-    renderer: &mut ReplRenderer,
-    streamed: &str,
-    tool: &str,
-    detail: &str,
-    columns: usize,
-    color: bool,
-) -> io::Result<bool> {
-    let mut lines = Vec::new();
-    if !streamed.trim().is_empty() {
-        lines.extend(message_block(
-            &Message::new("assistant", streamed.to_string()),
-            columns,
-            color,
-        ));
-    }
-    let ask = if detail.trim().is_empty() {
-        format!("Allow tool \"{}\" for this call? [y]es / [n]o", tool)
-    } else {
-        format!(
-            "Allow tool \"{}\" for this call? [y]es / [n]o\nReason: {}",
-            tool,
-            detail.trim()
-        )
-    };
-    lines.extend(message_block(&Message::new("system", ask), columns, color));
-    renderer.flush(&[], &lines)?;
-    loop {
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    continue;
-                }
-                return Ok(matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')));
-            }
-        }
-    }
-}
-
-/// A question the worker asked: its text, the offered choices, and the channel
-/// the event loop answers on.
-type PendingQuestion = (String, Vec<String>, mpsc::Sender<Result<String, String>>);
+use events::{prompt_tool_approval, trace_message, PendingQuestion, TurnMsg};
+use live::{build_live, commit_reasoning};
 
 /// Run a background turn on a worker thread while sweeping a skeleton bar and
 /// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
@@ -168,55 +67,6 @@ where
         .unwrap_or(columns)
         .min(112);
 
-    // Reasoning is committed the moment the model moves on, so the scrollback
-    // keeps the order things happened in: reasoning, tool call, result, answer.
-    let commit_reasoning = |reasoning: &mut String, blocks: &mut Vec<String>| {
-        if reasoning.trim().is_empty() {
-            reasoning.clear();
-            return;
-        }
-        blocks.extend(message_block(
-            &Message::new("reasoning", std::mem::take(reasoning)),
-            scrollback_columns,
-            color,
-        ));
-    };
-
-    // Build the live region for a background turn: reasoning as it arrives,
-    // streamed assistant text, then the skeleton and its status line.
-    let build_live = |reasoning: &str,
-                      streamed: &str,
-                      note: &str,
-                      frame: usize,
-                      cancelling: bool|
-     -> Vec<String> {
-        let mut lines = Vec::new();
-        if !reasoning.trim().is_empty() {
-            lines.extend(message_block(
-                &Message::new("reasoning", reasoning.to_string()),
-                columns,
-                color,
-            ));
-        }
-        if !streamed.trim().is_empty() {
-            lines.extend(message_block(
-                &Message::new("assistant", streamed.to_string()),
-                columns,
-                color,
-            ));
-        }
-        let label = if cancelling {
-            format!("{} cancelling…", skeleton_bar(frame))
-        } else {
-            format!("{} {} · esc to cancel", skeleton_bar(frame), note)
-        };
-        lines.extend(message_block(
-            &Message::new("system", label),
-            columns,
-            color,
-        ));
-        lines
-    };
 
     let outcome = thread::scope(|scope| -> io::Result<Result<CommandOutcome, String>> {
         let worker_cancel = cancel.clone();
@@ -295,14 +145,14 @@ where
                         note = m;
                     }
                     TurnMsg::Delta(p) => {
-                        commit_reasoning(&mut reasoning, &mut blocks);
+                        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
                         streamed.push_str(&p);
                     }
                     TurnMsg::Reasoning(p) => {
                         reasoning.push_str(&p);
                     }
                     TurnMsg::Trace(message) => {
-                        commit_reasoning(&mut reasoning, &mut blocks);
+                        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
                         blocks.extend(message_block(&message, scrollback_columns, color));
                     }
                     TurnMsg::Approve {
@@ -339,7 +189,7 @@ where
                 continue;
             }
             let cancelling = cancel.load(Ordering::Relaxed);
-            let mut live = build_live(&reasoning, &streamed, &note, frame, cancelling);
+            let mut live = build_live(&reasoning, &streamed, &note, frame, cancelling, columns, color);
             let mut composer = busy_editor_lines(editor, queue, columns, color);
             let cursor_rows_below = if composer.len() > 1 {
                 place_editor_cursor(
@@ -409,14 +259,14 @@ where
                     note = m;
                 }
                 TurnMsg::Delta(p) => {
-                    commit_reasoning(&mut reasoning, &mut blocks);
+                    commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
                     streamed.push_str(&p);
                 }
                 TurnMsg::Reasoning(p) => {
                     reasoning.push_str(&p);
                 }
                 TurnMsg::Trace(message) => {
-                    commit_reasoning(&mut reasoning, &mut blocks);
+                    commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
                     blocks.extend(message_block(&message, scrollback_columns, color));
                 }
                 TurnMsg::Approve { reply, .. } => {
@@ -427,7 +277,7 @@ where
                 }
             }
         }
-        commit_reasoning(&mut reasoning, &mut blocks);
+        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
         if !blocks.is_empty() {
             renderer.flush(&blocks, &[])?;
         }
