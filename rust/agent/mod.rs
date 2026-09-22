@@ -12,6 +12,8 @@ use crate::model_router::{
 use crate::protocol::{extract_json_object, parse_action, Action, ToolAction};
 use crate::{handle_slash, load_config, session_root, Args, Config};
 
+pub use conversation::protocol;
+
 mod approval;
 mod commands;
 mod conversation;
@@ -19,7 +21,6 @@ pub(crate) mod credential;
 mod hooks;
 mod runtime;
 mod state;
-
 
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;

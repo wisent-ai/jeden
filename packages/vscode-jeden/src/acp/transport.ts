@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { createInterface, type Interface } from "node:readline";
 import { parseMessage, type JsonRpcMessage } from "./protocol.js";
-import { publicMetadata, sensitiveMetadata, type RedactingLogger } from "./logging.js";
+import { publicMetadata, sensitiveMetadata, type RedactingLogger } from "../logging.js";
 
 export interface AcpTransport {
   readonly events: EventEmitter;

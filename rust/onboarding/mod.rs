@@ -14,7 +14,7 @@ use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
 const EVIDENCE_REVISION: &str = "jeden-first-use-2026-09-05";
 const JOURNEY_VERSION_ID: &str = "10000000-0000-4000-8000-000000000005";
-const FALLBACK: &str = include_str!("onboarding_first_use.json");
+const FALLBACK: &str = include_str!("first_use.json");
 
 type Client = JourneyClient<Box<dyn Transport>, FileStorage>;
 

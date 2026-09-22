@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import type { JsonObject, JsonValue, SessionEventEnvelope } from "./protocol.js";
+import type { JsonObject, JsonValue, SessionEventEnvelope } from "./acp/protocol.js";
 
 export interface Artifact { readonly id: string; readonly name: string; readonly uri: string; readonly mediaType?: string; }
 export interface Job { readonly id: string; readonly label: string; readonly state: string; readonly detail?: string; }

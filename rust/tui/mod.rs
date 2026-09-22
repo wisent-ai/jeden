@@ -11,6 +11,9 @@ mod render;
 mod repl;
 mod view;
 
+/// Terminal QR rendering, under the name every caller uses.
+pub use render::qr;
+
 // The editor's own pieces and the view's renderer, under the names the rest
 // of this module has always used.
 pub(crate) use editor::{attachments, text};

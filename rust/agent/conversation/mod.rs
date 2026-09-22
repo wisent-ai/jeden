@@ -1,5 +1,7 @@
 use super::*;
 
+pub mod protocol;
+
 mod action;
 mod compaction;
 mod completion;
@@ -71,6 +73,15 @@ impl Conversation {
     pub(crate) fn new_stage(cwd: &Path) -> Result<Self, String> {
         let mut conversation = Self::new(cwd)?;
         conversation.manages_completion = false;
+        Ok(conversation)
+    }
+
+    /// Restore a Pursuit-owned stage without starting another acceptance controller.
+    pub(crate) fn open_stage(cwd: &Path, session_dir: &Path) -> Result<Self, String> {
+        let mut conversation = Self::open(cwd, session_dir)?;
+        conversation.manages_completion = false;
+        conversation.reconcile_completion = false;
+        conversation.continuation = true;
         Ok(conversation)
     }
 

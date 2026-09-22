@@ -24,9 +24,13 @@ pub mod memory;
 pub mod model_router;
 pub mod net;
 pub mod onboarding;
-pub mod probierz;
-pub mod protocol;
-pub mod qr;
+
+// Moved to the modules that own them, under the paths every caller uses:
+// the action protocol the agent speaks, the terminal QR rendering, and the
+// Probierz runner the CLI offers.
+pub use agent::protocol;
+pub use cli::tooling::probierz;
+pub use tui::qr;
 pub mod report;
 pub mod roadmap;
 pub mod routing;

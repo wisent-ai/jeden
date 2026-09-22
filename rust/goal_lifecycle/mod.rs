@@ -22,7 +22,7 @@ pub const LIFECYCLE_MODEL_LABEL: &str = "oko-goal-lifecycle-v1";
 /// `/Users/lukaszbartoszcze/Documents/CodingProjects/Wisent/transcript-label-trainer`
 /// (the same file Oko vendors in `LocalGoalLifecycleClassifier.systemPrompt`).
 /// Keep the .txt byte-identical to that file; do not add headers to it.
-const SYSTEM_PROMPT: &str = include_str!("goal_lifecycle_prompt.txt");
+const SYSTEM_PROMPT: &str = include_str!("prompt.txt");
 
 const DEFAULT_COMPLETIONS_URL: &str = "http://127.0.0.1:11439/v1/chat/completions";
 

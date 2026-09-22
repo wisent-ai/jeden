@@ -1,10 +1,10 @@
 import * as vscode from "vscode";
 import { randomBytes } from "node:crypto";
-import { JedenAcpClient, type ClientInteraction } from "./client.js";
+import { JedenAcpClient, type ClientInteraction } from "./acp/client.js";
 import { RedactingLogger } from "./logging.js";
 import { ExtensionModel, type Artifact, type DiagnosticRecord, type Job, type PendingAction } from "./model.js";
-import type { InputRequest, PermissionRequest, SessionEventEnvelope } from "./protocol.js";
-import { StdioAcpTransport } from "./transport.js";
+import type { InputRequest, PermissionRequest, SessionEventEnvelope } from "./acp/protocol.js";
+import { StdioAcpTransport } from "./acp/transport.js";
 
 class ModelTreeProvider<T extends { readonly id: string }> implements vscode.TreeDataProvider<T> {
   private readonly changed = new vscode.EventEmitter<T | undefined | void>();

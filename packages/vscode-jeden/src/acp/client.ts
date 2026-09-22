@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import type { AcpTransport } from "./transport.js";
 import { ACP_PROTOCOL_VERSION, asJsonValue, isFailure, isNotification, isObject, isRequest, type AgentCapabilities, type InitializeResult, type InputRequest, type JsonObject, type JsonRpcMessage, type JsonValue, type PermissionRequest, type SessionEventEnvelope } from "./protocol.js";
-import type { RedactingLogger } from "./logging.js";
+import type { RedactingLogger } from "../logging.js";
 
 export interface ClientInteraction {
   requestPermission(request: PermissionRequest): Promise<string | undefined>;
