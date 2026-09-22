@@ -62,7 +62,7 @@ pub(super) fn rebuild(
     {
         return Err("embedding provider returned invalid or inconsistent vectors".into());
     }
-    let now = super::now_ms();
+    let now = crate::memory::now_ms();
     let tx = conn.transaction().map_err(|e| e.to_string())?;
     tx.execute("DELETE FROM memory_embeddings", [])
         .map_err(|e| e.to_string())?;

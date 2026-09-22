@@ -1,4 +1,4 @@
-use super::{EmbeddingProvider, MemoryScope};
+use crate::memory::{EmbeddingProvider, MemoryScope};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::HashMap;
@@ -61,7 +61,7 @@ impl SemanticBackend for FtsBackend {
             scope,
             query,
             limit,
-            super::now_ms(),
+            crate::memory::now_ms(),
             DEFAULT_HALF_LIFE_MS,
             None,
         )
@@ -114,7 +114,7 @@ impl SemanticBackend for HybridBackend<'_> {
             scope,
             query,
             limit,
-            self.as_of.unwrap_or_else(super::now_ms),
+            self.as_of.unwrap_or_else(crate::memory::now_ms),
             self.half_life_ms,
             semantic.as_deref(),
         )

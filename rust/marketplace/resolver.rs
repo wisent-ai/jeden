@@ -1,4 +1,4 @@
-use super::manifest::{PluginDependency, PluginReleaseV1};
+use crate::marketplace::manifest::{PluginDependency, PluginReleaseV1};
 use semver::{Version, VersionReq};
 use std::collections::{BTreeMap, BTreeSet};
 

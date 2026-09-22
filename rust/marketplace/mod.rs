@@ -1,5 +1,5 @@
-pub mod lock;
-pub mod manifest;
+mod packages;
 pub mod resolver;
 pub mod service;
-pub mod trust;
+
+pub use packages::{lock, manifest, trust};

@@ -1,9 +1,10 @@
 mod conflict;
-mod embeddings;
-mod ranking;
+mod retrieval;
 mod schema;
 mod store;
 mod worker;
+
+use retrieval::{embeddings, ranking};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
