@@ -1,0 +1,25 @@
+[package]
+name = "jeden-tools"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Jeden's repository tooling: the release build wrapper, the public surface and its published baseline, the protocol compatibility gate and the versioning rule."
+license-file = "../LICENSE"
+
+# Its own workspace: the release wrapper has to build before the private Git
+# sources the jeden package names are configured, so it cannot share jeden's
+# lockfile or resolution.
+[workspace]
+
+[[bin]]
+name = "jeden-tools"
+path = "src/main.rs"
+
+[dependencies]
+base64 = "0.22"
+flate2 = "1"
+regex = "1"
+serde_json = "1"
+sha2 = "0.10"
+tar = "0.4"
+url = "2"

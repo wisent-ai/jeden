@@ -28,9 +28,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Validate immutable benchmark JSON inputs
         run: |
-          python3 -m json.tool benchmarks/manifests/reference-v1.json > /dev/null
-          python3 -m json.tool benchmarks/schema/run-outcome-v1.schema.json > /dev/null
-          python3 -m json.tool benchmarks/schema/eval-report-v1.schema.json > /dev/null
+          jq empty benchmarks/manifests/reference-v1.json
+          jq empty benchmarks/schema/run-outcome-v1.schema.json
+          jq empty benchmarks/schema/eval-report-v1.schema.json
       - name: Execute reference benchmark in independent roots
         shell: bash
         run: |
@@ -47,15 +47,8 @@ jobs:
           set -euo pipefail
           cp -R benchmarks/output/reference-v1 "${RUNNER_TEMP}/reference-v1-tamper"
           outcome="$(find "${RUNNER_TEMP}/reference-v1-tamper/runs" -name outcome.json -print -quit)"
-          python3 - "${outcome}" <<'PY'
-          import json
-          import pathlib
-          import sys
-          path = pathlib.Path(sys.argv[1])
-          outcome = json.loads(path.read_text())
-          outcome["datasetDigest"] = "0" * 64
-          path.write_text(json.dumps(outcome, separators=(",", ":")))
-          PY
+          jq -c '.datasetDigest = ("0" * 64)' "${outcome}" > "${outcome}.tampered"
+          mv "${outcome}.tampered" "${outcome}"
           if cargo run --locked --bin jeden-reference-benchmark -- \
             --output-root "${RUNNER_TEMP}/reference-v1-tamper" > benchmark-negative.log 2>&1; then
             echo "tampered resumable outcome was accepted" >&2

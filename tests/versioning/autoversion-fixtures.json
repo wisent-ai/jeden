@@ -1,0 +1,136 @@
+{
+  "classify": [
+    {
+      "name": "a removed name is breaking, and while major is zero it advances minor",
+      "current": "0.1.0",
+      "published": ["chat", "steer", "evaluate"],
+      "candidate": ["chat", "evaluate"],
+      "declared_breaking": false,
+      "expect": {"class": "breaking", "next": "0.2.0", "removed": ["steer"], "added": []}
+    },
+    {
+      "name": "an added name is additive, and while major is zero it advances patch",
+      "current": "0.1.0",
+      "published": ["chat", "steer"],
+      "candidate": ["chat", "steer", "evaluate"],
+      "declared_breaking": false,
+      "expect": {"class": "additive", "next": "0.1.1", "removed": [], "added": ["evaluate"]}
+    },
+    {
+      "name": "an identical surface is internal, and order does not matter",
+      "current": "0.1.0",
+      "published": ["chat", "steer"],
+      "candidate": ["steer", "chat"],
+      "declared_breaking": false,
+      "expect": {"class": "internal", "next": "0.1.1", "removed": [], "added": []}
+    },
+    {
+      "name": "duplicates in a surface collapse",
+      "current": "0.1.0",
+      "published": ["steer", "chat", "chat"],
+      "candidate": ["chat", "steer"],
+      "declared_breaking": false,
+      "expect": {"class": "internal", "next": "0.1.1", "removed": [], "added": []}
+    },
+    {
+      "name": "a removal is breaking even when something was added alongside it",
+      "current": "0.1.0",
+      "published": ["chat", "steer"],
+      "candidate": ["chat", "evaluate"],
+      "declared_breaking": false,
+      "expect": {"class": "breaking", "next": "0.2.0", "removed": ["steer"], "added": ["evaluate"]}
+    },
+    {
+      "name": "a declaration escalates an internal change",
+      "current": "0.1.0",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "declared_breaking": true,
+      "expect": {"class": "breaking", "next": "0.2.0", "removed": [], "added": []}
+    },
+    {
+      "name": "a declaration escalates an additive change",
+      "current": "0.1.0",
+      "published": ["chat"],
+      "candidate": ["chat", "steer"],
+      "declared_breaking": true,
+      "expect": {"class": "breaking", "next": "0.2.0", "removed": [], "added": ["steer"]}
+    },
+    {
+      "name": "an unset declaration cannot lower a breaking change",
+      "current": "0.1.0",
+      "published": ["chat", "steer"],
+      "candidate": ["chat"],
+      "declared_breaking": false,
+      "expect": {"class": "breaking", "next": "0.2.0", "removed": ["steer"], "added": []}
+    },
+    {
+      "name": "a removed name at a stable major advances major, resetting the rest",
+      "current": "1.2.3",
+      "published": ["chat", "steer"],
+      "candidate": ["chat"],
+      "declared_breaking": false,
+      "expect": {"class": "breaking", "next": "2.0.0", "removed": ["steer"], "added": []}
+    },
+    {
+      "name": "an added name at a stable major advances minor, resetting patch",
+      "current": "1.2.3",
+      "published": ["chat"],
+      "candidate": ["chat", "steer"],
+      "declared_breaking": false,
+      "expect": {"class": "additive", "next": "1.3.0", "removed": [], "added": ["steer"]}
+    },
+    {
+      "name": "a declaration escalates at a stable major too",
+      "current": "1.2.3",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "declared_breaking": true,
+      "expect": {"class": "breaking", "next": "2.0.0", "removed": [], "added": []}
+    }
+  ],
+  "refuse": [
+    {
+      "name": "three slots with no numeric one would mean inventing an ordering",
+      "current": "x.y.z",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "expect": {"refusal": "not-numeric"}
+    },
+    {
+      "name": "a mutable alias is a legal segment and still not a version",
+      "current": "latest",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "expect": {"refusal": "not-a-triple"}
+    },
+    {
+      "name": "surrounding whitespace does not survive a path or a key",
+      "current": "latest ",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "expect": {"refusal": "not-canonical"}
+    },
+    {
+      "name": "a character outside the canonical set is refused",
+      "current": "latest+local",
+      "published": ["chat"],
+      "candidate": ["chat"],
+      "expect": {"refusal": "not-canonical"}
+    },
+    {
+      "name": "an empty published surface means a broken extractor, not a total removal",
+      "current": "0.1.0",
+      "published": [],
+      "candidate": ["chat"],
+      "expect": {"refusal": "empty-surface"}
+    },
+    {
+      "name": "an empty candidate surface means the same",
+      "current": "0.1.0",
+      "published": ["chat"],
+      "candidate": [],
+      "expect": {"refusal": "empty-surface"}
+    }
+  ]
+}

@@ -28,11 +28,11 @@ context: |-
   - `rust/control_plane/brama.rs` i `weles.rs` implementują realne klienty, katalog/provider/account lifecycle i scripted fixtures, ale brak pełnego staging readiness/version-skew/idempotency/Retry-After/degraded-cache contract.
   - Updater w `rust/cli/run/slash.rs` sprawdza SHA-256 i HMAC oraz robi swap/health/rollback, lecz klient posiada sekret podpisujący; brak asymmetric trust, channel/target/expiry/anti-rollback/journal/recovery.
   - Conformance ma 38 areas i UI honesty, lecz `rust/conformance/probes.rs` w większości dowodzi obecności symboli w źródłach, a nie zachowania.
-  - Rust `AgentSession` i NDJSON RPC istnieją; brak kanonicznego schema artifact, event cursor/replay, pełnego ACP, TS/Python SDK, mTLS headless i tenant isolation.
+  - Rust `AgentSession` i NDJSON RPC istnieją; brak kanonicznego schema artifact, event cursor/replay, pełnego ACP, TS SDK, mTLS headless i tenant isolation.
   - Marketplace instaluje realne pluginy, ale katalog/artefakty nie mają public-key signatures, deterministic dependency resolver, lockfile, revocation i transakcyjnej wielopakietowej aktywacji.
   - Task scheduler ma lokalny DAG, izolowane kopie/worktrees i recovery, lecz brak Worker/Attempt/Lease/fencing/heartbeat, CAS snapshotów i remote placement.
   - Memory używa SQLite WAL + FTS5, ale `SemanticBackend` jest faktycznie lexical; brak embeddings, logical revisions, conflicts, temporal validity i outcome measurement.
-  - W repo nie ma `.github/workflows`, `benchmarks/**`, TS/Python SDK, OpenTelemetry, rzeczywistego OS sandboxa ani pełnego Windows adaptera.
+  - W repo nie ma `.github/workflows`, `benchmarks/**`, TS SDK, OpenTelemetry, rzeczywistego OS sandboxa ani pełnego Windows adaptera.
 
   ---
 
@@ -288,15 +288,15 @@ context: |-
 
   **Zewnętrzne prerequisites:** zamrożona wersja oficjalnej specyfikacji i upstream conformance client/vectors; partner IDE do interoperability smoke.
 
-  ### 11. Stable Rust/TypeScript/Python SDK
+  ### 11. Stable Rust/TypeScript SDK
 
-  **Pliki/moduły:** wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; `python/jeden-sdk/**`; generator z `protocol/schema/v1/**`; compatibility checker.
+  **Pliki/moduły:** wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie: operator 2026-09-22, „masz usunac calego pythona. tylko rust”.
 
-  **Zmiana:** async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS/Python; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
+  **Zmiana:** async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
 
-  **Acceptance:** golden JSON round-trip w 3 językach; create/open/prompt/events/cancel/reconnect/dispose przeciw temu samemu daemon fixture; same typed errors; unknown additive field działa, breaking schema diff blokuje CI; package examples kompilują/uruchamiają się; version matrix jest spójny.
+  **Acceptance:** golden JSON round-trip w 2 językach; create/open/prompt/events/cancel/reconnect/dispose przeciw temu samemu daemon fixture; same typed errors; unknown additive field działa, breaking schema diff blokuje CI; package examples kompilują/uruchamiają się; version matrix jest spójny.
 
-  **Zewnętrzne prerequisites:** zarezerwowane crate/npm/PyPI names, publisher identities i minimalne wspierane Rust/Node/Python. Local package/build tests nie wymagają publikacji.
+  **Zewnętrzne prerequisites:** zarezerwowane crate/npm names, publisher identities i minimalne wspierane Rust/Node. Local package/build tests nie wymagają publikacji.
 
   ### 12. Secure headless service
 
@@ -842,17 +842,17 @@ items:
   createdAt: 2026-07-13T00:00:00Z
   createdBy: legacy-roadmap-migration
 - id: JED-011
-  title: Stable Rust/TypeScript/Python SDK
+  title: Stable Rust/TypeScript SDK
   area: sdk
   priority: P1
   status: not_run
-  summary: async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS/Python; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
-  implementation: wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; `python/jeden-sdk/**`; generator z `protocol/schema/v1/**`; compatibility checker.
+  summary: async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
+  implementation: wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie (operator 2026-09-22).
   rationale: ''
   implementationOrder: ''
   acceptance:
   - id: acceptance-1
-    text: golden JSON round-trip w 3 językach
+    text: golden JSON round-trip w 2 językach
   - id: acceptance-2
     text: create/open/prompt/events/cancel/reconnect/dispose przeciw temu samemu daemon fixture
   - id: acceptance-3
@@ -867,7 +867,7 @@ items:
   - JED-003
   capabilities: []
   externalPrerequisites:
-  - zarezerwowane crate/npm/PyPI names, publisher identities i minimalne wspierane Rust/Node/Python. Local package/build tests nie wymagają publikacji.
+  - zarezerwowane crate/npm names, publisher identities i minimalne wspierane Rust/Node. Local package/build tests nie wymagają publikacji.
   evidence: []
   createdAt: 2026-07-13T00:00:00Z
   createdBy: legacy-roadmap-migration

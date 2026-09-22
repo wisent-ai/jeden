@@ -14,7 +14,7 @@
     "stableArtifactSha256": { "$ref": "#/$defs/sha256" },
     "canaryManifestSha256": { "$ref": "#/$defs/sha256" },
     "stableManifestSha256": { "$ref": "#/$defs/sha256" },
-    "gateDigests": { "type": "object", "minProperties": 1, "additionalProperties": { "$ref": "#/$defs/sha256" } },
+    "gateDigests": { "type": "object", "required": ["staging", "soak", "fault", "conformance", "benchmark"], "additionalProperties": { "$ref": "#/$defs/sha256" } },
     "approvals": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "maxLength": 256 }, "uniqueItems": true },
     "promotedAt": { "type": "string", "format": "date-time" },
     "workflowRun": { "type": "string", "minLength": 1, "maxLength": 256 }

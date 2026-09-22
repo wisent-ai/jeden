@@ -1,0 +1,75 @@
+{
+  "about": "The jeden.session.v1 contract the protocol gate holds the schema, its golden envelopes and the SDK sources to. It states the field lists a second time on purpose: a gate that read its expectation out of the document under test would pass whatever that document said. An envelope or payload with an `optional` list must declare exactly `required` plus `optional`; one without it must declare every required field and may add others. Checked by `cargo run --manifest-path tools/Cargo.toml -- protocol-check`.",
+  "protocol": "jeden.session.v1",
+  "schemaDirectory": "protocol/schema/v1",
+  "envelopes": {
+    "request": {
+      "required": ["type", "id", "method", "params", "meta"],
+      "optional": [],
+      "nonEmpty": ["id", "method"],
+      "arbitrary": ["params"]
+    },
+    "response": {
+      "required": ["type", "id", "result"],
+      "optional": [],
+      "nonEmpty": ["id"],
+      "arbitrary": ["result"]
+    },
+    "event": {
+      "required": ["type", "sessionId", "streamId", "sequence", "cursor", "eventId", "kind", "payload"],
+      "optional": ["requestId"],
+      "nonEmpty": ["sessionId", "streamId", "cursor", "eventId", "kind", "requestId"],
+      "arbitrary": ["payload"],
+      "nonNegativeIntegers": ["sequence"]
+    },
+    "error": {
+      "required": ["type", "error"],
+      "optional": ["id"],
+      "nonEmpty": ["id"],
+      "arbitrary": []
+    }
+  },
+  "requestMeta": {
+    "property": "meta",
+    "required": ["protocolVersion", "idempotencyKey"],
+    "protocolConstant": "protocolVersion",
+    "nonEmpty": ["idempotencyKey"]
+  },
+  "errorPayload": {
+    "property": "error",
+    "required": ["code", "message", "retryable", "details"],
+    "optional": [],
+    "arbitrary": ["details"],
+    "booleans": ["retryable"]
+  },
+  "replay": {
+    "method": "session.replay",
+    "required": ["sessionId"],
+    "optional": ["cursor", "limit"],
+    "nonEmpty": ["sessionId"],
+    "nonNegativeIntegers": ["limit"]
+  },
+  "sdks": {
+    "rust": {
+      "path": "rust/sdk",
+      "suffixes": [".rs"],
+      "protocolConstant": "(?m)\\b(?:pub(?:\\([^)]*\\))?\\s+)?const\\s+(?:PROTOCOL[A-Z0-9_]*|[A-Z][A-Z0-9_]*_PROTOCOL[A-Z0-9_]*)\\s*:\\s*&(?:'static\\s+)?str\\s*=\\s*\"jeden\\.session\\.v1\"",
+      "camelCasePolicy": "rename_all\\s*=\\s*\"camelCase\"",
+      "fields": {
+        "protocolVersion": "protocol_version",
+        "idempotencyKey": "idempotency_key",
+        "traceId": "trace_id",
+        "sessionId": "session_id",
+        "streamId": "stream_id",
+        "eventId": "event_id",
+        "requestId": "request_id"
+      }
+    },
+    "typescript": {
+      "path": "packages/sdk-typescript",
+      "suffixes": [".ts", ".tsx"],
+      "protocolConstant": "(?m)\\b(?:export\\s+)?const\\s+(?:PROTOCOL[A-Z0-9_]*|[A-Z][A-Z0-9_]*_PROTOCOL[A-Z0-9_]*)\\s*(?::[^=]+)?=\\s*['\"]jeden\\.session\\.v1['\"]",
+      "wordFields": ["protocolVersion", "idempotencyKey", "traceId", "sessionId", "streamId", "sequence", "cursor", "eventId", "requestId", "retryable", "details"]
+    }
+  }
+}

@@ -93,7 +93,7 @@ export const toolPages = [
           "<strong>CLI</strong> (<code>jeden</code>, <code>jeden run</code>, <code>jeden pursue</code>, management subcommands) — canonical for human interactive, direct one-shot, and contract-driven autonomous use.",
           "<strong>Interactive terminal views and slash commands</strong> — canonical for in-terminal management; non-terminal stdin renders deterministic text lists for scripts.",
           "<strong><code>jeden rpc</code> (NDJSON), <code>jeden acp</code>, <code>jeden headless</code></strong> — canonical for automation and editor integration; <code>--json</code> flags cover scripting.",
-          "<strong>SDKs</strong> — <code>packages/sdk-typescript</code> and <code>python/jeden_sdk</code> for embedding the machine interfaces.",
+          "<strong>SDKs</strong> — the Rust SDK in <code>rust/sdk</code> and <code>packages/sdk-typescript</code> for embedding the machine interfaces.",
           "<strong>MCP</strong> — the extension interface for external tool servers.",
         ],
         callout: {

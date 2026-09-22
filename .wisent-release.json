@@ -17,28 +17,28 @@
       "quality": [
         {
           "name": "inspection-framing",
-          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
         },
         {
           "name": "native-image-read",
-          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
         },
         {
           "name": "release-compile",
-          "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
         {
           "name": "native-stage",
-          "argv": ["python3", "tests/release/private-sources.py", "--stage"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "release", "--", "--ignored", "--exact", "stage_from_declared_input"]
         }
       ],
       "build": {
-        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "tests": [
         {
           "name": "pursuit-durable-refusals",
-          "argv": ["python3", "-m", "unittest", "discover", "-s", "tests/pursuit", "-p", "test_requests.py", "-v"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "pursuit", "--", "--ignored"]
         }
       ],
       "stage": {
@@ -53,28 +53,28 @@
       "quality": [
         {
           "name": "inspection-framing",
-          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
         },
         {
           "name": "native-image-read",
-          "argv": ["python3", "release/cargo.py", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
         },
         {
           "name": "release-compile",
-          "argv": ["python3", "release/cargo.py", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
         {
           "name": "native-stage",
-          "argv": ["python3", "tests/release/private-sources.py", "--stage"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "release", "--", "--ignored", "--exact", "stage_from_declared_input"]
         }
       ],
       "build": {
-        "argv": ["python3", "release/cargo.py", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "tests": [
         {
           "name": "pursuit-durable-refusals",
-          "argv": ["python3", "-m", "unittest", "discover", "-s", "tests/pursuit", "-p", "test_requests.py", "-v"]
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "pursuit", "--", "--ignored"]
         }
       ],
       "stage": {

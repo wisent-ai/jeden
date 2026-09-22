@@ -6,30 +6,19 @@ name: Version check
 # an interactive user types — so adding one is a capability and removing one
 # breaks whoever scripted it yesterday.
 #
-# The rule itself lives in one place for the whole fleet and is not copied here:
-# https://github.com/lbartoszcze/AutoVersion. This workflow supplies only the
-# three things this repository alone knows: its surface, the version it declares,
-# and the published artifact its baseline was recovered from.
+# The rule is the fleet's shared one, https://github.com/lbartoszcze/AutoVersion,
+# whose SPEC keeps one small implementation per consumer language, held identical
+# by its conformance fixtures. Jeden's is the Rust port in tools/src/versioning,
+# run as `jeden-tools versioning decide`; tests/versioning/ reproduces every
+# fixture of AutoVersion v0.1.0 against it. This workflow supplies only the three
+# things this repository alone knows: its surface, the version it declares, and
+# the published artifact its baseline was recovered from.
 #
-# Note on this repository's version scheme: Cargo.toml holds the SemVer *floor*,
-# and the canary pipeline publishes floor-plus-one-patch as a prerelease. So the
-# version compared here is the floor, which is also what the published artifact's
-# signed manifest records as `minimumVersion`. The shared rule refuses anything
-# that is not a major.minor.patch triple, and the floor is the only stable triple
-# the published evidence names.
-#
-# That last paragraph was the contract and not the behaviour. The gate used to
-# call `quality-control/.github/workflows/rust-autoversion.yml@2de5785`, which
-# reads `.version` from the baseline — for this repository
-# `0.1.1-canary.8.1.shac034047b9341` — so AutoVersion refused every commit with
-# "is not a major.minor.patch triple, so there is no slot to advance". The gate
-# had been red on every push for that reason, which is the same class of defect
-# as a declaration nothing consumes: one side named the floor, the other read the
-# prerelease. The rule is still the shared one, installed from the same pin; only
-# the value handed to it is the floor the comment always said it was. The steps
-# are inline because that shared workflow no longer exists on quality-control's
-# main — it was deleted on 2026-08-09 — and pinning a deleted file by SHA leaves
-# nothing to fix when it is wrong.
+# Cargo.toml holds the SemVer *floor*, and the canary pipeline publishes
+# floor-plus-one-patch as a prerelease. So the version compared here is the
+# floor, which is also what the published artifact's signed manifest records as
+# `minimumVersion`: the rule refuses anything that is not a major.minor.patch
+# triple, and the floor is the only stable triple the published evidence names.
 
 on:
   pull_request:
@@ -48,20 +37,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Install the shared version rule
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build the repository tools
         run: |
           set -euo pipefail
-          python3 -m venv "$RUNNER_TEMP/autoversion"
-          "$RUNNER_TEMP/autoversion/bin/python" -m pip install --quiet \
-            "git+https://github.com/lbartoszcze/AutoVersion@v0.1.0"
-          rule="$RUNNER_TEMP/autoversion/bin/autoversion"
-          test -x "$rule"
-          echo "AUTOVERSION=$rule" >> "$GITHUB_ENV"
+          cargo build --quiet --locked --manifest-path tools/Cargo.toml
+          echo "TOOL=$PWD/tools/target/debug/jeden-tools" >> "$GITHUB_ENV"
 
       - name: Read candidate public surface
         run: |
           set -euo pipefail
-          python3 tests/versioning/surface.py > "$RUNNER_TEMP/candidate-surface.json"
+          "$TOOL" surface > "$RUNNER_TEMP/candidate-surface.json"
           jq -e '.surface | arrays | length > 0' "$RUNNER_TEMP/candidate-surface.json" >/dev/null
 
       - name: Enforce released surface and committed manifest version
@@ -74,15 +61,7 @@ jobs:
             echo "::error::$MANIFEST was modified while deriving the candidate; the gate only accepts the committed version."
             false
           }
-          declared="$(python3 - "$MANIFEST" <<'PY'
-          import pathlib, sys, tomllib
-          value = tomllib.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
-          version = value.get("package", {}).get("version")
-          if not isinstance(version, str) or not version:
-              raise SystemExit(f"{sys.argv[1]} has no non-empty [package].version")
-          print(version)
-          PY
-          )"
+          declared="$("$TOOL" versioning manifest-version "$MANIFEST")"
           # The floor, because that is the scale `declared` is on. A baseline that
           # names no floor falls back to its version, which is what every other
           # repository in the pack publishes.
@@ -95,18 +74,18 @@ jobs:
 
           jq '{surface: .surface}' "$BASELINE" > "$RUNNER_TEMP/identical.json"
           jq '{surface: (.surface - [(.surface | sort | first)])}' "$BASELINE" > "$RUNNER_TEMP/removed.json"
-          unchanged="$($AUTOVERSION decide --current "$released" \
+          unchanged="$("$TOOL" versioning decide --current "$released" \
             --published-surface "$BASELINE" --candidate-surface "$RUNNER_TEMP/identical.json" \
             --json | jq -er .change)"
-          removed="$($AUTOVERSION decide --current "$released" \
+          removed="$("$TOOL" versioning decide --current "$released" \
             --published-surface "$BASELINE" --candidate-surface "$RUNNER_TEMP/removed.json" \
             --json | jq -er .change)"
           if [ "$unchanged" != internal ] || [ "$removed" != breaking ]; then
-            echo "::error::AutoVersion self-check returned identical=$unchanged removed=$removed."
+            echo "::error::Versioning rule self-check returned identical=$unchanged removed=$removed."
             false
           fi
 
-          verdict="$($AUTOVERSION decide --current "$released" \
+          verdict="$("$TOOL" versioning decide --current "$released" \
             --published-surface "$BASELINE" \
             --candidate-surface "$RUNNER_TEMP/candidate-surface.json" --json)"
           echo "$verdict"
@@ -130,18 +109,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-
-
-
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Refuse a baseline that misstates where it came from
         if: github.ref == 'refs/heads/main'
         run: |
           set -euo pipefail
+          cargo build --quiet --locked --manifest-path tools/Cargo.toml
+          tool="$PWD/tools/target/debug/jeden-tools"
           # released-surface.json must describe an artifact a user can actually
           # obtain. The marker is the first whitespace-delimited token of "source"
-          # and is written by tests/versioning/baseline.py, so the two files agree by a
-          # constant rather than by prose.
+          # and is written by `jeden-tools versioning baseline`, so the two agree by
+          # a constant rather than by prose.
           marker="$(jq -r '.source | split(" ") | first' released-surface.json)"
           baseline="$(jq -r .version released-surface.json)"
           tier="${marker%%:*}"
@@ -161,13 +140,13 @@ jobs:
                 echo "::error::released-surface.json names $baseline, but release $tag" \
                   "serves no jeden-$baseline-<target>.tar.gz. The baseline was" \
                   "hand-edited and every later comparison is measured against" \
-                  "something nobody can install. Run tests/versioning/baseline.py."
+                  "something nobody can install. Run jeden-tools versioning baseline."
                 false
               fi
               echo "Baseline $baseline is served by $tag."
               ;;
             *)
-              # tests/versioning/baseline.py only ever emits gh-release:, and raises if this
+              # The generator only ever emits gh-release:, and refuses if this
               # repository publishes nothing. Any other tier means the file was
               # hand-edited or the release channel disappeared; either way a human
               # decides, rather than this gate quietly accepting a weaker baseline.
@@ -183,28 +162,15 @@ jobs:
           # surface any decision sees, because recomputing both sides at check time
           # is the one shape that structurally cannot refuse.
           #
-          # `--marker` and no other flag, and that is why this workflow needs no tag
-          # fetch after checkout. `actions/checkout@v4` takes one commit and no tags, so
-          # any step that resolved a tag or ran `git archive` would be blind here -- but
-          # every fact this job consults arrives over HTTP or from a static read of the
-          # checked-out tree: the floor from `awk` on Cargo.toml, the surface from
-          # tests/versioning/surface.py, the tier from the releases API. `--marker` exists
-          # precisely so the generator answers without reproducing a source revision a
-          # shallow checkout does not have. Measured: this whole job runs green inside
-          # `git clone --depth=one --no-tags`, which is the shape a runner checks out.
-          #
-          # What revokes that, so nobody has to remember it: the moment a step here
-          # invokes this generator WITHOUT `--marker`, resolves a tag, or archives one,
-          # a step that force-fetches the tags AND unshallows becomes mandatory, because
-          # a shallow clone lacks both the tag and its tree. Copy the "Make tags and
-          # history visible" step from wisent-desktop-auth's gate; it is not spelled out
-          # here on purpose, so that the fleet audit -- which decides this workflow needs
-          # such a step by looking for that command as a substring -- cannot be talked
-          # out of flagging a future defect by a comment that merely quotes the cure.
-          best="$(python3 tests/versioning/baseline.py --marker)"
+          # `--marker` resolves the newest release over HTTP without reproducing a
+          # source revision, which is why this job needs no tag fetch after a
+          # shallow, tagless checkout. The moment a step here runs the generator
+          # without `--marker`, resolves a tag, or archives one, a step that
+          # force-fetches the tags and unshallows becomes mandatory.
+          best="$("$tool" versioning baseline --marker)"
           if [ "$best" != "$marker" ]; then
             echo "::error::the baseline was recovered from $marker, but $best is" \
-              "published now. Run tests/versioning/baseline.py."
+              "published now. Run jeden-tools versioning baseline."
             false
           fi
           echo "Tier '$tier' at $tag is still the newest published artifact."

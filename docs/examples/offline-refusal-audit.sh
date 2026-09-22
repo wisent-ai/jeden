@@ -4,7 +4,7 @@
 #
 # Runs Jeden in an isolated throwaway HOME with no model credential and
 # shows that every refusal is exact, fail-closed, and still ledgered.
-# Nothing leaves the machine. Requires: jeden (or JEDEN_BIN=path), python3.
+# Nothing leaves the machine. Requires: jeden (or JEDEN_BIN=path), jq.
 set -eu
 
 JEDEN="${JEDEN_BIN:-jeden}"
@@ -24,8 +24,7 @@ echo "== 1. one-shot refusal (expect: BRAMA_URL is required...; exit 1)"
 echo "== the refused run is still a session"
 "$JEDEN" sessions
 SID="$("$JEDEN" sessions | head -1)"
-python3 -c "import sys,json; [print(json.loads(l)['payload']['type']) for l in open(sys.argv[1])]" \
-  "$HOME/.jeden/sessions/$SID/transcript.jsonl"
+jq -r '.payload.type' "$HOME/.jeden/sessions/$SID/transcript.jsonl"
 
 echo "== 2. same refusal over RPC"
 { printf '%s\n' '{"id":1,"method":"initialize"}'
@@ -49,13 +48,7 @@ echo "== 3. every credential-bearing command refuses the same way"
 
 echo "== 4. doctor names what is missing (expect exit 1: brama unavailable)"
 "$JEDEN" doctor > doctor.json || echo "exit=$?"
-python3 -c "
-import json
-d = json.load(open('doctor.json'))
-print('healthy', d['healthy'])
-for p in d['probes']:
-    print(p['subsystem'], p['state'], '|', p['detail'])
-"
+jq -r '"healthy \(.healthy)", (.probes[] | "\(.subsystem) \(.state) | \(.detail)")' doctor.json
 
 echo "== 5. accounting with zero spend"
 "$JEDEN" stats --summary

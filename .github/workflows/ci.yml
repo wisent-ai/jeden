@@ -61,9 +61,31 @@ jobs:
       - name: Check native library and binaries
         run: cargo check --locked --lib --bins
 
+  # jeden-tools is its own Cargo workspace (it has to build before the
+  # private Git sources are configured), so rust-gates does not see it.
+  tools:
+    name: Repository tools
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Formatting
+        run: cargo fmt --manifest-path tools/Cargo.toml --check
+      - name: Lints
+        run: cargo clippy --locked --manifest-path tools/Cargo.toml --all-targets -- -D warnings
+      - name: Protocol compatibility gate
+        run: cargo run --quiet --locked --manifest-path tools/Cargo.toml -- protocol-check
+      - name: Public surface
+        run: cargo run --quiet --locked --manifest-path tools/Cargo.toml -- surface
+
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rust-gates, native-platform]
+    needs: [rust-gates, native-platform, tools]
     permissions:
       contents: write
     uses: wisent-ai/quality-control/.github/workflows/tag-on-manifest-bump.yml@897485548846d7dfe38832b6b9a38212cdd1685a

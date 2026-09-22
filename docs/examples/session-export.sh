@@ -4,8 +4,7 @@
 #
 # Records a session (offline, so it holds a run_error refusal), then lists,
 # shows, exports, searches, resumes, and finally tears its ledger tail to
-# demonstrate the recovery contract. Requires: jeden (or JEDEN_BIN=path),
-# python3.
+# demonstrate the recovery contract. Requires: jeden (or JEDEN_BIN=path), jq.
 set -eu
 
 JEDEN="${JEDEN_BIN:-jeden}"
@@ -22,13 +21,7 @@ SID="$("$JEDEN" sessions | head -1)"
 echo "session: $SID"
 
 echo "== 1. show (same JSON document export produces)"
-"$JEDEN" show "$SID" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print('keys:', sorted(d))
-print('state:', d['state'])
-print('recoveredTruncatedTail:', d['recoveredTruncatedTail'])
-"
+"$JEDEN" show "$SID" | jq -r '"keys: \(keys)", "state: \(.state)", "recoveredTruncatedTail: \(.recoveredTruncatedTail)"'
 echo "== a missing id answers with JSON, not a crash"
 "$JEDEN" show no-such-session || true
 
@@ -47,22 +40,14 @@ echo "== 5. resume forks a child session (refuses offline at the model boundary)
 for d in "$HOME/.jeden/sessions"/*/; do
   case "$d" in *"$SID"*) continue ;; esac
   echo "child ledger event types ($d):"
-  python3 -c "import sys,json; [print(' ', json.loads(l)['payload']['type']) for l in open(sys.argv[1])]" \
-    "$d/transcript.jsonl"
+  jq -r '"  " + .payload.type' "$d/transcript.jsonl"
 done
 
 echo "== 6. tear the tail, observe the recovery contract"
 P="$HOME/.jeden/sessions/$SID/transcript.jsonl"
-python3 -c "
-import sys
-p = sys.argv[1]
-data = open(p, 'rb').read()
-open(p, 'wb').write(data[:-30])
-" "$P"
-"$JEDEN" show "$SID" | python3 -c "
-import json, sys
-d = json.load(sys.stdin)
-print('recoveredTruncatedTail =', d['recoveredTruncatedTail'], '| events =', len(d['events']))
-"
+size="$(wc -c < "$P")"
+head -c "$((size - 30))" "$P" > "$P.torn"
+mv "$P.torn" "$P"
+"$JEDEN" show "$SID" | jq -r '"recoveredTruncatedTail = \(.recoveredTruncatedTail) | events = \(.events | length)"'
 
 echo "== done; evidence in $HOME"

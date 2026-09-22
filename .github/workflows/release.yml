@@ -64,12 +64,24 @@ jobs:
             https://github.com/
           printf '%s\n' 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"
 
+      - name: Install Rust toolchain for target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build the repository tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --quiet --locked --manifest-path tools/Cargo.toml
+          echo "TOOL=$PWD/tools/target/debug/jeden-tools" >> "$GITHUB_ENV"
+
       - name: Resolve automatic canary version
         id: version
         shell: bash
         run: |
           set -euo pipefail
-          base="$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')"
+          base="$("$TOOL" versioning manifest-version Cargo.toml)"
           if [[ ! "$base" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
             echo '::error::Cargo package version must be a stable SemVer for automatic canary versioning'
             exit 1
@@ -77,11 +89,6 @@ jobs:
           next_patch=$((10#${BASH_REMATCH[3]} + 1))
           version="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.${next_patch}-canary.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}.sha${SOURCE_SHA:0:12}"
           printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
-
-      - name: Install Rust toolchain for target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
 
       - name: Build target exactly once
         shell: bash
@@ -99,14 +106,7 @@ jobs:
           cp 'dist/${{ matrix.executable }}' 'dist/sbom-input/${{ matrix.executable }}'
           archive="jeden-${{ steps.version.outputs.version }}-${{ matrix.target }}.tar.gz"
           tar -C dist -czf "dist/$archive" '${{ matrix.executable }}'
-          python3 - "$archive" <<'PY' >> "$GITHUB_OUTPUT"
-          import hashlib, pathlib, sys
-          name = sys.argv[1]
-          path = pathlib.Path('dist') / name
-          print(f'name={name}')
-          print(f'sha256={hashlib.sha256(path.read_bytes()).hexdigest()}')
-          print(f'size={path.stat().st_size}')
-          PY
+          "$TOOL" release facts "dist/$archive" >> "$GITHUB_OUTPUT"
 
       - name: Generate SPDX SBOM
         uses: anchore/sbom-action@v0.20.6
@@ -122,13 +122,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          import json, os, pathlib
-          path = pathlib.Path('dist/sbom.spdx.json')
-          document = json.loads(path.read_text(encoding='utf-8'))
-          document['documentComment'] = f'Jeden immutable build artifact sha256:{os.environ["ARTIFACT_SHA256"]}'
-          path.write_bytes(json.dumps(document, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n')
-          PY
+          jq -cS --arg digest "$ARTIFACT_SHA256" \
+            '.documentComment = "Jeden immutable build artifact sha256:" + $digest' \
+            dist/sbom.spdx.json > dist/sbom.bound.json
+          mv dist/sbom.bound.json dist/sbom.spdx.json
 
       - name: Generate provenance statement
         env:
@@ -138,29 +135,30 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          import json, os, pathlib
-          statement = {
-            '_type': 'https://in-toto.io/Statement/v1',
-            'subject': [{'name': os.environ['ARTIFACT_NAME'], 'digest': {'sha256': os.environ['ARTIFACT_SHA256']}}],
-            'predicateType': 'https://slsa.dev/provenance/v1',
-            'predicate': {
-              'buildDefinition': {
-                'buildType': 'https://github.com/jeden/release/.github/workflows/release.yml@v3',
-                'externalParameters': {'targetTriple': os.environ['TARGET_TRIPLE']},
-                'internalParameters': {'lockedDependencies': True},
-                'resolvedDependencies': [{'uri': f'git+{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}@{os.environ["SOURCE_SHA"]}'}],
-              },
-              'runDetails': {
-                'builder': {'id': f'{os.environ["GITHUB_SERVER_URL"]}/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{os.environ["GITHUB_RUN_ID"]}'},
-                'metadata': {'invocationId': f'{os.environ["GITHUB_RUN_ID"]}-{os.environ["GITHUB_RUN_ATTEMPT"]}'},
-              },
-            },
-          }
-          pathlib.Path('dist/provenance.intoto.json').write_bytes(
-              json.dumps(statement, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n'
-          )
-          PY
+          jq -ncS \
+            --arg name "$ARTIFACT_NAME" \
+            --arg digest "$ARTIFACT_SHA256" \
+            --arg target "$TARGET_TRIPLE" \
+            --arg source "git+$GITHUB_SERVER_URL/$GITHUB_REPOSITORY@$SOURCE_SHA" \
+            --arg builder "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg invocation "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            '{
+              _type: "https://in-toto.io/Statement/v1",
+              subject: [{name: $name, digest: {sha256: $digest}}],
+              predicateType: "https://slsa.dev/provenance/v1",
+              predicate: {
+                buildDefinition: {
+                  buildType: "https://github.com/jeden/release/.github/workflows/release.yml@v3",
+                  externalParameters: {targetTriple: $target},
+                  internalParameters: {lockedDependencies: true},
+                  resolvedDependencies: [{uri: $source}]
+                },
+                runDetails: {
+                  builder: {id: $builder},
+                  metadata: {invocationId: $invocation}
+                }
+              }
+            }' > dist/provenance.intoto.json
 
       - name: Create publisher build handoff
         env:
@@ -172,39 +170,40 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
-          import datetime, hashlib, json, os, pathlib
-          dist = pathlib.Path('dist')
-          handoff = {
-            'schema': 'jeden.release-build-handoff/v1',
-            'repository': os.environ['GITHUB_REPOSITORY'],
-            'headSha': os.environ['SOURCE_SHA'],
-            'version': os.environ['BUILD_VERSION'],
-            'minimumVersion': os.environ['MINIMUM_VERSION'],
-            'createdAt': datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace('+00:00', 'Z'),
-            'contractualCiRunId': os.environ['CONTRACTUAL_CI_RUN_ID'],
-            'contractualCiRunAttempt': int(os.environ['CONTRACTUAL_CI_RUN_ATTEMPT']),
-            'buildRunId': os.environ['GITHUB_RUN_ID'],
-            'buildRunAttempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
-            'targetTriple': os.environ['TARGET_TRIPLE'],
-            'artifact': {
-              'name': os.environ['ARTIFACT_NAME'],
-              'sha256': os.environ['ARTIFACT_SHA256'],
-              'size': int(os.environ['ARTIFACT_SIZE']),
-            },
-            'sbom': {
-              'name': 'sbom.spdx.json',
-              'sha256': hashlib.sha256((dist / 'sbom.spdx.json').read_bytes()).hexdigest(),
-            },
-            'provenance': {
-              'name': 'provenance.intoto.json',
-              'sha256': hashlib.sha256((dist / 'provenance.intoto.json').read_bytes()).hexdigest(),
-            },
-          }
-          (dist / 'build-handoff.json').write_bytes(
-              json.dumps(handoff, sort_keys=True, separators=(',', ':')).encode('utf-8') + b'\n'
-          )
-          PY
+          sbom_sha256="$("$TOOL" release facts dist/sbom.spdx.json | sed -n 's/^sha256=//p')"
+          provenance_sha256="$("$TOOL" release facts dist/provenance.intoto.json | sed -n 's/^sha256=//p')"
+          jq -ncS \
+            --arg repository "$GITHUB_REPOSITORY" \
+            --arg head "$SOURCE_SHA" \
+            --arg version "$BUILD_VERSION" \
+            --arg minimum "$MINIMUM_VERSION" \
+            --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg ci_run "$CONTRACTUAL_CI_RUN_ID" \
+            --argjson ci_attempt "$CONTRACTUAL_CI_RUN_ATTEMPT" \
+            --arg build_run "$GITHUB_RUN_ID" \
+            --argjson build_attempt "$GITHUB_RUN_ATTEMPT" \
+            --arg target "$TARGET_TRIPLE" \
+            --arg name "$ARTIFACT_NAME" \
+            --arg digest "$ARTIFACT_SHA256" \
+            --argjson size "$ARTIFACT_SIZE" \
+            --arg sbom "$sbom_sha256" \
+            --arg provenance "$provenance_sha256" \
+            '{
+              schema: "jeden.release-build-handoff/v1",
+              repository: $repository,
+              headSha: $head,
+              version: $version,
+              minimumVersion: $minimum,
+              createdAt: $created,
+              contractualCiRunId: $ci_run,
+              contractualCiRunAttempt: $ci_attempt,
+              buildRunId: $build_run,
+              buildRunAttempt: $build_attempt,
+              targetTriple: $target,
+              artifact: {name: $name, sha256: $digest, size: $size},
+              sbom: {name: "sbom.spdx.json", sha256: $sbom},
+              provenance: {name: "provenance.intoto.json", sha256: $provenance}
+            }' > dist/build-handoff.json
 
       - name: Upload unsigned build evidence for the publisher
         uses: actions/upload-artifact@v4
