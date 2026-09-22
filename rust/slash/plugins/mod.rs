@@ -1,21 +1,26 @@
+//! Installed plugins and extensions: what is there, what is enabled, and the
+//! rows an operator manages them from.
+
 use serde_json::{json, Value};
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::slash::common::{
-    dirs_home, merged_config, now_text, read_json_value, resolve_cwd_path, split_args,
-};
+use crate::slash::common::{dirs_home, now_text, split_args};
 use crate::slash::SlashContext;
 use crate::tools;
 use crate::tui::{PickerItem, PickerSpec};
 
+pub(crate) mod discovery;
 pub(crate) mod fetch;
 pub(crate) mod marketplace;
 pub(crate) mod ops;
 pub(crate) mod registry;
 pub(crate) use crate::marketplace as production;
 
+use discovery::{
+    configured_extension_paths, discover_custom_tool_files, discover_extension_module_files,
+    native_extension_roots,
+};
 use ops::{
     installed_entries_for_scope, merged_installed_values, normalize_scope, parse_marketplace_flags,
     registry_scope_dir,
@@ -29,104 +34,13 @@ pub(crate) fn plugins_home() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(dirs_home)
 }
+
 pub(crate) fn marketplace_cache_root() -> PathBuf {
     plugins_home().join(".jeden/plugins/cache/marketplaces")
 }
+
 pub(crate) fn marketplace_cache_dir(name: &str) -> PathBuf {
     marketplace_cache_root().join(name)
-}
-
-fn is_extension_module_file(path: &Path) -> bool {
-    path.is_file()
-        && matches!(
-            path.extension().and_then(|value| value.to_str()),
-            Some("ts" | "js" | "mjs")
-        )
-}
-
-fn extension_manifest_entries(dir: &Path) -> Vec<PathBuf> {
-    let manifest = read_json_value(&dir.join("package.json"));
-    let entries = manifest
-        .pointer("/jeden/extensions")
-        .and_then(Value::as_array)
-        .or_else(|| manifest.pointer("/pi/extensions").and_then(Value::as_array));
-    let mut out = Vec::new();
-    if let Some(entries) = entries {
-        for entry in entries {
-            let Some(raw) = entry.as_str() else {
-                continue;
-            };
-            let path = dir.join(raw);
-            if is_extension_module_file(&path) {
-                out.push(path);
-            }
-        }
-    }
-    out
-}
-
-fn extension_index_entry(dir: &Path) -> Option<PathBuf> {
-    for name in ["index.ts", "index.js", "index.mjs"] {
-        let path = dir.join(name);
-        if is_extension_module_file(&path) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-fn discover_extension_module_files(root: &Path) -> Vec<PathBuf> {
-    if is_extension_module_file(root) {
-        return vec![root.to_path_buf()];
-    }
-    if !root.is_dir() {
-        return Vec::new();
-    }
-    let manifest = extension_manifest_entries(root);
-    if !manifest.is_empty() {
-        return manifest;
-    }
-    if let Some(index) = extension_index_entry(root) {
-        return vec![index];
-    }
-    let mut out = Vec::new();
-    if let Ok(entries) = fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if is_extension_module_file(&path) {
-                out.push(path);
-            } else if path.is_dir() {
-                let manifest = extension_manifest_entries(&path);
-                if !manifest.is_empty() {
-                    out.extend(manifest);
-                } else if let Some(index) = extension_index_entry(&path) {
-                    out.push(index);
-                }
-            }
-        }
-    }
-    out.sort();
-    out.dedup();
-    out
-}
-
-fn native_extension_roots(cwd: &Path) -> Vec<PathBuf> {
-    let mut roots = vec![cwd.join(".jeden/extensions")];
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        roots.push(home.join(".jeden/extensions"));
-    }
-    roots
-}
-
-fn configured_extension_paths(cwd: &Path) -> Vec<PathBuf> {
-    merged_config(cwd)
-        .get("extensions")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .map(|raw| resolve_cwd_path(cwd, raw))
-        .collect()
 }
 
 fn empty_picker_item(message: &str) -> PickerItem {
@@ -287,34 +201,7 @@ pub(crate) fn handle_extensions(context: &SlashContext<'_>) -> Result<String, St
     crate::hooks::extension_status(context.cwd)
 }
 
-fn discover_custom_tool_files(cwd: &Path) -> Vec<String> {
-    let mut out = Vec::new();
-    let mut dirs = Vec::new();
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        dirs.push(home.join(".jeden/tools"));
-    }
-    dirs.push(cwd.join(".jeden/tools"));
-    dirs.sort();
-    dirs.dedup();
-    for dir in dirs {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    let ext = path
-                        .extension()
-                        .and_then(|value| value.to_str())
-                        .unwrap_or("");
-                    if matches!(ext, "js" | "mjs") {
-                        out.push(path.display().to_string());
-                    }
-                }
-            }
-        }
-    }
-    out.sort();
-    out
-}
+
 
 pub(crate) fn handle_reload_plugins(context: &SlashContext<'_>) -> Result<String, String> {
     let report = crate::hooks::reload_extensions(context.cwd)?;
