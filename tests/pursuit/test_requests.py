@@ -30,8 +30,11 @@ class DurableRequests(unittest.TestCase):
         self.assertIsNotNone(self.binary, "The real Jeden candidate is unavailable")
         self.binary = str(Path(self.binary).resolve())
         self.report["binary"] = self.binary
+        digest = hashlib.sha256()
         with open(self.binary, "rb") as executable:
-            self.report["binary_sha256"] = hashlib.file_digest(executable, "sha256").hexdigest()
+            for chunk in iter(lambda: executable.read(1024 * 1024), b""):
+                digest.update(chunk)
+        self.report["binary_sha256"] = digest.hexdigest()
         self.report["candidate_source_revision"] = os.environ.get("WISENT_SOURCE_COMMIT")
         if os.environ.get("WISENT_SOURCE_DIR"):
             self.assertEqual(Path(os.environ["WISENT_SOURCE_DIR"]).resolve(), ROOT)
