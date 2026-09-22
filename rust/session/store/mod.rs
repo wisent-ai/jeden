@@ -162,7 +162,6 @@ pub(crate) fn read_events(dir: &Path) -> Result<ReadEvents, String> {
     })
 }
 
-
 pub(crate) fn active_lineage<'a>(
     events: &'a [SessionEventV2],
     leaf_id: Option<&str>,
@@ -188,7 +187,6 @@ pub(crate) fn active_lineage<'a>(
     lineage.reverse();
     Ok(lineage)
 }
-
 
 pub(crate) fn reconcile_active_leaf(dir: &Path) -> Result<Option<String>, String> {
     let ledger = read_events(dir)?;

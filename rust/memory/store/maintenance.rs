@@ -90,7 +90,7 @@ impl MemoryStore {
         }))
     }
 }
-}
+
 fn fts_integrity_check(conn: &Connection) -> Result<(), String> {
     conn.execute(
         "INSERT INTO memories_fts(memories_fts) VALUES('integrity-check')",

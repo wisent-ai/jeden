@@ -105,8 +105,9 @@ fn an_open_session_with_nothing_running_parks_and_exits_zero() {
 
     let session_id =
         session_id.unwrap_or_else(|| panic!("session/new was not answered: {frames:?}\n{stderr}"));
-    let parked = parked
-        .unwrap_or_else(|| panic!("the process ended without a parked event: {frames:?}\n{stderr}"));
+    let parked = parked.unwrap_or_else(|| {
+        panic!("the process ended without a parked event: {frames:?}\n{stderr}")
+    });
     assert!(
         status.success(),
         "a parked process must exit 0 so the attach releases its hold: {status}\n{stderr}"
@@ -114,7 +115,9 @@ fn an_open_session_with_nothing_running_parks_and_exits_zero() {
     assert_eq!(parked["reason"], "idle", "{parked}");
     assert_eq!(parked["parkAfterSeconds"], 1, "{parked}");
     assert!(
-        parked["quietSeconds"].as_u64().is_some_and(|quiet| quiet >= 1),
+        parked["quietSeconds"]
+            .as_u64()
+            .is_some_and(|quiet| quiet >= 1),
         "the process parked before its declared quiet period: {parked}"
     );
     assert_eq!(

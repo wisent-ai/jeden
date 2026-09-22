@@ -5,7 +5,11 @@ coverage/
 !.env.example
 .DS_Store
 *.log
-sessions/
+# Runtime session ledgers written at the repository root. Anchored: the
+# unanchored `sessions/` also matched rust/cli/reports/sessions/, so the split
+# of the session commands (bc01c61) committed the deletion of sessions.rs and
+# silently left its five replacement modules out of Git.
+/sessions/
 artifacts/
 .jeden/
 benchmarks/output/

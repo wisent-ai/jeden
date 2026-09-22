@@ -85,7 +85,10 @@ pub(super) enum Inbound {
 /// One channel carrying the client's frames and, when a park time is
 /// declared, the periodic check. The loop that serves requests is the only
 /// reader, so a check and a frame are never handled at the same time.
-pub(super) fn inbox<R>(mut input: R, policy: Option<&ParkPolicy>) -> Result<Receiver<Inbound>, String>
+pub(super) fn inbox<R>(
+    mut input: R,
+    policy: Option<&ParkPolicy>,
+) -> Result<Receiver<Inbound>, String>
 where
     R: BufRead + Send + 'static,
 {
