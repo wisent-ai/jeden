@@ -1,5 +1,5 @@
-use super::render::{boxed, boxed_split};
-use super::text::{clamp_visible, paint, visible_len};
+use crate::tui::render::{boxed, boxed_split};
+use crate::tui::text::{clamp_visible, paint, visible_len};
 use super::{ConfirmState, PickerFocus, PickerItem, PickerState};
 use crate::cli::i18n::tr;
 

@@ -1,9 +1,9 @@
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use super::theme::{Emphasis, SemanticColor, Theme};
+use crate::tui::theme::{Emphasis, SemanticColor, Theme};
 
-pub(super) fn paint(value: &str, style: &str, enabled: bool) -> String {
+pub(in crate::tui) fn paint(value: &str, style: &str, enabled: bool) -> String {
     let (token, emphasis) = match style {
         "dim" => (
             SemanticColor::TextMuted,
@@ -35,7 +35,7 @@ pub(super) fn paint(value: &str, style: &str, enabled: bool) -> String {
     Theme::from_env(enabled).paint(value, token, emphasis)
 }
 
-pub(super) fn sanitize_terminal_text(value: &str) -> String {
+pub(in crate::tui) fn sanitize_terminal_text(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut index = 0;
     while index < value.len() {
@@ -59,15 +59,15 @@ pub(super) fn sanitize_terminal_text(value: &str) -> String {
     out
 }
 
-pub(super) fn strip_terminal_controls(value: &str) -> String {
+pub(in crate::tui) fn strip_terminal_controls(value: &str) -> String {
     sanitize_terminal_text(value)
 }
 
-pub(super) fn visible_len(value: &str) -> usize {
+pub(in crate::tui) fn visible_len(value: &str) -> usize {
     UnicodeWidthStr::width(strip_terminal_controls(value).as_str())
 }
 
-pub(super) fn take_visible(value: &str, max: usize) -> String {
+pub(in crate::tui) fn take_visible(value: &str, max: usize) -> String {
     if max == 0 {
         return String::new();
     }
@@ -95,7 +95,7 @@ pub(super) fn take_visible(value: &str, max: usize) -> String {
     out
 }
 
-pub(super) fn wrap_line(line: &str, width: usize) -> Vec<String> {
+pub(in crate::tui) fn wrap_line(line: &str, width: usize) -> Vec<String> {
     if width == 0 {
         return vec![String::new()];
     }
@@ -130,7 +130,7 @@ pub(super) fn wrap_line(line: &str, width: usize) -> Vec<String> {
     lines
 }
 
-pub(super) fn compact_path(cwd: &str) -> String {
+pub(in crate::tui) fn compact_path(cwd: &str) -> String {
     let parts = cwd
         .split('/')
         .filter(|part| !part.is_empty())
@@ -142,7 +142,7 @@ pub(super) fn compact_path(cwd: &str) -> String {
     }
 }
 
-pub(super) fn clamp_visible(value: &str, width: usize) -> String {
+pub(in crate::tui) fn clamp_visible(value: &str, width: usize) -> String {
     if visible_len(value) > width {
         if width == 0 {
             String::new()

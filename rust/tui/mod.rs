@@ -2,7 +2,6 @@ use std::io::{self, IsTerminal};
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-mod attachments;
 mod editor;
 mod integration;
 mod queue;
@@ -10,9 +9,12 @@ pub(crate) mod theme;
 
 mod render;
 mod repl;
-mod text;
 mod view;
-mod view_render;
+
+// The editor's own pieces and the view's renderer, under the names the rest
+// of this module has always used.
+pub(crate) use editor::{attachments, text};
+pub(crate) use view::render as view_render;
 
 pub use attachments::{Attachment, AttachmentId, AttachmentKind, AttachmentSource};
 pub(super) use attachments::{AttachmentTray, ClipboardContent};
