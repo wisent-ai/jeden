@@ -1,5 +1,7 @@
-use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
-use std::fmt;
+//! The billing contract's own shapes: what an account, a policy, a
+//! subscription, a quota and an operation result look like.
+
+use serde::{Deserialize, Serialize};
 
 pub const MAX_BILLING_ITEMS: usize = 512;
 pub const MAX_BILLING_STRING_BYTES: usize = 2_048;
@@ -24,68 +26,9 @@ pub enum BillingCapability {
     SubscriptionManagement,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PaymentMethodReference(String);
-impl PaymentMethodReference {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-impl fmt::Debug for PaymentMethodReference {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("PaymentMethodReference([REDACTED])")
-    }
-}
-impl Serialize for PaymentMethodReference {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-impl<'de> Deserialize<'de> for PaymentMethodReference {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        validate_opaque_reference(&value).map_err(de::Error::custom)?;
-        Ok(Self(value))
-    }
-}
+mod secrets;
 
-#[derive(Clone, PartialEq, Eq, Hash)]
-pub struct BillingGrant(String);
-impl BillingGrant {
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-impl fmt::Debug for BillingGrant {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("BillingGrant([REDACTED])")
-    }
-}
-impl Serialize for BillingGrant {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.0)
-    }
-}
-impl<'de> Deserialize<'de> for BillingGrant {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = String::deserialize(deserializer)?;
-        validate_opaque_reference(&value).map_err(de::Error::custom)?;
-        Ok(Self(value))
-    }
-}
-
-fn validate_opaque_reference(value: &str) -> Result<(), &'static str> {
-    if value.is_empty() {
-        return Err("opaque reference is empty");
-    }
-    if value.len() > MAX_BILLING_STRING_BYTES {
-        return Err("opaque reference is too long");
-    }
-    if value.chars().any(char::is_control) {
-        return Err("opaque reference contains control characters");
-    }
-    Ok(())
-}
+pub use secrets::{BillingGrant, PaymentMethodReference};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

@@ -1,123 +1,20 @@
+//! Certifying a staging deployment end to end, and writing the signed record
+//! of what happened.
+
 use super::brama::BramaClient;
-use super::contract::{
-    BramaApiV1, ContractError, ModelRequest, RequestMeta, RouteRequest, WelesApiV1,
-};
-use super::transport::{ReqwestTransport, SecretRef};
+use super::contract::{BramaApiV1, ModelRequest, RequestMeta, RouteRequest, WelesApiV1};
 use super::weles::WelesClient;
-use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
-use serde::{Deserialize, Serialize};
+use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use std::path::Path;
-use std::time::Duration;
 
-const REQUIRED_ENV: &[(&str, &str)] = &[
-    ("BRAMA_STAGING_URL", "Brama staging HTTPS endpoint"),
-    ("WELES_STAGING_URL", "Weles staging HTTPS endpoint"),
-    (
-        "JEDEN_STAGING_OIDC_TOKEN",
-        "short-lived workload OIDC credential for the configured audience/role",
-    ),
-    ("JEDEN_STAGING_OIDC_AUDIENCE", "workload OIDC audience"),
-    ("JEDEN_STAGING_OIDC_ROLE", "staging workload role"),
-    (
-        "JEDEN_STAGING_TENANT",
-        "disposable staging tenant/account namespace",
-    ),
-    (
-        "JEDEN_STAGING_PROVIDER",
-        "provider enabled for disposable lifecycle",
-    ),
-    ("JEDEN_STAGING_MODEL", "harmless model route with quota"),
-    (
-        "JEDEN_STAGING_SCHEMA_MIN",
-        "minimum supported staging schema version",
-    ),
-    (
-        "JEDEN_STAGING_SCHEMA_MAX",
-        "maximum supported staging schema version",
-    ),
-    (
-        "JEDEN_STAGING_REPORT_SIGNING_KEY_HEX",
-        "32-byte short-lived Ed25519 report signing seed",
-    ),
-    (
-        "JEDEN_RELEASE_DIGEST",
-        "immutable released canary digest under certification",
-    ),
-];
+mod evidence;
+mod prerequisites;
 
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct StagingEvidence {
-    pub schema_version: u32,
-    pub status: String,
-    pub release_digest: String,
-    pub endpoint_identities: Vec<String>,
-    pub schema_revisions: Vec<String>,
-    pub request_ids: Vec<String>,
-    pub operation_ids: Vec<String>,
-    pub served_route: String,
-    pub usage_input_tokens: u64,
-    pub usage_output_tokens: u64,
-    pub redacted_trace_refs: Vec<String>,
-    pub evidence_digest: String,
-    pub signing_public_key: String,
-    pub signing_key_id: String,
-    pub signature: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UnsignedEvidence<'a> {
-    schema_version: u32,
-    status: &'a str,
-    release_digest: &'a str,
-    endpoint_identities: &'a [String],
-    schema_revisions: &'a [String],
-    request_ids: &'a [String],
-    operation_ids: &'a [String],
-    served_route: &'a str,
-    usage_input_tokens: u64,
-    usage_output_tokens: u64,
-    redacted_trace_refs: &'a [String],
-    signing_key_id: &'a str,
-    signing_public_key: &'a str,
-}
-
-fn required(name: &str) -> String {
-    std::env::var(name).unwrap_or_default().trim().to_string()
-}
-
-fn identity(endpoint: &str) -> String {
-    format!(
-        "sha256:{}",
-        hex::encode(Sha256::digest(endpoint.as_bytes()))
-    )
-}
-
-pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), ContractError> {
-    let prerequisites = REQUIRED_ENV
-        .iter()
-        .filter(|&(name, _detail)| required(name).is_empty())
-        .map(|(name, detail)| format!("{name}: {detail}"))
-        .collect::<Vec<_>>();
-    if !prerequisites.is_empty() {
-        return Err(ContractError::ExternalBlocked { prerequisites });
-    }
-    let brama = BramaClient::with_secret_ref(
-        Some(required("BRAMA_STAGING_URL")),
-        Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
-        Duration::from_secs(30),
-        ReqwestTransport::production(),
-    );
-    let weles = WelesClient::with_secret_ref(
-        Some(required("WELES_STAGING_URL")),
-        Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
-        Duration::from_millis(500),
-        ReqwestTransport::production(),
-    );
-    Ok((brama, weles))
-}
+pub use evidence::{verify_staging_report, StagingEvidence};
+use evidence::UnsignedEvidence;
+pub use prerequisites::staging_preflight_from_env;
+use prerequisites::{identity, required};
 
 fn poll_to_terminal(
     client: &WelesClient,
@@ -345,48 +242,6 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
         signing_public_key,
         signature,
     })
-}
-
-pub fn verify_staging_report(evidence: &StagingEvidence) -> Result<(), String> {
-    let unsigned = UnsignedEvidence {
-        schema_version: evidence.schema_version,
-        status: &evidence.status,
-        release_digest: &evidence.release_digest,
-        endpoint_identities: &evidence.endpoint_identities,
-        schema_revisions: &evidence.schema_revisions,
-        request_ids: &evidence.request_ids,
-        operation_ids: &evidence.operation_ids,
-        served_route: &evidence.served_route,
-        usage_input_tokens: evidence.usage_input_tokens,
-        usage_output_tokens: evidence.usage_output_tokens,
-        redacted_trace_refs: &evidence.redacted_trace_refs,
-        signing_key_id: &evidence.signing_key_id,
-        signing_public_key: &evidence.signing_public_key,
-    };
-    let canonical = serde_json::to_vec(&unsigned).map_err(|error| error.to_string())?;
-    let digest = format!("sha256:{}", hex::encode(Sha256::digest(&canonical)));
-    if digest != evidence.evidence_digest {
-        return Err("staging evidence digest mismatch".into());
-    }
-    let public: [u8; 32] = hex::decode(&evidence.signing_public_key)
-        .map_err(|_| "invalid signing public key hex".to_string())?
-        .try_into()
-        .map_err(|_| "signing public key must be 32 bytes".to_string())?;
-    let verifying = VerifyingKey::from_bytes(&public).map_err(|error| error.to_string())?;
-    let expected_key_id = format!(
-        "ed25519:{}",
-        hex::encode(Sha256::digest(verifying.as_bytes()))
-    );
-    if expected_key_id != evidence.signing_key_id {
-        return Err("staging signing key id mismatch".into());
-    }
-    let signature: [u8; 64] = hex::decode(&evidence.signature)
-        .map_err(|_| "invalid signature hex".to_string())?
-        .try_into()
-        .map_err(|_| "signature must be 64 bytes".to_string())?;
-    verifying
-        .verify(&canonical, &Signature::from_bytes(&signature))
-        .map_err(|error| error.to_string())
 }
 
 pub fn write_staging_report(path: &Path) -> Result<StagingEvidence, String> {
