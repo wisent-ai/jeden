@@ -1,10 +1,13 @@
-use super::cas::LocalCas;
-use super::placement::{select_worker, PlacementDecision};
+pub mod placement;
+pub mod store;
+
+use crate::task_runtime::cas::LocalCas;
+use placement::{select_worker, PlacementDecision};
+use store::{CoordinatorStore, JobState};
 use super::protocol::{
     negotiate_version, Attempt, AttemptPhase, CommitRequest, Job, JobOutcome, JobPhase, Lease,
     NegotiatedHello, ProtocolError, WorkOffer, Worker, WorkerEvent, WorkerHello,
 };
-use super::store::{CoordinatorStore, JobState};
 use std::path::Path;
 
 #[derive(Clone, Debug)]

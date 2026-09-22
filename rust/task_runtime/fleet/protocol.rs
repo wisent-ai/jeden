@@ -1,4 +1,4 @@
-use super::cas::Digest;
+use crate::task_runtime::cas::Digest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 

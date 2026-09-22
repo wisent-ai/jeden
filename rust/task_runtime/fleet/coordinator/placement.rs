@@ -1,4 +1,4 @@
-use super::protocol::{Job, PlacementConstraints, ProtocolError, Worker};
+use crate::task_runtime::protocol::{Job, PlacementConstraints, ProtocolError, Worker};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlacementDecision {

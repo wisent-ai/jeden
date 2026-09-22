@@ -1,4 +1,4 @@
-use super::protocol::{
+use crate::task_runtime::protocol::{
     Attempt, Job, JobOutcome, JobPhase, Lease, ProtocolError, Worker, WorkerEvent,
 };
 use serde::{Deserialize, Serialize};

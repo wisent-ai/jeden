@@ -1,4 +1,4 @@
-use super::types::{AgentDefinition, TaskError};
+use crate::task_runtime::types::{AgentDefinition, TaskError};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};

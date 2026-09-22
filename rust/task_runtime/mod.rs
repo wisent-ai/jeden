@@ -1,16 +1,13 @@
 pub use crate::cas;
-pub mod coordinator;
-mod discovery;
 mod dispatch;
-mod mailbox;
-pub mod placement;
-pub mod protocol;
-pub(crate) mod sandbox;
+mod fleet;
+mod local;
 mod scheduler;
-pub mod store;
 mod types;
-pub mod worker;
-mod workspace;
+
+pub use fleet::{coordinator, placement, protocol, store, worker};
+pub(crate) use local::sandbox;
+pub use local::{discovery, mailbox, workspace};
 
 pub use coordinator::Coordinator;
 pub use discovery::discover_agents;
