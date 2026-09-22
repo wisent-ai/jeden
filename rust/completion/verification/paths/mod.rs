@@ -266,5 +266,4 @@ fn ends_with(observed: &Path, wanted: &Path) -> bool {
 }
 
 #[cfg(test)]
-#[path = "paths_tests.rs"]
 mod tests;
