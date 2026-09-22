@@ -1,4 +1,4 @@
-use super::{
+use super::super::{
     platform::{native, ProcessSignal, ProcessTree},
     BoundedOutput, OperationContext, OperationProgress, OutputCapture,
 };
@@ -101,7 +101,8 @@ impl ProcessManager {
             return Err("process inherited stdio denied by execution grant".into());
         }
         let mut builder =
-            super::sandbox::command(&command.program, grant).map_err(|error| error.to_string())?;
+            super::super::sandbox::command(&command.program, grant)
+                .map_err(|error| error.to_string())?;
         builder.env_clear();
         for key in &grant.process.environment {
             if let Some(value) = std::env::var_os(key) {

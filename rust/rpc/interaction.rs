@@ -5,7 +5,6 @@ use std::sync::{mpsc, Arc, Mutex};
 
 use super::server::JsonWriter;
 
-
 enum PendingInteraction {
     Elicitation(mpsc::SyncSender<Result<String, String>>),
     Approval(mpsc::SyncSender<Result<bool, String>>),

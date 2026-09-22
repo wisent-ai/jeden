@@ -1,14 +1,14 @@
-pub mod fs;
+mod host;
 pub mod kernel;
-pub mod network;
 mod output;
 #[path = "../platform/mod.rs"]
 pub mod platform;
-mod process;
-pub mod pty;
 pub mod sandbox;
 pub mod secrets;
 pub mod security;
+
+pub use host::{fs, network, pty};
+use host::process;
 
 pub use output::{ArtifactSink, BoundedOutput, OutputCapture, OutputLimits};
 pub use process::{ManagedCommand, ManagedProcessResult, ProcessManager, TerminationReason};

@@ -1,4 +1,4 @@
-use super::security::{ExecutionGrant, GrantError};
+use super::super::security::{ExecutionGrant, GrantError};
 #[cfg(unix)]
 use std::fs::File;
 #[cfg(unix)]

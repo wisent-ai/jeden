@@ -2,9 +2,9 @@ mod daemon;
 mod idempotency;
 mod replay;
 mod service;
-mod tenant;
-mod tls;
-mod transport;
+mod wire;
+
+use wire::{tenant, tls, transport};
 
 pub use daemon::{BoundedExecutor, HeadlessConfig, HeadlessDaemon, Readiness, SubmitError};
 pub use idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};

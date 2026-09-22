@@ -32,8 +32,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         let (reader, mut writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
         loop {
-            let frame = match read_async_frame(&mut reader, self.config.max_frame_bytes).await
-            {
+            let frame = match read_async_frame(&mut reader, self.config.max_frame_bytes).await {
                 Ok(Some(frame)) => frame,
                 Ok(None) => return Ok(()),
                 Err(error) => {

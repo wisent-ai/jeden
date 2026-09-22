@@ -1,4 +1,4 @@
-use super::{
+use super::super::{
     platform::{native, ProcessSignal, PtySession},
     BoundedOutput, OperationContext, OperationProgress, OutputCapture,
 };
