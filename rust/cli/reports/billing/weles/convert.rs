@@ -8,6 +8,7 @@ use super::super::model::{
     BillingError, BillingPolicy, SubscriptionMutationResult, SubscriptionSummary,
 };
 use crate::control_plane::billing::{PurchasePolicy, SubscriptionState};
+use crate::control_plane::billing::PolicyPeriod;
 
 pub(super) fn correlation(action: &str, identity: &str) -> String {
     format!("jeden-{action}-{identity}")

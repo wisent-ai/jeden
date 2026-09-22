@@ -90,7 +90,7 @@ pub(super) fn validate_tree(directory: &Path, tree: &MerkleTree) -> Result<(), C
     reject_case_collisions(directory, &tree.entries)
 }
 
-fn reject_case_collisions(directory: &Path, entries: &[MerkleEntry]) -> Result<(), CasError> {
+pub(crate) fn reject_case_collisions(directory: &Path, entries: &[MerkleEntry]) -> Result<(), CasError> {
     let mut folded = BTreeMap::<String, &str>::new();
     for entry in entries {
         let key = unicode_case_fold(&entry.name);

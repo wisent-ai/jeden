@@ -3,7 +3,7 @@
 //! Split out of `cli/run/slash_ui.rs`, which had grown past the module line
 //! cap.
 
-use super::columns::{context_metric, model_metrics, price_detail};
+use super::columns::model_metrics;
 use crate::cli::i18n::tr;
 use crate::control_plane::brama::ModelEntry;
 use crate::tui::PickerItem;
@@ -16,7 +16,7 @@ pub(super) fn provider_group(id: &str) -> &str {
 
 /// Subscription providers summarized at the top of the picker, in fixed
 /// order; everything else belongs to the public catalog.
-const SUBSCRIPTION_PROVIDERS: &[&str] = &["claude-code", "codex", "kimi"];
+pub(crate) const SUBSCRIPTION_PROVIDERS: &[&str] = &["claude-code", "codex", "kimi"];
 
 /// Subscription providers first in a fixed order, everything else alphabetical.
 pub(super) fn provider_rank(provider: &str) -> (u8, &str) {

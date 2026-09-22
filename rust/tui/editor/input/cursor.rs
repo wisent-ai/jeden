@@ -7,38 +7,38 @@ use std::cmp::Ordering;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-pub(super) fn ordered(a: usize, b: usize) -> (usize, usize) {
+pub(crate) fn ordered(a: usize, b: usize) -> (usize, usize) {
     match a.cmp(&b) {
         Ordering::Less | Ordering::Equal => (a, b),
         Ordering::Greater => (b, a),
     }
 }
 
-pub(super) fn previous_boundary(text: &str, cursor: usize) -> usize {
+pub(crate) fn previous_boundary(text: &str, cursor: usize) -> usize {
     text[..cursor]
         .grapheme_indices(true)
         .next_back()
         .map_or(0, |(index, _)| index)
 }
 
-pub(super) fn next_boundary(text: &str, cursor: usize) -> usize {
+pub(crate) fn next_boundary(text: &str, cursor: usize) -> usize {
     text[cursor..]
         .grapheme_indices(true)
         .nth(1)
         .map_or(text.len(), |(index, _)| cursor + index)
 }
 
-pub(super) fn line_start(text: &str, cursor: usize) -> usize {
+pub(crate) fn line_start(text: &str, cursor: usize) -> usize {
     text[..cursor].rfind('\n').map_or(0, |index| index + 1)
 }
 
-pub(super) fn line_end(text: &str, cursor: usize) -> usize {
+pub(crate) fn line_end(text: &str, cursor: usize) -> usize {
     text[cursor..]
         .find('\n')
         .map_or(text.len(), |index| cursor + index)
 }
 
-pub(super) fn word_left(text: &str, cursor: usize) -> usize {
+pub(crate) fn word_left(text: &str, cursor: usize) -> usize {
     let before = &text[..cursor];
     let mut target = 0;
     let mut seen_word = false;
@@ -56,7 +56,7 @@ pub(super) fn word_left(text: &str, cursor: usize) -> usize {
     target
 }
 
-pub(super) fn word_right(text: &str, cursor: usize) -> usize {
+pub(crate) fn word_right(text: &str, cursor: usize) -> usize {
     let mut seen_word = false;
     for (offset, grapheme) in text[cursor..].grapheme_indices(true) {
         let word = grapheme.chars().any(char::is_alphanumeric) || grapheme == "_";
@@ -69,7 +69,7 @@ pub(super) fn word_right(text: &str, cursor: usize) -> usize {
     text.len()
 }
 
-pub(super) fn byte_at_display_column(text: &str, start: usize, end: usize, target: usize) -> usize {
+pub(crate) fn byte_at_display_column(text: &str, start: usize, end: usize, target: usize) -> usize {
     let mut width = 0;
     let mut byte = start;
     for (offset, grapheme) in text[start..end].grapheme_indices(true) {
@@ -83,7 +83,7 @@ pub(super) fn byte_at_display_column(text: &str, start: usize, end: usize, targe
     byte
 }
 
-pub(super) fn normalize_paste(value: &str) -> String {
+pub(crate) fn normalize_paste(value: &str) -> String {
     let mut normalized = String::with_capacity(value.len());
     let mut chars = value.chars().peekable();
     while let Some(ch) = chars.next() {

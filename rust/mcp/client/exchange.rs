@@ -3,11 +3,13 @@
 //!
 //! Split out of `mcp/client.rs`, which had grown past the module line cap.
 
-use super::framing::{encode_message, parse_json_line};
+use super::framing::encode_message;
 use super::{McpClient, Transport, MAX_NOTIFICATIONS, MAX_SESSION_ID_BYTES, MCP_SESSION_ID};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::Value;
 use std::io::Write;
+use crate::mcp::client::framing::MAX_MESSAGE_BYTES;
+use std::sync::mpsc;
 
 impl McpClient {
     pub(super) fn send(&mut self, message: &Value) -> Result<Vec<Value>, String> {

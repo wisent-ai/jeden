@@ -101,7 +101,7 @@ pub(super) fn now() -> String {
     crate::agent::now_stamp()
 }
 
-pub(super) fn find_item<'a>(roadmap: &'a RoadmapFile, id: &str) -> Result<&'a RoadmapItem, RoadmapError> {
+pub(crate) fn find_item<'a>(roadmap: &'a RoadmapFile, id: &str) -> Result<&'a RoadmapItem, RoadmapError> {
     roadmap
         .items
         .iter()
@@ -109,7 +109,7 @@ pub(super) fn find_item<'a>(roadmap: &'a RoadmapFile, id: &str) -> Result<&'a Ro
         .ok_or_else(|| RoadmapError::NotFound(id.to_string()))
 }
 
-pub(super) fn find_item_mut<'a>(
+pub(crate) fn find_item_mut<'a>(
     roadmap: &'a mut RoadmapFile,
     id: &str,
 ) -> Result<&'a mut RoadmapItem, RoadmapError> {

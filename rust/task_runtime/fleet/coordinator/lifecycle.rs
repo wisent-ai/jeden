@@ -9,6 +9,9 @@ use super::store::JobState;
 use crate::task_runtime::fleet::protocol::{
     CommitRequest, ProtocolError, WorkerEvent,
 };
+use crate::task_runtime::fleet::protocol::AttemptPhase;
+use crate::task_runtime::fleet::protocol::JobOutcome;
+use crate::task_runtime::fleet::protocol::JobPhase;
 
 impl Coordinator {
     pub fn acknowledge(

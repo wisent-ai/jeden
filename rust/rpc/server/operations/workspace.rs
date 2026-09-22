@@ -7,8 +7,9 @@
 use super::wire::string_param;
 use serde_json::Value;
 use std::path::PathBuf;
+use serde_json::json;
 
-pub(super) fn workspace_status() -> Result<Value, (&'static str, String)> {
+pub(crate) fn workspace_status() -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
     crate::cli::workspace::status(&cwd)
         .map(|report| {
@@ -19,7 +20,7 @@ pub(super) fn workspace_status() -> Result<Value, (&'static str, String)> {
         .map_err(|error| ("invalid_workspace", error))
 }
 
-pub(super) fn workspace_discover(params: &Value) -> Result<Value, (&'static str, String)> {
+pub(crate) fn workspace_discover(params: &Value) -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
     let path = params
         .get("path")
@@ -31,7 +32,7 @@ pub(super) fn workspace_discover(params: &Value) -> Result<Value, (&'static str,
         .map_err(|error| ("invalid_workspace", error))
 }
 
-pub(super) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, String)> {
+pub(crate) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
     let path = string_param(params, "path")
         .map(PathBuf::from)
@@ -45,7 +46,7 @@ pub(super) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, St
 /// another harness, or directories to scan. A missing or empty `paths` is a
 /// request error; a path that cannot be imported is a failure row in the
 /// result, so one bad file never hides the rest.
-pub(super) fn import_sessions(params: &Value) -> Result<Value, (&'static str, String)> {
+pub(crate) fn import_sessions(params: &Value) -> Result<Value, (&'static str, String)> {
     let paths: Vec<PathBuf> = params
         .get("paths")
         .and_then(Value::as_array)

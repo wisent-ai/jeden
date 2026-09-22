@@ -4,10 +4,8 @@
 //! Split out of `runtime_ops/kernel.rs`, which had grown past the module line
 //! cap.
 
-use super::super::{
-    platform::{native, PipeReader, ProcessSignal, ProcessTree},
-    ArtifactSink, BoundedOutput, CancellationToken, OperationProgress, OutputCapture,
-};
+use super::super::platform::{PipeReader, ProcessSignal, ProcessTree, native};
+use super::super::{BoundedOutput, OperationProgress};
 use super::bootstrap::{JAVASCRIPT_BOOTSTRAP, PYTHON_BOOTSTRAP};
 use super::{KernelLanguage, KernelResult, FRAME_LIMIT, POLL};
 use serde_json::{json, Value};
@@ -17,6 +15,7 @@ use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+use crate::tool_runtime::runtime_ops::context::OperationContext;
 
 pub(super) struct KernelProcess {
     child: Child,

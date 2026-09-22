@@ -17,6 +17,8 @@ pub use report::{
     AreaResult, BehaviorAttempt, BehaviorCheckKind, BehaviorCheckResult, BehaviorEvidence,
     CheckStatus, ConformanceReport, ProductionScopeResult, UiHonestyFinding,
 };
+use crate::capability;
+use std::path::PathBuf;
 
 const REPORT_SCHEMA_VERSION: u32 = 2;
 const CHECK_VERSION: u32 = 2;

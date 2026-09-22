@@ -15,6 +15,8 @@ use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
+use crate::tool_runtime::language::lsp::NEXT_REQUEST;
+use std::sync::atomic::Ordering;
 
 const MAX_LSP_MESSAGE: usize = 8 * 1024 * 1024;
 

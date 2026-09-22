@@ -12,6 +12,10 @@ use super::{BramaClient, BramaError, BramaReadiness, ModelCatalog, MAX_CACHES, M
 use reqwest::StatusCode;
 use std::collections::BTreeMap;
 use std::time::Instant;
+use crate::control_plane::services::brama::API_VERSION;
+use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
+use crate::control_plane::now_ms;
+use serde_json::Value;
 
 impl BramaClient {
     ///
@@ -159,7 +163,7 @@ impl BramaClient {
                 return Err(BramaError::Transport(error));
             }
         };
-        super::contract::negotiate_response(&response.headers).map_err(|error| {
+        super::super::contract::negotiate_response(&response.headers).map_err(|error| {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         if response.status == StatusCode::NOT_MODIFIED.as_u16() {
@@ -236,7 +240,7 @@ impl BramaClient {
         body: Option<Vec<u8>>,
         meta: &RequestMeta,
     ) -> Result<TransportResponse, BramaError> {
-        super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
+        super::super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         let mut headers = BTreeMap::new();
@@ -260,7 +264,7 @@ impl BramaClient {
                 max_response_bytes: MAX_RESPONSE_BYTES,
             })
             .map_err(BramaError::Transport)?;
-        super::contract::negotiate_response(&response.headers).map_err(|error| {
+        super::super::contract::negotiate_response(&response.headers).map_err(|error| {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         if response.status == 429 {

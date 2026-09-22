@@ -4,6 +4,8 @@
 //! Split out of `tui/editor/mod.rs`, which had grown past the module line cap.
 
 use super::super::{EditorState, Snapshot, MAX_HISTORY_ITEMS, MAX_UNDO_STEPS};
+use crate::tui::editor::EditorLimitError;
+use crate::tui::editor::MAX_BUFFER_BYTES;
 
 impl EditorState {
     pub fn push_history(&mut self, value: String) {

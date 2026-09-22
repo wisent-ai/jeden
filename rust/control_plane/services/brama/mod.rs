@@ -1,14 +1,10 @@
 use super::contract::{ModelRequest, ModelStreamResultV1, RequestMeta, RouteRequest};
-use super::transport::{
-    ControlPlaneTransport, ReqwestTransport, SecretRef, TransportRequest, TransportResponse,
-};
+use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
 use super::{now_ms, ServiceHealth};
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::{Arc, LazyLock, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
 pub(super) const API_VERSION: &str = "v1";
 const DEFAULT_TTL: Duration = Duration::from_secs(300);
@@ -21,7 +17,7 @@ mod catalog;
 mod fetch;
 
 use auth::insert_caller_auth_headers;
-use cache::{catalog_cache_key, read_disk_cache, write_disk_cache, CachedCatalog, CACHE};
+use cache::{CACHE, catalog_cache_key};
 pub use catalog::{BramaReadiness, ModelCatalog, ModelEntry, ModelPerf, ModelPrice};
 use catalog::validate_catalog;
 

@@ -3,8 +3,9 @@
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
 use crate::tui::text::{clamp_visible, sanitize_terminal_text, visible_len, wrap_line};
+use crate::tui::text::paint;
 
-pub(super) fn pad_visible(value: &str, width: usize) -> String {
+pub(crate) fn pad_visible(value: &str, width: usize) -> String {
     let mut padded = clamp_visible(value, width);
     padded.extend(std::iter::repeat_n(
         ' ',
@@ -13,7 +14,7 @@ pub(super) fn pad_visible(value: &str, width: usize) -> String {
     padded
 }
 
-pub(super) fn framed_header(label: &str, width: usize, color: bool) -> String {
+pub(crate) fn framed_header(label: &str, width: usize, color: bool) -> String {
     let middle_width = width.saturating_sub(2);
     let label = clamp_visible(
         &format!(" {} ", sanitize_terminal_text(label)),
@@ -29,7 +30,7 @@ pub(super) fn framed_header(label: &str, width: usize, color: bool) -> String {
     )
 }
 
-pub(super) fn input_prefix_width(width: usize) -> usize {
+pub(crate) fn input_prefix_width(width: usize) -> usize {
     width.saturating_sub(1).min(2)
 }
 

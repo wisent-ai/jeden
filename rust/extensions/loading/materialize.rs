@@ -10,6 +10,9 @@ use std::path::{Path, PathBuf};
 use super::super::declarative;
 use super::super::{CommandDescriptor, HostExtension, Registry, SourceSet};
 use super::host::run_host;
+use crate::hooks::extensions::ABI_VERSION;
+use serde_json::json;
+use std::collections::BTreeSet;
 
 
 pub(super) fn materialize_commands(
@@ -79,7 +82,7 @@ pub(super) fn materialize_agents(
     Ok(Some(final_dir))
 }
 
-pub(super) fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
+pub(crate) fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
     let files = serde_json::to_string(&sources.modules).map_err(|error| error.to_string())?;
     let response = run_host(
         cwd,

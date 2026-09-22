@@ -1,4 +1,4 @@
-mod event;
+pub(crate) mod event;
 pub(crate) mod outbox;
 pub(crate) mod store;
 

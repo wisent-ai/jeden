@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-pub(super) fn validate_tools(value: &Value) -> Result<(), String> {
+pub(crate) fn validate_tools(value: &Value) -> Result<(), String> {
     let tools = value
         .get("tools")
         .and_then(Value::as_array)
@@ -30,7 +30,7 @@ pub(super) fn validate_tools(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn validate_resources(value: &Value) -> Result<(), String> {
+pub(crate) fn validate_resources(value: &Value) -> Result<(), String> {
     let resources = value
         .get("resources")
         .and_then(Value::as_array)
@@ -53,7 +53,7 @@ pub(super) fn validate_resources(value: &Value) -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn validate_prompts(value: &Value) -> Result<(), String> {
+pub(crate) fn validate_prompts(value: &Value) -> Result<(), String> {
     let prompts = value
         .get("prompts")
         .and_then(Value::as_array)

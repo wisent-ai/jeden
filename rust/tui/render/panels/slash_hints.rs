@@ -3,7 +3,6 @@
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
 use super::boxes::boxed;
-use crate::tui::{RegistryUiRuntime, UiRuntimeAdapter};
 use crate::tui::text::sanitize_terminal_text;
 
 fn slash_query(input_text: &str) -> Option<String> {
@@ -18,7 +17,7 @@ fn slash_query(input_text: &str) -> Option<String> {
     Some(query.to_ascii_lowercase())
 }
 
-pub(super) fn slash_matches(input_text: &str) -> Vec<(String, String)> {
+pub(crate) fn slash_matches(input_text: &str) -> Vec<(String, String)> {
     let Some(prefix) = slash_query(input_text) else {
         return Vec::new();
     };
@@ -34,13 +33,13 @@ pub(super) fn slash_matches(input_text: &str) -> Vec<(String, String)> {
         .collect()
 }
 
-pub(super) fn complete_slash_input(input_text: &str, selected: usize) -> Option<String> {
+pub(crate) fn complete_slash_input(input_text: &str, selected: usize) -> Option<String> {
     let matches = slash_matches(input_text);
     let (name, _) = matches.get(selected.min(matches.len().saturating_sub(1)))?;
     Some(format!("/{name} "))
 }
 
-pub(super) fn slash_hint_panel(
+pub(crate) fn slash_hint_panel(
     input_text: &str,
     width: usize,
     color: bool,

@@ -4,13 +4,15 @@
 //! Split out of `tool_runtime/exec/search.rs`, which had grown past the module
 //! line cap.
 
-use super::walk::{check, discover, rel_path};
+use super::walk::{check, discover};
 use crate::tool_runtime::ToolRuntime;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
+use crate::tool_runtime::exec::search::walk::MAX_SEARCH_FILE_BYTES;
+use std::fs;
 
 pub(super) fn text_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
     Ok(discover(runtime, input, false)?

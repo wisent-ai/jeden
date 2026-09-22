@@ -5,6 +5,8 @@
 
 use super::RelayStore;
 use sha2::{Digest, Sha256};
+use crate::collab::MAX_BLOB_BYTES;
+use serde_json::json;
 
 pub(super) fn relay_response_authorized(
     store: &RelayStore,
@@ -78,7 +80,7 @@ pub(super) fn parse_since(query: &str) -> usize {
         .unwrap_or_default()
 }
 
-pub(super) fn token_role(token: &str) -> Option<&str> {
+pub(crate) fn token_role(token: &str) -> Option<&str> {
     let (role, _) = token.split_once('.')?;
     matches!(role, "view" | "prompt" | "abort" | "full").then_some(role)
 }

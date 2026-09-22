@@ -8,6 +8,7 @@ use super::super::graders::sha256;
 use super::super::metrics::RunOutcomeV1;
 use super::{EvalRunner, IsolatedRunV1};
 use std::fs;
+use crate::eval::scoring::metrics::OUTCOME_SCHEMA;
 
 impl EvalRunner {
     pub(super) fn validate_resumed(

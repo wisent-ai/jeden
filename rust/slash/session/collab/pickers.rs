@@ -9,8 +9,9 @@ use crate::slash::common::read_json_value;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
+use crate::slash::session::collab::relay::collab_default_relay;
 
-pub(super) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
     let state = read_json_value(&collab_state_path(context.cwd));
     let host = state.get("host").unwrap_or(&Value::Null);
     let guest = state.get("guest").unwrap_or(&Value::Null);
@@ -43,7 +44,7 @@ pub(super) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
     )
 }
 
-pub(super) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
     let state = read_json_value(&collab_state_path(context.cwd));
     let host = state.get("host").unwrap_or(&Value::Null);
     let guest = state.get("guest").unwrap_or(&Value::Null);
@@ -81,7 +82,7 @@ pub(super) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new("Join collaboration", items)
 }
 
-pub(super) fn build_leave_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn build_leave_picker(context: &SlashContext<'_>) -> PickerSpec {
     let state = read_json_value(&collab_state_path(context.cwd));
     let guest = state.get("guest").unwrap_or(&Value::Null);
     PickerSpec::new(

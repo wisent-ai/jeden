@@ -8,12 +8,16 @@ use serde_json::{json, Value};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant};
+use crate::mcp::validate::validate_prompts;
+use crate::mcp::validate::validate_resources;
+use crate::mcp::validate::validate_tools;
+use std::thread;
 
 const CIRCUIT_FAILURE_LIMIT: u32 = 5;
 const CIRCUIT_OPEN: Duration = Duration::from_secs(30);
 
 #[derive(Clone, Copy)]
-pub(super) enum ConnectionState {
+pub(crate) enum ConnectionState {
     Disconnected,
     Connecting,
     Ready,

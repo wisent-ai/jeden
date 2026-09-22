@@ -9,7 +9,7 @@ pub(crate) mod i18n;
 pub(crate) mod invocation;
 mod reports;
 pub(crate) mod run;
-mod tooling;
+pub(crate) mod tooling;
 pub(crate) mod workspace;
 pub(crate) mod worktree;
 

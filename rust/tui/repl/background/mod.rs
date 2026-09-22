@@ -10,10 +10,7 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::agent::TraceEvent;
 use crate::tui::render::{busy_editor_lines, place_editor_cursor};
-use crate::tui::{
-    default_columns, stdout_supports_color, CommandOutcome, DeliveryAction, EditorAction,
-    EditorState, FollowUpQueue, Message, TurnCtx,
-};
+use crate::tui::{CommandOutcome, DeliveryAction, EditorAction, EditorState, FollowUpQueue, TurnCtx, default_columns, stdout_supports_color};
 
 use super::questions::prompt_user_question;
 use super::{message_block, ReplRenderer};

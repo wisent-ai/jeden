@@ -8,12 +8,13 @@ use super::super::config_value_at;
 use super::table::SETTINGS_SCHEMA;
 use super::SettingSpec;
 use serde_json::{json, Value};
+use crate::cli::config::parse_config_literal;
 
 pub(super) fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
     SETTINGS_SCHEMA.iter().find(|spec| spec.key == key)
 }
 
-pub(super) fn setting_default(spec: &SettingSpec) -> Value {
+pub(crate) fn setting_default(spec: &SettingSpec) -> Value {
     serde_json::from_str(spec.default_json).unwrap_or(Value::Null)
 }
 
@@ -78,7 +79,7 @@ pub(super) fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value
     }
 }
 
-pub(super) fn setting_metadata(spec: &SettingSpec, value: Value) -> Value {
+pub(crate) fn setting_metadata(spec: &SettingSpec, value: Value) -> Value {
     let mut out = json!({
         "value": value,
         "type": spec.typ,

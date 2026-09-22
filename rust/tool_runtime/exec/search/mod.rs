@@ -5,8 +5,7 @@ use glob::Pattern;
 use serde_json::{json, Value};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Mutex;
 
 use crate::tool_runtime::shared::{bool_input, jail_path, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
@@ -15,7 +14,7 @@ mod literal;
 mod walk;
 
 use literal::{parallel_literal, text_files};
-use walk::{check, discover, rel_path, roots, MAX_SEARCH_FILE_BYTES};
+use walk::{MAX_SEARCH_FILE_BYTES, check, discover, rel_path};
 
 pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_text requires query")?;

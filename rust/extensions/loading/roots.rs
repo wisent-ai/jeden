@@ -9,6 +9,12 @@ use std::path::{Path, PathBuf};
 
 use super::super::{InstalledPluginRoot, SourceSet};
 use super::{config_value, declarative_paths, hash_path_tree, read_json, scan_modules};
+use crate::hooks::extensions::MAX_EXTENSION_FILES;
+use crate::hooks::extensions::loading::package_entries;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
+use std::hash::DefaultHasher;
+use std::time::SystemTime;
 
 pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
     let home = env::var_os("JEDEN_PLUGINS_HOME")
@@ -49,7 +55,7 @@ pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
     roots
 }
 
-pub(super) fn source_set(cwd: &Path) -> Result<SourceSet, String> {
+pub(crate) fn source_set(cwd: &Path) -> Result<SourceSet, String> {
     let mut modules = Vec::new();
     let mut declarative = Vec::new();
     let mut roots = vec![cwd.join(".jeden/extensions")];

@@ -3,6 +3,8 @@
 //! what function it actually reaches.
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]

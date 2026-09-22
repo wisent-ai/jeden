@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::cli::auth::{format_auth_status, provider_picker};
-use crate::cli::config::{load_config, schema::settings_picker, ui_language};
+use crate::cli::config::schema::settings_picker;
 use crate::cli::i18n::lang_code;
 use crate::slash::{self, SlashContext};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
@@ -14,6 +14,7 @@ mod picker;
 mod rows;
 
 pub(crate) use picker::model_picker;
+use crate::cli::i18n::tr;
 
 
 fn logout_picker() -> Result<PickerSpec, String> {

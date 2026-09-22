@@ -1,6 +1,5 @@
 use super::*;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
-use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;

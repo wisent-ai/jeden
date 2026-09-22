@@ -7,6 +7,7 @@ use super::{safe_relative, EvalDatasetV1, FixtureV1, DATASET_SCHEMA, FIXTURE_SCH
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
+use crate::eval::dataset::GraderSpecV1;
 
 pub fn validate_dataset(dataset: &EvalDatasetV1) -> Result<(), String> {
     if dataset.schema != DATASET_SCHEMA {

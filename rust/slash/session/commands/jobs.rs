@@ -65,7 +65,7 @@ fn tracked_jobs(context: &SlashContext<'_>) -> Option<(PathBuf, Vec<Value>)> {
     Some((dir, jobs))
 }
 
-pub(super) fn jobs_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn jobs_picker(context: &SlashContext<'_>) -> PickerSpec {
     let Some((dir, jobs)) = tracked_jobs(context) else {
         return PickerSpec::new(
             "Background jobs",

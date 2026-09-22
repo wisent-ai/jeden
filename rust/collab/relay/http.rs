@@ -7,6 +7,8 @@ use super::{relay_response_authorized, RelayStore};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
+use crate::collab::relay::auth::token_role;
+use serde_json::json;
 
 pub fn serve(addr: &str) -> Result<(), String> {
     let listener = TcpListener::bind(addr).map_err(|e| format!("bind {addr}: {e}"))?;

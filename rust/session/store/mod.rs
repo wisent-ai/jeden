@@ -12,10 +12,7 @@ mod files;
 mod legacy;
 mod validate;
 
-use files::{
-    append_event_line, fresh_event_id, mirror_active_leaf, read_session_id, rewrite_v2,
-    sync_directory,
-};
+use files::{append_event_line, fresh_event_id, mirror_active_leaf, read_session_id, rewrite_v2};
 use legacy::migrate_legacy_value;
 use validate::validate_next;
 

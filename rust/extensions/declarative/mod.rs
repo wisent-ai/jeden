@@ -10,8 +10,11 @@ mod shapes;
 
 use parse::{collect, matches};
 use read::{capability_from_result, load_agent, load_rule, load_skill};
-pub(super) use shapes::{Agent, Input, Loaded, LoadedCapability, Rule, Skill};
+pub(crate) use shapes::{Agent, Input, Loaded};
 pub(crate) use shapes::PromptContribution;
+use crate::hooks::extensions::declarative::parse::skill_file_id;
+use serde_json::json;
+use std::collections::BTreeSet;
 
 const MAX_DEFINITIONS: usize = 512;
 const MAX_DEFINITION_BYTES: u64 = 256 * 1024;

@@ -5,6 +5,8 @@
 //! line cap.
 
 use serde_json::Value;
+use crate::slash::session::collab::relay::read_collab_events;
+use std::path::Path;
 
 pub(super) fn collab_descriptor(entry: &Value) -> String {
     if let Some(file) = entry.get("relayFile").and_then(Value::as_str) {

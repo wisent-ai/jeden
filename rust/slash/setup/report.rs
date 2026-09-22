@@ -5,6 +5,7 @@
 
 use super::super::SlashContext;
 use super::setup_state;
+use crate::slash::setup::DEFAULT_AGENT_ID;
 
 pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     let state = setup_state(context);

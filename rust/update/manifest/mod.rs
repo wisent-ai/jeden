@@ -4,13 +4,14 @@ use base64::Engine;
 use ed25519_dalek::{Signature, Verifier};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
+use semver::Version;
 use std::collections::BTreeMap;
 
 mod checks;
 mod instant;
 mod types;
 
-use checks::{validate_hash, validate_manifest};
+use checks::validate_manifest;
 pub use types::{
     DsseEnvelope, DsseSignature, ReleaseManifestV2, TrustRoot, TrustRootDocument, TrustRootEntry,
 };

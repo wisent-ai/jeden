@@ -1,10 +1,8 @@
 use super::SubscriptionTargetIdentity;
-use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
+use std::fs;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 mod cooldown;
 

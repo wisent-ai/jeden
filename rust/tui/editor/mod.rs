@@ -9,13 +9,19 @@ const MAX_BUFFER_BYTES: usize = 1024 * 1024;
 pub const EDITOR_KEYMAP_NAMESPACE: &str = "editor";
 pub const EXTERNAL_EDITOR_ACTION_ID: &str = "editor.external";
 
+// d183a11 moved attachments.rs and text.rs from tui/ into editor/ without
+// declaring them here, so the compiler never read them; tui/mod.rs
+// re-exports both for the rest of the crate.
+pub(crate) mod attachments;
 mod input;
+pub(crate) mod text;
 
 use input::{
     byte_at_display_column, line_end, line_start, next_boundary, normalize_paste, ordered,
     previous_boundary, word_left, word_right,
 };
-pub use input::{ActionKeyMap, EditorAction, KeyBinding};
+pub use input::{ActionKeyMap, EditorAction};
+use unicode_width::UnicodeWidthStr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EditorLimitError {

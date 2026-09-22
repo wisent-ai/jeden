@@ -4,10 +4,12 @@
 //! Split out of `completion/verification/mod.rs`, which had grown past the
 //! module line cap.
 
+use super::paths;
 use super::super::model::*;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::collections::BTreeSet;
 
 pub(super) fn canonical(path: &str) -> Result<PathBuf, String> {
     std::fs::canonicalize(crate::cli::sessions::session_dir_for(path))

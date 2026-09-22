@@ -1,12 +1,12 @@
 mod host;
 pub mod kernel;
-mod output;
+pub(crate) mod output;
 #[path = "../platform/mod.rs"]
 pub mod platform;
 pub mod sandbox;
 pub mod secrets;
 pub mod security;
-mod context;
+pub(crate) mod context;
 
 pub use context::{
     CancellationToken, OperationContext, OperationProgress, ProgressSink,

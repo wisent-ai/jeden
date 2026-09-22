@@ -33,13 +33,16 @@ impl<'a> DurableRunner<'a> {
     }
 }
 
+/// The ledger module is mounted once, as `cli::sessions::ledger_v2`; the
+/// crate root declares no `session` module, so `crate::session` never resolved.
 fn unresolved_effect(session: &std::path::Path) -> Result<bool, String> {
-    let ledger = crate::session::store::read_events(session)?;
+    use crate::cli::sessions::ledger_v2::{store::read_events, SessionPayloadV2};
+    let ledger = read_events(session)?;
     let mut pending = 0usize;
     for event in ledger.events {
         match event.payload {
-            crate::session::SessionPayloadV2::ToolCall(_) => pending += 1,
-            crate::session::SessionPayloadV2::ToolResult(_) => {
+            SessionPayloadV2::ToolCall(_) => pending += 1,
+            SessionPayloadV2::ToolResult(_) => {
                 pending = pending
                     .checked_sub(1)
                     .ok_or("session has a tool result without its dispatch receipt")?;

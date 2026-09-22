@@ -12,7 +12,7 @@ use super::schema::{PrivateId, TelemetryEnvelope, TelemetryRecord};
 
 mod files;
 
-use files::{append_envelope, now_ms, rewrite_filtered, FileFilterReport};
+use files::{append_envelope, now_ms, rewrite_filtered};
 
 #[derive(Clone, Debug)]
 pub struct TelemetryConfig {

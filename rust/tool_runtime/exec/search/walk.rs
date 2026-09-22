@@ -4,16 +4,17 @@
 //! Split out of `tool_runtime/exec/search.rs`, which had grown past the module
 //! line cap.
 
-use crate::tool_runtime::shared::{bool_input, jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{bool_input, jail_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 use glob::Pattern;
 use ignore::{WalkBuilder, WalkState};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::fs;
 
 const MAX_SEARCH_FILES: usize = 20_000;
-pub(super) const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(super) fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
     if runtime.operation.cancellation().is_cancelled() {

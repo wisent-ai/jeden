@@ -10,7 +10,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 
-pub(super) fn reject_forbidden_payment_fields(value: &Value) -> Result<(), WelesError> {
+pub(crate) fn reject_forbidden_payment_fields(value: &Value) -> Result<(), WelesError> {
     match value {
         Value::Object(fields) => {
             for (key, child) in fields {

@@ -5,7 +5,7 @@
 
 use serde_json::Value;
 
-pub(super) fn slash_session_text(session: &Value) -> String {
+pub(crate) fn slash_session_text(session: &Value) -> String {
     let mut out = vec![
         format!(
             "Session: {}",
@@ -52,7 +52,7 @@ fn slash_html_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
-pub(super) fn slash_session_export(session: &Value, format: &str) -> Result<String, String> {
+pub(crate) fn slash_session_export(session: &Value, format: &str) -> Result<String, String> {
     if format == "json" {
         return Ok(serde_json::to_string_pretty(session).map_err(|e| e.to_string())? + "\n");
     }

@@ -12,7 +12,7 @@ use crate::tui::{PickerItem, PickerSpec};
 mod quota;
 mod totals;
 
-use quota::{display_row, quota_rows};
+use quota::quota_rows;
 use totals::Agg;
 
 fn usage_path(cwd: &Path) -> PathBuf {

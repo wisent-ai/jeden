@@ -9,6 +9,7 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeMap;
 
 pub(super) fn resolve_repo_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let candidate = root.join(safe_relative(relative)?);

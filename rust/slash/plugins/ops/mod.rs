@@ -12,6 +12,7 @@ use crate::slash::common::now_text;
 mod install;
 
 pub(crate) use install::install_one;
+use std::fs;
 
 pub(crate) fn registry_scope_dir(cwd: &Path, scope: &str) -> PathBuf {
     if scope == "project" {

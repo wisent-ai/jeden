@@ -8,6 +8,7 @@ use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::v1::*;
 use agent_client_protocol::{Client, ConnectionTo};
 use futures::executor::block_on;
+use serde_json::json;
 
 pub(super) struct AcpInteraction {
     pub(super) session_id: String,

@@ -8,6 +8,7 @@ use crate::read_json;
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
+use std::env;
 
 pub(super) fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
     let branch = Command::new("git")
@@ -51,4 +52,14 @@ pub(super) fn service_tier_prompt(cwd: &Path) -> String {
         .or_else(|| env::var("MODEL_SERVICE_TIER").ok())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "default".into())
+}
+
+/// `JEDEN_CONTEXT_LIMIT`, when it names a whole number of tokens above zero.
+/// Read by the session setup for the status line and by `/context`, which the
+/// split moved into turn.rs, away from the local both used to share.
+pub(super) fn context_limit() -> Option<usize> {
+    env::var("JEDEN_CONTEXT_LIMIT")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v != usize::default())
 }

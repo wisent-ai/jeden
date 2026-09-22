@@ -7,7 +7,7 @@
 mod canary;
 mod policy;
 mod store;
-mod subscriptions;
+pub(crate) mod subscriptions;
 
 pub use canary::{stable_cohort, CanaryControl, CanaryGuardrail};
 pub use policy::{

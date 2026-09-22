@@ -5,6 +5,8 @@
 
 use std::env;
 use std::path::PathBuf;
+use serde_json::Value;
+use std::path::Path;
 
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
 /// --stdin --json` when the executable is available, otherwise the prompt's

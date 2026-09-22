@@ -12,6 +12,9 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use crate::mcp::client::McpClient;
+use crate::mcp::connection::ConnectionState;
+use std::collections::VecDeque;
 
 /// One handshake per server: its name, the connection, and how the handshake
 /// went.

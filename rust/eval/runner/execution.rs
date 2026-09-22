@@ -7,6 +7,7 @@ use super::super::dataset::EvalCaseV1;
 use super::super::metrics::{TerminalReasonV1, ToolStatsV1, UsageMetricsV1};
 use super::IsolatedRunV1;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

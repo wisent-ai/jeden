@@ -44,4 +44,4 @@ pub use shapes::{
     CapabilityBinding, CapabilityHealth, CapabilityKind, CapabilityPolicy, CapabilityProvenance,
     FunctionTarget, GrantId, HealthState, UiAffordance,
 };
-pub(crate) use builtin::{builtin_slash_specs, SlashSpec};
+pub(crate) use builtin::builtin_slash_specs;

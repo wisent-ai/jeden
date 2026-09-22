@@ -9,6 +9,8 @@ use super::builtin::builtin_slash_specs;
 use super::registry::for_cwd;
 use super::shapes::CapabilityKind;
 use super::CapabilityDescriptor;
+use crate::capability::registry::ConflictDiagnostic;
+use std::collections::BTreeSet;
 
 pub fn slash_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     for_cwd(cwd)

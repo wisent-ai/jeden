@@ -24,7 +24,7 @@ pub(super) fn content_hash(text: &str) -> String {
     hex::encode(Sha256::digest(text.as_bytes()))
 }
 
-pub(super) fn rebuild(
+pub(crate) fn rebuild(
     conn: &mut Connection,
     provider: &dyn EmbeddingProvider,
 ) -> Result<usize, String> {
@@ -76,7 +76,7 @@ pub(super) fn rebuild(
     Ok(records.len())
 }
 
-pub(super) fn health(
+pub(crate) fn health(
     conn: &Connection,
     provider: Option<&dyn EmbeddingProvider>,
 ) -> Result<EmbeddingHealth, String> {

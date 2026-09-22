@@ -6,8 +6,9 @@ use crate::slash::common::split_head;
 use crate::slash::state::{AdvisorState, ModeState};
 use crate::slash::SlashContext;
 use super::super::current_model_route;
+use serde_json::Value;
 
-pub(super) fn advisor_model_label(advisor: &AdvisorState, context: &SlashContext<'_>) -> String {
+pub(crate) fn advisor_model_label(advisor: &AdvisorState, context: &SlashContext<'_>) -> String {
     if advisor.model.is_empty() {
         current_model_route(context)
     } else {

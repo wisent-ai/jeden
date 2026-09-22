@@ -8,6 +8,8 @@ use crate::control_plane::billing::QuotaBucket;
 use crate::control_plane::now_ms;
 use crate::control_plane::quota::{fetch_subscription_quotas, percent_free, QuotaEntry, SubscriptionQuotas};
 use crate::tui::PickerItem;
+use crate::control_plane::billing::QuotaState;
+use std::collections::BTreeMap;
 
 /// One display row derived from a Weles quota bucket.
 struct QuotaRow {

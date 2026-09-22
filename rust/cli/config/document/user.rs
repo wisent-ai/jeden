@@ -10,6 +10,7 @@ use crate::{legacy_user_config_path, user_config_path};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use crate::cli::config::document::migrate::CONFIG_SCHEMA_VERSION;
 
 fn read_user_config_file_strict(path: &Path) -> Result<Option<Value>, String> {
     let text = match fs::read_to_string(path) {

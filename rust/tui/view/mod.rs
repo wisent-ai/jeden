@@ -7,6 +7,9 @@ const SELECTION_STEP: usize = true as usize;
 mod confirm;
 mod outcome;
 mod picker;
+// d183a11 moved view_render.rs here as render.rs without declaring it; tui
+// re-exports it as `view_render`.
+pub(crate) mod render;
 
 pub use confirm::{ConfirmEvent, ConfirmState};
 pub use outcome::CommandOutcome;

@@ -3,6 +3,8 @@
 //! Split out of `tui/view/mod.rs`, which had grown past the module line cap.
 
 use super::PickerSpec;
+use crate::cli::i18n::tr;
+use crate::tui::view::picker::spec::PickerItem;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandOutcome {

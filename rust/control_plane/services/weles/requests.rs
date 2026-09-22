@@ -5,10 +5,13 @@
 //! module line cap.
 
 use super::super::contract::RequestMeta;
-use super::super::transport::TransportRequest;
+use super::super::transport::{SecretRef, TransportRequest};
 use super::{WelesClient, WelesError, API_VERSION, MAX_RESPONSE_BYTES};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use crate::control_plane::services::weles::contract::guards::reject_forbidden_payment_fields;
+use std::collections::BTreeMap;
+
 
 impl WelesClient {
     pub(super) fn request(
@@ -145,7 +148,7 @@ impl WelesClient {
             .and_then(|version| {
                 (version == 2)
                     .then_some(())
-                    .ok_or(super::contract::ContractError::SchemaSkew {
+                    .ok_or(super::super::contract::ContractError::SchemaSkew {
                         service_min: version,
                         service_max: version,
                     })

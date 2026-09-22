@@ -1,13 +1,9 @@
 //! Settings schema, per-key parse and metadata, list rendering, and the config subcommand.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use std::path::Path;
 
-use super::communication::{CommunicationMode, DisplayPolicy, Visibility};
-use super::{
-    config_remove_value, config_set_value, merged_config_value,
-    parse_config_literal, read_user_writable_config, write_user_config,
-};
+use super::{config_remove_value, config_set_value, merged_config_value, read_user_writable_config, write_user_config};
 use crate::tui::PickerSpec;
 
 use crate::user_config_path;
@@ -24,6 +20,11 @@ pub(crate) use contracts::{
 pub(crate) use views::settings_picker;
 use values::{effective_setting_value, parse_setting_value, setting_spec};
 use views::{config_list_json, config_list_text};
+use crate::cli::config::schema::table::SETTINGS_SCHEMA;
+use crate::cli::config::schema::values::setting_default;
+use crate::cli::config::schema::values::setting_metadata;
+use crate::cli::config::shapes::ui_language_codes;
+use crate::cli::config::ui_language;
 
 /// The value that follows the user's own messages instead of pinning one
 /// language.

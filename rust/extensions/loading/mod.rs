@@ -4,14 +4,16 @@
 
 use serde_json::Value;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::{DefaultHasher, Hash};
 use std::path::{Path, PathBuf};
 
-use super::{DeclarativeCapability, MAX_DESCRIPTOR_BYTES, MAX_EXTENSION_FILES};
+use super::{DeclarativeCapability, MAX_EXTENSION_FILES};
+use std::env;
+use std::time::SystemTime;
 
-pub(super) mod host;
-pub(super) mod materialize;
-pub(super) mod roots;
+pub(crate) mod host;
+pub(crate) mod materialize;
+pub(crate) mod roots;
 
 pub(super) fn canonical_key(cwd: &Path) -> PathBuf {
     fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf())
@@ -150,7 +152,7 @@ pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher, remaining:
     }
 }
 
-pub(super) fn read_json(path: &Path) -> Value {
+pub(crate) fn read_json(path: &Path) -> Value {
     fs::read_to_string(path)
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())

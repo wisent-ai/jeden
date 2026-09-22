@@ -14,7 +14,7 @@ pub(super) fn collab_state_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/collab.json")
 }
 
-pub(super) fn collab_default_relay(cwd: &Path) -> PathBuf {
+pub(crate) fn collab_default_relay(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/collab-relay.jsonl")
 }
 
@@ -54,7 +54,7 @@ pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> 
     writeln!(file, "{}", line).map_err(|e| e.to_string())
 }
 
-pub(super) fn read_collab_events(path: &Path) -> Vec<Value> {
+pub(crate) fn read_collab_events(path: &Path) -> Vec<Value> {
     fs::read_to_string(path)
         .unwrap_or_default()
         .lines()

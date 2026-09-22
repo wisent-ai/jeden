@@ -4,6 +4,7 @@
 //! line cap.
 
 use super::CompletionModel;
+use crate::cli::tooling::completions::CommandSpec;
 
 impl CompletionModel {
     fn command(&self, name: &str) -> Option<&CommandSpec> {

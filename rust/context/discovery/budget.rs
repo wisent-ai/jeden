@@ -5,6 +5,8 @@
 //! cap.
 
 use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 pub(super) struct Budget {
     pub(super) max_bytes: usize,

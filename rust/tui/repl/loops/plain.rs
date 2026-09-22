@@ -3,7 +3,8 @@
 //!
 //! Split out of `tui/repl/loops.rs`, which had grown past the module line cap.
 
-use std::io::{self, IsTerminal, Write};
+use std::io;
+use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -14,6 +15,7 @@ use crossterm::terminal;
 use crate::tui::{
     AttachmentSource, AttachmentTray, CommandOutcome, PromptStatus, TurnCtx, TurnKind,
 };
+use crate::tui::text::sanitize_terminal_text;
 
 pub(super) fn old_read_line_loop<S, C, H>(
     mut _status_provider: S,
@@ -124,7 +126,7 @@ pub(super) fn attachment_command(
                 rest.strip_prefix('#')
                     .unwrap_or(rest)
                     .parse::<u64>()
-                    .map(super::super::AttachmentId)
+                    .map(crate::tui::AttachmentId)
                     .map_err(|_| "Usage: /detach [id|all]".to_string())
             };
             id.and_then(|id| {

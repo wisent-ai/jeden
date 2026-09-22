@@ -3,8 +3,15 @@
 //!
 //! Split out of `tui/editor/mod.rs`, which had grown past the module line cap.
 
-use super::super::{EditorLimitError, EditorState};
+use super::super::EditorState;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crate::tui::editor::EXTERNAL_EDITOR_ACTION_ID;
+use crate::tui::editor::input::cursor::line_end;
+use crate::tui::editor::input::cursor::line_start;
+use crate::tui::editor::input::cursor::next_boundary;
+use crate::tui::editor::input::cursor::previous_boundary;
+use crate::tui::editor::input::cursor::word_left;
+use crate::tui::editor::input::cursor::word_right;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EditorAction {

@@ -2,7 +2,9 @@
 //!
 //! Split out of `session/store.rs`, which had grown past the module line cap.
 
-use super::super::event::{SessionEventV2, SESSION_EVENT_SCHEMA_VERSION};
+use super::super::event::{SessionEventV2, SessionPayloadV2};
+use super::super::outbox::{OutboxConsumer, OutboxItem};
+use super::active_lineage;
 use std::path::Path;
 
 pub(super) fn validate_next(

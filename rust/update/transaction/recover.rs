@@ -4,7 +4,7 @@
 //! Split out of `update/transaction.rs`, which had grown past the module line
 //! cap.
 
-use super::disk::{durable_json, make_executable, sync_dir};
+use super::disk::{durable_json, sync_dir};
 use super::{InstallPaths, InstalledState, Journal, Phase};
 use std::fs;
 

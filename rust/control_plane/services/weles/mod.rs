@@ -1,9 +1,8 @@
 use super::contract::RequestMeta;
-use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef, TransportRequest};
-use super::{brama::BramaClient, now_ms, ServiceHealth};
+use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
+use super::brama::BramaClient;
+use super::{ServiceHealth, now_ms};
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;

@@ -5,14 +5,14 @@
 //! module line cap.
 
 use super::super::fetch::{catalog_plugins, fetch_marketplace, read_marketplace_catalog};
-use super::super::ops::{
-    all_marketplace_sources, find_marketplace_source, install_one, merged_installed_values,
-    normalize_scope, parse_marketplace_flags, production_service, split_plugin_id,
-    update_source_plugins,
-};
+use super::super::ops::{all_marketplace_sources, find_marketplace_source, install_one, merged_installed_values, normalize_scope, parse_marketplace_flags, split_plugin_id, update_source_plugins};
 use super::super::registry::{format_plugin, save_plugin_registry};
 use crate::slash::SlashContext;
 use serde_json::Value;
+use crate::slash::support::common::dirs_home;
+use super::super::marketplace_cache_dir;
+use super::super::ops::{installed_entries_for_scope, registry_scope_dir};
+use super::super::registry::plugin_registry;
 
 pub(super) fn handle_catalog(
     verb: &str,

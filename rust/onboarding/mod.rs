@@ -1,18 +1,18 @@
 //! First use: the guided journey a new operator is taken through, and what
 //! marks each step done.
 
-use serde_json::{json, Value};
+use serde_json::json;
 use std::collections::BTreeMap;
 use std::path::Path;
-use wisent_onboarding_client::{FileStorage, JourneyClient, ProgressStatus, ScopeKind, Transport};
+use wisent_onboarding_client::{FileStorage, JourneyClient, ProgressStatus, Transport};
 
 use crate::tui::{CommandOutcome, PickerSpec};
 
 mod client;
 mod screen;
 
-use client::{run, start_client, state_path, subject_hash};
-use screen::{current_screen, picker_for, presentation_text};
+use client::{run, start_client};
+use screen::{current_screen, picker_for};
 
 const EVIDENCE_REVISION: &str = "jeden-first-use-2026-09-05";
 const JOURNEY_VERSION_ID: &str = "10000000-0000-4000-8000-000000000005";

@@ -28,7 +28,7 @@ fn current_session_command(context: &SlashContext<'_>, command: &str) -> Option<
         .map(|path| format!("{command} {}", slash_command_path(&path)))
 }
 
-pub(super) fn dump_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn dump_picker(context: &SlashContext<'_>) -> PickerSpec {
     let command = current_session_command(context, "/dump");
     PickerSpec::new(
         "Dump session",
@@ -42,7 +42,7 @@ pub(super) fn dump_picker(context: &SlashContext<'_>) -> PickerSpec {
     )
 }
 
-pub(super) fn export_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn export_picker(context: &SlashContext<'_>) -> PickerSpec {
     let session = slash_session_dir(context, "").ok();
     let detail = current_session_picker_detail(context);
     let command = |prefix: &str| {
@@ -75,7 +75,7 @@ pub(super) fn export_picker(context: &SlashContext<'_>) -> PickerSpec {
     )
 }
 
-pub(super) fn share_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn share_picker(context: &SlashContext<'_>) -> PickerSpec {
     let available = slash_session_dir(context, "").is_ok();
     let detail = current_session_picker_detail(context);
     PickerSpec::new(
@@ -93,7 +93,7 @@ pub(super) fn share_picker(context: &SlashContext<'_>) -> PickerSpec {
     )
 }
 
-pub(super) fn tan_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn tan_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new(
         "Start background agent job",
         vec![PickerItem::action("Enter background work", "/tan ")
@@ -106,7 +106,7 @@ pub(super) fn tan_picker(context: &SlashContext<'_>) -> PickerSpec {
     )
 }
 
-pub(super) fn omfg_picker(context: &SlashContext<'_>) -> PickerSpec {
+pub(crate) fn omfg_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new(
         "Forge a local rule",
         vec![PickerItem::action("Describe the local rule", "/omfg ")

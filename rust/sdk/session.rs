@@ -3,7 +3,7 @@ mod turn;
 
 use super::types::*;
 use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
-use crate::{agent, session_conversation_turns, Args};
+use crate::{agent, session_conversation_turns};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};

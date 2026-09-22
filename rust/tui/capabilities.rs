@@ -4,6 +4,7 @@
 //! Split out of `tui/mod.rs`, which had grown past the module line cap.
 
 use super::{editor, queue, EDITOR_KEYMAP_NAMESPACE, EXTERNAL_EDITOR_ACTION_ID};
+use std::io;
 
 pub(crate) fn external_editor_capability_descriptor(
     cwd: &std::path::Path,
@@ -12,7 +13,7 @@ pub(crate) fn external_editor_capability_descriptor(
         CapabilityDescriptor, CapabilityHealth, CapabilityKind, FunctionTarget,
     };
 
-    let health = repl::external_editor::external_editor_health(cwd);
+    let health = super::repl::external_editor::external_editor_health(cwd);
     let mut descriptor = CapabilityDescriptor::new(
         "view/external-editor",
         CapabilityKind::View,

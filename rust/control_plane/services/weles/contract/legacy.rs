@@ -5,20 +5,24 @@
 //! module line cap.
 
 use crate::control_plane::{now_ms, ServiceHealth};
-use super::super::{Account, InteractionBridge, OperationV1, Provider, WelesClient, WelesError};
+use super::super::{Account, OperationV1, Provider, WelesClient, WelesError};
 use serde_json::Value;
+use crate::control_plane::brama::BramaClient;
+use crate::control_plane::contract::{self, RequestMeta};
+use crate::control_plane::services::weles::MAX_RESPONSE_BYTES;
+use serde_json::json;
 
 impl crate::control_plane::contract::WelesApiV1 for WelesClient {
     fn health(&self) -> ServiceHealth {
         WelesClient::health(self)
     }
 
-    fn readiness(&self) -> Result<super::contract::Readiness, WelesError> {
-        super::contract::negotiate(1, 1).map_err(|error| {
+    fn readiness(&self) -> Result<contract::Readiness, WelesError> {
+        contract::negotiate(1, 1).map_err(|error| {
             WelesError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         let providers = self.providers()?;
-        Ok(super::contract::Readiness {
+        Ok(contract::Readiness {
             ready: true,
             schema_min: 1,
             schema_max: 1,

@@ -5,7 +5,7 @@ use serde_json::Value;
 use std::env;
 
 use crate::slash::common::{now_millis, parse_duration_ms, split_head};
-use crate::slash::state::{ForceState, GoalState, LoopState, ModeState};
+use crate::slash::state::{ForceState, LoopState, ModeState};
 use crate::slash::SlashContext;
 use crate::tools;
 

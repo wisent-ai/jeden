@@ -3,7 +3,7 @@
 //!
 //! Split out of `cli/config/mod.rs`, which had grown past the module line cap.
 
-use super::schema;
+use super::{communication, schema};
 use serde_json::Value;
 use crate::cli::auth::AuthProviderConfig;
 use serde::{Deserialize, Serialize};

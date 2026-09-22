@@ -8,6 +8,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::collections::BTreeSet;
 
 pub(super) fn dirs_home() -> PathBuf {
     env::var_os("HOME")
@@ -52,7 +53,7 @@ pub fn load_config(cwd: &Path) -> Value {
     json!({"mcpServers": servers, "disabledServers": disabled})
 }
 
-pub(super) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, String> {
+pub(crate) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, String> {
     let config = load_config(cwd);
     let disabled = config
         .get("disabledServers")
@@ -72,7 +73,7 @@ pub(super) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, 
         .collect())
 }
 
-pub(super) fn configured_server(cwd: &Path, server_name: &str) -> Result<Value, String> {
+pub(crate) fn configured_server(cwd: &Path, server_name: &str) -> Result<Value, String> {
     let config = load_config(cwd);
     let disabled = config
         .get("disabledServers")
@@ -92,11 +93,11 @@ pub(super) fn configured_server(cwd: &Path, server_name: &str) -> Result<Value, 
         .ok_or_else(|| format!("unknown MCP server: {server_name}"))
 }
 
-pub(super) fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+pub(crate) fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
     value.get(key).and_then(Value::as_str)
 }
 
-pub(super) fn resolve_server_cwd(cwd: &Path, server: &Value) -> PathBuf {
+pub(crate) fn resolve_server_cwd(cwd: &Path, server: &Value) -> PathBuf {
     match string_field(server, "cwd") {
         Some(raw) if Path::new(raw).is_absolute() => PathBuf::from(raw),
         Some(raw) => cwd.join(raw),

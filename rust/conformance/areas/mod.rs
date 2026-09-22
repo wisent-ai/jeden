@@ -282,4 +282,4 @@ pub(crate) fn completion_areas() -> &'static [CompletionArea] {
 
 mod scopes;
 
-pub(crate) use scopes::{production_scopes, ProductionScope};
+pub(crate) use scopes::production_scopes;

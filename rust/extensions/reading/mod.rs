@@ -9,9 +9,10 @@ use super::{Registry, ReloadReport, REGISTRIES};
 use super::loading::materialize::build_registry;
 use super::loading::roots::source_set;
 use super::canonical_key;
+use std::fs;
 
-pub(super) mod capabilities;
-pub(super) mod entries;
+pub(crate) mod capabilities;
+pub(crate) mod entries;
 
 pub(super) fn retire_generated_dirs(previous: Option<&Arc<Registry>>, current: &Registry) {
     let Some(previous) = previous else {

@@ -7,8 +7,10 @@ use super::super::merged_config_value;
 use super::settings_schema;
 use super::values::{effective_setting_value, setting_metadata};
 use crate::tui::{PickerItem, PickerSpec};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::Path;
+use crate::cli::config::schema::values::setting_default;
+use crate::user_config_path;
 
 pub(super) fn config_list_json(cwd: &Path) -> Value {
     let config = merged_config_value(cwd);

@@ -1,16 +1,14 @@
 mod declarative;
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use serde_json::Value;
+use std::collections::BTreeMap;
 use std::env;
 use std::fs;
-use std::hash::{DefaultHasher, Hash, Hasher};
+use std::hash::Hasher;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::{mpsc, Arc, LazyLock, RwLock};
-use std::time::{Duration, SystemTime};
+use std::sync::{Arc, LazyLock, RwLock};
 
 use crate::capability::{
     CapabilityDescriptor as RegistryDescriptor, CapabilityHealth, CapabilityKind, CapabilityPolicy,
@@ -141,16 +139,19 @@ static REGISTRIES: LazyLock<RwLock<BTreeMap<PathBuf, Arc<Registry>>>> =
     LazyLock::new(|| RwLock::new(BTreeMap::new()));
 
 
-mod loading;
+pub(crate) mod loading;
 mod reading;
 
 pub use reading::reload;
 pub(crate) use reading::capabilities::capability_descriptors;
-pub(crate) use reading::entries::{agent_dirs, command_dirs, model_entries};
+pub(crate) use reading::entries::{
+    agent_dirs, command_dirs, execute_tool, model_entries, prompt_context, skill_context,
+};
 pub use reading::entries::provider_entries;
 
 use loading::canonical_key;
 use reading::current;
+pub(crate) use crate::hooks::extensions::reading::entries::fire_hooks;
 
 
 pub fn status(cwd: &Path) -> Result<String, String> {

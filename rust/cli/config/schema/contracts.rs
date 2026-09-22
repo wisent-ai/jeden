@@ -5,7 +5,7 @@
 //! cap.
 
 use super::super::{read_user_writable_config, write_user_config};
-use super::values::{effective_setting_value, parse_setting_value, setting_metadata, setting_spec};
+use super::values::{effective_setting_value, parse_setting_value, setting_spec};
 use super::{
     COMMUNICATION_CODE_KEY, COMMUNICATION_CONTRACT_KEY, COMMUNICATION_MODE_KEY,
     COMMUNICATION_REASONING_KEY, COMMUNICATION_TOOL_CALLS_KEY, COMMUNICATION_TOOL_RESULTS_KEY,
@@ -14,6 +14,8 @@ use super::{
 use crate::user_config_path;
 use serde_json::{json, Value};
 use std::path::Path;
+use crate::cli::config::communication::DisplayPolicy;
+use crate::cli::config::config_set_value;
 
 /// The two operator contracts plus what Jeden actually uses for
 /// communication: `communicationSource` says whether the text in force is

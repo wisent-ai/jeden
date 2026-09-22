@@ -4,12 +4,10 @@ use super::lock::PluginLockV1;
 use super::manifest::{MarketplaceEnvelopeV1, PluginDependency};
 use super::resolver;
 use super::trust::TrustRootV1;
-use crate::cas::{Digest, LocalCas};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
-use std::fs::{self, OpenOptions};
-use std::io::{Cursor, Write};
-use std::path::{Component, Path, PathBuf};
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

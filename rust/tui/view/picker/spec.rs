@@ -2,6 +2,7 @@
 //! chooser itself.
 //!
 //! Split out of `tui/view/mod.rs`, which had grown past the module line cap.
+use crate::cli::i18n::tr;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PickerItem {

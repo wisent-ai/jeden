@@ -7,11 +7,13 @@
 use std::io;
 use std::sync::mpsc;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event;
+use crossterm::event::{Event, KeyCode, KeyEventKind};
 
 use crate::agent::TraceEvent;
-use crate::tui::{default_columns, stdout_supports_color, Message};
+use crate::tui::Message;
 use super::super::{message_block, ReplRenderer};
+use std::time::Duration;
 
 /// Worker→render-loop message during a background turn.
 pub(super) enum TurnMsg {

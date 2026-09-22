@@ -1,14 +1,17 @@
 //! Running the JavaScript host that loads the extensions and answers what they
 //! declare, in a real node process with the sources it was given.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 use std::io::Read;
 
-use super::super::{ABI_VERSION, HOST};
+use super::super::HOST;
+use crate::hooks::extensions::MAX_DESCRIPTOR_BYTES;
+use std::env;
+use std::path::PathBuf;
 
 pub(super) fn node_supports_typescript(node: &str) -> bool {
     Command::new(node)
@@ -22,7 +25,7 @@ pub(super) fn node_supports_typescript(node: &str) -> bool {
 // generation, env, sources, both authorization flags, and the borrowed
 // operation context. Nothing in scope owns that set together.
 #[allow(clippy::too_many_arguments)]
-pub(super) fn run_host(
+pub(crate) fn run_host(
     cwd: &Path,
     mode: &str,
     generation: u64,

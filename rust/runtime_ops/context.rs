@@ -3,11 +3,14 @@
 //!
 //! Split out of `runtime_ops/mod.rs`, which had grown past the module line cap.
 
-use super::{ArtifactSink, ExecutionGrant, GrantError, Principal};
+use super::{ArtifactSink, ExecutionGrant, GrantError};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
 };
+use crate::tool_runtime::runtime_ops::TraceContext;
+use crate::tool_runtime::runtime_ops::output::OutputLimits;
+use crate::tool_runtime::runtime_ops::security::TelemetryPolicy;
 
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {

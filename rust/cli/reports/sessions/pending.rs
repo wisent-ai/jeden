@@ -9,6 +9,8 @@ use serde_json::json;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::Ordering;
+use crate::cli::reports::sessions::ledger::append_ledger_entry;
+use serde_json::Value;
 
 const MAX_PENDING_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 
@@ -102,7 +104,7 @@ fn pending_resolved(entries: &[LedgerEntry], id: &str) -> bool {
     })
 }
 
-fn unresolved_pending_claim(entries: &[LedgerEntry]) -> Option<&str> {
+pub(crate) fn unresolved_pending_claim(entries: &[LedgerEntry]) -> Option<&str> {
     entries.iter().rev().find_map(|entry| {
         if entry.kind != "pending_claim" {
             return None;

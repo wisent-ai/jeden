@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-pub(super) fn caller_credentials() -> Option<(String, String)> {
+pub(crate) fn caller_credentials() -> Option<(String, String)> {
     let secret = std::env::var("WISENT_APP_AGENT_AUTH_SECRET")
         .ok()
         .filter(|value| !value.is_empty())?;
@@ -17,7 +17,7 @@ pub(super) fn caller_credentials() -> Option<(String, String)> {
     Some((agent_id, secret))
 }
 
-pub(super) fn insert_caller_auth_headers(headers: &mut BTreeMap<String, String>, body: &[u8]) {
+pub(crate) fn insert_caller_auth_headers(headers: &mut BTreeMap<String, String>, body: &[u8]) {
     let Some((agent_id, secret)) = caller_credentials() else {
         return;
     };

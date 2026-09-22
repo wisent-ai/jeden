@@ -5,6 +5,9 @@
 
 use super::super::*;
 use super::{row_record, MemoryStore};
+use crate::memory::store::load_record;
+use rusqlite::TransactionBehavior;
+use rusqlite::params;
 
 impl MemoryStore {
     pub fn list(&self, limit: usize) -> Result<Vec<MemoryRecord>, String> {

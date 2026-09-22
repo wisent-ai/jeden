@@ -4,6 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use super::current;
+use crate::hooks::extensions::declarative;
+use crate::hooks::extensions::loading::host::run_host;
+use serde_json::Value;
 
 pub(crate) fn command_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(current(cwd)?.command_dir.iter().cloned().collect())

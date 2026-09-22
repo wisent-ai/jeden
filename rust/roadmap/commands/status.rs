@@ -7,6 +7,9 @@ use super::super::model::{RoadmapError, RoadmapStatus};
 use super::super::normalize::{actor, find_item_mut, now};
 use super::super::store::RoadmapStore;
 use super::options::{expected_revision, format_json, ParsedOptions};
+use crate::roadmap::model::EvidenceLink;
+use crate::roadmap::normalize::find_item;
+use serde_json::json;
 
 pub(super) fn mutate_status(
     store: &RoadmapStore,

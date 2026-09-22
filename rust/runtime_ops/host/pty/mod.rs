@@ -1,7 +1,5 @@
-use super::super::{
-    platform::{native, ProcessSignal, PtySession},
-    BoundedOutput, OperationContext, OperationProgress, OutputCapture,
-};
+use super::super::platform::PtySession;
+use super::super::{OperationContext, OutputCapture};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -9,7 +7,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard, TryLockError};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub(super) const POLL: Duration = Duration::from_millis(10);
 pub const MIN_PTY_COLS: u16 = 1;

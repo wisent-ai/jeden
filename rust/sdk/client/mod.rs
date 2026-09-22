@@ -1,7 +1,7 @@
 //! The asynchronous client for one session: requests out, responses and events
 //! back, with the reader task and the failure types beside it.
 
-use super::protocol::{Envelope, EventEnvelope, RequestEnvelope, RequestMeta};
+use super::protocol::{Envelope, RequestEnvelope, RequestMeta};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::future::Future;
@@ -19,6 +19,7 @@ mod stream;
 pub use errors::{ClientError, SessionTransport, TransportError};
 use inner::{reader_loop, ClientInner, EventSubscriber};
 pub use stream::EventStream;
+use tokio_stream::wrappers::ReceiverStream;
 
 /// Cloneable asynchronous client for `jeden.session.v1`.
 #[derive(Clone)]

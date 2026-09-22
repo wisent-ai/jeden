@@ -6,6 +6,10 @@
 use super::{current_job_mut_allow_cancelling, Coordinator};
 use super::store::JobState;
 use crate::task_runtime::fleet::protocol::ProtocolError;
+use crate::task_runtime::fleet::coordinator::current_job_mut;
+use crate::task_runtime::fleet::protocol::AttemptPhase;
+use crate::task_runtime::fleet::protocol::JobPhase;
+use crate::task_runtime::fleet::protocol::WorkOffer;
 
 impl Coordinator {
     pub fn cancel(&self, job_id: &str, now: u64) -> Result<bool, ProtocolError> {

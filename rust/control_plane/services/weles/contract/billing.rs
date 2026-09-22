@@ -6,9 +6,10 @@
 
 use crate::control_plane::billing;
 use crate::control_plane::contract::RequestMeta;
-use super::guards::{decode_v2, read_v2, reject_forbidden_payment_fields, validate_identifier};
+use super::guards::{decode_v2, read_v2, validate_identifier};
 use super::super::{encode_path_segment, WelesClient, WelesError};
 use serde_json::{json, Value};
+pub(crate) use crate::control_plane::billing::MAX_BILLING_STRING_BYTES;
 
 impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     fn billing_status(

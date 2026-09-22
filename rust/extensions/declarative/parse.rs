@@ -7,6 +7,7 @@ use super::{MAX_ASSETS_PER_SKILL, MAX_DEFINITIONS};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::path::{Path, PathBuf};
+use std::fs;
 
 pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()
@@ -113,7 +114,7 @@ pub(super) fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<
     Ok(assets)
 }
 
-pub(super) fn skill_file_id(path: &Path) -> String {
+pub(crate) fn skill_file_id(path: &Path) -> String {
     let file = path
         .file_stem()
         .and_then(|value| value.to_str())

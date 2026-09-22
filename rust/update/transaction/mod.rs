@@ -79,7 +79,7 @@ mod recover;
 use disk::{durable_json, make_executable, sync_dir};
 use lock::UpdateLock;
 pub use recover::recover;
-use recover::{restore_state, rollback};
+use recover::rollback;
 
 fn journal(
     paths: &InstallPaths,

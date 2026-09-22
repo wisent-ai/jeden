@@ -8,8 +8,11 @@ use super::ledger_v2;
 use super::{session_dir_for, LedgerEntry, SessionLedger};
 use serde_json::{json, Value};
 use std::path::Path;
+use crate::cli::reports::sessions::SESSION_LEDGER_VERSION;
+use crate::cli::reports::sessions::ledger_v2::event::payload::CheckpointPayloadV2;
+use crate::hooks::extensions::loading::read_json;
 
-pub(super) fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
+pub(crate) fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
     let ledger = ledger_v2::store::read_events(dir)?;
     let active_leaf = ledger.events.last().map(|event| event.event_id.clone());
     let active_entries = ledger_v2::store::active_lineage(&ledger.events, active_leaf.as_deref())?

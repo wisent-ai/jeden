@@ -9,6 +9,8 @@ use super::ledger_v2::{
 use super::{LedgerEntry, LEDGER_APPEND_LOCK, SESSION_LEDGER_VERSION};
 use serde_json::{json, Value};
 use std::path::Path;
+use crate::cli::reports::sessions::pending::unresolved_pending_claim;
+use crate::cli::reports::sessions::replay::parse_transcript;
 
 impl LedgerEntry {
     pub(super) fn from_event(event: &SessionEventV2) -> Self {

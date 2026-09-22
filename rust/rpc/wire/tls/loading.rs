@@ -13,6 +13,7 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use x509_parser::extensions::GeneralName;
 use x509_parser::parse_x509_certificate;
+use crate::rpc::wire::tls::REQUIRED_ALPN;
 
 /// rustls 0.23 refuses to guess a process-level provider when more than one is
 /// linked, and both are here: `ring` and `aws-lc-rs` arrive through different

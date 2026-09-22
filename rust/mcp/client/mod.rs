@@ -9,6 +9,8 @@ use std::process::Child;
 use std::sync::mpsc::Receiver;
 
 use super::MCP_PROTOCOL_VERSION;
+use std::sync::mpsc;
+use string_field;
 
 mod exchange;
 mod framing;
@@ -35,7 +37,7 @@ pub(super) enum Transport {
     Http(HttpTransport),
 }
 
-pub(super) struct McpClient {
+pub(crate) struct McpClient {
     pub(super) transport: Transport,
     pub(super) next_id: u64,
     pub(super) notifications: VecDeque<Value>,

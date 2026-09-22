@@ -4,21 +4,19 @@
 use serde_json::{json, Value};
 use url::Url;
 
-use crate::slash::common::{file_url, now_text, read_json_value, split_head, write_json_value};
+use crate::slash::common::{file_url, now_text, read_json_value, split_head};
 use crate::slash::SlashContext;
 
 mod pickers;
 mod relay;
 mod status;
 
-pub(in crate::slash::session) use pickers::{
+pub(crate) use pickers::{
     build_collab_picker, build_join_picker, build_leave_picker,
 };
-use relay::{
-    append_collab_event, collab_default_relay, collab_path, collab_state_path, post_collab_http,
-    read_collab_events, save_collab_state,
-};
-use status::{collab_descriptor, collab_http_role_status, collab_role_status};
+use relay::{append_collab_event, collab_path, collab_state_path, post_collab_http, save_collab_state};
+use status::{collab_http_role_status, collab_role_status};
+use std::path::Path;
 
 pub(crate) fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let (verb, rest) = split_head(args);

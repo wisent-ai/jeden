@@ -1,9 +1,7 @@
-use super::{MAX_BLOB_BYTES, MAX_ROOM_EVENTS};
+use super::MAX_ROOM_EVENTS;
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::json;
-use sha2::{Digest, Sha256};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use sha2::Digest;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 mod auth;

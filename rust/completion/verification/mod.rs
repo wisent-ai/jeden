@@ -5,12 +5,12 @@ mod paths;
 use super::{model::*, store};
 pub(crate) use evidence::{inspect as inspect_evidence, review_evidence};
 use serde_json::Value;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 mod index;
 
-use index::{canonical, EvidenceIndex};
+use index::EvidenceIndex;
 
 pub(crate) fn apply_review(
     session: &Path,

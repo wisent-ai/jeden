@@ -23,7 +23,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[path = "../extensions/mod.rs"]
-mod extensions;
+pub(crate) mod extensions;
 mod run;
 pub mod tama;
 
@@ -56,8 +56,6 @@ pub struct HookOutcome {
     pub stdout: String,
     pub stderr: String,
 }
-
-
 
 pub(crate) fn project_hooks_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/hooks.json")

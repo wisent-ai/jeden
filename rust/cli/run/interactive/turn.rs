@@ -4,20 +4,22 @@
 //! cap.
 
 use super::super::self_rebuild::RelaunchPlan;
-use super::super::{run_turn_shared, self_rebuild};
+use super::super::run_turn_shared;
 use super::{commands, input_accepts_attachments, model_attachments};
 use crate::cli::commands::expand::resolve_file_command;
 use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
 use crate::cli::run::slash_ui::interactive_view;
 use crate::cli::sessions::session_dir_for;
-use crate::{agent, hooks, tui, Args};
+use crate::{Args, agent, tui};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
+use crate::cli::reports::sessions::replay::session_conversation_turns;
+use crate::hooks::extensions::loading::read_json;
 
 /// One turn, with the session state every turn reads afresh.
 #[allow(clippy::too_many_arguments)]
@@ -231,6 +233,7 @@ pub(super) fn run_turn(
                             crate::context::advisor::render_text(&advice),
                         ));
                     }
+                    let context_limit = super::status::context_limit();
                     let conv = handler_conv.lock();
                     Ok(format!(
                         "Live conversation: {} message(s), ~{} tokens.{}",

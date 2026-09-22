@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
+use crate::cas::snapshot::safety::reject_case_collisions;
 
 pub(super) const TREE_SCHEMA: &str = "jeden.merkle-tree.v1";
 

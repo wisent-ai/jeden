@@ -5,6 +5,8 @@
 use super::boxes::{boxed, pad_visible};
 use crate::tui::text::{compact_path, paint, sanitize_terminal_text, visible_len};
 use crate::tui::{APP, PRODUCT, VERSION};
+use crate::tui::text::clamp_visible;
+use std::path::Path;
 
 const WISENT_MARK: &[&str] = &[
     "        ▄▄▄██▀▀▀▀▀▀██▄▄▄",

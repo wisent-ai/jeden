@@ -8,14 +8,14 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
-pub(super) struct Input {
+pub(crate) struct Input {
     pub kind: &'static str,
     pub path: PathBuf,
     pub precedence: usize,
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct LoadedCapability {
+pub(crate) struct LoadedCapability {
     pub kind: &'static str,
     pub active: bool,
     pub id: String,
@@ -27,7 +27,7 @@ pub(super) struct LoadedCapability {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Skill {
+pub(crate) struct Skill {
     pub id: String,
     pub description: String,
     pub prompt: String,
@@ -40,7 +40,7 @@ pub(super) struct Skill {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Rule {
+pub(crate) struct Rule {
     pub id: String,
     pub description: String,
     pub content: String,
@@ -51,7 +51,7 @@ pub(super) struct Rule {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct Agent {
+pub(crate) struct Agent {
     pub id: String,
     pub source: PathBuf,
     pub precedence: usize,
@@ -59,7 +59,7 @@ pub(super) struct Agent {
 }
 
 #[derive(Clone, Debug, Default)]
-pub(super) struct Loaded {
+pub(crate) struct Loaded {
     pub capabilities: Vec<LoadedCapability>,
     pub skills: BTreeMap<String, Skill>,
     pub rules: BTreeMap<String, Rule>,

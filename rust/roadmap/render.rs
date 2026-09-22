@@ -5,7 +5,7 @@
 
 use super::model::RoadmapFile;
 
-pub(super) fn render_markdown(roadmap: &RoadmapFile) -> String {
+pub(crate) fn render_markdown(roadmap: &RoadmapFile) -> String {
     let mut out = String::new();
     out.push_str("# Jeden Production Roadmap\n\n");
     out.push_str(&format!(

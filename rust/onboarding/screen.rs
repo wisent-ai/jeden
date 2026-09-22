@@ -6,6 +6,7 @@ use super::Client;
 use crate::tui::{PickerItem, PickerSpec};
 use std::path::Path;
 use wisent_onboarding_client::ProgressStatus;
+use serde_json::Value;
 
 pub(super) fn current_screen(client: &Client) -> Result<&wisent_onboarding_client::Screen, String> {
     let progress = client

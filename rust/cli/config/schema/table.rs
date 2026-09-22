@@ -5,6 +5,15 @@
 //! cap.
 
 use super::SettingSpec;
+use crate::cli::config::communication::{CommunicationMode, Visibility};
+use crate::cli::config::schema::COMMUNICATION_CODE_KEY;
+use crate::cli::config::schema::COMMUNICATION_CONTRACT_KEY;
+use crate::cli::config::schema::COMMUNICATION_MODE_KEY;
+use crate::cli::config::schema::COMMUNICATION_REASONING_KEY;
+use crate::cli::config::schema::COMMUNICATION_TOOL_CALLS_KEY;
+use crate::cli::config::schema::COMMUNICATION_TOOL_RESULTS_KEY;
+use crate::cli::config::schema::FUNCTIONALITY_CONTRACT_KEY;
+use crate::cli::config::schema::UI_LANGUAGE_AUTO;
 
 /// `auto` plus every pinnable language, from the declaration the parser
 /// reads. The schema used to carry its own copy of all sixty-five codes,
@@ -26,7 +35,7 @@ fn ui_language_choices() -> &'static [&'static str] {
     &CHOICES
 }
 
-pub(super) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyLock::new(|| {
+pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyLock::new(|| {
     vec![
     SettingSpec {
         key: "model",

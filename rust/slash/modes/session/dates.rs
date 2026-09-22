@@ -3,7 +3,7 @@
 //! Split out of `slash/modes/session.rs`, which had grown past the module line
 //! cap.
 
-fn started_epoch(started: &str) -> Option<u64> {
+pub(crate) fn started_epoch(started: &str) -> Option<u64> {
     let trimmed = started.trim();
     if let Ok(epoch) = trimmed.parse::<u64>() {
         return Some(epoch);

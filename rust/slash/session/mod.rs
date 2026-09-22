@@ -1,12 +1,12 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::slash::common::{file_url, now_text, read_json_value, resolve_cwd_path, split_args};
+use crate::slash::common::{read_json_value, resolve_cwd_path, split_args};
 use crate::slash::state::mode_state_path;
 use crate::slash::SlashContext;
-use crate::tui::{PickerItem, PickerSpec};
+use crate::tui::PickerSpec;
 
 pub(crate) mod clipboard;
 pub(crate) mod collab;

@@ -5,6 +5,7 @@
 use super::super::migrations;
 use serde_json::Value;
 use std::path::Path;
+use serde_json::json;
 
 pub(crate) const CONFIG_SCHEMA_VERSION: u32 = 4;
 

@@ -7,7 +7,7 @@ use super::super::runtime_ops::{
     kernel::{self, KernelLanguage},
     pty,
 };
-use super::super::shared::{bool_input, string_input, u64_input};
+use super::super::shared::{bool_input, string_input};
 use super::super::ToolRuntime;
 use serde_json::{json, Value};
 

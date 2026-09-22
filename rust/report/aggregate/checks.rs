@@ -5,6 +5,8 @@
 //! cap.
 
 use super::{Aggregator, Evidence};
+use crate::report::aggregate::Status;
+use std::collections::BTreeSet;
 
 pub(super) fn validate_evidence(aggregator: &Aggregator, evidence: &Evidence) -> Result<(), String> {
     if evidence.schema_version != 1 {

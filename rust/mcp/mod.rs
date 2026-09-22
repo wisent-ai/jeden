@@ -2,9 +2,9 @@
 //! and asking them for tools, resources and prompts.
 
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::thread;
 
 mod client;
@@ -13,7 +13,7 @@ mod servers;
 mod sweep;
 mod validate;
 
-use connection::{ConnectionState, ServerConnection};
+use connection::ServerConnection;
 pub(crate) use servers::capability_descriptors;
 pub use servers::load_config;
 use servers::{configured_server, configured_servers, resolve_server_cwd, string_field};

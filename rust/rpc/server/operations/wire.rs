@@ -6,8 +6,9 @@
 
 use serde_json::{json, Value};
 use std::io::BufRead;
+use crate::rpc::server::MAX_FRAME_BYTES;
 
-pub(super) fn string_param(params: &Value, key: &str) -> Result<String, String> {
+pub(crate) fn string_param(params: &Value, key: &str) -> Result<String, String> {
     params
         .get(key)
         .and_then(Value::as_str)
@@ -24,21 +25,21 @@ pub(super) fn text_param(params: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{} must be a string", key))
 }
 
-pub(super) fn wire_id(id: &Value) -> String {
+pub(crate) fn wire_id(id: &Value) -> String {
     id.as_str()
         .map(str::to_string)
         .unwrap_or_else(|| id.to_string())
 }
 
-pub(super) fn success_response(id: Value, result: Value) -> Value {
+pub(crate) fn success_response(id: Value, result: Value) -> Value {
     json!({"id": id, "result": result})
 }
 
-pub(super) fn error_response(id: Value, code: &str, message: &str) -> Value {
+pub(crate) fn error_response(id: Value, code: &str, message: &str) -> Value {
     json!({"id": id, "error": {"code": code, "message": message}})
 }
 
-pub(super) fn read_frame<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
+pub(crate) fn read_frame<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
     let mut frame = Vec::new();
     loop {
         let available = input.fill_buf().map_err(|error| error.to_string())?;

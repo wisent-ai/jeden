@@ -6,12 +6,13 @@
 use super::super::fetch::{fetch_marketplace, read_marketplace_catalog};
 use super::super::production::manifest::{MarketplaceEnvelopeV1, PluginDependency};
 use super::super::production::trust::TrustRootV1;
-use super::super::{marketplace_cache_dir, plugins_home};
+use super::super::marketplace_cache_dir;
 use super::{production_service, registry_scope_dir};
 use crate::slash::validate::{valid_marketplace_name, valid_plugin_id, valid_plugin_name};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
+use crate::slash::plugins::ops::find_marketplace_source;
 
 fn artifact_bytes(cache: &Path, location: &str) -> Result<Vec<u8>, String> {
     if let Some(path) = location.strip_prefix("file://") {

@@ -1,7 +1,7 @@
 //! Interactive REPL loop and shared run-turn bookkeeping.
 
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::env;
 use std::fs;
 use std::io::IsTerminal;
@@ -9,14 +9,13 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 
-use super::{run_turn_shared, self_rebuild};
+use super::self_rebuild;
 use crate::cli::commands::expand::resolve_file_command;
-use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::cli::config::load_config;
-use crate::cli::run::slash::{handle_slash, is_builtin_slash};
-use crate::cli::run::slash_ui::{interactive_view, model_picker};
-use crate::cli::sessions::{session_conversation_turns, session_dir_for};
-use crate::{agent, hooks, read_json, tui, Args};
+use crate::cli::run::slash::is_builtin_slash;
+use crate::cli::run::slash_ui::model_picker;
+use crate::cli::sessions::session_conversation_turns;
+use crate::{Args, agent, hooks, tui};
 
 mod commands;
 mod status;
@@ -125,10 +124,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     }
     let conversation = Arc::new(Mutex::new(initial_conversation));
     let pending_relaunch = Arc::new(Mutex::new(None));
-    let context_limit = env::var("JEDEN_CONTEXT_LIMIT")
-        .ok()
-        .and_then(|v| v.trim().parse::<usize>().ok())
-        .filter(|v| *v != usize::default());
+    let context_limit = status::context_limit();
     // SessionStart hooks fire once when the interactive session opens.
     let session_banner = hooks::session_start(&args.cwd, args.allow_command);
     if !session_banner.trim().is_empty() {

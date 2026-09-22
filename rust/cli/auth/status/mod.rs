@@ -1,11 +1,11 @@
 use std::env;
-use std::io::{self, Write};
+use std::io;
 use std::path::Path;
 
 use crate::control_plane::billing::{QuotaBucket, QuotaState};
 use crate::control_plane::contract::{RequestMeta, WelesApiV2};
 
-use crate::control_plane::weles::{InteractionBridge, OperationEvent, WelesClient};
+use crate::control_plane::weles::{InteractionBridge, WelesClient};
 use crate::load_config;
 use crate::tui::{PickerItem, PickerSpec};
 

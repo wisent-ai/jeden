@@ -64,7 +64,7 @@ pub(super) fn session_command(
                             handler_model.lock().as_deref().unwrap_or("not selected")
                         ))));
                     }
-                    let message = super::slash::set_model_route(&run_args.cwd, next)?;
+                    let message = crate::cli::run::slash::set_model_route(&run_args.cwd, next)?;
                     *handler_model.lock() = Some(next.to_string());
                     Ok(message)
                 }

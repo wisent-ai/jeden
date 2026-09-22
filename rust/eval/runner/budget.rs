@@ -3,7 +3,7 @@
 //! Split out of `eval/runner.rs`, which had grown past the module line cap.
 
 use super::super::dataset::EvalCaseV1;
-use super::super::metrics::{TerminalReasonV1, ToolStatsV1, UsageMetricsV1};
+use super::super::metrics::{ToolStatsV1, UsageMetricsV1};
 
 pub(super) fn enforce_budget(
     case: &EvalCaseV1,

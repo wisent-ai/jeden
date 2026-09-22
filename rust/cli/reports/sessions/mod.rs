@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 // Relative to this file's directory, rust/cli/reports/sessions/. The file
@@ -36,7 +36,7 @@ pub(crate) struct LedgerEntry {
 mod export;
 mod ledger;
 mod pending;
-mod replay;
+pub(crate) mod replay;
 
 pub(crate) use export::{
     artifact_command, export_session_command, list_artifacts_command, render_session_export,
@@ -44,12 +44,9 @@ pub(crate) use export::{
 pub(crate) use ledger::{
     append_checkpoint_entry, append_ledger_entry, append_rewind_entry, session_active_leaf,
 };
-pub(crate) use pending::{
-    claim_pending_action, complete_pending_action, create_pending_action, discard_pending_action,
-    PendingActionClaim, PendingActionCreate,
-};
+pub(crate) use pending::{PendingActionCreate, claim_pending_action, complete_pending_action, create_pending_action, discard_pending_action};
 pub(crate) use replay::{list_checkpoint_entries, session_conversation_turns};
-use replay::{parse_transcript, replay_entries};
+use replay::parse_transcript;
 
 #[derive(Debug)]
 struct SessionLedger {

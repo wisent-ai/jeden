@@ -14,7 +14,10 @@ mod prompt;
 mod wiring;
 
 use interaction::AcpInteraction;
-pub(in crate::rpc::acp) use wiring::build_agent;
+pub(crate) use wiring::build_agent;
+use crate::rpc::acp::agent::wiring::agent_capabilities;
+use crate::rpc::acp::internal;
+use crate::rpc::acp::invalid_params;
 
 static NEXT_PROMPT: AtomicU64 = AtomicU64::new(1);
 

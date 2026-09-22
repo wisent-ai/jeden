@@ -7,9 +7,12 @@ use super::columns::metric_widths;
 use super::rows::{
     model_rank, model_row, provider_group, provider_rank, summary_key, summary_row,
 };
-use crate::cli::i18n::{lang_code, tr};
+use crate::cli::i18n::tr;
 use crate::tui::{PickerItem, PickerSpec};
 use std::path::Path;
+use crate::cli::config::load_config;
+use crate::cli::config::ui_language;
+use crate::cli::run::slash_ui::rows::SUBSCRIPTION_PROVIDERS;
 
 pub(crate) fn model_picker(
     cwd: &Path,

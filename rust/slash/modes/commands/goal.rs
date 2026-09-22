@@ -5,7 +5,7 @@
 use crate::slash::common::split_head;
 use crate::slash::state::{GoalState, ModeState};
 
-pub(super) fn format_goal_status(goal: &GoalState) -> String {
+pub(crate) fn format_goal_status(goal: &GoalState) -> String {
     let auto = if goal.auto { "on" } else { "off" };
     if goal.objective.is_empty() {
         return format!(

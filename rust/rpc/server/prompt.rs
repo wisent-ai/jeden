@@ -9,6 +9,9 @@ use crate::sdk::{PromptRequest, SessionEventKind};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::thread;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 pub(super) fn handle_prompt(state: Arc<ServerState>, request: WireRequest) -> Result<(), String> {
     let id = request.id.clone();

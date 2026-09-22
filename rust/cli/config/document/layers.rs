@@ -7,6 +7,7 @@ use crate::{config_path, legacy_user_config_path, user_config_path};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
+use serde::Deserialize;
 
 pub(crate) fn read_config_value(path: &Path) -> Value {
     let Some(text) = fs::read_to_string(path).ok() else {
@@ -25,7 +26,7 @@ pub(crate) fn read_config_value(path: &Path) -> Value {
     parsed.filter(Value::is_object).unwrap_or_else(|| json!({}))
 }
 
-pub(super) fn read_config_typed<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
+pub(crate) fn read_config_typed<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
     serde_json::from_value(read_config_value(path)).unwrap_or_default()
 }
 
@@ -46,7 +47,7 @@ fn project_config_layer_paths(cwd: &Path) -> Vec<PathBuf> {
 /// legacy value, and a run started in the home directory used a model route
 /// Brama no longer serves. One file is one layer, in its user position, so
 /// the current file keeps overriding it.
-pub(super) fn config_layer_paths(cwd: &Path) -> Vec<PathBuf> {
+pub(crate) fn config_layer_paths(cwd: &Path) -> Vec<PathBuf> {
     let mut paths = global_config_layer_paths();
     for path in project_config_layer_paths(cwd) {
         if !paths.contains(&path) {

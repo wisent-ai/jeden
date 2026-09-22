@@ -4,6 +4,7 @@
 
 use crate::slash::common::split_args;
 use crate::slash::state::ModeState;
+use crate::slash::support::state::ToolsState;
 
 fn valid_approval_mode(value: &str) -> bool {
     matches!(value, "always-ask" | "write" | "yolo")

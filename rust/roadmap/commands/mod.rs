@@ -2,10 +2,11 @@
 //!
 //! Split out of `roadmap/mod.rs`, which had grown past the module line cap.
 
-use super::model::{RoadmapError, RoadmapItem, RoadmapStatus};
-use super::normalize::{actor, find_item, next_item_id, now};
-use super::store::RoadmapStore;
+use super::model::{AcceptanceCriterion, RoadmapError, RoadmapFile, RoadmapItem, RoadmapStatus};
+use super::normalize::{actor, find_item, find_item_mut, next_item_id, now};
+use super::{render::render_markdown, store::RoadmapStore};
 use serde_json::json;
+use std::path::Path;
 
 mod acceptance;
 mod options;

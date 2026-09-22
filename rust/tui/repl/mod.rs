@@ -7,7 +7,7 @@ use super::{CommandOutcome, Message, PickerState};
 
 pub(super) mod background;
 pub(crate) mod external_editor;
-pub(super) mod loops;
+pub(crate) mod loops;
 pub(super) mod questions;
 
 /// Sticky-prompt renderer for native scrollback. Finalized transcript blocks are

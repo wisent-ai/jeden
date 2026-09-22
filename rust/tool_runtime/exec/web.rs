@@ -7,6 +7,9 @@ use super::super::shared::{line_window, string_input, u64_input};
 use super::super::ToolRuntime;
 use serde_json::{json, Value};
 use std::io::Read;
+use crate::tool_runtime::runtime_ops::context::OperationProgress;
+use crate::tool_runtime::runtime_ops::output::BoundedOutput;
+use crate::tool_runtime::runtime_ops::output::OutputLimits;
 
 pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let url = string_input(input, "url").ok_or("fetch_url requires url")?;

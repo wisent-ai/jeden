@@ -1,12 +1,12 @@
 mod guard;
 
-pub use guard::{ActiveRequestPermit, TenantGuard};
+pub use guard::TenantGuard;
 
 use super::tls::VerifiedPeer;
-use sha2::{Digest, Sha256};
+use sha2::Digest;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct PrincipalId(String);

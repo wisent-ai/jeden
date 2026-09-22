@@ -3,12 +3,11 @@
 
 use super::*;
 
-mod wire;
-mod workspace;
+pub(crate) mod wire;
+pub(crate) mod workspace;
 
-pub(super) use wire::{error_response, read_frame, string_param, success_response, wire_id};
+pub(crate) use wire::{error_response, string_param, success_response, wire_id};
 use wire::text_param;
-pub(super) use workspace::{import_sessions, workspace_adopt, workspace_discover, workspace_status};
 
 pub(super) fn create_session(
     state: &Arc<ServerState>,

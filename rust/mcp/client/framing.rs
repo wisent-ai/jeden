@@ -9,7 +9,7 @@ use std::io::Read;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_QUEUED_MESSAGES: usize = 64;
 
 pub(super) fn encode_message(message: &Value) -> Result<Vec<u8>, String> {

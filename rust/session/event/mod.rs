@@ -6,7 +6,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod legacy_kinds;
-mod payload;
+pub(crate) mod payload;
 
 pub(crate) use payload::{CheckpointPayloadV2, RewindPayloadV2, SessionPayloadV2};
 

@@ -11,6 +11,7 @@ use uuid::Uuid;
 use wisent_onboarding_client::{
     bundle_from_canonical, FileStorage, IntegrationTransport, JourneyClient, Transport,
 };
+use wisent_onboarding_client::ScopeKind;
 
 pub(super) fn state_path() -> PathBuf {
     env::var_os("HOME")

@@ -9,10 +9,16 @@ use super::{
 
 mod panels;
 mod prompt;
+// ca38dda moved qr.rs here from the crate root without declaring it; the
+// crate reaches it as `tui::qr`.
+pub mod qr;
 
-pub(crate) use panels::{boxed, boxed_split, welcome_panel};
+pub(crate) use panels::{boxed, welcome_panel};
 pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
 pub(crate) use prompt::compact_prompt;
+use crate::tui::render::panels::boxes::input_prefix_width;
+use crate::tui::text::clamp_visible;
+use crate::tui::text::visible_len;
 
 fn role_color(role: &str) -> &'static str {
     match role {

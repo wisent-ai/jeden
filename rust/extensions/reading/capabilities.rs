@@ -7,6 +7,7 @@ use std::path::Path;
 use super::super::{CapabilityHealth, CapabilityKind, CapabilityPolicy, FunctionTarget};
 use super::super::RegistryDescriptor;
 use super::current;
+use serde_json::json;
 
 pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescriptor>, String> {
     let registry = current(cwd)?;

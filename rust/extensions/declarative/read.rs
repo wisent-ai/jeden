@@ -9,7 +9,7 @@ use super::parse::{
 };
 use super::shapes::{Agent, LoadedCapability, Rule, Skill};
 use super::MAX_DEFINITION_BYTES;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;

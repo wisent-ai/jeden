@@ -10,6 +10,7 @@ use crate::control_plane::contract::{RequestMeta, WelesApiV2};
 use crate::control_plane::weles::{platform_billing_configured, WelesClient};
 use crate::routing::SubscriptionPoolSnapshot;
 use sha2::{Digest, Sha256};
+use crate::routing::subscriptions::SubscriptionTarget;
 
 pub(super) fn subscription_pool_from_platform_billing() -> Result<Option<SubscriptionPoolSnapshot>, String> {
     if !platform_billing_configured() {

@@ -7,8 +7,9 @@ use agent_client_protocol::schema::v1::*;
 use agent_client_protocol::{Agent, Client, Dispatch, Responder};
 use serde_json::json;
 use std::sync::Arc;
+use agent_client_protocol::ConnectionTo;
 
-pub(super) fn build_agent() -> impl agent_client_protocol::ConnectTo<Client> {
+pub(crate) fn build_agent() -> impl agent_client_protocol::ConnectTo<Client> {
     let state = Arc::new(AcpState::default());
     Agent
         .builder()
@@ -77,7 +78,7 @@ pub(super) fn build_agent() -> impl agent_client_protocol::ConnectTo<Client> {
         )
 }
 
-fn agent_capabilities() -> AgentCapabilities {
+pub(crate) fn agent_capabilities() -> AgentCapabilities {
     AgentCapabilities::new()
         .load_session(true)
         .prompt_capabilities(PromptCapabilities::new())
