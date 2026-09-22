@@ -2,6 +2,10 @@ use crate::task_runtime::cas::Digest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
+mod errors;
+
+pub use errors::ProtocolError;
+
 pub const WORKER_PROTOCOL_MAJOR: u16 = 1;
 pub const WORKER_PROTOCOL_MINOR: u16 = 0;
 
@@ -257,46 +261,3 @@ pub struct JobOutcome {
     pub result: Vec<u8>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ProtocolError {
-    UnsupportedVersion {
-        minimum: ProtocolVersion,
-        maximum: ProtocolVersion,
-    },
-    Invalid(String),
-    NotFound(String),
-    NoPlacement(String),
-    LeaseLost(String),
-    StaleFence {
-        expected: u64,
-        actual: u64,
-    },
-    Conflict(String),
-    Cancelled(String),
-    Storage(String),
-    Transport(String),
-}
-impl std::fmt::Display for ProtocolError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::UnsupportedVersion { minimum, maximum } => write!(
-                f,
-                "unsupported worker protocol range {}.{}..={}.{}",
-                minimum.major, minimum.minor, maximum.major, maximum.minor
-            ),
-            Self::Invalid(v)
-            | Self::NotFound(v)
-            | Self::NoPlacement(v)
-            | Self::LeaseLost(v)
-            | Self::Conflict(v)
-            | Self::Cancelled(v)
-            | Self::Storage(v)
-            | Self::Transport(v) => f.write_str(v),
-            Self::StaleFence { expected, actual } => write!(
-                f,
-                "stale fencing token {actual}; current token is {expected}"
-            ),
-        }
-    }
-}
-impl std::error::Error for ProtocolError {}
