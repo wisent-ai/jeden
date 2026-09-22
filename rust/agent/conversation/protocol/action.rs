@@ -1,4 +1,4 @@
-use super::*;
+use super::super::*;
 
 pub(in crate::agent) fn action_or_text(content: &str, inspection: bool) -> Result<Action, String> {
     match extract_json_object(content) {

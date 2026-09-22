@@ -3,7 +3,7 @@
 //!
 //! Split out of `cas/store.rs`, which had grown past the module line cap.
 
-use super::digest::Digest;
+use super::super::digest::Digest;
 use std::fmt;
 use std::io;
 use std::path::PathBuf;

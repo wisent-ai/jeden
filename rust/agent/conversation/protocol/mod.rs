@@ -1,3 +1,5 @@
+pub(in crate::agent) mod action;
+
 use serde::Serialize;
 use serde_json::{json, Value};
 

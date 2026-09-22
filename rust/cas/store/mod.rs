@@ -1,5 +1,8 @@
-use super::digest::Digest;
-use super::error::CasError;
+mod error;
+
+pub use error::CasError;
+
+use super::super::digest::Digest;
 use sha2::{Digest as ShaDigest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};

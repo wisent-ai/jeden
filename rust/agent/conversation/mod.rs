@@ -2,14 +2,13 @@ use super::*;
 
 pub mod protocol;
 
-mod action;
 mod compaction;
 mod completion;
 mod history;
 mod local_exec;
 mod turn;
 
-pub(super) use action::{
+pub(super) use protocol::action::{
     action_or_text, action_to_value, record_unexecuted_tool_action, run_tool_action,
 };
 
