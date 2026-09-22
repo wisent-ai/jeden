@@ -37,18 +37,23 @@ export const sessionCommands = [
   },
   {
     path: "pursue",
-    invocation: 'jeden pursue "rough objective" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]',
+    invocation: 'jeden pursue "rough objective" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command]\njeden pursue --request-file request.json --allow-write --allow-command --json\njeden pursue --status REQUEST_ID --json\njeden pursue --resume-run REQUEST_ID --json',
     purpose: "Turn a rough objective into a source-grounded autonomous contract, execution, independent review, verdict, and receipt.",
     inputs: [
-      "Required: a non-empty rough objective.",
+      "Supply either a non-empty rough objective or exactly one machine operation: <code>--request-file</code>, <code>--status</code>, or <code>--resume-run</code>. Machine operations cannot be combined with a positional objective.",
       "The workspace, model route, grants, JSON output, and maximum steps use the same options as <code>run</code>.",
       "Transcript Lake preference evidence is consulted only when command execution is granted; otherwise pursuit proceeds without that external executable.",
+      "An immutable request has <code>schema_version: 1</code>, <code>request_id</code>, <code>initiative_id</code>, <code>objective</code>, absolute canonical <code>cwd</code>, <code>evidence_refs</code>, decimal-string <code>budget_usd</code>, <code>allow_write</code>, <code>allow_command</code>, and optional <code>repositories</code> containing exact GitHub owner/name pairs. Submission needs CLI grants matching every requested grant.",
+      "Machine state lives under <code>JEDEN_PURSUIT_STATE_ROOT</code>, or <code>~/.jeden/pursuit</code>. A request ID cannot be rebound to different input. Resume retains its original execution options and grants; it is not a way to enlarge authority.",
     ],
-    effect: "Runs Pursuit stages through persistent planner/executor conversations and fresh read-only reviewers, then prints or returns JSON containing the contract, verdict, receipt, and summary paths.",
+    effect: "Runs canonical Pursuit stages through persistent planner/executor conversations and fresh read-only reviewers. Machine responses include request and initiative identities, state, actual known spend, errors, source revisions and contract/verdict/receipt paths. Completed stages are reused only for the same role and input digest. Independent acceptance is bound to clean source revisions observed before and after review; successful machine requests must also match remote main. Status reads retained state without starting another run. A completed request is returned rather than executed again.",
     refusals: [
       "A missing objective is refused as <code>pursue requires a task</code> by the CLI parser; the command itself also rejects an empty value as <code>pursue requires a rough objective</code>.",
       "The run fails if Pursuit cannot establish its contract, execute it, or produce its verdict and durable receipt.",
       "Tool mutations remain subject to the same write and command grants as <code>run</code>.",
+      "A second process cannot execute an owned request. A mutable tool call without a durable matching result is indeterminate and is never automatically replayed. Missing transcripts and incomplete model-call accounting retain their uncertainty.",
+      "A machine request requires a concrete Brama model with current positive prices and token ceilings. Each model call reserves its catalog-priced upper bound before dispatch. Unknown usage retains the reservation; exhausted allocation prevents the next call. This meter does not authorize or account for external infrastructure, advertising or child-process spending.",
+      "Canonical repositories must be direct children of the one workspace, use main, have one checkout and match their declared origin. Dirty, changed-during-review or unpushed source cannot become accepted delivery evidence. A rejected contract or verdict remains failed, not succeeded.",
     ],
   },
   {

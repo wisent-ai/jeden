@@ -353,6 +353,8 @@ pub fn chat_completion(
     let client = crate::net::blocking_builder()
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
+    let reservation =
+        crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
     let response = client
         .post(format!(
             "{}/v1/chat/completions",
@@ -378,7 +380,9 @@ pub fn chat_completion(
             text.chars().take(800).collect::<String>()
         ));
     }
-    parse_completion_response(&text)
+    let completion = parse_completion_response(&text)?;
+    crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())?;
+    Ok(completion)
 }
 
 /// Parse a full (non-streamed) completion body into an action string / content.
@@ -853,6 +857,38 @@ fn build_streaming_body(
 // live delta sinks and cancel probe, so no one struct owns the set.
 #[allow(clippy::too_many_arguments)]
 fn streaming_attempt(
+    config: &ChatConfig,
+    route: &RouteDescriptor,
+    messages: &[Value],
+    max_tokens: Option<usize>,
+    tools: &[Value],
+    target: Option<&crate::routing::SubscriptionTarget>,
+    decision: Option<&crate::routing::RouteDecisionV2>,
+    on_delta: &mut dyn FnMut(&str) -> bool,
+    on_reasoning: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<Completion, AttemptError> {
+    let reservation = crate::autonomy::requests::budget::reserve(config, &route.model, max_tokens)
+        .map_err(AttemptError::permanent)?;
+    let completion = streaming_attempt_inner(
+        config,
+        route,
+        messages,
+        max_tokens,
+        tools,
+        target,
+        decision,
+        on_delta,
+        on_reasoning,
+        cancelled,
+    )?;
+    crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())
+        .map_err(AttemptError::permanent)?;
+    Ok(completion)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn streaming_attempt_inner(
     config: &ChatConfig,
     route: &RouteDescriptor,
     messages: &[Value],

@@ -7,14 +7,13 @@ use serde_json::json;
 use std::env;
 use std::path::PathBuf;
 
+pub(crate) mod requests;
+
 struct JedenStageRunner {
     read_only_args: Args,
     execution_args: Args,
     hooks: RunHooks<'static>,
-    planner: Conversation,
-    executor: Option<Conversation>,
-    contract_reviewer: Option<(usize, Conversation)>,
-    acceptance_reviewer: Option<(usize, Conversation)>,
+    conversations: StageConversations,
 }
 
 impl JedenStageRunner {
@@ -38,76 +37,78 @@ impl JedenStageRunner {
             read_only_args,
             execution_args,
             hooks: RunHooks::inert(),
-            planner: Conversation::new_stage(&args.cwd)?,
-            executor: None,
-            contract_reviewer: None,
-            acceptance_reviewer: None,
+            conversations: StageConversations {
+                planner: Conversation::new_stage(&args.cwd)?,
+                executor: None,
+                contract_reviewer: None,
+                acceptance_reviewer: None,
+            },
         })
     }
 
-    fn run_planner(&mut self, prompt: &str) -> Result<StageResponse, String> {
-        let text = self
-            .planner
-            .run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
-        Ok(StageResponse::new(text, Some(self.planner.session_path())))
+    fn prepare(&mut self, stage: &Stage) -> Result<PathBuf, String> {
+        Ok(self
+            .conversations
+            .get(stage, &self.execution_args.cwd)?
+            .session_path())
     }
 
-    fn run_executor(&mut self, prompt: &str) -> Result<StageResponse, String> {
-        if self.executor.is_none() {
-            self.executor = Some(Conversation::new_stage(&self.execution_args.cwd)?);
-        }
-        let executor = self.executor.as_mut().expect("executor was initialized");
-        let text = executor.run_turn(&self.execution_args, prompt, &[], &mut self.hooks)?;
-        Ok(StageResponse::new(text, Some(executor.session_path())))
-    }
-
-    fn run_contract_reviewer(
-        &mut self,
-        round: usize,
-        prompt: &str,
-    ) -> Result<StageResponse, String> {
-        if self.contract_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.contract_reviewer =
-                Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
-        }
-        let (_, reviewer) = self
-            .contract_reviewer
-            .as_mut()
-            .expect("contract reviewer was initialized");
-        let text = reviewer.run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
-        Ok(StageResponse::new(text, Some(reviewer.session_path())))
-    }
-
-    fn run_acceptance_reviewer(
-        &mut self,
-        round: usize,
-        prompt: &str,
-    ) -> Result<StageResponse, String> {
-        if self.acceptance_reviewer.as_ref().map(|(active, _)| *active) != Some(round) {
-            self.acceptance_reviewer =
-                Some((round, Conversation::new_stage(&self.read_only_args.cwd)?));
-        }
-        let (_, reviewer) = self
-            .acceptance_reviewer
-            .as_mut()
-            .expect("acceptance reviewer was initialized");
-        let text = reviewer.run_turn(&self.read_only_args, prompt, &[], &mut self.hooks)?;
-        Ok(StageResponse::new(text, Some(reviewer.session_path())))
+    fn restore(&mut self, stage: &Stage, path: &std::path::Path) -> Result<(), String> {
+        let restored = Conversation::open_stage(&self.execution_args.cwd, path)?;
+        *self.conversations.get(stage, &self.execution_args.cwd)? = restored;
+        Ok(())
     }
 }
 
 impl StageRunner for JedenStageRunner {
     fn run(&mut self, stage: &Stage, prompt: &str) -> Result<StageResponse, String> {
+        let args = if stage.read_only() {
+            &self.read_only_args
+        } else {
+            &self.execution_args
+        };
+        let conversation = self.conversations.get(stage, &args.cwd)?;
+        let text = conversation.run_turn(args, prompt, &[], &mut self.hooks)?;
+        Ok(StageResponse::new(text, Some(conversation.session_path())))
+    }
+}
+
+struct StageConversations {
+    planner: Conversation,
+    executor: Option<Conversation>,
+    contract_reviewer: Option<(usize, Conversation)>,
+    acceptance_reviewer: Option<(usize, Conversation)>,
+}
+
+impl StageConversations {
+    fn get(&mut self, stage: &Stage, cwd: &std::path::Path) -> Result<&mut Conversation, String> {
         match stage {
-            Stage::Distill | Stage::ContractRevision { .. } => self.run_planner(prompt),
-            Stage::ContractReview { round } => self.run_contract_reviewer(*round, prompt),
-            Stage::Execute { .. } | Stage::Repair { .. } => self.run_executor(prompt),
-            Stage::AcceptanceReview { round } => self.run_acceptance_reviewer(*round, prompt),
+            Stage::Distill | Stage::ContractRevision { .. } => Ok(&mut self.planner),
+            Stage::Execute { .. } | Stage::Repair { .. } => {
+                if self.executor.is_none() {
+                    self.executor = Some(Conversation::new_stage(cwd)?);
+                }
+                Ok(self.executor.as_mut().expect("executor initialized"))
+            }
+            Stage::ContractReview { round } | Stage::AcceptanceReview { round } => {
+                let slot = if matches!(stage, Stage::ContractReview { .. }) {
+                    &mut self.contract_reviewer
+                } else {
+                    &mut self.acceptance_reviewer
+                };
+                if slot.as_ref().map(|(active, _)| active) != Some(round) {
+                    *slot = Some((*round, Conversation::new_stage(cwd)?));
+                }
+                Ok(&mut slot.as_mut().expect("reviewer initialized").1)
+            }
         }
     }
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
+    if let Some(mode) = &args.pursuit_request {
+        return requests::command(args, mode);
+    }
     let objective = args.positionals.join(" ");
     if objective.trim().is_empty() {
         return Err("pursue requires a rough objective".into());
