@@ -174,30 +174,8 @@ Management commands open searchable native pickers. Type to filter, use arrows t
 
 ## Roadmap Registry
 
-`roadmap/roadmap.yaml` is the canonical, versioned team roadmap and `roadmap/schema/roadmap-v1.schema.json` defines its machine contract. Every mutating operation is serialized through a stable sibling lock, validates an `expectedRevision`, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML, and fsyncs the parent directory. Pass `--revision <n>` in automation; an omitted revision uses the snapshot read by that invocation and still fails if another writer commits first.
-
-Statuses are explicit: `backlog`, `planned`, `in_progress`, `implemented`, `not_run`, `failed`, `external_blocked`, `passed`, and `dropped`. `passed` requires evidence; `external_blocked` requires an external prerequisite. Dependencies must resolve and remain acyclic, and capability IDs must exist in the capability registry.
-
-```sh
-jeden roadmap list --status planned --priority P1 --json --cwd .
-jeden roadmap show JED-024 --json --cwd .
-jeden roadmap graph --json --cwd .
-jeden roadmap add --title "<title>" --area agent-quality --priority P1 \
-  --summary "<summary>" --acceptance "<observable criterion>" \
-  --revision "$REVISION" --cwd .
-jeden roadmap implemented "$ITEM_ID" --revision "$REVISION" --cwd .
-jeden roadmap block "$ITEM_ID" "Waiting for an external prerequisite" \
-  --revision "$REVISION" --cwd .
-jeden roadmap pass "$ITEM_ID" --evidence "artifact://$ARTIFACT_NAME" \
-  --revision "$REVISION" --cwd .
-jeden roadmap depends "$ITEM_ID" "$DEPENDENCY_ID" --revision "$REVISION" --cwd .
-jeden roadmap acceptance evidence "$ITEM_ID" "$ACCEPTANCE_ID" \
-  "artifact://$ARTIFACT_NAME" --revision "$REVISION" --cwd .
-jeden roadmap work JED-024 --cwd .
-jeden roadmap check --json --cwd .
-```
-
-The same operations are available through `/roadmap ...`. Entering `/roadmap` without arguments opens the native searchable picker; its **Add roadmap item** row prefills an editable command containing the required title, area, priority, summary, and acceptance fields. Optional dependencies and external prerequisites use repeated `--depends-on` and `--external-prerequisite` flags. `roadmap work <id>` sets the active goal and plan, creates todos from the item's acceptance criteria, records `roadmap_item_started` in the current session ledger, and pins subsequent session artifacts and branches to `activeRoadmapItem`.
+The roadmap registry, its schema and the rules every mutation follows are
+documented in [docs/roadmap.md](docs/roadmap.md).
 
 ## Billing and subscription routing
 
@@ -235,62 +213,8 @@ Jeden is a command-line package, not a fleet service. Publication therefore does
 
 ## Configuration and context
 
-User config loads from `~/.jeden/config.json` and `~/.jeden/config.yml`. Project config loads from `<cwd>/.jeden/config.json` and overrides user config. Environment variables still win over file config.
-
-Before each run, Jeden loads user context from `~/.jeden/instructions.md` and `~/.jeden/context.md`. Project context walks from the project ancestor to `--cwd` and reads:
-
-- `JEDEN.md`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `RULES.md`
-- `.jeden/instructions.md`
-- `.jeden/context.md`
-
-A context line such as `@./extra.md` imports another file under the same context root. Oversized context files are skipped.
-
-File-based custom commands load from project and user `.jeden/commands/` directories. Native extensions load from project and user `.jeden/extensions/` directories. Plugin and marketplace state lives under `~/.jeden/plugins/`.
-
-`jeden rpc` publishes executable file-based commands as `quickReplies` in both
-the `ready` frame and the `capabilities` response. Each entry carries its
-capability ID, label, slash prompt, and discovery source; native clients use
-that projection instead of reproducing command-directory precedence.
-
-### The context advisor
-
-The files above are what is always true here. What is relevant to the request
-that just arrived is a different question, and `jeden context` answers it with
-locators rather than prose: `path:first-last` for a chunk of a file,
-`memory:<id>` for a recalled memory, `session:<id>` for a transcript, and
-`repo/path@commit:first-last` for a ground-truth citation.
-
-Four sources answer, each owned where it belongs. `files` reads everything
-readable under the declared roots — documentation, source code, configuration,
-manifests — cutting Markdown at its headings and every other file into
-forty-line windows titled by the declaration they open with. `memory` recalls
-what earlier sessions in this workspace wrote down. `transcripts` runs
-Transcript Lake's own search over the masked archive. `ground-truth` asks the
-Wisent cross-repository index for cited chunks. Every answer reports each
-source's state — available or unavailable, with the observed reason — so a
-short list is never mistaken for a complete one.
-
-Before its first model call, every turn receives the top recommendations as a
-`[Context recommendations]` block, recorded in the session's own `user` event.
-`context.advisor.sources` defaults to `files,memory`, the two that answer from
-local state; `--source all` adds the archive and the index. Sources run
-concurrently and nothing cuts one short: there is no deadline setting and no
-`--timeout-ms` flag, because a guessed interval reports nothing and explains
-nothing. Measured here, one archive search took 30 s against 1 s for the two
-local sources, so choosing the source set is the decision that replaces that
-guess. `jeden context prompt "<task>"` prints exactly what the next turn would
-receive, `jeden context sources` reports what each source is and whether it
-answers now, and `context.advisor.enabled false` switches the block off.
-
-`jeden context install --omp` renders the same advisor into
-`~/.omp/agent/tools/jeden_context.ts`, Omp's own documented custom-tool
-directory, as the `context_recommend` tool bound to this binary; `jeden context
-installed --omp` exits non-zero when that file is stale or absent. No Omp
-source is modified. The full contract is at
-[jeden.wisent.com/docs/context](https://jeden.wisent.com/docs/context).
+Where configuration is read from and what context a run is given is documented
+in [docs/configuration.md](docs/configuration.md).
 
 ## Sessions and memory
 
