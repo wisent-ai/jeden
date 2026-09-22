@@ -10,7 +10,7 @@ use std::path::Path;
 mod evidence;
 mod prerequisites;
 
-pub use evidence::StagingEvidence;
+pub use evidence::{verify_staging_report, StagingEvidence};
 use evidence::UnsignedEvidence;
 pub use prerequisites::staging_preflight_from_env;
 use prerequisites::{identity, required};
