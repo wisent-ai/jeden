@@ -82,7 +82,7 @@ pub(super) fn materialize_agents(
     Ok(Some(final_dir))
 }
 
-pub(crate) fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
+pub(in crate::hooks::extensions) fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
     let files = serde_json::to_string(&sources.modules).map_err(|error| error.to_string())?;
     let response = run_host(
         cwd,

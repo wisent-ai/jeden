@@ -3,7 +3,7 @@ pub mod contract;
 mod services;
 pub mod transport;
 
-pub(crate) use services::{brama, quota, weles};
+pub use services::{brama, quota, staging, weles};
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

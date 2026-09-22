@@ -174,5 +174,3 @@ impl CapabilityDescriptorV2 {
             && (!self.ui.executable || (self.binding.coherent() && self.health.is_executable()))
     }
 }
-
-pub type CapabilityDescriptor = CapabilityDescriptorV2;

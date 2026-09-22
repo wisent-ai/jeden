@@ -3,7 +3,6 @@
 
 use crate::capability::{CapabilityDescriptor, CapabilityHealth, CapabilityKind, FunctionTarget};
 use crate::tui::{PickerItem, PickerSpec};
-use serde::Serialize;
 use std::path::Path;
 
 mod commands;
@@ -14,46 +13,12 @@ mod store;
 
 pub use commands::execute;
 pub use model::{
-    AcceptanceCriterion, EvidenceLink, RoadmapError, RoadmapFile, RoadmapItem, RoadmapStatus,
+    AcceptanceCriterion, CheckReport, EvidenceLink, RoadmapError, RoadmapFile, RoadmapGraph,
+    RoadmapGraphEdge, RoadmapGraphNode, RoadmapItem, RoadmapStatus,
 };
 pub use store::RoadmapStore;
 
 pub const ROADMAP_SCHEMA_VERSION: u32 = 1;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoadmapGraph {
-    pub revision: u64,
-    pub nodes: Vec<RoadmapGraphNode>,
-    pub edges: Vec<RoadmapGraphEdge>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoadmapGraphNode {
-    pub id: String,
-    pub title: String,
-    pub status: RoadmapStatus,
-    pub priority: String,
-    pub area: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RoadmapGraphEdge {
-    pub from: String,
-    pub to: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CheckReport {
-    pub ok: bool,
-    pub schema_version: u32,
-    pub revision: u64,
-    pub item_count: usize,
-    pub errors: Vec<String>,
-}
 
 pub fn split_command_line(input: &str) -> Result<Vec<String>, RoadmapError> {
     let mut args = Vec::new();

@@ -3,16 +3,13 @@
 //! Split out of `cli/reports/sessions.rs`, which had grown past the module
 //! line cap.
 
-use super::ledger::export_event;
 use super::ledger_v2;
-use super::{session_dir_for, LedgerEntry, SessionLedger};
+use super::{LedgerEntry, SessionLedger};
 use serde_json::{json, Value};
 use std::path::Path;
-use crate::cli::reports::sessions::SESSION_LEDGER_VERSION;
 use crate::cli::reports::sessions::ledger_v2::event::payload::CheckpointPayloadV2;
-use crate::hooks::extensions::loading::read_json;
 
-pub(crate) fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
+pub(super) fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
     let ledger = ledger_v2::store::read_events(dir)?;
     let active_leaf = ledger.events.last().map(|event| event.event_id.clone());
     let active_entries = ledger_v2::store::active_lineage(&ledger.events, active_leaf.as_deref())?
@@ -144,27 +141,4 @@ pub(super) fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, St
         }
     }
     Ok(messages)
-}
-
-pub(crate) fn read_session_value(id_or_path: &str) -> Result<Value, String> {
-    let dir = session_dir_for(id_or_path);
-    if !dir.exists() {
-        return Err(format!("session not found: {}", dir.display()));
-    }
-    let state: Value = read_json(&dir.join("state.json"));
-    let ledger = parse_transcript(&dir)?;
-    let id = dir
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| id_or_path.to_string());
-    let events = ledger.events.iter().map(export_event).collect::<Vec<_>>();
-    Ok(json!({
-        "id": id,
-        "path": dir,
-        "state": state,
-        "ledgerVersion": SESSION_LEDGER_VERSION,
-        "activeLeaf": ledger.active_leaf,
-        "recoveredTruncatedTail": ledger.recovered_truncated_tail,
-        "events": events,
-    }))
 }

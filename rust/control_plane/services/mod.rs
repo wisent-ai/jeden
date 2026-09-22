@@ -6,10 +6,10 @@
 //! Grouped here so the `control_plane` folder keeps to five entries; the
 //! module above re-exports these under the names callers already use.
 
-pub(crate) mod brama;
-pub(crate) mod quota;
-pub(crate) mod staging;
-pub(crate) mod weles;
+pub mod brama;
+pub mod quota;
+pub mod staging;
+pub mod weles;
 
 // The shared vocabulary each service is written against, under the names they
 // have always used: a request's shape, how it is carried, what billing calls

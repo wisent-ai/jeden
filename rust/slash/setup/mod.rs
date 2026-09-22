@@ -35,7 +35,7 @@ struct SetupState {
     theme: String,
 }
 
-pub(super) fn setup_state(context: &SlashContext<'_>) -> SetupState {
+fn setup_state(context: &SlashContext<'_>) -> SetupState {
     let config = load_config(context.cwd);
     let model = context
         .model

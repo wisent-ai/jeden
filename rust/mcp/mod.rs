@@ -24,7 +24,7 @@ const MAX_STDERR_BYTES: usize = 100_000;
 
 #[derive(Default)]
 pub(super) struct McpManager {
-    pub(super) servers: BTreeMap<String, ServerConnection>,
+    servers: BTreeMap<String, ServerConnection>,
 }
 
 impl McpManager {
@@ -60,7 +60,7 @@ pub(super) fn managers() -> Result<MutexGuard<'static, BTreeMap<PathBuf, McpMana
         .map_err(|_| "MCP manager lock is poisoned".to_string())
 }
 
-pub(super) fn with_connection<T>(
+fn with_connection<T>(
     cwd: &Path,
     server_name: &str,
     operation: impl FnOnce(&mut ServerConnection) -> Result<T, String>,

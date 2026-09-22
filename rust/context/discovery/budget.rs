@@ -12,8 +12,8 @@ pub(super) struct Budget {
     pub(super) max_bytes: usize,
     pub(super) max_tokens: usize,
     pub(super) used_bytes: usize,
-    used_tokens: usize,
-    warned_paths: BTreeSet<PathBuf>,
+    pub(super) used_tokens: usize,
+    pub(super) warned_paths: BTreeSet<PathBuf>,
     pub(super) files_read: usize,
     pub(super) warnings: Vec<String>,
 }

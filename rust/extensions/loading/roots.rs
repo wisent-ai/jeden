@@ -55,7 +55,7 @@ pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
     roots
 }
 
-pub(crate) fn source_set(cwd: &Path) -> Result<SourceSet, String> {
+pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, String> {
     let mut modules = Vec::new();
     let mut declarative = Vec::new();
     let mut roots = vec![cwd.join(".jeden/extensions")];
