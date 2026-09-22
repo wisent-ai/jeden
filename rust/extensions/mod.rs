@@ -755,7 +755,6 @@ fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Reg
         cwd,
         "discover",
         generation,
-
         &[("JEDEN_EXTENSION_FILES", files)],
         &sources.modules,
         false,
@@ -1303,7 +1302,6 @@ pub(crate) fn execute_tool(
         cwd,
         "execute_tool",
         registry.generation,
-
         &[
             (
                 "JEDEN_EXTENSION_SOURCE",
@@ -1343,7 +1341,6 @@ pub(crate) fn fire_hooks(
             cwd,
             "fire_hook",
             registry.generation,
-
             &[
                 (
                     "JEDEN_EXTENSION_SOURCE",
