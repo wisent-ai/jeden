@@ -1,6 +1,7 @@
 mod context;
 mod hosting;
 mod operations;
+mod parking;
 mod prompt;
 use hosting::quick_replies;
 pub use hosting::serve_headless_cli;
@@ -85,11 +86,12 @@ pub fn serve_stdio() -> Result<(), String> {
     serve(input, io::stdout())
 }
 
-pub fn serve<R, W>(mut input: R, output: W) -> Result<(), String>
+pub fn serve<R, W>(input: R, output: W) -> Result<(), String>
 where
-    R: BufRead,
+    R: BufRead + Send + 'static,
     W: Write + Send + 'static,
 {
+    let park = parking::ParkPolicy::from_environment()?;
     let writer = JsonWriter::new(output);
     let bridge = RpcInteractionBridge::new(writer.clone());
     let state = Arc::new(ServerState {
@@ -107,16 +109,34 @@ where
         "quickReplies": quick_replies()
     }))?;
 
+    let inbox = parking::inbox(input, park.as_ref())?;
+    let activity = parking::Activity::new();
     let mut workers = Vec::new();
     while !state.shutting_down.load(Ordering::Acquire) {
-        let frame = match read_frame(&mut input) {
-            Ok(Some(frame)) => frame,
-            Ok(None) => break,
-            Err(error) => {
+        let frame = match inbox.recv() {
+            Ok(parking::Inbound::Frame(Ok(frame))) => frame,
+            Ok(parking::Inbound::Frame(Err(error))) => {
                 writer.send(&error_response(Value::Null, "malformed_frame", &error))?;
                 continue;
             }
+            Ok(parking::Inbound::Check) => {
+                let notice = park
+                    .as_ref()
+                    .and_then(|policy| parking::park_notice(&state, &activity, policy));
+                if let Some(notice) = notice {
+                    eprintln!(
+                        "jeden rpc parked ({}): nothing ran for {} s",
+                        notice["reason"].as_str().unwrap_or_default(),
+                        notice["quietSeconds"]
+                    );
+                    writer.send(&notice)?;
+                    break;
+                }
+                continue;
+            }
+            Ok(parking::Inbound::Closed) | Err(_) => break,
         };
+        activity.touch();
         let request = match serde_json::from_slice::<WireRequest>(&frame) {
             Ok(request) => request,
             Err(error) => {
@@ -133,7 +153,11 @@ where
             "prompt" | "session/prompt" | "session/completion/continue"
         ) {
             let worker_state = state.clone();
-            workers.push(thread::spawn(move || handle_prompt(worker_state, request)));
+            let in_flight = activity.begin();
+            workers.push(thread::spawn(move || {
+                let _in_flight = in_flight;
+                handle_prompt(worker_state, request)
+            }));
         } else if let Err(error) = handle_request(&state, request) {
             writer.send(&error)?;
         }

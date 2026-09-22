@@ -156,6 +156,21 @@ printf '%s\n' '{"id":1,"method":"config/contracts/get","params":{}}' | jeden rpc
         ],
       },
       {
+        title: "Parking an RPC process that has nothing to do",
+        paragraphs: [
+          "Stado places every Jeden Desktop tab as <code>stado workload attach jeden-session</code>, and the attach holds the kind’s declared reservation — two cores and 4 GiB — for exactly as long as <code>jeden rpc</code> lives. On 2026-09-22 eight tabs held 16 cores and 32 GiB of a 12-core laptop for 26 hours at 0.0% CPU, seven of them stopped at their first model call with <code>model router 403</code> as their completion blocker, and the laptop refused every fleet build with <code>reservations_exhausted</code>.",
+          "When the process is started with <code>JEDEN_PARK_AFTER_SECONDS</code>, which Stado fills from the kind’s <code>park_after_seconds</code>, it looks at itself every fifteen seconds (or every <em>N</em> seconds when the park time is shorter). It parks when no prompt is in flight, no open session has an active request, and no frame has arrived from its client for the declared time; it parks after one quiet check when every open session carries a completion blocker, because a blocker is not work. Parking sends one frame, <code>{\"type\":\"parked\",\"reason\":\"idle\"|\"blocked\",\"quietSeconds\":…,\"parkAfterSeconds\":…,\"sessions\":[{\"sessionId\":…,\"blocker\":…}]}</code>, writes <code>jeden rpc parked (idle): nothing ran for N s</code> to standard error, disposes every session to its ledger through the ordinary shutdown path, and exits 0. Stado’s attach then sees its runtime end and releases the reservation, and <code>--resume</code> brings the session back whole.",
+          "Parking never ends work. A turn, a tool call, a question waiting for the operator and a completion continuation all count as a prompt in flight for as long as they run, however long that is. Without the setting nothing parks, which is what every client other than a Stado attach gets. A value that is not a whole number of seconds above zero refuses the process before <code>ready</code> with <code>JEDEN_PARK_AFTER_SECONDS must be a whole number of seconds above zero, got \"…\"</code>, so an unreadable declaration never turns into “never park”.",
+        ],
+        commands: [
+          {
+            label: "Watch a process park",
+            code: `printf '%s\\n' '{"id":"open","method":"session/new","params":{}}' \\
+  | (cat; sleep 20) | JEDEN_PARK_AFTER_SECONDS=5 jeden rpc`,
+          },
+        ],
+      },
+      {
         title: "Communication modes",
         paragraphs: [
           "The <code>communication.mode</code> setting chooses what Jeden shows of its own work while it answers. <code>normal</code> shows tool names while Jeden works and then the answer with its code. <code>debug</code> also shows every tool call with its input, every tool result, and the model's reasoning when the route streams it. <code>quiet</code> shows only the answer.",
