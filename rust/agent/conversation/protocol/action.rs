@@ -121,5 +121,5 @@ pub(in crate::agent) fn run_tool_action(
 }
 
 #[cfg(test)]
-#[path = "../../../tests/contracts/inspection.rs"]
+#[path = "../../../../tests/contracts/inspection.rs"]
 mod tests;

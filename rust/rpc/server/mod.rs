@@ -238,4 +238,3 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         Err((code, message)) => Err(error_response(id, code, &message)),
     }
 }
-

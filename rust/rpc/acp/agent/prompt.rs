@@ -154,7 +154,10 @@ impl AcpState {
         Ok(())
     }
 
-    pub(super) fn cancel_session(&self, session_id: &SessionId) -> agent_client_protocol::Result<()> {
+    pub(super) fn cancel_session(
+        &self,
+        session_id: &SessionId,
+    ) -> agent_client_protocol::Result<()> {
         self.require_initialized()?;
         let id = session_id.0.to_string();
         let session = self
@@ -198,6 +201,4 @@ impl AcpState {
         session.dispose().map_err(super::internal)?;
         Ok(CloseSessionResponse::new())
     }
-}
-
 }

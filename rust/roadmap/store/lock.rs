@@ -4,17 +4,13 @@
 
 use super::super::model::RoadmapError;
 use std::fs::{self, File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
 const LOCK_RETRIES: usize = 500;
 const LOCK_WAIT: Duration = Duration::from_millis(10);
-
-    cwd: PathBuf,
-    path: PathBuf,
-    lock_path: PathBuf,
-}
 
 pub(super) struct StableLock {
     path: PathBuf,
@@ -54,4 +50,3 @@ impl StableLock {
         )))
     }
 }
-

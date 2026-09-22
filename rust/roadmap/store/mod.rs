@@ -3,20 +3,22 @@
 //!
 //! Split out of `roadmap/mod.rs`, which had grown past the module line cap.
 
-use super::model::{RoadmapError, RoadmapFile, RoadmapItem, RoadmapStatus};
+use super::model::{RoadmapError, RoadmapFile, RoadmapStatus};
 use super::normalize::{cycle_errors, normalize};
 use super::render::render_markdown;
 use super::{CheckReport, RoadmapGraph, RoadmapGraphEdge, RoadmapGraphNode, ROADMAP_SCHEMA_VERSION};
+use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
-
-const LOCK_RETRIES: usize = 500;
-const LOCK_WAIT: Duration = Duration::from_millis(10);
 
 pub struct RoadmapStore {
+    cwd: PathBuf,
+    path: PathBuf,
+    lock_path: PathBuf,
+}
+
 mod lock;
 
 use lock::StableLock;
