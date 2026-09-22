@@ -1,92 +1,10 @@
-use serde::{Deserialize, Serialize};
+//! Reading an event written before the closed vocabulary existed, and giving
+//! it the variant that carries the same meaning.
+//!
+//! Split out of `session/event.rs`, which had grown past the module line cap.
+
+use super::payload::SessionPayloadV2;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct CheckpointPayloadV2 {
-    pub(crate) label: Option<String>,
-    pub(crate) messages: Vec<Value>,
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RewindPayloadV2 {
-    pub(crate) checkpoint_id: String,
-    pub(crate) from_leaf_id: String,
-}
-
-pub(crate) const SESSION_EVENT_SCHEMA_VERSION: u32 = 2;
-
-/// Closed session vocabulary. A variant is added here before a producer can
-/// persist it, preventing misspelled/stringly event kinds from entering replay.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", content = "data", rename_all = "snake_case")]
-pub(crate) enum SessionPayloadV2 {
-    Message(Value),
-    User(Value),
-    Assistant(Value),
-    AssistantRaw(Value),
-    Final(Value),
-    Action(Value),
-    ToolCall(Value),
-    ToolResult(Value),
-    Approval(Value),
-    Artifact(Value),
-    ContextSnapshot(Value),
-    Compaction(Value),
-    AutoCompaction(Value),
-    AutoCompactionError(Value),
-    AutoContinue(Value),
-    ToolPrune(Value),
-    Handoff(Value),
-    Lineage(Value),
-    Branch(Value),
-    Checkpoint(Value),
-    Rewind(Value),
-    GoalLifecycle(Value),
-    MemoryMutation(Value),
-    RoadmapItemCreated(Value),
-    RoadmapItemUpdated(Value),
-    RoadmapItemStarted(Value),
-    RoadmapItemBlocked(Value),
-    RoadmapEvidenceAttached(Value),
-    RoadmapItemPassed(Value),
-    RoadmapItemDropped(Value),
-    MemoryRecall(Value),
-    ModelAttempt(Value),
-    ModelRoute(Value),
-    ModelRouteResult(Value),
-    ModelRetry(Value),
-    ModelUsage(Value),
-    UsageError(Value),
-    CapabilityGeneration(Value),
-    WorkerJob(Value),
-    WorkerAttempt(Value),
-    WorkerLease(Value),
-    WorkerEvent(Value),
-    Collaboration(Value),
-    Interaction(Value),
-    TelemetryReference(Value),
-    TerminalOutcome(Value),
-    RunError(Value),
-    Advisor(Value),
-    Agent(Value),
-    AgentState(Value),
-    PendingPreview(Value),
-    PendingClaim(Value),
-    PendingApply(Value),
-    PendingDiscard(Value),
-    PendingExpire(Value),
-    /// The task contract was not met: `rule`, `outcome`, and a human `message`.
-    ContractViolation(Value),
-    TaskContract(Value),
-    TaskReport(Value),
-    CompletionState(Value),
-    CompletionReview(Value),
-    CompletionRejected(Value),
-    AssistantMessage(Value),
-}
 
 impl SessionPayloadV2 {
     pub(crate) fn from_legacy(kind: &str, data: Value) -> Result<Self, String> {
@@ -316,50 +234,4 @@ impl SessionPayloadV2 {
             | Self::AssistantMessage(v) => v,
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SessionEventV2 {
-    pub(crate) event_id: String,
-    pub(crate) session_id: String,
-    pub(crate) parent_id: Option<String>,
-    pub(crate) sequence: u64,
-    pub(crate) timestamp: String,
-    pub(crate) causation_id: Option<String>,
-    pub(crate) correlation_id: String,
-    pub(crate) schema_version: u32,
-    pub(crate) payload: SessionPayloadV2,
-    #[serde(default)]
-    pub(crate) outbox: Vec<super::outbox::OutboxItem>,
-    pub(crate) checksum: String,
-}
-
-impl SessionEventV2 {
-    pub(crate) fn seal(&mut self) -> Result<(), String> {
-        self.checksum.clear();
-        self.checksum = checksum(self)?;
-        Ok(())
-    }
-
-    pub(crate) fn verify(&self) -> Result<(), String> {
-        if self.schema_version != SESSION_EVENT_SCHEMA_VERSION {
-            return Err(format!(
-                "unsupported session event schema version {}",
-                self.schema_version
-            ));
-        }
-        let mut unsigned = self.clone();
-        let expected = std::mem::take(&mut unsigned.checksum);
-        let actual = checksum(&unsigned)?;
-        if expected != actual {
-            return Err(format!("event {} checksum mismatch", self.event_id));
-        }
-        Ok(())
-    }
-}
-
-fn checksum(event: &SessionEventV2) -> Result<String, String> {
-    let bytes = serde_json::to_vec(event).map_err(|e| e.to_string())?;
-    Ok(hex::encode(Sha256::digest(bytes)))
 }
