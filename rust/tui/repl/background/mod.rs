@@ -10,7 +10,10 @@ use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::agent::TraceEvent;
 use crate::tui::render::{busy_editor_lines, place_editor_cursor};
-use crate::tui::{CommandOutcome, DeliveryAction, EditorAction, EditorState, FollowUpQueue, TurnCtx, default_columns, stdout_supports_color};
+use crate::tui::{
+    default_columns, stdout_supports_color, CommandOutcome, DeliveryAction, EditorAction,
+    EditorState, FollowUpQueue, TurnCtx,
+};
 
 use super::questions::prompt_user_question;
 use super::{message_block, ReplRenderer};
@@ -63,7 +66,6 @@ where
         .map(|(width, _)| usize::from(width).max(1))
         .unwrap_or(columns)
         .min(112);
-
 
     let outcome = thread::scope(|scope| -> io::Result<Result<CommandOutcome, String>> {
         let worker_cancel = cancel.clone();
@@ -186,7 +188,9 @@ where
                 continue;
             }
             let cancelling = cancel.load(Ordering::Relaxed);
-            let mut live = build_live(&reasoning, &streamed, &note, frame, cancelling, columns, color);
+            let mut live = build_live(
+                &reasoning, &streamed, &note, frame, cancelling, columns, color,
+            );
             let mut composer = busy_editor_lines(editor, queue, columns, color);
             let cursor_rows_below = if composer.len() > 1 {
                 place_editor_cursor(

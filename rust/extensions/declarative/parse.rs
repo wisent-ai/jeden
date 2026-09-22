@@ -6,8 +6,8 @@
 use super::{MAX_ASSETS_PER_SKILL, MAX_DEFINITIONS};
 use regex::Regex;
 use serde_json::{Map, Value};
-use std::path::{Path, PathBuf};
 use std::fs;
+use std::path::{Path, PathBuf};
 
 pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()

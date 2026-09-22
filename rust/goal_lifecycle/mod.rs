@@ -56,7 +56,6 @@ pub struct LifecycleRequest {
     pub goal_objective: Option<String>,
 }
 
-
 /// A `(text, status)` sink for goal-lifecycle events, shared rather than
 /// borrowed because the background threads below outlive the turn that
 /// started them.

@@ -5,7 +5,9 @@
 
 use super::model::{RoadmapError, RoadmapFile, RoadmapStatus};
 use super::normalize::{cycle_errors, normalize};
-use super::{CheckReport, RoadmapGraph, RoadmapGraphEdge, RoadmapGraphNode, ROADMAP_SCHEMA_VERSION};
+use super::{
+    CheckReport, RoadmapGraph, RoadmapGraphEdge, RoadmapGraphNode, ROADMAP_SCHEMA_VERSION,
+};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
@@ -144,7 +146,11 @@ impl RoadmapStore {
         })
     }
 
-    pub(super) fn validation_errors(&self, roadmap: &RoadmapFile, validate_capabilities: bool) -> Vec<String> {
+    pub(super) fn validation_errors(
+        &self,
+        roadmap: &RoadmapFile,
+        validate_capabilities: bool,
+    ) -> Vec<String> {
         let mut errors = Vec::new();
         if roadmap.schema_version != ROADMAP_SCHEMA_VERSION {
             errors.push(format!(

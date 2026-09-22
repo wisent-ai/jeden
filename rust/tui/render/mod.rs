@@ -3,9 +3,7 @@
 use std::io::{self, IsTerminal};
 
 use super::text::{paint, sanitize_terminal_text, wrap_line};
-use super::{
-    AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, ASSISTANT_TITLE,
-};
+use super::{AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, ASSISTANT_TITLE};
 
 mod panels;
 mod prompt;
@@ -13,12 +11,12 @@ mod prompt;
 // crate reaches it as `tui::qr`.
 pub mod qr;
 
-pub(crate) use panels::{boxed, boxed_split, welcome_panel};
-pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
-pub(crate) use prompt::compact_prompt;
 use crate::tui::render::panels::boxes::input_prefix_width;
 use crate::tui::text::clamp_visible;
 use crate::tui::text::visible_len;
+pub(crate) use panels::{boxed, boxed_split, welcome_panel};
+pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
+pub(crate) use prompt::compact_prompt;
 
 fn role_color(role: &str) -> &'static str {
     match role {

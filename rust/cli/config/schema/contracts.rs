@@ -11,11 +11,11 @@ use super::{
     COMMUNICATION_REASONING_KEY, COMMUNICATION_TOOL_CALLS_KEY, COMMUNICATION_TOOL_RESULTS_KEY,
     FUNCTIONALITY_CONTRACT_KEY,
 };
+use crate::cli::config::communication::DisplayPolicy;
+use crate::cli::config::config_set_value;
 use crate::user_config_path;
 use serde_json::{json, Value};
 use std::path::Path;
-use crate::cli::config::communication::DisplayPolicy;
-use crate::cli::config::config_set_value;
 
 /// The two operator contracts plus what Jeden actually uses for
 /// communication: `communicationSource` says whether the text in force is

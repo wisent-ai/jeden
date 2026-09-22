@@ -4,9 +4,9 @@
 
 use super::AcpState;
 use agent_client_protocol::schema::v1::*;
+use agent_client_protocol::ConnectionTo;
 use agent_client_protocol::{Agent, Client, Dispatch, Responder};
 use std::sync::Arc;
-use agent_client_protocol::ConnectionTo;
 
 pub(crate) fn build_agent() -> impl agent_client_protocol::ConnectTo<Client> {
     let state = Arc::new(AcpState::default());

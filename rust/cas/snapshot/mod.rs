@@ -1,13 +1,13 @@
 mod safety;
 
 use super::{CasError, Digest, LocalCas};
+use crate::cas::snapshot::safety::reject_case_collisions;
 use safety::{ensure_safe_destination, validate_component, validate_tree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
-use crate::cas::snapshot::safety::reject_case_collisions;
 
 pub(super) const TREE_SCHEMA: &str = "jeden.merkle-tree.v1";
 
@@ -193,7 +193,6 @@ fn materialize_file(
     }
     write_result
 }
-
 
 pub(crate) fn load_tree(cas: &LocalCas, digest: Digest) -> Result<MerkleTree, CasError> {
     let bytes = cas.get(digest)?;

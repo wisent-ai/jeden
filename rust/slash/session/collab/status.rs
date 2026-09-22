@@ -4,8 +4,8 @@
 //! Split out of `slash/session/collab.rs`, which had grown past the module
 //! line cap.
 
-use serde_json::Value;
 use crate::slash::session::collab::relay::read_collab_events;
+use serde_json::Value;
 use std::path::Path;
 
 pub(super) fn collab_descriptor(entry: &Value) -> String {

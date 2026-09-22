@@ -4,11 +4,10 @@
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
-use crate::control_plane::contract::RequestMeta;
 use super::super::{WelesClient, WelesError};
+use crate::control_plane::contract::RequestMeta;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-
 
 pub(crate) fn reject_forbidden_payment_fields(value: &Value) -> Result<(), WelesError> {
     match value {
@@ -68,7 +67,6 @@ pub(super) fn validate_identifier(value: &str) -> Result<(), WelesError> {
     }
     Ok(())
 }
-
 
 /// Every plain read goes through one place, so no call can quietly skip the
 /// method, the encoding or the decoding the others use.

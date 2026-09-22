@@ -5,8 +5,8 @@
 
 use super::super::*;
 use super::{logical_key, MemoryStore};
-use rusqlite::params;
 use crate::memory::store::row_record;
+use rusqlite::params;
 use rusqlite::{OptionalExtension, TransactionBehavior};
 use serde_json::json;
 

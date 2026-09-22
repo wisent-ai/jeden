@@ -28,11 +28,11 @@ pub(super) fn copy_picker() -> PickerSpec {
 
 mod commands;
 
-use commands::{slash_session_export, slash_session_text};
 pub(super) use commands::{
     dump_picker, export_picker, jobs_picker, omfg_picker, share_picker, tan_picker,
 };
 pub(crate) use commands::{handle_jobs, handle_omfg, handle_share, handle_tan};
+use commands::{slash_session_export, slash_session_text};
 
 pub(super) fn slash_session_dir(
     context: &SlashContext<'_>,

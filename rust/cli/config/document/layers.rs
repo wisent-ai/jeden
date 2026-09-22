@@ -4,10 +4,10 @@
 //! Split out of `cli/config/mod.rs`, which had grown past the module line cap.
 
 use crate::{config_path, legacy_user_config_path, user_config_path};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use serde::Deserialize;
 
 pub(crate) fn read_config_value(path: &Path) -> Value {
     let Some(text) = fs::read_to_string(path).ok() else {

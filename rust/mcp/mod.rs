@@ -14,8 +14,8 @@ mod validate;
 
 use connection::ServerConnection;
 pub(crate) use servers::capability_descriptors;
-pub use servers::load_config;
 use servers::configured_servers;
+pub use servers::load_config;
 pub use sweep::{live_tools, reconnect, refresh_all};
 use validate::{validate_prompts, validate_resources, validate_tools};
 
@@ -164,7 +164,6 @@ pub fn get_prompt(cwd: &Path, server_name: &str, name: &str, args: Value) -> Res
         Ok(value)
     })
 }
-
 
 pub fn manager_status(cwd: &Path) -> Result<Value, String> {
     let key = session_key(cwd);

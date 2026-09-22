@@ -3,8 +3,8 @@
 //! Split out of `tui/repl/background.rs`, which had grown past the module line
 //! cap.
 
-use crate::tui::Message;
 use super::super::{message_block, skeleton_bar};
+use crate::tui::Message;
 
 /// Reasoning is committed the moment the model moves on, so the scrollback
 /// keeps the order things happened in: reasoning, tool call, result, answer.

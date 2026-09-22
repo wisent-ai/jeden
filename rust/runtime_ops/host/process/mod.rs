@@ -15,13 +15,13 @@ mod capture;
 mod command;
 mod limits;
 
+use crate::tool_runtime::runtime_ops::output::ArtifactSink;
+use crate::tool_runtime::runtime_ops::output::OutputLimits;
+use crate::tool_runtime::runtime_ops::security::ResourceLimits;
 use capture::{capture_stream, drain_progress};
 pub use command::ManagedCommand;
 use command::ManagedStdio;
 use limits::configure_resource_limits;
-use crate::tool_runtime::runtime_ops::output::ArtifactSink;
-use crate::tool_runtime::runtime_ops::output::OutputLimits;
-use crate::tool_runtime::runtime_ops::security::ResourceLimits;
 use std::io;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -79,9 +79,8 @@ impl ProcessManager {
         if command.stdio == ManagedStdio::InheritedForeground && !grant.process.inherit_stdio {
             return Err("process inherited stdio denied by execution grant".into());
         }
-        let mut builder =
-            super::super::sandbox::command(&command.program, grant)
-                .map_err(|error| error.to_string())?;
+        let mut builder = super::super::sandbox::command(&command.program, grant)
+            .map_err(|error| error.to_string())?;
         builder.env_clear();
         for key in &grant.process.environment {
             if let Some(value) = std::env::var_os(key) {
@@ -218,7 +217,6 @@ impl ProcessManager {
         })
     }
 }
-
 
 /// Wait for the child to finish. The only thing that ends this early is the
 /// operator cancelling the turn: a command that is still running is still

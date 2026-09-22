@@ -4,9 +4,9 @@
 //! Split out of `session/store.rs`, which had grown past the module line cap.
 
 use super::super::event::{SessionEventV2, SessionPayloadV2, SESSION_EVENT_SCHEMA_VERSION};
+use super::super::outbox::{OutboxConsumer, OutboxItem};
 use serde::Deserialize;
 use serde_json::Value;
-use super::super::outbox::{OutboxConsumer, OutboxItem};
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

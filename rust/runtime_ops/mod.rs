@@ -1,3 +1,4 @@
+pub(crate) mod context;
 mod host;
 pub mod kernel;
 pub(crate) mod output;
@@ -6,15 +7,11 @@ pub mod platform;
 pub mod sandbox;
 pub mod secrets;
 pub mod security;
-pub(crate) mod context;
 
-pub use context::{
-    CancellationToken, OperationContext, OperationProgress, ProgressSink,
-};
+pub use context::{CancellationToken, OperationContext, OperationProgress, ProgressSink};
 
-
-pub use host::{fs, network, pty};
 use host::process;
+pub use host::{fs, network, pty};
 
 pub use output::{ArtifactSink, BoundedOutput, OutputCapture, OutputLimits};
 pub use process::{ManagedCommand, ManagedProcessResult, ProcessManager, TerminationReason};

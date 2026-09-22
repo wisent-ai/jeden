@@ -25,7 +25,6 @@ mod table;
 
 pub(crate) use table::AREA_PROBES;
 
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct EvidenceArtifact {

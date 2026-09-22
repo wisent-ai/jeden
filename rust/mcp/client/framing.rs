@@ -32,7 +32,9 @@ pub(super) fn parse_json_line(line: &[u8]) -> Result<Option<Value>, String> {
         .map_err(|error| format!("invalid newline-delimited MCP JSON: {error}"))
 }
 
-pub(super) fn read_messages(mut stdout: impl Read + Send + 'static) -> Receiver<Result<Value, String>> {
+pub(super) fn read_messages(
+    mut stdout: impl Read + Send + 'static,
+) -> Receiver<Result<Value, String>> {
     let (tx, rx) = mpsc::sync_channel(MAX_QUEUED_MESSAGES);
     thread::spawn(move || {
         let mut pending = Vec::new();

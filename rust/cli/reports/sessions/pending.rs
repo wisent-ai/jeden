@@ -5,12 +5,12 @@
 
 use super::ledger::append_ledger_entry_unlocked;
 use super::{parse_transcript, LedgerEntry, LEDGER_APPEND_LOCK, NEXT_ENTRY_ID};
+use crate::cli::reports::sessions::ledger::append_ledger_entry;
 use serde_json::json;
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::sync::atomic::Ordering;
-use crate::cli::reports::sessions::ledger::append_ledger_entry;
-use serde_json::Value;
 
 const MAX_PENDING_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 

@@ -6,10 +6,10 @@
 use super::relay::collab_state_path;
 use super::status::picker_role_detail;
 use crate::slash::common::read_json_value;
+use crate::slash::session::collab::relay::collab_default_relay;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
-use crate::slash::session::collab::relay::collab_default_relay;
 
 pub(crate) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
     let state = read_json_value(&collab_state_path(context.cwd));

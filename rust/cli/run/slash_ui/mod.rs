@@ -13,9 +13,8 @@ mod columns;
 mod picker;
 mod rows;
 
-pub(crate) use picker::model_picker;
 use crate::cli::i18n::tr;
-
+pub(crate) use picker::model_picker;
 
 fn logout_picker() -> Result<PickerSpec, String> {
     let client = crate::control_plane::weles::WelesClient::from_env();

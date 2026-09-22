@@ -4,9 +4,9 @@
 //!
 //! Grouped here so the `runtime_ops` folder keeps to five entries; the module
 //! above re-exports these under the names callers already use.
-use crate::tool_runtime::runtime_ops::SecureRuntime;
 use crate::tool_runtime::runtime_ops::security::GrantError;
 use crate::tool_runtime::runtime_ops::untrusted_child;
+use crate::tool_runtime::runtime_ops::SecureRuntime;
 
 pub mod fs;
 pub mod network;

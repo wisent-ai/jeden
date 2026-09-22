@@ -5,11 +5,11 @@
 //! cap.
 
 use super::dates::relative_age;
+use crate::slash::modes::session::dates::started_epoch;
 use crate::tui::PickerItem;
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-use crate::slash::modes::session::dates::started_epoch;
 
 const MESSAGE_PREVIEW_SESSIONS: usize = 50;
 const MESSAGE_PREVIEW_CHARS: usize = 60;

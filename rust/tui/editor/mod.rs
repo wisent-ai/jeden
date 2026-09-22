@@ -257,5 +257,4 @@ impl EditorState {
         self.anchor = None;
         self.preferred_column = Some(column);
     }
-
 }

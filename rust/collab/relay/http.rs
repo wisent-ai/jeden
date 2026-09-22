@@ -4,10 +4,10 @@
 
 use super::super::MAX_BLOB_BYTES;
 use super::{relay_response_authorized, RelayStore};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
 use crate::collab::relay::auth::token_role;
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
 
 pub fn serve(addr: &str) -> Result<(), String> {
     let listener = TcpListener::bind(addr).map_err(|e| format!("bind {addr}: {e}"))?;
@@ -71,7 +71,11 @@ pub(super) fn handle_conn(mut stream: TcpStream, store: &RelayStore) -> std::io:
     };
     write_response(&mut stream, status, &response)
 }
-pub(super) fn write_response(stream: &mut TcpStream, status: u16, body: &str) -> std::io::Result<()> {
+pub(super) fn write_response(
+    stream: &mut TcpStream,
+    status: u16,
+    body: &str,
+) -> std::io::Result<()> {
     let reason = match status {
         200 => "OK",
         400 => "Bad Request",

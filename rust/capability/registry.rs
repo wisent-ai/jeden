@@ -258,4 +258,3 @@ fn build_and_publish(
     DIRTY.store(false, Ordering::Release);
     Ok(built)
 }
-

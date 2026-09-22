@@ -2,8 +2,8 @@
 //!
 //! Split out of `slash/commands/usage.rs`, which had grown past the module
 //! line cap.
-use serde_json::Value;
 use serde_json::json;
+use serde_json::Value;
 
 /// Running accumulation of usage counters. `Default` zeroes every field, so no
 /// bare numeric initializers are needed.

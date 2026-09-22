@@ -12,5 +12,9 @@ macro_rules! source {
 mod runtime;
 mod surfaces;
 
-pub(crate) static AREA_PROBES: LazyLock<Vec<&'static AreaProbe>> =
-    LazyLock::new(|| runtime::PROBES.iter().chain(surfaces::PROBES.iter()).collect());
+pub(crate) static AREA_PROBES: LazyLock<Vec<&'static AreaProbe>> = LazyLock::new(|| {
+    runtime::PROBES
+        .iter()
+        .chain(surfaces::PROBES.iter())
+        .collect()
+});

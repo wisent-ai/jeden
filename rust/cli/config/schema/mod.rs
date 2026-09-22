@@ -2,7 +2,10 @@
 
 use serde_json::json;
 
-use super::{config_remove_value, config_set_value, merged_config_value, read_user_writable_config, write_user_config};
+use super::{
+    config_remove_value, config_set_value, merged_config_value, read_user_writable_config,
+    write_user_config,
+};
 
 use crate::user_config_path;
 use crate::Args;
@@ -12,17 +15,17 @@ mod table;
 mod values;
 mod views;
 
-pub(crate) use contracts::{
-    communication_settings, contract_settings, set_communication_settings, set_contract_settings,
-};
-pub(crate) use views::settings_picker;
-use values::{effective_setting_value, parse_setting_value, setting_spec};
-use views::{config_list_json, config_list_text};
 use crate::cli::config::schema::table::SETTINGS_SCHEMA;
 use crate::cli::config::schema::values::setting_default;
 use crate::cli::config::schema::values::setting_metadata;
 use crate::cli::config::shapes::ui_language_codes;
 use crate::cli::config::ui_language;
+pub(crate) use contracts::{
+    communication_settings, contract_settings, set_communication_settings, set_contract_settings,
+};
+use values::{effective_setting_value, parse_setting_value, setting_spec};
+pub(crate) use views::settings_picker;
+use views::{config_list_json, config_list_text};
 
 /// The value that follows the user's own messages instead of pinning one
 /// language.

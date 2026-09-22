@@ -6,13 +6,13 @@
 use crate::capability::{
     CapabilityDescriptor, CapabilityHealth, CapabilityKind, CapabilityPolicy, FunctionTarget,
 };
-use serde_json::json;
-use std::path::Path;
 use crate::mcp::connection::ConnectionState;
 use crate::mcp::managers;
 use crate::mcp::session_key;
 use crate::mcp::sweep::live_tools;
+use serde_json::json;
 use serde_json::Value;
+use std::path::Path;
 
 pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     let sandbox = crate::tool_runtime::runtime_ops::SecureRuntime::detect()

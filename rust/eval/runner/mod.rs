@@ -1,6 +1,6 @@
-use super::dataset::{EvalCaseV1, load_dataset, load_fixture, safe_relative, validate_sha256};
+use super::dataset::{load_dataset, load_fixture, safe_relative, validate_sha256, EvalCaseV1};
 use super::graders::{grade, sha256, GRADER_IMPLEMENTATION_REVISION};
-use super::metrics::{OUTCOME_SCHEMA, RunOutcomeV1, ScoreV1, TerminalReasonV1};
+use super::metrics::{RunOutcomeV1, ScoreV1, TerminalReasonV1, OUTCOME_SCHEMA};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -48,7 +48,6 @@ pub struct IsolatedRunV1 {
 mod execution;
 
 pub use execution::{CaseExecutionV1, CaseExecutor, RouteEvidenceV1};
-
 
 pub struct EvalRunner {
     pub(super) config: RunnerConfigV1,
@@ -265,5 +264,4 @@ impl EvalRunner {
         )?;
         Ok(outcome)
     }
-
 }

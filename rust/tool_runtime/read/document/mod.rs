@@ -5,8 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::tool_runtime::shared::{
-    jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input,
-    MAX_READ_BYTES,
+    jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input, MAX_READ_BYTES,
 };
 use crate::tool_runtime::ToolRuntime;
 

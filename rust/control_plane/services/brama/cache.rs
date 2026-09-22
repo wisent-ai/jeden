@@ -6,11 +6,11 @@
 
 use super::super::transport::SecretRef;
 use super::ModelCatalog;
+use crate::control_plane::now_ms;
+use crate::control_plane::services::brama::auth::caller_credentials;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
 use std::time::Instant;
-use crate::control_plane::services::brama::auth::caller_credentials;
-use crate::control_plane::now_ms;
 
 #[derive(Clone)]
 pub(super) struct CachedCatalog {

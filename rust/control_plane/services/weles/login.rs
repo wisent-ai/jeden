@@ -3,10 +3,13 @@
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
-use super::{Account, InteractionBridge, MAX_ACCOUNTS, MAX_POLL_EVENTS, MAX_PROVIDERS, OperationEvent, OperationV1, Provider, WelesClient, WelesError};
-use serde_json::{json, Value};
+use super::{
+    Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesClient, WelesError,
+    MAX_ACCOUNTS, MAX_POLL_EVENTS, MAX_PROVIDERS,
+};
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::now_ms;
+use serde_json::{json, Value};
 
 impl WelesClient {
     pub fn providers(&self) -> Result<Vec<Provider>, WelesError> {

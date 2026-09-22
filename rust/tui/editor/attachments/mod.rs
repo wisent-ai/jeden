@@ -9,10 +9,10 @@ use std::sync::Arc;
 mod errors;
 mod sniff;
 
+use errors::format_bytes;
 pub use errors::{
     AttachmentError, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_TOTAL_ATTACHMENT_BYTES,
 };
-use errors::format_bytes;
 use sniff::sniff_kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -96,7 +96,6 @@ impl From<(String, Vec<u8>)> for ClipboardContent {
         }
     }
 }
-
 
 #[derive(Debug, Default, Clone)]
 pub struct AttachmentTray {

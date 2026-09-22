@@ -14,7 +14,7 @@ mod literal;
 mod walk;
 
 use literal::{parallel_literal, text_files};
-use walk::{MAX_SEARCH_FILE_BYTES, check, discover, rel_path};
+use walk::{check, discover, rel_path, MAX_SEARCH_FILE_BYTES};
 
 pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_text requires query")?;

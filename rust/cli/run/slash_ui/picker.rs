@@ -4,15 +4,13 @@
 //! cap.
 
 use super::columns::metric_widths;
-use super::rows::{
-    model_rank, model_row, provider_group, provider_rank, summary_key, summary_row,
-};
-use crate::cli::i18n::tr;
-use crate::tui::{PickerItem, PickerSpec};
-use std::path::Path;
+use super::rows::{model_rank, model_row, provider_group, provider_rank, summary_key, summary_row};
 use crate::cli::config::load_config;
 use crate::cli::config::ui_language;
+use crate::cli::i18n::tr;
 use crate::cli::run::slash_ui::rows::SUBSCRIPTION_PROVIDERS;
+use crate::tui::{PickerItem, PickerSpec};
+use std::path::Path;
 
 pub(crate) fn model_picker(
     cwd: &Path,

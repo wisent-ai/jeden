@@ -8,14 +8,16 @@ use super::super::contract::RequestMeta;
 use super::super::transport::{SecretRef, TransportRequest, TransportResponse};
 use super::cache::{catalog_cache_key, read_disk_cache, write_disk_cache, CachedCatalog, CACHE};
 use super::catalog::validate_catalog;
-use super::{BramaClient, BramaError, BramaReadiness, ModelCatalog, MAX_CACHES, MAX_RESPONSE_BYTES};
+use super::{
+    BramaClient, BramaError, BramaReadiness, ModelCatalog, MAX_CACHES, MAX_RESPONSE_BYTES,
+};
+use crate::control_plane::now_ms;
+use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
+use crate::control_plane::services::brama::API_VERSION;
 use reqwest::StatusCode;
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::time::Instant;
-use crate::control_plane::services::brama::API_VERSION;
-use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
-use crate::control_plane::now_ms;
-use serde_json::Value;
 
 impl BramaClient {
     ///

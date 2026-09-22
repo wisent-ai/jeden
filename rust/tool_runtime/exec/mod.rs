@@ -150,7 +150,6 @@ pub(crate) fn run_package_script(
     run_process(runtime, &payload)
 }
 
-
 pub(crate) fn delegate_task(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     if !runtime.allow_command {
         return Err("delegate_task requires --allow-command".into());

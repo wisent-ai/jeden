@@ -3,13 +3,13 @@
 //! Split out of `mcp/mod.rs`, which had grown past the module line cap.
 
 use super::client::McpClient;
-use serde_json::{json, Value};
-use std::path::Path;
-use std::time::{Duration, Instant};
 use crate::mcp::validate::validate_prompts;
 use crate::mcp::validate::validate_resources;
 use crate::mcp::validate::validate_tools;
+use serde_json::{json, Value};
+use std::path::Path;
 use std::thread;
+use std::time::{Duration, Instant};
 
 const CIRCUIT_FAILURE_LIMIT: u32 = 5;
 const CIRCUIT_OPEN: Duration = Duration::from_secs(30);
@@ -159,7 +159,12 @@ impl ServerConnection {
         }
     }
 
-    pub(super) fn request(&mut self, cwd: &Path, method: &str, params: Value) -> Result<Value, String> {
+    pub(super) fn request(
+        &mut self,
+        cwd: &Path,
+        method: &str,
+        params: Value,
+    ) -> Result<Value, String> {
         self.connect(cwd, false)?;
         let first = self
             .client

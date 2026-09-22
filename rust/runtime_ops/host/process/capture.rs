@@ -38,7 +38,10 @@ pub(super) fn capture_stream(
     output.finish().map_err(|error| error.to_string())
 }
 
-pub(super) fn drain_progress(context: &OperationContext<'_>, progress: &Receiver<OperationProgress>) {
+pub(super) fn drain_progress(
+    context: &OperationContext<'_>,
+    progress: &Receiver<OperationProgress>,
+) {
     while let Ok(event) = progress.try_recv() {
         context.progress(event);
     }

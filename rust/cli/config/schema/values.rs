@@ -7,8 +7,8 @@
 use super::super::config_value_at;
 use super::table::SETTINGS_SCHEMA;
 use super::SettingSpec;
-use serde_json::{json, Value};
 use crate::cli::config::parse_config_literal;
+use serde_json::{json, Value};
 
 pub(super) fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
     SETTINGS_SCHEMA.iter().find(|spec| spec.key == key)

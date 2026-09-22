@@ -9,7 +9,6 @@ mod http;
 use auth::{now_ms, relay_response_authorized, token_hash, token_role};
 pub use http::serve;
 
-
 const COLLAB_SCHEMA_VERSION: u32 = 2;
 fn collab_migration_marker(value: &mut serde_json::Value) -> Result<(), String> {
     crate::cli::config::migrations::object_preflight(value)
@@ -216,4 +215,3 @@ impl RelayStore {
         )
     }
 }
-

@@ -170,7 +170,6 @@ impl Aggregator {
     }
 }
 
-
 pub fn verify_report(envelope: &DsseEnvelope, root: &TrustedRoot) -> Result<QualityReport, String> {
     if envelope.payload_type != REPORT_PAYLOAD_TYPE {
         return Err("unexpected quality report payload type".into());

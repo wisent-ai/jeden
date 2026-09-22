@@ -6,8 +6,8 @@ use super::*;
 pub(crate) mod wire;
 pub(crate) mod workspace;
 
-pub(crate) use wire::{error_response, string_param, success_response, wire_id};
 use wire::text_param;
+pub(crate) use wire::{error_response, string_param, success_response, wire_id};
 
 pub(super) fn create_session(
     state: &Arc<ServerState>,
@@ -189,4 +189,3 @@ fn find_session(
             )
         })
 }
-

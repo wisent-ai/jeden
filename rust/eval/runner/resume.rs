@@ -7,8 +7,8 @@ use super::super::dataset::{safe_relative, EvalCaseV1};
 use super::super::graders::sha256;
 use super::super::metrics::RunOutcomeV1;
 use super::{EvalRunner, IsolatedRunV1};
-use std::fs;
 use crate::eval::scoring::metrics::OUTCOME_SCHEMA;
+use std::fs;
 
 impl EvalRunner {
     pub(super) fn validate_resumed(

@@ -2,11 +2,11 @@
 //! declare, in a real node process with the sources it was given.
 
 use serde_json::Value;
+use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
-use std::io::Read;
 
 use super::super::HOST;
 use crate::hooks::extensions::MAX_DESCRIPTOR_BYTES;

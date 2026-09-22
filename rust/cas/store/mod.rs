@@ -11,7 +11,6 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-
 #[derive(Clone, Debug)]
 pub struct LocalCas {
     root: PathBuf,

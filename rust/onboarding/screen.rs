@@ -4,9 +4,9 @@
 
 use super::Client;
 use crate::tui::{PickerItem, PickerSpec};
+use serde_json::Value;
 use std::path::Path;
 use wisent_onboarding_client::ProgressStatus;
-use serde_json::Value;
 
 pub(super) fn current_screen(client: &Client) -> Result<&wisent_onboarding_client::Screen, String> {
     let progress = client
@@ -33,7 +33,11 @@ pub(super) fn presentation_text(screen: &wisent_onboarding_client::Screen, key: 
         .to_string()
 }
 
-pub(super) fn picker_for(client: &Client, cwd: &Path, notice: Option<&str>) -> Result<PickerSpec, String> {
+pub(super) fn picker_for(
+    client: &Client,
+    cwd: &Path,
+    notice: Option<&str>,
+) -> Result<PickerSpec, String> {
     let progress = client
         .progress()
         .ok_or_else(|| "onboarding progress is unavailable".to_string())?;

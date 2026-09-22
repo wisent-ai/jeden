@@ -170,4 +170,3 @@ pub(super) fn config_value(cwd: &Path, key: &str) -> Value {
         .and_then(|config| config.get(key).cloned())
         .unwrap_or(Value::Null)
 }
-

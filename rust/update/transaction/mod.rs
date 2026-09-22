@@ -116,7 +116,6 @@ fn hit(configured: Option<&str>, point: &str) -> Result<(), String> {
     }
 }
 
-
 pub fn read_installed_state(paths: &InstallPaths) -> Result<Option<InstalledState>, String> {
     match fs::read(&paths.state) {
         Ok(bytes) => serde_json::from_slice(&bytes)
@@ -126,7 +125,6 @@ pub fn read_installed_state(paths: &InstallPaths) -> Result<Option<InstalledStat
         Err(error) => Err(format!("read installed update state: {error}")),
     }
 }
-
 
 pub fn install<F>(
     paths: &InstallPaths,

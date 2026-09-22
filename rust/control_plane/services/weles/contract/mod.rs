@@ -6,3 +6,4 @@ pub(crate) use crate::control_plane::contract::negotiate_response;
 mod billing;
 pub(crate) mod guards;
 mod legacy;
+mod subscriptions;

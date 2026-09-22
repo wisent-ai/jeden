@@ -4,15 +4,15 @@
 //! Split out of `slash/session/mod.rs`, which had grown past the module line
 //! cap.
 
-use crate::slash::session::clipboard::write_clipboard;
-use crate::slash::session::{slash_session_dir, slash_session_value};
 use crate::slash::common::{file_url, now_text, split_args};
 use crate::slash::plugins::marketplace::sanitize_marketplace_name;
+use crate::slash::session::clipboard::write_clipboard;
+use crate::slash::session::{slash_session_dir, slash_session_value};
 use crate::slash::SlashContext;
 use serde_json::json;
+use serde_json::Value;
 use std::fs;
 use std::io::Write;
-use serde_json::Value;
 
 pub(crate) fn handle_share(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);

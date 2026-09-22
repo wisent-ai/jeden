@@ -20,10 +20,10 @@ use crate::slash::SlashContext;
 mod catalog;
 mod picker;
 
-use catalog::handle_catalog;
-pub(crate) use picker::marketplace_picker;
 use crate::slash::plugins::plugins_home;
 use crate::slash::support::common::now_text;
+use catalog::handle_catalog;
+pub(crate) use picker::marketplace_picker;
 
 /// Sanitize a string into a marketplace/version cache component: keep
 /// alphanumerics and `.`/`_`/`-`, collapse other runs to a single `-`, trim

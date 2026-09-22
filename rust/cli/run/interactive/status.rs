@@ -6,9 +6,9 @@
 
 use crate::read_json;
 use serde_json::Value;
+use std::env;
 use std::path::Path;
 use std::process::Command;
-use std::env;
 
 pub(super) fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
     let branch = Command::new("git")

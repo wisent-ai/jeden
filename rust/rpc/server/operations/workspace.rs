@@ -5,9 +5,9 @@
 //! line cap.
 
 use super::wire::string_param;
+use serde_json::json;
 use serde_json::Value;
 use std::path::PathBuf;
-use serde_json::json;
 
 pub(crate) fn workspace_status() -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;

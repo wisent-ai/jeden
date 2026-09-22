@@ -68,7 +68,10 @@ pub fn recover(paths: &InstallPaths) -> Result<Option<String>, String> {
     )))
 }
 
-pub(super) fn restore_state(paths: &InstallPaths, previous: &Option<InstalledState>) -> Result<(), String> {
+pub(super) fn restore_state(
+    paths: &InstallPaths,
+    previous: &Option<InstalledState>,
+) -> Result<(), String> {
     match previous {
         Some(state) => durable_json(&paths.state, state),
         None if paths.state.exists() => {

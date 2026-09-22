@@ -21,7 +21,6 @@ fn current_session_picker_detail(context: &SlashContext<'_>) -> String {
     }
 }
 
-
 fn current_session_command(context: &SlashContext<'_>, command: &str) -> Option<String> {
     slash_session_dir(context, "")
         .ok()

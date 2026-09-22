@@ -7,7 +7,11 @@
 use super::super::super::SessionOptions;
 use crate::Args;
 
-pub(super) fn args_from_options(options: &SessionOptions, prompt: String, goal: Option<String>) -> Args {
+pub(super) fn args_from_options(
+    options: &SessionOptions,
+    prompt: String,
+    goal: Option<String>,
+) -> Args {
     Args {
         command: "run".into(),
         cwd: options.cwd.clone(),

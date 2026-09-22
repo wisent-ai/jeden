@@ -183,4 +183,3 @@ impl CapabilityBinding {
             && self.effective_grants.is_subset(&self.requested_grants)
     }
 }
-

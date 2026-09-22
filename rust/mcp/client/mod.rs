@@ -8,9 +8,9 @@ use std::path::Path;
 use std::process::Child;
 use std::sync::mpsc::Receiver;
 
+use super::servers::string_field;
 use super::MCP_PROTOCOL_VERSION;
 use std::sync::mpsc;
-use super::servers::string_field;
 
 mod exchange;
 mod framing;
@@ -79,7 +79,6 @@ impl McpClient {
             notifications: VecDeque::new(),
         })
     }
-
 
     pub(super) fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
         let id = self.next_id;

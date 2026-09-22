@@ -6,8 +6,8 @@
 use super::super::*;
 use super::{row_record, MemoryStore};
 use crate::memory::store::load_record;
-use rusqlite::TransactionBehavior;
 use rusqlite::params;
+use rusqlite::TransactionBehavior;
 use serde_json::json;
 
 impl MemoryStore {
@@ -109,5 +109,4 @@ impl MemoryStore {
         tx.commit().map_err(|e| e.to_string())?;
         Ok(resolved)
     }
-
 }

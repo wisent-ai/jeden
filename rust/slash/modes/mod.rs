@@ -45,7 +45,6 @@ pub(crate) fn current_model_route(context: &SlashContext<'_>) -> String {
         .unwrap_or_else(|| "default".into())
 }
 
-
 pub(crate) fn handle_plan(args: &str, state: &mut ModeState) -> Result<String, String> {
     let (head, rest) = split_head(args);
     let verb = head.to_ascii_lowercase();

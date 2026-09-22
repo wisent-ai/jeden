@@ -5,10 +5,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use super::{Registry, ReloadReport, REGISTRIES};
+use super::canonical_key;
 use super::loading::materialize::build_registry;
 use super::loading::roots::source_set;
-use super::canonical_key;
+use super::{Registry, ReloadReport, REGISTRIES};
 use std::fs;
 
 pub(crate) mod capabilities;

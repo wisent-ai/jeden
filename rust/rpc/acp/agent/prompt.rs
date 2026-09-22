@@ -8,14 +8,14 @@ use super::{operation_expired, AcpState, NEXT_PROMPT};
 use crate::sdk::PromptRequest as JedenPromptRequest;
 use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::v1::*;
+use agent_client_protocol::Client;
+use agent_client_protocol::ConnectionTo;
 use agent_client_protocol::Responder;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use agent_client_protocol::Client;
-use agent_client_protocol::ConnectionTo;
-use std::sync::atomic::AtomicBool;
 
 impl AcpState {
     pub(super) fn start_prompt(

@@ -2,8 +2,8 @@
 //!
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
-use crate::tui::text::{clamp_visible, sanitize_terminal_text, visible_len, wrap_line};
 use crate::tui::text::paint;
+use crate::tui::text::{clamp_visible, sanitize_terminal_text, visible_len, wrap_line};
 
 pub(crate) fn pad_visible(value: &str, width: usize) -> String {
     let mut padded = clamp_visible(value, width);

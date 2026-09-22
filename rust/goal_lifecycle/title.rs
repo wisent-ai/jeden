@@ -3,10 +3,10 @@
 //! Split out of `goal_lifecycle/mod.rs`, which had grown past the module line
 //! cap.
 
-use std::env;
-use std::path::PathBuf;
 use serde_json::Value;
+use std::env;
 use std::path::Path;
+use std::path::PathBuf;
 
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
 /// --stdin --json` when the executable is available, otherwise the prompt's

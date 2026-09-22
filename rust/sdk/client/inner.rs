@@ -3,8 +3,8 @@
 //!
 //! Split out of `sdk/client.rs`, which had grown past the module line cap.
 
-use super::errors::{ClientError, SessionTransport};
 use super::super::protocol::{Envelope, EventEnvelope};
+use super::errors::{ClientError, SessionTransport};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};

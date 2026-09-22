@@ -5,12 +5,10 @@
 //! the module line cap.
 
 use super::{current_job_mut, Coordinator};
-use crate::task_runtime::fleet::protocol::{
-    CommitRequest, ProtocolError, WorkerEvent,
-};
 use crate::task_runtime::fleet::protocol::AttemptPhase;
 use crate::task_runtime::fleet::protocol::JobOutcome;
 use crate::task_runtime::fleet::protocol::JobPhase;
+use crate::task_runtime::fleet::protocol::{CommitRequest, ProtocolError, WorkerEvent};
 
 impl Coordinator {
     pub fn acknowledge(

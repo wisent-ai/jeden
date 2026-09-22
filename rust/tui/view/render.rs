@@ -1,7 +1,7 @@
-use crate::tui::render::{boxed, boxed_split};
-use crate::tui::text::{clamp_visible, paint, visible_len};
 use super::{ConfirmState, PickerFocus, PickerItem, PickerState};
 use crate::cli::i18n::tr;
+use crate::tui::render::{boxed, boxed_split};
+use crate::tui::text::{clamp_visible, paint, visible_len};
 
 /// Marker column plus the dot in front of a category name.
 const CATEGORY_MARKERS: &str = "❯ ● ";

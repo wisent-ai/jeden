@@ -5,10 +5,10 @@
 
 use super::framing::encode_message;
 use super::{McpClient, Transport, MAX_NOTIFICATIONS, MAX_SESSION_ID_BYTES, MCP_SESSION_ID};
+use crate::mcp::client::framing::MAX_MESSAGE_BYTES;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::Value;
 use std::io::{Read, Write};
-use crate::mcp::client::framing::MAX_MESSAGE_BYTES;
 use std::sync::mpsc;
 
 impl McpClient {
@@ -116,5 +116,4 @@ impl McpClient {
             }
         }
     }
-
 }

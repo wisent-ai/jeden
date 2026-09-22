@@ -11,7 +11,7 @@ use crate::cli::config::load_config;
 use crate::cli::run::slash::is_builtin_slash;
 use crate::cli::run::slash_ui::model_picker;
 use crate::cli::sessions::session_conversation_turns;
-use crate::{Args, agent, hooks, tui};
+use crate::{agent, hooks, tui, Args};
 
 mod commands;
 mod status;

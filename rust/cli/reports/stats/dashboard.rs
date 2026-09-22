@@ -90,4 +90,3 @@ pub(super) fn serve(cwd: &Path, port: u16) -> Result<String, String> {
     }
     Ok(String::new())
 }
-

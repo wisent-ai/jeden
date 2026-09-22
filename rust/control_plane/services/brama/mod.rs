@@ -14,7 +14,7 @@ mod cache;
 mod catalog;
 mod fetch;
 
-use cache::{CACHE, catalog_cache_key};
+use cache::{catalog_cache_key, CACHE};
 pub use catalog::{BramaReadiness, ModelCatalog, ModelEntry, ModelPerf, ModelPrice};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -134,7 +134,6 @@ impl BramaClient {
         }
     }
 
-
     pub fn invalidate(&self) {
         if let Some(endpoint) = &self.endpoint {
             let key = catalog_cache_key(endpoint, self.authorization.as_ref());
@@ -149,7 +148,6 @@ impl BramaClient {
             cache.clear();
         }
     }
-
 }
 
 impl super::contract::BramaApiV1 for BramaClient {

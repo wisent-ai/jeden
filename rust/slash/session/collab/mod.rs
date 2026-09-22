@@ -10,10 +10,10 @@ mod pickers;
 mod relay;
 mod status;
 
-pub(crate) use pickers::{
-    build_collab_picker, build_join_picker, build_leave_picker,
+pub(crate) use pickers::{build_collab_picker, build_join_picker, build_leave_picker};
+use relay::{
+    append_collab_event, collab_path, collab_state_path, post_collab_http, save_collab_state,
 };
-use relay::{append_collab_event, collab_path, collab_state_path, post_collab_http, save_collab_state};
 use status::{collab_http_role_status, collab_role_status};
 use std::path::Path;
 

@@ -12,10 +12,10 @@ use std::sync::Arc;
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::terminal;
 
+use crate::tui::text::sanitize_terminal_text;
 use crate::tui::{
     AttachmentSource, AttachmentTray, CommandOutcome, PromptStatus, TurnCtx, TurnKind,
 };
-use crate::tui::text::sanitize_terminal_text;
 
 pub(super) fn old_read_line_loop<S, C, H>(
     mut _status_provider: S,

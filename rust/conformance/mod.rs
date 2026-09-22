@@ -11,13 +11,13 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::capability;
 pub(crate) use report::audit_ui_honesty_paths;
 use report::registered_checks;
 pub use report::{
     AreaResult, BehaviorAttempt, BehaviorCheckKind, BehaviorCheckResult, BehaviorEvidence,
     CheckStatus, ConformanceReport, ProductionScopeResult, UiHonestyFinding,
 };
-use crate::capability;
 use std::path::PathBuf;
 
 const REPORT_SCHEMA_VERSION: u32 = 2;

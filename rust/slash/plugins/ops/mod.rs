@@ -4,9 +4,9 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+use super::plugins_home;
 use super::production::service::MarketplaceService;
 use super::registry::{plugin_registry, save_plugin_registry};
-use super::plugins_home;
 use crate::slash::common::now_text;
 
 mod install;
@@ -148,7 +148,6 @@ pub(crate) fn normalize_scope(scope: Option<String>) -> Result<String, String> {
 pub(crate) fn production_service(scope_dir: &Path) -> MarketplaceService {
     MarketplaceService::new(scope_dir.join(".jeden/plugins/v2"))
 }
-
 
 pub(crate) fn installed_entries_for_scope(dir: &Path) -> Vec<Value> {
     production_service(dir)

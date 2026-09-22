@@ -8,7 +8,7 @@ mod pickers;
 mod share;
 
 pub(crate) use export::{slash_session_export, slash_session_text};
-pub(crate) use jobs::{handle_jobs, handle_tan};
 pub(crate) use jobs::jobs_picker;
+pub(crate) use jobs::{handle_jobs, handle_tan};
 pub(crate) use pickers::{dump_picker, export_picker, omfg_picker, share_picker, tan_picker};
 pub(crate) use share::{handle_omfg, handle_share};

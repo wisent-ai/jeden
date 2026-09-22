@@ -5,12 +5,12 @@
 //! line cap.
 
 use super::walk::{check, discover};
+use crate::tool_runtime::exec::search::walk::MAX_SEARCH_FILE_BYTES;
 use crate::tool_runtime::ToolRuntime;
 use serde_json::Value;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
-use crate::tool_runtime::exec::search::walk::MAX_SEARCH_FILE_BYTES;
-use std::fs;
 
 pub(super) fn text_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
     Ok(discover(runtime, input, false)?

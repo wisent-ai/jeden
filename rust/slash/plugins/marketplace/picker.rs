@@ -4,12 +4,12 @@
 //! Split out of `slash/plugins/marketplace.rs`, which had grown past the
 //! module line cap.
 
+use super::super::fetch::{catalog_plugins, read_marketplace_catalog};
+use super::super::marketplace_cache_dir;
 use super::super::registry::{plugin_registry, sorted_object_values};
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
-use super::super::fetch::{catalog_plugins, read_marketplace_catalog};
-use super::super::marketplace_cache_dir;
 
 pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);

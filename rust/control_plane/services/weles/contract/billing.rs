@@ -4,12 +4,12 @@
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
-use crate::control_plane::billing;
-use crate::control_plane::contract::RequestMeta;
-use super::guards::{decode_v2, read_v2, validate_identifier};
 use super::super::{encode_path_segment, WelesClient, WelesError};
-use serde_json::{json, Value};
+use super::guards::{decode_v2, read_v2, validate_identifier};
+use crate::control_plane::billing;
 pub(crate) use crate::control_plane::billing::MAX_BILLING_STRING_BYTES;
+use crate::control_plane::contract::RequestMeta;
+use serde_json::{json, Value};
 
 impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     fn billing_status(
@@ -19,13 +19,15 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     ) -> Result<billing::AccountStatus, WelesError> {
         let status: billing::AccountStatus = read_v2(
             self,
-            format!("/accounts/{}/billing/status", encode_path_segment(account_id)),
+            format!(
+                "/accounts/{}/billing/status",
+                encode_path_segment(account_id)
+            ),
             meta,
         )?;
         validate_identifier(&status.account_id)?;
         validate_identifier(&status.provider_id)?;
-        if status.account_id != account_id
-            || status.capabilities.len() > billing::MAX_BILLING_ITEMS
+        if status.account_id != account_id || status.capabilities.len() > billing::MAX_BILLING_ITEMS
         {
             return Err(WelesError::InvalidResponse(
                 "billing status identity or capability count is invalid".into(),
@@ -41,7 +43,10 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     ) -> Result<Vec<billing::PaymentMethodReference>, WelesError> {
         let value: Value = read_v2(
             self,
-            format!("/accounts/{}/payment-methods", encode_path_segment(account_id)),
+            format!(
+                "/accounts/{}/payment-methods",
+                encode_path_segment(account_id)
+            ),
             meta,
         )?;
         let methods: Vec<billing::PaymentMethodReference> =
@@ -105,7 +110,10 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     ) -> Result<billing::PurchasePolicy, WelesError> {
         let policy = read_v2(
             self,
-            format!("/accounts/{}/purchase-policy", encode_path_segment(account_id)),
+            format!(
+                "/accounts/{}/purchase-policy",
+                encode_path_segment(account_id)
+            ),
             meta,
         )?;
         billing::validate_policy(&policy)
@@ -173,7 +181,10 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     ) -> Result<Vec<billing::SubscriptionV2>, WelesError> {
         let value: Value = read_v2(
             self,
-            format!("/accounts/{}/subscriptions", encode_path_segment(account_id)),
+            format!(
+                "/accounts/{}/subscriptions",
+                encode_path_segment(account_id)
+            ),
             meta,
         )?;
         let subscriptions: Vec<billing::SubscriptionV2> =
@@ -195,25 +206,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         subscription_id: &str,
         meta: &RequestMeta,
     ) -> Result<billing::QuotaSnapshot, WelesError> {
-        let quota: billing::QuotaSnapshot = read_v2(
-            self,
-            format!("/subscriptions/{}/quota", encode_path_segment(subscription_id)),
-            meta,
-        )?;
-        if quota.subscription_id != subscription_id
-            || quota.buckets.len() > billing::MAX_BILLING_ITEMS
-            || quota.buckets.iter().any(|bucket| {
-                matches!(
-                    (bucket.remaining, bucket.limit),
-                    (Some(remaining), Some(limit)) if remaining > limit
-                )
-            })
-        {
-            return Err(WelesError::InvalidResponse(
-                "quota identity, count, or remaining amount is invalid".into(),
-            ));
-        }
-        Ok(quota)
+        super::subscriptions::quota(self, subscription_id, meta)
     }
 
     fn quote(
@@ -221,25 +214,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         request: &billing::QuoteRequest,
         meta: &RequestMeta,
     ) -> Result<billing::Quote, WelesError> {
-        let body = serde_json::to_value(request)
-            .map_err(|_| WelesError::InvalidRequest("quote request encoding failed"))?;
-        let quote: billing::Quote = self.request_v2(
-            reqwest::Method::POST,
-            "/subscription-quotes",
-            Some(&body),
-            meta,
-            false,
-        )?;
-        if quote.account_id != request.account_id
-            || quote.provider_id != request.provider_id
-            || quote.product_id != request.product_id
-            || quote.currency != request.currency
-        {
-            return Err(WelesError::InvalidResponse(
-                "quote identity does not match request".into(),
-            ));
-        }
-        Ok(quote)
+        super::subscriptions::quote(self, request, meta)
     }
 
     fn purchase(

@@ -260,4 +260,3 @@ pub struct JobOutcome {
     #[serde(default)]
     pub result: Vec<u8>,
 }
-

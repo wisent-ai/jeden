@@ -136,7 +136,11 @@ pub struct ConformanceReport {
     pub ui_honesty: Vec<UiHonestyFinding>,
 }
 
-pub(super) fn contract_check(id: String, passed: bool, detail: &'static str) -> BehaviorCheckResult {
+pub(super) fn contract_check(
+    id: String,
+    passed: bool,
+    detail: &'static str,
+) -> BehaviorCheckResult {
     let mut result = BehaviorCheckResult::base(
         id,
         if passed {

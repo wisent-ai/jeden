@@ -7,12 +7,12 @@ mod parse;
 mod read;
 mod shapes;
 
+use crate::hooks::extensions::declarative::parse::skill_file_id;
 use parse::{collect, matches};
 use read::{capability_from_result, load_agent, load_rule, load_skill};
-pub(crate) use shapes::{Agent, Input, Loaded};
-pub(crate) use shapes::PromptContribution;
-use crate::hooks::extensions::declarative::parse::skill_file_id;
 use serde_json::json;
+pub(crate) use shapes::PromptContribution;
+pub(crate) use shapes::{Agent, Input, Loaded};
 use std::collections::BTreeSet;
 
 const MAX_DEFINITIONS: usize = 512;

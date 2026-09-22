@@ -2,9 +2,9 @@
 //!
 //! Split out of `sdk/client.rs`, which had grown past the module line cap.
 
+use super::super::protocol::EventEnvelope;
 use super::errors::ClientError;
 use super::inner::ClientInner;
-use super::super::protocol::EventEnvelope;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Weak;

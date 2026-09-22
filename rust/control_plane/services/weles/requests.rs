@@ -7,11 +7,10 @@
 use super::super::contract::RequestMeta;
 use super::super::transport::{SecretRef, TransportRequest};
 use super::{WelesClient, WelesError, API_VERSION, MAX_RESPONSE_BYTES};
+use crate::control_plane::services::weles::contract::guards::reject_forbidden_payment_fields;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-use crate::control_plane::services::weles::contract::guards::reject_forbidden_payment_fields;
 use std::collections::BTreeMap;
-
 
 impl WelesClient {
     pub(super) fn request(
@@ -146,12 +145,12 @@ impl WelesClient {
             .map_err(WelesError::Transport)?;
         super::contract::negotiate_response(&response.headers)
             .and_then(|version| {
-                (version == 2)
-                    .then_some(())
-                    .ok_or(super::super::contract::ContractError::SchemaSkew {
+                (version == 2).then_some(()).ok_or(
+                    super::super::contract::ContractError::SchemaSkew {
                         service_min: version,
                         service_max: version,
-                    })
+                    },
+                )
             })
             .map_err(|_| WelesError::InvalidResponse("schema negotiation failed".into()))?;
         if response.status == 429 {
@@ -174,5 +173,4 @@ impl WelesClient {
             )
         })
     }
-
 }

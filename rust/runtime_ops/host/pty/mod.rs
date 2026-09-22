@@ -245,4 +245,3 @@ pub fn teardown_scope(scope: &Path) {
         }
     }
 }
-

@@ -201,8 +201,6 @@ pub(crate) fn handle_extensions(context: &SlashContext<'_>) -> Result<String, St
     crate::hooks::extension_status(context.cwd)
 }
 
-
-
 pub(crate) fn handle_reload_plugins(context: &SlashContext<'_>) -> Result<String, String> {
     let report = crate::hooks::reload_extensions(context.cwd)?;
     Ok(format!(

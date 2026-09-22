@@ -12,8 +12,8 @@ mod client;
 mod discovery;
 
 use client::{await_response, ensure_open, file_uri, send, start, LspClient};
-pub(super) use discovery::healthy_servers;
 use discovery::command_for;
+pub(super) use discovery::healthy_servers;
 
 const MAX_LSP_SERVERS: usize = 8;
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);

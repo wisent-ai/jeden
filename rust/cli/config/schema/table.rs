@@ -35,8 +35,9 @@ fn ui_language_choices() -> &'static [&'static str] {
     &CHOICES
 }
 
-pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyLock::new(|| {
-    vec![
+pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::sync::LazyLock::new(
+    || {
+        vec![
     SettingSpec {
         key: "model",
         typ: "string",
@@ -272,4 +273,5 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
         ],
     },
     ]
-});
+    },
+);

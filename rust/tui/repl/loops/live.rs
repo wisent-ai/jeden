@@ -2,15 +2,11 @@
 //!
 //! Split out of `tui/repl/loops.rs`, which had grown past the module line cap.
 
-use crate::tui::render::{
-    attachment_lines, compact_prompt, place_editor_cursor, slash_hint_panel,
-};
-use crate::tui::view_render::{confirm_panel, picker_panel};
 use super::super::ReplRenderer;
-use crate::tui::{
-    AttachmentTray, ConfirmState, EditorState, Message, PickerState, PromptStatus,
-};
+use crate::tui::render::{attachment_lines, compact_prompt, place_editor_cursor, slash_hint_panel};
 use crate::tui::repl::message_block;
+use crate::tui::view_render::{confirm_panel, picker_panel};
+use crate::tui::{AttachmentTray, ConfirmState, EditorState, Message, PickerState, PromptStatus};
 
 /// The bottom live region: an active interactive view above the prompt, or a
 /// fixed prompt followed by a shrinking slash-suggestion panel.

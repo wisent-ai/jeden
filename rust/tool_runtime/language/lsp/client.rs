@@ -5,6 +5,7 @@
 //! module line cap.
 
 use super::discovery::{executable_exists, language_id};
+use crate::tool_runtime::language::lsp::NEXT_REQUEST;
 use crate::tool_runtime::ToolRuntime;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -12,11 +13,10 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
-use crate::tool_runtime::language::lsp::NEXT_REQUEST;
-use std::sync::atomic::Ordering;
 
 const MAX_LSP_MESSAGE: usize = 8 * 1024 * 1024;
 
@@ -127,7 +127,11 @@ pub(super) fn await_response(
     }
 }
 
-pub(super) fn start(runtime: &ToolRuntime<'_>, program: &str, args: &[String]) -> Result<LspClient, String> {
+pub(super) fn start(
+    runtime: &ToolRuntime<'_>,
+    program: &str,
+    args: &[String],
+) -> Result<LspClient, String> {
     if !executable_exists(program) {
         return Err(format!("LSP server executable not found: {program}"));
     }

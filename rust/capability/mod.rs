@@ -26,7 +26,6 @@ impl std::fmt::Display for RegistryError {
 
 impl std::error::Error for RegistryError {}
 
-
 mod builtin;
 mod descriptor;
 mod queries;
@@ -35,13 +34,15 @@ mod shapes;
 
 pub use descriptor::CapabilityDescriptorV2;
 pub type CapabilityDescriptor = CapabilityDescriptorV2;
+pub(crate) use builtin::builtin_slash_specs;
 pub use queries::{
     diagnostics_for, is_builtin_slash, management_items, slash_descriptors, slash_matches,
     status_json, status_text, view_descriptor,
 };
-pub use registry::{for_cwd, invalidate, refresh, snapshot, CapabilitySnapshot, ConflictDiagnostic};
+pub use registry::{
+    for_cwd, invalidate, refresh, snapshot, CapabilitySnapshot, ConflictDiagnostic,
+};
 pub use shapes::{
     CapabilityBinding, CapabilityHealth, CapabilityKind, CapabilityPolicy, CapabilityProvenance,
     FunctionTarget, GrantId, HealthState, UiAffordance,
 };
-pub(crate) use builtin::builtin_slash_specs;

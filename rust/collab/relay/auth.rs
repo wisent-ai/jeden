@@ -4,9 +4,9 @@
 //! Split out of `collab/relay.rs`, which had grown past the module line cap.
 
 use super::RelayStore;
-use sha2::{Digest, Sha256};
 use crate::collab::MAX_BLOB_BYTES;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 
 pub(super) fn relay_response_authorized(
     store: &RelayStore,

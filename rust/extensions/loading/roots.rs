@@ -9,8 +9,8 @@ use std::path::{Path, PathBuf};
 
 use super::super::{InstalledPluginRoot, SourceSet};
 use super::{config_value, declarative_paths, hash_path_tree, read_json, scan_modules};
-use crate::hooks::extensions::MAX_EXTENSION_FILES;
 use crate::hooks::extensions::loading::package_entries;
+use crate::hooks::extensions::MAX_EXTENSION_FILES;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -164,4 +164,3 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
         fingerprint: hasher.finish(),
     })
 }
-

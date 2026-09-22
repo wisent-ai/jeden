@@ -10,13 +10,13 @@ use crate::tui::text::{
 
 mod status;
 
-use status::{cost_segment, mode_badges, quota_percent_free_cached, status_extras};
+use crate::tui::integration::{RegistryUiRuntime, UiRuntimeAdapter};
 use crate::tui::PromptStatus;
-use std::path::Path;
 use crate::tui::APP;
 use crate::tui::PRODUCT;
 use crate::tui::VERSION;
-use crate::tui::integration::{RegistryUiRuntime, UiRuntimeAdapter};
+use status::{cost_segment, mode_badges, quota_percent_free_cached, status_extras};
+use std::path::Path;
 
 pub(crate) fn compact_prompt(
     width: usize,

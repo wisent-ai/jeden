@@ -40,7 +40,12 @@ pub(super) fn model_rank(model: &ModelEntry, active: Option<&str>) -> u8 {
     }
 }
 
-pub(super) fn model_row(model: &ModelEntry, active: Option<&str>, lang: &str, widths: &[usize]) -> PickerItem {
+pub(super) fn model_row(
+    model: &ModelEntry,
+    active: Option<&str>,
+    lang: &str,
+    widths: &[usize],
+) -> PickerItem {
     let selected = active == Some(model.id.as_str());
     let detail = format!(
         "context {} · output {} · {}{}",

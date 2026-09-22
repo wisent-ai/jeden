@@ -6,8 +6,8 @@
 use super::super::*;
 use super::MemoryStore;
 use rusqlite::Connection;
-use serde_json::{json, Value};
 use rusqlite::TransactionBehavior;
+use serde_json::{json, Value};
 
 impl MemoryStore {
     pub fn rebuild_fts(&self) -> Result<Value, String> {

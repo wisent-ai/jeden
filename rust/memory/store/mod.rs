@@ -7,7 +7,6 @@ mod maintenance;
 mod recall;
 mod writes;
 
-
 pub struct MemoryStore {
     pub(super) path: PathBuf,
 }
@@ -47,7 +46,6 @@ impl MemoryStore {
     pub fn path(&self) -> &Path {
         &self.path
     }
-
 
     pub fn embedding_health(
         &self,
@@ -211,7 +209,6 @@ impl MemoryStore {
         tx.commit().map_err(|e| e.to_string())?;
         Ok(skill)
     }
-
 }
 pub(super) fn load_record(conn: &Connection, id: &str) -> Result<Option<MemoryRecord>, String> {
     conn.query_row("SELECT id,kind,scope_kind,scope_id,text,tags_json,source_json,confidence,status,created_at,updated_at,logical_key,revision,valid_from,valid_to,supersedes,tombstone FROM memories WHERE id=?1",[id],row_record).optional().map_err(|e|e.to_string())

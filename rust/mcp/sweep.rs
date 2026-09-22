@@ -3,17 +3,17 @@
 //!
 //! Split out of `mcp/mod.rs`, which had grown past the module line cap.
 
-use super::servers::{configured_server, configured_servers};
 use super::connection::ServerConnection;
+use super::servers::{configured_server, configured_servers};
 use super::{managers, session_key, with_connection};
+use crate::mcp::client::McpClient;
+use crate::mcp::connection::ConnectionState;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crate::mcp::client::McpClient;
-use crate::mcp::connection::ConnectionState;
-use std::collections::VecDeque;
 
 /// One handshake per server: its name, the connection, and how the handshake
 /// went.

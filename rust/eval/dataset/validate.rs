@@ -4,10 +4,10 @@
 //! Split out of `eval/dataset.rs`, which had grown past the module line cap.
 
 use super::{safe_relative, EvalDatasetV1, FixtureV1, DATASET_SCHEMA, FIXTURE_SCHEMA};
+use crate::eval::dataset::GraderSpecV1;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
-use crate::eval::dataset::GraderSpecV1;
 
 pub fn validate_dataset(dataset: &EvalDatasetV1) -> Result<(), String> {
     if dataset.schema != DATASET_SCHEMA {

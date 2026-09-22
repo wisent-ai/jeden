@@ -39,7 +39,6 @@ fn format_browser_settings(label: &str, value: &Value) -> String {
     }
 }
 
-
 pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
     let current = browser_record_from(&merged_config(context.cwd));
     let mode = current

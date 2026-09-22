@@ -10,9 +10,9 @@ use std::sync::mpsc;
 use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 
+use super::super::{message_block, ReplRenderer};
 use crate::agent::TraceEvent;
 use crate::tui::Message;
-use super::super::{message_block, ReplRenderer};
 use std::time::Duration;
 
 /// Worker→render-loop message during a background turn.

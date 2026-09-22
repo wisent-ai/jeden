@@ -19,6 +19,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::interaction::RpcInteractionBridge;
+use crate::rpc::server::operations::wire::error_response;
+use crate::rpc::server::operations::wire::success_response;
+use crate::rpc::server::operations::workspace::import_sessions;
+use crate::rpc::server::operations::workspace::workspace_adopt;
+use crate::rpc::server::operations::workspace::workspace_discover;
+use crate::rpc::server::operations::workspace::workspace_status;
 use crate::sdk::{AgentSession, SessionOptions};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -27,12 +33,6 @@ use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use crate::rpc::server::operations::wire::error_response;
-use crate::rpc::server::operations::wire::success_response;
-use crate::rpc::server::operations::workspace::import_sessions;
-use crate::rpc::server::operations::workspace::workspace_adopt;
-use crate::rpc::server::operations::workspace::workspace_discover;
-use crate::rpc::server::operations::workspace::workspace_status;
 
 const MAX_FRAME_BYTES: usize = 1024 * 1024;
 

@@ -5,9 +5,9 @@
 
 use super::ledger_v2;
 use super::{LedgerEntry, SessionLedger};
+use crate::cli::reports::sessions::ledger_v2::event::payload::CheckpointPayloadV2;
 use serde_json::{json, Value};
 use std::path::Path;
-use crate::cli::reports::sessions::ledger_v2::event::payload::CheckpointPayloadV2;
 
 pub(super) fn parse_transcript(dir: &Path) -> Result<SessionLedger, String> {
     let ledger = ledger_v2::store::read_events(dir)?;

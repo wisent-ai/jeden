@@ -1,6 +1,6 @@
 pub mod dataset;
-mod scoring;
 pub mod runner;
+mod scoring;
 
 pub use scoring::{graders, metrics, report};
 

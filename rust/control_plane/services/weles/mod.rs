@@ -1,5 +1,5 @@
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
-use super::{ServiceHealth, now_ms};
+use super::{now_ms, ServiceHealth};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,9 +18,7 @@ mod login;
 mod requests;
 mod types;
 
-pub use types::{
-    Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesError,
-};
+pub use types::{Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesError};
 
 #[derive(Clone)]
 pub struct WelesClient {

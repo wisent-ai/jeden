@@ -7,10 +7,10 @@ use super::ledger_v2::{
     self, CheckpointPayloadV2, RewindPayloadV2, SessionEventV2, SessionPayloadV2,
 };
 use super::{LedgerEntry, LEDGER_APPEND_LOCK, SESSION_LEDGER_VERSION};
-use serde_json::{json, Value};
-use std::path::Path;
 use crate::cli::reports::sessions::pending::unresolved_pending_claim;
 use crate::cli::reports::sessions::replay::parse_transcript;
+use serde_json::{json, Value};
+use std::path::Path;
 
 impl LedgerEntry {
     pub(super) fn from_event(event: &SessionEventV2) -> Self {

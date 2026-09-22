@@ -24,7 +24,10 @@ pub(super) fn duration_setting(
     Ok(std::time::Duration::from_millis(millis))
 }
 
-pub(super) fn route_descriptors(value: Option<&Value>, key: &str) -> Result<Vec<RouteDescriptor>, String> {
+pub(super) fn route_descriptors(
+    value: Option<&Value>,
+    key: &str,
+) -> Result<Vec<RouteDescriptor>, String> {
     let Some(value) = value else {
         return Ok(Vec::new());
     };

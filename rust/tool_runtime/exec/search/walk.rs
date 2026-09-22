@@ -8,9 +8,9 @@ use crate::tool_runtime::shared::{bool_input, jail_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 use ignore::{WalkBuilder, WalkState};
 use serde_json::Value;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::fs;
 
 const MAX_SEARCH_FILES: usize = 20_000;
 pub(crate) const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;

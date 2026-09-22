@@ -3,8 +3,8 @@
 //!
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
-use crate::tui::PromptStatus;
 use crate::tui::text::sanitize_terminal_text;
+use crate::tui::PromptStatus;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};

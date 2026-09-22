@@ -4,10 +4,10 @@
 //! the module line cap.
 
 use super::{current_job_mut_allow_cancelling, Coordinator};
-use crate::task_runtime::fleet::protocol::ProtocolError;
 use crate::task_runtime::fleet::coordinator::current_job_mut;
 use crate::task_runtime::fleet::protocol::AttemptPhase;
 use crate::task_runtime::fleet::protocol::JobPhase;
+use crate::task_runtime::fleet::protocol::ProtocolError;
 use crate::task_runtime::fleet::protocol::WorkOffer;
 
 impl Coordinator {

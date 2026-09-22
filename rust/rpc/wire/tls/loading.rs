@@ -4,6 +4,7 @@
 //! Split out of `rpc/wire/tls.rs`, which had grown past the module line cap.
 
 use super::{ConcreteTrustState, MtlsConfig, PeerCertificate};
+use crate::rpc::wire::tls::REQUIRED_ALPN;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig};
@@ -13,7 +14,6 @@ use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use x509_parser::extensions::GeneralName;
 use x509_parser::parse_x509_certificate;
-use crate::rpc::wire::tls::REQUIRED_ALPN;
 
 /// rustls 0.23 refuses to guess a process-level provider when more than one is
 /// linked, and both are here: `ring` and `aws-lc-rs` arrive through different
@@ -26,7 +26,10 @@ static CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
 });
 
-pub(super) fn load_server_config(source: &MtlsConfig, generation: u64) -> Result<ConcreteTrustState, String> {
+pub(super) fn load_server_config(
+    source: &MtlsConfig,
+    generation: u64,
+) -> Result<ConcreteTrustState, String> {
     LazyLock::force(&CRYPTO_PROVIDER);
     let certificates = load_certificates(&source.certificate_chain)?;
     let key = load_private_key(&source.private_key)?;

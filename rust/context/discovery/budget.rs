@@ -4,8 +4,8 @@
 //! Split out of `context/discovery.rs`, which had grown past the module line
 //! cap.
 
-use std::path::Path;
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::path::PathBuf;
 
 pub(super) struct Budget {

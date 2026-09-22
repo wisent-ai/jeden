@@ -4,11 +4,14 @@ mod recovery;
 pub mod placement;
 pub mod store;
 
+use super::protocol::{
+    negotiate_version, Attempt, AttemptPhase, Job, JobPhase, Lease, NegotiatedHello, ProtocolError,
+    WorkOffer, Worker, WorkerHello,
+};
 use crate::task_runtime::cas::LocalCas;
 use placement::{select_worker, PlacementDecision};
-use store::{CoordinatorStore, JobState};
-use super::protocol::{Attempt, AttemptPhase, Job, JobPhase, Lease, NegotiatedHello, ProtocolError, WorkOffer, Worker, WorkerHello, negotiate_version};
 use std::path::Path;
+use store::{CoordinatorStore, JobState};
 
 #[derive(Clone, Debug)]
 pub struct Coordinator {

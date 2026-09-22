@@ -14,7 +14,6 @@ use crate::hooks::extensions::ABI_VERSION;
 use serde_json::json;
 use std::collections::BTreeSet;
 
-
 pub(super) fn materialize_commands(
     cwd: &Path,
     generation: u64,
@@ -82,7 +81,11 @@ pub(super) fn materialize_agents(
     Ok(Some(final_dir))
 }
 
-pub(in crate::hooks::extensions) fn build_registry(cwd: &Path, sources: SourceSet, generation: u64) -> Result<Registry, String> {
+pub(in crate::hooks::extensions) fn build_registry(
+    cwd: &Path,
+    sources: SourceSet,
+    generation: u64,
+) -> Result<Registry, String> {
     let files = serde_json::to_string(&sources.modules).map_err(|error| error.to_string())?;
     let response = run_host(
         cwd,
@@ -183,4 +186,3 @@ pub(in crate::hooks::extensions) fn build_registry(cwd: &Path, sources: SourceSe
         installed_plugins: sources.installed_plugins,
     })
 }
-

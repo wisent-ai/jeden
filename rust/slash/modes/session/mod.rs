@@ -186,7 +186,6 @@ pub(crate) fn tree_picker(state: &ModeState, lang: &str) -> PickerSpec {
     PickerSpec::new("Branch tree", items)
 }
 
-
 pub(crate) fn session_picker(context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
     let mut items = vec![

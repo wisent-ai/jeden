@@ -3,9 +3,9 @@
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
 use super::boxes::{boxed, pad_visible};
+use crate::tui::text::clamp_visible;
 use crate::tui::text::{compact_path, sanitize_terminal_text};
 use crate::tui::{APP, PRODUCT, VERSION};
-use crate::tui::text::clamp_visible;
 use std::path::Path;
 
 const WISENT_MARK: &[&str] = &[

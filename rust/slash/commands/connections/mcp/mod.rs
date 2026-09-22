@@ -96,7 +96,6 @@ fn format_mcp_list(cwd: &Path) -> String {
     lines.join("\n")
 }
 
-
 fn head_rest(parts: &[String]) -> (&str, &[String]) {
     match parts.split_first() {
         Some((first, rest)) => (first.as_str(), rest),

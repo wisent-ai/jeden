@@ -134,21 +134,19 @@ pub struct ReloadReport {
 static REGISTRIES: LazyLock<RwLock<BTreeMap<PathBuf, Arc<Registry>>>> =
     LazyLock::new(|| RwLock::new(BTreeMap::new()));
 
-
 pub(crate) mod loading;
 mod reading;
 
-pub use reading::reload;
 pub(crate) use reading::capabilities::capability_descriptors;
+pub use reading::entries::provider_entries;
 pub(crate) use reading::entries::{
     agent_dirs, command_dirs, execute_tool, model_entries, prompt_context, skill_context,
 };
-pub use reading::entries::provider_entries;
+pub use reading::reload;
 
+pub(crate) use crate::hooks::extensions::reading::entries::fire_hooks;
 use loading::canonical_key;
 use reading::current;
-pub(crate) use crate::hooks::extensions::reading::entries::fire_hooks;
-
 
 pub fn status(cwd: &Path) -> Result<String, String> {
     let registry = current(cwd)?;

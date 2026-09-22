@@ -3,8 +3,8 @@
 //!
 //! Split out of `mcp/client.rs`, which had grown past the module line cap.
 
-use super::framing::{drain_stderr, read_messages};
 use super::super::servers::{resolve_server_cwd, string_field};
+use super::framing::{drain_stderr, read_messages};
 use super::{HttpTransport, McpClient, StdioTransport};
 use serde_json::Value;
 use std::path::Path;

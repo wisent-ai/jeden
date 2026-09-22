@@ -4,9 +4,9 @@
 //! Split out of `rpc/server/operations.rs`, which had grown past the module
 //! line cap.
 
+use crate::rpc::server::MAX_FRAME_BYTES;
 use serde_json::{json, Value};
 use std::io::BufRead;
-use crate::rpc::server::MAX_FRAME_BYTES;
 
 pub(crate) fn string_param(params: &Value, key: &str) -> Result<String, String> {
     params

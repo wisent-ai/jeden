@@ -5,10 +5,10 @@
 
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::collections::BTreeSet;
 
 pub(super) fn dirs_home() -> PathBuf {
     env::var_os("HOME")

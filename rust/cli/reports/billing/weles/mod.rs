@@ -3,17 +3,23 @@
 
 use super::model::{
     BillingBackend, BillingError, BillingPolicy, MutationRequest, PaymentMethodSetup,
-    PolicyApproval, PurchaseRequest, QuotaSummary, SubscriptionMutationResult,
-    SubscriptionStatus, SubscriptionSummary,
+    PolicyApproval, PurchaseRequest, QuotaSummary, SubscriptionMutationResult, SubscriptionStatus,
+    SubscriptionSummary,
 };
 use crate::control_plane::billing::{
     HostedPaymentSetup, PaymentMethodSetupRequest, QuoteRequest, RenewRequest as WelesRenewRequest,
 };
-use crate::control_plane::{contract::{RequestMeta, WelesApiV2}, weles::WelesClient};
+use crate::control_plane::{
+    contract::{RequestMeta, WelesApiV2},
+    weles::WelesClient,
+};
 
 mod convert;
 
-use convert::{backend, correlation, operation, policy_from_weles, policy_to_weles, summary};
+use convert::{
+    backend, correlation, operation, policy_from_weles, policy_to_weles, sole_payment_method,
+    summary,
+};
 
 pub(crate) struct WelesBillingBackend {
     client: WelesClient,
@@ -201,26 +207,7 @@ impl BillingBackend for WelesBillingBackend {
                 &RequestMeta::read_v2(correlation("policy-read", account_id)),
             )
             .map_err(backend)?;
-        let methods = self
-            .client
-            .payment_methods(
-                account_id,
-                &RequestMeta::read_v2(correlation("payment-methods", account_id)),
-            )
-            .map_err(backend)?;
-        let payment_method_reference = match methods.as_slice() {
-            [method] => method.clone(),
-            [] => {
-                return Err(BillingError::NotFound(format!(
-                    "account `{account_id}` has no payment method; run /payment-method setup"
-                )))
-            }
-            _ => {
-                return Err(BillingError::Backend(format!(
-                    "account `{account_id}` has multiple payment methods; choose one in Weles"
-                )))
-            }
-        };
+        let payment_method_reference = sole_payment_method(&self.client, account_id)?;
         let purchase = crate::control_plane::billing::PurchaseRequest {
             quote_id: quote.id,
             quote_revision: quote.revision,

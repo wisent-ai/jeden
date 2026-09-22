@@ -6,11 +6,10 @@ use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 
-
 use crate::tui::{
-    stdout_supports_color, AttachmentTray, CommandOutcome, ConfirmEvent, ConfirmState,
-    EditorState, FollowUpQueue, Message, PickerEvent, PickerSpec, PickerState, PromptStatus,
-    RegistryUiRuntime, TurnCtx, TurnKind,
+    stdout_supports_color, AttachmentTray, CommandOutcome, ConfirmEvent, ConfirmState, EditorState,
+    FollowUpQueue, Message, PickerEvent, PickerSpec, PickerState, PromptStatus, RegistryUiRuntime,
+    TurnCtx, TurnKind,
 };
 
 use super::{message_block, RawModeGuard, ReplRenderer};

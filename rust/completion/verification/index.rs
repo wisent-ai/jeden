@@ -4,12 +4,12 @@
 //! Split out of `completion/verification/mod.rs`, which had grown past the
 //! module line cap.
 
-use super::paths;
 use super::super::model::*;
+use super::paths;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::path::PathBuf;
 use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 pub(super) fn canonical(path: &str) -> Result<PathBuf, String> {
     std::fs::canonicalize(crate::cli::sessions::session_dir_for(path))
@@ -81,7 +81,11 @@ impl EvidenceIndex {
 
     /// An execution failure recorded after the given unix stamp: the one
     /// kind of failure that can follow an operator's answer.
-    pub(super) fn failure_after(&self, reference: &EvidenceReference, stamp: &str) -> Result<bool, String> {
+    pub(super) fn failure_after(
+        &self,
+        reference: &EvidenceReference,
+        stamp: &str,
+    ) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
         let after = receipt["timestamp"]
             .as_str()

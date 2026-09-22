@@ -55,7 +55,10 @@ impl ParsedOptions {
     }
 }
 
-pub(super) fn expected_revision(store: &RoadmapStore, options: &ParsedOptions) -> Result<u64, RoadmapError> {
+pub(super) fn expected_revision(
+    store: &RoadmapStore,
+    options: &ParsedOptions,
+) -> Result<u64, RoadmapError> {
     match options.one("revision") {
         Some(value) => value
             .parse::<u64>()

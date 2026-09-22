@@ -4,9 +4,9 @@
 //! Split out of `session/event.rs`, which had grown past the module line cap.
 
 use super::payload::SessionPayloadV2;
-use serde_json::Value;
 use crate::cli::reports::sessions::ledger_v2::event::payload::CheckpointPayloadV2;
 use crate::cli::reports::sessions::ledger_v2::event::payload::RewindPayloadV2;
+use serde_json::Value;
 
 impl SessionPayloadV2 {
     pub(crate) fn from_legacy(kind: &str, data: Value) -> Result<Self, String> {

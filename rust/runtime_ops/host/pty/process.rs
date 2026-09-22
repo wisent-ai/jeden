@@ -6,12 +6,14 @@
 
 use super::super::super::platform::{native, ProcessSignal, PtySession};
 use super::super::super::{BoundedOutput, OperationContext, OperationProgress};
-use super::{PtyError, PtySessionMetadata, PtySessionState, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS, POLL};
+use super::{
+    PtyError, PtySessionMetadata, PtySessionState, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS, POLL,
+};
+use crate::tool_runtime::runtime_ops::host::pty::PtyResult;
 use std::io;
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
-use crate::tool_runtime::runtime_ops::host::pty::PtyResult;
 
 pub(super) struct PtyProcess {
     session: Box<dyn PtySession>,
