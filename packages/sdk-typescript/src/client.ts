@@ -6,8 +6,8 @@ import {
   type JsonValue,
   type ReplayParams,
   type RequestEnvelope,
-} from "./types.js";
-import { isJsonValue, isRequestEnvelope, parseEnvelope } from "./validators.js";
+} from "./envelope/types.js";
+import { isJsonValue, isRequestEnvelope, parseEnvelope } from "./envelope/validators.js";
 
 export interface RequestOptions {
   /** Required for every call so retries cannot duplicate mutation side effects. */

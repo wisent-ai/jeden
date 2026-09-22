@@ -1,4 +1,4 @@
-import type { ErrorEnvelope, JsonValue } from "./types.js";
+import type { ErrorEnvelope, JsonValue } from "./envelope/types.js";
 
 export class EnvelopeValidationError extends TypeError {
   constructor(message: string) {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Write `src/protocol-keys.ts` from the canonical envelope schema.
+// Write `src/envelope/protocol-keys.ts` from the canonical envelope schema.
 //
 // `protocol/schema/v1/envelope.schema.json` is the protocol. The TypeScript
 // SDK used to repeat its field names as six hand-written arrays, so the
@@ -9,7 +9,7 @@
 // the checked-in file no longer matches, which is what the test runs.
 //
 // Usage:
-//   node scripts/protocol-keys.mjs            write src/protocol-keys.ts
+//   node scripts/protocol-keys.mjs            write src/envelope/protocol-keys.ts
 //   node scripts/protocol-keys.mjs --check    exit 1 if it would change
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(here, "..");
 const repoRoot = resolve(packageRoot, "..", "..");
 const schemaPath = join(repoRoot, "protocol", "schema", "v1", "envelope.schema.json");
-const outputPath = join(packageRoot, "src", "protocol-keys.ts");
+const outputPath = join(packageRoot, "src", "envelope", "protocol-keys.ts");
+const outputLabel = "src/envelope/protocol-keys.ts";
 
 /** Each envelope shape the SDK validates, and the schema definition it comes from. */
 const SHAPES = [
@@ -83,19 +84,19 @@ const current = (() => {
 
 if (check) {
   if (current === rendered) {
-    console.log(`src/protocol-keys.ts matches ${schemaPath}`);
+    console.log(`${outputLabel} matches ${schemaPath}`);
     process.exit(0);
   }
   console.error(
     current === null
-      ? "src/protocol-keys.ts is missing; run npm run generate:protocol"
-      : "src/protocol-keys.ts no longer matches the envelope schema; run npm run generate:protocol",
+      ? `${outputLabel} is missing; run npm run generate:protocol`
+      : `${outputLabel} no longer matches the envelope schema; run npm run generate:protocol`,
   );
   process.exit(1);
 }
 
 if (current === rendered) {
-  console.log("src/protocol-keys.ts already current");
+  console.log(`${outputLabel} already current`);
 } else {
   writeFileSync(outputPath, rendered);
   console.log(`wrote ${outputPath} from ${schemaPath}`);

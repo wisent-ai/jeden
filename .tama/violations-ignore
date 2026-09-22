@@ -18,3 +18,13 @@ web/docs/sessions.html
 web/docs/tools.html
 web/sitemap.xml
 web/wisent-components.css
+
+# The repository root. Every file left in it is fixed there by a tool that
+# reads it by that exact path: cargo reads Cargo.toml and Cargo.lock and runs
+# build.rs, npm reads package.json and package-lock.json, git reads
+# .gitignore, dotenv reads .env.example, the Wisent release tooling reads
+# .wisent-release.json and platform-entitlements.json, and the published
+# surface check reads released-surface.json. LICENSE, NOTICE and README.md are
+# read by people and by every registry this package is published to. Moving
+# any of them into a sub-folder breaks the tool that names the path.
+.

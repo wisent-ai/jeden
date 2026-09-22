@@ -51,7 +51,7 @@ execFileSync("npm", ["run", "build"], { cwd: sdk, stdio: "pipe" });
 const schema = JSON.parse(
   readFileSync(join(repoRoot, "protocol", "schema", "v1", "envelope.schema.json"), "utf8"),
 );
-const keys = await import(join(sdk, "dist", "src", "protocol-keys.js"));
+const keys = await import(join(sdk, "dist", "src", "envelope", "protocol-keys.js"));
 for (const [constant, def] of [
   ["REQUEST", "request"],
   ["REQUEST_META", "requestMeta"],
@@ -71,7 +71,9 @@ for (const [constant, def] of [
 }
 
 // 3. The validators accept every golden envelope.
-const { isEnvelope, parseEnvelope } = await import(join(sdk, "dist", "src", "validators.js"));
+const { isEnvelope, parseEnvelope } = await import(
+  join(sdk, "dist", "src", "envelope", "validators.js")
+);
 const golden = JSON.parse(
   readFileSync(join(repoRoot, "protocol", "schema", "v1", "golden", "envelopes.json"), "utf8"),
 );

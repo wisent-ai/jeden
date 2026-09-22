@@ -1,5 +1,5 @@
-import type { Envelope, RequestEnvelope } from "./types.js";
-import { parseEnvelope } from "./validators.js";
+import type { Envelope, RequestEnvelope } from "./envelope/types.js";
+import { parseEnvelope } from "./envelope/validators.js";
 
 export interface AsyncEnvelopeTransport {
   send(envelope: RequestEnvelope): Promise<void>;

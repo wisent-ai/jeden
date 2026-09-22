@@ -1,4 +1,4 @@
-import { EnvelopeValidationError } from "./errors.js";
+import { EnvelopeValidationError } from "../errors.js";
 import {
   PROTOCOL_VERSION,
   type Envelope,
