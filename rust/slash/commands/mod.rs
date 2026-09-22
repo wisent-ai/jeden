@@ -8,10 +8,11 @@ use crate::tools;
 use crate::tui::{PickerItem, PickerSpec};
 
 pub(crate) mod agents;
-pub(crate) mod mcp;
+pub(crate) mod connections;
 pub(crate) mod memory;
-pub(crate) mod ssh;
 pub(crate) mod usage;
+
+pub(crate) use connections::{mcp, ssh};
 
 use memory::memory_file_path;
 

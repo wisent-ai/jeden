@@ -9,13 +9,13 @@ use crate::tui::{PickerItem, PickerSpec};
 
 mod browser;
 mod commands;
-pub(crate) mod common;
 mod modes;
 mod plugins;
 mod session;
 pub(crate) mod setup;
-mod state;
-mod validate;
+mod support;
+
+pub(crate) use support::{common, state, validate};
 
 pub(crate) use plugins::ops::{installed_plugin_command_dirs, installed_plugin_hook_configs};
 pub(crate) use session::clipboard::{read_clipboard, same_payload, write_clipboard};
