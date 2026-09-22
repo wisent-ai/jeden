@@ -12,6 +12,13 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+mod budget;
+mod isolation;
+mod resume;
+
+use budget::enforce_budget;
+use isolation::{atomic_write_new, isolated_run, materialize_fixture, resolve_repo_path, run_key};
+
 pub const MANIFEST_SCHEMA: &str = "jeden.eval-manifest.v1";
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -77,12 +84,12 @@ pub trait CaseExecutor {
 }
 
 pub struct EvalRunner {
-    config: RunnerConfigV1,
-    manifest: EvalManifestV1,
-    manifest_digest: String,
-    dataset_bytes: Vec<u8>,
-    catalog_digest: String,
-    policy_digest: String,
+    pub(super) config: RunnerConfigV1,
+    pub(super) manifest: EvalManifestV1,
+    pub(super) manifest_digest: String,
+    pub(super) dataset_bytes: Vec<u8>,
+    pub(super) catalog_digest: String,
+    pub(super) policy_digest: String,
 }
 
 impl EvalRunner {
@@ -292,204 +299,4 @@ impl EvalRunner {
         Ok(outcome)
     }
 
-    fn validate_resumed(
-        &self,
-        outcome: &RunOutcomeV1,
-        case: &EvalCaseV1,
-        run_key: &str,
-        fixture_digest: &str,
-        grader_digest: &str,
-        isolated: &IsolatedRunV1,
-    ) -> Result<(), String> {
-        if outcome.schema != OUTCOME_SCHEMA
-            || outcome.run_key != run_key
-            || outcome.case_id != case.id
-            || outcome.seed != case.seed
-            || outcome.dataset_digest != sha256(&self.dataset_bytes)
-            || outcome.fixture_digest != fixture_digest
-            || outcome.grader_digest != grader_digest
-            || outcome.code_digest != self.manifest.code_digest
-            || outcome.catalog_digest != self.catalog_digest
-            || outcome.policy_digest != self.policy_digest
-        {
-            return Err(format!(
-                "resumable outcome for {} does not match immutable run inputs",
-                case.id
-            ));
-        }
-        for expected in &case.expected_artifacts {
-            let bytes = fs::read(isolated.artifacts.join(safe_relative(&expected.path)?)).map_err(
-                |error| {
-                    format!(
-                        "resumable outcome missing artifact {}: {error}",
-                        expected.path
-                    )
-                },
-            )?;
-            if sha256(bytes) != expected.sha256 {
-                return Err(format!(
-                    "resumable artifact {} digest mismatch",
-                    expected.path
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-fn resolve_repo_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-    let candidate = root.join(safe_relative(relative)?);
-    if !candidate.exists() {
-        return Ok(candidate);
-    }
-    let canonical = candidate.canonicalize().map_err(|error| {
-        format!(
-            "cannot resolve repository artifact {}: {error}",
-            candidate.display()
-        )
-    })?;
-    if !canonical.starts_with(root) {
-        return Err(format!("repository artifact escapes root: {relative}"));
-    }
-    Ok(canonical)
-}
-
-fn run_key(
-    case: &EvalCaseV1,
-    dataset: &str,
-    fixture: &str,
-    grader: &str,
-    code: &str,
-    catalog: &str,
-    policy: &str,
-) -> String {
-    let mut digest = Sha256::new();
-    for part in [
-        case.id.as_str(),
-        &case.seed.to_string(),
-        dataset,
-        fixture,
-        grader,
-        code,
-        catalog,
-        policy,
-    ] {
-        digest.update((part.len() as u64).to_be_bytes());
-        digest.update(part.as_bytes());
-    }
-    hex::encode(digest.finalize())
-}
-
-fn isolated_run(output_root: &Path, run_key: &str) -> Result<IsolatedRunV1, String> {
-    let root = output_root.join("runs").join(run_key);
-    let home = root.join("home");
-    let session = root.join("session");
-    let memory = root.join("memory");
-    let quality_db = root.join("quality");
-    let workspace = root.join("workspace");
-    let artifacts = root.join("artifacts");
-    for path in [
-        &home,
-        &session,
-        &memory,
-        &quality_db,
-        &workspace,
-        &artifacts,
-    ] {
-        fs::create_dir_all(path)
-            .map_err(|error| format!("cannot create isolated path {}: {error}", path.display()))?;
-    }
-    let environment = BTreeMap::from([
-        ("HOME".into(), home.display().to_string()),
-        ("JEDEN_SESSION_DIR".into(), session.display().to_string()),
-        ("JEDEN_MEMORY_DIR".into(), memory.display().to_string()),
-        (
-            "JEDEN_QUALITY_DB_DIR".into(),
-            quality_db.display().to_string(),
-        ),
-        ("JEDEN_WORKSPACE".into(), workspace.display().to_string()),
-        ("JEDEN_ARTIFACT_DIR".into(), artifacts.display().to_string()),
-        ("PATH".into(), "/usr/bin:/bin".into()),
-        ("TZ".into(), "UTC".into()),
-        ("LANG".into(), "C".into()),
-    ]);
-    Ok(IsolatedRunV1 {
-        run_key: run_key.into(),
-        root,
-        home,
-        session,
-        memory,
-        quality_db,
-        workspace,
-        artifacts,
-        environment,
-    })
-}
-
-fn materialize_fixture(fixture: &FixtureV1, workspace: &Path) -> Result<(), String> {
-    for (relative, content) in &fixture.files {
-        let target = workspace.join(safe_relative(relative)?);
-        if target.exists() {
-            let existing = fs::read(&target).map_err(|error| error.to_string())?;
-            if existing != content.as_bytes() {
-                return Err(format!(
-                    "partially materialized fixture differs at {relative}"
-                ));
-            }
-            continue;
-        }
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        atomic_write_new(&target, content.as_bytes())?;
-    }
-    Ok(())
-}
-
-fn enforce_budget(
-    case: &EvalCaseV1,
-    usage: &UsageMetricsV1,
-    tools: &ToolStatsV1,
-    violations: &mut Vec<String>,
-) {
-    let budget = &case.budget;
-    if usage.steps > budget.max_steps {
-        violations.push("budget exceeded: steps".into());
-    }
-    if tools.calls > budget.max_tool_calls {
-        violations.push("budget exceeded: tool calls".into());
-    }
-    if usage.input_tokens > budget.max_input_tokens {
-        violations.push("budget exceeded: input tokens".into());
-    }
-    if usage.output_tokens > budget.max_output_tokens {
-        violations.push("budget exceeded: output tokens".into());
-    }
-    if usage.cost_microunits > budget.max_cost_microunits {
-        violations.push("budget exceeded: cost".into());
-    }
-    if usage.latency_ms > budget.max_elapsed_ms {
-        violations.push("budget exceeded: elapsed time".into());
-    }
-}
-
-fn atomic_write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temporary = path.with_extension("tmp");
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
-    let result = (|| {
-        file.write_all(bytes).map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
-    })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
-    }
-    result
 }
