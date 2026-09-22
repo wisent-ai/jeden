@@ -4,6 +4,7 @@
 //! Split out of `runtime_ops/host/process.rs`, which had grown past the
 //! module line cap.
 
+#[cfg(unix)]
 use std::io;
 use std::process::Command;
 

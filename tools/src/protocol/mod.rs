@@ -141,13 +141,10 @@ fn source_files(
 fn strings(value: &Value) -> Vec<String> {
     value
         .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_else(Vec::new)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect()
 }
 
 fn check_sdk(

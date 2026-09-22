@@ -12,13 +12,10 @@ pub(super) type Located<'a> = (usize, &'a Value);
 fn names(value: &Value) -> Vec<String> {
     value
         .as_array()
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_else(Vec::new)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| item.as_str().map(str::to_string))
+        .collect()
 }
 
 /// An object schema with `additionalProperties: false`, whose `required`

@@ -151,7 +151,7 @@ impl Source {
         }
         let open_end = index + 1;
         let mut terminator = vec![b'"'];
-        terminator.extend(std::iter::repeat(b'#').take(hashes));
+        terminator.extend(std::iter::repeat_n(b'#', hashes));
         let close_start = self.text[open_end..]
             .windows(terminator.len())
             .position(|window| window == terminator.as_slice())
