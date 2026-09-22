@@ -1,52 +1,27 @@
+//! Running one command as a child of this process, under the authority and
+//! the limits it was granted.
+
 use super::super::{
     platform::{native, ProcessSignal, ProcessTree},
-    BoundedOutput, OperationContext, OperationProgress, OutputCapture,
+    OperationContext, OperationProgress, OutputCapture,
 };
-use std::ffi::OsString;
-use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::io::Write;
 use std::process::{Child, Command, ExitStatus, Stdio};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
+mod capture;
+mod command;
+mod limits;
+
+use capture::{capture_stream, drain_progress};
+pub use command::ManagedCommand;
+use command::ManagedStdio;
+use limits::configure_resource_limits;
+
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const TERMINATION_GRACE: Duration = Duration::from_millis(500);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ManagedStdio {
-    Captured,
-    InheritedForeground,
-}
-
-#[derive(Clone, Debug)]
-pub struct ManagedCommand {
-    pub program: OsString,
-    pub args: Vec<OsString>,
-    pub cwd: PathBuf,
-    pub env: Vec<(OsString, Option<OsString>)>,
-    pub stdin: Option<Vec<u8>>,
-    pub preserve_descendants: bool,
-    stdio: ManagedStdio,
-}
-
-impl ManagedCommand {
-    pub fn new(program: impl Into<OsString>, cwd: impl Into<PathBuf>) -> Self {
-        Self {
-            program: program.into(),
-            args: Vec::new(),
-            cwd: cwd.into(),
-            env: Vec::new(),
-            stdin: None,
-            preserve_descendants: false,
-            stdio: ManagedStdio::Captured,
-        }
-    }
-
-    pub(crate) fn inherit_stdio_for_foreground(&mut self) {
-        self.stdio = ManagedStdio::InheritedForeground;
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TerminationReason {
@@ -240,41 +215,6 @@ impl ProcessManager {
     }
 }
 
-fn capture_stream(
-    stream: &'static str,
-    mut reader: impl Read,
-    limits: super::OutputLimits,
-    artifacts: super::ArtifactSink,
-    progress: Sender<OperationProgress>,
-) -> Result<OutputCapture, String> {
-    let mut output = BoundedOutput::new(stream, limits, artifacts);
-    let mut buffer = [0u8; 8192];
-    let mut total = 0u64;
-    loop {
-        let count = reader
-            .read(&mut buffer)
-            .map_err(|error| error.to_string())?;
-        if count == 0 {
-            break;
-        }
-        output
-            .write_chunk(&buffer[..count])
-            .map_err(|error| format!("failed capturing {stream}: {error}"))?;
-        total = total.saturating_add(count as u64);
-        let _ = progress.send(OperationProgress {
-            stream,
-            bytes: count as u64,
-            total_bytes: total,
-        });
-    }
-    output.finish().map_err(|error| error.to_string())
-}
-
-fn drain_progress(context: &OperationContext<'_>, progress: &Receiver<OperationProgress>) {
-    while let Ok(event) = progress.try_recv() {
-        context.progress(event);
-    }
-}
 
 /// Wait for the child to finish. The only thing that ends this early is the
 /// operator cancelling the turn: a command that is still running is still
@@ -337,117 +277,3 @@ fn cleanup_descendants(process_tree: &mut dyn ProcessTree) {
     thread::sleep(Duration::from_millis(20));
     let _ = process_tree.signal(ProcessSignal::Kill);
 }
-
-#[cfg(unix)]
-fn configure_resource_limits(
-    command: &mut Command,
-    limits: super::ResourceLimits,
-) -> Result<(), String> {
-    use std::os::unix::process::CommandExt;
-    if limits.cpu_seconds == 0
-        || limits.address_space_bytes < 16 * 1024 * 1024
-        || limits.open_files < 3
-        || limits.processes == 0
-        || limits.file_bytes == 0
-    {
-        return Err("invalid zero/unsafe process resource limit".into());
-    }
-    let inherited_fds = inherited_fds();
-    unsafe {
-        command.pre_exec(move || {
-            mark_inherited_fds_close_on_exec(&inherited_fds);
-            set_limit(RLIMIT_CPU, limits.cpu_seconds)?;
-            #[cfg(target_os = "linux")]
-            set_limit(RLIMIT_AS, limits.address_space_bytes)?;
-            set_limit(RLIMIT_NOFILE, limits.open_files)?;
-            #[cfg(target_os = "linux")]
-            set_limit(RLIMIT_NPROC, limits.processes)?;
-            set_limit(RLIMIT_FSIZE, limits.file_bytes)?;
-            Ok(())
-        });
-    }
-    Ok(())
-}
-#[cfg(not(unix))]
-fn configure_resource_limits(
-    _command: &mut Command,
-    _limits: super::ResourceLimits,
-) -> Result<(), String> {
-    Err("native resource-limit backend unavailable".into())
-}
-#[cfg(target_os = "linux")]
-fn inherited_fds() -> Vec<i32> {
-    Vec::new()
-}
-#[cfg(target_os = "macos")]
-fn inherited_fds() -> Vec<i32> {
-    std::fs::read_dir("/dev/fd")
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            entry
-                .ok()?
-                .file_name()
-                .to_string_lossy()
-                .parse::<i32>()
-                .ok()
-        })
-        .filter(|fd| *fd > 2)
-        .collect()
-}
-#[cfg(target_os = "linux")]
-fn mark_inherited_fds_close_on_exec(_fds: &[i32]) {
-    unsafe {
-        syscall(436usize, 3u32, u32::MAX, 4u32);
-    }
-}
-#[cfg(target_os = "macos")]
-fn mark_inherited_fds_close_on_exec(fds: &[i32]) {
-    for fd in fds {
-        unsafe {
-            fcntl(*fd, 2, 1);
-        }
-    }
-}
-#[cfg(unix)]
-fn set_limit(resource: i32, value: u64) -> io::Result<()> {
-    let limit = RLimit {
-        current: value,
-        maximum: value,
-    };
-    if unsafe { setrlimit(resource, &limit) } == 0 {
-        Ok(())
-    } else {
-        Err(io::Error::last_os_error())
-    }
-}
-#[cfg(unix)]
-#[repr(C)]
-struct RLimit {
-    current: u64,
-    maximum: u64,
-}
-#[cfg(unix)]
-extern "C" {
-    fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
-}
-#[cfg(target_os = "linux")]
-extern "C" {
-    fn syscall(number: usize, ...) -> isize;
-}
-#[cfg(target_os = "macos")]
-extern "C" {
-    fn fcntl(fd: i32, command: i32, ...) -> i32;
-}
-#[cfg(unix)]
-const RLIMIT_CPU: i32 = 0;
-#[cfg(unix)]
-const RLIMIT_FSIZE: i32 = 1;
-#[cfg(target_os = "linux")]
-const RLIMIT_NPROC: i32 = 6;
-#[cfg(target_os = "linux")]
-const RLIMIT_NOFILE: i32 = 7;
-#[cfg(target_os = "linux")]
-const RLIMIT_AS: i32 = 9;
-#[cfg(target_os = "macos")]
-const RLIMIT_NOFILE: i32 = 8;
