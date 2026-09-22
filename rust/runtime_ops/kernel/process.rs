@@ -1,182 +1,24 @@
-use super::{
+//! One interpreter process, and the framed conversation this workshop holds
+//! with it.
+//!
+//! Split out of `runtime_ops/kernel.rs`, which had grown past the module line
+//! cap.
+
+use super::super::{
     platform::{native, PipeReader, ProcessSignal, ProcessTree},
-    ArtifactSink, BoundedOutput, CancellationToken, OperationContext, OperationProgress,
-    OutputCapture,
+    ArtifactSink, BoundedOutput, CancellationToken, OperationProgress, OutputCapture,
 };
+use super::bootstrap::{JAVASCRIPT_BOOTSTRAP, PYTHON_BOOTSTRAP};
+use super::{KernelLanguage, KernelResult, FRAME_LIMIT, POLL};
 use serde_json::{json, Value};
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{LazyLock, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-const FRAME_LIMIT: usize = 64 * 1024;
-const POLL: Duration = Duration::from_millis(10);
-
-static KERNELS: LazyLock<Mutex<HashMap<KernelKey, KernelProcess>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
-
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum KernelLanguage {
-    Python,
-    JavaScript,
-}
-
-impl KernelLanguage {
-    pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "python" | "py" => Ok(Self::Python),
-            "javascript" | "js" | "node" => Ok(Self::JavaScript),
-            _ => Err(format!("unsupported kernel language: {value}")),
-        }
-    }
-    fn label(self) -> &'static str {
-        match self {
-            Self::Python => "python",
-            Self::JavaScript => "javascript",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct KernelKey {
-    scope: PathBuf,
-    cwd: PathBuf,
-    language: KernelLanguage,
-}
-
-pub struct KernelResult {
-    pub ok: bool,
-    pub cancelled: bool,
-    pub reset: bool,
-    pub stdout: OutputCapture,
-    pub stderr: OutputCapture,
-    pub display: OutputCapture,
-    pub display_mime: Option<String>,
-    pub error: Option<String>,
-}
-
-pub fn evaluate(
-    context: &OperationContext<'_>,
-    scope: &Path,
-    cwd: &Path,
-    language: KernelLanguage,
-    code: &str,
-    reset: bool,
-) -> Result<KernelResult, String> {
-    let child = super::untrusted_child(
-        context,
-        format!("{}:kernel:{}", context.operation_id(), language.label()),
-    )
-    .map_err(|error| error.to_string())?;
-    let grant = child.execution_grant();
-    let program = match language {
-        KernelLanguage::Python => OsStr::new("python3"),
-        KernelLanguage::JavaScript => OsStr::new("node"),
-    };
-    if !grant.permits_program(program) {
-        return Err(
-            super::GrantError::ProgramDenied(program.to_string_lossy().into_owned()).to_string(),
-        );
-    }
-    let canonical_cwd = cwd
-        .canonicalize()
-        .map_err(|error| format!("kernel cwd unavailable: {error}"))?;
-    if !grant
-        .filesystem
-        .read_roots
-        .iter()
-        .any(|root| canonical_cwd.starts_with(root))
-    {
-        return Err(super::GrantError::FilesystemDenied(format!(
-            "kernel cwd {} is outside grant",
-            canonical_cwd.display()
-        ))
-        .to_string());
-    }
-    let key = KernelKey {
-        scope: scope.to_path_buf(),
-        cwd: canonical_cwd.clone(),
-        language,
-    };
-    let mut kernels = KERNELS
-        .lock()
-        .map_err(|_| "kernel registry lock poisoned")?;
-    if reset {
-        if let Some(mut old) = kernels.remove(&key) {
-            old.terminate();
-        }
-    }
-    let mut kernel = if let Some(mut existing) = kernels.remove(&key) {
-        if existing.alive() {
-            existing
-        } else {
-            existing.terminate();
-            KernelProcess::spawn(language, &canonical_cwd, grant)?
-        }
-    } else {
-        KernelProcess::spawn(language, &canonical_cwd, grant)?
-    };
-    let outcome = kernel.evaluate(context, code, reset);
-    match outcome {
-        Ok((result, healthy)) => {
-            if healthy {
-                kernels.insert(key, kernel);
-            } else {
-                kernel.terminate();
-            }
-            Ok(result)
-        }
-        Err(error) => {
-            kernel.terminate();
-            Err(error)
-        }
-    }
-}
-
-pub fn probe(language: KernelLanguage, cwd: &Path) -> Result<(), String> {
-    let mut kernel = KernelProcess::spawn(
-        language,
-        cwd,
-        OperationContext::new(
-            CancellationToken::new(),
-            ArtifactSink::new(std::env::temp_dir()),
-        )
-        .execution_grant(),
-    )?;
-    let artifacts = std::env::temp_dir().join("jeden-kernel-probe-artifacts");
-    let context = OperationContext::new(CancellationToken::new(), ArtifactSink::new(artifacts));
-    let result = kernel.evaluate(&context, "1", true);
-    kernel.terminate();
-    let (result, _) = result?;
-    if result.ok {
-        Ok(())
-    } else {
-        Err(result
-            .error
-            .unwrap_or_else(|| format!("{} kernel probe failed", language.label())))
-    }
-}
-
-pub fn teardown_scope(scope: &Path) {
-    if let Ok(mut kernels) = KERNELS.lock() {
-        let keys: Vec<_> = kernels
-            .keys()
-            .filter(|key| key.scope == scope)
-            .cloned()
-            .collect();
-        for key in keys {
-            if let Some(mut kernel) = kernels.remove(&key) {
-                kernel.terminate();
-            }
-        }
-    }
-}
-
-struct KernelProcess {
+pub(super) struct KernelProcess {
     child: Child,
     stdin: ChildStdin,
     stdout: Box<dyn PipeReader>,
@@ -188,7 +30,7 @@ struct KernelProcess {
 }
 
 impl KernelProcess {
-    fn spawn(
+    pub(super) fn spawn(
         language: KernelLanguage,
         cwd: &Path,
         grant: &super::ExecutionGrant,
@@ -252,11 +94,11 @@ impl KernelProcess {
         })
     }
 
-    fn alive(&mut self) -> bool {
+    pub(super) fn alive(&mut self) -> bool {
         self.child.try_wait().ok().flatten().is_none()
     }
 
-    fn evaluate(
+    pub(super) fn evaluate(
         &mut self,
         context: &OperationContext<'_>,
         code: &str,
@@ -398,7 +240,7 @@ impl KernelProcess {
         let _ = self.process_tree.signal(ProcessSignal::Interrupt);
         thread::sleep(Duration::from_millis(100));
     }
-    fn terminate(&mut self) {
+    pub(super) fn terminate(&mut self) {
         let _ = self.process_tree.signal(ProcessSignal::Terminate);
         let until = Instant::now() + Duration::from_millis(300);
         while Instant::now() < until {
@@ -412,7 +254,7 @@ impl KernelProcess {
     }
 }
 
-fn drain_kernel_stderr(
+pub(super) fn drain_kernel_stderr(
     reader: &mut Box<dyn PipeReader>,
     output: &mut BoundedOutput,
 ) -> Result<(), String> {
@@ -431,7 +273,7 @@ fn drain_kernel_stderr(
 // Three termination flags and three capture buffers, assembled by the poll
 // loop that owns them; this call is the first place they become one value.
 #[allow(clippy::too_many_arguments)]
-fn finish_kernel(
+pub(super) fn finish_kernel(
     ok: bool,
     cancelled: bool,
     reset: bool,
@@ -452,36 +294,3 @@ fn finish_kernel(
         error,
     })
 }
-
-const PYTHON_BOOTSTRAP: &str = r#"import sys,json,traceback,base64
-G={'__name__':'__main__'}
-def emit(i,s,d,m=None):
- for p in [d[x:x+3072] for x in range(0,len(d),3072)] or ['']:
-  print(json.dumps({'id':i,'type':'chunk','stream':s,'data':p,'mime':m}),file=sys.__stdout__,flush=True)
-class W:
- def __init__(self,i,s): self.i=i; self.s=s
- def write(self,d):
-  if d: emit(self.i,self.s,str(d))
- def flush(self): pass
-for line in sys.stdin:
- try:
-  r=json.loads(line); i=r['id']; code=r['code']; oldo,olde=sys.stdout,sys.stderr; sys.stdout,sys.stderr=W(i,'stdout'),W(i,'stderr')
-  try:
-   try: v=eval(compile(code,'<jeden>','eval'),G,G)
-   except SyntaxError: exec(compile(code,'<jeden>','exec'),G,G); v=None
-   if v is not None:
-    if hasattr(v,'_repr_png_'):
-     p=v._repr_png_(); emit(i,'display',base64.b64encode(p).decode() if isinstance(p,bytes) else str(p),'image/png;base64')
-    elif hasattr(v,'_repr_html_'): emit(i,'display',str(v._repr_html_()),'text/html')
-    elif hasattr(v,'_repr_json_'): emit(i,'display',json.dumps(v._repr_json_()),'application/json')
-    else: emit(i,'display',repr(v),'text/plain')
-   done={'id':i,'type':'done','ok':True}
-  except BaseException as e:
-   traceback.print_exc(); done={'id':i,'type':'done','ok':False,'error':str(e)}
-  finally: sys.stdout,sys.stderr=oldo,olde
-  print(json.dumps(done),flush=True)
- except BaseException as e: print(json.dumps({'id':0,'type':'done','ok':False,'error':str(e)}),flush=True)
-"#;
-
-const JAVASCRIPT_BOOTSTRAP: &str = r#"const vm=require('vm'),readline=require('readline'),util=require('util');let id=0;function emit(s,d,m){d=String(d);for(let x=0;x<d.length;x+=3072)process.stdout.write(JSON.stringify({id,type:'chunk',stream:s,data:d.slice(x,x+3072),mime:m})+'\n')}const context=vm.createContext({});context.console={log:(...a)=>emit('stdout',a.map(x=>typeof x==='string'?x:util.inspect(x)).join(' ')+'\n'),error:(...a)=>emit('stderr',a.map(x=>typeof x==='string'?x:util.inspect(x)).join(' ')+'\n')};readline.createInterface({input:process.stdin}).on('line',line=>{try{const r=JSON.parse(line);id=r.id;let v=vm.runInContext(r.code,context,{timeout:Math.max(1,r.timeoutMs)});if(v!==undefined)emit('display',typeof v==='string'?v:util.inspect(v,{depth:4}),'text/plain');process.stdout.write(JSON.stringify({id,type:'done',ok:true})+'\n')}catch(e){emit('stderr',e.stack||String(e));process.stdout.write(JSON.stringify({id,type:'done',ok:false,error:String(e.message||e)})+'\n')}});
-"#;

@@ -1,13 +1,18 @@
+//! The local telemetry spool: what is kept in memory, what reaches the audit
+//! file, and what retention takes back out of it.
+
 use std::collections::VecDeque;
-use std::fs::{self, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, TryLockError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::export::{ExportStatus, OtlpExporter};
 use super::schema::{PrivateId, TelemetryEnvelope, TelemetryRecord};
+
+mod files;
+
+use files::{append_envelope, now_ms, rewrite_filtered, FileFilterReport};
 
 #[derive(Clone, Debug)]
 pub struct TelemetryConfig {
@@ -276,108 +281,4 @@ fn record_session(record: &TelemetryRecord) -> Option<&PrivateId> {
         TelemetryRecord::Metric(event) => event.ids.as_ref().map(|ids| &ids.session_id),
         TelemetryRecord::Audit(event) => Some(&event.ids.session_id),
     }
-}
-
-fn append_envelope(path: &Path, envelope: &TelemetryEnvelope) -> Result<(), ()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|_| ())?;
-    }
-    let file = private_append_file(path)?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, envelope).map_err(|_| ())?;
-    writer.write_all(b"\n").map_err(|_| ())?;
-    writer.flush().map_err(|_| ())
-}
-
-#[derive(Default)]
-struct FileFilterReport {
-    removed: u64,
-    malformed: u64,
-}
-
-fn rewrite_filtered(
-    path: &Path,
-    keep: impl Fn(&TelemetryEnvelope) -> bool,
-) -> Result<FileFilterReport, ()> {
-    if !path.exists() {
-        return Ok(FileFilterReport::default());
-    }
-    let input = fs::File::open(path).map_err(|_| ())?;
-    let temporary = path.with_extension("telemetry.tmp");
-    let output = private_replace_file(&temporary)?;
-    let mut writer = BufWriter::new(output);
-    let mut report = FileFilterReport::default();
-    for line in BufReader::new(input).lines() {
-        let line = line.map_err(|_| ())?;
-        let envelope = match serde_json::from_str::<TelemetryEnvelope>(&line) {
-            Ok(envelope) => envelope,
-            Err(_) => {
-                report.malformed += 1;
-                continue;
-            }
-        };
-        if keep(&envelope) {
-            serde_json::to_writer(&mut writer, &envelope).map_err(|_| ())?;
-            writer.write_all(b"\n").map_err(|_| ())?;
-        } else {
-            report.removed += 1;
-        }
-    }
-    writer.flush().map_err(|_| ())?;
-    writer.get_ref().sync_all().map_err(|_| ())?;
-    fs::rename(&temporary, path).map_err(|_| ())?;
-    Ok(report)
-}
-
-#[cfg(unix)]
-fn private_append_file(path: &Path) -> Result<fs::File, ()> {
-    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-    let file = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|_| ())?;
-    file.set_permissions(fs::Permissions::from_mode(0o600))
-        .map_err(|_| ())?;
-    Ok(file)
-}
-
-#[cfg(not(unix))]
-fn private_append_file(path: &Path) -> Result<fs::File, ()> {
-    OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .map_err(|_| ())
-}
-
-#[cfg(unix)]
-fn private_replace_file(path: &Path) -> Result<fs::File, ()> {
-    use std::os::unix::fs::OpenOptionsExt;
-    OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .mode(0o600)
-        .open(path)
-        .map_err(|_| ())
-}
-
-#[cfg(not(unix))]
-fn private_replace_file(path: &Path) -> Result<fs::File, ()> {
-    OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(path)
-        .map_err(|_| ())
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u64::MAX as u128) as u64
 }
