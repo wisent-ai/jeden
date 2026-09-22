@@ -1,11 +1,11 @@
 use super::*;
 
-pub(crate) mod communication_contract;
-pub(crate) mod language_prose;
+mod contracts;
 mod recorder;
 mod routing;
 pub(crate) mod specs;
-pub(crate) mod task_contract;
+
+pub(crate) use contracts::{communication_contract, language_prose, task_contract};
 #[path = "media/tool_images.rs"]
 mod tool_images;
 
