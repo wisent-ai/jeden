@@ -186,5 +186,5 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
                 .join("\n")
         });
     }
-    handle_catalog(verb, rest, first, &mut registry, context)
+    handle_catalog(verb, rest, first, context)
 }

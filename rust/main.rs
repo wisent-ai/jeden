@@ -29,7 +29,7 @@ pub mod onboarding;
 // the action protocol the agent speaks, the terminal QR rendering, and the
 // Probierz runner the CLI offers.
 pub use agent::protocol;
-pub use cli::tooling::probierz;
+pub(crate) use cli::tooling::probierz;
 pub use tui::qr;
 pub mod report;
 pub mod roadmap;

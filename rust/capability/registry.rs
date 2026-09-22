@@ -9,7 +9,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
 use super::builtin::{builtin_slash_descriptors, file_slash_descriptors, native_view_descriptors};
-use super::descriptor::CapabilityDescriptorV2;
 use super::shapes::CapabilityKind;
 use super::{CapabilityDescriptor, RegistryError, MAX_CAPABILITIES, REGISTRY_VERSION};
 use crate::capability::shapes::CapabilityHealth;

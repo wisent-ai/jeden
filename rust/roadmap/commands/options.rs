@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 #[derive(Default)]
 pub(super) struct ParsedOptions {
     values: BTreeMap<String, Vec<String>>,
-    positionals: Vec<String>,
+    pub(super) positionals: Vec<String>,
 }
 
 impl ParsedOptions {
@@ -43,14 +43,14 @@ impl ParsedOptions {
         Ok(parsed)
     }
 
-    fn one(&self, name: &str) -> Option<&str> {
+    pub(super) fn one(&self, name: &str) -> Option<&str> {
         self.values
             .get(name)
             .and_then(|values| values.last())
             .map(String::as_str)
     }
 
-    fn many(&self, name: &str) -> Vec<String> {
+    pub(super) fn many(&self, name: &str) -> Vec<String> {
         self.values.get(name).cloned().unwrap_or_default()
     }
 }

@@ -2,7 +2,6 @@
 //! that proves it was not edited after the fact.
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 mod legacy_kinds;

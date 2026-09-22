@@ -6,7 +6,6 @@ use super::super::MAX_BLOB_BYTES;
 use super::{relay_response_authorized, RelayStore};
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
 use crate::collab::relay::auth::token_role;
 use serde_json::json;
 

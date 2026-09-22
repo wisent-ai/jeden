@@ -5,7 +5,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard};
-use std::thread;
 
 mod client;
 mod connection;
@@ -16,7 +15,7 @@ mod validate;
 use connection::ServerConnection;
 pub(crate) use servers::capability_descriptors;
 pub use servers::load_config;
-use servers::{configured_server, configured_servers, resolve_server_cwd, string_field};
+use servers::configured_servers;
 pub use sweep::{live_tools, reconnect, refresh_all};
 use validate::{validate_prompts, validate_resources, validate_tools};
 

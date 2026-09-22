@@ -4,7 +4,7 @@
 //! Split out of `tui/mod.rs`, which had grown past the module line cap.
 
 use super::{editor, queue, EDITOR_KEYMAP_NAMESPACE, EXTERNAL_EDITOR_ACTION_ID};
-use std::io;
+use std::io::{self, IsTerminal};
 
 pub(crate) fn external_editor_capability_descriptor(
     cwd: &std::path::Path,

@@ -13,7 +13,7 @@ use crate::hooks::extensions::MAX_EXTENSION_FILES;
 use crate::hooks::extensions::loading::package_entries;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::hash::DefaultHasher;
+use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::SystemTime;
 
 pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {

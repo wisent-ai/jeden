@@ -1,6 +1,5 @@
 use super::*;
 use crate::model_router::RouteDescriptor;
-use crate::routing::SubscriptionTarget;
 
 mod pool;
 mod settings;

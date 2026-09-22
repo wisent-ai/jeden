@@ -43,7 +43,7 @@ impl PtyProcess {
         })
     }
 
-    fn alive(&mut self) -> bool {
+    pub(super) fn alive(&mut self) -> bool {
         self.session.alive().unwrap_or(false)
     }
 

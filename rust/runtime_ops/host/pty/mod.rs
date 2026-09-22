@@ -3,7 +3,6 @@ use super::super::{OperationContext, OutputCapture};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard, TryLockError};
 use std::thread;

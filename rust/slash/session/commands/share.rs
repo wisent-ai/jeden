@@ -5,7 +5,6 @@
 //! cap.
 
 use crate::slash::session::clipboard::write_clipboard;
-use super::export::slash_session_export;
 use crate::slash::session::{slash_session_dir, slash_session_value};
 use crate::slash::common::{file_url, now_text, split_args};
 use crate::slash::plugins::marketplace::sanitize_marketplace_name;

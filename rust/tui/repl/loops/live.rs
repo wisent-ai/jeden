@@ -10,8 +10,7 @@ use super::super::ReplRenderer;
 use crate::tui::{
     AttachmentTray, ConfirmState, EditorState, Message, PickerState, PromptStatus,
 };
-use crate::tui::text::sanitize_terminal_text;
-use message_block;
+use crate::tui::repl::message_block;
 
 /// The bottom live region: an active interactive view above the prompt, or a
 /// fixed prompt followed by a shrinking slash-suggestion panel.

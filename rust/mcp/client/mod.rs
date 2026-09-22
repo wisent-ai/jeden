@@ -10,7 +10,7 @@ use std::sync::mpsc::Receiver;
 
 use super::MCP_PROTOCOL_VERSION;
 use std::sync::mpsc;
-use string_field;
+use super::servers::string_field;
 
 mod exchange;
 mod framing;

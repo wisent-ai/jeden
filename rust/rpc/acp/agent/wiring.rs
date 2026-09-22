@@ -5,7 +5,6 @@
 use super::AcpState;
 use agent_client_protocol::schema::v1::*;
 use agent_client_protocol::{Agent, Client, Dispatch, Responder};
-use serde_json::json;
 use std::sync::Arc;
 use agent_client_protocol::ConnectionTo;
 

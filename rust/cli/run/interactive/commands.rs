@@ -31,7 +31,7 @@ pub(super) fn session_command(
 ) -> Result<Option<tui::CommandOutcome>, String> {
     let result: Result<String, String> = match command {
                 "/todo" if rest.trim() == "continue" => {
-                    handler_conv.lock().continue_work(&run_args, &mut hooks)
+                    handler_conv.lock().continue_work(&run_args, hooks)
                 }
                 "/todo" => {
                     let session = handler_conv.lock().session_path();
@@ -140,11 +140,11 @@ pub(super) fn session_command(
                 }
                 "/retry" => {
                     let task = agent::retry_task(&run_args)?;
-                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, &mut hooks)
+                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, hooks)
                 }
                 "/btw" => {
                     let task = agent::btw_task(rest)?;
-                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, &mut hooks)
+                    run_turn_shared(&handler_conv, &run_args, &task, &attachments, hooks)
                 }
                 "/login" => {
                     let target = rest.trim();
@@ -168,8 +168,8 @@ pub(super) fn session_command(
                         &move || cancel.load(std::sync::atomic::Ordering::Relaxed),
                     )
                 }
-                "/compact" => handler_conv.lock().compact(&run_args, rest, &mut hooks),
-                "/handoff" => handler_conv.lock().handoff(&run_args, rest, &mut hooks),
+                "/compact" => handler_conv.lock().compact(&run_args, rest, hooks),
+                "/handoff" => handler_conv.lock().handoff(&run_args, rest, hooks),
                 "/checkpoint" => {
                     if rest.trim() == "list" {
                         handler_conv.lock().list_checkpoints()

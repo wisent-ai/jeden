@@ -3,7 +3,6 @@
 //!
 //! Split out of `tui/view/mod.rs`, which had grown past the module line cap.
 
-use crate::cli::i18n::tr;
 use crossterm::event::{KeyCode, KeyEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -3,7 +3,6 @@
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
 use super::boxes::boxed;
-use crate::tui::text::sanitize_terminal_text;
 
 fn slash_query(input_text: &str) -> Option<String> {
     let text = input_text.trim_start();

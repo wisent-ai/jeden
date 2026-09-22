@@ -7,6 +7,6 @@ mod keymap;
 
 pub(crate) use cursor::{
     byte_at_display_column, line_end, line_start, next_boundary, normalize_paste, ordered,
-    previous_boundary, word_left, word_right,
+    previous_boundary,
 };
-pub use keymap::{ActionKeyMap, EditorAction, KeyBinding};
+pub use keymap::{ActionKeyMap, EditorAction};

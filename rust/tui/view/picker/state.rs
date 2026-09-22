@@ -5,7 +5,6 @@
 
 use super::super::{PickerEvent, PickerFocus, PickerState, INITIAL_SELECTION, SELECTION_STEP};
 use super::PickerSpec;
-use crate::cli::i18n::tr;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 impl PickerState {

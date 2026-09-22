@@ -52,7 +52,7 @@ impl EvidenceIndex {
         Ok((receipt, independent))
     }
 
-    fn observation(&self, reference: &EvidenceReference) -> Result<bool, String> {
+    pub(super) fn observation(&self, reference: &EvidenceReference) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
         let tool = receipt
             .get("tool")
@@ -64,7 +64,7 @@ impl EvidenceIndex {
     }
 
     /// Where an accepted observation actually happened.
-    fn places(&self, reference: &EvidenceReference) -> Result<BTreeSet<String>, String> {
+    pub(super) fn places(&self, reference: &EvidenceReference) -> Result<BTreeSet<String>, String> {
         self.get(reference)
             .map(|(receipt, _)| paths::touched(receipt))
     }
@@ -74,14 +74,14 @@ impl EvidenceIndex {
     /// `task_evidence` miss on a made-up id as the failed operation behind a
     /// block, when the task was waiting on a value only the operator held
     /// and should have asked for it.
-    fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
+    pub(super) fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
         self.get(reference)
             .map(|(receipt, independent)| !independent && receipt["failed"] == true)
     }
 
     /// An execution failure recorded after the given unix stamp: the one
     /// kind of failure that can follow an operator's answer.
-    fn failure_after(&self, reference: &EvidenceReference, stamp: &str) -> Result<bool, String> {
+    pub(super) fn failure_after(&self, reference: &EvidenceReference, stamp: &str) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
         let after = receipt["timestamp"]
             .as_str()

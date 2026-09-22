@@ -1,5 +1,4 @@
 use std::env;
-use std::io;
 use std::path::Path;
 
 use crate::control_plane::billing::{QuotaBucket, QuotaState};

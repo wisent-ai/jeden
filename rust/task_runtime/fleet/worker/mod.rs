@@ -1,5 +1,4 @@
 use crate::task_runtime::cas::{build_snapshot, materialize_snapshot, LocalCas};
-use super::coordinator::Coordinator;
 use super::protocol::{AttemptPhase, CommitRequest, ProtocolError, ProtocolVersion, WorkOffer, WorkerEvent, WorkerHello};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;

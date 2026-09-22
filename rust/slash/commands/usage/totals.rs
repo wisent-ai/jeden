@@ -51,7 +51,7 @@ impl Agg {
         self.cost_total += cost_total;
     }
 
-    fn to_json(&self) -> Value {
+    pub(super) fn to_json(&self) -> Value {
         json!({
             "calls": self.calls,
             "inputTokens": self.input,

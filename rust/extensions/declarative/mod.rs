@@ -2,7 +2,6 @@
 //! which of them a prompt gets.
 
 use serde_json::Value;
-use std::path::PathBuf;
 
 mod parse;
 mod read;

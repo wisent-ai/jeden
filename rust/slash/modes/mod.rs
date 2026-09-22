@@ -1,7 +1,6 @@
 //! The standing shape of a session: what it is working on, how it loops, how
 //! fast it answers, and what it may force.
 
-use serde_json::Value;
 use std::env;
 
 use crate::slash::common::{now_millis, parse_duration_ms, split_head};
@@ -13,7 +12,7 @@ mod commands;
 pub(crate) mod session;
 pub(crate) mod todo;
 
-use commands::{advisor_model_label, format_goal_status};
+use commands::advisor_model_label;
 pub(crate) use commands::{handle_advisor, handle_approval, handle_goal, handle_guided_goal};
 
 fn format_loop_status(loop_state: &LoopState) -> String {

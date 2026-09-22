@@ -4,7 +4,6 @@
 //! Split out of `agent/runtime/routing.rs`, which had grown past the module
 //! line cap.
 
-use super::super::*;
 use crate::control_plane::billing::{AccountState, SubscriptionState, MAX_BILLING_ITEMS};
 use crate::control_plane::contract::{RequestMeta, WelesApiV2};
 use crate::control_plane::weles::{platform_billing_configured, WelesClient};

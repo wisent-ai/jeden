@@ -9,7 +9,6 @@ use super::super::production::trust::TrustRootV1;
 use super::super::marketplace_cache_dir;
 use super::{production_service, registry_scope_dir};
 use crate::slash::validate::{valid_marketplace_name, valid_plugin_id, valid_plugin_name};
-use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use crate::slash::plugins::ops::find_marketplace_source;

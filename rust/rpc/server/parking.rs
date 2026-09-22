@@ -25,7 +25,8 @@
 //! interrupts anything. A turn that runs for an hour is work in flight for
 //! that hour, and nothing here ends it.
 
-use super::{read_frame, ServerState};
+use super::operations::wire::read_frame;
+use super::ServerState;
 use crate::sdk::AgentSession;
 use serde_json::{json, Value};
 use std::io::BufRead;

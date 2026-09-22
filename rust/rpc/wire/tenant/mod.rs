@@ -3,7 +3,6 @@ mod guard;
 pub use guard::TenantGuard;
 
 use super::tls::VerifiedPeer;
-use sha2::Digest;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};

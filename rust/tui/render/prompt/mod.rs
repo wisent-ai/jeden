@@ -3,7 +3,7 @@
 //!
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
-use super::panels::{framed_header, input_prefix_width, pad_visible};
+use super::panels::{framed_header, input_prefix_width};
 use crate::tui::text::{
     clamp_visible, compact_path, paint, sanitize_terminal_text, visible_len, wrap_line,
 };
@@ -16,7 +16,7 @@ use std::path::Path;
 use crate::tui::APP;
 use crate::tui::PRODUCT;
 use crate::tui::VERSION;
-use crate::tui::integration::RegistryUiRuntime;
+use crate::tui::integration::{RegistryUiRuntime, UiRuntimeAdapter};
 
 pub(crate) fn compact_prompt(
     width: usize,

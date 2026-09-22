@@ -5,6 +5,7 @@
 use super::errors::ClientError;
 use super::inner::ClientInner;
 use super::super::protocol::EventEnvelope;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Weak;
 use std::task::{Context, Poll};

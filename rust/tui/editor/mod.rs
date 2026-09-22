@@ -18,7 +18,7 @@ pub(crate) mod text;
 
 use input::{
     byte_at_display_column, line_end, line_start, next_boundary, normalize_paste, ordered,
-    previous_boundary, word_left, word_right,
+    previous_boundary,
 };
 pub use input::{ActionKeyMap, EditorAction};
 use unicode_width::UnicodeWidthStr;

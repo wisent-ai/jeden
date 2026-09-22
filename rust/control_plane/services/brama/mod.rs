@@ -1,8 +1,6 @@
 use super::contract::{ModelRequest, ModelStreamResultV1, RequestMeta, RouteRequest};
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
 use super::{now_ms, ServiceHealth};
-use reqwest::StatusCode;
-use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -16,10 +14,8 @@ mod cache;
 mod catalog;
 mod fetch;
 
-use auth::insert_caller_auth_headers;
 use cache::{CACHE, catalog_cache_key};
 pub use catalog::{BramaReadiness, ModelCatalog, ModelEntry, ModelPerf, ModelPrice};
-use catalog::validate_catalog;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BramaError {

@@ -6,7 +6,6 @@
 
 use crate::tool_runtime::shared::{bool_input, jail_path, string_input};
 use crate::tool_runtime::ToolRuntime;
-use glob::Pattern;
 use ignore::{WalkBuilder, WalkState};
 use serde_json::Value;
 use std::path::{Path, PathBuf};

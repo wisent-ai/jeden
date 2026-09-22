@@ -14,12 +14,11 @@ use crate::cli::sessions::session_dir_for;
 use crate::{Args, agent, tui};
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use crate::cli::reports::sessions::replay::session_conversation_turns;
-use crate::hooks::extensions::loading::read_json;
+use crate::read_json;
 
 /// One turn, with the session state every turn reads afresh.
 #[allow(clippy::too_many_arguments)]

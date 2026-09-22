@@ -1,7 +1,6 @@
 //! Configuration: what a document may contain, and how the layers that apply
 //! here are found, merged and written.
 
-use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::Path;
 

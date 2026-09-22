@@ -5,7 +5,6 @@
 
 use super::model::{RoadmapError, RoadmapFile, RoadmapStatus};
 use super::normalize::{cycle_errors, normalize};
-use super::render::render_markdown;
 use super::{CheckReport, RoadmapGraph, RoadmapGraphEdge, RoadmapGraphNode, ROADMAP_SCHEMA_VERSION};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
@@ -14,7 +13,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub struct RoadmapStore {
-    cwd: PathBuf,
+    pub(super) cwd: PathBuf,
     path: PathBuf,
     lock_path: PathBuf,
 }
@@ -145,7 +144,7 @@ impl RoadmapStore {
         })
     }
 
-    fn validation_errors(&self, roadmap: &RoadmapFile, validate_capabilities: bool) -> Vec<String> {
+    pub(super) fn validation_errors(&self, roadmap: &RoadmapFile, validate_capabilities: bool) -> Vec<String> {
         let mut errors = Vec::new();
         if roadmap.schema_version != ROADMAP_SCHEMA_VERSION {
             errors.push(format!(

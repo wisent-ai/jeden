@@ -4,7 +4,6 @@
 //! Split out of `cli/config/mod.rs`, which had grown past the module line cap.
 
 use super::{communication, schema};
-use serde_json::Value;
 use crate::cli::auth::AuthProviderConfig;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -237,7 +236,7 @@ impl Default for UiLanguage {
 }
 
 impl UiLanguage {
-    fn parse(value: &str) -> Option<Self> {
+    pub(super) fn parse(value: &str) -> Option<Self> {
         let value = value.trim().to_ascii_lowercase();
         if value == schema::UI_LANGUAGE_AUTO
             || ui_language_codes().iter().any(|code| *code == value)

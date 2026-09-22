@@ -1,8 +1,6 @@
 //! The session-shaped views: which roles are in force, which sessions exist,
 //! and what starting, resuming or ending one does.
 
-use std::path::Path;
-
 use crate::slash::common::split_head;
 use crate::slash::state::{read_mode_state, ModeState};
 use crate::slash::SlashContext;

@@ -6,7 +6,7 @@ use super::model::{AcceptanceCriterion, RoadmapError, RoadmapFile, RoadmapItem, 
 use super::normalize::{actor, find_item, find_item_mut, next_item_id, now};
 use super::{render::render_markdown, store::RoadmapStore};
 use serde_json::json;
-use std::path::Path;
+use std::{path::Path, str::FromStr};
 
 mod acceptance;
 mod options;

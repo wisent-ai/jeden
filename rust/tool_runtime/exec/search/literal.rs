@@ -7,8 +7,6 @@
 use super::walk::{check, discover};
 use crate::tool_runtime::ToolRuntime;
 use serde_json::Value;
-use std::fs::File;
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use crate::tool_runtime::exec::search::walk::MAX_SEARCH_FILE_BYTES;

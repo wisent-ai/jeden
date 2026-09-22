@@ -13,7 +13,6 @@ mod interaction;
 mod prompt;
 mod wiring;
 
-use interaction::AcpInteraction;
 pub(crate) use wiring::build_agent;
 use crate::rpc::acp::agent::wiring::agent_capabilities;
 use crate::rpc::acp::internal;

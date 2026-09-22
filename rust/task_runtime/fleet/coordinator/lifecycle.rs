@@ -5,7 +5,6 @@
 //! the module line cap.
 
 use super::{current_job_mut, Coordinator};
-use super::store::JobState;
 use crate::task_runtime::fleet::protocol::{
     CommitRequest, ProtocolError, WorkerEvent,
 };

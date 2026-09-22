@@ -1,7 +1,6 @@
 use super::MAX_ROOM_EVENTS;
 use rusqlite::{params, Connection, TransactionBehavior};
 use serde_json::json;
-use sha2::Digest;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 mod auth;

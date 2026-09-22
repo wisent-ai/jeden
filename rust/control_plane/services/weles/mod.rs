@@ -1,9 +1,5 @@
-use super::contract::RequestMeta;
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
-use super::brama::BramaClient;
 use super::{ServiceHealth, now_ms};
-use serde::de::DeserializeOwned;
-use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -23,7 +19,7 @@ mod requests;
 mod types;
 
 pub use types::{
-    Account, InteractionBridge, LoginMethod, OperationEvent, OperationV1, Provider, WelesError,
+    Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesError,
 };
 
 #[derive(Clone)]

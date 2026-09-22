@@ -5,7 +5,6 @@
 
 use super::servers::{configured_server, configured_servers};
 use super::connection::ServerConnection;
-use super::validate::validate_tools;
 use super::{managers, session_key, with_connection};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;

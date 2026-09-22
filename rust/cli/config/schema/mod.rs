@@ -1,10 +1,8 @@
 //! Settings schema, per-key parse and metadata, list rendering, and the config subcommand.
 
 use serde_json::json;
-use std::path::Path;
 
 use super::{config_remove_value, config_set_value, merged_config_value, read_user_writable_config, write_user_config};
-use crate::tui::PickerSpec;
 
 use crate::user_config_path;
 use crate::Args;

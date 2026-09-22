@@ -65,7 +65,7 @@ impl EditorState {
         Ok(true)
     }
 
-    fn record_undo(&mut self) {
+    pub(crate) fn record_undo(&mut self) {
         if self.undo.len() == MAX_UNDO_STEPS {
             self.undo.remove(0);
         }
@@ -73,7 +73,7 @@ impl EditorState {
         self.redo.clear();
     }
 
-    fn undo(&mut self) {
+    pub(crate) fn undo(&mut self) {
         let Some(snapshot) = self.undo.pop() else {
             return;
         };
@@ -84,7 +84,7 @@ impl EditorState {
         self.restore(snapshot);
     }
 
-    fn redo(&mut self) {
+    pub(crate) fn redo(&mut self) {
         let Some(snapshot) = self.redo.pop() else {
             return;
         };

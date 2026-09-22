@@ -5,7 +5,6 @@
 //! Split out of `update/mod.rs`, which had grown past the module line cap.
 
 use serde_json::Value;
-use std::io::Read;
 use std::path::Path;
 
 fn github_auth_token(location: &str) -> Option<String> {

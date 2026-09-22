@@ -6,7 +6,6 @@
 use super::framing::{drain_stderr, read_messages};
 use super::super::servers::{resolve_server_cwd, string_field};
 use super::{HttpTransport, McpClient, StdioTransport};
-use reqwest::blocking::Client as HttpClient;
 use serde_json::Value;
 use std::path::Path;
 use std::process::{Command, Stdio};

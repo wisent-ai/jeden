@@ -18,7 +18,6 @@ pub(super) fn handle_catalog(
     verb: &str,
     rest: &[String],
     first: &str,
-    registry: &mut Value,
     context: &SlashContext<'_>,
 ) -> Result<String, String> {
     if verb == "installed" {

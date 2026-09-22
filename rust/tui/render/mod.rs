@@ -13,7 +13,7 @@ mod prompt;
 // crate reaches it as `tui::qr`.
 pub mod qr;
 
-pub(crate) use panels::{boxed, welcome_panel};
+pub(crate) use panels::{boxed, boxed_split, welcome_panel};
 pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
 pub(crate) use prompt::compact_prompt;
 use crate::tui::render::panels::boxes::input_prefix_width;

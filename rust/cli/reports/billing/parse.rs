@@ -7,7 +7,6 @@
 use super::model::{
     BillingCommand, BillingError, BillingPolicy, MutationRequest, PolicyApproval, PurchaseRequest,
 };
-use crate::control_plane::billing::PolicyPeriod;
 use std::collections::BTreeMap;
 
 const MAX_POLICY_CAP_MICROUNITS: u64 = 1_000_000_000_000_000;

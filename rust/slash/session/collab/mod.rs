@@ -2,7 +2,6 @@
 //! leaving it.
 
 use serde_json::{json, Value};
-use url::Url;
 
 use crate::slash::common::{file_url, now_text, read_json_value, split_head};
 use crate::slash::SlashContext;

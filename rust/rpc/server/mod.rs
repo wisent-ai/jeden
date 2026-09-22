@@ -27,7 +27,6 @@ use std::io::{self, BufRead, Write};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
 use crate::rpc::server::operations::wire::error_response;
 use crate::rpc::server::operations::wire::success_response;
 use crate::rpc::server::operations::workspace::import_sessions;

@@ -4,7 +4,6 @@ mod paths;
 
 use super::{model::*, store};
 pub(crate) use evidence::{inspect as inspect_evidence, review_evidence};
-use serde_json::Value;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 

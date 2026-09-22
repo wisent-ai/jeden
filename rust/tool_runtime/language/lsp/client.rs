@@ -21,8 +21,8 @@ use std::sync::atomic::Ordering;
 const MAX_LSP_MESSAGE: usize = 8 * 1024 * 1024;
 
 pub(super) struct LspClient {
-    child: Child,
-    stdin: ChildStdin,
+    pub(super) child: Child,
+    pub(super) stdin: ChildStdin,
     messages: Receiver<Result<Value, String>>,
     opened: BTreeMap<PathBuf, i64>,
 }

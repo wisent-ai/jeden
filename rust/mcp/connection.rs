@@ -3,9 +3,7 @@
 //! Split out of `mcp/mod.rs`, which had grown past the module line cap.
 
 use super::client::McpClient;
-use super::servers::{resolve_server_cwd, string_field};
 use serde_json::{json, Value};
-use std::collections::VecDeque;
 use std::path::Path;
 use std::time::{Duration, Instant};
 use crate::mcp::validate::validate_prompts;
@@ -26,7 +24,7 @@ pub(crate) enum ConnectionState {
 }
 
 impl ConnectionState {
-    fn as_str(self) -> &'static str {
+    pub(super) fn as_str(self) -> &'static str {
         match self {
             Self::Disconnected => "disconnected",
             Self::Connecting => "connecting",
@@ -38,20 +36,20 @@ impl ConnectionState {
 }
 
 pub(super) struct ServerConnection {
-    config: Value,
-    client: Option<McpClient>,
-    state: ConnectionState,
-    failures: u32,
-    retry_after: Option<Instant>,
-    last_error: Option<String>,
-    initialize: Value,
-    tools: Value,
-    resources: Value,
-    prompts: Value,
+    pub(super) config: Value,
+    pub(super) client: Option<McpClient>,
+    pub(super) state: ConnectionState,
+    pub(super) failures: u32,
+    pub(super) retry_after: Option<Instant>,
+    pub(super) last_error: Option<String>,
+    pub(super) initialize: Value,
+    pub(super) tools: Value,
+    pub(super) resources: Value,
+    pub(super) prompts: Value,
 }
 
 impl ServerConnection {
-    fn new(config: Value) -> Self {
+    pub(super) fn new(config: Value) -> Self {
         Self {
             config,
             client: None,
@@ -66,14 +64,14 @@ impl ServerConnection {
         }
     }
 
-    fn disconnect(&mut self) {
+    pub(super) fn disconnect(&mut self) {
         if let Some(mut client) = self.client.take() {
             client.close();
         }
         self.state = ConnectionState::Disconnected;
     }
 
-    fn record_failure(&mut self, error: String) {
+    pub(super) fn record_failure(&mut self, error: String) {
         self.disconnect();
         self.failures = self.failures.saturating_add(1);
         self.last_error = Some(error);
@@ -87,7 +85,7 @@ impl ServerConnection {
         self.retry_after = Some(Instant::now() + delay);
     }
 
-    fn connect(&mut self, cwd: &Path, force: bool) -> Result<(), String> {
+    pub(super) fn connect(&mut self, cwd: &Path, force: bool) -> Result<(), String> {
         if self.client.as_mut().map(McpClient::is_alive) == Some(true) && !force {
             return Ok(());
         }
@@ -161,7 +159,7 @@ impl ServerConnection {
         }
     }
 
-    fn request(&mut self, cwd: &Path, method: &str, params: Value) -> Result<Value, String> {
+    pub(super) fn request(&mut self, cwd: &Path, method: &str, params: Value) -> Result<Value, String> {
         self.connect(cwd, false)?;
         let first = self
             .client
@@ -216,7 +214,7 @@ impl ServerConnection {
         Ok(result)
     }
 
-    fn process_notifications(
+    pub(super) fn process_notifications(
         &mut self,
         _cwd: &Path,
         notifications: Vec<Value>,

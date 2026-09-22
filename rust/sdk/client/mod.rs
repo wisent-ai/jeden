@@ -4,7 +4,6 @@
 use super::protocol::{Envelope, RequestEnvelope, RequestMeta};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::future::Future;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot, Notify};

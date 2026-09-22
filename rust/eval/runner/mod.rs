@@ -2,10 +2,8 @@ use super::dataset::{EvalCaseV1, load_dataset, load_fixture, safe_relative, vali
 use super::graders::{grade, sha256, GRADER_IMPLEMENTATION_REVISION};
 use super::metrics::{OUTCOME_SCHEMA, RunOutcomeV1, ScoreV1, TerminalReasonV1};
 use serde::{Deserialize, Serialize};
-use sha2::Digest;
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Write;
 use std::path::PathBuf;
 
 mod budget;

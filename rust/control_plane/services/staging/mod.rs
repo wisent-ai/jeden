@@ -1,7 +1,6 @@
 //! Certifying a staging deployment end to end, and writing the signed record
 //! of what happened.
 
-use super::brama::BramaClient;
 use super::contract::{BramaApiV1, ModelRequest, RequestMeta, RouteRequest, WelesApiV1};
 use super::weles::WelesClient;
 use ed25519_dalek::{Signer, SigningKey};

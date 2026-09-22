@@ -1,6 +1,5 @@
 use serde_json::Value;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::slash::common::{read_json_value, resolve_cwd_path, split_args};

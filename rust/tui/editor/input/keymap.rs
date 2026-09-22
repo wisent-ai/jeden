@@ -132,7 +132,7 @@ fn bind(code: KeyCode, modifiers: KeyModifiers, action: EditorAction) -> KeyBind
 }
 
 impl ActionKeyMap {
-    pub(super) fn bindings(&self) -> &[KeyBinding] {
+    pub(crate) fn bindings(&self) -> &[KeyBinding] {
         &self.bindings
     }
 
