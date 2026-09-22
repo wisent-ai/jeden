@@ -3,7 +3,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 
-
 use super::runtime_ops::{
     kernel::{self, KernelLanguage},
     pty, BoundedOutput, ManagedCommand, ManagedProcessResult, OperationProgress, OutputLimits,
@@ -280,10 +279,7 @@ pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(
-        runtime,
-        &json!({"command": "git", "args": args}),
-    )
+    run_read_process(runtime, &json!({"command": "git", "args": args}))
 }
 
 pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -299,10 +295,7 @@ pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value,
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(
-        runtime,
-        &json!({"command": "git", "args": args}),
-    )
+    run_read_process(runtime, &json!({"command": "git", "args": args}))
 }
 
 pub(crate) fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -319,10 +312,7 @@ pub(crate) fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         let _ = jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
-    run_read_process(
-        runtime,
-        &json!({"command": "git", "args": args}),
-    )
+    run_read_process(runtime, &json!({"command": "git", "args": args}))
 }
 
 pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {

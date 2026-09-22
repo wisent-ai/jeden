@@ -1,7 +1,6 @@
 //! The `context_recommend` tool: the advisor as something the model can ask
 //! again mid-task, after the automatic advisory that opened the turn.
 
-
 use serde_json::{json, Value};
 
 use crate::context::advisor;

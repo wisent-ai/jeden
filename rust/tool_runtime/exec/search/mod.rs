@@ -1,5 +1,7 @@
+//! The search tools: text in one file, text across many, paths by pattern,
+//! and a regular expression across the tree.
+
 use glob::Pattern;
-use ignore::{WalkBuilder, WalkState};
 use serde_json::{json, Value};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
@@ -9,127 +11,11 @@ use std::sync::{Arc, Mutex};
 use crate::tool_runtime::shared::{bool_input, jail_path, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
 
-const MAX_SEARCH_FILES: usize = 20_000;
-const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;
+mod literal;
+mod walk;
 
-fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
-    if runtime.operation.cancellation().is_cancelled() {
-        return Err("search cancelled".into());
-    }
-    Ok(())
-}
-
-fn rel_path(cwd: &Path, file: &Path) -> String {
-    file.strip_prefix(cwd)
-        .unwrap_or(file)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
-fn roots(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
-    if let Some(paths) = input.get("paths").and_then(Value::as_array) {
-        return paths
-            .iter()
-            .filter_map(Value::as_str)
-            .map(|path| jail_path(runtime.cwd, path))
-            .collect();
-    }
-    Ok(vec![jail_path(
-        runtime.cwd,
-        &string_input(input, "path").unwrap_or_else(|| ".".into()),
-    )?])
-}
-
-fn discover(
-    runtime: &ToolRuntime<'_>,
-    input: &Value,
-    include_dirs: bool,
-) -> Result<Vec<(PathBuf, bool)>, String> {
-    check(runtime)?;
-    let hidden = bool_input(input, "hidden", false);
-    let gitignore = bool_input(input, "gitignore", true);
-    let output = Arc::new(Mutex::new(Vec::<(PathBuf, bool)>::new()));
-    let error = Arc::new(Mutex::new(None::<String>));
-    for root in roots(runtime, input)? {
-        let metadata = fs::metadata(&root).map_err(|value| value.to_string())?;
-        if metadata.is_file() {
-            output
-                .lock()
-                .map_err(|_| "search result lock poisoned")?
-                .push((root, false));
-            continue;
-        }
-        let mut builder = WalkBuilder::new(&root);
-        builder
-            .hidden(!hidden)
-            .git_ignore(gitignore)
-            .git_exclude(gitignore)
-            .ignore(gitignore)
-            .parents(gitignore)
-            .require_git(false)
-            .threads(
-                std::thread::available_parallelism()
-                    .map(usize::from)
-                    .unwrap_or(2)
-                    .min(8),
-            );
-        let output = Arc::clone(&output);
-        let error = Arc::clone(&error);
-        let cancellation = runtime.operation.cancellation().clone();
-        builder.build_parallel().run(|| {
-            let output = Arc::clone(&output);
-            let error = Arc::clone(&error);
-            let cancellation = cancellation.clone();
-            let root = root.clone();
-            Box::new(move |entry| {
-                if cancellation.is_cancelled() {
-                    return WalkState::Quit;
-                }
-                let entry = match entry {
-                    Ok(entry) => entry,
-                    Err(value) => {
-                        if let Ok(mut slot) = error.lock() {
-                            if slot.is_none() {
-                                *slot = Some(value.to_string());
-                            }
-                        }
-                        return WalkState::Continue;
-                    }
-                };
-                if entry.path() == root {
-                    return WalkState::Continue;
-                }
-                let is_dir = entry.file_type().is_some_and(|kind| kind.is_dir());
-                if !include_dirs && is_dir {
-                    return WalkState::Continue;
-                }
-                if let Ok(mut values) = output.lock() {
-                    if values.len() >= MAX_SEARCH_FILES {
-                        return WalkState::Quit;
-                    }
-                    values.push((entry.into_path(), is_dir));
-                }
-                WalkState::Continue
-            })
-        });
-        check(runtime)?;
-    }
-    if let Some(error) = error
-        .lock()
-        .map_err(|_| "search error lock poisoned")?
-        .take()
-    {
-        return Err(error);
-    }
-    let mut values = Arc::try_unwrap(output)
-        .map_err(|_| "search workers still active")?
-        .into_inner()
-        .map_err(|_| "search result lock poisoned")?;
-    values.sort_by(|left, right| left.0.cmp(&right.0));
-    values.dedup_by(|left, right| left.0 == right.0);
-    values.truncate(MAX_SEARCH_FILES);
-    Ok(values)
-}
+use literal::{parallel_literal, text_files};
+use walk::{check, discover, rel_path, roots, MAX_SEARCH_FILE_BYTES};
 
 pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_text requires query")?;
@@ -159,81 +45,6 @@ pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         }
     }
     Ok(json!({"ok":true,"path":label,"query":query,"matches":matches}))
-}
-
-fn text_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
-    Ok(discover(runtime, input, false)?
-        .into_iter()
-        .filter_map(|(path, is_dir)| if is_dir { None } else { Some(path) })
-        .collect())
-}
-
-fn parallel_literal(
-    runtime: &ToolRuntime<'_>,
-    files: &[PathBuf],
-    query: &str,
-    case: bool,
-    max_matches: usize,
-) -> Result<Vec<(usize, usize, String)>, String> {
-    let output = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(2)
-        .min(8);
-    let chunk = files.len().max(1).div_ceil(workers);
-    std::thread::scope(|scope| {
-        for (chunk_index, part) in files.chunks(chunk).enumerate() {
-            let output = &output;
-            let cancellation = runtime.operation.cancellation().clone();
-            let needle = query.to_string();
-            scope.spawn(move || {
-                let mut collected = 0usize;
-                for (offset, path) in part.iter().enumerate() {
-                    if collected >= max_matches {
-                        break;
-                    }
-                    if cancellation.is_cancelled() {
-                        break;
-                    }
-                    if fs::metadata(path)
-                        .map(|meta| meta.len() > MAX_SEARCH_FILE_BYTES)
-                        .unwrap_or(true)
-                    {
-                        continue;
-                    }
-                    let Ok(content) = fs::read_to_string(path) else {
-                        continue;
-                    };
-                    if content.contains('\0') {
-                        continue;
-                    }
-                    for (line_index, line) in content.lines().enumerate() {
-                        let found = if case {
-                            line.contains(&needle)
-                        } else {
-                            line.to_lowercase().contains(&needle)
-                        };
-                        if found && collected < max_matches {
-                            if let Ok(mut values) = output.lock() {
-                                values.push((
-                                    chunk_index * chunk + offset,
-                                    line_index + 1,
-                                    line.to_string(),
-                                ));
-                                collected += 1;
-                            }
-                        }
-                    }
-                }
-            });
-        }
-    });
-    check(runtime)?;
-    let mut values = output
-        .into_inner()
-        .map_err(|_| "search result lock poisoned")?;
-    values.sort_by_key(|a| (a.0, a.1));
-    Ok(values)
 }
 
 pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {

@@ -29,8 +29,6 @@ pub(crate) fn mcp_native_tool(
     })
 }
 
-
-
 fn mcp_server(input: &Value) -> Result<String, String> {
     string_input(input, "server")
         .filter(|server| !server.is_empty())
