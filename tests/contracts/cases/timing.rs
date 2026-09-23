@@ -39,7 +39,8 @@ fn the_contract_states_time_to_completion_wherever_it_is_read() {
         .contains(&format!("Time to completion: {CLAUSE}")));
 
     let frames = home.rpc(&[json!({"id":"get", "method":"config/contracts/get", "params":{}})]);
-    let contract = &frames.iter().find(|frame| frame["id"] == "get").unwrap()["result"]["taskContract"];
+    let contract =
+        &frames.iter().find(|frame| frame["id"] == "get").unwrap()["result"]["taskContract"];
     assert_eq!(contract["version"], 2);
     assert_eq!(contract["timeToCompletion"]["title"], "Time to completion");
     assert_eq!(contract["timeToCompletion"]["description"], CLAUSE);
@@ -163,7 +164,11 @@ fn a_verified_request_keeps_its_first_estimate_beside_the_measured_time() {
         timing["differenceSeconds"],
         elapsed as i64 - (minutes * 60) as i64
     );
-    let expected = if elapsed <= minutes * 60 { "on_time" } else { "late" };
+    let expected = if elapsed <= minutes * 60 {
+        "on_time"
+    } else {
+        "late"
+    };
     assert_eq!(timing["state"], expected);
     let answer = result["text"].as_str().unwrap();
     assert!(
@@ -171,7 +176,10 @@ fn a_verified_request_keeps_its_first_estimate_beside_the_measured_time() {
         "{answer}"
     );
     let listed = text(home.ok(&["todo", "list"]));
-    assert!(listed.contains("  Time to completion: estimated "), "{listed}");
+    assert!(
+        listed.contains("  Time to completion: estimated "),
+        "{listed}"
+    );
     assert!(listed.contains(" · done in "), "{listed}");
 
     // A defect says the work was not really done: the completion moment

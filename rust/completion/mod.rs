@@ -8,8 +8,8 @@ mod constants;
 mod model;
 mod operations;
 mod store;
-mod todo;
 pub(crate) mod timing;
+mod todo;
 mod verification;
 
 pub(crate) use cli::command;

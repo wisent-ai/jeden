@@ -66,7 +66,10 @@ pub(crate) fn duration(seconds: u64) -> String {
 #[derive(Clone, Copy)]
 enum Outcome {
     Open,
-    Done { completed_at: u64, elapsed: u64 },
+    Done {
+        completed_at: u64,
+        elapsed: u64,
+    },
     /// Closed without an accepted review: every task was cancelled.
     Cancelled,
 }
