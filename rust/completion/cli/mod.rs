@@ -37,6 +37,7 @@ pub(crate) fn render(state: &CompletionState) -> String {
     if let Some(blocker) = &state.blocker {
         lines.push(format!("{}: {}", blocker.operation, blocker.message));
     }
+    let now = super::timing::now();
     for request in &state.requests {
         lines.push(format!(
             "Request {} [{}]: {}",
@@ -52,6 +53,7 @@ pub(crate) fn render(state: &CompletionState) -> String {
             },
             request.prompt
         ));
+        lines.push(format!("  {}", super::timing::line(request, now)));
         for task in state
             .tasks
             .iter()

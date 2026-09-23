@@ -40,6 +40,8 @@ pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), Stri
                 captured_at: crate::agent::now_stamp(),
                 planned: false,
                 coverage_verified: false,
+                estimate: None,
+                completed_at: None,
             });
             Ok(())
         })?;

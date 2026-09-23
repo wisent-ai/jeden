@@ -183,6 +183,21 @@ impl Conversation {
         } else {
             text
         };
+        // Jeden measures the time to completion itself; the model states
+        // neither figure in its report, so the answer cannot flatter it.
+        let text = if prepared.tracks_completion {
+            let state = crate::completion::read_state(&self.recorder.path())?;
+            match crate::completion::timing::report(
+                &state,
+                prepared.started_at,
+                prepared.language.code() == "pl",
+            ) {
+                Some(timing) => format!("{}\n\n{timing}", text.trim_end()),
+                None => text,
+            }
+        } else {
+            text
+        };
         if prepared.tracks_completion {
             crate::goal_lifecycle::finish_verified_goal(
                 &args.cwd,

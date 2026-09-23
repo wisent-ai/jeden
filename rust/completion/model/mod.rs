@@ -81,6 +81,16 @@ pub struct WorkTask {
     pub operator_request: Option<OperatorRequest>,
 }
 
+/// How long the independent intake expected a request to take, recorded once
+/// when it planned the request, before any execution. Nothing revises it, so
+/// the measured time is always compared with the first promise.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompletionEstimate {
+    pub minutes: u64,
+    pub recorded_at: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkRequest {
@@ -92,6 +102,12 @@ pub struct WorkRequest {
     pub captured_at: String,
     pub planned: bool,
     pub coverage_verified: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimate: Option<CompletionEstimate>,
+    /// When an independent review accepted the request as complete; removed
+    /// again when a defect reopens it, because reopened work was not done.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -215,6 +231,22 @@ impl CompletionState {
                 || !ids.insert(request.id.as_str())
             {
                 return Err("completion state contains an empty or duplicate request".into());
+            }
+            if request
+                .estimate
+                .as_ref()
+                .is_some_and(|estimate| estimate.minutes == 0)
+            {
+                return Err(format!(
+                    "request {} records a time-to-completion estimate of zero minutes",
+                    request.id
+                ));
+            }
+            if request.completed_at.is_some() && !request.coverage_verified {
+                return Err(format!(
+                    "request {} records a completion time but is not verified complete",
+                    request.id
+                ));
             }
         }
         ids.clear();

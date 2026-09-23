@@ -200,6 +200,17 @@ pub(crate) fn apply_review(
                     .iter()
                     .filter(|task| task.request_id == request.id)
                     .all(|task| task.status.terminal());
+            // Only an accepted review ends a request's time to completion, and
+            // only when some of its work was really done: a request whose
+            // every task was cancelled closed without being completed.
+            if request.coverage_verified
+                && state
+                    .tasks
+                    .iter()
+                    .any(|task| task.request_id == request.id && task.status == TaskStatus::Done)
+            {
+                request.completed_at = Some(crate::agent::now_stamp());
+            }
             let owned: Vec<_> = state
                 .tasks
                 .iter()

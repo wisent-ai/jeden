@@ -24,6 +24,12 @@ pub(crate) struct IntakePlan {
     pub tasks: Vec<PlannedTask>,
     #[serde(default)]
     pub cancellations: Vec<UserCancellation>,
+    /// Whole minutes the intake expects the request to take until it is
+    /// independently verified complete. Unlike `kind`, a missing estimate has
+    /// no strict reading to fall back on, so the controller refuses the plan
+    /// and the intake gets its one correction.
+    #[serde(default)]
+    pub estimate_minutes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]

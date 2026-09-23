@@ -67,6 +67,17 @@ impl Conversation {
                     "revision": planned.revision,
                 }),
             )?;
+            if let Some(estimate) = planned
+                .requests
+                .iter()
+                .find(|request| request.id == request_id)
+                .and_then(|request| request.estimate.as_ref())
+            {
+                hooks.note(&format!(
+                    "time to completion estimated at {} before execution; Jeden measures the actual time to verified completion",
+                    completion::timing::duration(estimate.minutes.saturating_mul(60))
+                ));
+            }
             self.publish_completion(&planned, hooks)?;
         }
     }

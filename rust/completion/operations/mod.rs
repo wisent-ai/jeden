@@ -28,6 +28,10 @@ pub(crate) fn plan_request(
         if plan.tasks.is_empty() {
             return Err("completion intake must account for the full user request".into());
         }
+        let minutes = plan
+            .estimate_minutes
+            .filter(|minutes| *minutes > 0)
+            .ok_or("completion intake must estimate the time to completion before execution: estimateMinutes is a whole number of minutes above zero")?;
         for cancellation in &plan.cancellations {
             if cancellation.quote.trim().is_empty() || !request.prompt.contains(&cancellation.quote)
             {
@@ -97,12 +101,16 @@ pub(crate) fn plan_request(
                 operator_request: None,
             });
         }
-        state
+        let request = state
             .requests
             .iter_mut()
             .find(|request| request.id == request_id)
-            .expect("request checked above")
-            .planned = true;
+            .expect("request checked above");
+        request.planned = true;
+        request.estimate = Some(CompletionEstimate {
+            minutes,
+            recorded_at: crate::agent::now_stamp(),
+        });
         state.blocker = None;
         Ok(())
     })?;
@@ -256,6 +264,7 @@ pub(crate) fn snapshot_value(state: &CompletionState) -> Value {
         "requests": state.requests,
         "tasks": state.tasks,
         "blocker": state.blocker,
+        "timing": super::timing::values(state),
         "completed": state.tasks.iter().filter(|task| task.status == TaskStatus::Done).count(),
         "cancelled": state.tasks.iter().filter(|task| task.status == TaskStatus::Cancelled).count(),
         "unplanned": state.requests.iter().filter(|request| !request.planned).count(),
@@ -266,9 +275,16 @@ pub(crate) fn snapshot_value(state: &CompletionState) -> Value {
 }
 
 pub(crate) fn model_context(state: &CompletionState) -> String {
+    let now = super::timing::now();
     let requests: Vec<_> = state.requests.iter()
         .filter(|request| !request.coverage_verified)
-        .map(|request| json!({"id": request.id, "prompt": request.prompt, "cwd": request.cwd, "paused": request.paused, "planned": request.planned}))
+        .map(|request| {
+            let mut value = json!({"id": request.id, "prompt": request.prompt, "cwd": request.cwd, "paused": request.paused, "planned": request.planned});
+            if let Some(timing) = super::timing::context(request, now) {
+                value["timeToCompletion"] = timing;
+            }
+            value
+        })
         .collect();
     let tasks: Vec<_> = state
         .tasks
@@ -282,6 +298,8 @@ pub(crate) fn model_context(state: &CompletionState) -> String {
          Use a message action for progress or an answer that does not finish the retained work. \
          A task with an operatorRequest waits on the operator: an unanswered ask is theirs to answer, not yours to work around; \
          an answered one carries their answer, so use it and do not ask again. \
+         A planned request's timeToCompletion is the estimate the intake recorded before execution and the minutes spent since: \
+         tell the user that estimate when you start the work and never revise it; Jeden measures the actual time and adds it to the final answer. \
          A final action is a completion proposal and will be checked against ALL open requests.\n{}",
         json!({"requests": requests, "tasks": tasks, "blocker": state.blocker})
     )

@@ -14,6 +14,9 @@ pub(super) struct Prepared {
     pub(super) tracks_completion: bool,
     pub(super) language: crate::cli::config::UiLanguage,
     pub(super) classification: Option<std::thread::JoinHandle<()>>,
+    /// When this turn began, so its answer reports the time to completion of
+    /// exactly the requests an independent review accepted during the turn.
+    pub(super) started_at: u64,
 }
 
 impl Conversation {
@@ -26,6 +29,7 @@ impl Conversation {
         completion_request: Option<String>,
         hooks: &RunHooks<'_>,
     ) -> Result<Prepared, String> {
+        let started_at = crate::completion::timing::now();
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
         // The stage that can change the product owes the delivery report,
@@ -165,6 +169,7 @@ impl Conversation {
             tracks_completion,
             language,
             classification,
+            started_at,
         })
     }
 }

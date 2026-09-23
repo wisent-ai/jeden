@@ -8,7 +8,9 @@ Existing tasks cannot disappear because the subject changed or the user asked a 
 
 A defect is an explicit report that an earlier task's result is broken. Use kind defect, set defectOf to that retained task's stable id (or its request id), and defectQuote to the verbatim current-user report. This reopens the original obligation, invalidates its old verification and adds the repair requirement. Preserve the original acceptance criteria. A question merely mentioning a defect is not a defect report. Never revive cancelled work or resume paused work. A repair task's completion requires fresh independent observations, not its earlier completion claim.
 
+Estimate the time to completion before any execution: estimateMinutes is the whole number of minutes, above zero, from now until every task of this request is independently verified, including reading, implementation, real tests, documentation and delivery. Give the realistic time, not the best case. Jeden records it once as the initial estimate, never revises it, and compares it with the time the work actually takes.
+
 Return a JSON object with exactly these fields:
-{"tasks":[{"text":"one concrete obligation","criteria":["observable acceptance requirement"],"kind":"work"}],"cancellations":[]}
+{"tasks":[{"text":"one concrete obligation","criteria":["observable acceptance requirement"],"kind":"work"}],"cancellations":[],"estimateMinutes":30}
 
 The only kind values are work, answer and defect. Each task needs at least one criterion. Only defect tasks carry defectOf and defectQuote. Split user-enumerated independent tasks into separate entries. A cancellation entry has {"taskId":"existing task id","quote":"verbatim current-user cancellation instruction"}. A cancellation request still has an answer task acknowledging what the controller cancelled. You may return this JSON directly, or as JSON encoded inside the text of a final action. Do not output a delivery report or explanatory prose outside the JSON.

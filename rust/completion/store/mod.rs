@@ -49,7 +49,7 @@ pub(crate) fn read(dir: &Path) -> Result<CompletionState, String> {
             ))
         }
     };
-    if state.schema_version == super::constants::PRE_DEFECT_SCHEMA_VERSION {
+    if super::constants::UPGRADED_SCHEMA_VERSIONS.contains(&state.schema_version) {
         state.schema_version = super::constants::SCHEMA_VERSION;
     }
     state.validate()?;
@@ -208,6 +208,8 @@ fn legacy_state(dir: &Path) -> Result<CompletionState, String> {
             captured_at: crate::agent::now_stamp(),
             planned: true,
             coverage_verified: false,
+            estimate: None,
+            completed_at: None,
         });
     }
     Ok(state)
@@ -258,6 +260,8 @@ fn legacy_requests(dir: &Path) -> Result<CompletionState, String> {
             captured_at: event.timestamp,
             planned: false,
             coverage_verified: false,
+            estimate: None,
+            completed_at: None,
         });
     }
     Ok(state)

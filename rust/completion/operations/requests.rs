@@ -22,6 +22,8 @@ pub(crate) fn capture_request(
             captured_at: crate::agent::now_stamp(),
             planned: false,
             coverage_verified: false,
+            estimate: None,
+            completed_at: None,
         });
         state.blocker = None;
         Ok(id)

@@ -80,7 +80,10 @@ pub(super) fn reopen_target(
             task.reason = Some(format!("Reopened by defect: {reason}"));
         }
     }
+    // Reopened work was not done, so its time to completion runs on from the
+    // same first estimate until a fresh review accepts the repair.
     state.requests[owner].coverage_verified = false;
+    state.requests[owner].completed_at = None;
     state.blocker = None;
     Ok((target, request_id, status))
 }

@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt::Write;
 
-pub(crate) const VERSION: u32 = 1;
+/// Version two adds the time-to-completion clause: an estimate before any
+/// implementation, never revised, beside the measured time to verified
+/// completion. The seven report entries are unchanged.
+pub(crate) const VERSION: u32 = 2;
 pub(crate) const VIOLATION_EVENT: &str = "contract_violation";
 pub(crate) const REPAIR_INSTRUCTION: &str = "Return the complete final action with text and report. Report must contain functionality, diagnostics, cli, gui, documentation, tests, delivery. Each entry must have status (done, not_applicable, or blocked), a concrete nonempty explanation of how you fulfilled it or why it does not apply/is blocked, and an evidence array. Every done entry needs at least one nonempty evidence reference. Do not invent work or results, repeat completed work, or mark unfinished work done. A heading alone is not a report. The next invalid report ends this turn with a contract error, not success.";
 
@@ -54,6 +57,15 @@ const REQUIREMENTS: [Requirement; 7] = [
     },
 ];
 
+/// The one clause Jeden also measures instead of only stating: the intake
+/// records the estimate before execution and the completion controller the
+/// moment an independent review accepts the work, so no report carries it.
+const TIME_TO_COMPLETION: Requirement = Requirement {
+    id: "timeToCompletion",
+    en: ("Time to completion", "Before implementation, estimate how long the task will take and tell the user when it will be done. Do not change that first estimate to fit the result. When the task is done, give the actual time next to the estimate. Jeden records the estimate before execution and measures the actual time itself; where no harness measures it, state both yourself."),
+    pl: ("Czas ukończenia", "Przed implementacją oszacuj, ile potrwa zadanie, i powiedz użytkownikowi, kiedy będzie gotowe. Nie zmieniaj tej pierwszej estymacji pod wynik. Po ukończeniu podaj rzeczywisty czas obok estymacji. Jeden zapisuje estymację przed wykonaniem i sam mierzy rzeczywisty czas; tam, gdzie nic go nie mierzy, podaj oba czasy sam."),
+};
+
 impl Requirement {
     fn prose(&self, language: &UiLanguage) -> (&'static str, &'static str) {
         if language.code() == "pl" {
@@ -97,6 +109,8 @@ pub(crate) fn section(language: &UiLanguage) -> String {
     } else {
         "Do not modify the source, binaries or installed packages of externally owned products such as OMP. A local copy, fork, renamed directory or changed remote does not transfer ownership. Use documented configuration, APIs and separately maintained extensions; repair our product's integration. If a requirement would require modifying OMP, switch entirely to Jeden. Updating or uninstalling through the supported product mechanism is not permission to patch third-party code.\n"
     });
+    let (title, description) = TIME_TO_COMPLETION.prose(language);
+    writeln!(text, "{title}: {description}").unwrap();
     for requirement in &REQUIREMENTS {
         let (title, description) = requirement.prose(language);
         writeln!(text, "- {} ({title}): {description}", requirement.id).unwrap();
@@ -105,6 +119,7 @@ pub(crate) fn section(language: &UiLanguage) -> String {
 }
 
 pub(crate) fn snapshot(language: &UiLanguage) -> Value {
+    let (title, description) = TIME_TO_COMPLETION.prose(language);
     json!({
         "version": VERSION,
         "instructions": section(language),
@@ -113,11 +128,12 @@ pub(crate) fn snapshot(language: &UiLanguage) -> Value {
             let (title, description) = requirement.prose(language);
             json!({ "id": requirement.id, "title": title, "description": description })
         }).collect::<Vec<_>>(),
+        TIME_TO_COMPLETION.id: { "title": title, "description": description },
     })
 }
 
 pub(crate) fn turn_instruction() -> &'static str {
-    "Task delivery contract v1 applies to this turn, including tasks completed without tools. Return {\"action\":\"final\",\"text\":\"your concise answer\",\"report\":{...}}. The report contains exactly functionality, diagnostics, cli, gui, documentation, tests, delivery. Each entry has {\"status\":\"done|not_applicable|blocked\",\"explanation\":\"how this requirement was fulfilled, or the concrete reason it does not apply/is blocked\",\"evidence\":[\"actual file, command, run, revision or other source reference\"]}. Use one of the three status values, not their combined spelling. A done entry requires evidence; other statuses may use an empty array. When a blocked entry waits on something only the user can supply (a secret, a credential, a decision, a value that exists in no file), its explanation names exactly what they must give and where it goes, in one sentence; the independent review records that ask on the task and the work waits for the user's answer instead of being asked to continue. Write explanations in the user's language. Do not put a second report in text: Jeden renders the report. Do not mark an applicable but unfinished requirement not_applicable. Tests for product changes must execute real full flows and retain results; no particular test runner is required. Do not fabricate tests, results or evidence. A report describes your work; its structural acceptance is not independent verification of your claims."
+    "Task delivery contract v2 applies to this turn, including tasks completed without tools. Return {\"action\":\"final\",\"text\":\"your concise answer\",\"report\":{...}}. The report contains exactly functionality, diagnostics, cli, gui, documentation, tests, delivery. Each entry has {\"status\":\"done|not_applicable|blocked\",\"explanation\":\"how this requirement was fulfilled, or the concrete reason it does not apply/is blocked\",\"evidence\":[\"actual file, command, run, revision or other source reference\"]}. Use one of the three status values, not their combined spelling. A done entry requires evidence; other statuses may use an empty array. When a blocked entry waits on something only the user can supply (a secret, a credential, a decision, a value that exists in no file), its explanation names exactly what they must give and where it goes, in one sentence; the independent review records that ask on the task and the work waits for the user's answer instead of being asked to continue. Write explanations in the user's language. Do not put a second report in text: Jeden renders the report. Do not mark an applicable but unfinished requirement not_applicable. Tests for product changes must execute real full flows and retain results; no particular test runner is required. Do not fabricate tests, results or evidence. A report describes your work; its structural acceptance is not independent verification of your claims. The time to completion is not a report entry: Jeden recorded the estimate before execution and adds the measured time to your answer itself."
 }
 
 #[derive(Debug, Deserialize, Serialize)]
