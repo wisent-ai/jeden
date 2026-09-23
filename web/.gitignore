@@ -1,2 +1,7 @@
 .vercel
 .env*.local
+# Rendered from docs/**/*.mjs by `node docs/pages.mjs`: the Vercel build
+# writes them for every deployment, `npm run build:docs` for a local preview.
+/docs/**/*.html
+/sitemap.xml
+/wisent-components.css

@@ -170,44 +170,45 @@ ${SITE_FOOTER}
 `;
 }
 
-/* ------------------------------------------------------------------------ */
-export async function buildDocs() {
-  const componentStyles = fileURLToPath(await import.meta.resolve("@wisent-ai/components/styles.css"));
-  await copyFile(componentStyles, path.join(webRoot, "wisent-components.css"));
+/* ------------------------------------------------------------------------
+ * What the site serves. The Vercel build writes these outputs from the
+ * sources pushed to main, and tests/docs compares production with them, so
+ * each output has exactly one renderer.
+ * ---------------------------------------------------------------------- */
+function pageLink(page) {
+  return {
+    label: page.navLabel ?? nav.find((item) => item.href === page.href)?.label ?? page.slug,
+    href: page.href,
+  };
+}
 
-  function pageLink(page) {
-    return {
-      label: page.navLabel ?? nav.find((item) => item.href === page.href)?.label ?? page.slug,
-      href: page.href,
-    };
-  }
+/** The whole HTML document of `pages[index]`, byte for byte as served. */
+export function renderPage(index) {
+  const page = pages[index];
+  const body = renderToStaticMarkup(
+    h(DocumentationLayout, {
+      product,
+      homeHref,
+      sourceHref,
+      sourceLabel,
+      nav,
+      currentHref: page.href,
+      previous: index > 0 ? pageLink(pages[index - 1]) : undefined,
+      next: index < pages.length - 1 ? pageLink(pages[index + 1]) : undefined,
+      page: {
+        slug: page.slug,
+        eyebrow: page.eyebrow,
+        title: rich(page.title),
+        description: rich(page.description),
+        sections: page.sections.map(richSection),
+      },
+    }),
+  );
+  return shell(page, body);
+}
 
-  for (const [i, page] of pages.entries()) {
-    const body = renderToStaticMarkup(
-      h(DocumentationLayout, {
-        product,
-        homeHref,
-        sourceHref,
-        sourceLabel,
-        nav,
-        currentHref: page.href,
-        previous: i > 0 ? pageLink(pages[i - 1]) : undefined,
-        next: i < pages.length - 1 ? pageLink(pages[i + 1]) : undefined,
-        page: {
-          slug: page.slug,
-          eyebrow: page.eyebrow,
-          title: rich(page.title),
-          description: rich(page.description),
-          sections: page.sections.map(richSection),
-        },
-      }),
-    );
-    const outFile = path.join(docsDir, page.file);
-    await mkdir(path.dirname(outFile), { recursive: true });
-    await writeFile(outFile, shell(page, body));
-    console.log(`wrote docs/${page.file}`);
-  }
-
+/** `/sitemap.xml`: the landing page and every documentation page. */
+export function renderSitemap() {
   const sitemapUrls = [
     { href: "/", priority: "1.0" },
     ...pages.map((page) => ({
@@ -215,7 +216,7 @@ export async function buildDocs() {
       priority: page.href === "/docs" ? "0.8" : "0.7",
     })),
   ];
-  const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
+  return `<?xml version="1.0" encoding="UTF-8"?>
   <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   ${sitemapUrls
     .map(
@@ -228,7 +229,22 @@ export async function buildDocs() {
     .join("\n")}
   </urlset>
   `;
-  await writeFile(path.join(webRoot, "sitemap.xml"), sitemap);
+}
+
+/** The component package's stylesheet, served as `/wisent-components.css`. */
+export function componentStylesPath() {
+  return fileURLToPath(import.meta.resolve("@wisent-ai/components/styles.css"));
+}
+
+export async function buildDocs() {
+  await copyFile(componentStylesPath(), path.join(webRoot, "wisent-components.css"));
+  for (const [index, page] of pages.entries()) {
+    const outFile = path.join(docsDir, page.file);
+    await mkdir(path.dirname(outFile), { recursive: true });
+    await writeFile(outFile, renderPage(index));
+    console.log(`wrote docs/${page.file}`);
+  }
+  await writeFile(path.join(webRoot, "sitemap.xml"), renderSitemap());
   console.log("wrote sitemap.xml");
   console.log("wrote wisent-components.css");
 }

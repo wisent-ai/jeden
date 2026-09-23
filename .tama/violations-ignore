@@ -3,22 +3,6 @@
 # audit reads it as generated output instead of asking somebody to split it.
 assets/readme-banner.svg
 
-# The documentation site. Every page below is written whole by
-# `npm run build:docs` (`node web/docs/pages.mjs`) from the definitions in
-# `web/docs/pages.mjs`, `web/docs/cli-pages.mjs` and `web/docs/commands/*.mjs`,
-# which is where a person edits them. Splitting a rendered page, or moving one
-# into a sub-folder by hand, would be undone by the next build and would put
-# the file somewhere the generator does not write. The sources above are NOT
-# declared and are audited as ordinary modules.
-web/docs/cli/
-web/docs/cli.html
-web/docs/context.html
-web/docs/index.html
-web/docs/sessions.html
-web/docs/tools.html
-web/sitemap.xml
-web/wisent-components.css
-
 # The repository root. Every file left in it is fixed there by a tool that
 # reads it by that exact path: cargo reads Cargo.toml and Cargo.lock and runs
 # build.rs, npm reads package.json and package-lock.json, git reads

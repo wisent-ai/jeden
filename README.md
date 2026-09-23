@@ -214,6 +214,8 @@ Jeden is a command-line package, not a fleet service. Publication therefore does
 
 `darwin-arm64` and `linux-amd64` are the declared promoted outputs. A compilation gate is not evidence that the model-backed completion journey passed; the real contract run and its result remain separate recorded evidence.
 
+The documentation site at [jeden.wisent.com/docs](https://jeden.wisent.com/docs) is published from source, and no rendered page is committed. Vercel deploys `web/` on every push to `main`: its build installs the repository's locked Node packages (`npm ci --prefix ..`) and runs `node docs/pages.mjs`, which renders `web/docs/**/*.html`, `web/sitemap.xml` and `web/wisent-components.css` from the page sources in `web/docs/` (`pages.mjs`, `cli-pages.mjs`, `content/`, `commands/`). A documentation change is therefore published by pushing its source. `npm run build:docs` renders the same files for a local preview; git ignores them. `node tests/docs/published-pages.probierz.spec.mjs` fetches every production page, the sitemap and the stylesheet, and fails with the page and the first differing text unless production serves exactly what the sources of the checked-out revision render. Run it once that revision is deployed: a failed Vercel build leaves the previous deployment in production, and the check reports that as a difference.
+
 ## Configuration and context
 
 Where configuration is read from and what context a run is given is documented
