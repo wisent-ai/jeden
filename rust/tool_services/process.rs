@@ -6,7 +6,6 @@ use serde_json::Value;
 use std::ffi::OsString;
 use std::path::Path;
 
-
 pub(crate) fn run(
     service: &'static str,
     context: &OperationContext<'_>,

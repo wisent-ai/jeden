@@ -62,12 +62,7 @@ fn a_recorded_turn_carries_the_advisory() {
     // Intake plans the retained request before the turn itself runs, and it
     // spends a step doing it, so a one-step budget ends the run before the
     // prologue this case measures. Three leaves the turn its own step.
-    let run = workspace.run(&[
-        "run",
-        "how is a lease renewal done",
-        "--max-steps",
-        "3",
-    ]);
+    let run = workspace.run(&["run", "how is a lease renewal done", "--max-steps", "3"]);
     let transcript = workspace.transcript();
     let recorded = transcript
         .lines()

@@ -180,7 +180,6 @@ impl MediaRouterClient {
         let response = self
             .client
             .post(self.endpoint(path)?)
-
             .bearer_auth(&self.token)
             .json(body)
             .send()
@@ -204,7 +203,6 @@ impl MediaRouterClient {
         let response = self
             .client
             .get(self.endpoint(&format!("media/{job_id}"))?)
-
             .bearer_auth(&self.token)
             .send()
             .map_err(|error| backend_error("media-router", error))?;
@@ -228,7 +226,6 @@ impl MediaRouterClient {
         let response = self
             .client
             .get(self.endpoint(&format!("media/{job_id}/content"))?)
-
             .bearer_auth(&self.token)
             .send()
             .map_err(|error| backend_error("media-router", error))?;
@@ -660,7 +657,6 @@ fn backend_error(service: &'static str, error: reqwest::Error) -> ServiceError {
         detail: error.to_string(),
     }
 }
-
 
 fn image_metadata(bytes: &[u8]) -> ServiceResult<(&'static str, u32, u32)> {
     if bytes.len() >= 24 && &bytes[..8] == b"\x89PNG\r\n\x1a\n" {

@@ -79,7 +79,10 @@ fn tools() -> Option<Tools> {
                 write: ("wl-copy".to_string(), Vec::new()),
             },
             Tools {
-                read: ("xclip".to_string(), words(&["-selection", "clipboard", "-o"])),
+                read: (
+                    "xclip".to_string(),
+                    words(&["-selection", "clipboard", "-o"]),
+                ),
                 write: ("xclip".to_string(), words(&["-selection", "clipboard"])),
             },
         ],

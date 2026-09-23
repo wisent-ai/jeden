@@ -134,7 +134,8 @@ fn tama_registry_end_to_end() {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&guard, fs::Permissions::from_mode(0o755)).expect("make guard runnable");
+        fs::set_permissions(&guard, fs::Permissions::from_mode(0o755))
+            .expect("make guard runnable");
     }
     env::set_var("JEDEN_TAMA_REGISTRY", &beside);
     assert_eq!(

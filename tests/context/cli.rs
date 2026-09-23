@@ -212,7 +212,11 @@ fn a_configured_but_unreachable_index_says_so() {
 fn an_unknown_source_is_refused_by_name() {
     let workspace = Workspace::new("unknown-source");
     let run = workspace.run(&["context", "recommend", "lease", "--source", "nonsense"]);
-    assert!(!run.success, "an unknown source must refuse: {}", run.stdout);
+    assert!(
+        !run.success,
+        "an unknown source must refuse: {}",
+        run.stdout
+    );
     assert!(
         run.stderr.contains(
             "unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts"

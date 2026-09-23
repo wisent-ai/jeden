@@ -43,9 +43,11 @@ fn a_second_install_changes_nothing_and_says_so() {
     let workspace = Workspace::new("omp-idempotent");
     let file = workspace.path("omp-tools/jeden_context.ts");
     let path = file.display().to_string();
-    assert!(workspace
-        .run(&["context", "install", "--file", &path])
-        .success);
+    assert!(
+        workspace
+            .run(&["context", "install", "--file", &path])
+            .success
+    );
     let again = workspace.run(&["context", "install", "--file", &path, "--json"]);
     assert!(again.success, "the second install failed: {}", again.stderr);
     assert_eq!(again.json()["changed"], false);
@@ -59,9 +61,11 @@ fn an_edited_tool_is_reported_stale_and_refused() {
     let workspace = Workspace::new("omp-stale");
     let file = workspace.path("omp-tools/jeden_context.ts");
     let path = file.display().to_string();
-    assert!(workspace
-        .run(&["context", "install", "--file", &path])
-        .success);
+    assert!(
+        workspace
+            .run(&["context", "install", "--file", &path])
+            .success
+    );
     std::fs::write(&file, "export default null;\n").expect("edit the installed tool by hand");
     let reported = workspace.run(&["context", "installed", "--file", &path]);
     assert!(

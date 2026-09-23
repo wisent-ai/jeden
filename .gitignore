@@ -16,6 +16,9 @@ benchmarks/output/
 
 target/
 .wisent-output/
+# Throwaway state a local run keeps inside the checkout (for example the
+# migration adoption check's session ledgers); never source.
+/.build/
 *.rmeta
 packages/*/dist/
 .worktrees/
