@@ -17,7 +17,11 @@ unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
 }
 
-const EMBEDDED_BRIDGE: &str = include_str!("browser-bridge.mjs");
+// The bridge is one node script kept in two files; they run as one program.
+const EMBEDDED_BRIDGE: &str = concat!(
+    include_str!("bridge-core.mjs"),
+    include_str!("bridge-actions.mjs")
+);
 
 fn default_chromium(config: &Value) -> Option<String> {
     config::string(

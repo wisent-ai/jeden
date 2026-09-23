@@ -4,6 +4,8 @@ use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 
 mod operator;
 mod review;
+mod criterion;
+pub use criterion::CriterionReview;
 
 pub use operator::{OperatorAnswer, OperatorRequest};
 pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus, TaskReview};
@@ -294,15 +296,4 @@ impl CompletionState {
         }
         Ok(())
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-// Read from a verifier's answer as well as from the state, so extra fields a
-// model echoes are ignored; every field below is still required.
-#[serde(rename_all = "camelCase")]
-pub struct CriterionReview {
-    pub index: usize,
-    pub satisfied: bool,
-    pub explanation: String,
-    pub evidence: Vec<EvidenceReference>,
 }

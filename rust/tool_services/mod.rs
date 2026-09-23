@@ -4,8 +4,10 @@ mod debugger;
 mod github;
 mod media;
 mod process;
+#[path = "network/ssh.rs"]
 mod ssh;
 mod types;
+#[path = "network/web.rs"]
 mod web;
 
 pub use types::{HealthDescriptor, HealthStatus};
