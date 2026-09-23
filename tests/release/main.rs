@@ -129,7 +129,12 @@ fn export_and_stage_offline() {
     let provenance_path = inputs.join("provenance.json");
     let original = fs::read(&provenance_path).expect("read provenance");
     let mut provenance: Value = serde_json::from_slice(&original).expect("provenance JSON");
+    // A lockfile that changed anywhere but its private packages - a jeden
+    // version bump rewrites jeden's own entry - still matches the input.
     provenance["cargo_lock_sha256"] = json!(format!("{:x}", Sha256::digest(b"different lockfile")));
+    fs::write(&provenance_path, provenance.to_string()).expect("write altered provenance");
+    journey.tool(&metadata, &worker, 0);
+    provenance["packages"][0]["version"] = json!("0.0.0-not-locked");
     fs::write(&provenance_path, provenance.to_string()).expect("write altered provenance");
     let mismatch = journey.tool(&build, &env, 1).1;
     assert!(

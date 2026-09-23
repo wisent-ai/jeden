@@ -1,7 +1,6 @@
 //! Running Cargo with the declared private-source input, and staging the
 //! native binaries a release worker packages.
 
-use super::digest_file;
 use crate::repository_root;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -126,23 +125,41 @@ pub(super) fn cargo(arguments: &[String]) -> Result<u8, String> {
     if provenance["schema_version"] != PROVENANCE_SCHEMA_VERSION {
         return Err("unsupported private Cargo source schema".into());
     }
-    let lock = digest_file(&repository_root().join("Cargo.lock"))?;
-    if provenance["cargo_lock_sha256"].as_str() != Some(lock.as_str()) {
-        return Err(
-            "private Cargo sources do not match Cargo.lock; export and publish a new input".into(),
-        );
-    }
-    let sources = provenance["packages"]
+    let lock_path = repository_root().join("Cargo.lock");
+    let lock = fs::read_to_string(&lock_path)
+        .map_err(|error| format!("{}: {error}", lock_path.display()))?;
+    let locked = locked_private_packages(&lock)?;
+    let carried = provenance["packages"]
         .as_array()
         .ok_or("private Cargo source provenance lists no packages")?
         .iter()
         .map(|package| {
-            package["source"]
-                .as_str()
-                .map(str::to_string)
-                .ok_or("a private Cargo source package names no source")
+            match (
+                package["name"].as_str(),
+                package["version"].as_str(),
+                package["source"].as_str(),
+            ) {
+                (Some(name), Some(version), Some(source)) => {
+                    Ok([name.to_string(), version.to_string(), source.to_string()])
+                }
+                _ => Err(format!(
+                    "a private Cargo source package is incomplete: {package}"
+                )),
+            }
         })
         .collect::<Result<BTreeSet<_>, _>>()?;
+    if carried != locked {
+        return Err(format!(
+            "private Cargo sources do not match Cargo.lock; export and publish a new input \
+             (the input carries {}, Cargo.lock locks {})",
+            listed(&carried),
+            listed(&locked)
+        ));
+    }
+    let sources = carried
+        .into_iter()
+        .map(|[_, _, source]| source)
+        .collect::<BTreeSet<_>>();
     let configuration = input.join("config.toml");
     let declared = fs::read_to_string(&configuration)
         .map_err(|error| format!("{}: {error}", configuration.display()))?;
@@ -166,6 +183,52 @@ pub(super) fn cargo(arguments: &[String]) -> Result<u8, String> {
         Some(Ok(code)) => Ok(code),
         _ => Err(format!("Cargo ended without an exit code: {status}")),
     }
+}
+
+/// Every private Git package `Cargo.lock` locks, as name, version and source.
+///
+/// This is what an exported input has to match, because it is all the input
+/// carries. The input used to be bound to the whole lockfile's digest, and
+/// every version bump of jeden rewrites jeden's own entry there: release run
+/// 7ebda0f9 (0.1.22) and six queued changes before it died at their first
+/// quality step on an unchanged pair of private crates.
+fn locked_private_packages(lock: &str) -> Result<BTreeSet<[String; 3]>, String> {
+    let mut packages = BTreeSet::new();
+    for block in lock.split("[[package]]").skip(1) {
+        let field = |key: &str| -> Result<Option<String>, String> {
+            let prefix = format!("{key} = ");
+            match block
+                .lines()
+                .find_map(|line| line.strip_prefix(prefix.as_str()))
+            {
+                None => Ok(None),
+                Some(value) => value
+                    .strip_prefix('"')
+                    .and_then(|value| value.strip_suffix('"'))
+                    .map(|value| Some(value.to_string()))
+                    .ok_or_else(|| format!("Cargo.lock {key} is not a plain string: {value}")),
+            }
+        };
+        // Registry packages name a `registry+` source and path packages none;
+        // only Git sources are exported.
+        let Some(source) = field("source")?.filter(|source| source.starts_with("git+")) else {
+            continue;
+        };
+        let name =
+            field("name")?.ok_or_else(|| format!("Cargo.lock locks {source} without a name"))?;
+        let version = field("version")?
+            .ok_or_else(|| format!("Cargo.lock locks {name} without a version"))?;
+        packages.insert([name, version, source]);
+    }
+    Ok(packages)
+}
+
+fn listed(packages: &BTreeSet<[String; 3]>) -> String {
+    packages
+        .iter()
+        .map(|[name, version, source]| format!("{name} {version} from {source}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub(super) fn stage(binaries: &[String]) -> Result<u8, String> {
