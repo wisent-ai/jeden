@@ -30,7 +30,7 @@ pub(super) fn session_command(
     handler_relaunch: &Arc<Mutex<Option<RelaunchPlan>>>,
 ) -> Result<Option<tui::CommandOutcome>, String> {
     let result: Result<String, String> = match command {
-        "/todo" if rest.trim() == "continue" => handler_conv.lock().continue_work(&run_args, hooks),
+        "/todo" if rest.trim() == "continue" => handler_conv.lock().continue_work(run_args, hooks),
         "/todo" => {
             let session = handler_conv.lock().session_path();
             agent::update_last_session_path(&run_args.cwd, &session)?;
@@ -38,7 +38,7 @@ pub(super) fn session_command(
                 &run_args.cwd,
                 &crate::slash::common::split_args(rest),
                 false,
-                Some(&run_args),
+                Some(run_args),
             )
         }
         "/model" | "/models" | "/switch" => {
@@ -121,7 +121,7 @@ pub(super) fn session_command(
                 return Err("Usage: /rebuild".into());
             }
             let session_path = handler_conv.lock().session_path();
-            let plan = self_rebuild::prepare(&run_args, &session_path)?;
+            let plan = self_rebuild::prepare(run_args, &session_path)?;
             *handler_relaunch.lock() = Some(plan);
             return Ok(Some(tui::CommandOutcome::Exit(
                 "Rebuilt and health-checked Jeden; resuming this session in the new executable."
@@ -129,12 +129,12 @@ pub(super) fn session_command(
             )));
         }
         "/retry" => {
-            let task = agent::retry_task(&run_args)?;
-            run_turn_shared(&handler_conv, &run_args, &task, &attachments, hooks)
+            let task = agent::retry_task(run_args)?;
+            run_turn_shared(handler_conv, run_args, &task, attachments, hooks)
         }
         "/btw" => {
             let task = agent::btw_task(rest)?;
-            run_turn_shared(&handler_conv, &run_args, &task, &attachments, hooks)
+            run_turn_shared(handler_conv, run_args, &task, attachments, hooks)
         }
         "/login" => {
             let target = rest.trim();
@@ -155,8 +155,8 @@ pub(super) fn session_command(
                 cancel.load(std::sync::atomic::Ordering::Relaxed)
             })
         }
-        "/compact" => handler_conv.lock().compact(&run_args, rest, hooks),
-        "/handoff" => handler_conv.lock().handoff(&run_args, rest, hooks),
+        "/compact" => handler_conv.lock().compact(run_args, rest, hooks),
+        "/handoff" => handler_conv.lock().handoff(run_args, rest, hooks),
         "/checkpoint" => {
             if rest.trim() == "list" {
                 handler_conv.lock().list_checkpoints()

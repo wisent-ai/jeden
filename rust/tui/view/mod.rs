@@ -51,6 +51,7 @@ pub enum PickerEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     fn tabbed_state() -> PickerState {
         let spec = PickerSpec::new(

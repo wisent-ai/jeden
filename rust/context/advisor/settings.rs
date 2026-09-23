@@ -169,9 +169,7 @@ impl Settings {
         else {
             return false;
         };
-        self.file_extensions
-            .iter()
-            .any(|declared| *declared == found)
+        self.file_extensions.contains(&found)
     }
 }
 

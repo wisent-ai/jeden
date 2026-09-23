@@ -108,15 +108,15 @@ mod tests {
     #[test]
     fn summary_key_picks_english_singular_and_plural() {
         assert_eq!(
-            super::summary_key("picker.summary.subscription", "en", 1),
+            super::rows::summary_key("picker.summary.subscription", "en", 1),
             "picker.summary.subscription.one"
         );
         assert_eq!(
-            super::summary_key("picker.summary.subscription", "en", 2),
+            super::rows::summary_key("picker.summary.subscription", "en", 2),
             "picker.summary.subscription"
         );
         assert_eq!(
-            super::summary_key("picker.summary.catalog", "en", 1),
+            super::rows::summary_key("picker.summary.catalog", "en", 1),
             "picker.summary.catalog.one"
         );
     }
@@ -125,19 +125,19 @@ mod tests {
     fn summary_key_picks_polish_few_form() {
         // Polish: 1 model, 2–4 modele, 5+ modeli; 12–14 stay modeli.
         assert_eq!(
-            super::summary_key("picker.summary.subscription", "pl", 1),
+            super::rows::summary_key("picker.summary.subscription", "pl", 1),
             "picker.summary.subscription.one"
         );
         for n in [2_usize, 3, 4, 22, 33] {
             assert_eq!(
-                super::summary_key("picker.summary.subscription", "pl", n),
+                super::rows::summary_key("picker.summary.subscription", "pl", n),
                 "picker.summary.subscription.few",
                 "count {n}"
             );
         }
         for n in [5_usize, 11, 12, 14, 25] {
             assert_eq!(
-                super::summary_key("picker.summary.subscription", "pl", n),
+                super::rows::summary_key("picker.summary.subscription", "pl", n),
                 "picker.summary.subscription",
                 "count {n}"
             );
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn summary_key_ignores_few_for_non_polish() {
         assert_eq!(
-            super::summary_key("picker.summary.catalog", "de", 3),
+            super::rows::summary_key("picker.summary.catalog", "de", 3),
             "picker.summary.catalog"
         );
     }

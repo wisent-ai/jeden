@@ -158,7 +158,7 @@ pub(super) fn run_turn(
                 };
                 if !tool.is_empty() && !prompt.is_empty() {
                     agent::arm_force_tool(&run_args.cwd, &tool)?;
-                    run_turn_shared(&handler_conv, &run_args, &prompt, &attachments, &mut hooks)
+                    run_turn_shared(handler_conv, &run_args, &prompt, &attachments, &mut hooks)
                 } else {
                     handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
                 }
@@ -272,22 +272,16 @@ pub(super) fn run_turn(
                 if is_builtin_slash(command) {
                     handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
                 } else if let Some(expanded) = resolve_file_command(&run_args.cwd, command, rest) {
-                    run_turn_shared(
-                        &handler_conv,
-                        &run_args,
-                        &expanded,
-                        &attachments,
-                        &mut hooks,
-                    )
-                    .map(|text| policy.answer(text))
+                    run_turn_shared(handler_conv, &run_args, &expanded, &attachments, &mut hooks)
+                        .map(|text| policy.answer(text))
                 } else {
-                    run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
+                    run_turn_shared(handler_conv, &run_args, input, &attachments, &mut hooks)
                         .map(|text| policy.answer(text))
                 }
             }
         }
     } else {
-        run_turn_shared(&handler_conv, &run_args, input, &attachments, &mut hooks)
+        run_turn_shared(handler_conv, &run_args, input, &attachments, &mut hooks)
             .map(|text| policy.answer(text))
     };
     if !input.trim_start().starts_with('/') && result.is_ok() {

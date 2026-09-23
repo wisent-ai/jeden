@@ -238,9 +238,7 @@ impl Default for UiLanguage {
 impl UiLanguage {
     pub(super) fn parse(value: &str) -> Option<Self> {
         let value = value.trim().to_ascii_lowercase();
-        if value == schema::UI_LANGUAGE_AUTO
-            || ui_language_codes().iter().any(|code| *code == value)
-        {
+        if value == schema::UI_LANGUAGE_AUTO || ui_language_codes().contains(&value) {
             Some(Self(value))
         } else {
             None
