@@ -71,6 +71,36 @@
         "release-tests": "evidence/release-tests",
         "pursuit-tests": "evidence/pursuit-tests"
       }
+    },
+    "web": {
+      "runner_platform": "darwin-arm64",
+      "quality": [
+        {
+          "name": "web-quality",
+          "argv": [
+            "stado",
+            "web",
+            "quality",
+            "--root",
+            "web"
+          ]
+        }
+      ],
+      "build": {
+        "argv": [
+          "stado",
+          "web",
+          "build",
+          "--root",
+          "web"
+        ]
+      },
+      "stage": {
+        "dist/jeden-web.tar.gz": "jeden-web.tar.gz",
+        "dist/jeden-web.tar.gz.sha256": "jeden-web.tar.gz.sha256",
+        "dist/SOURCE_REVISION": "SOURCE_REVISION"
+      },
+      "secret_env": {}
     }
   },
   "inputs": {
