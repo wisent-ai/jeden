@@ -10,13 +10,13 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 pub(super) const INPUT_ENV: &str = "WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR";
-const OUTPUT_ENV: &str = "WISENT_OUTPUT_DIR";
+pub(super) const OUTPUT_ENV: &str = "WISENT_OUTPUT_DIR";
 /// The provenance layout `export` writes and `cargo` accepts. Published inputs
 /// carry it, so it changes only together with a new input and both readers.
 pub(super) const PROVENANCE_SCHEMA_VERSION: u64 = 1;
 
 /// A non-empty environment value, trimmed; an unset or blank one is absent.
-fn setting(name: &str) -> Option<String> {
+pub(super) fn setting(name: &str) -> Option<String> {
     env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
@@ -229,48 +229,4 @@ fn listed(packages: &BTreeSet<[String; 3]>) -> String {
         .map(|[name, version, source]| format!("{name} {version} from {source}"))
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-pub(super) fn stage(binaries: &[String]) -> Result<u8, String> {
-    let Some(configured) = setting(OUTPUT_ENV) else {
-        return Err(format!("{OUTPUT_ENV} is required for native staging"));
-    };
-    let output = std::path::absolute(&configured)
-        .map_err(|error| format!("{OUTPUT_ENV}: {error}"))?
-        .join("bin");
-    let target = repository_root().join("target");
-    let mut arguments = vec![
-        "build".to_string(),
-        "--release".into(),
-        "--locked".into(),
-        "--target-dir".into(),
-        target.display().to_string(),
-    ];
-    for binary in binaries {
-        arguments.push("--bin".into());
-        arguments.push(binary.clone());
-    }
-    let tool = env::current_exe().map_err(|error| error.to_string())?;
-    eprintln!("native stage: jeden-tools {}", tool.display());
-    let status = cargo(&arguments)?;
-    if status != 0 {
-        return Ok(status);
-    }
-    fs::create_dir_all(&output).map_err(|error| format!("{}: {error}", output.display()))?;
-    for binary in binaries {
-        let name = format!("{binary}{}", env::consts::EXE_SUFFIX);
-        let source = target.join("release").join(&name);
-        let destination = output.join(&name);
-        fs::copy(&source, &destination).map_err(|error| {
-            format!("{} -> {}: {error}", source.display(), destination.display())
-        })?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&destination, fs::Permissions::from_mode(0o755))
-                .map_err(|error| format!("{}: {error}", destination.display()))?;
-        }
-        eprintln!("native stage: {}", destination.display());
-    }
-    Ok(0)
 }

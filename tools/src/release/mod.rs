@@ -5,6 +5,7 @@
 mod cargo;
 mod dsse;
 mod export;
+mod stage;
 
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -13,7 +14,7 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: jeden-tools release <export ARCHIVE | cargo ARGS... | stage --bin NAME... | facts FILE | dsse ...>";
+const USAGE: &str = "usage: jeden-tools release <export ARCHIVE | cargo ARGS... | stage --bin NAME... [--qualify TEST...] | facts FILE | dsse ...>";
 /// Every refusal from the private-source commands carries this prefix, so a
 /// release log names which layer refused.
 const PREFIX: &str = "private Cargo sources: ";
@@ -29,7 +30,10 @@ pub(crate) fn run(arguments: &[String]) -> Result<u8, String> {
         },
         "cargo" if rest.is_empty() => Err("cargo requires a Cargo command".into()),
         "cargo" => cargo::cargo(rest),
-        "stage" => cargo::stage(&binaries(rest)?),
+        "stage" => {
+            let (binaries, qualifications) = stage_arguments(rest)?;
+            stage::stage(&binaries, &qualifications)
+        }
         "facts" => return facts(rest),
         "dsse" => return dsse::run(rest),
         other => return Err(format!("unknown release action `{other}`; {USAGE}")),
@@ -37,19 +41,27 @@ pub(crate) fn run(arguments: &[String]) -> Result<u8, String> {
     outcome.map_err(|message| format!("{PREFIX}{message}"))
 }
 
-fn binaries(arguments: &[String]) -> Result<Vec<String>, String> {
+/// `--bin NAME` pairs name what is staged; `--qualify TEST` pairs name the
+/// ignored integration tests run against the staged candidate afterwards.
+fn stage_arguments(arguments: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
     let mut names = Vec::new();
+    let mut qualifications = Vec::new();
     let mut remaining = arguments.iter();
     while let Some(flag) = remaining.next() {
         match (flag.as_str(), remaining.next()) {
             ("--bin", Some(name)) if !name.is_empty() => names.push(name.clone()),
-            _ => return Err(format!("{PREFIX}stage takes only --bin NAME pairs")),
+            ("--qualify", Some(test)) if !test.is_empty() => qualifications.push(test.clone()),
+            _ => {
+                return Err(format!(
+                    "{PREFIX}stage takes only --bin NAME and --qualify TEST pairs"
+                ))
+            }
         }
     }
     if names.is_empty() {
         return Err(format!("{PREFIX}stage requires at least one --bin NAME"));
     }
-    Ok(names)
+    Ok((names, qualifications))
 }
 
 /// `name=`, `sha256=` and `size=` lines for one file, in the form a GitHub

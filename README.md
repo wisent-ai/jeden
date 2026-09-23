@@ -101,7 +101,7 @@ Development or Developer ID Application identity. An ad-hoc sandbox helper is
 refused. `/rebuild` captures the running identity before compilation and
 verifies the replacement against that identity before resuming the session.
 The release recipe uses `cargo run --locked --manifest-path tools/Cargo.toml --
-release stage --bin jeden --bin jeden-sandbox-helper` to build and stage both executables. Stado's pinned signer,
+release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit` to build and stage both executables and then run the `tests/pursuit` journeys against the staged `bin/jeden`. The journeys run in the build step rather than a recipe `tests` key because Stado 0.21.48, still installed on the Linux builder, refuses that key (`unknown recipe keys for this Stado: tests`); a failing journey fails the build. Stado's pinned signer,
 or Wisent Products during local installation,
 signs the declared native stage before archiving or installing it. Stado's signed
 build and publication receipts describe those final bytes.

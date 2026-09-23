@@ -5,8 +5,8 @@
 //! supplies: the candidate (`JEDEN_TEST_BINARY`, else `$WISENT_OUTPUT_DIR/bin/jeden`,
 //! else the binary this `cargo test` built) and `WISENT_SOURCE_COMMIT`, the
 //! revision it was built from. A missing source binding fails the journey.
-//! The release recipe runs them with
-//! `jeden-tools release cargo test --test pursuit -- --ignored`.
+//! The release recipe runs them after staging, from its build step:
+//! `jeden-tools release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit`.
 //!
 //! Each journey keeps its commands, exit statuses, the executable's hash and
 //! source identity in `report.json` under `$WISENT_OUTPUT_DIR/pursuit-tests`,

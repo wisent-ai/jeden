@@ -33,14 +33,8 @@
         }
       ],
       "build": {
-        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper", "--qualify", "pursuit"]
       },
-      "tests": [
-        {
-          "name": "pursuit-durable-refusals",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "pursuit", "--", "--ignored"]
-        }
-      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
@@ -69,14 +63,8 @@
         }
       ],
       "build": {
-        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper", "--qualify", "pursuit"]
       },
-      "tests": [
-        {
-          "name": "pursuit-durable-refusals",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--target-dir", "target/qualification", "--test", "pursuit", "--", "--ignored"]
-        }
-      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
