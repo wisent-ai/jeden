@@ -47,8 +47,8 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
     let previous_signature = {
         let previous = std::env::current_exe()
             .map_err(|error| format!("cannot identify the running Jeden executable: {error}"))?;
-        let report = Command::new("wisent-products")
-            .args(["signing", "inspect", "--json"])
+        let report = Command::new("stado")
+            .args(["product", "signing", "inspect", "--json"])
             .arg(previous)
             .output()
             .map_err(|error| format!("cannot inspect the running code identity: {error}"))?;
@@ -84,8 +84,8 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
         .join(format!("jeden{}", std::env::consts::EXE_SUFFIX));
     #[cfg(target_os = "macos")]
     {
-        let mut signer = Command::new("wisent-products");
-        signer.args(["signing", "sign"]);
+        let mut signer = Command::new("stado");
+        signer.args(["product", "signing", "sign"]);
         if let Some(previous) = &previous_signature {
             signer.args([
                 "--identifier",

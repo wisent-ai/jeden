@@ -78,7 +78,7 @@ try {
     return artifact.executable;
   });
   if (process.platform === "darwin") {
-    succeeded(await command(["wisent-products", "signing", "sign", "--product", "jeden", "--json", ...products]));
+    succeeded(await command(["stado", "product", "signing", "sign", "--product", "jeden", "--json", ...products]));
   }
   for (const path of [...products, tests[0].executable]) {
     trace.binaries.push({ path, sha256: await digest(path) });

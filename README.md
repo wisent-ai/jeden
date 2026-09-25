@@ -96,13 +96,13 @@ jeden run "Read this project's package.json and explain its entry points."
 The [canonical documentation](https://jeden.wisent.com/docs) owns the full setup, credential, platform, approval, onboarding and operational instructions. The [CLI reference](https://jeden.wisent.com/docs/cli) describes every command and refusal. Keep the signed sandbox helper beside the executable on macOS.
 
 On macOS, the native build signs both executables through
-`wisent-products signing sign --product jeden`, using an available Apple
+`stado product signing sign --product jeden`, using an available Apple
 Development or Developer ID Application identity. An ad-hoc sandbox helper is
 refused. `/rebuild` captures the running identity before compilation and
 verifies the replacement against that identity before resuming the session.
 The release recipe uses `cargo run --locked --manifest-path tools/Cargo.toml --
-release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit` to build and stage both executables and then run the `tests/pursuit` journeys against the staged `bin/jeden`. The journeys run in the build step rather than a recipe `tests` key because Stado 0.21.48, still installed on the Linux builder, refuses that key (`unknown recipe keys for this Stado: tests`); a failing journey fails the build. Stado's pinned signer,
-or Wisent Products during local installation,
+release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit` to build and stage both executables and then run the `tests/pursuit` journeys against the staged `bin/jeden`. The journeys run in the build step rather than a recipe `tests` key because Stado 0.21.48, still installed on the Linux builder, refuses that key (`unknown recipe keys for this Stado: tests`); a failing journey fails the build. The Stado running the release job,
+or `stado product install` during local installation,
 signs the declared native stage before archiving or installing it. Stado's signed
 build and publication receipts describe those final bytes.
 See the shared [macOS signing contract](https://stado.wisent.com/docs/signing).
