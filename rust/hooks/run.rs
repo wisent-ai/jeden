@@ -174,8 +174,19 @@ pub fn posttool(cwd: &Path, tool: &str, result: &Value, allow_project: bool) {
 }
 
 /// Fire `UserPromptSubmit`; returns injected context (joined hook stdout).
-pub fn user_prompt_submit(cwd: &Path, prompt: &str, allow_project: bool) -> String {
-    let payload = json!({ "event": event::USER_PROMPT_SUBMIT, "prompt": prompt, "cwd": cwd });
+///
+/// `automation` says Jeden itself wrote the prompt — a Pursuit stage or an
+/// automatic continuation — so a hook that learns from the operator's words
+/// (Tama's frustration drafter, the adaptive bridge) does not take a stage
+/// instruction such as "do not execute commands" for his correction.
+pub fn user_prompt_submit(cwd: &Path, prompt: &str, automation: bool, allow_project: bool) -> String {
+    let author = if automation { "automation" } else { "operator" };
+    let payload = json!({
+        "event": event::USER_PROMPT_SUBMIT,
+        "prompt": prompt,
+        "prompt_author": author,
+        "cwd": cwd,
+    });
     let outcomes = fire_event(cwd, event::USER_PROMPT_SUBMIT, "", &payload, allow_project);
     prompt_context(&outcomes)
 }

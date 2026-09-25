@@ -60,8 +60,12 @@ impl Conversation {
             );
         }
         if !args.model_only {
-            let hook_context =
-                crate::hooks::user_prompt_submit(&args.cwd, task, args.allow_command);
+            let hook_context = crate::hooks::user_prompt_submit(
+                &args.cwd,
+                task,
+                args.autonomous || continuing,
+                args.allow_command,
+            );
             if !hook_context.trim().is_empty() {
                 effective_task = format!(
                     "{}\n\n[Hook context]\n{}",

@@ -48,7 +48,7 @@ fn tama_registry_end_to_end() {
         &registry,
         r#"{"version":1,"events":{
             "user_prompt_submit":{"blocking":false,"hooks":[
-                {"id":"echo","type":"command","command":"cat","timeout":5}]},
+                {"id":"echo","type":"command","command":"sed 's/^/payload: /'","timeout":5}]},
             "pre_tool_use:bash":{"blocking":true,"hooks":[
                 {"id":"deny","type":"command","command":"exit 3","timeout":5}]}
         }}"#,
@@ -68,7 +68,8 @@ fn tama_registry_end_to_end() {
 
     // The echo hook fires on user-prompt: drive the same firing path
     // `user_prompt_submit` uses (`fire_event` with the UserPromptSubmit
-    // payload); `cat` echoes the payload back on stdout.
+    // payload); it echoes the payload back as text, so the injected context
+    // carries it rather than being read as a JSON hook answer.
     let payload = json!({ "event": "UserPromptSubmit", "prompt": "hello-jeden-tama", "cwd": cwd });
     let outcomes = jeden::hooks::fire_event(&cwd, "UserPromptSubmit", "", &payload, false);
     assert!(
@@ -77,6 +78,13 @@ fn tama_registry_end_to_end() {
             .any(|o| o.exit_code == 0 && o.stdout.contains("hello-jeden-tama")),
         "echo hook should have fired and echoed the payload, got: {outcomes:?}"
     );
+
+    // The payload says who wrote the prompt, so a hook that learns from the
+    // operator's words can tell a Pursuit stage's instruction from his.
+    let staged = jeden::hooks::user_prompt_submit(&cwd, "stage-prompt", true, false);
+    assert!(staged.contains(r#""prompt_author":"automation""#), "{staged}");
+    let typed = jeden::hooks::user_prompt_submit(&cwd, "typed-prompt", false, false);
+    assert!(typed.contains(r#""prompt_author":"operator""#), "{typed}");
 
     // The blocking deny hook (exit 3) blocks run_command and run_process
     // pre-tool calls, but not tools outside the bash matcher.

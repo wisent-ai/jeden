@@ -1,6 +1,8 @@
 //! Lifecycle hook runtime: user- and project-defined shell commands that fire
 //! on agent events. A `PreToolUse` hook can block a tool by exiting with code 2;
-//! `UserPromptSubmit` hooks inject their stdout as extra context;
+//! `UserPromptSubmit` hooks inject their stdout as extra context, and their
+//! payload's `prompt_author` is `automation` when Jeden wrote the prompt itself
+//! (a Pursuit stage, an automatic continuation) and `operator` otherwise;
 //! `PostToolUse`/`SessionStart`/`Stop` run best-effort.
 //!
 //! Config lives in `.jeden/hooks.json` (project) and `~/.jeden/hooks.json`
