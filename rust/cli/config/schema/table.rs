@@ -167,7 +167,7 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: COMMUNICATION_CONTRACT_KEY,
         typ: "string",
-        description: "How Jeden writes to you. Empty means Jeden's default: plain language, a question answered directly without headings, a work report in three parts — what was done, blockers, next steps — and nothing a reply was not asked for. Write your own text to replace it, or 'none' to add no communication instruction.",
+        description: "How Jeden writes to you. Empty means Jeden's default: plain language, then three parts — what was done, blockers, next steps. Write your own text to replace it, or 'none' to add no communication instruction.",
         default_json: "\"\"",
         enum_values: &[],
     },

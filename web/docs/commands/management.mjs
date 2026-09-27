@@ -46,7 +46,7 @@ export const managementCommands = [
     purpose: "Validate and persist one user configuration setting.",
     inputs: [
       "Required: exact schema key and value. Multi-token values are joined with spaces before type parsing; JSON arrays and records must be valid JSON.",
-      "Use <code>contracts.communication</code> to say how Jeden writes to you: your text replaces Jeden's default (plain language, a question answered directly without headings, a work report as what was done, blockers, next steps, and nothing a reply was not asked for) and <code>none</code> turns it off. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
+      "Use <code>contracts.communication</code> to say how Jeden writes to you: your text replaces Jeden's default (plain language, then what was done, blockers, next steps) and <code>none</code> turns it off. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
       "Use <code>communication.mode</code> to choose <code>normal</code>, <code>debug</code>, or <code>quiet</code>, and <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, or <code>communication.code</code> with <code>auto</code>, <code>show</code>, or <code>hide</code> to override one item.",
     ],
     effect: "Parses the schema type, updates the nested user configuration object, atomically writes the user config, and prints the key/path or structured mutation result. A non-empty contract is added to every new or rebuilt system prompt; a communication setting applies from the next turn, including in a running session.",
