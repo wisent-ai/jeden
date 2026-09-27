@@ -61,7 +61,7 @@ export const operationCommands = [
       "No action defaults to <code>list</code>.",
       "<code>--cwd</code> selects the project layer used when computing effective values; <code>--json</code> selects structured output.",
       "Use the linked leaf commands for their required key/value inputs.",
-      "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings. An empty communication contract means Jeden's default (plain language, then what was done, blockers, next steps); <code>none</code> turns it off.",
+      "The contract keys are <code>contracts.communication</code> and <code>contracts.functionality</code>; both are strings. An empty communication contract means Jeden's default (plain language, a question answered directly without headings, a work report as what was done, blockers, next steps, and nothing a reply was not asked for); <code>none</code> turns it off.",
       "The communication keys are <code>communication.mode</code> (<code>normal</code>, <code>debug</code>, <code>quiet</code>) and the overrides <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, and <code>communication.code</code> (<code>auto</code>, <code>show</code>, <code>hide</code>).",
       "<code>model</code> is the model route turns run on, as Brama advertises it; <code>/setup</code> records it, <code>jeden config get model</code> reads the effective value with the project layer applied, and <code>JEDEN_MODEL</code> or <code>--model</code> overrides it for one run. The contract journeys under <code>tests/contracts</code> pass it into their isolated homes the same way they pass credentials.",
     ],
