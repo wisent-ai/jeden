@@ -21,7 +21,8 @@ pub(crate) fn empty_response(message: impl Into<String>, visible_output: bool) -
 }
 
 pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration>) -> AttemptError {
-    let normalized = body.to_ascii_lowercase();
+    // Brama answers every refusal with its contract document; the class is
+    // read from its fields, never from words in the body.
     let contract = serde_json::from_str::<Value>(&body).ok();
     let declared_retryable = contract
         .as_ref()
@@ -34,24 +35,18 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
     // A 429 `subscription_unavailable` fires while a reauth is still in
     // progress; it clears on its own, so treat it as transient rather than
     // quota exhaustion.
-    let subscription_transient = status == 429 && normalized.contains("subscription_unavailable");
-    let quota_exhausted = error_code == Some("provider_quota_exhausted")
-        || status == 402
-        || (status == 429 && (normalized.contains("quota") || normalized.contains("subscription")));
-    // An explicit `"retryable": false` is the gateway answering the question
+    let subscription_transient = error_code == Some("subscription_unavailable");
+    let quota_exhausted = error_code == Some("provider_quota_exhausted") || status == 402;
+    // An explicit `retryable: false` is the gateway answering the question
     // this function guesses at from the status family. It wins: a subscription
     // the provider rejected needs a human to authorize it again, and retrying
     // spends the session's budget on a wait that cannot end.
-    let refused_outright =
-        normalized.contains("\"retryable\":false") || normalized.contains("\"retryable\": false");
-    let class = if refused_outright {
+    let class = if declared_retryable == Some(false) {
         StreamErrorClass::Permanent
     } else if subscription_transient {
         StreamErrorClass::TransientHttp
     } else if quota_exhausted {
         StreamErrorClass::QuotaExhausted
-    } else if declared_retryable == Some(false) {
-        StreamErrorClass::Permanent
     } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
     } else if is_context_overflow_body(&body) {

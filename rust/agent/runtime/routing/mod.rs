@@ -28,17 +28,18 @@ fn model_catalog_with_retry(
             Ok(catalog) => return Ok(catalog),
             Err(error) => {
                 // The status family is a guess about the gateway's intent; the
-                // body is the gateway saying it. A refused subscription answers
-                // `503 ... "retryable": false` and every retry of that is two
-                // provider round trips and eight seconds spent on a credential
-                // only a human can renew, so an explicit `false` wins.
-                let refused_outright = match &error {
-                    BramaError::Http { message, .. } => {
-                        message.contains("\"retryable\":false")
-                            || message.contains("\"retryable\": false")
+                // refusal document is the gateway saying it. A refused
+                // subscription answers `503` with `retryable: false`, and every
+                // retry of that is two provider round trips and eight seconds
+                // spent on a credential only a human can renew, so an explicit
+                // `false` wins.
+                let refused_outright = matches!(
+                    &error,
+                    BramaError::Http {
+                        retryable: Some(false),
+                        ..
                     }
-                    _ => false,
-                };
+                );
                 let transient = !refused_outright
                     && match &error {
                         BramaError::Transport(_) | BramaError::RateLimited { .. } => true,
