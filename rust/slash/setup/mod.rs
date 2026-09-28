@@ -7,8 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::common::split_head;
 use super::SlashContext;
+use super::common::split_head;
 use crate::cli::config::{load_config, ui_language};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
@@ -140,12 +140,12 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     if state.secret_configured {
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET configured",
-            "injected in memory by the Stado/Skarbiec launcher",
+            "read by Jeden with `stado secrets get agent:wisent-app --field value`",
         ));
     } else {
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET unavailable",
-            "launch with bin/jeden-rust or scripts/run-with-stado.sh",
+            "`stado secrets get agent:wisent-app --field value` must answer for Stado's identity",
         ));
     }
     match &state.model {
@@ -194,8 +194,7 @@ fn preferences_picker(cwd: &Path) -> PickerSpec {
     PickerSpec::new("Preferences — language & theme", items).localized(&lang)
 }
 
-const USAGE: &str =
-    "Usage: /setup [status|validate|workspace <path>|brama-url <url>|agent-id <id>|model|preferences]";
+const USAGE: &str = "Usage: /setup [status|validate|workspace <path>|brama-url <url>|agent-id <id>|model|preferences]";
 
 /// Text-mode handler (non-interactive callers such as `jeden run "/setup …"`
 /// and the slash fallback). Bare `/setup` and `/setup status` print the
