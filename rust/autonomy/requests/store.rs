@@ -1,5 +1,5 @@
+use super::fleet::{run_db, sql};
 use super::{Request, Response, SCHEMA_VERSION};
-use rusqlite::{params, Connection, OptionalExtension};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
@@ -8,12 +8,17 @@ use std::{
 
 const MAX_REQUEST_ID_BYTES: usize = 100;
 
+/// One pursuit request: its values and stages live in the fleet database
+/// under the request id; `directory` keeps only the run artifacts and the
+/// owner lock, which are local to the process that executes it.
 pub(super) struct Store {
     pub directory: PathBuf,
-    connection: Connection,
+    id: String,
 }
+/// Held while this process executes the request; the kernel drops the lock
+/// with the file when the process ends, however it ends.
 pub(super) struct Claim {
-    _connection: Connection,
+    _file: fs::File,
 }
 
 pub(super) fn identifier(id: &str) -> bool {
@@ -65,36 +70,29 @@ impl Store {
         {
             return Err("pursuit state directory must not be a symlink".into());
         }
-        let connection =
-            Connection::open(directory.join("state.sqlite3")).map_err(|e| e.to_string())?;
-        connection
-            .execute_batch(
-                "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-            CREATE TABLE IF NOT EXISTS values_store (key TEXT PRIMARY KEY, data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS stages (position INTEGER PRIMARY KEY, data TEXT NOT NULL);",
-            )
-            .map_err(|e| e.to_string())?;
         let store = Self {
             directory,
-            connection,
+            id: request.request_id.clone(),
         };
         let encoded = serde_json::to_string(request).map_err(|e| e.to_string())?;
-        store
-            .connection
-            .execute(
-                "INSERT OR IGNORE INTO values_store VALUES ('request',?1)",
-                [&encoded],
-            )
-            .map_err(|e| e.to_string())?;
-        let existing: String = store
-            .connection
-            .query_row(
-                "SELECT data FROM values_store WHERE key='request'",
-                [],
-                |r| r.get(0),
-            )
-            .map_err(|e| e.to_string())?;
-        if existing != encoded {
+        let id = store.id.clone();
+        let existing: String = run_db(move |client| {
+            client
+                .execute(
+                    "INSERT INTO pursuit_values(request,key,data) VALUES ($1,'request',$2)
+                     ON CONFLICT(request,key) DO NOTHING",
+                    &[&id, &encoded],
+                )
+                .map_err(sql)?;
+            Ok(client
+                .query_one(
+                    "SELECT data FROM pursuit_values WHERE request=$1 AND key='request'",
+                    &[&id],
+                )
+                .map_err(sql)?
+                .get(0))
+        })?;
+        if existing != serde_json::to_string(request).map_err(|e| e.to_string())? {
             return Err(
                 "request_id_conflict: this request id already names a different immutable payload"
                     .into(),
@@ -111,64 +109,102 @@ impl Store {
     }
     pub fn existing(id: &str) -> Result<Self, String> {
         let directory = directory(id)?;
-        let connection = Connection::open_with_flags(
-            directory.join("state.sqlite3"),
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
-        )
-        .map_err(|e| format!("request {id} is unavailable: {e}"))?;
+        let owned = id.to_owned();
+        let known: bool = run_db(move |client| {
+            Ok(client
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM pursuit_values WHERE request=$1 AND key='request')",
+                    &[&owned],
+                )
+                .map_err(sql)?
+                .get(0))
+        })?;
+        if !known {
+            return Err(format!(
+                "request {id} is unavailable: no such request in the fleet database"
+            ));
+        }
         Ok(Self {
             directory,
-            connection,
+            id: id.to_owned(),
         })
     }
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, String> {
-        let text: Option<String> = self
-            .connection
-            .query_row("SELECT data FROM values_store WHERE key=?1", [key], |r| {
-                r.get(0)
-            })
-            .optional()
-            .map_err(|e| e.to_string())?;
+        let (id, key) = (self.id.clone(), key.to_owned());
+        let text: Option<String> = run_db(move |client| {
+            Ok(client
+                .query_opt(
+                    "SELECT data FROM pursuit_values WHERE request=$1 AND key=$2",
+                    &[&id, &key],
+                )
+                .map_err(sql)?
+                .map(|row| row.get(0)))
+        })?;
         text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
             .transpose()
     }
     pub fn set(&self, key: &str, value: &impl Serialize) -> Result<(), String> {
-        self.connection.execute("INSERT INTO values_store VALUES (?1,?2) ON CONFLICT(key) DO UPDATE SET data=excluded.data",
-            params![key,serde_json::to_string(value).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
-        Ok(())
+        let (id, key) = (self.id.clone(), key.to_owned());
+        let data = serde_json::to_string(value).map_err(|e| e.to_string())?;
+        run_db(move |client| {
+            client
+                .execute(
+                    "INSERT INTO pursuit_values(request,key,data) VALUES ($1,$2,$3)
+                     ON CONFLICT(request,key) DO UPDATE SET data=excluded.data",
+                    &[&id, &key, &data],
+                )
+                .map_err(sql)?;
+            Ok(())
+        })
     }
     pub fn stage<T: DeserializeOwned>(&self, position: usize) -> Result<Option<T>, String> {
-        let text: Option<String> = self
-            .connection
-            .query_row(
-                "SELECT data FROM stages WHERE position=?1",
-                [position as u64],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
+        let (id, position) = (self.id.clone(), position as i64);
+        let text: Option<String> = run_db(move |client| {
+            Ok(client
+                .query_opt(
+                    "SELECT data FROM pursuit_stages WHERE request=$1 AND position=$2",
+                    &[&id, &position],
+                )
+                .map_err(sql)?
+                .map(|row| row.get(0)))
+        })?;
         text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
             .transpose()
     }
     pub fn record_stage(&self, position: usize, value: &impl Serialize) -> Result<(), String> {
-        self.connection.execute("INSERT INTO stages VALUES (?1,?2) ON CONFLICT(position) DO UPDATE SET data=excluded.data",
-            params![position as u64,serde_json::to_string(value).map_err(|e|e.to_string())?]).map_err(|e|e.to_string())?;
-        Ok(())
+        let (id, position) = (self.id.clone(), position as i64);
+        let data = serde_json::to_string(value).map_err(|e| e.to_string())?;
+        run_db(move |client| {
+            client
+                .execute(
+                    "INSERT INTO pursuit_stages(request,position,data) VALUES ($1,$2,$3)
+                     ON CONFLICT(request,position) DO UPDATE SET data=excluded.data",
+                    &[&id, &position, &data],
+                )
+                .map_err(sql)?;
+            Ok(())
+        })
+    }
+    /// The request id the fleet database keys this request's rows by.
+    pub fn id(&self) -> &str {
+        &self.id
     }
     pub fn claim(&self) -> Result<Option<Claim>, String> {
-        let connection =
-            Connection::open(self.directory.join("owner.sqlite3")).map_err(|e| e.to_string())?;
-        match connection.execute_batch("BEGIN IMMEDIATE") {
-            Ok(()) => Ok(Some(Claim {
-                _connection: connection,
-            })),
-            Err(rusqlite::Error::SqliteFailure(error, _))
-                if error.code == rusqlite::ErrorCode::DatabaseBusy
-                    || error.code == rusqlite::ErrorCode::DatabaseLocked =>
-            {
-                Ok(None)
-            }
-            Err(error) => Err(format!("claim pursuit request: {error}")),
+        use std::os::unix::io::AsRawFd;
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(self.directory.join("owner.lock"))
+            .map_err(|e| format!("claim pursuit request: {e}"))?;
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
+            return Ok(Some(Claim { _file: file }));
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+            Ok(None)
+        } else {
+            Err(format!("claim pursuit request: {error}"))
         }
     }
     pub fn response(&self) -> Result<Response, String> {

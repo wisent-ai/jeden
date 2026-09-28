@@ -1,8 +1,7 @@
+use super::fleet::{run_db, sql};
 use crate::model_router::{ChatConfig, CompletionUsage};
-use rusqlite::{params, Connection};
 use rust_decimal::Decimal;
 use std::{
-    path::Path,
     str::FromStr,
     sync::{Arc, Mutex},
 };
@@ -10,8 +9,11 @@ use std::{
 // One machine request owns the process. Keep its accounting active until process exit,
 // including model workers that finish after their original caller has returned.
 static ACTIVE: Mutex<Option<Arc<Budget>>> = Mutex::new(None);
+/// The request whose calls this process accounts, in the fleet database's
+/// `pursuit_calls`; reservations of one request serialize on its ledger lock.
 struct Budget {
-    connection: Mutex<Connection>,
+    request: String,
+    ledger: Mutex<()>,
     limit: Decimal,
 }
 pub(crate) struct Reservation {
@@ -27,7 +29,7 @@ fn decimal(value: f64) -> Result<Decimal, String> {
     }
     Decimal::from_str(&value.to_string()).map_err(|e| e.to_string())
 }
-pub(super) fn activate(directory: &Path, limit: &str) -> Result<(), String> {
+pub(super) fn activate(request: &str, limit: &str) -> Result<(), String> {
     let mut active = ACTIVE
         .lock()
         .map_err(|_| "request budget owner lock failed")?;
@@ -38,12 +40,9 @@ pub(super) fn activate(directory: &Path, limit: &str) -> Result<(), String> {
     if limit <= Decimal::ZERO {
         return Err("request budget must be positive".into());
     }
-    let connection =
-        Connection::open(directory.join("inference.sqlite3")).map_err(|e| e.to_string())?;
-    connection.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;
-        CREATE TABLE IF NOT EXISTS calls (id TEXT PRIMARY KEY, model TEXT NOT NULL, catalog_revision TEXT NOT NULL, reserved TEXT NOT NULL, actual TEXT);").map_err(|e| e.to_string())?;
     *active = Some(Arc::new(Budget {
-        connection: Mutex::new(connection),
+        request: request.to_owned(),
+        ledger: Mutex::new(()),
         limit,
     }));
     Ok(())
@@ -98,39 +97,51 @@ pub(crate) fn reserve(
     let upper = (Decimal::from(entry.context_window) * input_rate
         + Decimal::from(output) * rates[1])
         / million;
-    let connection = budget
-        .connection
+    let _ledger = budget
+        .ledger
         .lock()
         .map_err(|_| "request budget ledger lock failed")?;
-    let tx = connection
-        .unchecked_transaction()
-        .map_err(|e| e.to_string())?;
-    let mut statement = tx
-        .prepare("SELECT reserved,actual FROM calls")
-        .map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
-        })
-        .map_err(|e| e.to_string())?;
-    let mut allocated = Decimal::ZERO;
-    for row in rows {
-        let (reserved, actual) = row.map_err(|e| e.to_string())?;
-        allocated +=
-            Decimal::from_str(actual.as_deref().unwrap_or(&reserved)).map_err(|e| e.to_string())?;
-    }
-    drop(statement);
-    if allocated + upper > budget.limit {
-        return Err(format!("budget_exhausted: limit {}, spent or still reserved {allocated}, next model attempt requires {upper}",budget.limit));
-    }
+    let request = budget.request.clone();
+    let limit = budget.limit;
     let id = uuid::Uuid::new_v4().to_string();
-    tx.execute(
-        "INSERT INTO calls VALUES (?1,?2,?3,?4,NULL)",
-        params![id, model, catalog.catalog_revision, upper.to_string()],
-    )
-    .map_err(|e| e.to_string())?;
-    tx.commit().map_err(|e| e.to_string())?;
-    drop(connection);
+    let (row_id, model_name, revision) = (
+        id.clone(),
+        model.to_owned(),
+        catalog.catalog_revision.clone(),
+    );
+    run_db(move |client| {
+        let mut tx = client.transaction().map_err(sql)?;
+        let mut allocated = Decimal::ZERO;
+        for row in tx
+            .query(
+                "SELECT reserved,actual FROM pursuit_calls WHERE request=$1 FOR UPDATE",
+                &[&request],
+            )
+            .map_err(sql)?
+        {
+            let reserved: String = row.get(0);
+            let actual: Option<String> = row.get(1);
+            allocated += Decimal::from_str(actual.as_deref().unwrap_or(&reserved))
+                .map_err(|e| e.to_string())?;
+        }
+        if allocated + upper > limit {
+            return Err(format!("budget_exhausted: limit {limit}, spent or still reserved {allocated}, next model attempt requires {upper}"));
+        }
+        tx.execute(
+            "INSERT INTO pursuit_calls(request,id,model,catalog_revision,reserved,actual)
+             VALUES ($1,$2,$3,$4,$5,NULL)",
+            &[
+                &request,
+                &row_id,
+                &model_name,
+                &revision,
+                &upper.to_string(),
+            ],
+        )
+        .map_err(sql)?;
+        tx.commit().map_err(sql)
+    })?;
+    drop(_ledger);
     Ok(Some(Reservation {
         budget,
         id,
@@ -159,16 +170,17 @@ pub(crate) fn settle(
         .map(|(count, rate)| *count * rate)
         .sum::<Decimal>()
         / Decimal::from(1_000_000u64);
-    reservation
-        .budget
-        .connection
-        .lock()
-        .map_err(|_| "request budget ledger lock failed")?
-        .execute(
-            "UPDATE calls SET actual=?1 WHERE id=?2",
-            params![actual.to_string(), reservation.id],
-        )
-        .map_err(|e| e.to_string())?;
+    let (request, id) = (reservation.budget.request.clone(), reservation.id.clone());
+    let settled = actual.to_string();
+    run_db(move |client| {
+        client
+            .execute(
+                "UPDATE pursuit_calls SET actual=$1 WHERE request=$2 AND id=$3",
+                &[&settled, &request, &id],
+            )
+            .map_err(sql)?;
+        Ok(())
+    })?;
     if actual > reservation.upper {
         return Err(
             "model usage exceeded its advertised bound; no further budget is granted".into(),
@@ -177,22 +189,22 @@ pub(crate) fn settle(
     Ok(())
 }
 
-pub(super) fn spent(directory: &Path) -> Result<Option<String>, String> {
-    let path = directory.join("inference.sqlite3");
-    if !path.exists() {
-        return Ok(Some(Decimal::ZERO.to_string()));
-    }
-    let connection = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-        .map_err(|e| e.to_string())?;
-    let mut statement = connection
-        .prepare("SELECT actual FROM calls")
-        .map_err(|e| e.to_string())?;
-    let rows = statement
-        .query_map([], |r| r.get::<_, Option<String>>(0))
-        .map_err(|e| e.to_string())?;
+pub(super) fn spent(request: &str) -> Result<Option<String>, String> {
+    let request = request.to_owned();
+    let actuals: Vec<Option<String>> = run_db(move |client| {
+        Ok(client
+            .query(
+                "SELECT actual FROM pursuit_calls WHERE request=$1",
+                &[&request],
+            )
+            .map_err(sql)?
+            .into_iter()
+            .map(|row| row.get(0))
+            .collect())
+    })?;
     let mut total = Decimal::ZERO;
-    for row in rows {
-        let Some(actual) = row.map_err(|e| e.to_string())? else {
+    for actual in actuals {
+        let Some(actual) = actual else {
             return Ok(None);
         };
         total += Decimal::from_str(&actual).map_err(|e| e.to_string())?;

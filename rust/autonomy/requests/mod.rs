@@ -1,5 +1,6 @@
 pub(crate) mod budget;
 mod evidence;
+mod fleet;
 mod runner;
 mod store;
 use crate::Args;
@@ -154,7 +155,7 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
         }
         response.error = Some(error);
     }
-    response.spent_usd = budget::spent(&store.directory)?;
+    response.spent_usd = budget::spent(store.id())?;
     store.set("response", &response)?;
     emit(&response)
 }
@@ -220,7 +221,7 @@ fn execute(
     };
     let mut config = PursuitConfig::new(&request.cwd, &request.objective, preferences);
     config.artifact_root = Some(store.directory.join("runs"));
-    budget::activate(&store.directory, &request.budget_usd)?;
+    budget::activate(store.id(), &request.budget_usd)?;
     let mut runner = runner::DurableRunner::new(store, args)?;
     match pursue(config, &mut runner) {
         Ok(outcome) => {
