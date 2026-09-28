@@ -1,5 +1,7 @@
-//! Mutual TLS on the session port: who is allowed to connect, and the trust
-//! state that can be reloaded without dropping the listener.
+//! TLS on the session port: who is allowed to connect, and the trust state
+//! that can be reloaded without dropping the listener. A peer proves itself
+//! with a client certificate, or, where the identity map names Wisent
+//! organizations, with a Wisent identity in its first frame.
 
 use rustls::ServerConfig;
 use std::collections::HashSet;
@@ -43,6 +45,16 @@ pub struct TlsHandshake {
 pub struct VerifiedPeer {
     pub certificate: PeerCertificate,
     pub trust_generation: u64,
+}
+
+/// What the TLS handshake proved about the peer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TlsPeer {
+    /// A client certificate the trust store verified.
+    Certificate(VerifiedPeer),
+    /// No certificate was presented; the connection must authenticate with a
+    /// Wisent identity before any other request is served.
+    Anonymous { trust_generation: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -156,6 +168,9 @@ pub struct MtlsConfig {
     pub private_key: PathBuf,
     pub client_ca_bundle: PathBuf,
     pub revoked_serials: HashSet<String>,
+    /// Finish handshakes that present no client certificate, for peers that
+    /// authenticate with a Wisent identity instead.
+    pub admit_without_certificate: bool,
 }
 
 #[derive(Clone)]
@@ -195,7 +210,7 @@ impl ReloadableTlsAcceptor {
     pub async fn accept(
         &self,
         stream: TcpStream,
-    ) -> Result<(TlsStream<TcpStream>, VerifiedPeer), String> {
+    ) -> Result<(TlsStream<TcpStream>, TlsPeer), String> {
         let (config, revoked, generation) = {
             let state = self
                 .state
@@ -218,10 +233,17 @@ impl ReloadableTlsAcceptor {
         if connection.alpn_protocol() != Some(REQUIRED_ALPN.as_bytes()) {
             return Err("required ALPN was not negotiated".into());
         }
-        let leaf = connection
+        let Some(leaf) = connection
             .peer_certificates()
             .and_then(|chain| chain.first())
-            .ok_or_else(|| "client certificate is required".to_string())?;
+        else {
+            return Ok((
+                stream,
+                TlsPeer::Anonymous {
+                    trust_generation: generation,
+                },
+            ));
+        };
         let certificate = peer_from_der(leaf)?;
         if revoked.contains(&certificate.serial) {
             return Err("client certificate is revoked".into());
@@ -231,10 +253,10 @@ impl ReloadableTlsAcceptor {
         }
         Ok((
             stream,
-            VerifiedPeer {
+            TlsPeer::Certificate(VerifiedPeer {
                 certificate,
                 trust_generation: generation,
-            },
+            }),
         ))
     }
 }

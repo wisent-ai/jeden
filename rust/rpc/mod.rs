@@ -4,7 +4,7 @@ mod replay;
 mod service;
 mod wire;
 
-use wire::{tenant, tls, transport};
+use wire::{identity, tenant, tls, transport};
 
 pub use daemon::{BoundedExecutor, HeadlessConfig, HeadlessDaemon, Readiness, SubmitError};
 pub use idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};
@@ -13,12 +13,14 @@ pub use service::{
     AgentSessionFacade, ServiceError, SessionBackend, SessionListing, SessionService,
     SessionSummary, SubmitOutcome,
 };
+pub use identity::{IdentityRefusal, WisentIdentityAuthority, WisentMember};
 pub use tenant::{
     TenantDirectory, TenantError, TenantGuard, TenantId, TenantLimits, TenantPrincipal,
 };
 pub use tls::{
     ClientCertificateVerifier, MtlsConfig, PeerCertificate, ReloadableTlsAcceptor,
-    ReloadableTrustStore, TlsError, TlsHandshake, TlsVersion, VerifiedPeer, REQUIRED_ALPN,
+    ReloadableTrustStore, TlsError, TlsHandshake, TlsPeer, TlsVersion, VerifiedPeer,
+    REQUIRED_ALPN,
 };
 pub use transport::{
     AuthenticatedConnection, ErrorV1, ReconnectTokens, RequestEnvelopeV1, RequestMetaV1,

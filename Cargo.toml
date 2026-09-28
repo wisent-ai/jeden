@@ -65,7 +65,7 @@ sha2 = "0.10"
 shell-words = "1"
 url = "2"
 unicode-segmentation = "1.12"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["v4", "serde"] }
 unicode-width = "0.2"
 
 tree-sitter = "0.25"

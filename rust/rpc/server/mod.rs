@@ -11,7 +11,7 @@ use prompt::handle_prompt;
 use super::{
     AgentSessionFacade, BoundedExecutor, HeadlessConfig, HeadlessDaemon, IdempotencyStore,
     MtlsConfig, ReloadableTlsAcceptor, ReplayStore, SessionService, TenantDirectory, TenantError,
-    TenantGuard, TenantLimits,
+    TenantGuard, TenantLimits, WisentIdentityAuthority,
 };
 use rand::RngCore;
 use std::collections::HashSet;
@@ -73,11 +73,18 @@ pub(super) struct ServerState {
     shutting_down: AtomicBool,
 }
 
+/// One entry of the identity map. It names either a client certificate SAN
+/// (`san` plus `principal`) or a Wisent organization whose members sign in
+/// with their Wisent identity (`wisentOrganization`), never both.
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct HeadlessIdentityMapping {
-    san: String,
-    principal: String,
+    #[serde(default)]
+    san: Option<String>,
+    #[serde(default)]
+    principal: Option<String>,
+    #[serde(default)]
+    wisent_organization: Option<uuid::Uuid>,
     tenant: String,
     /// Absolute host directories this principal may read and continue sessions
     /// inside. Absent means the principal only ever sees the scratch workspaces

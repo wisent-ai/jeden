@@ -13,31 +13,45 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
     }
     let directory = TenantDirectory::new();
     for mapping in mappings {
-        let san = mapping.san.clone();
-        directory
-            .map_san(
-                mapping.san,
-                mapping.principal,
+        let label = mapping
+            .san
+            .clone()
+            .or_else(|| mapping.wisent_organization.map(|org| format!("wisent organization {org}")))
+            .unwrap_or_else(|| format!("tenant {}", mapping.tenant));
+        let mapped = match (mapping.san, mapping.principal, mapping.wisent_organization) {
+            (Some(san), Some(principal), None) => {
+                directory.map_san(san, principal, mapping.tenant, mapping.workspaces)
+            }
+            (None, None, Some(organization)) => directory.map_wisent_organization(
+                organization,
                 mapping.tenant,
                 mapping.workspaces,
-            )
-            .map_err(|error| match error {
-                TenantError::InvalidWorkspace(message) => {
-                    format!("invalid identity mapping for {san}: {message}")
-                }
-                _ => format!("invalid identity mapping for {san}"),
-            })?;
+            ),
+            _ => {
+                return Err(format!(
+                    "invalid identity mapping for {label}: name either san and principal, or wisentOrganization"
+                ))
+            }
+        };
+        mapped.map_err(|error| match error {
+            TenantError::InvalidWorkspace(message) => {
+                format!("invalid identity mapping for {label}: {message}")
+            }
+            _ => format!("invalid identity mapping for {label}"),
+        })?;
     }
     let revoked_serials = positionals
         .get(5)
         .map(|path| read_revoked_serials(Path::new(path)))
         .transpose()?
         .unwrap_or_default();
+    let admits_members = directory.admits_wisent_members();
     let tls = ReloadableTlsAcceptor::new(MtlsConfig {
         certificate_chain: PathBuf::from(&positionals[1]),
         private_key: PathBuf::from(&positionals[2]),
         client_ca_bundle: PathBuf::from(&positionals[3]),
         revoked_serials,
+        admit_without_certificate: admits_members,
     })?;
     fs::create_dir_all(data_root)
         .map_err(|error| format!("failed to create headless data root: {error}"))?;
@@ -62,7 +76,12 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
         reconnect_key: load_or_create_reconnect_key(&data_root.join("reconnect.key"))?,
         ..Default::default()
     };
-    let daemon = Arc::new(HeadlessDaemon::new(tls, directory, service, config)?);
+    let daemon = HeadlessDaemon::new(tls, directory, service, config)?;
+    let daemon = Arc::new(if admits_members {
+        daemon.with_wisent_identity(WisentIdentityAuthority::from_environment()?)
+    } else {
+        daemon
+    });
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

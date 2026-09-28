@@ -42,7 +42,16 @@ pub(super) fn load_server_config(
     if roots.is_empty() {
         return Err("client CA bundle is empty".into());
     }
-    let verifier = WebPkiClientVerifier::builder(Arc::new(roots))
+    let builder = WebPkiClientVerifier::builder(Arc::new(roots));
+    // A listener that admits Wisent members lets the handshake finish without
+    // a client certificate; such a connection is authenticated by its first
+    // frame instead, and one that presents a certificate is still verified.
+    let builder = if source.admit_without_certificate {
+        builder.allow_unauthenticated()
+    } else {
+        builder
+    };
+    let verifier = builder
         .build()
         .map_err(|error| format!("invalid client verifier: {error}"))?;
     let mut config = ServerConfig::builder_with_protocol_versions(&[&rustls::version::TLS13])

@@ -2,6 +2,7 @@ mod guard;
 
 pub use guard::TenantGuard;
 
+use super::identity::WisentMember;
 use super::tls::VerifiedPeer;
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -86,9 +87,18 @@ pub(super) struct Usage {
     pub(super) stored_bytes: u64,
 }
 
+/// What a Wisent organization named in the identity map is granted: every
+/// member Wisent Identity confirms becomes a principal of this tenant.
+#[derive(Debug, Clone)]
+struct OrganizationGrant {
+    tenant: TenantId,
+    workspaces: Vec<PathBuf>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TenantDirectory {
     mappings: Arc<RwLock<HashMap<String, TenantPrincipal>>>,
+    organizations: Arc<RwLock<HashMap<uuid::Uuid, OrganizationGrant>>>,
 }
 
 impl Default for TenantDirectory {
@@ -101,6 +111,7 @@ impl TenantDirectory {
     pub fn new() -> Self {
         Self {
             mappings: Arc::new(RwLock::new(HashMap::new())),
+            organizations: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -114,35 +125,7 @@ impl TenantDirectory {
         let san = san.into();
         let principal = validate_id(principal.into())?;
         let tenant = validate_id(tenant.into())?;
-        let mut granted = Vec::with_capacity(workspaces.len());
-        for workspace in workspaces {
-            // A grant is resolved once, at map time, so every later containment
-            // check is a pure component comparison against a real directory.
-            if !workspace.is_absolute()
-                || workspace
-                    .components()
-                    .any(|part| matches!(part, Component::ParentDir))
-            {
-                return Err(TenantError::InvalidWorkspace(format!(
-                    "workspace {} must be an absolute path without ..",
-                    workspace.display()
-                )));
-            }
-            let resolved = workspace.canonicalize().map_err(|error| {
-                TenantError::InvalidWorkspace(format!(
-                    "workspace {} is not readable: {}",
-                    workspace.display(),
-                    error
-                ))
-            })?;
-            if !resolved.is_dir() {
-                return Err(TenantError::InvalidWorkspace(format!(
-                    "workspace {} is not an existing directory",
-                    workspace.display()
-                )));
-            }
-            granted.push(resolved);
-        }
+        let granted = grant_workspaces(workspaces)?;
         self.mappings
             .write()
             .map_err(|_| TenantError::StorageUnavailable)?
@@ -152,6 +135,30 @@ impl TenantDirectory {
                     principal: PrincipalId(principal),
                     tenant: TenantId(tenant),
                     workspaces: granted,
+                },
+            );
+        Ok(())
+    }
+
+    /// Admit every member of one Wisent organization as a principal of
+    /// `tenant`. Only organizations named here are admitted; a valid Wisent
+    /// session of anyone else is refused as unmapped.
+    pub fn map_wisent_organization(
+        &self,
+        organization: uuid::Uuid,
+        tenant: impl Into<String>,
+        workspaces: Vec<PathBuf>,
+    ) -> Result<(), TenantError> {
+        let tenant = validate_id(tenant.into())?;
+        let workspaces = grant_workspaces(workspaces)?;
+        self.organizations
+            .write()
+            .map_err(|_| TenantError::StorageUnavailable)?
+            .insert(
+                organization,
+                OrganizationGrant {
+                    tenant: TenantId(tenant),
+                    workspaces,
                 },
             );
         Ok(())
@@ -169,6 +176,65 @@ impl TenantDirectory {
             .find_map(|san| mappings.get(san).cloned())
             .ok_or(TenantError::IdentityNotMapped)
     }
+
+    /// The principal a confirmed Wisent member is: the user, inside the
+    /// tenant their organization is mapped to.
+    pub fn resolve_member(&self, member: &WisentMember) -> Result<TenantPrincipal, TenantError> {
+        let organizations = self
+            .organizations
+            .read()
+            .map_err(|_| TenantError::StorageUnavailable)?;
+        let grant = organizations
+            .get(&member.organization_id)
+            .ok_or(TenantError::IdentityNotMapped)?;
+        Ok(TenantPrincipal {
+            principal: PrincipalId(format!("wisent-user:{}", member.user_id)),
+            tenant: grant.tenant.clone(),
+            workspaces: grant.workspaces.clone(),
+        })
+    }
+
+    /// True when at least one Wisent organization is mapped, so the listener
+    /// admits connections that present no client certificate.
+    pub fn admits_wisent_members(&self) -> bool {
+        self.organizations
+            .read()
+            .map(|organizations| !organizations.is_empty())
+            .unwrap_or(false)
+    }
+}
+
+/// A grant is resolved once, at map time, so every later containment check is
+/// a pure component comparison against a real directory.
+fn grant_workspaces(workspaces: Vec<PathBuf>) -> Result<Vec<PathBuf>, TenantError> {
+    let mut granted = Vec::with_capacity(workspaces.len());
+    for workspace in workspaces {
+        if !workspace.is_absolute()
+            || workspace
+                .components()
+                .any(|part| matches!(part, Component::ParentDir))
+        {
+            return Err(TenantError::InvalidWorkspace(format!(
+                "workspace {} must be an absolute path without ..",
+                workspace.display()
+            )));
+        }
+        let resolved = workspace.canonicalize().map_err(|error| {
+            TenantError::InvalidWorkspace(format!(
+                "workspace {} is not readable: {}",
+                workspace.display(),
+                error
+            ))
+        })?;
+        if !resolved.is_dir() {
+            return Err(TenantError::InvalidWorkspace(format!(
+                "workspace {} is not an existing directory",
+                workspace.display()
+            )));
+        }
+        granted.push(resolved);
+    }
+    Ok(granted)
 }
 
 fn validate_id(value: String) -> Result<String, TenantError> {

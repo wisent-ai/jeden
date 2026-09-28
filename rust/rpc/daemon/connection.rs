@@ -20,17 +20,33 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             let _ = stream.shutdown().await;
             return Err("plaintext or malformed TLS preface rejected".into());
         }
-        let (stream, verified) = self.tls.accept(stream).await?;
-        let identity = self
-            .directory
-            .resolve(&verified)
-            .map_err(|_| "certificate SAN is not mapped".to_string())?;
-        let connection = AuthenticatedConnection {
-            identity,
-            trust_generation: verified.trust_generation,
-        };
+        let (stream, peer) = self.tls.accept(stream).await?;
         let (reader, mut writer) = tokio::io::split(stream);
         let mut reader = BufReader::new(reader);
+        let connection = match peer {
+            TlsPeer::Certificate(verified) => AuthenticatedConnection {
+                identity: self
+                    .directory
+                    .resolve(&verified)
+                    .map_err(|_| "certificate SAN is not mapped".to_string())?,
+                trust_generation: verified.trust_generation,
+            },
+            TlsPeer::Anonymous { trust_generation } => {
+                let frame = read_async_frame(&mut reader, self.config.max_frame_bytes).await?;
+                let Some(frame) = frame else { return Ok(()) };
+                match self.authenticate_member(&frame, trust_generation).await {
+                    Ok((connection, response)) => {
+                        write_async_frame(&mut writer, &response).await?;
+                        connection
+                    }
+                    Err(response) => {
+                        write_async_frame(&mut writer, &response).await?;
+                        let _ = writer.shutdown().await;
+                        return Ok(());
+                    }
+                }
+            }
+        };
         loop {
             let frame = match read_async_frame(&mut reader, self.config.max_frame_bytes).await {
                 Ok(Some(frame)) => frame,

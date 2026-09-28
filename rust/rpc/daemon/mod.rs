@@ -1,11 +1,13 @@
 mod connection;
 mod dispatch;
+mod member;
 use connection::reject_overloaded;
 use dispatch::*;
 
+use super::identity::{IdentityRefusal, WisentIdentityAuthority};
 use super::service::{ServiceError, SessionBackend, SessionService, SubmitOutcome};
 use super::tenant::{TenantDirectory, TenantError};
-use super::tls::ReloadableTlsAcceptor;
+use super::tls::{ReloadableTlsAcceptor, TlsPeer};
 use super::transport::{AuthenticatedConnection, ErrorV1, ReconnectTokens, RequestEnvelopeV1};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
@@ -220,6 +222,7 @@ pub struct HeadlessDaemon<B: SessionBackend> {
     service: Arc<SessionService<B>>,
     config: HeadlessConfig,
     reconnect: ReconnectTokens,
+    identity: Option<WisentIdentityAuthority>,
 }
 
 impl<B: SessionBackend> HeadlessDaemon<B> {
@@ -240,7 +243,15 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             service,
             config,
             reconnect,
+            identity: None,
         })
+    }
+
+    /// Admit connections without a client certificate that authenticate with
+    /// a Wisent identity of an organization the directory maps.
+    pub fn with_wisent_identity(mut self, authority: WisentIdentityAuthority) -> Self {
+        self.identity = Some(authority);
+        self
     }
 
     pub fn local_addr(listener: &TcpListener) -> Result<SocketAddr, String> {

@@ -4,6 +4,7 @@
 //! Grouped here so the `rpc` folder keeps to five entries; the module above
 //! re-exports these under the names callers already use.
 
+pub mod identity;
 pub mod tenant;
 pub mod tls;
 pub mod transport;
