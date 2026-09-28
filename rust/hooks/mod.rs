@@ -41,7 +41,7 @@ pub use extensions::{
     status as extension_status, ReloadReport,
 };
 pub use run::{
-    fire_event, posttool, pretool_block, session_start, session_stop, user_prompt_submit,
+    answer_stop_block, fire_event, posttool, pretool_block, session_start, user_prompt_submit,
 };
 pub use describe::describe_hooks;
 
@@ -159,11 +159,11 @@ pub(crate) fn parse_hook_json(stdout: &str) -> Option<Value> {
         .filter(|v| v.is_object())
 }
 
-/// A `PreToolUse` block decision: `Some(reason)` blocks the tool. A hook blocks
-/// either by exiting with code 2, or by printing JSON `{"decision":"block",
-/// "reason":"…"}` on stdout. The reason is the JSON `reason`, else stderr, else
-/// stdout (or a default).
-pub fn pretool_block_decision(outcomes: &[HookOutcome]) -> Option<String> {
+/// A refusing hook decision (`PreToolUse` for a tool, `Stop` for an answer):
+/// `Some(reason)` refuses. A hook refuses either by exiting with code 2, or by
+/// printing JSON `{"decision":"block", "reason":"…"}` on stdout. The reason is
+/// the JSON `reason`, else stderr, else stdout, else `fallback`.
+pub fn block_decision(outcomes: &[HookOutcome], fallback: &str) -> Option<String> {
     outcomes.iter().find_map(|o| {
         let json = parse_hook_json(&o.stdout);
         let json_block = json
@@ -193,7 +193,7 @@ pub fn pretool_block_decision(outcomes: &[HookOutcome]) -> Option<String> {
                     .filter(|s| !s.is_empty() && parse_hook_json(&o.stdout).is_none())
                     .map(str::to_string)
             })
-            .unwrap_or_else(|| "PreToolUse hook denied this tool".to_string());
+            .unwrap_or_else(|| fallback.to_string());
         Some(reason)
     })
 }
@@ -240,11 +240,12 @@ pub mod event {
     pub const SESSION_START: &str = "SessionStart";
     /// The operator submitted a prompt.
     pub const USER_PROMPT_SUBMIT: &str = "UserPromptSubmit";
-    /// Before a tool runs; this is the one that can refuse.
+    /// Before a tool runs; a hook may refuse the tool.
     pub const PRE_TOOL_USE: &str = "PreToolUse";
     /// After a tool ran, with its result.
     pub const POST_TOOL_USE: &str = "PostToolUse";
-    /// The agent is about to stop answering.
+    /// The agent is about to give its answer and end the turn; a hook may
+    /// refuse the answer, and the turn then continues with the refusal.
     pub const STOP: &str = "Stop";
 
     /// Every event, in the order `/hooks` lists them.

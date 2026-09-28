@@ -14,6 +14,9 @@ pub(super) const ANSWER_REPAIRS: u32 = 1;
 /// the delivery-report rule of the same event.
 const ANSWER_RULE: &str = "model-answer";
 
+/// The rule an answer refused by a `Stop` hook is recorded under.
+const STOP_RULE: &str = "stop-hook";
+
 /// The correction one unusable answer is given.
 ///
 /// A cut answer needs a shorter answer; an unreadable one almost always
@@ -168,20 +171,12 @@ impl Conversation {
             return Ok(None);
         }
         let blocked = report.as_ref().is_some_and(|report| report.is_blocked());
-        let text = if let Some(report) = &report {
-            let rendered = report.render(&prepared.language);
-            self.recorder.record(
-                "task_report",
-                json!({
-                    "version": task_contract::VERSION,
-                    "status": if blocked { "blocked" } else { "complete" },
-                    "report": report,
-                    "text": rendered,
-                }),
-            )?;
-            format!("{}\n\n{}", text.trim_end(), rendered)
-        } else {
-            text
+        let rendered = report
+            .as_ref()
+            .map(|report| report.render(&prepared.language));
+        let text = match &rendered {
+            Some(rendered) => format!("{}\n\n{}", text.trim_end(), rendered),
+            None => text,
         };
         // Jeden measures the time to completion itself; the model states
         // neither figure in its report, so the answer cannot flatter it.
@@ -198,6 +193,20 @@ impl Conversation {
         } else {
             text
         };
+        if self.answer_refused(args, step, &text, prepared, hooks)? {
+            return Ok(None);
+        }
+        if let (Some(report), Some(rendered)) = (&report, &rendered) {
+            self.recorder.record(
+                "task_report",
+                json!({
+                    "version": task_contract::VERSION,
+                    "status": if blocked { "blocked" } else { "complete" },
+                    "report": report,
+                    "text": rendered,
+                }),
+            )?;
+        }
         if prepared.tracks_completion {
             crate::goal_lifecycle::finish_verified_goal(
                 &args.cwd,
@@ -221,5 +230,51 @@ impl Conversation {
         let answer = self.maybe_advisor_review(args, text, hooks)?;
         let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
         Ok(Some(answer))
+    }
+
+    /// The last gate before an answer is shown: the `Stop` hooks read the exact
+    /// text the operator would receive. A refusal is never shown as the answer;
+    /// it goes back to the model as the next instruction and the turn goes on,
+    /// so an answer that a hook rejects (open work, a missing blocker id) is
+    /// replaced by more work instead of reaching the operator first and being
+    /// refused after. `max_steps`, when the operator set one, still bounds it.
+    fn answer_refused(
+        &mut self,
+        args: &Args,
+        step: u32,
+        text: &str,
+        prepared: &mut Prepared,
+        hooks: &RunHooks,
+    ) -> Result<bool, String> {
+        let session = self.recorder.path();
+        let session_id = session
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let Some(reason) = crate::hooks::answer_stop_block(
+            &args.cwd,
+            &session_id,
+            &session.join("transcript.jsonl"),
+            text,
+            prepared.stop_refused,
+            args.allow_command,
+        ) else {
+            return Ok(false);
+        };
+        prepared.stop_refused = true;
+        self.recorder.record(
+            task_contract::VIOLATION_EVENT,
+            json!({
+                "step": step,
+                "rule": STOP_RULE,
+                "outcome": "requested",
+                "message": &reason,
+                "prompt": &reason,
+            }),
+        )?;
+        hooks.note("answer refused by a Stop hook; continuing the work");
+        self.messages
+            .push(json!({ "role": "user", "content": reason }));
+        Ok(true)
     }
 }

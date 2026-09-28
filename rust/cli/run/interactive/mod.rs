@@ -188,7 +188,6 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     // `! <shell>` / `$ <python>` escapes are a TTY-only affordance; piped stdin
     // (script mode) keeps forwarding such lines to the model unchanged.
     let local_escape_enabled = std::io::stdin().is_terminal() && std::io::stdout().is_terminal();
-    let allow_command = args.allow_command;
     let args = args.clone();
     let handler = move |input: &str, ctx: &tui::TurnCtx| -> Result<tui::CommandOutcome, String> {
         run_turn(
@@ -204,7 +203,6 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     };
 
     tui::run_basic_loop(status, classify, handler, initial_picker).map_err(|e| e.to_string())?;
-    hooks::session_stop(&session_cwd.lock().clone(), allow_command);
     if let Some(plan) = pending_relaunch.lock().take() {
         self_rebuild::execute(plan)?;
     }

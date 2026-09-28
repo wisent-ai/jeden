@@ -17,6 +17,9 @@ pub(super) struct Prepared {
     /// When this turn began, so its answer reports the time to completion of
     /// exactly the requests an independent review accepted during the turn.
     pub(super) started_at: u64,
+    /// A Stop hook already refused an answer of this turn; the next Stop
+    /// payload says so as `stop_hook_active`.
+    pub(super) stop_refused: bool,
 }
 
 impl Conversation {
@@ -174,6 +177,7 @@ impl Conversation {
             language,
             classification,
             started_at,
+            stop_refused: false,
         })
     }
 }

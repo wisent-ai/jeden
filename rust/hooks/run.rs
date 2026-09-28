@@ -163,7 +163,7 @@ pub fn pretool_block(
         "transcript_path": transcript_path,
     });
     let outcomes = fire_event(cwd, event::PRE_TOOL_USE, tool, &payload, allow_project);
-    super::pretool_block_decision(&outcomes)
+    super::block_decision(&outcomes, "PreToolUse hook denied this tool")
 }
 
 /// Fire `PostToolUse` for `tool` (best-effort; outcomes are ignored).
@@ -199,8 +199,29 @@ pub fn session_start(cwd: &Path, allow_project: bool) -> String {
     prompt_context(&outcomes)
 }
 
-/// Fire `Stop` at the end of a session (best-effort side effects).
-pub fn session_stop(cwd: &Path, allow_project: bool) {
-    let payload = json!({ "event": event::STOP, "cwd": cwd });
-    let _ = fire_event(cwd, event::STOP, "", &payload, allow_project);
+/// Fire `Stop` for the answer the agent is about to give; `Some(reason)` means
+/// a hook refused it, and the turn must continue with that reason instead of
+/// ending. The payload is the shape every Stop hook reads (Claude's, which the
+/// Tama catalog is written against): the session, its transcript, the pending
+/// answer as `last_assistant_message`, and `stop_hook_active` once an earlier
+/// answer of the same turn was already refused.
+pub fn answer_stop_block(
+    cwd: &Path,
+    session_id: &str,
+    transcript_path: &Path,
+    answer: &str,
+    stop_hook_active: bool,
+    allow_project: bool,
+) -> Option<String> {
+    let payload = json!({
+        "event": event::STOP,
+        "hook_event_name": event::STOP,
+        "cwd": cwd,
+        "session_id": session_id,
+        "transcript_path": transcript_path,
+        "last_assistant_message": answer,
+        "stop_hook_active": stop_hook_active,
+    });
+    let outcomes = fire_event(cwd, event::STOP, "", &payload, allow_project);
+    super::block_decision(&outcomes, "Stop hook refused this answer")
 }
