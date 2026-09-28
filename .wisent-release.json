@@ -16,14 +16,6 @@
       },
       "quality": [
         {
-          "name": "inspection-framing",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
-        },
-        {
-          "name": "native-image-read",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
-        },
-        {
           "name": "release-compile",
           "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
@@ -35,6 +27,16 @@
       "build": {
         "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper", "--qualify", "pursuit"]
       },
+      "tests": [
+        {
+          "name": "inspection-framing",
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+        },
+        {
+          "name": "native-image-read",
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+        }
+      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
@@ -46,14 +48,6 @@
       "runner_platform": "linux-amd64",
       "quality": [
         {
-          "name": "inspection-framing",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
-        },
-        {
-          "name": "native-image-read",
-          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
-        },
-        {
           "name": "release-compile",
           "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
         },
@@ -65,6 +59,16 @@
       "build": {
         "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper", "--qualify", "pursuit"]
       },
+      "tests": [
+        {
+          "name": "inspection-framing",
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::conversation::action::tests"]
+        },
+        {
+          "name": "native-image-read",
+          "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "test", "--locked", "--release", "--bin", "jeden", "agent::runtime::specs::image_read_tests"]
+        }
+      ],
       "stage": {
         "bin/jeden": "bin/jeden",
         "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
@@ -95,6 +99,9 @@
           "web"
         ]
       },
+      "tests": [
+        {"name": "smoke", "argv": ["stado", "web", "smoke"]}
+      ],
       "stage": {
         "dist/jeden-web.tar.gz": "jeden-web.tar.gz",
         "dist/jeden-web.tar.gz.sha256": "jeden-web.tar.gz.sha256",
