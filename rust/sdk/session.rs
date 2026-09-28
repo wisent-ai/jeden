@@ -117,6 +117,13 @@ impl AgentSession {
         Self::resume(options, id_or_path)
     }
 
+    /// Whether `id_or_path` names a stored session `resume` can open, resolved
+    /// the way `resume` resolves it, so a caller can answer "not found" from
+    /// the store instead of from the words of resume's error.
+    pub fn exists(id_or_path: impl AsRef<Path>) -> bool {
+        resolve_session_path(id_or_path.as_ref()).exists()
+    }
+
     pub fn resume(options: SessionOptions, id_or_path: impl AsRef<Path>) -> Result<Self, String> {
         let source = resolve_session_path(id_or_path.as_ref());
         if !source.exists() {

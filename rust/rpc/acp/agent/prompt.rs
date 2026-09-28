@@ -135,13 +135,12 @@ impl AcpState {
                 active.remove(&session_id);
             }
 
-            if cancellation.is_cancelled()
-                || operation_expired(&operation_token)
-                || result
-                    .as_ref()
-                    .err()
-                    .is_some_and(|error| error.to_ascii_lowercase().contains("cancel"))
-            {
+            let aborted = state
+                .aborted
+                .lock()
+                .map(|mut aborted| aborted.remove(&request_id))
+                .unwrap_or_else(|poisoned| poisoned.into_inner().remove(&request_id));
+            if cancellation.is_cancelled() || operation_expired(&operation_token) || aborted {
                 let _ = responder.respond(PromptResponse::new(StopReason::Cancelled));
             } else {
                 match result {
@@ -176,6 +175,10 @@ impl AcpState {
             .get(&id)
             .cloned();
         if let (Some(session), Some(request_id)) = (session, request_id) {
+            self.aborted
+                .lock()
+                .map_err(|_| super::internal("ACP aborted prompt lock poisoned"))?
+                .insert(request_id.clone());
             let _ = session.abort(&request_id).map_err(super::internal)?;
         }
         Ok(())

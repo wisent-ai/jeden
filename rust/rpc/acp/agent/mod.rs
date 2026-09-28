@@ -4,7 +4,7 @@
 use crate::sdk::{AgentSession, SessionOptions};
 use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::{v1::*, ProtocolVersion};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -26,6 +26,9 @@ pub(super) struct AcpState {
     pub(super) client_capabilities: Mutex<ClientCapabilities>,
     pub(super) sessions: Mutex<HashMap<String, AgentSession>>,
     pub(super) active: Mutex<HashMap<String, String>>,
+    /// Prompt request ids a `session/cancel` aborted, so the prompt thread
+    /// answers Cancelled from this record rather than from its error's words.
+    pub(super) aborted: Mutex<HashSet<String>>,
 }
 
 impl AcpState {
@@ -95,6 +98,11 @@ impl AcpState {
             request.mcp_servers.len(),
         )?;
         let session_id = request.session_id.0.to_string();
+        if !AgentSession::exists(&session_id) {
+            return Err(agent_client_protocol::Error::resource_not_found(Some(
+                session_id,
+            )));
+        }
         let session = AgentSession::resume(
             SessionOptions {
                 cwd: request.cwd,
@@ -102,13 +110,7 @@ impl AcpState {
             },
             &session_id,
         )
-        .map_err(|error| {
-            if error.contains("session not found") {
-                agent_client_protocol::Error::resource_not_found(Some(session_id.clone()))
-            } else {
-                super::internal(error)
-            }
-        })?;
+        .map_err(super::internal)?;
         self.sessions
             .lock()
             .map_err(|_| super::internal("ACP session lock poisoned"))?
