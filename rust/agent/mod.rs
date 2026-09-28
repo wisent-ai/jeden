@@ -62,30 +62,15 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
 /// `Work remains open (task_intake): Brama transport error ...` because one
 /// `GET /v1/models` timed out while chat calls in the same minute were being
 /// served. A configured route now reaches the gateway and the request itself
-/// answers. The prefixes below are `BramaError`'s own sentences, the only
-/// shape of that failure which survives into `ChatConfig`; an explicit
-/// refusal (`"retryable": false`), a missing model or any other configuration
+/// answers. Routing sets `catalog_unanswered` from the typed `BramaError`
+/// (`left_unanswered`: transport, busy or 5xx without Brama's explicit
+/// `retryable: false`); a refusal, a missing model or any other configuration
 /// error still stops the run here.
 fn catalog_left_unread(router: &ChatConfig) -> Option<&str> {
-    let error = router.config_error.as_deref()?;
-    if router.model.trim().is_empty() || error.contains("\"retryable\":false") {
+    if router.model.trim().is_empty() || !router.catalog_unanswered {
         return None;
     }
-    let unread = error.starts_with("Brama transport error")
-        || error.starts_with("Brama rate limited the request")
-        || http_status(error).is_some_and(|status| (500..600).contains(&status));
-    unread.then_some(error)
-}
-
-/// The HTTP status a `BramaError::Http` sentence carries, if it is one.
-fn http_status(error: &str) -> Option<u16> {
-    error
-        .strip_prefix("Brama returned HTTP ")?
-        .split(':')
-        .next()?
-        .trim()
-        .parse()
-        .ok()
+    router.config_error.as_deref()
 }
 
 pub(crate) use runtime::now_stamp;

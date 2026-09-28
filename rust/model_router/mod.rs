@@ -173,6 +173,10 @@ pub struct ChatConfig {
     pub subscription_pool: Option<crate::routing::SubscriptionPoolSnapshot>,
     pub subscription_cooldown_path: Option<PathBuf>,
     pub config_error: Option<String>,
+    /// `config_error` is the catalog read that got no answer about the
+    /// request (`BramaError::left_unanswered`), set where the typed error is
+    /// still in hand so no caller reads that from the sentence.
+    pub catalog_unanswered: bool,
 }
 
 #[derive(Debug, Clone)]

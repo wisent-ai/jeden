@@ -157,11 +157,17 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let token_error = bearer_token.is_none().then(|| {
         "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential".to_string()
     });
-    let config_error = endpoint_error
+    let precondition_error = endpoint_error
         .or(token_error)
         .or_else(|| retry.as_ref().err().cloned())
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
-        .or_else(|| configured_promotions.as_ref().err().cloned())
+        .or_else(|| configured_promotions.as_ref().err().cloned());
+    let catalog_unanswered = precondition_error.is_none()
+        && matches!(
+            (&selected_model, &catalog),
+            (Some(_), Err(error)) if error.left_unanswered()
+        );
+    let config_error = precondition_error
         .or(catalog_error)
         .or_else(|| validate_routes(&configured_fallbacks))
         .or_else(|| validate_routes(&configured_promotions));
@@ -225,6 +231,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         subscription_pool,
         subscription_cooldown_path,
         config_error,
+        catalog_unanswered,
     }
 }
 
