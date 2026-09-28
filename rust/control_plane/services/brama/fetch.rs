@@ -190,13 +190,7 @@ impl BramaClient {
         }
         let status = response.status;
         if !(200..300).contains(&status) {
-            return Err(BramaError::Http {
-                status,
-                message: format!(
-                    "/{API_VERSION}/models: {:?}",
-                    String::from_utf8_lossy(&response.body)
-                ),
-            });
+            return Err(BramaError::http(status, "/models", &response.body));
         }
         let etag = response.headers.get("etag").cloned();
         let text = String::from_utf8(response.body)
@@ -278,13 +272,7 @@ impl BramaClient {
             return Err(BramaError::RateLimited { retry_after_ms });
         }
         if !(200..300).contains(&response.status) {
-            return Err(BramaError::Http {
-                status: response.status,
-                message: format!(
-                    "/{API_VERSION}{path}: {:?}",
-                    String::from_utf8_lossy(&response.body)
-                ),
-            });
+            return Err(BramaError::http(response.status, path, &response.body));
         }
         Ok(response)
     }
