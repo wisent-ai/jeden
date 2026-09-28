@@ -80,6 +80,12 @@ pub enum PlatformError {
     },
     Io(io::Error),
     Process(String),
+    /// Output larger than the caller's limit, with both sizes, so a caller
+    /// reports a capacity refusal from the numbers rather than the sentence.
+    TooLarge {
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl PlatformError {
@@ -102,6 +108,12 @@ impl fmt::Display for PlatformError {
             } => write!(f, "{feature} is unsupported on {target}: {reason:?}"),
             Self::Io(error) => error.fmt(f),
             Self::Process(message) => f.write_str(message),
+            Self::TooLarge { size, limit } => {
+                write!(
+                    f,
+                    "workspace snapshot of {size} bytes exceeds {limit} bytes"
+                )
+            }
         }
     }
 }

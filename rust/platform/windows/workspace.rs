@@ -62,9 +62,10 @@ impl WorkspacePlatform for NativePlatform {
             ));
         }
         if out.stdout.len() as u64 > max {
-            return Err(PlatformError::Process(format!(
-                "workspace snapshot exceeds {max} bytes"
-            )));
+            return Err(PlatformError::TooLarge {
+                size: out.stdout.len() as u64,
+                limit: max,
+            });
         }
         Ok(out.stdout)
     }

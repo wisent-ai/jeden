@@ -1,5 +1,5 @@
 use crate::task_runtime::types::TaskError;
-use crate::tool_runtime::runtime_ops::platform::native;
+use crate::tool_runtime::runtime_ops::platform::{native, PlatformError};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -33,16 +33,12 @@ impl IsolatedWorkspace {
     pub fn capture(&self, destination: &Path, max_bytes: u64) -> Result<(), TaskError> {
         let snapshot = native()
             .snapshot(&self.parent, &self.path, max_bytes)
-            .map_err(|error| {
-                let message = error.to_string();
-                if message.contains("exceeds") {
-                    TaskError::Capacity {
-                        running: max_bytes.saturating_add(1) as usize,
-                        limit: max_bytes as usize,
-                    }
-                } else {
-                    TaskError::Process(message)
-                }
+            .map_err(|error| match error {
+                PlatformError::TooLarge { size, limit } => TaskError::Capacity {
+                    running: size as usize,
+                    limit: limit as usize,
+                },
+                other => TaskError::Process(other.to_string()),
             })?;
         fs::write(destination, snapshot)?;
         Ok(())

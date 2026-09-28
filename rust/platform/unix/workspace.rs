@@ -126,9 +126,10 @@ fn quiet(command: &mut Command) -> bool {
 fn bounded(command: &mut Command, max: u64, allow_one: bool) -> Result<Vec<u8>, PlatformError> {
     let out = command.output()?;
     if out.stdout.len() as u64 > max {
-        return Err(PlatformError::Process(format!(
-            "workspace snapshot exceeds {max} bytes"
-        )));
+        return Err(PlatformError::TooLarge {
+            size: out.stdout.len() as u64,
+            limit: max,
+        });
     }
     if !out.status.success() && !(allow_one && out.status.code() == Some(1)) {
         return Err(PlatformError::Process(
