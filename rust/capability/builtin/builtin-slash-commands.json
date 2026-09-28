@@ -59,7 +59,7 @@
   { "name": "tan", "description": "Background agent", "aliases": [] },
   { "name": "omfg", "description": "Forge local rule", "aliases": [] },
   { "name": "retry", "description": "Retry last failed turn", "aliases": [] },
-  { "name": "memory", "description": "Inspect memory, control its durable queue, and rebuild SQLite FTS5", "aliases": [] },
+  { "name": "memory", "description": "Inspect memory, control its durable queue, and rebuild its full-text index", "aliases": [] },
   { "name": "rename", "description": "Rename session", "aliases": [] },
   { "name": "move", "description": "Move session workspace", "aliases": [] },
   { "name": "marketplace", "description": "Manage marketplace plugins", "aliases": [] },

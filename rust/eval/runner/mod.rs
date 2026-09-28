@@ -38,7 +38,6 @@ pub struct IsolatedRunV1 {
     pub root: PathBuf,
     pub home: PathBuf,
     pub session: PathBuf,
-    pub memory: PathBuf,
     pub quality_db: PathBuf,
     pub workspace: PathBuf,
     pub artifacts: PathBuf,

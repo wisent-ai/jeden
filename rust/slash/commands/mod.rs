@@ -74,7 +74,7 @@ fn diagnostics_picker(title: &str, context: &SlashContext<'_>) -> PickerSpec {
             .detail(format!("{tool_count} tools loaded for this workspace"))
             .badge("tools"),
         PickerItem::action("Inspect memory diagnostics", "/memory stats")
-            .detail("Show SQLite/FTS5 integrity, record counts, and durable queue state")
+            .detail("Show the fleet database location, record counts, and durable queue state")
             .badge("memory"),
         PickerItem::action("Inspect provider usage", "/usage status")
             .detail("Show local token and recorded cost accounting")

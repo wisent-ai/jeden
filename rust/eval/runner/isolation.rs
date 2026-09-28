@@ -58,25 +58,18 @@ pub(super) fn isolated_run(output_root: &Path, run_key: &str) -> Result<Isolated
     let root = output_root.join("runs").join(run_key);
     let home = root.join("home");
     let session = root.join("session");
-    let memory = root.join("memory");
+    // Memory lives in the fleet database; an eval's memories stay apart from
+    // the operator's because every one is scoped to the run's own workspace.
     let quality_db = root.join("quality");
     let workspace = root.join("workspace");
     let artifacts = root.join("artifacts");
-    for path in [
-        &home,
-        &session,
-        &memory,
-        &quality_db,
-        &workspace,
-        &artifacts,
-    ] {
+    for path in [&home, &session, &quality_db, &workspace, &artifacts] {
         fs::create_dir_all(path)
             .map_err(|error| format!("cannot create isolated path {}: {error}", path.display()))?;
     }
-    let environment = BTreeMap::from([
+    let mut environment = BTreeMap::from([
         ("HOME".into(), home.display().to_string()),
         ("JEDEN_SESSION_DIR".into(), session.display().to_string()),
-        ("JEDEN_MEMORY_DIR".into(), memory.display().to_string()),
         (
             "JEDEN_QUALITY_DB_DIR".into(),
             quality_db.display().to_string(),
@@ -87,12 +80,21 @@ pub(super) fn isolated_run(output_root: &Path, run_key: &str) -> Result<Isolated
         ("TZ".into(), "UTC".into()),
         ("LANG".into(), "C".into()),
     ]);
+    // The isolated HOME holds no `.stado/`; Jeden reaches the fleet database
+    // through the home that does.
+    if let Some(stado_home) =
+        std::env::var_os("JEDEN_STADO_HOME").or_else(|| std::env::var_os("HOME"))
+    {
+        environment.insert(
+            "JEDEN_STADO_HOME".into(),
+            PathBuf::from(stado_home).display().to_string(),
+        );
+    }
     Ok(IsolatedRunV1 {
         run_key: run_key.into(),
         root,
         home,
         session,
-        memory,
         quality_db,
         workspace,
         artifacts,

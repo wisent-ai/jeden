@@ -105,10 +105,10 @@ fn enqueue_maintenance(
     }
     let id = store.enqueue(
         "reindex",
-        &json!({"requestedBy":"slash","scope":scope,"operation":"fts-rebuild-optimize"}),
+        &json!({"requestedBy":"slash","scope":scope,"operation":"reindex"}),
     )?;
     Ok(format!(
-        "Enqueued durable FTS5 rebuild job {id}. Inspect it with /memory queue; execute queued work with /memory queue run."
+        "Enqueued durable full-text reindex job {id}. Inspect it with /memory queue; execute queued work with /memory queue run."
     ))
 }
 
