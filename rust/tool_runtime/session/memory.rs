@@ -5,7 +5,7 @@ use crate::tool_runtime::shared::{string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let store = MemoryStore::open(MemoryStore::default_path())?;
+    let store = MemoryStore::open()?;
     let op = string_input(input, "op").unwrap_or_else(|| "recall".into());
     let scope = scope_from_value(input.get("scope"), runtime.cwd);
     match op.as_str() {
@@ -45,7 +45,7 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                     .and_then(Value::as_f64)
                     .unwrap_or(0.5),
             )?;
-            Ok(json!({"entry":entry,"backend":"sqlite-wal"}))
+            Ok(json!({"entry":entry,"backend":"fleet-postgres"}))
         }
         "list" => {
             Ok(json!({"entries":store.list(u64_input(input,"limit",20).clamp(1,200) as usize)?}))
@@ -59,7 +59,7 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 u64_input(input, "limit", 10).clamp(1, 100) as usize,
             )?;
             Ok(
-                json!({"entries":hits.iter().map(|h|&h.record).collect::<Vec<_>>(),"hits":hits,"query":query,"backend":"sqlite-fts5"}),
+                json!({"entries":hits.iter().map(|h|&h.record).collect::<Vec<_>>(),"hits":hits,"query":query,"backend":"postgres-fts"}),
             )
         }
         "context" => Ok(

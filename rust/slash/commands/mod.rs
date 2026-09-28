@@ -14,8 +14,6 @@ pub(crate) mod usage;
 
 pub(crate) use connections::{mcp, ssh};
 
-use memory::memory_file_path;
-
 fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
     tools::list_tools(context.cwd)
         .into_iter()
@@ -25,14 +23,14 @@ fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
 
 pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String> {
     let all = tool_values(context);
-    let memory_health = crate::memory::MemoryStore::open(memory_file_path())
+    let memory_health = crate::memory::MemoryStore::open()
         .and_then(|store| store.health())
         .unwrap_or_else(|error| {
             json!({
                 "service": "memory",
                 "healthy": false,
-                "backend": "sqlite-wal-fts5",
-                "path": memory_file_path(),
+                "backend": "fleet-postgres-fts",
+                "location": "fleet database jeden",
                 "error": error,
             })
         });

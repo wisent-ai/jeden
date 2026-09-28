@@ -8,6 +8,17 @@ use std::{
 
 const MAX_REQUEST_ID_BYTES: usize = 100;
 
+/// The pursuit tables in the fleet database `jeden`, created by
+/// `crate::fleet` on connection.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS pursuit_values (request TEXT NOT NULL, key TEXT NOT NULL,
+        data TEXT NOT NULL, PRIMARY KEY(request,key));
+    CREATE TABLE IF NOT EXISTS pursuit_stages (request TEXT NOT NULL, position BIGINT NOT NULL,
+        data TEXT NOT NULL, PRIMARY KEY(request,position));
+    CREATE TABLE IF NOT EXISTS pursuit_calls (request TEXT NOT NULL, id TEXT NOT NULL,
+        model TEXT NOT NULL, catalog_revision TEXT NOT NULL, reserved TEXT NOT NULL, actual TEXT,
+        PRIMARY KEY(request,id));";
+
 /// One pursuit request: its values and stages live in the fleet database
 /// under the request id; `directory` keeps only the run artifacts and the
 /// owner lock, which are local to the process that executes it.
@@ -189,8 +200,32 @@ impl Store {
     pub fn id(&self) -> &str {
         &self.id
     }
+    /// Every value stored for this request, by key, as `pursue --state` shows.
+    pub fn saved(&self) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
+        let id = self.id.clone();
+        let rows: Vec<(String, String)> = run_db(move |client| {
+            Ok(client
+                .query(
+                    "SELECT key,data FROM pursuit_values WHERE request=$1 ORDER BY key",
+                    &[&id],
+                )
+                .map_err(sql)?
+                .into_iter()
+                .map(|row| (row.get(0), row.get(1)))
+                .collect())
+        })?;
+        rows.into_iter()
+            .map(|(key, data)| {
+                serde_json::from_str(&data)
+                    .map(|value| (key, value))
+                    .map_err(|e| e.to_string())
+            })
+            .collect()
+    }
     pub fn claim(&self) -> Result<Option<Claim>, String> {
         use std::os::unix::io::AsRawFd;
+        // A request resumed on another host has no local directory yet.
+        fs::create_dir_all(&self.directory).map_err(|e| format!("claim pursuit request: {e}"))?;
         let file = fs::OpenOptions::new()
             .create(true)
             .truncate(false)

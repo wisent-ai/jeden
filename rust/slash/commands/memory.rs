@@ -1,5 +1,4 @@
 use serde_json::{json, Value};
-use std::path::PathBuf;
 
 use crate::memory::{scope_from_value, FtsBackend, MemoryStore};
 use crate::slash::common::split_args;
@@ -8,12 +7,8 @@ use crate::tui::{PickerItem, PickerSpec};
 
 const MEMORY_USAGE: &str = "Usage: /memory [view [query]|stats|queue [status|run [limit]]|enqueue [reindex]|rebuild|clear]";
 
-pub(crate) fn memory_file_path() -> PathBuf {
-    MemoryStore::default_path()
-}
-
 pub(crate) fn memory_picker() -> Result<PickerSpec, String> {
-    let store = MemoryStore::open(memory_file_path())?;
+    let store = MemoryStore::open()?;
     let health = store.health()?;
     let count = health
         .get("activeMemories")
@@ -31,19 +26,18 @@ pub(crate) fn memory_picker() -> Result<PickerSpec, String> {
         "Durable memory",
         vec![
             PickerItem::action("View durable memory", "/memory view")
-                .detail(format!(
-                    "{count} active records in {}",
-                    store.path().display()
-                ))
-                .badge("SQLite WAL"),
+                .detail(format!("{count} active records in {}", store.location()))
+                .badge("fleet"),
             PickerItem::action("Show memory health", "/memory stats")
                 .detail(format!("{pending} pending jobs; {failed} failed jobs"))
-                .badge("FTS5"),
+                .badge("full-text"),
             PickerItem::action("Inspect maintenance queue", "/memory queue")
                 .detail("Show durable extraction and reindex jobs with explicit states")
                 .badge("durable"),
             PickerItem::action("Rebuild search index now", "/memory rebuild")
-                .detail("Rebuild and optimize the SQLite FTS5 index, then verify integrity")
+                .detail(
+                    "Rebuild the full-text index memories_search and report the stored row count",
+                )
                 .badge("maintenance"),
             PickerItem::action("Clear durable memory", "/memory clear")
                 .detail("Delete stored memory revisions; queued work is retained")
@@ -59,7 +53,7 @@ pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<St
         .split_first()
         .map(|(value, tail)| (value.as_str(), tail))
         .unwrap_or(("view", &[][..]));
-    let store = MemoryStore::open(memory_file_path())?;
+    let store = MemoryStore::open()?;
     let scope = scope_from_value(None, context.cwd);
     match verb {
         "stats" | "diagnose" | "health" if rest.is_empty() => {
@@ -68,7 +62,7 @@ pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<St
         "clear" | "reset" if rest.is_empty() => Ok(format!(
             "Deleted {} stored memory revision row(s) from {}. The durable job queue was not changed.",
             store.clear()?,
-            store.path().display()
+            store.location()
         )),
         "view" | "list" | "" => {
             let query = rest.join(" ");

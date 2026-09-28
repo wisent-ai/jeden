@@ -26,17 +26,14 @@ fn scope(cwd: &Path) -> MemoryScope {
 
 pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) -> SourceOutcome {
     let started = Instant::now();
-    let store = match MemoryStore::open(MemoryStore::default_path()) {
+    let store = match MemoryStore::open() {
         Ok(store) => store,
         Err(error) => {
             return SourceOutcome {
                 hits: Vec::new(),
                 status: SourceStatus::unavailable(
                     "memory",
-                    format!(
-                        "{} could not be opened: {error}",
-                        MemoryStore::default_path().display()
-                    ),
+                    format!("memory could not be opened: {error}"),
                     started,
                 ),
             }
@@ -87,12 +84,12 @@ pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) ->
 /// from an empty store.
 pub(crate) fn probe() -> Value {
     let started = Instant::now();
-    let path = MemoryStore::default_path();
-    let status = match MemoryStore::open(&path) {
+    let location = "fleet database jeden";
+    let status = match MemoryStore::open() {
         Ok(store) => match store.health() {
             Ok(health) => {
                 let memories = health
-                    .get("memories")
+                    .get("activeMemories")
                     .and_then(Value::as_i64)
                     .unwrap_or_default();
                 if memories > i64::default() {
@@ -117,11 +114,11 @@ pub(crate) fn probe() -> Value {
         },
         Err(error) => SourceStatus::unavailable(
             "memory",
-            format!("{} could not be opened: {error}", path.display()),
+            format!("memory could not be opened: {error}"),
             started,
         ),
     };
-    probe_value(&status, vec![("store", json!(path.display().to_string()))])
+    probe_value(&status, vec![("store", json!(location))])
 }
 
 fn active_count(store: &MemoryStore) -> String {
@@ -129,7 +126,7 @@ fn active_count(store: &MemoryStore) -> String {
         Ok(health) => format!(
             "{} active record(s)",
             health
-                .get("memories")
+                .get("activeMemories")
                 .and_then(Value::as_i64)
                 .unwrap_or_default()
         ),

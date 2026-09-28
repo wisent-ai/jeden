@@ -29,6 +29,7 @@ pub(crate) fn usage() -> String {
         "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
         "  jeden pursue --request-file JSON [--allow-write] [--allow-command] --json\n",
         "  jeden pursue --status REQUEST_ID --json\n",
+        "  jeden pursue --state REQUEST_ID\n",
         "  jeden pursue --resume-run REQUEST_ID --json\n",
         "  jeden todo [list|add|pause|resume|cancel|defect|answer|continue] [--session id] [--revision n --reason text|--text answer] [--json]\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
@@ -144,10 +145,13 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     };
     while let Some(arg) = rest.next() {
         match arg.as_str() {
-            "--request-file" | "--status" | "--resume-run" if args.command == "pursue" => {
+            "--request-file" | "--status" | "--state" | "--resume-run"
+                if args.command == "pursue" =>
+            {
                 if args.pursuit_request.is_some() {
                     return Err(
-                        "pursue request, status and resume modes are mutually exclusive".into(),
+                        "pursue request, status, state and resume modes are mutually exclusive"
+                            .into(),
                     );
                 }
                 let value = rest
@@ -158,6 +162,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                         crate::autonomy::requests::Mode::Submit(PathBuf::from(value))
                     }
                     "--status" => crate::autonomy::requests::Mode::Status(value),
+                    "--state" => crate::autonomy::requests::Mode::State(value),
                     _ => crate::autonomy::requests::Mode::Resume(value),
                 });
             }

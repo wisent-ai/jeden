@@ -1,63 +1,42 @@
 use super::*;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use crate::fleet::{run_db, sql};
+use postgres::GenericClient;
 use sha2::{Digest, Sha256};
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 mod maintenance;
 mod recall;
 mod writes;
 
-pub struct MemoryStore {
-    pub(super) path: PathBuf,
-}
+/// The columns every memory read returns, in the order `row_record` reads.
+pub(super) const RECORD_COLUMNS: &str = "id,kind,scope_kind,scope_id,text,tags_json,source_json,confidence,status,created_at,updated_at,logical_key,revision,valid_from,valid_to,supersedes,tombstone";
+
+/// Jeden's memory, kept in the fleet database `jeden` so every host and
+/// session of the operator reads and writes the same memories.
+pub struct MemoryStore;
 
 impl MemoryStore {
-    pub fn default_path() -> PathBuf {
-        std::env::var_os("JEDEN_MEMORY_DB")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("JEDEN_MEMORY_FILE").map(PathBuf::from))
-            .unwrap_or_else(|| {
-                PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into()))
-                    .join(".jeden/memory.sqlite3")
-            })
+    /// Opens memory by reaching the fleet database; the error names the
+    /// step that failed (Stado resolve, Skarbiec, or Postgres).
+    pub fn open() -> Result<Self, String> {
+        run_db(|_| Ok(()))?;
+        Ok(Self)
     }
-
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, String> {
-        let path = path.as_ref().to_path_buf();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?
-        }
-        let store = Self { path };
-        let conn = store.connect()?;
-        schema::initialize(&conn)?;
-        drop(conn);
-        schema::migrate(&store.path)?;
-        Ok(store)
-    }
-
-    pub(crate) fn connect(&self) -> Result<Connection, String> {
-        let conn = Connection::open(&self.path).map_err(|e| e.to_string())?;
-        conn.busy_timeout(Duration::from_secs(10))
-            .map_err(|e| e.to_string())?;
-        conn.execute_batch("PRAGMA foreign_keys=ON;")
-            .map_err(|e| e.to_string())?;
-        Ok(conn)
-    }
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// Where memory is kept, as health reports and pickers show it.
+    pub fn location(&self) -> &'static str {
+        "fleet database jeden (memories, memory_*)"
     }
 
     pub fn embedding_health(
         &self,
         provider: Option<&dyn EmbeddingProvider>,
     ) -> Result<EmbeddingHealth, String> {
-        embeddings::health(&self.connect()?, provider)
+        embeddings::health(provider)
     }
     pub fn edges(&self, id: &str) -> Result<Vec<MemoryEdge>, String> {
-        conflict::edges(&self.connect()?, id)
+        let id = id.to_owned();
+        run_db(move |client| conflict::edges(client, &id))
     }
     pub fn rebuild_embeddings(&self, provider: &dyn EmbeddingProvider) -> Result<usize, String> {
-        embeddings::rebuild(&mut self.connect()?, provider)
+        embeddings::rebuild(provider)
     }
 
     pub fn acquire_scope_lock(
@@ -66,25 +45,39 @@ impl MemoryStore {
         owner: &str,
         ttl_ms: i64,
     ) -> Result<bool, String> {
-        let now = now_ms();
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        tx.execute("DELETE FROM scope_locks WHERE expires_at<?1", [now])
-            .map_err(|e| e.to_string())?;
-        let acquired=tx.execute("INSERT INTO scope_locks(scope_kind,scope_id,owner,expires_at) VALUES(?1,?2,?3,?4) ON CONFLICT(scope_kind,scope_id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at WHERE scope_locks.owner=excluded.owner",params![scope.kind,scope.id,owner,now+ttl_ms.clamp(1_000,300_000)]).map_err(|e|e.to_string())?==1;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(acquired)
+        let (scope, owner) = (scope.clone(), owner.to_owned());
+        run_db(move |client| {
+            let now = now_ms();
+            let mut tx = client.transaction().map_err(sql)?;
+            tx.execute(
+                "DELETE FROM memory_scope_locks WHERE expires_at<$1",
+                &[&now],
+            )
+            .map_err(sql)?;
+            let acquired = tx
+                .execute(
+                    "INSERT INTO memory_scope_locks(scope_kind,scope_id,owner,expires_at) VALUES($1,$2,$3,$4)
+                     ON CONFLICT(scope_kind,scope_id) DO UPDATE SET owner=excluded.owner,expires_at=excluded.expires_at
+                     WHERE memory_scope_locks.owner=excluded.owner",
+                    &[&scope.kind, &scope.id, &owner, &(now + ttl_ms.clamp(1_000, 300_000))],
+                )
+                .map_err(sql)?
+                == 1;
+            tx.commit().map_err(sql)?;
+            Ok(acquired)
+        })
     }
     pub fn release_scope_lock(&self, scope: &MemoryScope, owner: &str) -> Result<(), String> {
-        self.connect()?
-            .execute(
-                "DELETE FROM scope_locks WHERE scope_kind=?1 AND scope_id=?2 AND owner=?3",
-                params![scope.kind, scope.id, owner],
-            )
-            .map_err(|e| e.to_string())?;
-        Ok(())
+        let (scope, owner) = (scope.clone(), owner.to_owned());
+        run_db(move |client| {
+            client
+                .execute(
+                    "DELETE FROM memory_scope_locks WHERE scope_kind=$1 AND scope_id=$2 AND owner=$3",
+                    &[&scope.kind, &scope.id, &owner],
+                )
+                .map_err(sql)?;
+            Ok(())
+        })
     }
 
     pub fn pre_compaction_context(
@@ -165,82 +158,102 @@ impl MemoryStore {
         session_id: &str,
         verified: bool,
     ) -> Result<Option<String>, String> {
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        let prior: Option<(String, i64, i64)> = tx
-            .query_row(
-                "SELECT sessions_json,occurrences,verified FROM workflows WHERE fingerprint=?1",
-                [fingerprint],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            )
-            .optional()
-            .map_err(|e| e.to_string())?;
-        let (mut sessions, occ, was_verified) = prior
-            .map(|(j, o, v)| {
-                (
-                    serde_json::from_str::<Vec<String>>(&j).unwrap_or_default(),
-                    o,
-                    v,
+        let fingerprint = fingerprint.to_owned();
+        let description = bounded_redacted(description, MAX_MEMORY_CHARS);
+        let session_id = session_id.to_owned();
+        run_db(move |client| {
+            let mut tx = client.transaction().map_err(sql)?;
+            let prior = tx
+                .query_opt(
+                    "SELECT sessions_json,occurrences,verified FROM memory_workflows WHERE fingerprint=$1 FOR UPDATE",
+                    &[&fingerprint],
                 )
-            })
-            .unwrap_or((Vec::new(), 0, 0));
-        if !sessions.iter().any(|s| s == session_id) {
-            sessions.push(session_id.into())
-        }
-        let occurrences = occ + 1;
-        let is_verified = was_verified == 1 || verified;
-        tx.execute("INSERT INTO workflows(fingerprint,description,sessions_json,occurrences,verified,updated_at) VALUES(?1,?2,?3,?4,?5,?6) ON CONFLICT(fingerprint) DO UPDATE SET description=excluded.description,sessions_json=excluded.sessions_json,occurrences=excluded.occurrences,verified=excluded.verified,updated_at=excluded.updated_at",params![fingerprint,bounded_redacted(description,MAX_MEMORY_CHARS),serde_json::to_string(&sessions).map_err(|e|e.to_string())?,occurrences,is_verified as i64,now_ms()]).map_err(|e|e.to_string())?;
-        let skill = if occurrences >= 3 && is_verified {
-            let id = format!(
-                "skill_{}",
-                &hex::encode(Sha256::digest(fingerprint.as_bytes()))[..24]
-            );
-            let body = format!(
-                "# Managed workflow\n\n{}",
-                bounded_redacted(description, MAX_MEMORY_CHARS)
-            );
-            tx.execute("INSERT OR IGNORE INTO managed_skills(id,workflow_fingerprint,body,created_at) VALUES(?1,?2,?3,?4)",params![id,fingerprint,body,now_ms()]).map_err(|e|e.to_string())?;
-            Some(id)
-        } else {
-            None
-        };
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(skill)
+                .map_err(sql)?
+                .map(|row| (row.get::<_, String>(0), row.get::<_, i64>(1), row.get::<_, bool>(2)));
+            let (mut sessions, occ, was_verified) = prior
+                .map(|(j, o, v)| {
+                    (
+                        serde_json::from_str::<Vec<String>>(&j).unwrap_or_default(),
+                        o,
+                        v,
+                    )
+                })
+                .unwrap_or((Vec::new(), 0, false));
+            if !sessions.iter().any(|s| *s == session_id) {
+                sessions.push(session_id)
+            }
+            let occurrences = occ + 1;
+            let is_verified = was_verified || verified;
+            let sessions = serde_json::to_string(&sessions).map_err(|e| e.to_string())?;
+            tx.execute(
+                "INSERT INTO memory_workflows(fingerprint,description,sessions_json,occurrences,verified,updated_at)
+                 VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(fingerprint) DO UPDATE SET description=excluded.description,
+                 sessions_json=excluded.sessions_json,occurrences=excluded.occurrences,verified=excluded.verified,
+                 updated_at=excluded.updated_at",
+                &[&fingerprint, &description, &sessions, &occurrences, &is_verified, &now_ms()],
+            )
+            .map_err(sql)?;
+            let skill = if occurrences >= 3 && is_verified {
+                let id = format!(
+                    "skill_{}",
+                    &hex::encode(Sha256::digest(fingerprint.as_bytes()))[..24]
+                );
+                let body = format!("# Managed workflow\n\n{description}");
+                tx.execute(
+                    "INSERT INTO memory_managed_skills(id,workflow_fingerprint,body,created_at)
+                     VALUES($1,$2,$3,$4) ON CONFLICT DO NOTHING",
+                    &[&id, &fingerprint, &body, &now_ms()],
+                )
+                .map_err(sql)?;
+                Some(id)
+            } else {
+                None
+            };
+            tx.commit().map_err(sql)?;
+            Ok(skill)
+        })
     }
 }
-pub(super) fn load_record(conn: &Connection, id: &str) -> Result<Option<MemoryRecord>, String> {
-    conn.query_row("SELECT id,kind,scope_kind,scope_id,text,tags_json,source_json,confidence,status,created_at,updated_at,logical_key,revision,valid_from,valid_to,supersedes,tombstone FROM memories WHERE id=?1",[id],row_record).optional().map_err(|e|e.to_string())
+pub(super) fn load_record(
+    client: &mut impl GenericClient,
+    id: &str,
+) -> Result<Option<MemoryRecord>, String> {
+    Ok(client
+        .query_opt(
+            &*format!("SELECT {RECORD_COLUMNS} FROM memories WHERE id=$1"),
+            &[&id],
+        )
+        .map_err(sql)?
+        .map(|row| row_record(&row)))
 }
-pub(super) fn row_record(row: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryRecord> {
-    let tags: String = row.get(5)?;
-    let source: String = row.get(6)?;
-    Ok(MemoryRecord {
-        id: row.get(0)?,
-        kind: row.get(1)?,
+pub(super) fn row_record(row: &postgres::Row) -> MemoryRecord {
+    let tags: String = row.get(5);
+    let source: String = row.get(6);
+    MemoryRecord {
+        id: row.get(0),
+        kind: row.get(1),
         scope: MemoryScope {
-            kind: row.get(2)?,
-            id: row.get(3)?,
+            kind: row.get(2),
+            id: row.get(3),
         },
-        text: row.get(4)?,
+        text: row.get(4),
         tags: serde_json::from_str(&tags).unwrap_or_default(),
         source: serde_json::from_str(&source).unwrap_or(MemorySource {
             origin: "unknown".into(),
             session_id: None,
             entry_id: None,
         }),
-        confidence: row.get(7)?,
-        status: row.get(8)?,
-        created_at: row.get(9)?,
-        updated_at: row.get(10)?,
-        logical_key: row.get(11)?,
-        revision: row.get(12)?,
-        valid_from: row.get(13)?,
-        valid_to: row.get(14)?,
-        supersedes: row.get(15)?,
-        tombstone: row.get::<_, i64>(16)? != 0,
-    })
+        confidence: row.get(7),
+        status: row.get(8),
+        created_at: row.get(9),
+        updated_at: row.get(10),
+        logical_key: row.get(11),
+        revision: row.get(12),
+        valid_from: row.get(13),
+        valid_to: row.get(14),
+        supersedes: row.get(15),
+        tombstone: row.get(16),
+    }
 }
 pub(super) fn logical_key(kind: &str, scope: &MemoryScope, text: &str) -> String {
     let mut hash = Sha256::new();

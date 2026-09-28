@@ -67,6 +67,11 @@ impl Journey {
         let ambient = env::vars().collect::<BTreeMap<_, _>>();
         let mut journey_env = ambient.clone();
         journey_env.remove("JEDEN_LANGUAGE");
+        // Fleet state is reached with the operator's Stado identity while
+        // everything else Jeden keeps under HOME stays inside the journey.
+        if let Some(home) = ambient.get("HOME") {
+            journey_env.insert("JEDEN_STADO_HOME".into(), home.clone());
+        }
         journey_env.insert("HOME".into(), directory.join("home").display().to_string());
         journey_env.insert(
             "JEDEN_SESSION_ROOT".into(),
@@ -169,26 +174,13 @@ impl Journey {
         self.root.join("requests").join(&self.identity)
     }
 
-    fn saved(&self) -> BTreeMap<String, Value> {
-        let path = self.state_dir().join("state.sqlite3");
-        let connection = rusqlite::Connection::open_with_flags(
-            &path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
-        )
-        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
-        let mut statement = connection
-            .prepare("SELECT key, data FROM values_store ORDER BY key")
-            .expect("query saved values");
-        let rows = statement
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .expect("read saved values");
-        rows.map(|row| {
-            let (key, data) = row.expect("saved row");
-            (key, serde_json::from_str(&data).expect("saved JSON"))
-        })
-        .collect()
+    /// Everything the fleet database holds for the request, as the product
+    /// itself reports it with `jeden pursue --state`.
+    fn saved(&mut self) -> BTreeMap<String, Value> {
+        let identity = self.identity.clone();
+        let state = self.cli(&["pursue", "--state", &identity]);
+        let saved = response(&state);
+        serde_json::from_value(saved).expect("saved values by key")
     }
 
     fn retain(&self) {
@@ -287,8 +279,8 @@ fn blocked_request_survives_reopen_and_rejects_rebinding() {
     let resumed = response(&journey.cli(&["pursue", "--resume-run", &identity, "--json"]));
     assert_eq!(resumed["state"], "blocked");
     assert_eq!(journey.saved()["request"], before["request"]);
-    assert!(
-        !journey.state_dir().join("inference.sqlite3").exists(),
+    assert_eq!(
+        resumed["spent_usd"], "0",
         "a non-checkout must refuse before inference"
     );
     journey.report["persisted_request"] = journey.saved()["request"].clone();

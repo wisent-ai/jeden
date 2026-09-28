@@ -69,9 +69,7 @@ pub(super) fn task_probe(cwd: &Path) -> HealthProbe {
 
 pub(super) fn memory_probe() -> HealthProbe {
     let started = Instant::now();
-    match crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path())
-        .and_then(|store| store.health())
-    {
+    match crate::memory::MemoryStore::open().and_then(|store| store.health()) {
         Ok(health) => HealthProbe::healthy(
             "memory",
             started,

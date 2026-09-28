@@ -7,6 +7,17 @@ mod http;
 use auth::{now_ms, relay_response_authorized, token_hash, token_role};
 pub use http::serve;
 
+/// The relay tables in the fleet database `jeden`, created by
+/// `crate::fleet` on connection.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS relay_rooms (id TEXT PRIMARY KEY, created_at BIGINT NOT NULL);
+    CREATE TABLE IF NOT EXISTS relay_room_tokens (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
+        ON DELETE CASCADE, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+        generation BIGINT NOT NULL DEFAULT 1, PRIMARY KEY(room_id,role));
+    CREATE TABLE IF NOT EXISTS relay_events (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
+        ON DELETE CASCADE, seq BIGINT NOT NULL, blob TEXT NOT NULL, created_at BIGINT NOT NULL,
+        PRIMARY KEY(room_id,seq));";
+
 /// The content-blind collab relay: rooms, their role tokens and their
 /// encrypted events live in the fleet database `jeden` (tables `relay_*`),
 /// so every relay process on every host serves the same rooms.

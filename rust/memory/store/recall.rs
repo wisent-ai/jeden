@@ -1,25 +1,25 @@
 //! Getting memories back out: what is there, what matches, and what was
 //! believed at a given moment.
-//!
-//! Split out of `memory/store.rs`, which had grown past the module line cap.
 
 use super::super::*;
-use super::{row_record, MemoryStore};
-use crate::memory::store::load_record;
-use rusqlite::params;
-use rusqlite::TransactionBehavior;
+use super::{load_record, row_record, MemoryStore, RECORD_COLUMNS};
+use crate::fleet::{run_db, sql};
 use serde_json::json;
 
 impl MemoryStore {
     pub fn list(&self, limit: usize) -> Result<Vec<MemoryRecord>, String> {
-        let conn = self.connect()?;
-        let mut stmt=conn.prepare("SELECT id,kind,scope_kind,scope_id,text,tags_json,source_json,confidence,status,created_at,updated_at,logical_key,revision,valid_from,valid_to,supersedes,tombstone FROM memories ORDER BY updated_at DESC,id LIMIT ?1").map_err(|e|e.to_string())?;
-        let rows = stmt
-            .query_map([limit.min(500) as i64], row_record)
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
-        Ok(rows)
+        let limit = limit.min(500) as i64;
+        run_db(move |client| {
+            Ok(client
+                .query(
+                    &*format!("SELECT {RECORD_COLUMNS} FROM memories ORDER BY updated_at DESC,id LIMIT $1"),
+                    &[&limit],
+                )
+                .map_err(sql)?
+                .iter()
+                .map(row_record)
+                .collect())
+        })
     }
 
     pub fn recall(
@@ -29,33 +29,44 @@ impl MemoryStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<RecallHit>, String> {
-        let conn = self.connect()?;
-        let ranked = backend.recall(&conn, scope, query, limit.min(100))?;
+        let ranked = backend.recall(scope, query, limit.min(100))?;
         let ids = ranked
             .iter()
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
-        let groups = conflict::conflict_groups(&conn, &ids)?;
-        let mut hits = Vec::new();
-        for candidate in ranked {
-            if let Some(record) = load_record(&conn, &candidate.id)? {
-                let edges = conflict::edges(&conn, &record.id)?;
-                hits.push(RecallHit {
-                    score: candidate.score,
-                    components: candidate.components,
-                    conflict_group: groups.get(&record.id).cloned(),
-                    provenance: RecallProvenance {
-                        backend: backend.name().into(),
-                        query: query.into(),
-                        source: record.source.clone(),
-                        memory_id: record.id.clone(),
-                        logical_key: record.logical_key.clone(),
-                        revision: record.revision,
-                        edges,
-                    },
-                    record,
-                })
+        let (groups, records) = run_db(move |client| {
+            let groups = conflict::conflict_groups(client, &ids)?;
+            let mut records = Vec::new();
+            for id in &ids {
+                let record = load_record(client, id)?;
+                let edges = match &record {
+                    Some(record) => conflict::edges(client, &record.id)?,
+                    None => Vec::new(),
+                };
+                records.push(record.map(|record| (record, edges)));
             }
+            Ok((groups, records))
+        })?;
+        let mut hits = Vec::new();
+        for (candidate, found) in ranked.into_iter().zip(records) {
+            let Some((record, edges)) = found else {
+                continue;
+            };
+            hits.push(RecallHit {
+                score: candidate.score,
+                components: candidate.components,
+                conflict_group: groups.get(&record.id).cloned(),
+                provenance: RecallProvenance {
+                    backend: backend.name().into(),
+                    query: query.into(),
+                    source: record.source.clone(),
+                    memory_id: record.id.clone(),
+                    logical_key: record.logical_key.clone(),
+                    revision: record.revision,
+                    edges,
+                },
+                record,
+            })
         }
         Ok(hits)
     }
@@ -81,7 +92,8 @@ impl MemoryStore {
         relation: MemoryRelation,
         source: &MemorySource,
     ) -> Result<(), String> {
-        conflict::add_edge(&self.connect()?, from_id, to_id, relation, source)
+        let (from_id, to_id, source) = (from_id.to_owned(), to_id.to_owned(), source.clone());
+        run_db(move |client| conflict::add_edge(client, &from_id, &to_id, relation, &source))
     }
     pub fn resolve_conflict(
         &self,
@@ -93,20 +105,41 @@ impl MemoryStore {
             return Err("conflict winner cannot also be a loser".into());
         }
         let now = now_ms();
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        let winner_exists:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM memories WHERE id=?1 AND status='active' AND tombstone=0)",[winner_id],|row|row.get(0)).map_err(|e|e.to_string())?;
-        if !winner_exists {
-            return Err("conflict winner is not active".into());
-        }
-        let mut resolved = 0;
-        for loser in loser_ids {
-            resolved+=tx.execute("UPDATE memories SET status='resolved',valid_to=COALESCE(valid_to,?2),updated_at=?2 WHERE id=?1 AND status='active'",params![loser,now]).map_err(|e|e.to_string())?;
-        }
-        tx.execute("INSERT OR IGNORE INTO memory_outbox(id,dedupe_key,event_kind,payload_json,available_at,created_at) VALUES(?1,?2,'conflict-resolved',?3,?4,?4)",params![stable_id("evt"),format!("conflict-resolved:{winner_id}:{}",loser_ids.join(":")),json!({"winnerId":winner_id,"loserIds":loser_ids,"source":source}).to_string(),now]).map_err(|e|e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(resolved)
+        let winner_id = winner_id.to_owned();
+        let loser_ids = loser_ids.to_vec();
+        let payload =
+            json!({"winnerId": winner_id, "loserIds": loser_ids, "source": source}).to_string();
+        run_db(move |client| {
+            let mut tx = client.transaction().map_err(sql)?;
+            let winner_exists: bool = tx
+                .query_one(
+                    "SELECT EXISTS(SELECT 1 FROM memories WHERE id=$1 AND status='active' AND NOT tombstone)",
+                    &[&winner_id],
+                )
+                .map_err(sql)?
+                .get(0);
+            if !winner_exists {
+                return Err("conflict winner is not active".into());
+            }
+            let mut resolved = 0;
+            for loser in &loser_ids {
+                resolved += tx
+                    .execute(
+                        "UPDATE memories SET status='resolved',valid_to=COALESCE(valid_to,$2),updated_at=$2
+                         WHERE id=$1 AND status='active'",
+                        &[loser, &now],
+                    )
+                    .map_err(sql)? as usize;
+            }
+            tx.execute(
+                "INSERT INTO memory_outbox(id,dedupe_key,event_kind,payload_json,available_at,created_at)
+                 VALUES($1,$2,'conflict-resolved',$3,$4,$4) ON CONFLICT DO NOTHING",
+                &[&stable_id("evt"), &format!("conflict-resolved:{winner_id}:{}", loser_ids.join(":")),
+                  &payload, &now],
+            )
+            .map_err(sql)?;
+            tx.commit().map_err(sql)?;
+            Ok(resolved)
+        })
     }
 }

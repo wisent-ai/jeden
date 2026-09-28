@@ -15,6 +15,7 @@ pub use client::{
     relay_get, relay_post, relay_post_authorized, relay_rotate_write_token, LiveClient,
 };
 pub use relay::serve;
+pub(crate) use relay::SCHEMA as RELAY_SCHEMA;
 
 /// Max size of a single relay blob (base64 E2EE payload). Rejects larger POSTs.
 pub const MAX_BLOB_BYTES: usize = 1024 * 1024;

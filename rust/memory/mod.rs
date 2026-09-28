@@ -1,4 +1,5 @@
 mod conflict;
+mod outbox;
 mod retrieval;
 mod schema;
 mod store;
@@ -11,13 +12,14 @@ use serde_json::Value;
 use std::path::Path;
 
 pub use embeddings::{EmbeddingHealth, EmbeddingProvider};
+pub use outbox::{OutboxConsumer, OutboxEvent};
 pub use ranking::{
     mean_reciprocal_rank, ndcg_at_k, recall_at_k, FtsBackend, HybridBackend, RankedCandidate,
     ScoreComponents, SemanticBackend,
 };
+pub(crate) use schema::SCHEMA;
 pub use store::MemoryStore;
 pub use worker::MAX_ATTEMPTS;
-pub use worker::{OutboxConsumer, OutboxEvent};
 
 pub const MAX_MEMORY_CHARS: usize = 2_000;
 pub const MAX_CONTEXT_CHARS: usize = 12_000;

@@ -251,8 +251,7 @@ pub(in crate::agent) fn env_usize(name: &str) -> Option<usize> {
 }
 
 pub(in crate::agent) fn memory_guidance_for_prompt(cwd: &Path) -> Option<String> {
-    let store =
-        crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path()).ok()?;
+    let store = crate::memory::MemoryStore::open().ok()?;
     let scope = crate::memory::MemoryScope {
         kind: "repo".into(),
         id: cwd.display().to_string(),

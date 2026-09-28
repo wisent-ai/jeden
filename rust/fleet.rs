@@ -25,22 +25,6 @@ const DIRECTORY_CONSUMER: &str = "jeden";
 const CREDENTIAL_CONSUMER: &str = "jeden-database-client";
 const TOKEN_FILE: &str = "jeden-database-client-skarbiec-token";
 
-const SCHEMA: &str = "
-    CREATE TABLE IF NOT EXISTS pursuit_values (request TEXT NOT NULL, key TEXT NOT NULL,
-        data TEXT NOT NULL, PRIMARY KEY(request,key));
-    CREATE TABLE IF NOT EXISTS pursuit_stages (request TEXT NOT NULL, position BIGINT NOT NULL,
-        data TEXT NOT NULL, PRIMARY KEY(request,position));
-    CREATE TABLE IF NOT EXISTS pursuit_calls (request TEXT NOT NULL, id TEXT NOT NULL,
-        model TEXT NOT NULL, catalog_revision TEXT NOT NULL, reserved TEXT NOT NULL, actual TEXT,
-        PRIMARY KEY(request,id));
-    CREATE TABLE IF NOT EXISTS relay_rooms (id TEXT PRIMARY KEY, created_at BIGINT NOT NULL);
-    CREATE TABLE IF NOT EXISTS relay_room_tokens (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
-        ON DELETE CASCADE, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
-        generation BIGINT NOT NULL DEFAULT 1, PRIMARY KEY(room_id,role));
-    CREATE TABLE IF NOT EXISTS relay_events (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
-        ON DELETE CASCADE, seq BIGINT NOT NULL, blob TEXT NOT NULL, created_at BIGINT NOT NULL,
-        PRIMARY KEY(room_id,seq));";
-
 #[derive(Deserialize)]
 struct Resolution {
     credential_item: String,
@@ -55,8 +39,13 @@ fn failed(step: &str, detail: impl std::fmt::Display) -> String {
     format!("jeden fleet database: {step}: {detail}")
 }
 
+/// The home holding `.stado/` — Stado's binary and the consumer bearer.
+/// `JEDEN_STADO_HOME` names it when `HOME` is isolated (as in the pursuit
+/// journeys), so Jeden still reaches the fleet as the operator's host.
 fn home() -> PathBuf {
-    std::env::var_os("HOME")
+    std::env::var_os("JEDEN_STADO_HOME")
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var_os("HOME"))
         .map(PathBuf::from)
         .unwrap_or_default()
 }
@@ -200,13 +189,21 @@ fn connect() -> Result<Client, String> {
                 error,
             )
         })?;
-    client
-        .batch_execute(SCHEMA)
-        .map_err(|error| failed("creating the pursuit tables", error))?;
+    for (tables, schema) in [
+        ("pursuit", crate::autonomy::requests::SCHEMA),
+        ("collab relay", crate::collab::RELAY_SCHEMA),
+        ("memory", crate::memory::SCHEMA),
+    ] {
+        client
+            .batch_execute(schema)
+            .map_err(|error| failed(&format!("creating the {tables} tables"), error))?;
+    }
     Ok(client)
 }
 
-type Job = Box<dyn FnOnce(&mut Client) + Send>;
+/// One operation for the database thread, given the connection or the
+/// failed step that left it without one.
+type Job = Box<dyn FnOnce(Result<&mut Client, String>) + Send>;
 
 static JOBS: Mutex<Option<mpsc::Sender<Job>>> = Mutex::new(None);
 
@@ -227,7 +224,18 @@ fn start() -> Result<mpsc::Sender<Job>, String> {
                 }
             };
             for job in inbox {
-                job(&mut client);
+                // A dropped connection is reopened before the next operation;
+                // when that fails, the operation answers the failed step.
+                if client.is_closed() {
+                    match connect() {
+                        Ok(fresh) => client = fresh,
+                        Err(error) => {
+                            job(Err(error));
+                            continue;
+                        }
+                    }
+                }
+                job(Ok(&mut client));
             }
         })
         .map_err(|error| failed("starting the database thread", error))?;
@@ -254,7 +262,7 @@ pub(crate) fn run_db<R: Send + 'static>(
     let (reply, answer) = mpsc::sync_channel::<Result<R, String>>(1);
     if jobs
         .send(Box::new(move |client| {
-            let _ = reply.send(work(client));
+            let _ = reply.send(client.and_then(work));
         }))
         .is_err()
     {
@@ -274,7 +282,7 @@ pub(crate) fn run_db<R: Send + 'static>(
     })?
 }
 
-/// A Postgres error as the text the pursuit surfaces show.
+/// A Postgres error as the text Jeden's surfaces show.
 pub(crate) fn sql(error: postgres::Error) -> String {
     failed("query", error)
 }

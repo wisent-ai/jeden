@@ -1,5 +1,5 @@
+use crate::fleet::{run_db, sql};
 use crate::memory::{EmbeddingProvider, MemoryScope};
-use rusqlite::{params, Connection};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -36,7 +36,6 @@ pub trait SemanticBackend {
     fn name(&self) -> &'static str;
     fn recall(
         &self,
-        conn: &Connection,
         scope: &MemoryScope,
         query: &str,
         limit: usize,
@@ -47,17 +46,15 @@ pub struct FtsBackend;
 
 impl SemanticBackend for FtsBackend {
     fn name(&self) -> &'static str {
-        "sqlite-fts5"
+        "postgres-fts"
     }
     fn recall(
         &self,
-        conn: &Connection,
         scope: &MemoryScope,
         query: &str,
         limit: usize,
     ) -> Result<Vec<RankedCandidate>, String> {
         rank(
-            conn,
             scope,
             query,
             limit,
@@ -89,12 +86,11 @@ impl SemanticBackend for HybridBackend<'_> {
         if self.provider.is_some() {
             "hybrid-fts-semantic"
         } else {
-            "sqlite-fts5"
+            "postgres-fts"
         }
     }
     fn recall(
         &self,
-        conn: &Connection,
         scope: &MemoryScope,
         query: &str,
         limit: usize,
@@ -105,12 +101,11 @@ impl SemanticBackend for HybridBackend<'_> {
                 let vector = vectors
                     .first()
                     .ok_or("embedding provider returned no query vector")?;
-                Some(super::embeddings::semantic_scores(conn, vector)?)
+                Some(super::embeddings::semantic_scores(vector)?)
             }
             _ => None,
         };
         rank(
-            conn,
             scope,
             query,
             limit,
@@ -121,8 +116,23 @@ impl SemanticBackend for HybridBackend<'_> {
     }
 }
 
+/// The words of `query` as a prefix-matching `to_tsquery` expression; only
+/// letters and digits survive, so no query text can change its syntax.
+fn tsquery(query: &str) -> String {
+    query
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .map(|word| format!("{}:*", word.to_lowercase()))
+        .collect::<Vec<_>>()
+        .join(" | ")
+}
+
+/// Memories visible in `scope` at `as_of`: not forgotten, not a tombstone,
+/// valid at that moment, in the scope or global.
+const VISIBLE: &str = "status<>'forgotten' AND NOT tombstone AND valid_from<=$3
+    AND (valid_to IS NULL OR valid_to>$3) AND ((scope_kind=$1 AND scope_id=$2) OR scope_kind='global')";
+
 fn rank(
-    conn: &Connection,
     scope: &MemoryScope,
     query: &str,
     limit: usize,
@@ -130,61 +140,53 @@ fn rank(
     half_life_ms: f64,
     semantic: Option<&[(String, f64)]>,
 ) -> Result<Vec<RankedCandidate>, String> {
-    let safe_query = query
-        .split_whitespace()
-        .filter(|word| !word.is_empty())
-        .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
-        .collect::<Vec<_>>()
-        .join(" OR ");
-    let mut lexical = HashMap::new();
-    if safe_query.is_empty() {
-        let mut stmt = conn.prepare(
-            "SELECT id FROM memories WHERE status!='forgotten' AND tombstone=0 AND valid_from<=?3 AND (valid_to IS NULL OR valid_to>?3) AND ((scope_kind=?1 AND scope_id=?2) OR scope_kind='global')"
-        ).map_err(|e| e.to_string())?;
-        for id in stmt
-            .query_map(params![scope.kind, scope.id, as_of], |row| {
-                row.get::<_, String>(0)
-            })
-            .map_err(|e| e.to_string())?
-        {
-            lexical.insert(id.map_err(|e| e.to_string())?, 1.0);
-        }
-    } else {
-        let mut stmt = conn.prepare(
-            "SELECT m.id,bm25(memories_fts) FROM memories_fts JOIN memories m ON m.rowid=memories_fts.rowid
-             WHERE memories_fts MATCH ?1 AND m.status!='forgotten' AND m.tombstone=0
-             AND m.valid_from<=?4 AND (m.valid_to IS NULL OR m.valid_to>?4)
-             AND ((m.scope_kind=?2 AND m.scope_id=?3) OR m.scope_kind='global')"
-        ).map_err(|e| e.to_string())?;
-        let rows = stmt
-            .query_map(params![safe_query, scope.kind, scope.id, as_of], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
-            })
-            .map_err(|e| e.to_string())?;
-        for row in rows {
-            let (id, bm25) = row.map_err(|e| e.to_string())?;
-            lexical.insert(id, 1.0 / (1.0 + bm25.abs()));
-        }
-    }
     let semantic = semantic
         .unwrap_or(&[])
         .iter()
         .cloned()
         .collect::<HashMap<_, _>>();
-    let ids = lexical
-        .keys()
-        .chain(semantic.keys())
-        .cloned()
-        .collect::<std::collections::HashSet<_>>();
-    let mut ranked = Vec::new();
-    for id in ids {
-        let row = conn.query_row(
-            "SELECT confidence,updated_at FROM memories WHERE id=?1 AND status!='forgotten' AND tombstone=0 AND valid_from<=?2 AND (valid_to IS NULL OR valid_to>?2) AND ((scope_kind=?3 AND scope_id=?4) OR scope_kind='global')",
-            params![id, as_of, scope.kind, scope.id], |row| Ok((row.get::<_, f64>(0)?, row.get::<_, i64>(1)?)),
-        ).ok();
-        let Some((confidence, updated_at)) = row else {
-            continue;
+    let (scope, terms) = (scope.clone(), tsquery(query));
+    let semantic_ids = semantic.keys().cloned().collect::<Vec<_>>();
+    // id -> (lexical, confidence, updated_at)
+    let rows: HashMap<String, (f64, f64, i64)> = run_db(move |client| {
+        let mut rows = HashMap::new();
+        let lexical = if terms.is_empty() {
+            client.query(
+                &*format!(
+                    "SELECT id,1.0::float8,confidence,updated_at FROM memories WHERE {VISIBLE}"
+                ),
+                &[&scope.kind, &scope.id, &as_of],
+            )
+        } else {
+            client.query(
+                &*format!(
+                    "SELECT id,ts_rank(search,to_tsquery('simple',$4),32)::float8,confidence,updated_at
+                     FROM memories WHERE search @@ to_tsquery('simple',$4) AND {VISIBLE}"
+                ),
+                &[&scope.kind, &scope.id, &as_of, &terms],
+            )
         };
+        for row in lexical.map_err(sql)? {
+            rows.insert(row.get(0), (row.get(1), row.get(2), row.get(3)));
+        }
+        if !semantic_ids.is_empty() {
+            for row in client
+                .query(
+                    &*format!(
+                        "SELECT id,confidence,updated_at FROM memories WHERE id=ANY($4) AND {VISIBLE}"
+                    ),
+                    &[&scope.kind, &scope.id, &as_of, &semantic_ids],
+                )
+                .map_err(sql)?
+            {
+                rows.entry(row.get(0))
+                    .or_insert((0.0, row.get(1), row.get(2)));
+            }
+        }
+        Ok(rows)
+    })?;
+    let mut ranked = Vec::new();
+    for (id, (lexical, confidence, updated_at)) in rows {
         let age = as_of.saturating_sub(updated_at).max(0) as f64;
         let temporal = if half_life_ms > 0.0 {
             2.0_f64.powf(-age / half_life_ms)
@@ -192,7 +194,7 @@ fn rank(
             1.0
         };
         let components = ScoreComponents {
-            lexical: lexical.get(&id).copied().unwrap_or(0.0),
+            lexical,
             semantic: semantic.get(&id).copied().unwrap_or(0.0).max(0.0),
             confidence: confidence.clamp(0.0, 1.0),
             temporal,

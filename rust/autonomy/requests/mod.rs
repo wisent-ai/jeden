@@ -7,6 +7,7 @@ use pursuit::{collect_preference_evidence, pursue, PreferenceEvidence, PursuitCo
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::PathBuf};
 use store::Store;
+pub(crate) use store::SCHEMA;
 
 const SCHEMA_VERSION: u32 = 1;
 
@@ -14,6 +15,8 @@ const SCHEMA_VERSION: u32 = 1;
 pub(crate) enum Mode {
     Submit(PathBuf),
     Status(String),
+    /// Every value the fleet database holds for the request, by key.
+    State(String),
     Resume(String),
 }
 
@@ -74,6 +77,11 @@ fn emit(response: &Response) -> Result<String, String> {
 pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
     let (store, request, resume) = match mode {
         Mode::Status(id) => return emit(&Store::existing(id)?.response()?),
+        Mode::State(id) => {
+            return serde_json::to_string_pretty(&Store::existing(id)?.saved()?)
+                .map(|v| v + "\n")
+                .map_err(|e| e.to_string())
+        }
         Mode::Resume(id) => {
             let store = Store::existing(id)?;
             let request = store

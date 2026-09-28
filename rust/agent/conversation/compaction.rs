@@ -99,7 +99,7 @@ impl Conversation {
         if hooks.cancelled() {
             return Err("Turn cancelled.".into());
         }
-        let memory = crate::memory::MemoryStore::open(crate::memory::MemoryStore::default_path())?;
+        let memory = crate::memory::MemoryStore::open()?;
         let scope = crate::memory::MemoryScope {
             kind: "repo".into(),
             id: args.cwd.display().to_string(),

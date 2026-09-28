@@ -2,73 +2,72 @@ use super::{
     bounded_redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
     MemoryStore,
 };
-use rusqlite::{params, OptionalExtension, TransactionBehavior};
+use crate::fleet::{run_db, sql};
 use serde_json::Value;
 
 pub(super) const DEFAULT_LEASE_MS: i64 = 30_000;
 pub const MAX_ATTEMPTS: i64 = 5;
 
-#[derive(Debug, Clone)]
-pub struct OutboxEvent {
-    pub id: String,
-    pub dedupe_key: String,
-    pub kind: String,
-    pub payload: Value,
-}
-
-pub trait OutboxConsumer {
-    fn name(&self) -> &str;
-    fn consume(&self, event: &OutboxEvent) -> Result<(), String>;
-}
-
 impl MemoryStore {
     pub fn enqueue(&self, kind: &str, payload: &Value) -> Result<String, String> {
-        let conn = self.connect()?;
         let id = super::stable_id("job");
         let now = super::now_ms();
-        conn.execute("INSERT INTO jobs(id,kind,payload_json,state,available_at,created_at,updated_at) VALUES(?1,?2,?3,'queued',?4,?4,?4)", params![id,kind,serde_json::to_string(payload).map_err(|e|e.to_string())?,now]).map_err(|e|e.to_string())?;
+        let (kind, payload) = (
+            kind.to_owned(),
+            serde_json::to_string(payload).map_err(|e| e.to_string())?,
+        );
+        let job = id.clone();
+        run_db(move |client| {
+            client
+                .execute(
+                    "INSERT INTO memory_jobs(id,kind,payload_json,state,available_at,created_at,updated_at)
+                     VALUES($1,$2,$3,'queued',$4,$4,$4)",
+                    &[&job, &kind, &payload, &now],
+                )
+                .map_err(sql)?;
+            Ok(())
+        })?;
         Ok(id)
     }
 
     pub fn queue_status(&self, limit: usize) -> Result<MemoryQueueStatus, String> {
-        let conn = self.connect()?;
-        let mut counts = conn
-            .prepare("SELECT state,count(*) FROM jobs GROUP BY state")
-            .map_err(|e| e.to_string())?;
-        let state_counts = counts
-            .query_map([], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<std::collections::BTreeMap<_, _>, _>>()
-            .map_err(|e| e.to_string())?;
+        let limit = limit.min(200) as i64;
+        let (state_counts, jobs) = run_db(move |client| {
+            let counts = client
+                .query("SELECT state,count(*) FROM memory_jobs GROUP BY state", &[])
+                .map_err(sql)?
+                .into_iter()
+                .map(|row| (row.get::<_, String>(0), row.get::<_, i64>(1)))
+                .collect::<std::collections::BTreeMap<_, _>>();
+            let jobs = client
+                .query(
+                    "SELECT id,kind,state,attempts,available_at,lease_owner,lease_until,last_error,created_at,updated_at
+                     FROM memory_jobs ORDER BY CASE state WHEN 'leased' THEN 0 WHEN 'queued' THEN 1
+                     WHEN 'failed' THEN 2 ELSE 3 END,updated_at DESC,id LIMIT $1",
+                    &[&limit],
+                )
+                .map_err(sql)?
+                .into_iter()
+                .map(|row| MemoryQueueJob {
+                    id: row.get(0),
+                    kind: row.get(1),
+                    state: row.get(2),
+                    attempts: row.get(3),
+                    available_at: row.get(4),
+                    lease_owner: row.get(5),
+                    lease_until: row.get(6),
+                    last_error: row.get(7),
+                    created_at: row.get(8),
+                    updated_at: row.get(9),
+                })
+                .collect::<Vec<_>>();
+            Ok((counts, jobs))
+        })?;
         let queued = state_counts.get("queued").copied().unwrap_or_default();
         let leased = state_counts.get("leased").copied().unwrap_or_default();
         let done = state_counts.get("done").copied().unwrap_or_default();
         let failed = state_counts.get("failed").copied().unwrap_or_default();
         let total = state_counts.values().sum();
-
-        let mut statement = conn
-            .prepare("SELECT id,kind,state,attempts,available_at,lease_owner,lease_until,last_error,created_at,updated_at FROM jobs ORDER BY CASE state WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END,updated_at DESC,id LIMIT ?1")
-            .map_err(|e| e.to_string())?;
-        let jobs = statement
-            .query_map([limit.min(200) as i64], |row| {
-                Ok(MemoryQueueJob {
-                    id: row.get(0)?,
-                    kind: row.get(1)?,
-                    state: row.get(2)?,
-                    attempts: row.get(3)?,
-                    available_at: row.get(4)?,
-                    lease_owner: row.get(5)?,
-                    lease_until: row.get(6)?,
-                    last_error: row.get(7)?,
-                    created_at: row.get(8)?,
-                    updated_at: row.get(9)?,
-                })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| e.to_string())?;
         Ok(MemoryQueueStatus {
             total,
             pending: queued + leased,
@@ -83,58 +82,88 @@ impl MemoryStore {
     pub fn claim(&self, worker: &str, lease_ms: Option<i64>) -> Result<Option<LeasedJob>, String> {
         let now = super::now_ms();
         let until = now + lease_ms.unwrap_or(DEFAULT_LEASE_MS).clamp(1_000, 300_000);
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        let id:Option<String>=tx.query_row("SELECT id FROM jobs WHERE attempts < ?1 AND available_at<=?2 AND (state='queued' OR (state='leased' AND lease_until<?2)) ORDER BY created_at LIMIT 1",params![MAX_ATTEMPTS,now],|r|r.get(0)).optional().map_err(|e|e.to_string())?;
-        let Some(id) = id else {
-            tx.commit().map_err(|e| e.to_string())?;
-            return Ok(None);
-        };
-        tx.execute("UPDATE jobs SET state='leased',lease_owner=?2,lease_until=?3,heartbeat_at=?4,attempts=attempts+1,updated_at=?4 WHERE id=?1",params![id,worker,until,now]).map_err(|e|e.to_string())?;
-        let job = tx
-            .query_row(
-                "SELECT id,kind,payload_json,attempts,lease_until FROM jobs WHERE id=?1",
-                [&id],
-                |r| {
-                    let raw: String = r.get(2)?;
-                    Ok(LeasedJob {
-                        id: r.get(0)?,
-                        kind: r.get(1)?,
-                        payload: serde_json::from_str(&raw).unwrap_or(Value::Null),
-                        attempts: r.get(3)?,
-                        lease_until: r.get(4)?,
-                    })
-                },
-            )
-            .map_err(|e| e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(Some(job))
+        let worker = worker.to_owned();
+        run_db(move |client| {
+            // SKIP LOCKED lets workers on other hosts claim other jobs at once.
+            let row = client
+                .query_opt(
+                    "UPDATE memory_jobs SET state='leased',lease_owner=$3,lease_until=$4,heartbeat_at=$2,
+                     attempts=attempts+1,updated_at=$2
+                     WHERE id=(SELECT id FROM memory_jobs WHERE attempts<$1 AND available_at<=$2
+                        AND (state='queued' OR (state='leased' AND lease_until<$2))
+                        ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
+                     RETURNING id,kind,payload_json,attempts,lease_until",
+                    &[&MAX_ATTEMPTS, &now, &worker, &until],
+                )
+                .map_err(sql)?;
+            Ok(row.map(|row| {
+                let raw: String = row.get(2);
+                LeasedJob {
+                    id: row.get(0),
+                    kind: row.get(1),
+                    payload: serde_json::from_str(&raw).unwrap_or(Value::Null),
+                    attempts: row.get(3),
+                    lease_until: row.get(4),
+                }
+            }))
+        })
     }
 
     pub fn heartbeat(&self, id: &str, worker: &str, lease_ms: i64) -> Result<bool, String> {
         let now = super::now_ms();
-        let conn = self.connect()?;
-        Ok(conn.execute("UPDATE jobs SET heartbeat_at=?3,lease_until=?4,updated_at=?3 WHERE id=?1 AND state='leased' AND lease_owner=?2",params![id,worker,now,now+lease_ms.clamp(1_000,300_000)]).map_err(|e|e.to_string())?==1)
+        let until = now + lease_ms.clamp(1_000, 300_000);
+        let (id, worker) = (id.to_owned(), worker.to_owned());
+        run_db(move |client| {
+            Ok(client
+                .execute(
+                    "UPDATE memory_jobs SET heartbeat_at=$3,lease_until=$4,updated_at=$3
+                     WHERE id=$1 AND state='leased' AND lease_owner=$2",
+                    &[&id, &worker, &now, &until],
+                )
+                .map_err(sql)?
+                == 1)
+        })
     }
     pub fn complete(&self, id: &str, worker: &str) -> Result<bool, String> {
-        let conn = self.connect()?;
-        Ok(conn.execute("UPDATE jobs SET state='done',lease_owner=NULL,lease_until=NULL,updated_at=?3 WHERE id=?1 AND state='leased' AND lease_owner=?2",params![id,worker,super::now_ms()]).map_err(|e|e.to_string())?==1)
+        let (id, worker) = (id.to_owned(), worker.to_owned());
+        run_db(move |client| {
+            Ok(client
+                .execute(
+                    "UPDATE memory_jobs SET state='done',lease_owner=NULL,lease_until=NULL,updated_at=$3
+                     WHERE id=$1 AND state='leased' AND lease_owner=$2",
+                    &[&id, &worker, &super::now_ms()],
+                )
+                .map_err(sql)?
+                == 1)
+        })
     }
     pub fn retry(&self, id: &str, worker: &str, error: &str) -> Result<bool, String> {
-        let conn = self.connect()?;
         let now = super::now_ms();
-        let attempts: i64 = conn
-            .query_row("SELECT attempts FROM jobs WHERE id=?1", [id], |r| r.get(0))
-            .map_err(|e| e.to_string())?;
-        let state = if attempts >= MAX_ATTEMPTS {
-            "failed"
-        } else {
-            "queued"
-        };
-        let delay = (1_i64 << attempts.min(8)) * 1_000;
-        Ok(conn.execute("UPDATE jobs SET state=?3,available_at=?4,lease_owner=NULL,lease_until=NULL,last_error=?5,updated_at=?6 WHERE id=?1 AND lease_owner=?2",params![id,worker,state,now+delay,bounded_redacted(error,500),now]).map_err(|e|e.to_string())?==1)
+        let (id, worker, error) = (
+            id.to_owned(),
+            worker.to_owned(),
+            bounded_redacted(error, 500),
+        );
+        run_db(move |client| {
+            let attempts: i64 = client
+                .query_one("SELECT attempts FROM memory_jobs WHERE id=$1", &[&id])
+                .map_err(sql)?
+                .get(0);
+            let state = if attempts >= MAX_ATTEMPTS {
+                "failed"
+            } else {
+                "queued"
+            };
+            let delay = (1_i64 << attempts.min(8)) * 1_000;
+            Ok(client
+                .execute(
+                    "UPDATE memory_jobs SET state=$3,available_at=$4,lease_owner=NULL,lease_until=NULL,
+                     last_error=$5,updated_at=$6 WHERE id=$1 AND lease_owner=$2",
+                    &[&id, &worker, &state, &(now + delay), &error, &now],
+                )
+                .map_err(sql)?
+                == 1)
+        })
     }
 
     pub fn process_one(&self, worker: &str) -> Result<bool, String> {
@@ -191,66 +220,5 @@ impl MemoryStore {
                 Err(error)
             }
         }
-    }
-
-    pub fn enqueue_outbox(
-        &self,
-        dedupe_key: &str,
-        kind: &str,
-        payload: &Value,
-    ) -> Result<String, String> {
-        let conn = self.connect()?;
-        let id = super::stable_id("evt");
-        let now = super::now_ms();
-        conn.execute("INSERT OR IGNORE INTO memory_outbox(id,dedupe_key,event_kind,payload_json,available_at,created_at) VALUES(?1,?2,?3,?4,?5,?5)",params![id,dedupe_key,kind,serde_json::to_string(payload).map_err(|e|e.to_string())?,now]).map_err(|e|e.to_string())?;
-        conn.query_row(
-            "SELECT id FROM memory_outbox WHERE dedupe_key=?1",
-            [dedupe_key],
-            |row| row.get(0),
-        )
-        .map_err(|e| e.to_string())
-    }
-
-    pub fn consume_outbox_one(&self, consumer: &dyn OutboxConsumer) -> Result<bool, String> {
-        let now = super::now_ms();
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        let row:Option<(String,String,String,String)>=tx.query_row("SELECT id,dedupe_key,event_kind,payload_json FROM memory_outbox WHERE state='pending' AND available_at<=?1 ORDER BY created_at LIMIT 1",[now],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|e|e.to_string())?;
-        let Some((id, dedupe_key, kind, raw)) = row else {
-            tx.commit().map_err(|e| e.to_string())?;
-            return Ok(false);
-        };
-        let already:bool=tx.query_row("SELECT EXISTS(SELECT 1 FROM memory_processed_events WHERE consumer=?1 AND event_id=?2)",params![consumer.name(),id],|r|r.get(0)).map_err(|e|e.to_string())?;
-        if already {
-            tx.execute(
-                "UPDATE memory_outbox SET state='done',processed_at=?2 WHERE id=?1",
-                params![id, now],
-            )
-            .map_err(|e| e.to_string())?;
-            tx.commit().map_err(|e| e.to_string())?;
-            return Ok(true);
-        }
-        tx.execute("UPDATE memory_outbox SET state='processing',attempts=attempts+1,lease_owner=?2,lease_until=?3 WHERE id=?1",params![id,consumer.name(),now+DEFAULT_LEASE_MS]).map_err(|e|e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        let event = OutboxEvent {
-            id: id.clone(),
-            dedupe_key,
-            kind,
-            payload: serde_json::from_str(&raw).map_err(|e| e.to_string())?,
-        };
-        if let Err(error) = consumer.consume(&event) {
-            self.connect()?.execute("UPDATE memory_outbox SET state='pending',lease_owner=NULL,lease_until=NULL,last_error=?2,available_at=?3 WHERE id=?1",params![id,bounded_redacted(&error,500),now+1_000]).map_err(|e|e.to_string())?;
-            return Err(error);
-        }
-        let mut conn = self.connect()?;
-        let tx = conn
-            .transaction_with_behavior(TransactionBehavior::Immediate)
-            .map_err(|e| e.to_string())?;
-        tx.execute("INSERT OR IGNORE INTO memory_processed_events(consumer,event_id,processed_at) VALUES(?1,?2,?3)",params![consumer.name(),id,super::now_ms()]).map_err(|e|e.to_string())?;
-        tx.execute("UPDATE memory_outbox SET state='done',lease_owner=NULL,lease_until=NULL,processed_at=?2 WHERE id=?1",params![id,super::now_ms()]).map_err(|e|e.to_string())?;
-        tx.commit().map_err(|e| e.to_string())?;
-        Ok(true)
     }
 }
