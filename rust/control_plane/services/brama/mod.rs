@@ -29,11 +29,16 @@ pub enum BramaError {
         message: String,
         retryable: Option<bool>,
     },
-    RateLimited { retry_after_ms: Option<u64> },
+    RateLimited {
+        retry_after_ms: Option<u64>,
+    },
     InvalidCatalog(String),
     InvalidResponse(String),
     UnknownModel(String),
-    UnavailableModel { model: String, reason: String },
+    UnavailableModel {
+        model: String,
+        reason: String,
+    },
     Cancelled,
 }
 impl std::fmt::Display for BramaError {
@@ -96,9 +101,11 @@ impl BramaError {
         }
         match self {
             Self::Transport(_) | Self::RateLimited { .. } => true,
-            Self::Http { status, .. } => reqwest::StatusCode::from_u16(*status).is_ok_and(|status| {
-                status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
-            }),
+            Self::Http { status, .. } => {
+                reqwest::StatusCode::from_u16(*status).is_ok_and(|status| {
+                    status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+                })
+            }
             _ => false,
         }
     }
