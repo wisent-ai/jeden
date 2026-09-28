@@ -59,13 +59,13 @@ pub(super) fn relay_response_authorized(
                 Err(e) => (403, json!({"ok":false,"error":e}).to_string()),
             }
         }
-        "GET" => {
-            let (events, next) = store.get(target, parse_since(query));
-            (
+        "GET" => match store.get(target, parse_since(query)) {
+            Ok((events, next)) => (
                 200,
                 json!({"ok":true,"events":events,"next":next}).to_string(),
-            )
-        }
+            ),
+            Err(e) => (500, json!({"ok":false,"error":e}).to_string()),
+        },
         _ => (
             405,
             json!({"ok":false,"error":"method not allowed"}).to_string(),

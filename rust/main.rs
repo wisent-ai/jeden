@@ -15,6 +15,7 @@ pub mod completion;
 pub mod conformance;
 pub mod context;
 pub mod control_plane;
+pub(crate) mod fleet;
 pub mod eval;
 pub mod goal_lifecycle;
 pub mod hooks;

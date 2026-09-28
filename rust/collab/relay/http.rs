@@ -15,7 +15,7 @@ pub fn serve(addr: &str) -> Result<(), String> {
     let store = std::sync::Arc::new(RelayStore::new());
     println!(
         "jeden collab-relay listening on http://{bound} (durable {})",
-        store.path().display()
+        store.location()
     );
     for stream in listener.incoming().flatten() {
         let store = store.clone();

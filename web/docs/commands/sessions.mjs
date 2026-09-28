@@ -118,10 +118,11 @@ export const sessionCommands = [
       "Optional: a listen address; the default is <code>127.0.0.1:8877</code>.",
       "Room payloads are opaque, client-encrypted blobs; mutation requests carry the room write token and role.",
     ],
-    effect: "Binds an HTTP relay, keeps room blobs in the relay store, prints the bound address, and serves until stopped.",
+    effect: "Binds an HTTP relay, keeps rooms, their role tokens and their blobs in the fleet database <code>jeden</code> (tables <code>relay_rooms</code>, <code>relay_room_tokens</code>, <code>relay_events</code>), so relays on every host serve the same rooms, prints the bound address and that location, and serves until stopped. <code>GET /health</code> reports <code>backend: fleet-postgres</code> with room, event and token counts.",
     refusals: [
       "Bind failures stop startup.",
       "The relay refuses missing or invalid write tokens, empty bodies, blobs over 1 MiB, full rooms, unsupported methods, invalid roles, and unknown routes with explicit HTTP errors.",
+      "When the fleet database cannot be reached, <code>/health</code> and reads answer HTTP 500 with the failed step (Stado resolve, the Skarbiec route or bearer <code>jeden-database-client</code>, or the Postgres connection) in <code>error</code>.",
     ],
   },
   {

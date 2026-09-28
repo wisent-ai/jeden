@@ -1,4 +1,4 @@
-//! Where pursuit requests keep their state: the fleet database `jeden`.
+//! Where Jeden keeps durable shared state: the fleet database `jeden`.
 //! Stado names the Skarbiec item that holds its address (`stado database
 //! resolve`), and Skarbiec answers the pooler URL and the provider's root
 //! certificate to the consumer `jeden-database-client`, whose bearer Stado
@@ -32,7 +32,14 @@ const SCHEMA: &str = "
         data TEXT NOT NULL, PRIMARY KEY(request,position));
     CREATE TABLE IF NOT EXISTS pursuit_calls (request TEXT NOT NULL, id TEXT NOT NULL,
         model TEXT NOT NULL, catalog_revision TEXT NOT NULL, reserved TEXT NOT NULL, actual TEXT,
-        PRIMARY KEY(request,id));";
+        PRIMARY KEY(request,id));
+    CREATE TABLE IF NOT EXISTS relay_rooms (id TEXT PRIMARY KEY, created_at BIGINT NOT NULL);
+    CREATE TABLE IF NOT EXISTS relay_room_tokens (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
+        ON DELETE CASCADE, role TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE,
+        generation BIGINT NOT NULL DEFAULT 1, PRIMARY KEY(room_id,role));
+    CREATE TABLE IF NOT EXISTS relay_events (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
+        ON DELETE CASCADE, seq BIGINT NOT NULL, blob TEXT NOT NULL, created_at BIGINT NOT NULL,
+        PRIMARY KEY(room_id,seq));";
 
 #[derive(Deserialize)]
 struct Resolution {
@@ -231,7 +238,7 @@ fn start() -> Result<mpsc::Sender<Job>, String> {
 }
 
 /// Run `work` against the shared connection and wait for its answer.
-pub(super) fn run_db<R: Send + 'static>(
+pub(crate) fn run_db<R: Send + 'static>(
     work: impl FnOnce(&mut Client) -> Result<R, String> + Send + 'static,
 ) -> Result<R, String> {
     let jobs = {
@@ -268,6 +275,6 @@ pub(super) fn run_db<R: Send + 'static>(
 }
 
 /// A Postgres error as the text the pursuit surfaces show.
-pub(super) fn sql(error: postgres::Error) -> String {
+pub(crate) fn sql(error: postgres::Error) -> String {
     failed("query", error)
 }
