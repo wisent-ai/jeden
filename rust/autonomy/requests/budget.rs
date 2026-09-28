@@ -1,6 +1,9 @@
 use crate::fleet::{run_db, sql};
 use crate::model_router::{ChatConfig, CompletionUsage};
 use rust_decimal::Decimal;
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
+};
 use std::{
     str::FromStr,
     sync::{Arc, Mutex},
@@ -15,6 +18,28 @@ struct Budget {
     request: String,
     ledger: Mutex<()>,
     limit: Decimal,
+}
+
+/// `pursuit_calls`: one reserved model attempt of a request and, once
+/// settled, what it actually cost.
+mod call {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "pursuit_calls")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub request: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub id: String,
+        pub model: String,
+        pub catalog_revision: String,
+        pub reserved: String,
+        pub actual: Option<String>,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
 }
 pub(crate) struct Reservation {
     budget: Arc<Budget>,
@@ -104,42 +129,35 @@ pub(crate) fn reserve(
     let request = budget.request.clone();
     let limit = budget.limit;
     let id = uuid::Uuid::new_v4().to_string();
-    let (row_id, model_name, revision) = (
-        id.clone(),
-        model.to_owned(),
-        catalog.catalog_revision.clone(),
-    );
-    run_db(move |client| {
-        let mut tx = client.transaction().map_err(sql)?;
+    let row = call::ActiveModel {
+        request: Set(request.clone()),
+        id: Set(id.clone()),
+        model: Set(model.to_owned()),
+        catalog_revision: Set(catalog.catalog_revision.clone()),
+        reserved: Set(upper.to_string()),
+        actual: Set(None),
+    };
+    run_db(move |db| async move {
+        let tx = db.begin().await.map_err(sql)?;
         let mut allocated = Decimal::ZERO;
-        for row in tx
-            .query(
-                "SELECT reserved,actual FROM pursuit_calls WHERE request=$1 FOR UPDATE",
-                &[&request],
-            )
+        for call in call::Entity::find()
+            .filter(call::Column::Request.eq(request))
+            .lock_exclusive()
+            .all(&tx)
+            .await
             .map_err(sql)?
         {
-            let reserved: String = row.get(0);
-            let actual: Option<String> = row.get(1);
-            allocated += Decimal::from_str(actual.as_deref().unwrap_or(&reserved))
+            allocated += Decimal::from_str(call.actual.as_deref().unwrap_or(&call.reserved))
                 .map_err(|e| e.to_string())?;
         }
         if allocated + upper > limit {
             return Err(format!("budget_exhausted: limit {limit}, spent or still reserved {allocated}, next model attempt requires {upper}"));
         }
-        tx.execute(
-            "INSERT INTO pursuit_calls(request,id,model,catalog_revision,reserved,actual)
-             VALUES ($1,$2,$3,$4,$5,NULL)",
-            &[
-                &request,
-                &row_id,
-                &model_name,
-                &revision,
-                &upper.to_string(),
-            ],
-        )
-        .map_err(sql)?;
-        tx.commit().map_err(sql)
+        call::Entity::insert(row)
+            .exec_without_returning(&tx)
+            .await
+            .map_err(sql)?;
+        tx.commit().await.map_err(sql)
     })?;
     drop(_ledger);
     Ok(Some(Reservation {
@@ -172,12 +190,16 @@ pub(crate) fn settle(
         / Decimal::from(1_000_000u64);
     let (request, id) = (reservation.budget.request.clone(), reservation.id.clone());
     let settled = actual.to_string();
-    run_db(move |client| {
-        client
-            .execute(
-                "UPDATE pursuit_calls SET actual=$1 WHERE request=$2 AND id=$3",
-                &[&settled, &request, &id],
+    run_db(move |db| async move {
+        call::Entity::update_many()
+            .col_expr(
+                call::Column::Actual,
+                sea_orm::sea_query::Expr::value(settled),
             )
+            .filter(call::Column::Request.eq(request))
+            .filter(call::Column::Id.eq(id))
+            .exec(&db)
+            .await
             .map_err(sql)?;
         Ok(())
     })?;
@@ -191,16 +213,15 @@ pub(crate) fn settle(
 
 pub(super) fn spent(request: &str) -> Result<Option<String>, String> {
     let request = request.to_owned();
-    let actuals: Vec<Option<String>> = run_db(move |client| {
-        Ok(client
-            .query(
-                "SELECT actual FROM pursuit_calls WHERE request=$1",
-                &[&request],
-            )
+    let actuals = run_db(move |db| async move {
+        Ok(call::Entity::find()
+            .filter(call::Column::Request.eq(request))
+            .all(&db)
+            .await
             .map_err(sql)?
             .into_iter()
-            .map(|row| row.get(0))
-            .collect())
+            .map(|call| call.actual)
+            .collect::<Vec<_>>())
     })?;
     let mut total = Decimal::ZERO;
     for actual in actuals {

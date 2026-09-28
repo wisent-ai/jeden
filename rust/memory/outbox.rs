@@ -1,10 +1,17 @@
 //! Events memory publishes for other consumers, delivered at most once per
 //! consumer through `memory_processed_events`.
 
+use super::store::entities::{outbox, processed_event};
 use super::worker::DEFAULT_LEASE_MS;
 use super::{bounded_redacted, MemoryStore};
 use crate::fleet::{run_db, sql};
+use sea_orm::sea_query::{Expr, LockBehavior, LockType, OnConflict};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
+};
 use serde_json::Value;
+
 #[derive(Debug, Clone)]
 pub struct OutboxEvent {
     pub id: String,
@@ -25,25 +32,39 @@ impl MemoryStore {
         kind: &str,
         payload: &Value,
     ) -> Result<String, String> {
-        let id = super::stable_id("evt");
         let now = super::now_ms();
-        let (dedupe_key, kind) = (dedupe_key.to_owned(), kind.to_owned());
-        let payload = serde_json::to_string(payload).map_err(|e| e.to_string())?;
-        run_db(move |client| {
-            client
-                .execute(
-                    "INSERT INTO memory_outbox(id,dedupe_key,event_kind,payload_json,available_at,created_at)
-                     VALUES($1,$2,$3,$4,$5,$5) ON CONFLICT DO NOTHING",
-                    &[&id, &dedupe_key, &kind, &payload, &now],
+        let dedupe_key = dedupe_key.to_owned();
+        let row = outbox::ActiveModel {
+            id: Set(super::stable_id("evt")),
+            dedupe_key: Set(dedupe_key.clone()),
+            event_kind: Set(kind.to_owned()),
+            payload_json: Set(serde_json::to_string(payload).map_err(|e| e.to_string())?),
+            state: Set("pending".into()),
+            attempts: Set(0),
+            available_at: Set(now),
+            lease_owner: Set(None),
+            lease_until: Set(None),
+            last_error: Set(None),
+            created_at: Set(now),
+            processed_at: Set(None),
+        };
+        run_db(move |db| async move {
+            outbox::Entity::insert(row)
+                .on_conflict(
+                    OnConflict::column(outbox::Column::DedupeKey)
+                        .do_nothing()
+                        .to_owned(),
                 )
+                .exec_without_returning(&db)
+                .await
                 .map_err(sql)?;
-            Ok(client
-                .query_one(
-                    "SELECT id FROM memory_outbox WHERE dedupe_key=$1",
-                    &[&dedupe_key],
-                )
+            outbox::Entity::find()
+                .filter(outbox::Column::DedupeKey.eq(dedupe_key))
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .get(0))
+                .map(|event| event.id)
+                .ok_or_else(|| "the outbox event vanished after it was written".to_owned())
         })
     }
 
@@ -53,84 +74,115 @@ impl MemoryStore {
         let owner = name.clone();
         // Ok(event) to deliver, or Err(outcome): false when nothing was
         // pending, true when this consumer had already processed the event.
-        let claimed: Result<(String, String, String, String), bool> = run_db(move |client| {
-            let mut tx = client.transaction().map_err(sql)?;
-            let Some(row) = tx
-                .query_opt(
-                    "SELECT id,dedupe_key,event_kind,payload_json FROM memory_outbox
-                     WHERE state='pending' AND available_at<=$1 ORDER BY created_at LIMIT 1
-                     FOR UPDATE SKIP LOCKED",
-                    &[&now],
-                )
+        let claimed: Result<outbox::Model, bool> = run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
+            let Some(event) = outbox::Entity::find()
+                .filter(outbox::Column::State.eq("pending"))
+                .filter(outbox::Column::AvailableAt.lte(now))
+                .order_by_asc(outbox::Column::CreatedAt)
+                .limit(1)
+                .lock_with_behavior(LockType::Update, LockBehavior::SkipLocked)
+                .one(&tx)
+                .await
                 .map_err(sql)?
             else {
-                tx.commit().map_err(sql)?;
+                tx.commit().await.map_err(sql)?;
                 return Ok(Err(false));
             };
-            let id: String = row.get(0);
-            let already: bool = tx
-                .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM memory_processed_events WHERE consumer=$1 AND event_id=$2)",
-                    &[&owner, &id],
-                )
+            let already = processed_event::Entity::find_by_id((owner.clone(), event.id.clone()))
+                .one(&tx)
+                .await
                 .map_err(sql)?
-                .get(0);
+                .is_some();
+            let update =
+                outbox::Entity::update_many().filter(outbox::Column::Id.eq(event.id.clone()));
             if already {
-                tx.execute(
-                    "UPDATE memory_outbox SET state='done',processed_at=$2 WHERE id=$1",
-                    &[&id, &now],
-                )
-                .map_err(sql)?;
-                tx.commit().map_err(sql)?;
+                update
+                    .col_expr(outbox::Column::State, Expr::value("done"))
+                    .col_expr(outbox::Column::ProcessedAt, Expr::value(now))
+                    .exec(&tx)
+                    .await
+                    .map_err(sql)?;
+                tx.commit().await.map_err(sql)?;
                 return Ok(Err(true));
             }
-            tx.execute(
-                "UPDATE memory_outbox SET state='processing',attempts=attempts+1,lease_owner=$2,lease_until=$3 WHERE id=$1",
-                &[&id, &owner, &(now + DEFAULT_LEASE_MS)],
-            )
-            .map_err(sql)?;
-            tx.commit().map_err(sql)?;
-            Ok(Ok((id, row.get(1), row.get(2), row.get(3))))
+            update
+                .col_expr(outbox::Column::State, Expr::value("processing"))
+                .col_expr(outbox::Column::Attempts, Expr::value(event.attempts + 1))
+                .col_expr(outbox::Column::LeaseOwner, Expr::value(owner))
+                .col_expr(
+                    outbox::Column::LeaseUntil,
+                    Expr::value(now + DEFAULT_LEASE_MS),
+                )
+                .exec(&tx)
+                .await
+                .map_err(sql)?;
+            tx.commit().await.map_err(sql)?;
+            Ok(Ok(event))
         })?;
-        let (id, dedupe_key, kind, raw) = match claimed {
+        let row = match claimed {
             Ok(event) => event,
             Err(outcome) => return Ok(outcome),
         };
         let event = OutboxEvent {
-            id: id.clone(),
-            dedupe_key,
-            kind,
-            payload: serde_json::from_str(&raw).map_err(|e| e.to_string())?,
+            id: row.id.clone(),
+            dedupe_key: row.dedupe_key,
+            kind: row.event_kind,
+            payload: serde_json::from_str(&row.payload_json).map_err(|e| e.to_string())?,
         };
+        let id = row.id;
         if let Err(error) = consumer.consume(&event) {
             let detail = bounded_redacted(&error, 500);
-            run_db(move |client| {
-                client
-                    .execute(
-                        "UPDATE memory_outbox SET state='pending',lease_owner=NULL,lease_until=NULL,
-                         last_error=$2,available_at=$3 WHERE id=$1",
-                        &[&id, &detail, &(now + 1_000)],
+            run_db(move |db| async move {
+                outbox::Entity::update_many()
+                    .col_expr(outbox::Column::State, Expr::value("pending"))
+                    .col_expr(
+                        outbox::Column::LeaseOwner,
+                        Expr::value(Option::<String>::None),
                     )
+                    .col_expr(outbox::Column::LeaseUntil, Expr::value(Option::<i64>::None))
+                    .col_expr(outbox::Column::LastError, Expr::value(detail))
+                    .col_expr(outbox::Column::AvailableAt, Expr::value(now + 1_000))
+                    .filter(outbox::Column::Id.eq(id))
+                    .exec(&db)
+                    .await
                     .map_err(sql)?;
                 Ok(())
             })?;
             return Err(error);
         }
-        run_db(move |client| {
-            let mut tx = client.transaction().map_err(sql)?;
+        run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
             let at = super::now_ms();
-            tx.execute(
-                "INSERT INTO memory_processed_events(consumer,event_id,processed_at) VALUES($1,$2,$3)
-                 ON CONFLICT DO NOTHING",
-                &[&name, &id, &at],
+            processed_event::Entity::insert(processed_event::ActiveModel {
+                consumer: Set(name),
+                event_id: Set(id.clone()),
+                processed_at: Set(at),
+            })
+            .on_conflict(
+                OnConflict::columns([
+                    processed_event::Column::Consumer,
+                    processed_event::Column::EventId,
+                ])
+                .do_nothing()
+                .to_owned(),
             )
+            .exec_without_returning(&tx)
+            .await
             .map_err(sql)?;
-            tx.execute(
-                "UPDATE memory_outbox SET state='done',lease_owner=NULL,lease_until=NULL,processed_at=$2 WHERE id=$1",
-                &[&id, &at],
-            )
-            .map_err(sql)?;
-            tx.commit().map_err(sql)?;
+            outbox::Entity::update_many()
+                .col_expr(outbox::Column::State, Expr::value("done"))
+                .col_expr(
+                    outbox::Column::LeaseOwner,
+                    Expr::value(Option::<String>::None),
+                )
+                .col_expr(outbox::Column::LeaseUntil, Expr::value(Option::<i64>::None))
+                .col_expr(outbox::Column::ProcessedAt, Expr::value(at))
+                .filter(outbox::Column::Id.eq(id))
+                .exec(&tx)
+                .await
+                .map_err(sql)?;
+            tx.commit().await.map_err(sql)?;
             Ok(true)
         })
     }

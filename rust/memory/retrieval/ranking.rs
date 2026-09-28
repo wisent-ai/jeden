@@ -1,5 +1,8 @@
 use crate::fleet::{run_db, sql};
+use crate::memory::store::entities::memory;
 use crate::memory::{EmbeddingProvider, MemoryScope};
+use sea_orm::sea_query::{Condition, Expr};
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -129,8 +132,26 @@ fn tsquery(query: &str) -> String {
 
 /// Memories visible in `scope` at `as_of`: not forgotten, not a tombstone,
 /// valid at that moment, in the scope or global.
-const VISIBLE: &str = "status<>'forgotten' AND NOT tombstone AND valid_from<=$3
-    AND (valid_to IS NULL OR valid_to>$3) AND ((scope_kind=$1 AND scope_id=$2) OR scope_kind='global')";
+fn visible(scope: &MemoryScope, as_of: i64) -> Condition {
+    Condition::all()
+        .add(memory::Column::Status.ne("forgotten"))
+        .add(memory::Column::Tombstone.eq(false))
+        .add(memory::Column::ValidFrom.lte(as_of))
+        .add(
+            Condition::any()
+                .add(memory::Column::ValidTo.is_null())
+                .add(memory::Column::ValidTo.gt(as_of)),
+        )
+        .add(
+            Condition::any()
+                .add(
+                    Condition::all()
+                        .add(memory::Column::ScopeKind.eq(scope.kind.clone()))
+                        .add(memory::Column::ScopeId.eq(scope.id.clone())),
+                )
+                .add(memory::Column::ScopeKind.eq("global")),
+        )
+}
 
 fn rank(
     scope: &MemoryScope,
@@ -148,39 +169,51 @@ fn rank(
     let (scope, terms) = (scope.clone(), tsquery(query));
     let semantic_ids = semantic.keys().cloned().collect::<Vec<_>>();
     // id -> (lexical, confidence, updated_at)
-    let rows: HashMap<String, (f64, f64, i64)> = run_db(move |client| {
-        let mut rows = HashMap::new();
-        let lexical = if terms.is_empty() {
-            client.query(
-                &*format!(
-                    "SELECT id,1.0::float8,confidence,updated_at FROM memories WHERE {VISIBLE}"
-                ),
-                &[&scope.kind, &scope.id, &as_of],
-            )
+    let rows: HashMap<String, (f64, f64, i64)> = run_db(move |db| async move {
+        let lexical_score = if terms.is_empty() {
+            Expr::cust("1.0::float8")
         } else {
-            client.query(
-                &*format!(
-                    "SELECT id,ts_rank(search,to_tsquery('simple',$4),32)::float8,confidence,updated_at
-                     FROM memories WHERE search @@ to_tsquery('simple',$4) AND {VISIBLE}"
-                ),
-                &[&scope.kind, &scope.id, &as_of, &terms],
+            Expr::cust_with_values(
+                "ts_rank(search, to_tsquery('simple', $1), 32)::float8",
+                [terms.clone()],
             )
         };
-        for row in lexical.map_err(sql)? {
-            rows.insert(row.get(0), (row.get(1), row.get(2), row.get(3)));
+        let mut lexical = memory::Entity::find()
+            .select_only()
+            .column(memory::Column::Id)
+            .column_as(lexical_score, "lexical")
+            .column(memory::Column::Confidence)
+            .column(memory::Column::UpdatedAt)
+            .filter(visible(&scope, as_of));
+        if !terms.is_empty() {
+            lexical = lexical.filter(Expr::cust_with_values(
+                "search @@ to_tsquery('simple', $1)",
+                [terms],
+            ));
+        }
+        let mut rows = HashMap::new();
+        for (id, score, confidence, updated_at) in lexical
+            .into_tuple::<(String, f64, f64, i64)>()
+            .all(&db)
+            .await
+            .map_err(sql)?
+        {
+            rows.insert(id, (score, confidence, updated_at));
         }
         if !semantic_ids.is_empty() {
-            for row in client
-                .query(
-                    &*format!(
-                        "SELECT id,confidence,updated_at FROM memories WHERE id=ANY($4) AND {VISIBLE}"
-                    ),
-                    &[&scope.kind, &scope.id, &as_of, &semantic_ids],
-                )
+            for (id, confidence, updated_at) in memory::Entity::find()
+                .select_only()
+                .column(memory::Column::Id)
+                .column(memory::Column::Confidence)
+                .column(memory::Column::UpdatedAt)
+                .filter(memory::Column::Id.is_in(semantic_ids))
+                .filter(visible(&scope, as_of))
+                .into_tuple::<(String, f64, i64)>()
+                .all(&db)
+                .await
                 .map_err(sql)?
             {
-                rows.entry(row.get(0))
-                    .or_insert((0.0, row.get(1), row.get(2)));
+                rows.entry(id).or_insert((0.0, confidence, updated_at));
             }
         }
         Ok(rows)

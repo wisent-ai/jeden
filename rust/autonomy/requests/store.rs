@@ -1,5 +1,7 @@
 use super::{Request, Response, SCHEMA_VERSION};
 use crate::fleet::{run_db, sql};
+use sea_orm::sea_query::OnConflict;
+use sea_orm::{ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder};
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
@@ -18,6 +20,42 @@ pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS pursuit_calls (request TEXT NOT NULL, id TEXT NOT NULL,
         model TEXT NOT NULL, catalog_revision TEXT NOT NULL, reserved TEXT NOT NULL, actual TEXT,
         PRIMARY KEY(request,id));";
+
+/// `pursuit_values`: one JSON value of a request, by key.
+pub(super) mod value {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "pursuit_values")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub request: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub key: String,
+        pub data: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
+
+/// `pursuit_stages`: one completed pursuit stage of a request, by position.
+pub(super) mod stage {
+    use sea_orm::entity::prelude::*;
+
+    #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
+    #[sea_orm(table_name = "pursuit_stages")]
+    pub struct Model {
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub request: String,
+        #[sea_orm(primary_key, auto_increment = false)]
+        pub position: i64,
+        pub data: String,
+    }
+    #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
+    pub enum Relation {}
+    impl ActiveModelBehavior for ActiveModel {}
+}
 
 /// One pursuit request: its values and stages live in the fleet database
 /// under the request id; `directory` keeps only the run artifacts and the
@@ -86,24 +124,29 @@ impl Store {
             id: request.request_id.clone(),
         };
         let encoded = serde_json::to_string(request).map_err(|e| e.to_string())?;
-        let id = store.id.clone();
-        let existing: String = run_db(move |client| {
-            client
-                .execute(
-                    "INSERT INTO pursuit_values(request,key,data) VALUES ($1,'request',$2)
-                     ON CONFLICT(request,key) DO NOTHING",
-                    &[&id, &encoded],
-                )
-                .map_err(sql)?;
-            Ok(client
-                .query_one(
-                    "SELECT data FROM pursuit_values WHERE request=$1 AND key='request'",
-                    &[&id],
-                )
+        let (id, data) = (store.id.clone(), encoded.clone());
+        let existing: String = run_db(move |db| async move {
+            value::Entity::insert(value::ActiveModel {
+                request: Set(id.clone()),
+                key: Set("request".into()),
+                data: Set(data),
+            })
+            .on_conflict(
+                OnConflict::columns([value::Column::Request, value::Column::Key])
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec_without_returning(&db)
+            .await
+            .map_err(sql)?;
+            value::Entity::find_by_id((id, "request".to_owned()))
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .get(0))
+                .map(|row| row.data)
+                .ok_or_else(|| "the request row vanished after it was written".to_owned())
         })?;
-        if existing != serde_json::to_string(request).map_err(|e| e.to_string())? {
+        if existing != encoded {
             return Err(
                 "request_id_conflict: this request id already names a different immutable payload"
                     .into(),
@@ -120,15 +163,13 @@ impl Store {
     }
     pub fn existing(id: &str) -> Result<Self, String> {
         let directory = directory(id)?;
-        let owned = id.to_owned();
-        let known: bool = run_db(move |client| {
-            Ok(client
-                .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM pursuit_values WHERE request=$1 AND key='request')",
-                    &[&owned],
-                )
+        let key = (id.to_owned(), "request".to_owned());
+        let known = run_db(move |db| async move {
+            Ok(value::Entity::find_by_id(key)
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .get(0))
+                .is_some())
         })?;
         if !known {
             return Err(format!(
@@ -141,57 +182,63 @@ impl Store {
         })
     }
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, String> {
-        let (id, key) = (self.id.clone(), key.to_owned());
-        let text: Option<String> = run_db(move |client| {
-            Ok(client
-                .query_opt(
-                    "SELECT data FROM pursuit_values WHERE request=$1 AND key=$2",
-                    &[&id, &key],
-                )
+        let key = (self.id.clone(), key.to_owned());
+        let text = run_db(move |db| async move {
+            Ok(value::Entity::find_by_id(key)
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .map(|row| row.get(0)))
+                .map(|row| row.data))
         })?;
         text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
             .transpose()
     }
     pub fn set(&self, key: &str, value: &impl Serialize) -> Result<(), String> {
-        let (id, key) = (self.id.clone(), key.to_owned());
-        let data = serde_json::to_string(value).map_err(|e| e.to_string())?;
-        run_db(move |client| {
-            client
-                .execute(
-                    "INSERT INTO pursuit_values(request,key,data) VALUES ($1,$2,$3)
-                     ON CONFLICT(request,key) DO UPDATE SET data=excluded.data",
-                    &[&id, &key, &data],
+        let row = value::ActiveModel {
+            request: Set(self.id.clone()),
+            key: Set(key.to_owned()),
+            data: Set(serde_json::to_string(value).map_err(|e| e.to_string())?),
+        };
+        run_db(move |db| async move {
+            value::Entity::insert(row)
+                .on_conflict(
+                    OnConflict::columns([value::Column::Request, value::Column::Key])
+                        .update_column(value::Column::Data)
+                        .to_owned(),
                 )
+                .exec_without_returning(&db)
+                .await
                 .map_err(sql)?;
             Ok(())
         })
     }
     pub fn stage<T: DeserializeOwned>(&self, position: usize) -> Result<Option<T>, String> {
-        let (id, position) = (self.id.clone(), position as i64);
-        let text: Option<String> = run_db(move |client| {
-            Ok(client
-                .query_opt(
-                    "SELECT data FROM pursuit_stages WHERE request=$1 AND position=$2",
-                    &[&id, &position],
-                )
+        let key = (self.id.clone(), position as i64);
+        let text = run_db(move |db| async move {
+            Ok(stage::Entity::find_by_id(key)
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .map(|row| row.get(0)))
+                .map(|row| row.data))
         })?;
         text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
             .transpose()
     }
     pub fn record_stage(&self, position: usize, value: &impl Serialize) -> Result<(), String> {
-        let (id, position) = (self.id.clone(), position as i64);
-        let data = serde_json::to_string(value).map_err(|e| e.to_string())?;
-        run_db(move |client| {
-            client
-                .execute(
-                    "INSERT INTO pursuit_stages(request,position,data) VALUES ($1,$2,$3)
-                     ON CONFLICT(request,position) DO UPDATE SET data=excluded.data",
-                    &[&id, &position, &data],
+        let row = stage::ActiveModel {
+            request: Set(self.id.clone()),
+            position: Set(position as i64),
+            data: Set(serde_json::to_string(value).map_err(|e| e.to_string())?),
+        };
+        run_db(move |db| async move {
+            stage::Entity::insert(row)
+                .on_conflict(
+                    OnConflict::columns([stage::Column::Request, stage::Column::Position])
+                        .update_column(stage::Column::Data)
+                        .to_owned(),
                 )
+                .exec_without_returning(&db)
+                .await
                 .map_err(sql)?;
             Ok(())
         })
@@ -203,21 +250,18 @@ impl Store {
     /// Every value stored for this request, by key, as `pursue --state` shows.
     pub fn saved(&self) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
         let id = self.id.clone();
-        let rows: Vec<(String, String)> = run_db(move |client| {
-            Ok(client
-                .query(
-                    "SELECT key,data FROM pursuit_values WHERE request=$1 ORDER BY key",
-                    &[&id],
-                )
-                .map_err(sql)?
-                .into_iter()
-                .map(|row| (row.get(0), row.get(1)))
-                .collect())
+        let rows = run_db(move |db| async move {
+            value::Entity::find()
+                .filter(value::Column::Request.eq(id))
+                .order_by_asc(value::Column::Key)
+                .all(&db)
+                .await
+                .map_err(sql)
         })?;
         rows.into_iter()
-            .map(|(key, data)| {
-                serde_json::from_str(&data)
-                    .map(|value| (key, value))
+            .map(|row| {
+                serde_json::from_str(&row.data)
+                    .map(|value| (row.key, value))
                     .map_err(|e| e.to_string())
             })
             .collect()

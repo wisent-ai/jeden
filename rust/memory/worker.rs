@@ -1,29 +1,63 @@
+use super::store::entities::job;
 use super::{
     bounded_redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
     MemoryStore,
 };
 use crate::fleet::{run_db, sql};
+use sea_orm::sea_query::{Condition, Expr, Order, SimpleExpr};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
+};
 use serde_json::Value;
 
 pub(super) const DEFAULT_LEASE_MS: i64 = 30_000;
 pub const MAX_ATTEMPTS: i64 = 5;
 
+/// Set `id`'s columns in `changes` when `id` is leased to `worker`;
+/// true when the row was this worker's to change.
+async fn update_leased(
+    db: &sea_orm::DatabaseConnection,
+    id: String,
+    worker: String,
+    changes: Vec<(job::Column, SimpleExpr)>,
+    leased_only: bool,
+) -> Result<bool, String> {
+    let mut update = job::Entity::update_many();
+    for (column, value) in changes {
+        update = update.col_expr(column, value);
+    }
+    let mut update = update
+        .filter(job::Column::Id.eq(id))
+        .filter(job::Column::LeaseOwner.eq(worker));
+    if leased_only {
+        update = update.filter(job::Column::State.eq("leased"));
+    }
+    Ok(update.exec(db).await.map_err(sql)?.rows_affected == 1)
+}
+
 impl MemoryStore {
     pub fn enqueue(&self, kind: &str, payload: &Value) -> Result<String, String> {
         let id = super::stable_id("job");
         let now = super::now_ms();
-        let (kind, payload) = (
-            kind.to_owned(),
-            serde_json::to_string(payload).map_err(|e| e.to_string())?,
-        );
-        let job = id.clone();
-        run_db(move |client| {
-            client
-                .execute(
-                    "INSERT INTO memory_jobs(id,kind,payload_json,state,available_at,created_at,updated_at)
-                     VALUES($1,$2,$3,'queued',$4,$4,$4)",
-                    &[&job, &kind, &payload, &now],
-                )
+        let row = job::ActiveModel {
+            id: Set(id.clone()),
+            kind: Set(kind.to_owned()),
+            payload_json: Set(serde_json::to_string(payload).map_err(|e| e.to_string())?),
+            state: Set("queued".into()),
+            attempts: Set(0),
+            available_at: Set(now),
+            lease_owner: Set(None),
+            lease_until: Set(None),
+            heartbeat_at: Set(None),
+            last_error: Set(None),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        run_db(move |db| async move {
+            job::Entity::insert(row)
+                .exec_without_returning(&db)
+                .await
                 .map_err(sql)?;
             Ok(())
         })?;
@@ -31,38 +65,49 @@ impl MemoryStore {
     }
 
     pub fn queue_status(&self, limit: usize) -> Result<MemoryQueueStatus, String> {
-        let limit = limit.min(200) as i64;
-        let (state_counts, jobs) = run_db(move |client| {
-            let counts = client
-                .query("SELECT state,count(*) FROM memory_jobs GROUP BY state", &[])
+        let limit = limit.min(200) as u64;
+        let (state_counts, rows) = run_db(move |db| async move {
+            let counts = job::Entity::find()
+                .select_only()
+                .column(job::Column::State)
+                .column_as(job::Column::Id.count(), "jobs")
+                .group_by(job::Column::State)
+                .into_tuple::<(String, i64)>()
+                .all(&db)
+                .await
                 .map_err(sql)?
                 .into_iter()
-                .map(|row| (row.get::<_, String>(0), row.get::<_, i64>(1)))
                 .collect::<std::collections::BTreeMap<_, _>>();
-            let jobs = client
-                .query(
-                    "SELECT id,kind,state,attempts,available_at,lease_owner,lease_until,last_error,created_at,updated_at
-                     FROM memory_jobs ORDER BY CASE state WHEN 'leased' THEN 0 WHEN 'queued' THEN 1
-                     WHEN 'failed' THEN 2 ELSE 3 END,updated_at DESC,id LIMIT $1",
-                    &[&limit],
+            let rows = job::Entity::find()
+                .order_by(
+                    Expr::cust(
+                        "CASE state WHEN 'leased' THEN 0 WHEN 'queued' THEN 1 WHEN 'failed' THEN 2 ELSE 3 END",
+                    ),
+                    Order::Asc,
                 )
-                .map_err(sql)?
-                .into_iter()
-                .map(|row| MemoryQueueJob {
-                    id: row.get(0),
-                    kind: row.get(1),
-                    state: row.get(2),
-                    attempts: row.get(3),
-                    available_at: row.get(4),
-                    lease_owner: row.get(5),
-                    lease_until: row.get(6),
-                    last_error: row.get(7),
-                    created_at: row.get(8),
-                    updated_at: row.get(9),
-                })
-                .collect::<Vec<_>>();
-            Ok((counts, jobs))
+                .order_by_desc(job::Column::UpdatedAt)
+                .order_by_asc(job::Column::Id)
+                .limit(limit)
+                .all(&db)
+                .await
+                .map_err(sql)?;
+            Ok((counts, rows))
         })?;
+        let jobs = rows
+            .into_iter()
+            .map(|row| MemoryQueueJob {
+                id: row.id,
+                kind: row.kind,
+                state: row.state,
+                attempts: row.attempts,
+                available_at: row.available_at,
+                lease_owner: row.lease_owner,
+                lease_until: row.lease_until,
+                last_error: row.last_error,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            })
+            .collect();
         let queued = state_counts.get("queued").copied().unwrap_or_default();
         let leased = state_counts.get("leased").copied().unwrap_or_default();
         let done = state_counts.get("done").copied().unwrap_or_default();
@@ -83,28 +128,51 @@ impl MemoryStore {
         let now = super::now_ms();
         let until = now + lease_ms.unwrap_or(DEFAULT_LEASE_MS).clamp(1_000, 300_000);
         let worker = worker.to_owned();
-        run_db(move |client| {
+        run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
             // SKIP LOCKED lets workers on other hosts claim other jobs at once.
-            let row = client
-                .query_opt(
-                    "UPDATE memory_jobs SET state='leased',lease_owner=$3,lease_until=$4,heartbeat_at=$2,
-                     attempts=attempts+1,updated_at=$2
-                     WHERE id=(SELECT id FROM memory_jobs WHERE attempts<$1 AND available_at<=$2
-                        AND (state='queued' OR (state='leased' AND lease_until<$2))
-                        ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
-                     RETURNING id,kind,payload_json,attempts,lease_until",
-                    &[&MAX_ATTEMPTS, &now, &worker, &until],
+            let Some(found) = job::Entity::find()
+                .filter(job::Column::Attempts.lt(MAX_ATTEMPTS))
+                .filter(job::Column::AvailableAt.lte(now))
+                .filter(
+                    Condition::any().add(job::Column::State.eq("queued")).add(
+                        Condition::all()
+                            .add(job::Column::State.eq("leased"))
+                            .add(job::Column::LeaseUntil.lt(now)),
+                    ),
                 )
+                .order_by_asc(job::Column::CreatedAt)
+                .limit(1)
+                .lock_with_behavior(
+                    sea_orm::sea_query::LockType::Update,
+                    sea_orm::sea_query::LockBehavior::SkipLocked,
+                )
+                .one(&tx)
+                .await
+                .map_err(sql)?
+            else {
+                tx.commit().await.map_err(sql)?;
+                return Ok(None);
+            };
+            let attempts = found.attempts + 1;
+            job::Entity::update_many()
+                .col_expr(job::Column::State, Expr::value("leased"))
+                .col_expr(job::Column::LeaseOwner, Expr::value(worker))
+                .col_expr(job::Column::LeaseUntil, Expr::value(until))
+                .col_expr(job::Column::HeartbeatAt, Expr::value(now))
+                .col_expr(job::Column::Attempts, Expr::value(attempts))
+                .col_expr(job::Column::UpdatedAt, Expr::value(now))
+                .filter(job::Column::Id.eq(found.id.clone()))
+                .exec(&tx)
+                .await
                 .map_err(sql)?;
-            Ok(row.map(|row| {
-                let raw: String = row.get(2);
-                LeasedJob {
-                    id: row.get(0),
-                    kind: row.get(1),
-                    payload: serde_json::from_str(&raw).unwrap_or(Value::Null),
-                    attempts: row.get(3),
-                    lease_until: row.get(4),
-                }
+            tx.commit().await.map_err(sql)?;
+            Ok(Some(LeasedJob {
+                payload: serde_json::from_str(&found.payload_json).unwrap_or(Value::Null),
+                id: found.id,
+                kind: found.kind,
+                attempts,
+                lease_until: until,
             }))
         })
     }
@@ -113,28 +181,26 @@ impl MemoryStore {
         let now = super::now_ms();
         let until = now + lease_ms.clamp(1_000, 300_000);
         let (id, worker) = (id.to_owned(), worker.to_owned());
-        run_db(move |client| {
-            Ok(client
-                .execute(
-                    "UPDATE memory_jobs SET heartbeat_at=$3,lease_until=$4,updated_at=$3
-                     WHERE id=$1 AND state='leased' AND lease_owner=$2",
-                    &[&id, &worker, &now, &until],
-                )
-                .map_err(sql)?
-                == 1)
+        run_db(move |db| async move {
+            let changes = vec![
+                (job::Column::HeartbeatAt, Expr::value(now)),
+                (job::Column::LeaseUntil, Expr::value(until)),
+                (job::Column::UpdatedAt, Expr::value(now)),
+            ];
+            update_leased(&db, id, worker, changes, true).await
         })
     }
     pub fn complete(&self, id: &str, worker: &str) -> Result<bool, String> {
         let (id, worker) = (id.to_owned(), worker.to_owned());
-        run_db(move |client| {
-            Ok(client
-                .execute(
-                    "UPDATE memory_jobs SET state='done',lease_owner=NULL,lease_until=NULL,updated_at=$3
-                     WHERE id=$1 AND state='leased' AND lease_owner=$2",
-                    &[&id, &worker, &super::now_ms()],
-                )
-                .map_err(sql)?
-                == 1)
+        let now = super::now_ms();
+        run_db(move |db| async move {
+            let changes = vec![
+                (job::Column::State, Expr::value("done")),
+                (job::Column::LeaseOwner, Expr::value(Option::<String>::None)),
+                (job::Column::LeaseUntil, Expr::value(Option::<i64>::None)),
+                (job::Column::UpdatedAt, Expr::value(now)),
+            ];
+            update_leased(&db, id, worker, changes, true).await
         })
     }
     pub fn retry(&self, id: &str, worker: &str, error: &str) -> Result<bool, String> {
@@ -144,25 +210,28 @@ impl MemoryStore {
             worker.to_owned(),
             bounded_redacted(error, 500),
         );
-        run_db(move |client| {
-            let attempts: i64 = client
-                .query_one("SELECT attempts FROM memory_jobs WHERE id=$1", &[&id])
+        run_db(move |db| async move {
+            let attempts = job::Entity::find_by_id(id.clone())
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .get(0);
+                .map(|row| row.attempts)
+                .ok_or_else(|| format!("memory job {id} does not exist"))?;
             let state = if attempts >= MAX_ATTEMPTS {
                 "failed"
             } else {
                 "queued"
             };
             let delay = (1_i64 << attempts.min(8)) * 1_000;
-            Ok(client
-                .execute(
-                    "UPDATE memory_jobs SET state=$3,available_at=$4,lease_owner=NULL,lease_until=NULL,
-                     last_error=$5,updated_at=$6 WHERE id=$1 AND lease_owner=$2",
-                    &[&id, &worker, &state, &(now + delay), &error, &now],
-                )
-                .map_err(sql)?
-                == 1)
+            let changes = vec![
+                (job::Column::State, Expr::value(state)),
+                (job::Column::AvailableAt, Expr::value(now + delay)),
+                (job::Column::LeaseOwner, Expr::value(Option::<String>::None)),
+                (job::Column::LeaseUntil, Expr::value(Option::<i64>::None)),
+                (job::Column::LastError, Expr::value(error)),
+                (job::Column::UpdatedAt, Expr::value(now)),
+            ];
+            update_leased(&db, id, worker, changes, false).await
         })
     }
 

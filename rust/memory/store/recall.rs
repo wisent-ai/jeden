@@ -2,22 +2,29 @@
 //! believed at a given moment.
 
 use super::super::*;
-use super::{load_record, row_record, MemoryStore, RECORD_COLUMNS};
+use super::entities::{memory, outbox};
+use super::{load_record, record, MemoryStore};
 use crate::fleet::{run_db, sql};
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionTrait,
+};
 use serde_json::json;
 
 impl MemoryStore {
     pub fn list(&self, limit: usize) -> Result<Vec<MemoryRecord>, String> {
-        let limit = limit.min(500) as i64;
-        run_db(move |client| {
-            Ok(client
-                .query(
-                    &*format!("SELECT {RECORD_COLUMNS} FROM memories ORDER BY updated_at DESC,id LIMIT $1"),
-                    &[&limit],
-                )
+        let limit = limit.min(500) as u64;
+        run_db(move |db| async move {
+            Ok(memory::Entity::find()
+                .order_by_desc(memory::Column::UpdatedAt)
+                .order_by_asc(memory::Column::Id)
+                .limit(limit)
+                .all(&db)
+                .await
                 .map_err(sql)?
-                .iter()
-                .map(row_record)
+                .into_iter()
+                .map(record)
                 .collect())
         })
     }
@@ -34,16 +41,18 @@ impl MemoryStore {
             .iter()
             .map(|candidate| candidate.id.clone())
             .collect::<Vec<_>>();
-        let (groups, records) = run_db(move |client| {
-            let groups = conflict::conflict_groups(client, &ids)?;
+        let (groups, records) = run_db(move |db| async move {
+            let groups = conflict::conflict_groups(&db, &ids).await?;
             let mut records = Vec::new();
             for id in &ids {
-                let record = load_record(client, id)?;
-                let edges = match &record {
-                    Some(record) => conflict::edges(client, &record.id)?,
-                    None => Vec::new(),
+                let found = match load_record(&db, id).await? {
+                    Some(record) => {
+                        let edges = conflict::edges(&db, &record.id).await?;
+                        Some((record, edges))
+                    }
+                    None => None,
                 };
-                records.push(record.map(|record| (record, edges)));
+                records.push(found);
             }
             Ok((groups, records))
         })?;
@@ -93,7 +102,9 @@ impl MemoryStore {
         source: &MemorySource,
     ) -> Result<(), String> {
         let (from_id, to_id, source) = (from_id.to_owned(), to_id.to_owned(), source.clone());
-        run_db(move |client| conflict::add_edge(client, &from_id, &to_id, relation, &source))
+        run_db(move |db| async move {
+            conflict::add_edge(&db, &from_id, &to_id, relation, &source).await
+        })
     }
     pub fn resolve_conflict(
         &self,
@@ -109,37 +120,57 @@ impl MemoryStore {
         let loser_ids = loser_ids.to_vec();
         let payload =
             json!({"winnerId": winner_id, "loserIds": loser_ids, "source": source}).to_string();
-        run_db(move |client| {
-            let mut tx = client.transaction().map_err(sql)?;
-            let winner_exists: bool = tx
-                .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM memories WHERE id=$1 AND status='active' AND NOT tombstone)",
-                    &[&winner_id],
-                )
-                .map_err(sql)?
-                .get(0);
-            if !winner_exists {
+        run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
+            let winner = memory::Entity::find_by_id(winner_id.clone())
+                .filter(memory::Column::Status.eq("active"))
+                .filter(memory::Column::Tombstone.eq(false))
+                .one(&tx)
+                .await
+                .map_err(sql)?;
+            if winner.is_none() {
                 return Err("conflict winner is not active".into());
             }
-            let mut resolved = 0;
-            for loser in &loser_ids {
-                resolved += tx
-                    .execute(
-                        "UPDATE memories SET status='resolved',valid_to=COALESCE(valid_to,$2),updated_at=$2
-                         WHERE id=$1 AND status='active'",
-                        &[loser, &now],
-                    )
-                    .map_err(sql)? as usize;
-            }
-            tx.execute(
-                "INSERT INTO memory_outbox(id,dedupe_key,event_kind,payload_json,available_at,created_at)
-                 VALUES($1,$2,'conflict-resolved',$3,$4,$4) ON CONFLICT DO NOTHING",
-                &[&stable_id("evt"), &format!("conflict-resolved:{winner_id}:{}", loser_ids.join(":")),
-                  &payload, &now],
+            let resolved = memory::Entity::update_many()
+                .col_expr(memory::Column::Status, Expr::value("resolved"))
+                .col_expr(
+                    memory::Column::ValidTo,
+                    Expr::cust_with_values("COALESCE(valid_to, $1)", [now]),
+                )
+                .col_expr(memory::Column::UpdatedAt, Expr::value(now))
+                .filter(memory::Column::Id.is_in(loser_ids.clone()))
+                .filter(memory::Column::Status.eq("active"))
+                .exec(&tx)
+                .await
+                .map_err(sql)?
+                .rows_affected;
+            outbox::Entity::insert(outbox::ActiveModel {
+                id: Set(stable_id("evt")),
+                dedupe_key: Set(format!(
+                    "conflict-resolved:{winner_id}:{}",
+                    loser_ids.join(":")
+                )),
+                event_kind: Set("conflict-resolved".into()),
+                payload_json: Set(payload),
+                state: Set("pending".into()),
+                attempts: Set(0),
+                available_at: Set(now),
+                lease_owner: Set(None),
+                lease_until: Set(None),
+                last_error: Set(None),
+                created_at: Set(now),
+                processed_at: Set(None),
+            })
+            .on_conflict(
+                OnConflict::column(outbox::Column::DedupeKey)
+                    .do_nothing()
+                    .to_owned(),
             )
+            .exec_without_returning(&tx)
+            .await
             .map_err(sql)?;
-            tx.commit().map_err(sql)?;
-            Ok(resolved)
+            tx.commit().await.map_err(sql)?;
+            Ok(resolved as usize)
         })
     }
 }

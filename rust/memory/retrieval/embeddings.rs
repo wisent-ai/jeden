@@ -1,4 +1,8 @@
 use crate::fleet::{run_db, sql};
+use crate::memory::store::entities::{embedding, memory};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QueryOrder, TransactionTrait,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -31,15 +35,17 @@ pub(crate) fn rebuild(provider: &dyn EmbeddingProvider) -> Result<usize, String>
             provider.name()
         ));
     }
-    let records: Vec<(String, String)> = run_db(|client| {
-        Ok(client
-            .query(
-                "SELECT id,text FROM memories WHERE status='active' AND NOT tombstone AND valid_to IS NULL ORDER BY id",
-                &[],
-            )
+    let records: Vec<(String, String)> = run_db(|db| async move {
+        Ok(memory::Entity::find()
+            .filter(memory::Column::Status.eq("active"))
+            .filter(memory::Column::Tombstone.eq(false))
+            .filter(memory::Column::ValidTo.is_null())
+            .order_by_asc(memory::Column::Id)
+            .all(&db)
+            .await
             .map_err(sql)?
             .into_iter()
-            .map(|row| (row.get(0), row.get(1)))
+            .map(|row| (row.id, row.text))
             .collect())
     })?;
     let texts = records
@@ -64,43 +70,60 @@ pub(crate) fn rebuild(provider: &dyn EmbeddingProvider) -> Result<usize, String>
         .zip(vectors)
         .map(|((id, text), vector)| {
             serde_json::to_string(&vector)
-                .map(|json| (id, json, content_hash(&text)))
+                .map(|json| embedding::ActiveModel {
+                    memory_id: Set(id),
+                    model: Set(model.clone()),
+                    dimensions: Set(dimensions),
+                    vector_json: Set(json),
+                    content_hash: Set(content_hash(&text)),
+                    updated_at: Set(now),
+                })
                 .map_err(|e| e.to_string())
         })
         .collect::<Result<Vec<_>, _>>()?;
-    run_db(move |client| {
-        let mut tx = client.transaction().map_err(sql)?;
-        tx.execute("DELETE FROM memory_embeddings", &[])
+    let count = rows.len();
+    run_db(move |db| async move {
+        let tx = db.begin().await.map_err(sql)?;
+        embedding::Entity::delete_many()
+            .exec(&tx)
+            .await
             .map_err(sql)?;
-        for (id, json, hash) in &rows {
-            tx.execute(
-                "INSERT INTO memory_embeddings(memory_id,model,dimensions,vector_json,content_hash,updated_at)
-                 VALUES($1,$2,$3,$4,$5,$6)",
-                &[id, &model, &dimensions, json, hash, &now],
-            )
-            .map_err(sql)?;
+        if !rows.is_empty() {
+            embedding::Entity::insert_many(rows)
+                .exec_without_returning(&tx)
+                .await
+                .map_err(sql)?;
         }
-        tx.commit().map_err(sql)?;
-        Ok(rows.len())
-    })
+        tx.commit().await.map_err(sql)
+    })?;
+    Ok(count)
 }
 
 pub(crate) fn health(provider: Option<&dyn EmbeddingProvider>) -> Result<EmbeddingHealth, String> {
-    let rows: Vec<(String, String)> = run_db(|client| {
-        Ok(client
-            .query(
-                "SELECT e.content_hash,m.text FROM memory_embeddings e JOIN memories m ON m.id=e.memory_id",
-                &[],
-            )
+    let (embeddings, texts) = run_db(|db| async move {
+        let embeddings = embedding::Entity::find().all(&db).await.map_err(sql)?;
+        let ids = embeddings
+            .iter()
+            .map(|row| row.memory_id.clone())
+            .collect::<Vec<_>>();
+        let texts = memory::Entity::find()
+            .filter(memory::Column::Id.is_in(ids))
+            .all(&db)
+            .await
             .map_err(sql)?
             .into_iter()
-            .map(|row| (row.get(0), row.get(1)))
-            .collect())
+            .map(|row| (row.id, row.text))
+            .collect::<std::collections::HashMap<_, _>>();
+        Ok((embeddings, texts))
     })?;
-    let indexed = rows.len();
-    let stale = rows
+    let indexed = embeddings.len();
+    let stale = embeddings
         .iter()
-        .filter(|(stored, text)| *stored != content_hash(text))
+        .filter(|row| {
+            texts
+                .get(&row.memory_id)
+                .is_none_or(|text| row.content_hash != content_hash(text))
+        })
         .count();
     let available = provider.map(EmbeddingProvider::available).unwrap_or(false);
     Ok(EmbeddingHealth {
@@ -121,21 +144,17 @@ pub(super) fn semantic_scores(query: &[f32]) -> Result<Vec<(String, f64)>, Strin
         return Ok(Vec::new());
     }
     let dimensions = query.len() as i64;
-    let rows: Vec<(String, String)> = run_db(move |client| {
-        Ok(client
-            .query(
-                "SELECT memory_id,vector_json FROM memory_embeddings WHERE dimensions=$1",
-                &[&dimensions],
-            )
-            .map_err(sql)?
-            .into_iter()
-            .map(|row| (row.get(0), row.get(1)))
-            .collect())
+    let rows = run_db(move |db| async move {
+        embedding::Entity::find()
+            .filter(embedding::Column::Dimensions.eq(dimensions))
+            .all(&db)
+            .await
+            .map_err(sql)
     })?;
     let mut result = Vec::new();
-    for (id, json) in rows {
-        let vector: Vec<f32> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        result.push((id, cosine(query, &vector)));
+    for row in rows {
+        let vector: Vec<f32> = serde_json::from_str(&row.vector_json).map_err(|e| e.to_string())?;
+        result.push((row.memory_id, cosine(query, &vector)));
     }
     Ok(result)
 }

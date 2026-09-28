@@ -1,14 +1,21 @@
 use super::MAX_ROOM_EVENTS;
 use crate::fleet::{run_db, sql};
+use sea_orm::sea_query::{Expr, OnConflict};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionTrait,
+};
 use serde_json::json;
 mod auth;
+mod entities;
 mod http;
 
 use auth::{now_ms, relay_response_authorized, token_hash, token_role};
+use entities::{event, room, token};
 pub use http::serve;
 
 /// The relay tables in the fleet database `jeden`, created by
-/// `crate::fleet` on connection.
+/// `crate::fleet`'s migrator.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE IF NOT EXISTS relay_rooms (id TEXT PRIMARY KEY, created_at BIGINT NOT NULL);
     CREATE TABLE IF NOT EXISTS relay_room_tokens (room_id TEXT NOT NULL REFERENCES relay_rooms(id)
@@ -44,82 +51,92 @@ impl RelayStore {
             return Err("view role is read-only".into());
         }
         let (room, hash) = (room.to_owned(), token_hash(token));
-        run_db(move |client| {
-            let mut tx = client.transaction().map_err(sql)?;
-            // Serialize writers of one room on its row; a new room serializes
-            // on the insert's primary key.
-            let exists = tx
-                .query_opt(
-                    "SELECT id FROM relay_rooms WHERE id=$1 FOR UPDATE",
-                    &[&room],
-                )
+        run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
+            // Writers of one room serialize on its row.
+            let exists = room::Entity::find_by_id(room.clone())
+                .lock_exclusive()
+                .one(&tx)
+                .await
                 .map_err(sql)?
                 .is_some();
             if !exists {
                 if role != "full" {
                     return Err("full token required to create room".into());
                 }
-                tx.execute(
-                    "INSERT INTO relay_rooms(id,created_at) VALUES($1,$2)",
-                    &[&room, &now_ms()],
-                )
+                room::Entity::insert(room::ActiveModel {
+                    id: Set(room.clone()),
+                    created_at: Set(now_ms()),
+                })
+                .exec_without_returning(&tx)
+                .await
                 .map_err(sql)?;
-                tx.execute(
-                    "INSERT INTO relay_room_tokens(room_id,role,token_hash) VALUES($1,'full',$2)",
-                    &[&room, &hash],
-                )
+                token::Entity::insert(token::ActiveModel {
+                    room_id: Set(room.clone()),
+                    role: Set("full".into()),
+                    token_hash: Set(hash.clone()),
+                    generation: Set(1),
+                })
+                .exec_without_returning(&tx)
+                .await
                 .map_err(sql)?;
             }
-            let authorized: bool = tx
-                .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM relay_room_tokens WHERE room_id=$1 AND role=$2 AND token_hash=$3)",
-                    &[&room, &role, &hash],
-                )
+            let authorized = token::Entity::find()
+                .filter(token::Column::RoomId.eq(room.clone()))
+                .filter(token::Column::Role.eq(role))
+                .filter(token::Column::TokenHash.eq(hash))
+                .one(&tx)
+                .await
                 .map_err(sql)?
-                .get(0);
+                .is_some();
             if !authorized {
                 return Err("unauthorized room write".into());
             }
-            let count: i64 = tx
-                .query_one(
-                    "SELECT count(*) FROM relay_events WHERE room_id=$1",
-                    &[&room],
-                )
-                .map_err(sql)?
-                .get(0);
-            if count >= MAX_ROOM_EVENTS as i64 {
+            let count = event::Entity::find()
+                .filter(event::Column::RoomId.eq(room.clone()))
+                .count(&tx)
+                .await
+                .map_err(sql)?;
+            if count >= MAX_ROOM_EVENTS as u64 {
                 return Ok(None);
             }
-            let seq = count + 1;
-            tx.execute(
-                "INSERT INTO relay_events(room_id,seq,blob,created_at) VALUES($1,$2,$3,$4)",
-                &[&room, &seq, &blob, &now_ms()],
-            )
+            let seq = count as i64 + 1;
+            event::Entity::insert(event::ActiveModel {
+                room_id: Set(room),
+                seq: Set(seq),
+                blob: Set(blob),
+                created_at: Set(now_ms()),
+            })
+            .exec_without_returning(&tx)
+            .await
             .map_err(sql)?;
-            tx.commit().map_err(sql)?;
+            tx.commit().await.map_err(sql)?;
             Ok(Some(seq as usize))
         })
     }
     pub fn get(&self, room: &str, since: usize) -> Result<(Vec<String>, usize), String> {
         let (room, since) = (room.to_owned(), since as i64);
-        run_db(move |client| {
-            let events = client
-                .query(
-                    "SELECT blob FROM relay_events WHERE room_id=$1 AND seq>$2 ORDER BY seq",
-                    &[&room, &since],
-                )
+        run_db(move |db| async move {
+            let blobs = event::Entity::find()
+                .filter(event::Column::RoomId.eq(room.clone()))
+                .filter(event::Column::Seq.gt(since))
+                .order_by_asc(event::Column::Seq)
+                .all(&db)
+                .await
                 .map_err(sql)?
                 .into_iter()
-                .map(|row| row.get(0))
+                .map(|event| event.blob)
                 .collect();
-            let next: i64 = client
-                .query_one(
-                    "SELECT coalesce(max(seq),0) FROM relay_events WHERE room_id=$1",
-                    &[&room],
-                )
+            let next: Option<i64> = event::Entity::find()
+                .select_only()
+                .column_as(event::Column::Seq.max(), "next")
+                .filter(event::Column::RoomId.eq(room))
+                .into_tuple()
+                .one(&db)
+                .await
                 .map_err(sql)?
-                .get(0);
-            Ok((events, next as usize))
+                .flatten();
+            Ok((blobs, next.unwrap_or(0) as usize))
         })
     }
     pub fn rotate_token(&self, room: &str, old: &str, new: &str) -> Result<bool, String> {
@@ -129,50 +146,64 @@ impl RelayStore {
             return Ok(false);
         }
         let (room, old_hash, new_hash) = (room.to_owned(), token_hash(old), token_hash(new));
-        run_db(move |client| {
-            let mut tx = client.transaction().map_err(sql)?;
-            let authorized: bool = tx
-                .query_one(
-                    "SELECT EXISTS(SELECT 1 FROM relay_room_tokens WHERE room_id=$1 AND role=$2 AND token_hash=$3)",
-                    &[&room, &old_role, &old_hash],
-                )
+        run_db(move |db| async move {
+            let tx = db.begin().await.map_err(sql)?;
+            let authorized = token::Entity::find()
+                .filter(token::Column::RoomId.eq(room.clone()))
+                .filter(token::Column::Role.eq(old_role.clone()))
+                .filter(token::Column::TokenHash.eq(old_hash))
+                .one(&tx)
+                .await
                 .map_err(sql)?
-                .get(0);
+                .is_some();
             if !authorized {
                 return Ok(false);
             }
             if old_role == "full" && new_role != "full" {
-                tx.execute(
-                    "INSERT INTO relay_room_tokens(room_id,role,token_hash) VALUES($1,$2,$3)
-                     ON CONFLICT(room_id,role) DO UPDATE SET token_hash=excluded.token_hash,
-                     generation=relay_room_tokens.generation+1",
-                    &[&room, &new_role, &new_hash],
+                token::Entity::insert(token::ActiveModel {
+                    room_id: Set(room),
+                    role: Set(new_role),
+                    token_hash: Set(new_hash),
+                    generation: Set(1),
+                })
+                .on_conflict(
+                    OnConflict::columns([token::Column::RoomId, token::Column::Role])
+                        .update_column(token::Column::TokenHash)
+                        .value(
+                            token::Column::Generation,
+                            Expr::col((token::Entity, token::Column::Generation)).add(1),
+                        )
+                        .to_owned(),
                 )
+                .exec_without_returning(&tx)
+                .await
                 .map_err(sql)?;
             } else if old_role == new_role {
-                tx.execute(
-                    "UPDATE relay_room_tokens SET token_hash=$3,generation=generation+1
-                     WHERE room_id=$1 AND role=$2",
-                    &[&room, &old_role, &new_hash],
-                )
-                .map_err(sql)?;
+                token::Entity::update_many()
+                    .col_expr(token::Column::TokenHash, Expr::value(new_hash))
+                    .col_expr(
+                        token::Column::Generation,
+                        Expr::col(token::Column::Generation).add(1),
+                    )
+                    .filter(token::Column::RoomId.eq(room))
+                    .filter(token::Column::Role.eq(old_role))
+                    .exec(&tx)
+                    .await
+                    .map_err(sql)?;
             } else {
                 return Err("only full tokens may provision another role".into());
             }
-            tx.commit().map_err(sql)?;
+            tx.commit().await.map_err(sql)?;
             Ok(true)
         })
     }
     pub fn health(&self) -> Result<serde_json::Value, String> {
-        let (rooms, events, tokens): (i64, i64, i64) = run_db(|client| {
-            let row = client
-                .query_one(
-                    "SELECT (SELECT count(*) FROM relay_rooms), (SELECT count(*) FROM relay_events),
-                            (SELECT count(*) FROM relay_room_tokens)",
-                    &[],
-                )
-                .map_err(sql)?;
-            Ok((row.get(0), row.get(1), row.get(2)))
+        let (rooms, events, tokens) = run_db(|db| async move {
+            Ok((
+                room::Entity::find().count(&db).await.map_err(sql)?,
+                event::Entity::find().count(&db).await.map_err(sql)?,
+                token::Entity::find().count(&db).await.map_err(sql)?,
+            ))
         })?;
         Ok(
             json!({"ok":true,"service":"jeden-collab-relay","backend":"fleet-postgres","contentBlind":true,"rooms":rooms,"events":events,"roleTokens":tokens,"location":self.location()}),

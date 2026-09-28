@@ -1,10 +1,15 @@
+use super::store::entities::{edge, memory};
 use super::{MemoryEdge, MemoryRelation, MemorySource};
 use crate::fleet::sql;
-use postgres::GenericClient;
+use sea_orm::sea_query::{Condition, OnConflict};
+use sea_orm::{
+    ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter,
+    QueryOrder,
+};
 use std::collections::{HashMap, HashSet};
 
-pub(super) fn add_edge(
-    client: &mut impl GenericClient,
+pub(super) async fn add_edge(
+    db: &impl ConnectionTrait,
     from_id: &str,
     to_id: &str,
     relation: MemoryRelation,
@@ -13,13 +18,11 @@ pub(super) fn add_edge(
     if from_id == to_id {
         return Err("memory edge cannot be self-referential".into());
     }
-    let exists: i64 = client
-        .query_one(
-            "SELECT count(*) FROM memories WHERE id IN ($1,$2)",
-            &[&from_id, &to_id],
-        )
-        .map_err(sql)?
-        .get(0);
+    let exists = memory::Entity::find()
+        .filter(memory::Column::Id.is_in([from_id.to_owned(), to_id.to_owned()]))
+        .count(db)
+        .await
+        .map_err(sql)?;
     if exists != 2 {
         return Err("memory edge endpoint does not exist".into());
     }
@@ -29,69 +32,75 @@ pub(super) fn add_edge(
         pairs.push((to_id, from_id));
     }
     for (from, to) in pairs {
-        client
-            .execute(
-                "INSERT INTO memory_edges(from_id,to_id,relation,created_at,provenance_json)
-                 VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING",
-                &[
-                    &from,
-                    &to,
-                    &relation.as_str(),
-                    &super::now_ms(),
-                    &provenance,
-                ],
-            )
-            .map_err(sql)?;
+        edge::Entity::insert(edge::ActiveModel {
+            from_id: Set(from.to_owned()),
+            to_id: Set(to.to_owned()),
+            relation: Set(relation.as_str().to_owned()),
+            created_at: Set(super::now_ms()),
+            provenance_json: Set(provenance.clone()),
+        })
+        .on_conflict(
+            OnConflict::columns([
+                edge::Column::FromId,
+                edge::Column::ToId,
+                edge::Column::Relation,
+            ])
+            .do_nothing()
+            .to_owned(),
+        )
+        .exec_without_returning(db)
+        .await
+        .map_err(sql)?;
     }
     Ok(())
 }
 
-pub(super) fn edges(
-    client: &mut impl GenericClient,
+pub(super) async fn edges(
+    db: &impl ConnectionTrait,
     memory_id: &str,
 ) -> Result<Vec<MemoryEdge>, String> {
-    Ok(client
-        .query(
-            "SELECT from_id,to_id,relation,created_at,provenance_json FROM memory_edges
-             WHERE from_id=$1 OR to_id=$1 ORDER BY created_at,from_id,to_id",
-            &[&memory_id],
+    Ok(edge::Entity::find()
+        .filter(
+            Condition::any()
+                .add(edge::Column::FromId.eq(memory_id.to_owned()))
+                .add(edge::Column::ToId.eq(memory_id.to_owned())),
         )
+        .order_by_asc(edge::Column::CreatedAt)
+        .order_by_asc(edge::Column::FromId)
+        .order_by_asc(edge::Column::ToId)
+        .all(db)
+        .await
         .map_err(sql)?
         .into_iter()
-        .map(|row| {
-            let relation: String = row.get(2);
-            let provenance: String = row.get(4);
-            MemoryEdge {
-                from_id: row.get(0),
-                to_id: row.get(1),
-                relation: MemoryRelation::parse(&relation).unwrap_or(MemoryRelation::Supports),
-                created_at: row.get(3),
-                provenance: serde_json::from_str(&provenance).unwrap_or(MemorySource {
-                    origin: "unknown".into(),
-                    session_id: None,
-                    entry_id: None,
-                }),
-            }
+        .map(|row| MemoryEdge {
+            relation: MemoryRelation::parse(&row.relation).unwrap_or(MemoryRelation::Supports),
+            provenance: serde_json::from_str(&row.provenance_json).unwrap_or(MemorySource {
+                origin: "unknown".into(),
+                session_id: None,
+                entry_id: None,
+            }),
+            from_id: row.from_id,
+            to_id: row.to_id,
+            created_at: row.created_at,
         })
         .collect())
 }
 
-pub(super) fn conflict_groups(
-    client: &mut impl GenericClient,
+pub(super) async fn conflict_groups(
+    db: &impl ConnectionTrait,
     ids: &[String],
 ) -> Result<HashMap<String, String>, String> {
     let wanted = ids.iter().cloned().collect::<HashSet<_>>();
     let mut graph: HashMap<String, Vec<String>> = HashMap::new();
-    for row in client
-        .query(
-            "SELECT from_id,to_id FROM memory_edges WHERE relation='conflicts' AND from_id=ANY($1)",
-            &[&ids],
-        )
+    for row in edge::Entity::find()
+        .filter(edge::Column::Relation.eq("conflicts"))
+        .filter(edge::Column::FromId.is_in(ids.to_vec()))
+        .all(db)
+        .await
         .map_err(sql)?
     {
-        let (a, b): (String, String) = (row.get(0), row.get(1));
-        if wanted.contains(&a) && wanted.contains(&b) {
-            graph.entry(a).or_default().push(b);
+        if wanted.contains(&row.from_id) && wanted.contains(&row.to_id) {
+            graph.entry(row.from_id).or_default().push(row.to_id);
         }
     }
     let mut groups = HashMap::new();
