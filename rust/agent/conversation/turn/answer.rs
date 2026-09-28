@@ -73,19 +73,21 @@ impl Conversation {
     ///
     /// `Ok(None)` means a correction was asked for and the turn continues;
     /// `Ok(Some(refusal))` is the sentence the turn must end with.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn repair_unusable_answer(
         &mut self,
         args: &Args,
         step: u32,
         refusal: &str,
+        cut_off: bool,
         answer_bytes: Option<usize>,
         repairs: &mut u32,
         hooks: &RunHooks<'_>,
     ) -> Result<Option<String>, String> {
         let repairable = *repairs < ANSWER_REPAIRS && args.max_steps.is_none_or(|max| step < max);
-        // Only the provider knows whether it stopped for length; an answer
-        // it finished normally with brackets open is malformed, not cut.
-        let cut_off = is_incomplete_output_error(refusal);
+        // Only the provider knows whether it stopped for length
+        // (`StreamErrorClass::Incomplete`); an answer it finished normally
+        // with brackets open is malformed, not cut.
         let instruction = repair_instruction(refusal, cut_off, args.max_tokens);
         self.recorder.record(
             task_contract::VIOLATION_EVENT,

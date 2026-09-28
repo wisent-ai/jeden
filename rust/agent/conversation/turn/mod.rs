@@ -135,6 +135,7 @@ impl Conversation {
                         args,
                         step,
                         &refusal,
+                        false,
                         Some(content.len()),
                         &mut repairs,
                         hooks,

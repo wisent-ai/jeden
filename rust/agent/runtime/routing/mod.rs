@@ -260,7 +260,3 @@ pub(in crate::agent) fn is_context_overflow_error(error: &str) -> bool {
         || lower.contains("too many tokens")
         || lower.contains("tokens exceed")
 }
-
-pub(in crate::agent) fn is_incomplete_output_error(error: &str) -> bool {
-    error.to_ascii_lowercase().contains("response incomplete")
-}

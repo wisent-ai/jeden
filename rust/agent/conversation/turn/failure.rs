@@ -76,7 +76,7 @@ impl Conversation {
                 return Ok(());
             }
         }
-        let cut_off = is_incomplete_output_error(&error);
+        let cut_off = failure.class == crate::model_router::StreamErrorClass::Incomplete;
         let recovery_reason = if overflow {
             Some("overflow")
         } else if cut_off {
@@ -125,7 +125,7 @@ impl Conversation {
             // refused, so a caller never reads it twice.
             let refusal = format!("model answer was cut off before it was complete ({error})");
             let Some(refusal) =
-                self.repair_unusable_answer(args, step, &refusal, None, repairs, hooks)?
+                self.repair_unusable_answer(args, step, &refusal, true, None, repairs, hooks)?
             else {
                 return Ok(());
             };
