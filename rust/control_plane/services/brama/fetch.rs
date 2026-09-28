@@ -269,7 +269,10 @@ impl BramaClient {
                 .get("retry-after")
                 .and_then(|value| value.parse::<u64>().ok())
                 .map(|seconds| seconds.saturating_mul(1000));
-            return Err(BramaError::RateLimited { retry_after_ms });
+            return Err(BramaError::RateLimited {
+                retry_after_ms,
+                retryable: BramaError::stated_retryable(&response.body),
+            });
         }
         if !(200..300).contains(&response.status) {
             return Err(BramaError::http(response.status, path, &response.body));

@@ -29,8 +29,12 @@ pub enum BramaError {
         message: String,
         retryable: Option<bool>,
     },
+    /// HTTP 429. `retryable` is Brama's `error.retryable` field, read the
+    /// same way as for [`BramaError::Http`], so an explicit refusal sent
+    /// with 429 is not mistaken for a busy gateway.
     RateLimited {
         retry_after_ms: Option<u64>,
+        retryable: Option<bool>,
     },
     InvalidCatalog(String),
     InvalidResponse(String),
@@ -51,7 +55,7 @@ impl std::fmt::Display for BramaError {
             Self::Http {
                 status, message, ..
             } => write!(f, "Brama returned HTTP {status}: {message}"),
-            Self::RateLimited { retry_after_ms } => write!(
+            Self::RateLimited { retry_after_ms, .. } => write!(
                 f,
                 "Brama rate limited the request; retry after {:?} ms",
                 retry_after_ms
@@ -71,14 +75,19 @@ impl BramaError {
     /// A non-2xx answer from `path`, with Brama's stated retryability read
     /// from its error document.
     pub(super) fn http(status: u16, path: &str, body: &[u8]) -> Self {
-        let retryable = serde_json::from_slice::<serde_json::Value>(body)
-            .ok()
-            .and_then(|document| document.pointer("/error/retryable")?.as_bool());
         Self::Http {
             status,
             message: format!("/{API_VERSION}{path}: {:?}", String::from_utf8_lossy(body)),
-            retryable,
+            retryable: Self::stated_retryable(body),
         }
+    }
+
+    /// Brama's `error.retryable` verdict from its error document, if the
+    /// body is one.
+    pub(super) fn stated_retryable(body: &[u8]) -> Option<bool> {
+        serde_json::from_slice::<serde_json::Value>(body)
+            .ok()
+            .and_then(|document| document.pointer("/error/retryable")?.as_bool())
     }
 
     /// Brama said, in its error document, that retrying will not help.
@@ -86,6 +95,9 @@ impl BramaError {
         matches!(
             self,
             Self::Http {
+                retryable: Some(false),
+                ..
+            } | Self::RateLimited {
                 retryable: Some(false),
                 ..
             }

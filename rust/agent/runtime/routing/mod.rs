@@ -18,7 +18,6 @@ fn model_catalog_with_retry(
     cwd: &Path,
     client: &crate::control_plane::brama::BramaClient,
 ) -> Result<crate::control_plane::brama::ModelCatalog, crate::control_plane::brama::BramaError> {
-    use crate::control_plane::brama::BramaError;
     const DELAYS: [std::time::Duration; 2] = [
         std::time::Duration::from_secs(2),
         std::time::Duration::from_secs(8),
@@ -29,26 +28,11 @@ fn model_catalog_with_retry(
             Err(error) => {
                 // The status family is a guess about the gateway's intent; the
                 // refusal document is the gateway saying it. A refused
-                // subscription answers `503` with `retryable: false`, and every
-                // retry of that is two provider round trips and eight seconds
-                // spent on a credential only a human can renew, so an explicit
-                // `false` wins.
-                let refused_outright = matches!(
-                    &error,
-                    BramaError::Http {
-                        retryable: Some(false),
-                        ..
-                    }
-                );
-                let transient = !refused_outright
-                    && match &error {
-                        BramaError::Transport(_) | BramaError::RateLimited { .. } => true,
-                        BramaError::Http { status, .. } => {
-                            *status == 429 || (500..600).contains(status)
-                        }
-                        _ => false,
-                    };
-                if !transient {
+                // subscription answers `503` or `429` with `retryable: false`,
+                // and every retry of that is two provider round trips and
+                // eight seconds spent on a credential only a human can renew,
+                // so `left_unanswered` lets an explicit `false` win.
+                if !error.left_unanswered() {
                     return Err(error);
                 }
                 eprintln!("retry {}/{} after {}", attempt + 1, DELAYS.len(), error);
