@@ -86,7 +86,7 @@ impl ServerConnection {
     }
 
     pub(super) fn connect(&mut self, cwd: &Path, force: bool) -> Result<(), String> {
-        if self.client.as_mut().map(McpClient::is_alive) == Some(true) && !force {
+        if !force && !self.transport_broken() {
             return Ok(());
         }
         self.disconnect();
@@ -174,16 +174,7 @@ impl ServerConnection {
         let result = match first {
             Ok(value) => Ok(value),
             Err(error) => {
-                let dead = self
-                    .client
-                    .as_mut()
-                    .map(|client| !client.is_alive())
-                    .unwrap_or(true);
-                let transport_error = dead
-                    || error.contains("transport")
-                    || error.contains("stdio")
-                    || error.contains("exceeded");
-                if !transport_error {
+                if !self.transport_broken() {
                     return Err(error);
                 }
                 self.record_failure(error);
@@ -193,17 +184,8 @@ impl ServerConnection {
                     .as_mut()
                     .ok_or("MCP connection unavailable")?
                     .request(method, params);
-                if let Err(error) = &retry {
-                    let dead = self
-                        .client
-                        .as_mut()
-                        .map(|client| !client.is_alive())
-                        .unwrap_or(true);
-                    if dead
-                        || error.contains("transport")
-                        || error.contains("stdio")
-                        || error.contains("exceeded")
-                    {
+                if retry.is_err() && self.transport_broken() {
+                    if let Err(error) = &retry {
                         self.record_failure(error.clone());
                     }
                 }
@@ -217,6 +199,15 @@ impl ServerConnection {
             .unwrap_or_default();
         self.process_notifications(cwd, notifications)?;
         Ok(result)
+    }
+
+    /// The client's process exited or its last exchange failed at the
+    /// transport; a server's own error answer is neither.
+    fn transport_broken(&mut self) -> bool {
+        self.client
+            .as_mut()
+            .map(|client| !client.is_alive() || client.transport_failed())
+            .unwrap_or(true)
     }
 
     pub(super) fn process_notifications(

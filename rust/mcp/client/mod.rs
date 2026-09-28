@@ -41,6 +41,10 @@ pub(crate) struct McpClient {
     pub(super) transport: Transport,
     pub(super) next_id: u64,
     pub(super) notifications: VecDeque<Value>,
+    /// The exchange itself failed (write, read, HTTP status, size or queue
+    /// limit), as opposed to the server answering with an error. The
+    /// connection reconnects on this, never on words in the error.
+    transport_failed: bool,
 }
 
 impl McpClient {
@@ -77,6 +81,7 @@ impl McpClient {
             transport,
             next_id: 1,
             notifications: VecDeque::new(),
+            transport_failed: false,
         })
     }
 
@@ -88,12 +93,13 @@ impl McpClient {
             .ok_or("MCP request id exhausted")?;
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         loop {
-            let messages = self.send(&message)?;
+            let messages = self.exchange(&message)?;
             for response in messages {
                 if response.get("method").is_some()
                     && response.get("id").is_none()
                     && self.notifications.len() >= MAX_NOTIFICATIONS
                 {
+                    self.transport_failed = true;
                     return Err("MCP notification queue limit exceeded".into());
                 }
                 if response.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
@@ -124,11 +130,23 @@ impl McpClient {
         }
     }
 
+    /// `send`, with a failed exchange recorded on the client.
+    fn exchange(&mut self, message: &Value) -> Result<Vec<Value>, String> {
+        let result = self.send(message);
+        self.transport_failed |= result.is_err();
+        result
+    }
+
+    pub(super) fn transport_failed(&self) -> bool {
+        self.transport_failed
+    }
+
     fn notify(&mut self, method: &str, params: Value) -> Result<(), String> {
         let message = json!({"jsonrpc": "2.0", "method": method, "params": params});
-        for response in self.send(&message)? {
+        for response in self.exchange(&message)? {
             if response.get("method").is_some() && response.get("id").is_none() {
                 if self.notifications.len() >= MAX_NOTIFICATIONS {
+                    self.transport_failed = true;
                     return Err("MCP notification queue limit exceeded".into());
                 }
                 self.notifications.push_back(response);
