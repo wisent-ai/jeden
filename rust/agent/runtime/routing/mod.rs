@@ -251,12 +251,3 @@ pub(in crate::agent) fn memory_guidance_for_prompt(cwd: &Path) -> Option<String>
     let context = store.pre_compaction_context(&scope, "", 12_000).ok()?;
     (!context.is_empty()).then_some(context)
 }
-
-pub(in crate::agent) fn is_context_overflow_error(error: &str) -> bool {
-    let lower = error.to_ascii_lowercase();
-    lower.contains("context length")
-        || lower.contains("context window")
-        || lower.contains("maximum context")
-        || lower.contains("too many tokens")
-        || lower.contains("tokens exceed")
-}

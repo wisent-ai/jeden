@@ -82,8 +82,8 @@ pub(crate) use state::{
 
 use approval::{resolve_tool_approval, ToolDecision};
 use runtime::{
-    append_usage_event, env_usize, is_context_overflow_error, prepare_outbound_messages,
-    rust_tool_specs, usage_cost, SessionRecorder,
+    append_usage_event, env_usize, prepare_outbound_messages, rust_tool_specs, usage_cost,
+    SessionRecorder,
 };
 use state::{apply_mode_instructions, capture_plan_if_enabled, read_mode_state, write_mode_state};
 

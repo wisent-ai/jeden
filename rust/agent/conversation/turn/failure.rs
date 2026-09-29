@@ -48,8 +48,7 @@ impl Conversation {
             });
         }
         let error = failure.message;
-        let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow
-            || is_context_overflow_error(&error);
+        let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow;
         if overflow && !failure.visible_output {
             while !router.context_promotions.is_empty() {
                 let next = router.context_promotions.remove(0);

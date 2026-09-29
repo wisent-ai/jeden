@@ -37,11 +37,17 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
     // quota exhaustion.
     let subscription_transient = error_code == Some("subscription_unavailable");
     let quota_exhausted = error_code == Some("provider_quota_exhausted") || status == 402;
-    // An explicit `retryable: false` is the gateway answering the question
-    // this function guesses at from the status family. It wins: a subscription
-    // the provider rejected needs a human to authorize it again, and retrying
-    // spends the session's budget on a wait that cannot end.
-    let class = if declared_retryable == Some(false) {
+    // A prompt longer than the model takes is refused with `retryable: false`
+    // too, but it has its own repair: a larger route or a compacted context.
+    // Brama names it `context_length_exceeded` from the provider's status or
+    // error code; the words of the body decide nothing.
+    // An explicit `retryable: false` is otherwise the gateway answering the
+    // question this function guesses at from the status family. It wins: a
+    // subscription the provider rejected needs a human to authorize it again,
+    // and retrying spends the session's budget on a wait that cannot end.
+    let class = if error_code == Some("context_length_exceeded") {
+        StreamErrorClass::ContextOverflow
+    } else if declared_retryable == Some(false) {
         StreamErrorClass::Permanent
     } else if subscription_transient {
         StreamErrorClass::TransientHttp
@@ -49,8 +55,6 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
         StreamErrorClass::QuotaExhausted
     } else if matches!(status, 408 | 409 | 425 | 429) || (500..600).contains(&status) {
         StreamErrorClass::TransientHttp
-    } else if is_context_overflow_body(&body) {
-        StreamErrorClass::ContextOverflow
     } else {
         StreamErrorClass::Permanent
     };
@@ -63,15 +67,6 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
         retry_after,
         visible_output: false,
     }
-}
-
-pub(crate) fn is_context_overflow_body(body: &str) -> bool {
-    let lower = body.to_ascii_lowercase();
-    lower.contains("context length")
-        || lower.contains("context window")
-        || lower.contains("maximum context")
-        || lower.contains("too many tokens")
-        || lower.contains("tokens exceed")
 }
 
 /// Take the next message from the stream adapter. It arrives, the adapter
