@@ -144,7 +144,7 @@ pub(crate) use reading::entries::{
 };
 pub use reading::reload;
 
-pub(crate) use crate::hooks::extensions::reading::entries::fire_hooks;
+pub(crate) use crate::hooks::extensions::reading::entries::{fire_hooks, has_hooks};
 use loading::canonical_key;
 use reading::current;
 

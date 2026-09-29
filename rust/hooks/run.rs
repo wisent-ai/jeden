@@ -144,6 +144,23 @@ pub fn fire_event(
     outcomes
 }
 
+/// Whether `fire_event` would run anything for `event`: a user, project,
+/// plugin, Tama registry or extension hook. A turn holds back the text of its
+/// answer while a `Stop` hook can still refuse it, so that a refused answer
+/// is never streamed to the operator before the refusal.
+pub fn has_event_hooks(cwd: &Path, event: &str, allow_project: bool) -> bool {
+    let project = read_config(&project_hooks_path(cwd));
+    let user = user_hooks_path()
+        .map(|p| read_config(&p))
+        .unwrap_or(Value::Null);
+    !resolve_trusted_hooks(&user, &project, event, "", allow_project).is_empty()
+        || crate::slash::installed_plugin_hook_configs(cwd, allow_project)
+            .iter()
+            .any(|config| !parse_event_hooks(config, event).is_empty())
+        || !super::tama::load_event_hooks(cwd, event, "").is_empty()
+        || super::extensions::has_hooks(cwd, event)
+}
+
 /// Fire `PreToolUse` for `tool`; returns `Some(reason)` if a hook blocks it.
 pub fn pretool_block(
     cwd: &Path,

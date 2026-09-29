@@ -152,3 +152,13 @@ pub(crate) fn fire_hooks(
     }
     Ok(results)
 }
+
+/// Whether any loaded extension registers a hook on `event`. An unreadable
+/// registry counts as registered: `fire_hooks` would report that failure as
+/// an outcome of the event, so a caller deciding what to hold back until the
+/// event has run must assume it will run.
+pub(crate) fn has_hooks(cwd: &Path, event: &str) -> bool {
+    current(cwd).map_or(true, |registry| {
+        registry.hooks.iter().any(|hook| hook.event == event)
+    })
+}

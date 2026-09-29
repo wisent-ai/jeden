@@ -71,6 +71,12 @@ impl Conversation {
         };
         let mut repairs = u32::default();
         let mut recoveries = u32::default();
+        // A `Stop` hook reads the finished answer and may refuse it. Streaming
+        // the text first showed the operator an answer the hook then refused,
+        // so the turn looked ended while the work went on; with a `Stop` hook
+        // configured the text waits for `answer_refused` like a report does.
+        let stop_gated =
+            crate::hooks::has_event_hooks(&args.cwd, crate::hooks::event::STOP, args.allow_command);
         // A model call that never produced an answer is not a step of this
         // turn's work: it is the transport failing. Advancing the step counter
         // on it spent an operator's whole budget on a flapping gateway and
@@ -97,7 +103,7 @@ impl Conversation {
                 outbound_messages,
                 args.max_tokens.map(|tokens| tokens as usize),
                 &tool_specs,
-                prepared.report_required || tracks_completion,
+                prepared.report_required || tracks_completion || stop_gated,
                 hooks,
             ) {
                 Ok(streaming) => streaming,

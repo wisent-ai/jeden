@@ -3,7 +3,10 @@
 //! `UserPromptSubmit` hooks inject their stdout as extra context, and their
 //! payload's `prompt_author` is `automation` when Jeden wrote the prompt itself
 //! (a Pursuit stage, an automatic continuation) and `operator` otherwise;
-//! `PostToolUse`/`SessionStart`/`Stop` run best-effort.
+//! `PostToolUse`/`SessionStart` run best-effort. A `Stop` hook reads the
+//! finished answer and may refuse it the same way a `PreToolUse` hook refuses
+//! a tool; while any `Stop` hook is configured the turn streams no answer
+//! text, so a refused answer never reaches the operator before its refusal.
 //!
 //! Config lives in `.jeden/hooks.json` (project) and `~/.jeden/hooks.json`
 //! (user). Both are merged — user hooks run first, then project hooks. Schema:
@@ -41,7 +44,8 @@ pub use extensions::{
     status as extension_status, ReloadReport,
 };
 pub use run::{
-    answer_stop_block, fire_event, posttool, pretool_block, session_start, user_prompt_submit,
+    answer_stop_block, fire_event, has_event_hooks, posttool, pretool_block, session_start,
+    user_prompt_submit,
 };
 pub use describe::describe_hooks;
 
