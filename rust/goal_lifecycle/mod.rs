@@ -1,10 +1,10 @@
 //! Background goal-lifecycle classification via Oko's local qualified model.
 //!
 //! Each classified user prompt is sent to the loopback OpenAI-compatible
-//! endpoint served by `com.wisent.compute.service.oko-goal-lifecycle`
-//! (`mlx_lm.server`). Everything here is fail-open: when the service is
-//! unreachable the first probe caches the verdict for the process lifetime and
-//! every later call is a fast no-op, so a Jeden turn never blocks on Oko.
+//! endpoint Oko's one process (`com.wisent.oko`) serves for its qualified
+//! model. Everything here is fail-open: when the endpoint is unreachable the
+//! first probe caches the verdict for the process lifetime and every later
+//! call is a fast no-op, so a Jeden turn never blocks on Oko.
 
 use serde_json::json;
 use std::path::{Path, PathBuf};
