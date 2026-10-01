@@ -28,11 +28,11 @@ pub struct ToolAction {
 
 /// Prefix of every refusal for an answer that stopped before it was whole.
 ///
-/// A cut-off answer used to reach the caller as serde's own `EOF while parsing
-/// a string at line 1 column 1440`, a column in text nobody can see. On
-/// 2026-09-10 that sentence ended a whole assignment, because the answer it
-/// described was one truncated intake plan. The prefix lets a turn recognise
-/// the shape of the failure and say what happened to the answer.
+/// A cut-off answer that reaches the caller as serde's own `EOF while parsing
+/// a string at line 1 column 1440` names a column in text nobody can see, and
+/// that sentence can end a whole assignment over one truncated intake plan.
+/// The prefix lets a turn recognise the shape of the failure and say what
+/// happened to the answer.
 pub const INCOMPLETE_ANSWER: &str = "model answer stopped mid-JSON";
 
 /// Prefix of every refusal for content that carries no JSON object at all.
