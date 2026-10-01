@@ -46,7 +46,7 @@ pub(crate) fn usage() -> String {
         "  jeden copy <text> | jeden copy - [--check] [--json] — hand an exact payload to the operator's clipboard, read back to confirm; --check asks later whether it is still there\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] [--json] [--cwd path]\n",
         "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
-        "  jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]\n",
+        "  jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]\n",
         "  jeden context [recommend] \"<task>\" [--limit n] [--source list] [--json] [--cwd path]\n",
         "  jeden context sources [--json] [--cwd path] — what each context source is and whether it answers\n",
         "  jeden context install|installed [--omp|--file <path>] [--json] — the same advisor as an Omp tool\n",

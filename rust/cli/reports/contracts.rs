@@ -19,7 +19,7 @@ use crate::Args;
 const BLOCK_START: &str = "<!-- jeden contracts: start -->";
 const BLOCK_END: &str = "<!-- jeden contracts: end -->";
 const USAGE: &str =
-    "Usage: jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]";
+    "Usage: jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]";
 
 /// The text Jeden puts into every system prompt: the task contract and the
 /// communication contract in force, in the conversation language.
@@ -76,6 +76,24 @@ fn spliced(existing: &str, block: &str) -> String {
     out
 }
 
+/// `existing` without its Jeden block and the blank line `spliced` put before
+/// it; `None` when it carries no block.
+fn unspliced(existing: &str) -> Option<String> {
+    let start = existing.find(BLOCK_START)?;
+    let end = start + existing[start..].find(BLOCK_END)? + BLOCK_END.len();
+    let before = existing[..start].trim_end();
+    let after = existing[end..].trim_start_matches('\n');
+    let mut out = before.to_string();
+    if !before.is_empty() && !after.is_empty() {
+        out.push_str("\n\n");
+    }
+    out.push_str(after);
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    Some(out)
+}
+
 fn omp_append_system_file() -> Result<PathBuf, String> {
     let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
     Ok(PathBuf::from(home).join(".omp/agent/APPEND_SYSTEM.md"))
@@ -108,7 +126,7 @@ fn target(rest: &[String]) -> Result<Target, String> {
         }
     }
     target.ok_or_else(|| {
-        crate::cli::invocation::refusal::usage(format!("contracts install and status require --omp or --file <path>\n{USAGE}"))
+        crate::cli::invocation::refusal::usage(format!("contracts install, uninstall and status require --omp or --file <path>\n{USAGE}"))
     })
 }
 
@@ -194,6 +212,34 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 format!("Installed the Jeden contracts into {path}\n")
             } else {
                 format!("{path} already carries the Jeden contracts\n")
+            })
+        }
+        // The inverse of install (cli.md rule 2): the block goes, the rest of
+        // the file stays as it was.
+        "uninstall" => {
+            let target = target(rest)?;
+            let existing = match fs::read_to_string(&target.file) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+                Err(error) => return Err(format!("cannot read {}: {error}", target.file.display())),
+            };
+            let next = unspliced(&existing);
+            if let Some(next) = &next {
+                crate::cli::config::migrations::write_text_atomic(&target.file, next)?;
+            }
+            let path = target.file.display().to_string();
+            Ok(if args.json {
+                serde_json::to_string_pretty(&json!({
+                    "target": target.name,
+                    "path": path,
+                    "changed": next.is_some(),
+                }))
+                .map_err(|error| error.to_string())?
+                    + "\n"
+            } else if next.is_some() {
+                format!("Removed the Jeden contracts from {path}\n")
+            } else {
+                format!("{path} carries no Jeden contracts\n")
             })
         }
         _ => Err(crate::cli::invocation::refusal::usage(USAGE)),

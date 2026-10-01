@@ -73,15 +73,15 @@ export const operationCommands = [
   },
   {
     path: "contracts",
-    invocation: "jeden contracts [render|status|install] [--omp|--file <path>] [--json] [--cwd path]",
+    invocation: "jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]",
     purpose: "Print Jeden's contracts as one text, and install them into another harness's system prompt.",
     inputs: [
       "No action defaults to <code>render</code>, which prints the task contract and the communication contract in force (Jeden's default, the operator's own text, or none) in the conversation language; <code>--cwd</code> selects the project layer and <code>--json</code> wraps the text.",
-      "<code>status</code> and <code>install</code> need a target: <code>--omp</code> is <code>~/.omp/agent/APPEND_SYSTEM.md</code>, the file Omp appends to every system prompt; <code>--file &lt;path&gt;</code> is any other file.",
+      "<code>status</code>, <code>install</code> and <code>uninstall</code> need a target: <code>--omp</code> is <code>~/.omp/agent/APPEND_SYSTEM.md</code>, the file Omp appends to every system prompt; <code>--file &lt;path&gt;</code> is any other file.",
     ],
-    effect: "<code>install</code> writes the rendered text between the lines <code>&lt;!-- jeden contracts: start --&gt;</code> and <code>&lt;!-- jeden contracts: end --&gt;</code>, replacing the previous block and leaving the rest of the file alone, through an atomic rename; it prints <code>Installed the Jeden contracts into &lt;path&gt;</code> or <code>&lt;path&gt; already carries the Jeden contracts</code>. <code>status</code> prints <code>current</code>, <code>stale</code>, or <code>absent</code> with the path and exits 0 only when current. The Wisent product catalog runs <code>install --omp</code> after every Jeden CLI installation and sweep.",
+    effect: "<code>install</code> writes the rendered text between the lines <code>&lt;!-- jeden contracts: start --&gt;</code> and <code>&lt;!-- jeden contracts: end --&gt;</code>, replacing the previous block and leaving the rest of the file alone, through an atomic rename; it prints <code>Installed the Jeden contracts into &lt;path&gt;</code> or <code>&lt;path&gt; already carries the Jeden contracts</code>. <code>uninstall</code> removes that block and nothing else, through the same atomic rename, and prints <code>Removed the Jeden contracts from &lt;path&gt;</code> or <code>&lt;path&gt; carries no Jeden contracts</code>; with <code>--json</code> both print <code>target</code>, <code>path</code> and <code>changed</code>. <code>status</code> prints <code>current</code>, <code>stale</code>, or <code>absent</code> with the path and exits 0 only when current. The Wisent product catalog runs <code>install --omp</code> after every Jeden CLI installation and sweep.",
     refusals: [
-      "<code>status</code> and <code>install</code> without a target are refused as <code>contracts install and status require --omp or --file &lt;path&gt;</code>; <code>--file</code> without a path is refused as <code>--file requires a path</code>.",
+      "<code>status</code>, <code>install</code> and <code>uninstall</code> without a target are refused as <code>contracts install, uninstall and status require --omp or --file &lt;path&gt;</code>; <code>--file</code> without a path is refused as <code>--file requires a path</code>. Both exit 2.",
       "An unknown action or option is refused with the usage line; a stale or absent block makes <code>status</code> exit 1 and name the install command.",
     ],
   },
