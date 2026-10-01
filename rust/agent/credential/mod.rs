@@ -3,13 +3,10 @@
 //!
 //! The harness holds no credential store and writes no secret to disk, so the
 //! signing secret and the router bearer have to arrive from the product that
-//! owns credential delivery: Stado, reading Skarbiec. Until 2026-09-06 a
-//! checked-in shell script did that, and `Remove the scripts directories`
-//! deleted it on the operator's instruction that every capability lives in the
-//! product it belongs to. Nothing replaced it: `bin/jeden-rust` still exec'd
-//! the deleted file, `/setup` still told the reader to run it, and on a
-//! configured workstation `jeden run` answered `BRAMA_URL is required` with no
-//! way to satisfy it. This is that capability, inside the product.
+//! owns credential delivery: Stado, reading Skarbiec. A checked-in shell
+//! script is not where that capability lives; it lives here, inside the
+//! product, so a configured workstation never answers `BRAMA_URL is required`
+//! with no way to satisfy it.
 //!
 //! Two items, each read one field at a time through `stado secrets get`:
 //! `agent:wisent-app/value` is the HMAC signing secret every request is signed

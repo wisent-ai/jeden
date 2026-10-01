@@ -5,11 +5,10 @@ use std::path::Path;
 use std::process::Command;
 
 /// Linux confinement is the same shape as the macOS one: a helper beside the
-/// executable applies the platform's own sandbox and execs the program.
-/// Until 2026-09-20 this file only guessed from `/sys/kernel/security` and
-/// always answered `Degraded`, so every session on a Linux fleet host
-/// refused with `sandbox launcher not active` even though that kernel
-/// carried Landlock.
+/// executable applies the platform's own sandbox and execs the program. The
+/// health is measured from the launcher, never guessed from
+/// `/sys/kernel/security`: a guess that always answers `Degraded` refuses
+/// every session on a kernel that does carry Landlock.
 pub(super) fn health() -> SandboxHealth {
     let health = crate::task_runtime::sandbox::health();
     SandboxHealth {
