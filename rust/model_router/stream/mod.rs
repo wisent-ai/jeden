@@ -198,29 +198,11 @@ pub fn chat_completion_streaming(
                                 error.visible_output,
                             ));
                         }
-                        if attempt < attempts {
-                            let delay = retry_delay(&config.retry, attempt, error.retry_after);
-                            eprintln!(
-                                "retry {attempt}/{} after {}",
-                                attempts.saturating_sub(1),
-                                error.message
-                            );
-                            route_results.push(RouteResult::RetryScheduled {
-                                route: route.clone(),
-                                attempt: attempt + 1,
-                                delay_ms: duration_millis(delay),
-                                reason: error.message.clone(),
-                            });
-                            cancellable_sleep(delay, cancelled).map_err(|message| {
-                                stream_failure(
-                                    StreamErrorClass::Cancelled,
-                                    message,
-                                    route_results.clone(),
-                                    false,
-                                )
-                            })?;
-                        }
+                        // A transient failure moves to the next subscription or
+                        // route at once; the last one's error is what the turn
+                        // reports when none is left.
                         last_error = Some(error);
+                        break;
                     }
                 }
             }

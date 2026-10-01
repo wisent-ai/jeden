@@ -89,38 +89,6 @@ pub(crate) fn recv_until(
     }
 }
 
-pub(crate) fn retry_delay(policy: &RetryPolicy, attempt: usize, retry_after: Option<Duration>) -> Duration {
-    if let Some(delay) = retry_after {
-        return delay;
-    }
-    // With the default 2s base this backs off ~2s then ~8s (capped), giving a
-    // recovering router real time instead of hammering it.
-    let exponent = attempt.saturating_sub(1).saturating_mul(2).min(20) as u32;
-    let base_ms = policy
-        .base_delay
-        .as_millis()
-        .saturating_mul(1u128 << exponent);
-    let capped_ms = base_ms.min(policy.max_delay.as_millis()) as f64;
-    let jitter = policy.jitter_ratio.clamp(0.0, 1.0);
-    let factor = rand::thread_rng().gen_range((1.0 - jitter)..=(1.0 + jitter));
-    Duration::from_millis((capped_ms * factor).round().max(0.0) as u64)
-}
-
-pub(crate) fn cancellable_sleep(delay: Duration, cancelled: &dyn Fn() -> bool) -> Result<(), String> {
-    let deadline = Instant::now() + delay;
-    while Instant::now() < deadline {
-        if cancelled() {
-            return Err("Turn cancelled.".into());
-        }
-        std::thread::sleep(
-            deadline
-                .saturating_duration_since(Instant::now())
-                .min(Duration::from_millis(25)),
-        );
-    }
-    Ok(())
-}
-
 pub(crate) fn parse_retry_after(value: &str) -> Option<Duration> {
     if let Ok(seconds) = value.trim().parse::<u64>() {
         return Some(Duration::from_secs(seconds));

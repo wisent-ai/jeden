@@ -1,6 +1,5 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use hmac::{Hmac, Mac};
-use rand::Rng;
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -45,19 +44,11 @@ pub struct RouteDescriptor {
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub max_attempts: usize,
-    pub base_delay: Duration,
-    pub max_delay: Duration,
-    pub jitter_ratio: f64,
 }
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self {
-            max_attempts: 3,
-            base_delay: Duration::from_secs(2),
-            max_delay: Duration::from_secs(8),
-            jitter_ratio: 0.2,
-        }
+        Self { max_attempts: 3 }
     }
 }
 
