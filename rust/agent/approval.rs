@@ -126,54 +126,6 @@ pub(super) fn tool_policy(state: &Value, tool: &str) -> Option<ToolPolicy> {
         .and_then(parse_tool_policy)
 }
 
-pub(super) fn safety_override_reason(tool: &str, input: &Value) -> Option<String> {
-    let command = match tool {
-        "run_command" => input
-            .get("command")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string(),
-        "run_process" => {
-            let mut parts = Vec::new();
-            if let Some(cmd) = input.get("command").and_then(Value::as_str) {
-                parts.push(cmd.to_string());
-            }
-            if let Some(args) = input.get("args").and_then(Value::as_array) {
-                parts.extend(args.iter().filter_map(Value::as_str).map(str::to_string));
-            }
-            parts.join(" ")
-        }
-        _ => return None,
-    };
-    let lower = command.to_ascii_lowercase();
-    let compact = lower.split_whitespace().collect::<Vec<_>>().join(" ");
-    if compact.contains("rm -rf /") || compact.contains("rm -rf /*") || compact.contains("rm -rf ~")
-    {
-        return Some("Critical destructive delete pattern detected.".into());
-    }
-    if lower.contains(":(){ :|:& };:") || lower.contains(":() { :|:& };:") {
-        return Some("Fork-bomb pattern detected.".into());
-    }
-    let fetches = lower.contains("curl ") || lower.contains("wget ");
-    let shells = lower.contains("| sh") || lower.contains("| bash") || lower.contains("| zsh");
-    if fetches && shells {
-        return Some("Remote fetch piped to a shell detected.".into());
-    }
-    if lower.contains("/etc/passwd") && (lower.contains('>') || lower.contains("tee ")) {
-        return Some("Write to /etc/passwd detected.".into());
-    }
-    if compact.contains("shutdown ")
-        || compact == "shutdown"
-        || compact.contains("reboot ")
-        || compact == "reboot"
-        || compact.contains("halt ")
-        || compact == "halt"
-    {
-        return Some("Host shutdown command detected.".into());
-    }
-    None
-}
-
 pub(super) fn tier_flags(tier: ToolTier) -> (bool, bool) {
     match tier {
         ToolTier::Read => (false, false),
@@ -194,17 +146,11 @@ pub(super) fn prompt_or_deny(tool: &str, detail: &str, hooks: &RunHooks) -> Tool
     }
 }
 
-pub(super) fn resolve_tool_approval(
-    args: &Args,
-    tool: &str,
-    input: &Value,
-    hooks: &RunHooks,
-) -> ToolDecision {
+pub(super) fn resolve_tool_approval(args: &Args, tool: &str, hooks: &RunHooks) -> ToolDecision {
     let state = read_mode_state(&args.cwd);
     let tier = tool_tier(tool);
     let policy = tool_policy(&state, tool);
     let mode = approval_mode(args, &state);
-    let safety = safety_override_reason(tool, input);
 
     // Plan mode is read-only by design: write- and exec-tier tools are denied
     // outright, with a hint on how to allow modifications again.
@@ -224,9 +170,7 @@ pub(super) fn resolve_tool_approval(
             Some(ToolPolicy::Deny) => {
                 ToolDecision::Deny(format!("tool denied by policy: {}", tool))
             }
-            Some(ToolPolicy::Prompt) => {
-                prompt_or_deny(tool, safety.as_deref().unwrap_or(""), hooks)
-            }
+            Some(ToolPolicy::Prompt) => prompt_or_deny(tool, "", hooks),
             Some(ToolPolicy::Allow) | None => {
                 let (allow_write, allow_command) = tier_flags(tier);
                 ToolDecision::Allow {
@@ -234,15 +178,6 @@ pub(super) fn resolve_tool_approval(
                     allow_command,
                 }
             }
-        };
-    }
-
-    if let Some(reason) = safety.as_deref() {
-        return match policy {
-            Some(ToolPolicy::Deny) => {
-                ToolDecision::Deny(format!("tool denied by policy: {}", tool))
-            }
-            _ => prompt_or_deny(tool, reason, hooks),
         };
     }
 

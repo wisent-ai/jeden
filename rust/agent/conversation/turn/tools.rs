@@ -39,7 +39,7 @@ impl Conversation {
             record_unexecuted_tool_action(&mut self.recorder, step, action, &result, hooks)?;
             return Ok(result);
         }
-        match resolve_tool_approval(args, &action.tool, &action.input, hooks) {
+        match resolve_tool_approval(args, &action.tool, hooks) {
             ToolDecision::Allow {
                 allow_write,
                 allow_command,

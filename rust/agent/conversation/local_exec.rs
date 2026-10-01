@@ -31,7 +31,7 @@ impl Conversation {
         ) {
             return Ok(format!("Blocked by PreToolUse hook: {reason}"));
         }
-        let result = match resolve_tool_approval(args, tool, &input, hooks) {
+        let result = match resolve_tool_approval(args, tool, hooks) {
             ToolDecision::Allow {
                 allow_write,
                 allow_command,
