@@ -17,7 +17,7 @@ const USAGE: &str = concat!(
     "  jeden context prompt \"<task>\" [--json] [--cwd path]\n",
     "  jeden context sources [--json] [--cwd path]\n",
     "  jeden context install [--omp|--file <path>] [--json]\n",
-    "  jeden context installed [--omp|--file <path>] [--json]\n",
+    "  jeden context status [--omp|--file <path>] [--json]\n",
     "  jeden context uninstall [--omp|--file <path>] [--json]\n",
     "\n",
     "Sources: docs, ground-truth, memory, transcripts, or all.",
@@ -73,7 +73,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         "prompt" => prompt(args, rest),
         "sources" => sources(args, rest),
         "install" => install(args, rest),
-        "installed" | "status" => installed(args, rest),
+        "status" => installed(args, rest),
         "uninstall" => uninstall(args, rest),
         // A bare query is the common case: `jeden context "why does X fail"`.
         other if !other.starts_with("--") => {

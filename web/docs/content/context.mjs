@@ -77,12 +77,12 @@ export const contextPages = [
         title: "The same advisor in an Omp session",
         paragraphs: [
           "Omp is not Jeden's to patch, and it does not need to be: it loads custom tools from <code>~/.omp/agent/tools/*.ts</code>. <code>jeden context install --omp</code> renders a <code>context_recommend</code> tool into that directory, bound to the absolute path of the Jeden binary that rendered it, and that tool calls <code>jeden context recommend --json</code>. One implementation, two harnesses.",
-          "<code>jeden context installed --omp</code> reports <code>current</code>, <code>stale</code> or <code>absent</code> and exits non-zero unless the installed file is exactly what this binary renders, so an upgrade that changes the tool is visible instead of silent. <code>--file &lt;path&gt;</code> writes or checks any other location, which is how the product's own tests drive it.",
+          "<code>jeden context status --omp</code> reports <code>current</code>, <code>stale</code> or <code>absent</code> and exits non-zero unless the installed file is exactly what this binary renders, so an upgrade that changes the tool is visible instead of silent. <code>jeden context uninstall --omp</code> removes it again. <code>--file &lt;path&gt;</code> writes or checks any other location, which is how the product's own tests drive it.",
         ],
         commands: [
           {
             label: "Install and verify",
-            code: "jeden context install --omp\njeden context installed --omp",
+            code: "jeden context install --omp\njeden context status --omp",
           },
         ],
       },

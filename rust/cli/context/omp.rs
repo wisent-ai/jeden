@@ -42,7 +42,7 @@ pub(super) fn target(rest: &[String]) -> Result<Target, String> {
         }
     }
     target.ok_or_else(|| {
-        crate::cli::invocation::refusal::usage("context install, installed and uninstall require --omp or --file <path>")
+        crate::cli::invocation::refusal::usage("context install, status and uninstall require --omp or --file <path>")
     })
 }
 
