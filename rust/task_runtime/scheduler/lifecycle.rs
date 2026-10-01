@@ -14,24 +14,21 @@ use crate::task_runtime::types::{CapabilityHealth, JobRecord, JobStatus, TaskErr
 use crate::task_runtime::workspace::IsolatedWorkspace;
 use serde_json::json;
 use std::collections::BTreeSet;
-use std::thread;
-use std::time::Duration;
-
-/// How often a waiting caller re-reads a job record. Short enough that a
-/// finished job is reported promptly, long enough not to spin a core.
-const POLL_INTERVAL: Duration = Duration::from_millis(50);
 
 impl TaskScheduler {
     /// Wait for a job to reach a terminal status. A job that is still running
     /// is still doing the work it was given; `list` reports what is in flight
-    /// and `cancel` is what ends one early.
+    /// and `cancel` is what ends one early. The job directory is watched
+    /// before the record is read, so a status written in between still wakes
+    /// the wait.
     pub fn poll(&self, id: &str) -> Result<JobRecord, TaskError> {
+        let watch = crate::task_runtime::watch::watch(&self.store.join("jobs"))?;
         loop {
             let job = self.get(id)?;
             if job.status.terminal() {
                 return Ok(job);
             }
-            thread::sleep(POLL_INTERVAL);
+            watch.wait()?;
         }
     }
     pub fn deliver(&self, id: &str) -> Result<JobRecord, TaskError> {
