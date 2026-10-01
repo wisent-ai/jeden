@@ -3,8 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "bin": {
-    "jeden": "./bin/jeden-rust",
-    "jeden-rust": "./bin/jeden-rust"
+    "jeden": "./bin/jeden-rust"
   },
   "scripts": {
     "check": "cargo check",
