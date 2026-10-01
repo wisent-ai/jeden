@@ -10,10 +10,10 @@ use crate::tool_runtime::ToolRuntime;
 /// An extension tool runs in a short-lived host process, so it cannot reach
 /// the registry this session holds in memory. `context.requestReload()` writes
 /// this marker and the session honours it here, immediately after the tool
-/// answers. Before 2026-09-09 there was no such path at all: a tool could
-/// install extension material and then only report that the runtime it had
-/// just installed was not the runtime it was running, and the sole way to load
-/// it was a slash command typed by a person.
+/// answers. Without that path a tool could install extension material and then
+/// only report that the runtime it had just installed was not the runtime it
+/// was running, and the sole way to load it would be a slash command typed by
+/// a person.
 const RELOAD_REQUEST: &str = ".jeden/runtime/extensions/reload-request.json";
 
 fn reload_request_path(cwd: &Path) -> PathBuf {
