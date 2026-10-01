@@ -45,7 +45,7 @@ pub(crate) fn usage() -> String {
         "  jeden artifact <session-id-or-path> <name> [output]\n",
         "  jeden copy <text> | jeden copy - [--check] [--json] — hand an exact payload to the operator's clipboard, read back to confirm; --check asks later whether it is still there\n",
         "  jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] [--json] [--cwd path]\n",
-        "  jeden workspace [status|discover [path]|adopt <path>] [--json]\n",
+        "  jeden workspace [status|discover [path]|adopt <path>|forget] [--json]\n",
         "  jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]\n",
         "  jeden context [recommend] \"<task>\" [--limit n] [--source list] [--json] [--cwd path]\n",
         "  jeden context sources [--json] [--cwd path] — what each context source is and whether it answers\n",

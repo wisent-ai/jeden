@@ -9,7 +9,8 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use super::config::{
-    config_set_value, config_value_at, read_user_writable_config_strict, write_user_config,
+    config_remove_value, config_set_value, config_value_at, read_user_writable_config_strict,
+    write_user_config,
 };
 use crate::Args;
 
@@ -157,6 +158,21 @@ pub(crate) fn adopt(path: &Path, base: &Path) -> Result<WorkspaceReport, String>
     Ok(report)
 }
 
+/// The inverse of [`adopt`]: the selected workspace leaves the user
+/// configuration, so tasks run in the current directory again. Nothing in
+/// the workspace or its session ledgers is touched. Returns the path that was
+/// selected, or `None` when none was, so a repeated forget changes nothing.
+pub(crate) fn forget() -> Result<Option<PathBuf>, String> {
+    let previous = configured_path()?;
+    if previous.is_none() {
+        return Ok(None);
+    }
+    let mut config = read_user_writable_config_strict()?;
+    config_remove_value(&mut config, DEFAULT_WORKSPACE_KEY)?;
+    write_user_config(&config)?;
+    Ok(previous)
+}
+
 pub(crate) fn command(args: &Args) -> Result<String, String> {
     let verb = args
         .positionals
@@ -189,9 +205,23 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 .ok_or("Usage: jeden workspace adopt <path> [--json]")?;
             adopt(Path::new(path), &args.cwd)?
         }
+        "forget" => {
+            let previous = forget()?;
+            return Ok(match (args.json, previous) {
+                (true, previous) => format!(
+                    "{}\n",
+                    json!({"status": if previous.is_some() { "forgotten" } else { "not_adopted" }, "workspace": previous})
+                ),
+                (false, Some(path)) => format!(
+                    "Forgot the adopted workspace {}; tasks run in the current directory unless --cwd is supplied. Its files and sessions were not changed.\n",
+                    path.display()
+                ),
+                (false, None) => "No workspace is adopted; nothing changed.\n".into(),
+            });
+        }
         _ => {
             return Err(
-                "Usage: jeden workspace [status|discover [path]|adopt <path>] [--json]".into(),
+                "Usage: jeden workspace [status|discover [path]|adopt <path>|forget] [--json]".into(),
             )
         }
     };

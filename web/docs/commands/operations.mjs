@@ -15,8 +15,8 @@ export const operationCommands = [
   },
   {
     path: "workspace",
-    invocation: "jeden workspace [status|discover [path]|adopt <path>] [--json]",
-    purpose: "Inspect, validate, or adopt an existing local repository as Jeden's default workspace.",
+    invocation: "jeden workspace [status|discover [path]|adopt <path>|forget] [--json]",
+    purpose: "Inspect, validate, adopt or forget an existing local repository as Jeden's default workspace.",
     inputs: [
       "No action defaults to <code>status</code>. <code>discover</code> accepts an optional existing path and otherwise inspects the current directory. <code>adopt</code> requires a path.",
       "A relative path is resolved from the invocation directory; <code>--json</code> returns the same operation report as a JSON object.",
@@ -36,6 +36,14 @@ export const operationCommands = [
     inputs: ["No path is accepted. Optional: <code>--json</code> for the structured operation report."],
     effect: "Reads the user selection and inspects the workspace and canonical session root without mutating either. With no selection it prints a setup command or returns <code>{\"status\":\"not_adopted\"}</code>.",
     refusals: ["A selected path that no longer resolves, or an invalid stored value, is returned as an actionable workspace error rather than shown as usable."],
+  },
+  {
+    path: "workspace/forget",
+    invocation: "jeden workspace forget [--json]",
+    purpose: "Stop using the adopted workspace as the default, the inverse of adopt.",
+    inputs: ["No path is accepted. Optional: <code>--json</code> returns <code>{\"status\":\"forgotten\"|\"not_adopted\",\"workspace\":…}</code>."],
+    effect: "Removes <code>workspace.defaultPath</code> from <code>~/.jeden/config.yml</code>, so later tasks run in the invocation directory unless <code>--cwd</code> is explicit. The workspace's files and session ledgers are not touched. With no adopted workspace nothing is written and the answer says so, so a repeated forget changes nothing.",
+    refusals: ["A malformed user configuration, or a write to it that fails, is refused with the reading or writing error; the selection is then unchanged."],
   },
   {
     path: "workspace/discover",
