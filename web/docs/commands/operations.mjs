@@ -167,7 +167,7 @@ export const operationCommands = [
     effect: "Reads credentials from process memory and prints them; it does not persist, rotate, or revoke credentials. Default text reveals only the final four characters and length.",
     refusals: [
       "Missing router URL is refused as <code>BRAMA_URL is required; configure the Brama model-router service URL</code>.",
-      "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; Skarbiec item `agent:wisent-app` holds it and `stado secrets get agent:wisent-app --field value` is how this process reads it</code>, or with Stado's own refusal of that read after <code>is not configured:</code>.",
+      "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; Skarbiec item `agent:wisent-app` holds it and `stado credentials get agent:wisent-app --field value` is how this process reads it</code>, or with Stado's own refusal of that read after <code>is not configured:</code>.",
     ],
   },
   {

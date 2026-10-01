@@ -33,7 +33,7 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
             mark(state.agent_id.is_some())
         ),
         format!(
-            "4. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value, read by Jeden with `stado secrets get`",
+            "4. WISENT_APP_AGENT_AUTH_SECRET {} — Skarbiec item agent:wisent-app/value, read by Jeden with `stado credentials get`",
             mark(state.secret_configured)
         ),
         "   Only nonsecret router settings are written to ~/.jeden/.env; Jeden reads its credentials through Stado and keeps them in memory."

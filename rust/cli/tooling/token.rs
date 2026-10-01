@@ -50,7 +50,7 @@ fn configured() -> Result<(String, String, String, &'static str), String> {
             Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
             None => format!(
                 "{SECRET_KEY} is not configured; Skarbiec item `agent:wisent-app` holds it and \
-                 `stado secrets get agent:wisent-app --field value` is how this process reads it"
+                 `stado credentials get agent:wisent-app --field value` is how this process reads it"
             ),
         });
     }

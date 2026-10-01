@@ -8,7 +8,7 @@
 //! product, so a configured workstation never answers `BRAMA_URL is required`
 //! with no way to satisfy it.
 //!
-//! Two items, each read one field at a time through `stado secrets get`:
+//! Two items, each read one field at a time through `stado credentials get`:
 //! `agent:wisent-app/value` is the HMAC signing secret every request is signed
 //! with, and `jeden-model-router/token` is the gateway bearer. Neither value
 //! ever reaches a command line — `stado` writes it to stdout, this module
@@ -57,16 +57,20 @@ impl Source {
     }
 }
 
+/// The `stado` command group that reads credential fields.
+const CREDENTIALS_GROUP: &str = "credentials";
+
 /// Read one field of one Skarbiec item through the Stado CLI.
 ///
-/// `stado secrets get <item> --field <field>` prints the value and nothing
+/// `stado credentials get <item> --field <field>` prints the value and nothing
 /// else. A non-zero exit carries Stado's own sentence, which is the sentence a
 /// caller needs: an absent binary, an unauthorized consumer and an item that
 /// does not exist are three different problems, and Stado already words them
 /// apart.
 fn field_from_stado(item: &str, field: &str) -> Result<String, String> {
     let output = Command::new("stado")
-        .args(["secrets", "get", item, "--field", field])
+        .arg(CREDENTIALS_GROUP)
+        .args(["get", item, "--field", field])
         .output()
         .map_err(|error| {
             format!(
@@ -82,14 +86,14 @@ fn field_from_stado(item: &str, field: &str) -> Result<String, String> {
             stderr
         };
         return Err(format!(
-            "stado secrets get {item} --field {field} exited {}: {said}",
+            "stado credentials get {item} --field {field} exited {}: {said}",
             output.status.code().unwrap_or(-1)
         ));
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
         return Err(format!(
-            "stado secrets get {item} --field {field} printed nothing, so that field is empty in \
+            "stado credentials get {item} --field {field} printed nothing, so that field is empty in \
              Skarbiec and no request can be signed with it"
         ));
     }
