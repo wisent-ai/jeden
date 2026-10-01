@@ -42,7 +42,7 @@ pub(super) fn target(rest: &[String]) -> Result<Target, String> {
         }
     }
     target.ok_or_else(|| {
-        crate::cli::invocation::refusal::usage("context install and context installed require --omp or --file <path>")
+        crate::cli::invocation::refusal::usage("context install, installed and uninstall require --omp or --file <path>")
     })
 }
 
@@ -76,5 +76,32 @@ pub(super) fn install(file: &Path, rendered: &str) -> Result<bool, String> {
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
     crate::cli::config::migrations::write_text_atomic(file, rendered)?;
+    Ok(true)
+}
+
+/// Whether `existing` is this tool as some Jeden binary rendered it: the
+/// template with any binary path in place of the placeholder.
+fn is_rendered_tool(existing: &str) -> bool {
+    match TEMPLATE.split_once(BINARY_PLACEHOLDER) {
+        Some((before, after)) => existing.starts_with(before) && existing.ends_with(after),
+        None => existing == TEMPLATE,
+    }
+}
+
+/// Remove the tool `install` wrote. A file at that path that is not a
+/// rendered tool is refused rather than deleted. `Ok(false)` when absent.
+pub(super) fn uninstall(file: &Path) -> Result<bool, String> {
+    let existing = match fs::read_to_string(file) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("cannot read {}: {error}", file.display())),
+    };
+    if !is_rendered_tool(&existing) {
+        return Err(format!(
+            "{} is not a context_recommend tool Jeden rendered; it was left in place",
+            file.display()
+        ));
+    }
+    fs::remove_file(file).map_err(|error| format!("cannot remove {}: {error}", file.display()))?;
     Ok(true)
 }

@@ -18,6 +18,7 @@ const USAGE: &str = concat!(
     "  jeden context sources [--json] [--cwd path]\n",
     "  jeden context install [--omp|--file <path>] [--json]\n",
     "  jeden context installed [--omp|--file <path>] [--json]\n",
+    "  jeden context uninstall [--omp|--file <path>] [--json]\n",
     "\n",
     "Sources: docs, ground-truth, memory, transcripts, or all.",
 );
@@ -73,6 +74,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         "sources" => sources(args, rest),
         "install" => install(args, rest),
         "installed" | "status" => installed(args, rest),
+        "uninstall" => uninstall(args, rest),
         // A bare query is the common case: `jeden context "why does X fail"`.
         other if !other.starts_with("--") => {
             let mut all = vec![other.to_string()];
@@ -215,6 +217,28 @@ fn install(args: &Args, rest: &[String]) -> Result<String, String> {
         format!("Installed the context_recommend tool into {path}\n")
     } else {
         format!("{path} already carries this binary's context_recommend tool\n")
+    })
+}
+
+/// The inverse of `install` (cli.md rule 2).
+fn uninstall(args: &Args, rest: &[String]) -> Result<String, String> {
+    let target = omp::target(rest)?;
+    let changed = omp::uninstall(&target.file)?;
+    let path = target.file.display().to_string();
+    if args.json {
+        return Ok(serde_json::to_string_pretty(&json!({
+            "target": target.name,
+            "path": path,
+            "tool": "context_recommend",
+            "changed": changed,
+        }))
+        .map_err(|error| error.to_string())?
+            + "\n");
+    }
+    Ok(if changed {
+        format!("Removed the context_recommend tool from {path}\n")
+    } else {
+        format!("{path} carries no context_recommend tool\n")
     })
 }
 
