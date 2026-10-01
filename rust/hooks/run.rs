@@ -2,7 +2,6 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::Duration;
 
 use super::event;
 
@@ -45,19 +44,6 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
     };
     if let Some(mut stdin) = child.stdin.take() {
         let _ = stdin.write_all(payload.to_string().as_bytes());
-    }
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => std::thread::sleep(Duration::from_millis(10)),
-            Err(e) => {
-                return HookOutcome {
-                    exit_code: -1,
-                    stdout: String::new(),
-                    stderr: format!("hook wait failed: {e}"),
-                };
-            }
-        }
     }
     let output = match child.wait_with_output() {
         Ok(o) => o,

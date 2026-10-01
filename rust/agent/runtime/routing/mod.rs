@@ -10,39 +10,6 @@ use settings::{retry_policy, route_descriptors};
 
 pub(in crate::agent) use usage::{append_usage_event, usage_cost};
 
-/// Fetch the Brama catalog with bounded retries (max 2 extra attempts, ~2s
-/// then ~8s) on transient failures only — transport errors and HTTP 429/5xx —
-/// so a momentary outage does not hard-fail the run before the first chat
-/// call. Validation and schema errors surface immediately.
-fn model_catalog_with_retry(
-    cwd: &Path,
-    client: &crate::control_plane::brama::BramaClient,
-) -> Result<crate::control_plane::brama::ModelCatalog, crate::control_plane::brama::BramaError> {
-    const DELAYS: [std::time::Duration; 2] = [
-        std::time::Duration::from_secs(2),
-        std::time::Duration::from_secs(8),
-    ];
-    for (attempt, delay) in DELAYS.iter().enumerate() {
-        match crate::control_plane::model_catalog(cwd, client, false) {
-            Ok(catalog) => return Ok(catalog),
-            Err(error) => {
-                // The status family is a guess about the gateway's intent; the
-                // refusal document is the gateway saying it. A refused
-                // subscription answers `503` or `429` with `retryable: false`,
-                // and every retry of that is two provider round trips and
-                // eight seconds spent on a credential only a human can renew,
-                // so `left_unanswered` lets an explicit `false` win.
-                if !error.left_unanswered() {
-                    return Err(error);
-                }
-                eprintln!("retry {}/{} after {}", attempt + 1, DELAYS.len(), error);
-                std::thread::sleep(*delay);
-            }
-        }
-    }
-    crate::control_plane::model_catalog(cwd, client, false)
-}
-
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let mode_state = read_mode_state(&args.cwd);
     let mode_service_tier = if mode_state
@@ -90,7 +57,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         endpoint.clone(),
         bearer_token.clone(),
     );
-    let catalog = model_catalog_with_retry(&args.cwd, &catalog_client);
+    // One read: a gateway that cannot answer now names its own refusal, and
+    // that error is what the run reports.
+    let catalog = crate::control_plane::model_catalog(&args.cwd, &catalog_client, false);
     // Bare (provider-less) model ids resolve to the unique catalog route whose
     // id ends with `/<model>`; an ambiguous id names every matching route.
     let mut bare_model_error = None;

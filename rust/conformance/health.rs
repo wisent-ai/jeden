@@ -11,9 +11,7 @@ use crate::capability::CapabilityKind;
 use serde::Serialize;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
-const PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+use std::time::Instant;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]

@@ -1,12 +1,12 @@
 //! The host itself: can Jeden spawn a process, write durably beside the
 //! checkout, and enforce the sandbox every task runs inside.
-use super::{HealthProbe, PROBE_TIMEOUT};
+use super::HealthProbe;
 use serde_json::json;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(super) fn process_probe(subsystem: &'static str, program: &str, args: &[&str]) -> HealthProbe {
     let started = Instant::now();
@@ -26,47 +26,23 @@ pub(super) fn process_probe(subsystem: &'static str, program: &str, args: &[&str
             )
         }
     };
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => {
-                return HealthProbe::healthy(
-                    subsystem,
-                    started,
-                    format!("{program} probe exited successfully"),
-                    None,
-                )
-            }
-            Ok(Some(status)) => {
-                return HealthProbe::unavailable(
-                    subsystem,
-                    started,
-                    format!("{program} probe exited with {status}"),
-                )
-            }
-            Ok(None) if started.elapsed() < PROBE_TIMEOUT => {
-                std::thread::sleep(Duration::from_millis(10))
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return HealthProbe::unavailable(
-                    subsystem,
-                    started,
-                    format!(
-                        "{program} probe timed out after {}ms",
-                        PROBE_TIMEOUT.as_millis()
-                    ),
-                );
-            }
-            Err(error) => {
-                let _ = child.kill();
-                return HealthProbe::unavailable(
-                    subsystem,
-                    started,
-                    format!("{program} probe failed: {error}"),
-                );
-            }
-        }
+    match child.wait() {
+        Ok(status) if status.success() => HealthProbe::healthy(
+            subsystem,
+            started,
+            format!("{program} probe exited successfully"),
+            None,
+        ),
+        Ok(status) => HealthProbe::unavailable(
+            subsystem,
+            started,
+            format!("{program} probe exited with {status}"),
+        ),
+        Err(error) => HealthProbe::unavailable(
+            subsystem,
+            started,
+            format!("{program} probe failed: {error}"),
+        ),
     }
 }
 

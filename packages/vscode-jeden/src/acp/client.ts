@@ -209,8 +209,8 @@ export class JedenAcpClient extends EventEmitter {
     for (const pending of this.pending.values()) pending.reject(new Error("ACP connection closed"));
     this.pending.clear(); this.emit("disconnected", intentional);
     if (!intentional && !this.disposed && this.options.autoReconnect() && this.reconnectAttempt < this.options.reconnectLimit()) {
-      const attempt = ++this.reconnectAttempt; const session = this.session;
-      setTimeout(() => {
+      ++this.reconnectAttempt; const session = this.session;
+      queueMicrotask(() => {
         void this.connect().then(async () => {
           if (session) {
             if (!this.hasCapability("sessionLoad")) {
@@ -227,7 +227,7 @@ export class JedenAcpClient extends EventEmitter {
           this.options.logger.error("acp.reconnect.error", error);
           this.closed(false);
         });
-      }, Math.min(250 * 2 ** (attempt - 1), 4_000));
+      });
     }
   }
 

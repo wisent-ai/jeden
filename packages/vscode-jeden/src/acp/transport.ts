@@ -68,11 +68,9 @@ export class StdioAcpTransport implements AcpTransport {
     const child = this.child;
     if (!child) return;
     this.child = undefined;
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
     child.stdin.end();
-    await new Promise<void>((resolve) => {
-      const timer = setTimeout(() => { child.kill(); resolve(); }, 1_000);
-      timer.unref();
-      child.once("exit", () => { clearTimeout(timer); resolve(); });
-    });
+    await exited;
   }
 }

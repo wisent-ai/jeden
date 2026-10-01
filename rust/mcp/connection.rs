@@ -8,7 +8,6 @@ use crate::mcp::validate::validate_resources;
 use crate::mcp::validate::validate_tools;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::thread;
 use std::time::{Duration, Instant};
 
 const CIRCUIT_FAILURE_LIMIT: u32 = 5;
@@ -98,13 +97,6 @@ impl ServerConnection {
                         "MCP circuit is open for {}ms",
                         retry_after.duration_since(Instant::now()).as_millis()
                     ));
-                }
-                if retry_after > Instant::now() {
-                    thread::sleep(
-                        retry_after
-                            .duration_since(Instant::now())
-                            .min(Duration::from_secs(2)),
-                    );
                 }
             }
         }
