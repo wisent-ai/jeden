@@ -104,6 +104,11 @@ On macOS, the native build signs both executables through
 Development or Developer ID Application identity. An ad-hoc sandbox helper is
 refused. `/rebuild` captures the running identity before compilation and
 verifies the replacement against that identity before resuming the session.
+On a Mac without Stado, `/rebuild` stops with `cannot inspect the running code
+identity through Stado: …; without Stado set JEDEN_CODESIGN_IDENTITY to a
+codesign identity, or - for ad-hoc`. With `JEDEN_CODESIGN_IDENTITY` set it
+signs the new build with `/usr/bin/codesign --force --sign <identity>` and asks
+Stado nothing; it does not compare that identity with the running one.
 The release recipe uses `cargo run --locked --manifest-path tools/Cargo.toml --
 release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit` to build and stage both executables and then run the `tests/pursuit` journeys against the staged `bin/jeden`. The journeys run in the build step rather than a recipe `tests` key because Stado 0.21.48, still installed on the Linux builder, refuses that key (`unknown recipe keys for this Stado: tests`); a failing journey fails the build. The Stado running the release job,
 or `stado product install` during local installation,

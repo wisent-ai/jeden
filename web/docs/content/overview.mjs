@@ -84,10 +84,11 @@ export const overviewPages = [
         ],
       },
       {
-        title: "Run without Brama",
+        title: "Run without Brama or Stado",
         paragraphs: [
           "A user without Brama points Jeden at any OpenAI-compatible provider with <code>JEDEN_MODEL_ENDPOINT</code>, for example <code>https://api.openai.com</code> or a local <code>http://127.0.0.1:11434</code>. Jeden then reads the model list from that provider's <code>/v1/models</code> and sends chat to its <code>/v1/chat/completions</code>, with <code>JEDEN_MODEL_KEY</code> as the bearer when the provider needs one. It does not ask Stado for the Brama credentials and does not sign requests.",
           "Only this setting turns Brama off. Without it, a missing Brama is still a refusal: <code>BRAMA_URL is required; configure the Brama model-router service URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider to run without Brama</code>, and a Brama run without its signing credential stops with <code>WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama</code>. A provider's model list carries no fallbacks, promotions or prices, so only the fallbacks in <code>modelRouting</code> apply and usage is recorded without cost.",
+          "<code>/rebuild</code> on macOS asks Stado for the running code identity and has Stado sign the new build. Without Stado it stops with <code>cannot inspect the running code identity through Stado: …; without Stado set JEDEN_CODESIGN_IDENTITY to a codesign identity, or - for ad-hoc</code>. With <code>JEDEN_CODESIGN_IDENTITY</code> set it signs the new build with <code>/usr/bin/codesign --force --sign &lt;identity&gt;</code>, asks Stado nothing, and does not compare that identity with the running one.",
         ],
         commands: [
           {

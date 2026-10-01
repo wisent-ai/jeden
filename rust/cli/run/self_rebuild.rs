@@ -43,15 +43,29 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
         .and_then(Value::as_str)
         .map(PathBuf::from)
         .ok_or("cargo metadata omitted target_directory")?;
+    // A machine without Stado names its own codesign identity (`-` for an
+    // ad-hoc signature); Stado is then neither asked about the running
+    // identity nor asked to sign the new build.
     #[cfg(target_os = "macos")]
-    let previous_signature = {
+    let own_identity = std::env::var("JEDEN_CODESIGN_IDENTITY")
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+    #[cfg(target_os = "macos")]
+    let previous_signature = if own_identity.is_some() {
+        None
+    } else {
         let previous = std::env::current_exe()
             .map_err(|error| format!("cannot identify the running Jeden executable: {error}"))?;
         let report = Command::new("stado")
             .args(["product", "signing", "inspect", "--json"])
             .arg(previous)
             .output()
-            .map_err(|error| format!("cannot inspect the running code identity: {error}"))?;
+            .map_err(|error| {
+                format!(
+                    "cannot inspect the running code identity through Stado: {error}; \
+                     without Stado set JEDEN_CODESIGN_IDENTITY to a codesign identity, or - for ad-hoc"
+                )
+            })?;
         let reports: Vec<Value> = serde_json::from_slice(&report.stdout)
             .map_err(|error| format!("cannot read the running code identity: {error}"))?;
         let observed = reports
@@ -84,44 +98,59 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
         .join(format!("jeden{}", std::env::consts::EXE_SUFFIX));
     #[cfg(target_os = "macos")]
     {
-        let mut signer = Command::new("stado");
-        signer.args(["product", "signing", "sign"]);
-        if let Some(previous) = &previous_signature {
-            signer.args([
-                "--identifier",
-                previous["identifier"]
-                    .as_str()
-                    .ok_or("signing report omitted identifier")?,
-                "--identity",
-                previous["authority"]
-                    .as_str()
-                    .ok_or("signing report omitted authority")?,
-            ]);
-        } else {
-            signer.args(["--product", "jeden"]);
-        }
-        let output = signer
-            .arg(&executable)
-            .output()
-            .map_err(|error| format!("cannot start stable macOS signing: {error}"))?;
-        if !output.status.success() {
-            return Err(command_failure("stable macOS signing", &output.stderr));
-        }
-        if let Some(previous) = previous_signature {
-            let requirement = previous["requirement"]
-                .as_str()
-                .ok_or("signing report omitted requirement")?;
-            let proof = Command::new("/usr/bin/codesign")
-                .args(["--verify", "--strict", "-R"])
-                .arg(format!("={requirement}"))
+        if let Some(identity) = &own_identity {
+            let output = Command::new("/usr/bin/codesign")
+                .args(["--force", "--sign"])
+                .arg(identity)
                 .arg(&executable)
                 .output()
-                .map_err(|error| format!("cannot verify update identity: {error}"))?;
-            if !proof.status.success() {
+                .map_err(|error| format!("cannot start codesign: {error}"))?;
+            if !output.status.success() {
                 return Err(command_failure(
-                    "update changed macOS code identity",
-                    &proof.stderr,
+                    "codesign with JEDEN_CODESIGN_IDENTITY",
+                    &output.stderr,
                 ));
+            }
+        } else {
+            let mut signer = Command::new("stado");
+            signer.args(["product", "signing", "sign"]);
+            if let Some(previous) = &previous_signature {
+                signer.args([
+                    "--identifier",
+                    previous["identifier"]
+                        .as_str()
+                        .ok_or("signing report omitted identifier")?,
+                    "--identity",
+                    previous["authority"]
+                        .as_str()
+                        .ok_or("signing report omitted authority")?,
+                ]);
+            } else {
+                signer.args(["--product", "jeden"]);
+            }
+            let output = signer
+                .arg(&executable)
+                .output()
+                .map_err(|error| format!("cannot start stable macOS signing: {error}"))?;
+            if !output.status.success() {
+                return Err(command_failure("stable macOS signing", &output.stderr));
+            }
+            if let Some(previous) = previous_signature {
+                let requirement = previous["requirement"]
+                    .as_str()
+                    .ok_or("signing report omitted requirement")?;
+                let proof = Command::new("/usr/bin/codesign")
+                    .args(["--verify", "--strict", "-R"])
+                    .arg(format!("={requirement}"))
+                    .arg(&executable)
+                    .output()
+                    .map_err(|error| format!("cannot verify update identity: {error}"))?;
+                if !proof.status.success() {
+                    return Err(command_failure(
+                        "update changed macOS code identity",
+                        &proof.stderr,
+                    ));
+                }
             }
         }
     }
