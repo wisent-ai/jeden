@@ -6,8 +6,6 @@ use std::time::Duration;
 pub(super) const API_VERSION: &str = "v1";
 const PLATFORM_BILLING_URL_ENV: &str = "WISENT_PLATFORM_BILLING_URL";
 const PLATFORM_BILLING_TOKEN_ENV: &str = "WISENT_PLATFORM_BILLING_TOKEN";
-const LEGACY_BILLING_URL_ENV: &str = "WELES_URL";
-const LEGACY_BILLING_TOKEN_ENV: &str = "WELES_TOKEN";
 pub(super) const MAX_POLL_EVENTS: usize = 256;
 pub(super) const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 pub(super) const MAX_PROVIDERS: usize = 128;
@@ -30,27 +28,17 @@ pub struct WelesClient {
 }
 
 pub(crate) fn platform_billing_configured() -> bool {
-    [PLATFORM_BILLING_URL_ENV, LEGACY_BILLING_URL_ENV]
-        .iter()
-        .any(|name| {
-            std::env::var(name)
-                .ok()
-                .is_some_and(|value| !value.trim().is_empty())
-        })
+    std::env::var(PLATFORM_BILLING_URL_ENV)
+        .ok()
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 fn platform_billing_endpoint() -> Option<String> {
-    std::env::var(PLATFORM_BILLING_URL_ENV)
-        .or_else(|_| std::env::var(LEGACY_BILLING_URL_ENV))
-        .ok()
+    std::env::var(PLATFORM_BILLING_URL_ENV).ok()
 }
 
 fn platform_billing_token() -> SecretRef {
-    if std::env::var_os(PLATFORM_BILLING_TOKEN_ENV).is_some() {
-        SecretRef::environment(PLATFORM_BILLING_TOKEN_ENV)
-    } else {
-        SecretRef::environment(LEGACY_BILLING_TOKEN_ENV)
-    }
+    SecretRef::environment(PLATFORM_BILLING_TOKEN_ENV)
 }
 
 impl WelesClient {

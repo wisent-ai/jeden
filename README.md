@@ -180,7 +180,7 @@ documented in [docs/roadmap.md](docs/roadmap.md).
 
 ## Billing and subscription routing
 
-Wisent Platform Billing owns billing. The current compatibility transport still reads `WELES_URL` and `WELES_TOKEN`; those names will migrate without changing the billing authority. Weles Automation is not the billing owner. Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` opens the configured platform-hosted HTTPS setup URL.
+Wisent Platform Billing owns billing. Jeden reads its endpoint from `WISENT_PLATFORM_BILLING_URL` and its bearer from `WISENT_PLATFORM_BILLING_TOKEN`; no other spelling is read. Weles Automation is not the billing owner. Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` opens the configured platform-hosted HTTPS setup URL.
 
 The interactive slash surface provides:
 
