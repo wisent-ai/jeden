@@ -60,17 +60,11 @@ request() {
         printf '# rerun with the requestId above to watch it:\n' >&2
         printf '#   %s %s %s %s "%s" <requestId>\n' "$0" "$MATERIAL" "$ADDR" "$SESSION" "$PROMPT" >&2
     elif [ -n "$SESSION" ]; then
-        # The prompt runs on the daemon's executor, so the replay is polled rather
-        # than read once: an empty `events` list means the request is accepted and
-        # still running, which is a different answer from a refusal. The poll stays
-        # inside the daemon's own 30 s read deadline, because a connection idle past
-        # it is closed with `malformed_frame: frame read deadline exceeded` — correct
-        # of the daemon, and confusing as the last line of an example.
-        for _ in 1 2 3 4 5 6 7 8; do
-            request req-replay 'session/replay' \
-                "$(printf '{"sessionId":"%s","requestId":"%s","limit":100}' "$SESSION" "$REQUEST")"
-            sleep 3
-        done
+        # One replay read: an empty `events` list means the request is accepted
+        # and still running, which is a different answer from a refusal. Run the
+        # same line again to read what it has done since.
+        request req-replay 'session/replay' \
+            "$(printf '{"sessionId":"%s","requestId":"%s","limit":100}' "$SESSION" "$REQUEST")"
     fi
 } | openssl s_client -connect "$ADDR" \
         -cert "$MATERIAL/client-cert.pem" \
