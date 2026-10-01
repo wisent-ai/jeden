@@ -82,9 +82,9 @@ pub(super) fn storage_probe(cwd: &Path) -> HealthProbe {
 
 /// Whether `jeden run` can execute a task at all. The scheduler store opens
 /// fine on a host whose sandbox helper is missing or unsigned, and every task
-/// then dies with "enforced sandbox unavailable" - until now the only way to
-/// see that was to run one. On 2026-09-10 a browser service asked forty page
-/// questions through such a Jeden and got forty empty answers.
+/// then dies with "enforced sandbox unavailable" - without this probe the only
+/// way to see that is to run one, and a service asking page questions through
+/// such a Jeden gets empty answers for every one of them.
 pub(super) fn sandbox_probe() -> HealthProbe {
     let started = Instant::now();
     let health = crate::task_runtime::sandbox::health();

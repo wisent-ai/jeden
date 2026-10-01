@@ -133,10 +133,10 @@ pub(crate) struct TaskReview {
     /// A review that lists no criterion has reviewed no criterion. Reading the
     /// absent field as an empty list keeps the task unverified, which is the
     /// strict reading: the controller accepts `done` only when every recorded
-    /// criterion is satisfied by an observation. On 2026-09-10 the opposite
-    /// reading cost a whole retained assignment, which ended as `Work remains
-    /// open (acceptance_review): invalid acceptance review: missing field
-    /// `criteria``, with the work done and the review unread.
+    /// criterion is satisfied by an observation. The opposite reading ends a
+    /// whole retained assignment as `Work remains open (acceptance_review):
+    /// invalid acceptance review: missing field `criteria``, with the work
+    /// done and the review unread.
     #[serde(default)]
     pub criteria: Vec<CriterionReview>,
     /// For a `blocked` verdict: the exact value or decision only the operator

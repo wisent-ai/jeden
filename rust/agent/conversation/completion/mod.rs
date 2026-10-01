@@ -251,8 +251,8 @@ impl Conversation {
         self.reconcile_completion = true;
         // The operator's answers are their words to the work, so they go in
         // the message the model reads as the user's, not only in the state
-        // it may or may not consult. On 2026-09-18 a model given the answer
-        // only through the state blocked again on "no allowed source".
+        // it may or may not consult: a model given the answer only through
+        // the state can block again on "no allowed source".
         let mut prompt = String::from(
             "Continue every retained unfinished task. Inspect prior effects before retrying anything.",
         );

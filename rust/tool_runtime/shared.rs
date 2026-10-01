@@ -49,9 +49,9 @@ pub(crate) const WORKSPACE_STATE_DIR: &str = ".jeden";
 /// Resolve a path a tool is about to change, refusing the harness's own state
 /// directory.
 ///
-/// On 2026-09-10 a real turn wrote both files its assignment asked for into
-/// `.jeden/` and reported the work done: the workspace root held neither file,
-/// and the directory that holds the record the work is judged by held them
+/// A turn that writes the files its assignment asked for into `.jeden/` and
+/// reports the work done leaves the workspace root holding neither file, while
+/// the directory that holds the record the work is judged by holds them
 /// instead. Session pointers, mode state, the usage ledger and completion
 /// state live there, so a tool write there rewrites that record. Reads stay
 /// allowed; only changes are refused.

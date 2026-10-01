@@ -20,9 +20,8 @@ fn named(verdict: &TaskReview) -> Option<&str> {
 /// answer is their input to the work: once it is recorded, the task is
 /// blocked again only by an operation that failed after the answer. A
 /// review that asks again, however it words the ask, or cites a failure
-/// older than the answer, has not read it. On 2026-09-18 three reviews in
-/// a row re-asked for a token the operator had already given, each with
-/// new wording, before this rule existed.
+/// older than the answer, has not read it; without this rule reviews re-ask
+/// for a value the operator has already given, each with new wording.
 pub(super) fn check(
     task: &WorkTask,
     verdict: &TaskReview,

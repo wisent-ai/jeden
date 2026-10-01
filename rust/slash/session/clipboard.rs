@@ -123,9 +123,9 @@ pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
 }
 
 /// A writer that exits zero can still leave the clipboard untouched, and the
-/// operator finds that out by pasting nothing. On 2026-09-11 a hand-off was
-/// reported as copied and the clipboard held something else entirely, so the
-/// claim is now checked before it is made.
+/// operator finds that out by pasting nothing: a hand-off reported as copied
+/// while the clipboard holds something else entirely. So the claim is checked
+/// before it is made.
 fn verified(command: &str, payload: &str) -> Result<String, String> {
     let (found, reader) = match read_clipboard() {
         Ok(pair) => pair,

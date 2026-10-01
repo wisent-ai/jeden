@@ -6,9 +6,9 @@
 //! — a path relative to the operator's home, not to the workspace a turn runs
 //! in. Run from a checkout, that label names nothing: `sh` answers `No such
 //! file or directory`, the exit code is non-zero, and a blocking event turns
-//! that into a refusal of the tool. On 2026-09-15 that refused every file
-//! write of every Jeden run on this machine, and the message the agent saw
-//! named the file it was writing rather than the hook that could not start.
+//! that into a refusal of the tool — of every file write of every Jeden run
+//! on the machine, with a message that names the file being written rather
+//! than the hook that could not start.
 //!
 //! So a relative program is resolved against the registry itself, which is the
 //! only directory the registration can be talking about, and a registration

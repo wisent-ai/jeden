@@ -58,11 +58,10 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
 ///
 /// Discovery is how a model name becomes a readable refusal; it is not the
 /// authority on whether a route works, because the gateway that serves the
-/// request is. On 2026-09-10 three retained assignments ended at
-/// `Work remains open (task_intake): Brama transport error ...` because one
-/// `GET /v1/models` timed out while chat calls in the same minute were being
-/// served. A configured route now reaches the gateway and the request itself
-/// answers. Routing sets `catalog_unanswered` from the typed `BramaError`
+/// request is: one `GET /v1/models` can time out while chat calls in the same
+/// minute are being served, and an assignment ended on that read ends on
+/// `Brama transport error` for nothing. A configured route reaches the gateway
+/// and the request itself answers. Routing sets `catalog_unanswered` from the typed `BramaError`
 /// (`left_unanswered`: transport, busy or 5xx without Brama's explicit
 /// `retryable: false`); a refusal, a missing model or any other configuration
 /// error still stops the run here.

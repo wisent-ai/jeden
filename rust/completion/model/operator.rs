@@ -11,11 +11,11 @@ use super::{CompletionState, TaskStatus, WorkTask};
 /// waiting on the operator and stays a plain blocker with its failed
 /// operation.
 ///
-/// On 2026-09-18 an agent sat behind the same blocker for a whole afternoon,
-/// answered the Stop guard sixteen times with the same paragraph, and the
-/// operator had to ask "what exactly are you waiting for". The answer was
-/// three concrete things that existed in no file. This record is where they
-/// go, so the next session reads them instead of rediscovering them.
+/// Without this record an agent sits behind the same blocker answering the
+/// Stop guard with the same paragraph until the operator asks what exactly it
+/// is waiting for, and the answer is concrete things that exist in no file.
+/// This record is where they go, so the next session reads them instead of
+/// rediscovering them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperatorRequest {

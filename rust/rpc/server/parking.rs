@@ -2,11 +2,10 @@
 //!
 //! Stado places every Jeden Desktop tab as `stado workload attach
 //! jeden-session`, and the attach holds the kind's declared reservation for
-//! exactly as long as this process lives. On 2026-09-22 eight such tabs held
-//! 16 cores and 32 GiB of a 12-core laptop for 26 hours at 0.0% CPU: seven
-//! resumed sessions had stopped at their first model call with `model router
-//! 403` recorded as their completion blocker, the eighth was an empty tab,
-//! and the laptop refused every fleet build with `reservations_exhausted`.
+//! exactly as long as this process lives. A handful of idle tabs — resumed
+//! sessions stopped at their first model call with a completion blocker, or
+//! an empty tab — can hold more cores than a laptop has at 0.0% CPU, and the
+//! laptop then refuses every fleet build with `reservations_exhausted`.
 //!
 //! Only this process knows whether a turn, a tool call, a question to the
 //! operator or a completion continuation is in flight, so the decision is
