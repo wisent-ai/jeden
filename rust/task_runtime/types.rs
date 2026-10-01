@@ -11,8 +11,6 @@ pub struct TaskLimits {
     pub max_depth: u32,
     pub max_children: usize,
     pub max_output_bytes: u64,
-
-    pub kill_grace_ms: u64,
 }
 
 impl Default for TaskLimits {
@@ -23,8 +21,6 @@ impl Default for TaskLimits {
             max_depth: 4,
             max_children: 16,
             max_output_bytes: 2 * 1024 * 1024,
-
-            kill_grace_ms: 1_500,
         }
     }
 }

@@ -71,7 +71,6 @@ impl TaskScheduler {
         limits.max_depth = limits.max_depth.min(16);
         limits.max_children = limits.max_children.clamp(1, 256);
         limits.max_output_bytes = limits.max_output_bytes.clamp(1_024, 64 * 1024 * 1024);
-        limits.kill_grace_ms = limits.kill_grace_ms.clamp(10, 30_000);
         for path in [
             store.to_path_buf(),
             store.join("jobs"),

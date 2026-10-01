@@ -198,20 +198,17 @@ pub(super) fn process_alive(pid: u32) -> bool {
 pub(super) fn process_alive(_pid: u32) -> bool {
     false
 }
+/// A cancelled job's process group is killed at once: there is no grace
+/// period to wait out, and what the job had not yet written is what the
+/// `cancelled` status records as lost.
 #[cfg(unix)]
-pub(super) fn terminate_group(pid: u32, grace_ms: u64) {
+pub(super) fn terminate_group(pid: u32) {
     unsafe {
-        kill(-(pid as i32), 15);
-    }
-    std::thread::sleep(std::time::Duration::from_millis(grace_ms));
-    if process_alive(pid) {
-        unsafe {
-            kill(-(pid as i32), 9);
-        }
+        kill(-(pid as i32), 9);
     }
 }
 #[cfg(not(unix))]
-pub(super) fn terminate_group(_pid: u32, _grace_ms: u64) {}
+pub(super) fn terminate_group(_pid: u32) {}
 #[cfg(unix)]
 pub(super) fn configure_group(command: &mut Command) {
     use std::os::unix::process::CommandExt;

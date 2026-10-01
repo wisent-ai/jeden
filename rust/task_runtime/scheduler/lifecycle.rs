@@ -68,7 +68,7 @@ impl TaskScheduler {
             let mut job = self.get(target)?;
             if !job.status.terminal() {
                 if let Some(pid) = job.pid {
-                    terminate_group(pid, self.limits.kill_grace_ms);
+                    terminate_group(pid);
                 }
                 job.status = JobStatus::Cancelled;
                 job.pid = None;
