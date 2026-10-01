@@ -5,7 +5,7 @@
 
 use super::{
     Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesClient, WelesError,
-    MAX_ACCOUNTS, MAX_POLL_EVENTS, MAX_PROVIDERS,
+    HOLD_QUERY, MAX_ACCOUNTS, MAX_PROVIDERS,
 };
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::now_ms;
@@ -147,7 +147,11 @@ impl WelesClient {
             .ok_or_else(|| WelesError::InvalidResponse("operation id is missing".into()))?
             .to_string();
         let mut cursor: Option<String> = None;
-        for _ in 0..MAX_POLL_EVENTS {
+        // One holding read per event: the deployment answers when the
+        // operation has moved past the cursor or has ended. A page that
+        // carries no new event and no end was not held, and the client
+        // refuses rather than reading again on a timer.
+        loop {
             if cancelled() {
                 let _ = self.request(
                     reqwest::Method::POST,
@@ -156,18 +160,16 @@ impl WelesClient {
                 );
                 return Err(WelesError::Cancelled);
             }
-            let suffix = cursor
-                .as_ref()
-                .map(|value| {
-                    format!(
-                        "?cursor={}",
-                        url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-                    )
-                })
-                .unwrap_or_default();
+            let query = match cursor.as_ref() {
+                Some(value) => format!(
+                    "?{HOLD_QUERY}&cursor={}",
+                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+                ),
+                None => format!("?{HOLD_QUERY}"),
+            };
             let value = self.request(
                 reqwest::Method::GET,
-                &format!("/operations/{operation_id}{suffix}"),
+                &format!("/operations/{operation_id}{query}"),
                 None,
             )?;
             let page: OperationV1 = serde_json::from_value(value)
@@ -176,6 +178,7 @@ impl WelesClient {
                 return Err(WelesError::ExpiredOperation);
             }
             cursor = page.cursor;
+            let moved = !page.events.is_empty();
             for event in page.events {
                 bridge.event(&event);
                 match event {
@@ -216,9 +219,9 @@ impl WelesClient {
                     })
                 }
                 "cancelled" => return Err(WelesError::Cancelled),
-                _ => std::thread::sleep(self.poll_interval),
+                _ if moved => {}
+                _ => return Err(WelesError::NoHoldingRead),
             }
         }
-        Err(WelesError::PollLimit)
     }
 }

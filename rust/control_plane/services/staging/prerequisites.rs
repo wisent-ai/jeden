@@ -75,7 +75,6 @@ pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), Contra
     let weles = WelesClient::with_secret_ref(
         Some(required("WELES_STAGING_URL")),
         Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
-        Duration::from_millis(500),
         ReqwestTransport::production(),
     );
     Ok((brama, weles))

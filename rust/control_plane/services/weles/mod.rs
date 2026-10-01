@@ -6,7 +6,9 @@ use std::time::Duration;
 pub(super) const API_VERSION: &str = "v1";
 const PLATFORM_BILLING_URL_ENV: &str = "WISENT_PLATFORM_BILLING_URL";
 const PLATFORM_BILLING_TOKEN_ENV: &str = "WISENT_PLATFORM_BILLING_TOKEN";
-pub(super) const MAX_POLL_EVENTS: usize = 256;
+/// The query a holding read of an operation carries: the server answers once
+/// the operation has events after the cursor or has ended, not before.
+pub(super) const HOLD_QUERY: &str = "wait=1";
 pub(super) const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 pub(super) const MAX_PROVIDERS: usize = 128;
 pub(super) const MAX_ACCOUNTS: usize = 512;
@@ -23,7 +25,6 @@ pub struct WelesClient {
     pub(super) endpoint: Option<String>,
     pub(super) authorization: Option<SecretRef>,
     pub(super) transport: Arc<dyn ControlPlaneTransport>,
-    pub(super) poll_interval: Duration,
     pub(super) correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 
@@ -46,38 +47,25 @@ impl WelesClient {
         Self::with_secret_ref(
             platform_billing_endpoint(),
             Some(platform_billing_token()),
-            Duration::from_millis(500),
             ReqwestTransport::production(),
         )
     }
 
-    pub fn new(endpoint: Option<String>, bearer: Option<String>, poll_interval: Duration) -> Self {
-        Self::with_transport(
-            endpoint,
-            bearer,
-            poll_interval,
-            ReqwestTransport::production(),
-        )
+    pub fn new(endpoint: Option<String>, bearer: Option<String>) -> Self {
+        Self::with_transport(endpoint, bearer, ReqwestTransport::production())
     }
 
     pub fn with_transport(
         endpoint: Option<String>,
         bearer: Option<String>,
-        poll_interval: Duration,
         transport: Arc<dyn ControlPlaneTransport>,
     ) -> Self {
-        Self::with_secret_ref(
-            endpoint,
-            bearer.map(SecretRef::inline),
-            poll_interval,
-            transport,
-        )
+        Self::with_secret_ref(endpoint, bearer.map(SecretRef::inline), transport)
     }
 
     pub fn with_secret_ref(
         endpoint: Option<String>,
         authorization: Option<SecretRef>,
-        poll_interval: Duration,
         transport: Arc<dyn ControlPlaneTransport>,
     ) -> Self {
         let endpoint = endpoint
@@ -87,7 +75,6 @@ impl WelesClient {
             endpoint,
             authorization,
             transport,
-            poll_interval,
             correlation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }

@@ -95,16 +95,29 @@ pub trait InteractionBridge {
 pub enum WelesError {
     Unconfigured,
     Transport(String),
-    Http { status: u16, message: String },
+    Http {
+        status: u16,
+        message: String,
+    },
     InvalidResponse(String),
     InvalidRequest(&'static str),
     UnknownProvider(String),
-    UnavailableProvider { provider: String, reason: String },
+    UnavailableProvider {
+        provider: String,
+        reason: String,
+    },
     Cancelled,
-    RateLimited { retry_after_ms: Option<u64> },
+    RateLimited {
+        retry_after_ms: Option<u64>,
+    },
     ExpiredOperation,
-    PollLimit,
-    Operation { code: String, message: String },
+    /// The feed answered a holding read with no new event and no end: the
+    /// deployment does not hold a read, and this client never polls.
+    NoHoldingRead,
+    Operation {
+        code: String,
+        message: String,
+    },
     Interaction(String),
 }
 impl std::fmt::Display for WelesError {
@@ -126,7 +139,9 @@ impl std::fmt::Display for WelesError {
                 retry_after_ms
             ),
             Self::ExpiredOperation => f.write_str("Weles operation expired"),
-            Self::PollLimit => f.write_str("Weles operation exceeded its event limit"),
+            Self::NoHoldingRead => f.write_str(
+                "Weles answered a holding operation read before the operation moved; the deployment has no holding read, and Jeden does not poll on a timer",
+            ),
             Self::Operation { code, message } => {
                 write!(f, "Weles operation failed ({code}): {message}")
             }
