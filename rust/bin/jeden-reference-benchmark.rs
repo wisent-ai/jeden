@@ -92,14 +92,22 @@ impl CaseExecutor for ReferenceExecutor {
 }
 
 fn main() {
-    if let Err(error) = run() {
+    // A wrong invocation exits 2 and a failed benchmark 1 (cli.md rule 10):
+    // arguments are parsed here, apart from the run, so the two never mix.
+    let config = match parse_args() {
+        Ok(config) => config,
+        Err(error) => {
+            eprintln!("{error}\nusage: jeden-reference-benchmark [--repository-root PATH] [--manifest PATH] [--output-root PATH]");
+            std::process::exit(2);
+        }
+    };
+    if let Err(error) = run(config) {
         eprintln!("reference benchmark failed: {error}");
         std::process::exit(1);
     }
 }
 
-fn run() -> Result<(), String> {
-    let config = parse_args()?;
+fn run(config: Config) -> Result<(), String> {
     let runner = EvalRunner::load(RunnerConfigV1 {
         repository_root: config.repository_root.clone(),
         manifest_path: config.manifest_path.clone(),
