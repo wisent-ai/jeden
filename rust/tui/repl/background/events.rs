@@ -7,13 +7,12 @@
 use std::io;
 use std::sync::mpsc;
 
-use crossterm::event;
 use crossterm::event::{Event, KeyCode, KeyEventKind};
 
+use super::super::input::TerminalInput;
 use super::super::{message_block, ReplRenderer};
 use crate::agent::TraceEvent;
 use crate::tui::Message;
-use std::time::Duration;
 
 /// Worker→render-loop message during a background turn.
 pub(super) enum TurnMsg {
@@ -90,6 +89,7 @@ pub(super) fn prompt_tool_approval(
     detail: &str,
     columns: usize,
     color: bool,
+    input: &mut TerminalInput,
 ) -> io::Result<bool> {
     let mut lines = Vec::new();
     if !streamed.trim().is_empty() {
@@ -111,13 +111,11 @@ pub(super) fn prompt_tool_approval(
     lines.extend(message_block(&Message::new("system", ask), columns, color));
     renderer.flush(&[], &lines)?;
     loop {
-        if event::poll(Duration::from_millis(250))? {
-            if let Event::Key(key) = event::read()? {
-                if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
-                    continue;
-                }
-                return Ok(matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')));
+        if let Event::Key(key) = input.read()? {
+            if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
+                continue;
             }
+            return Ok(matches!(key.code, KeyCode::Char('y') | KeyCode::Char('Y')));
         }
     }
 }

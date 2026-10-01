@@ -7,6 +7,7 @@ use super::{CommandOutcome, Message, PickerState};
 
 pub(super) mod background;
 pub(crate) mod external_editor;
+mod input;
 pub(crate) mod loops;
 pub(super) mod questions;
 

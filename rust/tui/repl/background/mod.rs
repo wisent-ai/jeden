@@ -4,9 +4,8 @@ use std::io;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::agent::TraceEvent;
 use crate::tui::render::{busy_editor_lines, place_editor_cursor};
@@ -15,6 +14,7 @@ use crate::tui::{
     EditorState, FollowUpQueue, TurnCtx,
 };
 
+use super::input::{InputOrMessage, TerminalInput};
 use super::questions::prompt_user_question;
 use super::{message_block, ReplRenderer};
 
@@ -24,9 +24,8 @@ mod live;
 use events::{prompt_tool_approval, trace_message, PendingQuestion, TurnMsg};
 use live::{build_live, commit_reasoning};
 
-/// Run a background turn on a worker thread while sweeping a skeleton bar and
-/// draining live progress. Esc / Ctrl-C set the shared cancel flag, which the
-/// agent loop polls between steps. Returns the handler's result.
+/// Run a background turn while terminal and worker events wake the renderer.
+/// Esc / Ctrl-C announce cancellation to the running operation.
 // The renderer, editor, and follow-up queue are separate `&mut` borrows owned
 // by the caller's loop, so no struct can group them without moving that state.
 #[allow(clippy::too_many_arguments)]
@@ -39,13 +38,14 @@ pub(super) fn run_background_turn<H>(
     editor: &mut EditorState,
     queue: &mut FollowUpQueue,
     steering_available: bool,
+    input: &mut TerminalInput,
 ) -> io::Result<(Result<CommandOutcome, String>, Vec<String>)>
 where
     H: Fn(&str, &TurnCtx) -> Result<CommandOutcome, String> + Sync,
 {
     let cancel = Arc::new(AtomicBool::new(false));
     // Note = the status line beside the skeleton; Delta = a live assistant text chunk.
-    let (tx, rx) = mpsc::channel::<TurnMsg>();
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<TurnMsg>();
     let mut note = String::from("working…");
     let mut streamed = String::new();
     let mut reasoning = String::new();
@@ -76,10 +76,10 @@ where
         let ask_tx = tx.clone();
         let worker = scope.spawn(move || {
             let progress = move |message: &str| {
-                let _ = note_tx.send(TurnMsg::Note(message.to_string()));
+                let _ = note_tx.unbounded_send(TurnMsg::Note(message.to_string()));
             };
             let stream = move |piece: &str| {
-                let _ = delta_tx.send(TurnMsg::Delta(piece.to_string()));
+                let _ = delta_tx.unbounded_send(TurnMsg::Delta(piece.to_string()));
             };
             let trace = move |event: &TraceEvent<'_>| {
                 let message = match *event {
@@ -89,12 +89,12 @@ where
                         None => return,
                     },
                 };
-                let _ = trace_tx.send(message);
+                let _ = trace_tx.unbounded_send(message);
             };
             let approve = move |tool: &str, detail: &str| -> bool {
                 let (reply, answer) = mpsc::channel::<bool>();
                 if approve_tx
-                    .send(TurnMsg::Approve {
+                    .unbounded_send(TurnMsg::Approve {
                         tool: tool.to_string(),
                         detail: detail.to_string(),
                         reply,
@@ -108,7 +108,7 @@ where
             let ask_user = move |question: &str, options: &[String]| -> Result<String, String> {
                 let (reply, answer) = mpsc::channel::<Result<String, String>>();
                 ask_tx
-                    .send(TurnMsg::AskUser {
+                    .unbounded_send(TurnMsg::AskUser {
                         question: question.to_string(),
                         options: options.to_vec(),
                         reply,
@@ -133,160 +133,157 @@ where
         });
         drop(tx);
 
-        loop {
-            let mut pending_approval: Option<(String, String, mpsc::Sender<bool>)> = None;
-            let mut pending_question: Option<PendingQuestion> = None;
-            let mut blocks = Vec::new();
-            while let Ok(message) = rx.try_recv() {
-                match message {
-                    TurnMsg::Note(m) => {
-                        record_tool(&m, &mut tools_used);
-                        note = m;
-                    }
-                    TurnMsg::Delta(p) => {
-                        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
-                        streamed.push_str(&p);
-                    }
-                    TurnMsg::Reasoning(p) => {
-                        reasoning.push_str(&p);
-                    }
-                    TurnMsg::Trace(message) => {
-                        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
-                        blocks.extend(message_block(&message, scrollback_columns, color));
-                    }
-                    TurnMsg::Approve {
-                        tool,
-                        detail,
-                        reply,
-                    } => {
-                        pending_approval = Some((tool, detail, reply));
-                        break;
-                    }
-                    TurnMsg::AskUser {
-                        question,
-                        options,
-                        reply,
-                    } => {
-                        pending_question = Some((question, options, reply));
-                        break;
+        let render_result = (|| -> io::Result<()> {
+            let mut pending = None;
+            loop {
+                let mut pending_approval: Option<(String, String, mpsc::Sender<bool>)> = None;
+                let mut pending_question: Option<PendingQuestion> = None;
+                let mut blocks = Vec::new();
+                while let Some(message) = pending.take().or_else(|| rx.try_recv().ok()) {
+                    match message {
+                        TurnMsg::Note(m) => {
+                            record_tool(&m, &mut tools_used);
+                            note = m;
+                        }
+                        TurnMsg::Delta(p) => {
+                            commit_reasoning(
+                                &mut reasoning,
+                                &mut blocks,
+                                scrollback_columns,
+                                color,
+                            );
+                            streamed.push_str(&p);
+                        }
+                        TurnMsg::Reasoning(p) => {
+                            reasoning.push_str(&p);
+                        }
+                        TurnMsg::Trace(message) => {
+                            commit_reasoning(
+                                &mut reasoning,
+                                &mut blocks,
+                                scrollback_columns,
+                                color,
+                            );
+                            blocks.extend(message_block(&message, scrollback_columns, color));
+                        }
+                        TurnMsg::Approve {
+                            tool,
+                            detail,
+                            reply,
+                        } => {
+                            pending_approval = Some((tool, detail, reply));
+                            break;
+                        }
+                        TurnMsg::AskUser {
+                            question,
+                            options,
+                            reply,
+                        } => {
+                            pending_question = Some((question, options, reply));
+                            break;
+                        }
                     }
                 }
+                if !blocks.is_empty() {
+                    renderer.flush(&blocks, &[])?;
+                }
+                if let Some((tool, detail, reply)) = pending_approval {
+                    let decision = prompt_tool_approval(
+                        renderer, &streamed, &tool, &detail, columns, color, input,
+                    )?;
+                    let _ = reply.send(decision);
+                    continue;
+                }
+                if let Some((question, options, reply)) = pending_question {
+                    let answer = prompt_user_question(
+                        renderer, &streamed, &question, &options, columns, color, input,
+                    )?;
+                    let _ = reply.send(answer);
+                    continue;
+                }
+                let cancelling = cancel.load(Ordering::Relaxed);
+                let mut live = build_live(
+                    &reasoning, &streamed, &note, frame, cancelling, columns, color,
+                );
+                let mut composer = busy_editor_lines(editor, queue, columns, color);
+                let cursor_rows_below = if composer.len() > 1 {
+                    place_editor_cursor(
+                        &mut composer[1..],
+                        editor.text(),
+                        editor.cursor(),
+                        columns,
+                        0,
+                    )
+                } else {
+                    0
+                };
+                live.extend(composer);
+                renderer.flush_with_cursor(&[], &live, cursor_rows_below)?;
+                frame = frame.wrapping_add(1);
+
+                match input.read_or_message(&mut rx)? {
+                    InputOrMessage::Message(Some(message)) => pending = Some(message),
+                    InputOrMessage::Message(None) => break,
+                    InputOrMessage::Input(event) => match event {
+                        Event::Paste(text) => editor.paste(&text),
+                        Event::Key(key)
+                            if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
+                        {
+                            let is_ctrl_c = key.code == KeyCode::Char('c')
+                                && key.modifiers.contains(KeyModifiers::CONTROL);
+                            if key.code == KeyCode::Esc || is_ctrl_c {
+                                cancel.store(true, Ordering::Relaxed);
+                                crate::tool_runtime::runtime_ops::announce_cancellation();
+                            } else if key.code == KeyCode::Up
+                                && key.modifiers.contains(KeyModifiers::ALT)
+                            {
+                                if let Some(recalled) = queue.recall_last() {
+                                    editor.set_text(recalled.text);
+                                }
+                            } else if key.code == KeyCode::Enter
+                                && key.modifiers.contains(KeyModifiers::ALT)
+                            {
+                                editor.apply(EditorAction::InsertNewline);
+                            } else if let Some(mut action) = queue.action_for(key) {
+                                let text = editor.take();
+                                if action == DeliveryAction::Steer && !steering_available {
+                                    action = DeliveryAction::FollowUp;
+                                    note = "Steering unavailable; queued as follow-up".into();
+                                }
+                                if let Err(error) = queue.push(text, action) {
+                                    note = error.to_string();
+                                }
+                            } else {
+                                editor.handle_key(key);
+                            }
+                            if let Some(error) = editor.take_error() {
+                                note = error.to_string();
+                            }
+                        }
+                        Event::Resize(_, _) => {}
+                        _ => {}
+                    },
+                }
             }
+
+            let mut blocks = Vec::new();
+            commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
             if !blocks.is_empty() {
                 renderer.flush(&blocks, &[])?;
             }
-            if let Some((tool, detail, reply)) = pending_approval {
-                let decision =
-                    prompt_tool_approval(renderer, &streamed, &tool, &detail, columns, color)?;
-                let _ = reply.send(decision);
-                continue;
-            }
-            if let Some((question, options, reply)) = pending_question {
-                let answer =
-                    prompt_user_question(renderer, &streamed, &question, &options, columns, color)?;
-                let _ = reply.send(answer);
-                continue;
-            }
-            let cancelling = cancel.load(Ordering::Relaxed);
-            let mut live = build_live(
-                &reasoning, &streamed, &note, frame, cancelling, columns, color,
-            );
-            let mut composer = busy_editor_lines(editor, queue, columns, color);
-            let cursor_rows_below = if composer.len() > 1 {
-                place_editor_cursor(
-                    &mut composer[1..],
-                    editor.text(),
-                    editor.cursor(),
-                    columns,
-                    0,
-                )
-            } else {
-                0
-            };
-            live.extend(composer);
-            renderer.flush_with_cursor(&[], &live, cursor_rows_below)?;
-            frame = frame.wrapping_add(1);
-
-            if worker.is_finished() {
-                break;
-            }
-            if event::poll(Duration::from_millis(120))? {
-                match event::read()? {
-                    Event::Paste(text) => editor.paste(&text),
-                    Event::Key(key)
-                        if matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) =>
-                    {
-                        let is_ctrl_c = key.code == KeyCode::Char('c')
-                            && key.modifiers.contains(KeyModifiers::CONTROL);
-                        if key.code == KeyCode::Esc || is_ctrl_c {
-                            cancel.store(true, Ordering::Relaxed);
-                            crate::tool_runtime::runtime_ops::announce_cancellation();
-                        } else if key.code == KeyCode::Up
-                            && key.modifiers.contains(KeyModifiers::ALT)
-                        {
-                            if let Some(recalled) = queue.recall_last() {
-                                editor.set_text(recalled.text);
-                            }
-                        } else if key.code == KeyCode::Enter
-                            && key.modifiers.contains(KeyModifiers::ALT)
-                        {
-                            editor.apply(EditorAction::InsertNewline);
-                        } else if let Some(mut action) = queue.action_for(key) {
-                            let text = editor.take();
-                            if action == DeliveryAction::Steer && !steering_available {
-                                action = DeliveryAction::FollowUp;
-                                note = "Steering unavailable; queued as follow-up".into();
-                            }
-                            if let Err(error) = queue.push(text, action) {
-                                note = error.to_string();
-                            }
-                        } else {
-                            editor.handle_key(key);
-                        }
-                        if let Some(error) = editor.take_error() {
-                            note = error.to_string();
-                        }
-                    }
-                    Event::Resize(_, _) => {}
-                    _ => {}
-                }
-            }
+            Ok(())
+        })();
+        if render_result.is_err() {
+            cancel.store(true, Ordering::Relaxed);
+            crate::tool_runtime::runtime_ops::announce_cancellation();
         }
-
-        let mut blocks = Vec::new();
-        while let Ok(message) = rx.try_recv() {
-            match message {
-                TurnMsg::Note(m) => {
-                    record_tool(&m, &mut tools_used);
-                    note = m;
-                }
-                TurnMsg::Delta(p) => {
-                    commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
-                    streamed.push_str(&p);
-                }
-                TurnMsg::Reasoning(p) => {
-                    reasoning.push_str(&p);
-                }
-                TurnMsg::Trace(message) => {
-                    commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
-                    blocks.extend(message_block(&message, scrollback_columns, color));
-                }
-                TurnMsg::Approve { reply, .. } => {
-                    let _ = reply.send(false);
-                }
-                TurnMsg::AskUser { reply, .. } => {
-                    let _ = reply.send(Err("Question channel closed".into()));
-                }
-            }
-        }
-        commit_reasoning(&mut reasoning, &mut blocks, scrollback_columns, color);
-        if !blocks.is_empty() {
-            renderer.flush(&blocks, &[])?;
-        }
-        let _ = (note, streamed);
-        Ok(worker
+        // Drop queued reply senders before joining a worker blocked on approval.
+        drop(rx);
+        let outcome = worker
             .join()
-            .unwrap_or_else(|_| Err("Turn thread panicked.".into())))
+            .unwrap_or_else(|_| Err("Turn thread panicked.".into()));
+        render_result?;
+        Ok(outcome)
     })?;
 
     // Collapse the live region; the caller commits the finalized result.

@@ -2,9 +2,8 @@
 
 use std::io::{self, IsTerminal, Write};
 use std::path::Path;
-use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::tui::{
     stdout_supports_color, AttachmentTray, CommandOutcome, ConfirmEvent, ConfirmState, EditorState,
@@ -12,6 +11,7 @@ use crate::tui::{
     TurnCtx, TurnKind,
 };
 
+use super::input::TerminalInput;
 use super::{message_block, RawModeGuard, ReplRenderer};
 
 mod keys;
@@ -41,6 +41,7 @@ where
 
     let _raw = RawModeGuard::enter()?;
     let _paste = BracketedPasteGuard::enter()?;
+    let mut input = TerminalInput::default();
     let mut messages: Vec<Message> = Vec::new();
     let mut committed = 0usize;
     let mut editor = EditorState::default();
@@ -91,10 +92,7 @@ where
             needs_render = false;
         }
 
-        if !event::poll(Duration::from_millis(250))? {
-            continue;
-        }
-        let event = event::read()?;
+        let event = input.read()?;
         match event {
             Event::Resize(_, _) => {
                 needs_render = true;
@@ -187,6 +185,7 @@ where
                     &mut renderer,
                     &runtime,
                     &mut status_provider,
+                    &mut input,
                 )?;
                 if let Some(error) = editor.take_error() {
                     messages.push(Message::new("error", error.to_string()));
@@ -260,6 +259,7 @@ where
                     &mut picker,
                     &mut view,
                     &runtime,
+                    &mut input,
                 )? {
                     break;
                 }

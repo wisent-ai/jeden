@@ -104,6 +104,8 @@ export const cliIndexPage = {
       paragraphs: [
         "Running <code>jeden</code> without a command opens the interactive terminal. <code>--cwd path</code>, <code>--model name</code>, <code>--max-tokens n</code>, <code>--max-steps n</code>, <code>--allow-write</code>, <code>--allow-command</code>, and <code>--yolo</code>/<code>--auto-approve</code> configure that root invocation. <code>--version</code>/<code>-V</code> prints the compiled version and <code>--help</code>/<code>-h</code> prints usage. <code>--help</code> or <code>-h</code> after any subcommand prints that subcommand's usage lines and never runs it.",
         "Unknown commands and unknown global options fail instead of falling through. Environment files load from the selected workspace before dispatched commands run.",
+        "The prompt, approval questions and running turns share one terminal event stream. A key press, resize, worker output or worker completion triggers the next update; the busy indicator does not advance on a timer. Esc or Ctrl-C during a turn announces cancellation. Foreground commands and the external editor take ownership of stdin after the event reader is released.",
+        "A terminal read failure reports <code>terminal event read failed: &lt;cause&gt;</code>; a closed stream reports <code>terminal event stream closed</code>. A rendering or input error cancels the running turn and releases queued approval replies before joining its worker. A worker panic reports <code>Turn thread panicked.</code> rather than leaving the prompt waiting for another key.",
       ],
       commands: [{ label: "Interactive", code: "jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]" }],
     },

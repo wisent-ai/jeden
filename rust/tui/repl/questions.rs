@@ -1,9 +1,10 @@
 use std::io;
 
-use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::super::view_render::picker_panel;
 use super::super::{default_rows, Message, PickerEvent, PickerItem, PickerSpec, PickerState};
+use super::input::TerminalInput;
 use super::{message_block, ReplRenderer};
 
 pub(super) fn prompt_user_question(
@@ -13,6 +14,7 @@ pub(super) fn prompt_user_question(
     options: &[String],
     columns: usize,
     color: bool,
+    input: &mut TerminalInput,
 ) -> io::Result<Result<String, String>> {
     if !options.is_empty() {
         let items = options
@@ -31,7 +33,7 @@ pub(super) fn prompt_user_question(
             }
             lines.extend(picker_panel(&picker, columns, default_rows(), color));
             renderer.flush(&[], &lines)?;
-            let Event::Key(key) = event::read()? else {
+            let Event::Key(key) = input.read()? else {
                 continue;
             };
             if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {
@@ -67,7 +69,7 @@ pub(super) fn prompt_user_question(
             color,
         ));
         renderer.flush(&[], &lines)?;
-        let Event::Key(key) = event::read()? else {
+        let Event::Key(key) = input.read()? else {
             continue;
         };
         if !matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat) {

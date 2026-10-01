@@ -18,6 +18,7 @@ use crate::tui::{
 };
 
 use super::super::external_editor::{external_editor, external_editor_health};
+use super::super::input::TerminalInput;
 use super::super::ReplRenderer;
 
 /// Returns whether this key asks for the buffer to be submitted.
@@ -31,6 +32,7 @@ pub(super) fn handle_editing_key<S>(
     renderer: &mut ReplRenderer,
     runtime: &RegistryUiRuntime,
     status_provider: &mut S,
+    input: &mut TerminalInput,
 ) -> io::Result<bool>
 where
     S: FnMut() -> PromptStatus,
@@ -42,6 +44,7 @@ where
         {
             let cwd = status_provider().cwd;
             renderer.flush(&[], &[])?;
+            input.suspend();
             crossterm::execute!(io::stdout(), DisableBracketedPaste)?;
             disable_raw_mode()?;
             let operation = OperationContext::new(

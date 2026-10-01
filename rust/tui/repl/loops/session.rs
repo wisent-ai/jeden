@@ -16,6 +16,7 @@ use crate::tui::{
 };
 
 use super::super::background::run_background_turn;
+use super::super::input::TerminalInput;
 use super::super::{apply_turn_result, message_block, ReplRenderer};
 use super::plain::terminal_dimensions;
 
@@ -36,6 +37,7 @@ pub(super) fn run_turn_chain<S, C, H>(
     picker: &mut Option<PickerState>,
     view: &mut Option<Message>,
     runtime: &RegistryUiRuntime,
+    input: &mut TerminalInput,
 ) -> io::Result<bool>
 where
     S: FnMut() -> PromptStatus,
@@ -45,6 +47,7 @@ where
     loop {
         match classify(&active_prompt) {
             TurnKind::Foreground => {
+                input.suspend();
                 crossterm::execute!(io::stdout(), DisableBracketedPaste)?;
                 disable_raw_mode()?;
                 let ctx = TurnCtx {
@@ -79,6 +82,7 @@ where
                     editor,
                     follow_ups,
                     steering_available,
+                    input,
                 )?;
                 if !tools_used.is_empty() {
                     messages.push(Message::new(

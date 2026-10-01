@@ -37,7 +37,7 @@ agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"
 base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
 aes-gcm = "0.10"
-crossterm = "0.28"
+crossterm = { version = "0.28", features = ["event-stream"] }
 hex = "0.4"
 flate2 = "1"
 futures = "0.3"

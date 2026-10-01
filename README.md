@@ -59,6 +59,10 @@ Jeden separates five concerns:
 
 Tool schemas are derived from each input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer.
 
+Terminal input and worker output wake the same event-driven renderer; no timer polls
+for keys or turn completion. The busy indicator advances on activity, and Esc or
+Ctrl-C announces cancellation. Foreground commands take stdin after the reader is released.
+
 ## How it works
 
 Jeden records each original request before model access and its acceptance requirements before execution. The execution agent proposes a result; a separate read-only conversation observes it, and the native controller checks every retained request before allowing a final answer. Unfinished actionable work continues, while genuine failures remain recorded as incomplete. Model access still goes only through Brama.
