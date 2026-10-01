@@ -6,7 +6,6 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex};
-use std::time::Duration;
 
 mod bootstrap;
 mod process;
@@ -15,7 +14,6 @@ use crate::tool_runtime::runtime_ops::security::ExecutionGrant;
 use process::KernelProcess;
 
 const FRAME_LIMIT: usize = 64 * 1024;
-const POLL: Duration = Duration::from_millis(10);
 
 static KERNELS: LazyLock<Mutex<HashMap<KernelKey, KernelProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));

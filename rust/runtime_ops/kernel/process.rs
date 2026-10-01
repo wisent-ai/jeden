@@ -7,15 +7,13 @@
 use super::super::platform::{native, PipeReader, ProcessSignal, ProcessTree};
 use super::super::{BoundedOutput, OperationProgress};
 use super::bootstrap::{JAVASCRIPT_BOOTSTRAP, PYTHON_BOOTSTRAP};
-use super::{KernelLanguage, KernelResult, FRAME_LIMIT, POLL};
+use super::{KernelLanguage, KernelResult, FRAME_LIMIT};
 use crate::tool_runtime::runtime_ops::context::OperationContext;
 use serde_json::{json, Value};
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::path::Path;
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
 pub(super) struct KernelProcess {
     child: Child,
@@ -81,6 +79,8 @@ impl KernelProcess {
                 child.stderr.take().ok_or("kernel stderr unavailable")?,
             ))
             .map_err(|error| error.to_string())?;
+        // A cancelled turn interrupts the blocked frame read in `evaluate`.
+        crate::tool_runtime::runtime_ops::wake_on_cancellation(stdout.waker());
         Ok(Self {
             child,
             stdin,
@@ -207,25 +207,36 @@ impl KernelProcess {
                     self.language.label(),
                     internal.text
                 ));
-            } else {
-                thread::sleep(POLL);
             }
         }
     }
 
+    /// The next complete frame: one already buffered, or the next bytes the
+    /// kernel writes. `None` when the read was woken by a cancellation, or when
+    /// the kernel closed stdout (its exit is then awaited, so `alive` answers).
     fn next_frame(&mut self) -> Result<Option<Value>, String> {
+        if let Some(frame) = self.buffered_frame()? {
+            return Ok(Some(frame));
+        }
         let mut chunk = [0u8; 8192];
-        match self.stdout.read_available(&mut chunk) {
-            Ok(0) => return Ok(None),
+        match self.stdout.read_blocking(&mut chunk) {
+            Ok(0) => {
+                let _ = self.child.wait();
+                return Ok(None);
+            }
             Ok(count) => {
                 self.pending.extend_from_slice(&chunk[..count]);
                 if self.pending.len() > FRAME_LIMIT {
                     return Err("kernel protocol frame exceeded 64 KiB".into());
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(None),
             Err(error) => return Err(error.to_string()),
         }
+        self.buffered_frame()
+    }
+
+    fn buffered_frame(&mut self) -> Result<Option<Value>, String> {
         let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') else {
             return Ok(None);
         };
@@ -235,19 +246,15 @@ impl KernelProcess {
             .map_err(|error| format!("invalid kernel protocol frame: {error}"))
     }
 
+    /// The interrupted evaluation still answers with a `done` frame under its
+    /// own id; the next evaluation skips frames that are not its own, so
+    /// nothing here waits for it.
     fn interrupt(&mut self) {
         let _ = self.process_tree.signal(ProcessSignal::Interrupt);
-        thread::sleep(Duration::from_millis(100));
     }
+    /// An interpreter holds no state worth flushing, so it is killed and its
+    /// exit awaited.
     pub(super) fn terminate(&mut self) {
-        let _ = self.process_tree.signal(ProcessSignal::Terminate);
-        let until = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < until {
-            if self.child.try_wait().ok().flatten().is_some() {
-                return;
-            }
-            thread::sleep(POLL);
-        }
         let _ = self.process_tree.signal(ProcessSignal::Kill);
         let _ = self.child.wait();
     }

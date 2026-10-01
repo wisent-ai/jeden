@@ -6,7 +6,14 @@ use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
-use std::time::Duration;
+
+/// What the wait for the extension host reacts to: stdout progress, stdout
+/// closing (the host is done), and an announced cancellation.
+enum HostEvent {
+    Progress(u64, u64),
+    StdoutClosed,
+    Cancelled,
+}
 
 use super::super::HOST;
 use crate::hooks::extensions::MAX_DESCRIPTOR_BYTES;
@@ -158,8 +165,8 @@ pub(crate) fn run_host(
         .map_err(|error| format!("extension host failed to start: {error}"))?;
     let mut stdout = child.stdout.take().ok_or("extension host missing stdout")?;
     let mut stderr = child.stderr.take().ok_or("extension host missing stderr")?;
-    let (progress_tx, progress_rx) = mpsc::channel();
-    let stdout_progress = progress_tx.clone();
+    let (events_tx, events_rx) = mpsc::channel();
+    let stdout_events = events_tx.clone();
     let stdout_reader = std::thread::spawn(move || {
         let mut bytes = Vec::new();
         let mut buffer = [0u8; 8192];
@@ -172,8 +179,9 @@ pub(crate) fn run_host(
             total = total.saturating_add(count as u64);
             let remaining = (MAX_DESCRIPTOR_BYTES + 1).saturating_sub(bytes.len());
             bytes.extend_from_slice(&buffer[..count.min(remaining)]);
-            let _ = stdout_progress.send(("extension-stdout", count as u64, total));
+            let _ = stdout_events.send(HostEvent::Progress(count as u64, total));
         }
+        let _ = stdout_events.send(HostEvent::StdoutClosed);
         bytes
     });
     let stderr_reader = std::thread::spawn(move || {
@@ -189,17 +197,16 @@ pub(crate) fn run_host(
         }
         bytes
     });
-    drop(progress_tx);
-    let status = loop {
-        while let Ok((stream, bytes, total_bytes)) = progress_rx.try_recv() {
-            if let Some(context) = operation {
-                context.progress(crate::tool_runtime::runtime_ops::OperationProgress {
-                    stream,
-                    bytes,
-                    total_bytes,
-                });
-            }
-        }
+    if operation.is_some() {
+        let wake = events_tx.clone();
+        crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
+            wake.send(HostEvent::Cancelled).is_ok()
+        });
+    }
+    drop(events_tx);
+    // The host writes its answer and closes stdout when it is done; its exit
+    // is then awaited. A cancelled turn kills it instead.
+    loop {
         if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
             let _ = child.kill();
             let _ = child.wait();
@@ -207,11 +214,21 @@ pub(crate) fn run_host(
             let _ = stderr_reader.join();
             return Err("extension operation cancelled".into());
         }
-        if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-            break status;
+        match events_rx.recv() {
+            Ok(HostEvent::Progress(bytes, total_bytes)) => {
+                if let Some(context) = operation {
+                    context.progress(crate::tool_runtime::runtime_ops::OperationProgress {
+                        stream: "extension-stdout",
+                        bytes,
+                        total_bytes,
+                    });
+                }
+            }
+            Ok(HostEvent::Cancelled) => {}
+            Ok(HostEvent::StdoutClosed) | Err(_) => break,
         }
-        std::thread::sleep(Duration::from_millis(20));
-    };
+    }
+    let status = child.wait().map_err(|error| error.to_string())?;
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
     if let Some(context) = operation {

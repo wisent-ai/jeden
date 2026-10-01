@@ -23,15 +23,31 @@ pub enum UnsupportedReason {
     FilesystemCapability,
 }
 
+type PipeSender = std::sync::mpsc::Sender<io::Result<Vec<u8>>>;
+
 struct ThreadPipeReader {
     receiver: std::sync::mpsc::Receiver<io::Result<Vec<u8>>>,
     pending: Vec<u8>,
+    // A sender the reader thread clears when the pipe ends, so a waker never
+    // keeps the channel open past the pipe's end of file.
+    wake: std::sync::Arc<std::sync::Mutex<Option<PipeSender>>>,
+}
+
+impl ThreadPipeReader {
+    fn take_pending(&mut self, buffer: &mut [u8]) -> usize {
+        let count = buffer.len().min(self.pending.len());
+        buffer[..count].copy_from_slice(&self.pending[..count]);
+        self.pending.drain(..count);
+        count
+    }
 }
 
 impl PipeReader for ThreadPipeReader {
     fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        if self.pending.is_empty() {
+        while self.pending.is_empty() {
             match self.receiver.try_recv() {
+                // An empty chunk is a wake, not data.
+                Ok(Ok(bytes)) if bytes.is_empty() => continue,
                 Ok(Ok(bytes)) => self.pending = bytes,
                 Ok(Err(error)) => return Err(error),
                 Err(std::sync::mpsc::TryRecvError::Empty) => {
@@ -40,35 +56,64 @@ impl PipeReader for ThreadPipeReader {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => return Ok(0),
             }
         }
-        let count = buffer.len().min(self.pending.len());
-        buffer[..count].copy_from_slice(&self.pending[..count]);
-        self.pending.drain(..count);
-        Ok(count)
+        Ok(self.take_pending(buffer))
+    }
+
+    fn read_blocking(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        if self.pending.is_empty() {
+            match self.receiver.recv() {
+                Ok(Ok(bytes)) if bytes.is_empty() => return Err(io::ErrorKind::Interrupted.into()),
+                Ok(Ok(bytes)) => self.pending = bytes,
+                Ok(Err(error)) => return Err(error),
+                Err(_) => return Ok(0),
+            }
+        }
+        Ok(self.take_pending(buffer))
+    }
+
+    fn waker(&self) -> Box<dyn Fn() -> bool + Send> {
+        let wake = std::sync::Arc::clone(&self.wake);
+        Box::new(move || {
+            let slot = wake.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            match slot.as_ref() {
+                Some(sender) => sender.send(Ok(Vec::new())).is_ok(),
+                None => false,
+            }
+        })
     }
 }
 
 pub(super) fn threaded_pipe(mut pipe: Box<dyn std::io::Read + Send>) -> Box<dyn PipeReader> {
     use std::io::Read;
     let (sender, receiver) = std::sync::mpsc::channel();
-    std::thread::spawn(move || loop {
-        let mut bytes = vec![0; 8192];
-        match pipe.read(&mut bytes) {
-            Ok(0) => break,
-            Ok(count) => {
-                bytes.truncate(count);
-                if sender.send(Ok(bytes)).is_err() {
+    let wake = std::sync::Arc::new(std::sync::Mutex::new(Some(sender.clone())));
+    let reader_wake = std::sync::Arc::clone(&wake);
+    std::thread::spawn(move || {
+        loop {
+            let mut bytes = vec![0; 8192];
+            match pipe.read(&mut bytes) {
+                Ok(0) => break,
+                Ok(count) => {
+                    bytes.truncate(count);
+                    if sender.send(Ok(bytes)).is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error));
                     break;
                 }
             }
-            Err(error) => {
-                let _ = sender.send(Err(error));
-                break;
-            }
         }
+        reader_wake
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
     });
     Box::new(ThreadPipeReader {
         receiver,
         pending: Vec::new(),
+        wake,
     })
 }
 #[derive(Debug)]
@@ -136,7 +181,14 @@ pub trait ProcessTree: Send {
 }
 
 pub trait PipeReader: Send {
+    /// What has arrived so far; `WouldBlock` when nothing has.
     fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize>;
+    /// Blocks until bytes arrive (their count), the pipe ends (`Ok(0)`), or a
+    /// waker from `waker` fires (`Interrupted`).
+    fn read_blocking(&mut self, buffer: &mut [u8]) -> io::Result<usize>;
+    /// A wake for `read_blocking`: it interrupts the blocked read and returns
+    /// false once the pipe has ended.
+    fn waker(&self) -> Box<dyn Fn() -> bool + Send>;
 }
 
 pub trait ProcessPlatform: Sync {

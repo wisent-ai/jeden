@@ -5,6 +5,7 @@
 //! module line cap.
 
 use super::super::super::{BoundedOutput, OperationContext, OperationProgress, OutputCapture};
+use super::ProcessEvent;
 use std::io::Read;
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -13,7 +14,7 @@ pub(super) fn capture_stream(
     mut reader: impl Read,
     limits: super::OutputLimits,
     artifacts: super::ArtifactSink,
-    progress: Sender<OperationProgress>,
+    events: Sender<ProcessEvent>,
 ) -> Result<OutputCapture, String> {
     let mut output = BoundedOutput::new(stream, limits, artifacts);
     let mut buffer = [0u8; 8192];
@@ -29,20 +30,20 @@ pub(super) fn capture_stream(
             .write_chunk(&buffer[..count])
             .map_err(|error| format!("failed capturing {stream}: {error}"))?;
         total = total.saturating_add(count as u64);
-        let _ = progress.send(OperationProgress {
+        let _ = events.send(ProcessEvent::Progress(OperationProgress {
             stream,
             bytes: count as u64,
             total_bytes: total,
-        });
+        }));
     }
     output.finish().map_err(|error| error.to_string())
 }
 
-pub(super) fn drain_progress(
-    context: &OperationContext<'_>,
-    progress: &Receiver<OperationProgress>,
-) {
-    while let Ok(event) = progress.try_recv() {
-        context.progress(event);
+/// Reports the progress still queued once the process has been waited for.
+pub(super) fn drain_progress(context: &OperationContext<'_>, events: &Receiver<ProcessEvent>) {
+    while let Ok(event) = events.try_recv() {
+        if let ProcessEvent::Progress(progress) = event {
+            context.progress(progress);
+        }
     }
 }
