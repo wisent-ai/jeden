@@ -14,9 +14,8 @@ use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
-use std::time::Duration;
 
 const MAX_LSP_MESSAGE: usize = 8 * 1024 * 1024;
 
@@ -100,9 +99,10 @@ pub(super) fn file_uri(path: &Path) -> Result<String, String> {
         .map_err(|_| "cannot convert path to LSP URI".into())
 }
 
-/// Wait for the server's answer to one request. The loop still wakes often
-/// enough to notice a cancelled turn; what it no longer does is decide that
-/// a server indexing a large repository has failed.
+/// Wait for the server's answer to one request. The receive blocks; an
+/// announced cancellation reaches it as a null message from the client's
+/// cancellation wake, after which this turn's own flag decides. A server
+/// indexing a large repository is not a failure.
 pub(super) fn await_response(
     runtime: &ToolRuntime<'_>,
     client: &mut LspClient,
@@ -112,17 +112,16 @@ pub(super) fn await_response(
         if runtime.operation.cancellation().is_cancelled() {
             return Err("LSP request cancelled".into());
         }
-        match client.messages.recv_timeout(Duration::from_millis(50)) {
+        match client.messages.recv() {
             Ok(Ok(message)) if message.get("id").and_then(Value::as_u64) == Some(id) => {
                 if let Some(error) = message.get("error") {
                     return Err(format!("LSP error: {error}"));
                 }
                 return Ok(message.get("result").cloned().unwrap_or(Value::Null));
             }
-            Ok(Ok(_notification)) => {}
+            Ok(Ok(_notification_or_wake)) => {}
             Ok(Err(error)) => return Err(error),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Err("LSP reader stopped".into()),
+            Err(_) => return Err("LSP reader stopped".into()),
         }
     }
 }
@@ -146,6 +145,12 @@ pub(super) fn start(
     let stdin = child.stdin.take().ok_or("LSP server stdin unavailable")?;
     let stdout = child.stdout.take().ok_or("LSP server stdout unavailable")?;
     let (sender, messages) = mpsc::channel();
+    // One wake per client: it ends with the client, whose dropped receiver
+    // makes the send fail and removes it.
+    let wake = sender.clone();
+    crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
+        wake.send(Ok(Value::Null)).is_ok()
+    });
     reader_thread(stdout, sender);
     let mut client = LspClient {
         child,

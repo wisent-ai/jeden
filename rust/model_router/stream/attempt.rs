@@ -81,6 +81,9 @@ pub(crate) enum WireMessage {
     Line(Result<String, String>),
     Eof,
     Network(String),
+    /// Sent by the cancellation wake: some turn was cancelled, and the reader
+    /// checks whether it was this one.
+    Cancelled,
 }
 
 pub(crate) fn build_streaming_body(
@@ -167,7 +170,15 @@ pub(crate) fn streaming_attempt_inner(
     let body_text =
         serde_json::to_string(&body).map_err(|error| AttemptError::permanent(error.to_string()))?;
     let (sender, receiver) = mpsc::sync_channel(16);
-    spawn_openai_stream_adapter(config, body_text, sender)?;
+    spawn_openai_stream_adapter(config, body_text, sender.clone())?;
+    // An announced cancellation wakes the blocked receive below; the wake
+    // removes itself once this attempt's receiver is gone.
+    crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
+        !matches!(
+            sender.try_send(WireMessage::Cancelled),
+            Err(std::sync::mpsc::TrySendError::Disconnected(_))
+        )
+    });
 
     let mut state = OpenAiStreamState::default();
     let mut content_type = String::new();
@@ -259,6 +270,14 @@ pub(crate) fn streaming_attempt_inner(
                 return Err(AttemptError {
                     class: StreamErrorClass::Network,
                     message,
+                    retry_after: None,
+                    visible_output: state.visible_output,
+                });
+            }
+            WireMessage::Cancelled => {
+                return Err(AttemptError {
+                    class: StreamErrorClass::Cancelled,
+                    message: "Turn cancelled.".into(),
                     retry_after: None,
                     visible_output: state.visible_output,
                 });

@@ -72,7 +72,9 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
 /// Take the next message from the stream adapter. It arrives, the adapter
 /// disconnects, or the operator cancels the turn; a model that is still
 /// thinking is not one of those, which is what the old first-event and idle
-/// deadlines used to report it as.
+/// deadlines used to report it as. The receive blocks: a cancellation reaches
+/// it as `WireMessage::Cancelled`, sent by the attempt's cancellation wake,
+/// and is acted on only when it is this turn's flag that is set.
 pub(crate) fn recv_until(
     receiver: &Receiver<WireMessage>,
     cancelled: &dyn Fn() -> bool,
@@ -81,10 +83,10 @@ pub(crate) fn recv_until(
         if cancelled() {
             return Err(StreamErrorClass::Cancelled);
         }
-        match receiver.recv_timeout(Duration::from_millis(25)) {
+        match receiver.recv() {
+            Ok(WireMessage::Cancelled) => continue,
             Ok(message) => return Ok(message),
-            Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => return Err(StreamErrorClass::Network),
+            Err(_) => return Err(StreamErrorClass::Network),
         }
     }
 }

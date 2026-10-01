@@ -9,8 +9,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError};
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver, TrySendError};
 
 const MAX_DAP_FRAME: usize = 8 * 1024 * 1024;
 pub(crate) const TOOLS: &[(&str, &str)] = &[
@@ -99,6 +98,16 @@ impl DebuggerService {
             detail: "adapter stdout unavailable".into(),
         })?;
         let (tx, rx) = mpsc::sync_channel(64);
+        // One wake per adapter session: an announced cancellation sends a null
+        // frame that `wait_response` reads as an event before re-checking its
+        // own flag; the wake ends with the session's receiver.
+        let wake = tx.clone();
+        crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
+            !matches!(
+                wake.try_send(Ok(Value::Null)),
+                Err(TrySendError::Disconnected(_))
+            )
+        });
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
             loop {
@@ -242,10 +251,10 @@ fn wait_response(
     request_seq: u64,
 ) -> ServiceResult<Value> {
     // The adapter answers this request or its connection ends; a cancelled
-    // turn stops the wait at the next poll.
+    // turn wakes the receive through the session's cancellation wake.
     loop {
         check_operation(context)?;
-        match rx.recv_timeout(Duration::from_millis(20)) {
+        match rx.recv() {
             Ok(Ok(value))
                 if value.get("type").and_then(Value::as_str) == Some("response")
                     && value.get("request_seq").and_then(Value::as_u64) == Some(request_seq) =>
@@ -264,8 +273,7 @@ fn wait_response(
             }
             Ok(Ok(_event)) => continue,
             Ok(Err(error)) => return Err(error),
-            Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => {
+            Err(_) => {
                 return Err(ServiceError::Protocol {
                     service: "debugger",
                     detail: "adapter response channel closed".into(),

@@ -220,6 +220,7 @@ where
                             && key.modifiers.contains(KeyModifiers::CONTROL);
                         if key.code == KeyCode::Esc || is_ctrl_c {
                             cancel.store(true, Ordering::Relaxed);
+                            crate::tool_runtime::runtime_ops::announce_cancellation();
                         } else if key.code == KeyCode::Up
                             && key.modifiers.contains(KeyModifiers::ALT)
                         {

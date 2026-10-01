@@ -9,8 +9,34 @@ use crate::tool_runtime::runtime_ops::security::TelemetryPolicy;
 use crate::tool_runtime::runtime_ops::TraceContext;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, Mutex,
 };
+
+/// A waiter's wake for announced cancellations: it runs once per announcement
+/// and returns false once its waiter is gone, which removes it.
+type CancellationWake = Box<dyn Fn() -> bool + Send>;
+
+static CANCELLATION_WAKES: Mutex<Vec<CancellationWake>> = Mutex::new(Vec::new());
+
+/// Every place that sets a cancellation flag calls this after setting it, so
+/// the waits registered with `wake_on_cancellation` re-check their own flag
+/// instead of polling it on a clock.
+pub fn announce_cancellation() {
+    let mut wakes = CANCELLATION_WAKES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    wakes.retain(|wake| wake());
+}
+
+/// Registers `wake` to run on every announced cancellation until it returns
+/// false. A blocking wait sends itself a message from `wake` and, when woken,
+/// checks whether its own flag is the one that was set.
+pub fn wake_on_cancellation(wake: impl Fn() -> bool + Send + 'static) {
+    CANCELLATION_WAKES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .push(Box::new(wake));
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
@@ -28,6 +54,7 @@ impl CancellationToken {
 
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
+        announce_cancellation();
     }
 
     pub fn is_cancelled(&self) -> bool {

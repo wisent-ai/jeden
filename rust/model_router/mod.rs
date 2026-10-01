@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::{
-    mpsc::{self, Receiver, RecvTimeoutError, SyncSender},
+    mpsc::{self, Receiver, SyncSender},
     Arc,
 };
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};

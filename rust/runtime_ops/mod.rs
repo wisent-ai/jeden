@@ -8,7 +8,10 @@ pub mod sandbox;
 pub mod secrets;
 pub mod security;
 
-pub use context::{CancellationToken, OperationContext, OperationProgress, ProgressSink};
+pub use context::{
+    announce_cancellation, wake_on_cancellation, CancellationToken, OperationContext,
+    OperationProgress, ProgressSink,
+};
 
 use host::process;
 pub use host::{fs, network, pty};

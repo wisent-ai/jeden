@@ -49,6 +49,7 @@ impl AgentSession {
             {
                 cancel.store(true, Ordering::Release);
             }
+            crate::tool_runtime::runtime_ops::announce_cancellation();
         }
         let value = crate::completion::snapshot_value(&state);
         crate::cli::sessions::append_ledger_entry(

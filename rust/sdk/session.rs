@@ -242,6 +242,7 @@ impl AgentSession {
             .map_err(|_| "active request lock poisoned")?;
         if let Some(cancel) = active.get(request_id) {
             cancel.store(true, Ordering::Release);
+            crate::tool_runtime::runtime_ops::announce_cancellation();
             Ok(true)
         } else {
             Ok(false)
@@ -272,6 +273,7 @@ impl AgentSession {
         {
             cancel.store(true, Ordering::Release);
         }
+        crate::tool_runtime::runtime_ops::announce_cancellation();
         self.inner
             .subscribers
             .lock()
