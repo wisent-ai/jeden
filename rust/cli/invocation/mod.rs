@@ -141,7 +141,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     }
     if matches!(
         command.as_str(),
-        "resume" | "recall_conversation" | "recall-conversation" | "search-sessions" | "probierz"
+        "resume" | "recall_conversation" | "search-sessions" | "probierz"
     ) {
         return Ok(Args {
             command,

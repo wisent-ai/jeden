@@ -30,18 +30,29 @@ pub(crate) fn repository_root() -> PathBuf {
     manifest.parent().map(PathBuf::from).unwrap_or(manifest)
 }
 
+/// 2 for an invocation that is itself wrong; every other failure exits 1.
+const USAGE_STATUS: u8 = 2;
+
 fn main() -> ExitCode {
     let arguments = std::env::args().skip(1).collect::<Vec<_>>();
     let Some((command, rest)) = arguments.split_first() else {
         eprintln!("{USAGE}");
-        return ExitCode::FAILURE;
+        return ExitCode::from(USAGE_STATUS);
     };
     let outcome = match command.as_str() {
+        // Help is an answer, not a refusal: stdout and exit 0.
+        "--help" | "-h" | "help" => {
+            println!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
         "release" => release::run(rest),
         "surface" => surface::run(rest),
         "versioning" => versioning::run(rest),
         "protocol-check" => protocol::run(rest),
-        other => Err(format!("unknown command `{other}`; {USAGE}")),
+        other => {
+            eprintln!("unknown command `{other}`; {USAGE}");
+            return ExitCode::from(USAGE_STATUS);
+        }
     };
     match outcome {
         Ok(code) => ExitCode::from(code),

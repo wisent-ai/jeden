@@ -155,8 +155,11 @@ pub fn main() -> ExitCode {
     let mut args = match parse_args(argv) {
         Ok(v) => v,
         Err(e) => {
+            // A command line that does not parse is a usage error: exit 2,
+            // every other failure exits 1.
+            const USAGE_STATUS: u8 = 2;
             eprintln!("Error: {}\n{}", e, usage());
-            return ExitCode::FAILURE;
+            return ExitCode::from(USAGE_STATUS);
         }
     };
     if args.command == "version" {
@@ -257,7 +260,7 @@ pub fn main() -> ExitCode {
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
         "search-sessions" => search_sessions_command(&args),
         "resume" => resume_command(&args),
-        "recall_conversation" | "recall-conversation" => recall_conversation_command(&args),
+        "recall_conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),
         "workspace" => workspace_command(&args),
@@ -278,7 +281,11 @@ pub fn main() -> ExitCode {
         "token" => token_command(&args),
         "stats" => stats_command(&args),
         "gallery" => gallery_command(&args),
-        other => Err(format!("unknown command: {}", other)),
+        other => {
+            const USAGE_STATUS: u8 = 2;
+            eprintln!("Error: unknown command: {}\n{}", other, usage());
+            return ExitCode::from(USAGE_STATUS);
+        }
     };
     match result {
         Ok(text) => {

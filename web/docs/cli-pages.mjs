@@ -4,6 +4,8 @@ import { managementCommands } from "./commands/management.mjs";
 import { completionCommands } from "./commands/completion.mjs";
 import { contextCommands } from "./commands/context.mjs";
 const ORIGIN = "https://jeden.wisent.com";
+// The exit status every command shares, stated once rather than per page.
+const EXIT_STATUS = "A command line that does not parse, or names an unknown command, prints the error and the usage and exits <code>2</code>; any other refusal or failure exits <code>1</code>.";
 
 function commandPage({ path, invocation, purpose, inputs, effect, refusals }) {
   const command = path.split("/").join(" ");
@@ -38,7 +40,7 @@ function commandPage({ path, invocation, purpose, inputs, effect, refusals }) {
       },
       {
         title: "Refusals and boundaries",
-        bullets: refusals,
+        bullets: [...refusals, EXIT_STATUS],
       },
     ],
   };
