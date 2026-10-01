@@ -11,8 +11,8 @@
     "darwin-arm64": {
       "runner_platform": "darwin-arm64",
       "secret_env": {
-        "WISENT_CODESIGN_CERTIFICATE_PEM": "desktop-signing-apple-development#certificate",
-        "WISENT_CODESIGN_PRIVATE_KEY_PEM": "desktop-signing-apple-development#private_key"
+        "WISENT_CODESIGN_CERTIFICATE_PEM": "macos-development-signing#certificate",
+        "WISENT_CODESIGN_PRIVATE_KEY_PEM": "macos-development-signing#private_key"
       },
       "quality": [
         {
