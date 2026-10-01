@@ -1,10 +1,9 @@
-//! `jeden token` — print the agent's own Brama credential for scripting
-//! (curl examples, CI jobs). Provider OAuth tokens live in Skarbiec/Brama and
-//! are never held by jeden, so the agent auth secret is the only credential
-//! jeden can print. Values are redacted by default; `--reveal` prints the full
-//! secret to the user's shell. The `/token` slash form never reveals —
-//! transcript text can reach the model, and `secrets.mode` protects exactly
-//! that path.
+//! `jeden token` — which Brama credential this agent uses: the router URL,
+//! the agent id, where the secret came from and a redacted form of it.
+//! Provider OAuth tokens live in Skarbiec/Brama and are never held by jeden.
+//! The secret itself is never printed (cli.md rule 15): outside the
+//! credential boundary only its Skarbiec item, `agent:wisent-app`, travels,
+//! and a script that needs the value reads that item through its own grant.
 
 use std::env;
 
@@ -62,27 +61,23 @@ fn configured() -> Result<(String, String, String, &'static str), String> {
     ))
 }
 
-/// CLI `jeden token [--list] [--reveal] [--json]`. `--reveal` prints the bare
-/// secret on its own line so `TOKEN=$(jeden token --reveal)` stays scriptable.
+/// CLI `jeden token [--list] [--json]`.
 pub(crate) fn token_command(args: &Args) -> Result<String, String> {
-    let reveal = args.positionals.iter().any(|part| part == "--reveal");
-    let list = args
-        .positionals
-        .iter()
-        .any(|part| part == "--list" || part == "list");
+    if let Some(unknown) = args.positionals.iter().find(|part| *part != "--list" && *part != "list") {
+        return Err(format!(
+            "jeden token takes --list and --json; got {unknown}. The secret is never printed: read the Skarbiec item agent:wisent-app through a grant of its own"
+        ));
+    }
+    let list = !args.positionals.is_empty();
     let (brama, agent_id, secret, source) = configured()?;
     if args.json {
         return Ok(format!(
-            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{}}}\n",
+            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{},\"tokenItem\":\"agent:wisent-app\"}}\n",
             serde_json::to_string(&brama).map_err(|error| error.to_string())?,
             serde_json::to_string(&agent_id).map_err(|error| error.to_string())?,
-            serde_json::to_string(&if reveal { secret } else { redacted(&secret) })
-                .map_err(|error| error.to_string())?,
+            serde_json::to_string(&redacted(&secret)).map_err(|error| error.to_string())?,
             serde_json::to_string(source).map_err(|error| error.to_string())?,
         ));
-    }
-    if reveal {
-        return Ok(format!("{secret}\n"));
     }
     let mut lines = vec![
         format!("Brama:   {brama}"),
@@ -97,7 +92,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
                 redacted(&secret)
             ),
         },
-        "Reveal:  jeden token --reveal (prints the bare value for scripting)".to_string(),
+        "Item:    agent:wisent-app (the value stays in Skarbiec; read it through a grant of its own)".to_string(),
     ];
     if list {
         let client = crate::control_plane::weles::WelesClient::from_env();
@@ -119,7 +114,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
         }
     }
     lines.push(format!(
-        "Example: curl -H \"Authorization: Bearer $(jeden token --reveal)\" {brama}/v1/models"
+        "Example: curl -H \"Authorization: Bearer $(stado credentials get agent:wisent-app --field value)\" {brama}/v1/models"
     ));
     Ok(lines.join("\n") + "\n")
 }
@@ -129,7 +124,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
 pub(crate) fn token_slash() -> Result<String, String> {
     let (brama, agent_id, secret, source) = configured()?;
     Ok(format!(
-        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted — transcript text can reach the model, source: {source}).\nPrint the full value from your shell with: jeden token --reveal\n",
+        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted, source: {source}).\nThe value stays in the Skarbiec item agent:wisent-app.\n",
         redacted(&secret)
     ))
 }

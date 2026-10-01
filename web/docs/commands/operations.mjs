@@ -166,13 +166,13 @@ export const operationCommands = [
   },
   {
     path: "token",
-    invocation: "jeden token [--list] [--reveal] [--json]",
-    purpose: "Print the agent's own Brama credential for shell scripting, redacted unless explicitly revealed.",
+    invocation: "jeden token [--list] [--json]",
+    purpose: "Report which Brama credential this agent uses: router URL, agent id, where the secret came from, a redacted form of it, and its Skarbiec item.",
     inputs: [
       "Required environment: non-empty <code>BRAMA_URL</code> and <code>WISENT_APP_AGENT_AUTH_SECRET</code>. <code>WISENT_APP_AGENT_ID</code> is included when configured.",
-      "<code>--reveal</code> prints the bare secret; <code>--list</code> adds Weles accounts to text output; <code>--json</code> returns the structured URL, agent id, and redacted or revealed token.",
+      "<code>--list</code> adds Weles accounts to text output; <code>--json</code> returns <code>bramaUrl</code>, <code>agentId</code>, the redacted <code>token</code>, <code>tokenSource</code> and <code>tokenItem</code>.",
     ],
-    effect: "Reads credentials from process memory and prints them; it does not persist, rotate, or revoke credentials. Default text reveals only the final four characters and length.",
+    effect: "Reads credentials from process memory and prints only the final four characters and length of the secret, never the value; it does not persist, rotate, or revoke credentials. A script that needs the value reads the Skarbiec item <code>agent:wisent-app</code> through its own grant.",
     refusals: [
       "Missing router URL is refused as <code>BRAMA_URL is required; configure the Brama model-router service URL</code>.",
       "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; Skarbiec item `agent:wisent-app` holds it and `stado credentials get agent:wisent-app --field value` is how this process reads it</code>, or with Stado's own refusal of that read after <code>is not configured:</code>.",
