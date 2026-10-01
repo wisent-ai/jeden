@@ -23,6 +23,26 @@ pub fn hmac_headers(
     Ok((ts, body_hash, hex::encode(mac.finalize().into_bytes())))
 }
 
+/// The headers that prove to Brama which agent is calling. A provider named
+/// by `JEDEN_MODEL_ENDPOINT` gets none: its configuration carries no signing
+/// secret, and routing refuses a Brama run that has none.
+pub(crate) fn agent_headers(
+    body: &str,
+    agent_id: &str,
+    secret: &str,
+) -> Result<Vec<(&'static str, String)>, String> {
+    if secret.is_empty() {
+        return Ok(Vec::new());
+    }
+    let (ts, body_hash, signature) = hmac_headers(body, agent_id, secret)?;
+    Ok(vec![
+        ("x-agent-id", agent_id.to_string()),
+        ("x-agent-timestamp", ts),
+        ("x-agent-body-sha256", body_hash),
+        ("x-agent-signature", signature),
+    ])
+}
+
 pub(crate) fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, String> {
     let mut actions = Vec::new();
     for call in tool_calls {
@@ -80,23 +100,23 @@ pub fn chat_completion(
         body["tool_choice"] = Value::String("auto".into());
     }
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    let (ts, body_hash, sig) = hmac_headers(&body_text, &config.agent_id, &config.secret)?;
+    let signed = agent_headers(&body_text, &config.agent_id, &config.secret)?;
     let client = crate::net::blocking_builder()
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
     let reservation =
         crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
-    let response = client
+    let mut request = client
         .post(format!(
             "{}/v1/chat/completions",
             config.url.trim_end_matches('/')
         ))
         .bearer_auth(&config.bearer_token)
-        .header("content-type", "application/json")
-        .header("x-agent-id", &config.agent_id)
-        .header("x-agent-timestamp", ts)
-        .header("x-agent-body-sha256", body_hash)
-        .header("x-agent-signature", sig)
+        .header("content-type", "application/json");
+    for (name, value) in signed {
+        request = request.header(name, value);
+    }
+    let response = request
         .body(body_text)
         .send()
         .map_err(crate::control_plane::transport::describe_reqwest)?;

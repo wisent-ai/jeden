@@ -31,22 +31,27 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let configured_fallbacks = route_descriptors(routing.get("fallbacks"), "fallbacks");
     let configured_promotions =
         route_descriptors(routing.get("contextPromotions"), "contextPromotions");
-    let endpoint = env::var("BRAMA_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            env::var("STADO_MODEL_ROUTER_URL")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        });
-    let bearer_token = env::var("BRAMA_TOKEN")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| {
-            env::var("STADO_MODEL_ROUTER_TOKEN")
-                .ok()
-                .filter(|value| !value.trim().is_empty())
-        });
+    let brama_variable = |primary: &str, legacy: &str| {
+        env::var(primary)
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| {
+                env::var(legacy)
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            })
+    };
+    // A provider named in JEDEN_MODEL_ENDPOINT replaces Brama outright: its
+    // own key is the bearer and its requests carry no Brama signature.
+    let direct = crate::agent::credential::direct_provider();
+    let (endpoint, bearer_token, secret) = match &direct {
+        Some((url, key)) => (Some(url.clone()), key.clone(), String::new()),
+        None => (
+            brama_variable("BRAMA_URL", "STADO_MODEL_ROUTER_URL"),
+            brama_variable("BRAMA_TOKEN", "STADO_MODEL_ROUTER_TOKEN"),
+            env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
+        ),
+    };
     let selected_model = args
         .model
         .clone()
@@ -120,14 +125,19 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             }
         })
     };
-    let endpoint_error = endpoint
-        .is_none()
-        .then(|| "BRAMA_URL is required; configure the Brama model-router service URL".to_string());
-    let token_error = bearer_token.is_none().then(|| {
+    let endpoint_error = endpoint.is_none().then(|| {
+        "BRAMA_URL is required; configure the Brama model-router service URL, or set \
+         JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider to run without Brama"
+            .to_string()
+    });
+    let token_error = (direct.is_none() && bearer_token.is_none()).then(|| {
         "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential".to_string()
     });
+    let secret_error = (direct.is_none() && secret.is_empty())
+        .then(|| "WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama".to_string());
     let precondition_error = endpoint_error
         .or(token_error)
+        .or(secret_error)
         .or_else(|| retry.as_ref().err().cloned())
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned());
@@ -186,7 +196,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             .ok()
             .or(config.agent_id.clone())
             .unwrap_or_else(|| "wisent-app".into()),
-        secret: env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
+        secret,
         model: selected_model.unwrap_or_default(),
         service_tier: env::var("JEDEN_SERVICE_TIER")
             .ok()

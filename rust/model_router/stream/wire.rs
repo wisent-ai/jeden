@@ -6,10 +6,9 @@ pub(crate) fn spawn_openai_stream_adapter(
     sender: SyncSender<WireMessage>,
 ) -> Result<(), AttemptError> {
     use std::io::{BufRead, BufReader};
-    let (ts, body_hash, signature) = hmac_headers(&body_text, &config.agent_id, &config.secret)
+    let signed = agent_headers(&body_text, &config.agent_id, &config.secret)
         .map_err(AttemptError::permanent)?;
     let url = format!("{}/v1/chat/completions", config.url.trim_end_matches('/'));
-    let agent_id = config.agent_id.clone();
     let bearer_token = config.bearer_token.clone();
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
@@ -23,18 +22,15 @@ pub(crate) fn spawn_openai_stream_adapter(
                     return;
                 }
             };
-            let response = match client
+            let mut request = client
                 .post(url)
                 .bearer_auth(bearer_token)
                 .header("content-type", "application/json")
-                .header("accept", "text/event-stream")
-                .header("x-agent-id", agent_id)
-                .header("x-agent-timestamp", ts)
-                .header("x-agent-body-sha256", body_hash)
-                .header("x-agent-signature", signature)
-                .body(body_text)
-                .send()
-            {
+                .header("accept", "text/event-stream");
+            for (name, value) in signed {
+                request = request.header(name, value);
+            }
+            let response = match request.body(body_text).send() {
                 Ok(response) => response,
                 Err(error) => {
                     let _ = sender.send(WireMessage::Network(

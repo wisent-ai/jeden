@@ -84,6 +84,19 @@ export const overviewPages = [
         ],
       },
       {
+        title: "Run without Brama",
+        paragraphs: [
+          "A user without Brama points Jeden at any OpenAI-compatible provider with <code>JEDEN_MODEL_ENDPOINT</code>, for example <code>https://api.openai.com</code> or a local <code>http://127.0.0.1:11434</code>. Jeden then reads the model list from that provider's <code>/v1/models</code> and sends chat to its <code>/v1/chat/completions</code>, with <code>JEDEN_MODEL_KEY</code> as the bearer when the provider needs one. It does not ask Stado for the Brama credentials and does not sign requests.",
+          "Only this setting turns Brama off. Without it, a missing Brama is still a refusal: <code>BRAMA_URL is required; configure the Brama model-router service URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider to run without Brama</code>, and a Brama run without its signing credential stops with <code>WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama</code>. A provider's model list carries no fallbacks, promotions or prices, so only the fallbacks in <code>modelRouting</code> apply and usage is recorded without cost.",
+        ],
+        commands: [
+          {
+            label: "Environment for a direct provider",
+            code: 'JEDEN_MODEL_ENDPOINT=https://api.openai.com\nJEDEN_MODEL_KEY=<provider-api-key>\njeden run "Respond exactly: OK" --model gpt-4o --model-only',
+          },
+        ],
+      },
+      {
         title: "Run a named VS Code task on macOS",
         paragraphs: [
           "On a configured Wisent workstation the installed Jeden reads the agent signing credential <code>agent:wisent-app/value</code> and the separate <code>jeden-model-router/token</code> bearer itself with <code>stado credentials get</code>, under Stado's one identity, so no launcher script stands in front of it. The reusable task in <code>scripts/vscode-tasks.json</code> runs a disk diagnosis with <code>gpt-6-astra</code> in a dedicated integrated terminal, without typing into another terminal's prompt or changing the default model.",
@@ -104,7 +117,7 @@ export const overviewPages = [
           "interactive terminal and one-shot <code>jeden run</code> modes;",
           "autonomous outcome pursuit through <code>jeden pursue</code>, with source-grounded contracts, independent reviews, and durable receipts;",
           "session transcripts and artifacts under <code>~/.jeden/sessions/</code>;",
-          "model routing through required <code>BRAMA_URL</code>, <code>WISENT_APP_AGENT_ID</code>, and <code>WISENT_APP_AGENT_AUTH_SECRET</code>;",
+          "model routing through <code>BRAMA_URL</code>, <code>WISENT_APP_AGENT_ID</code>, and <code>WISENT_APP_AGENT_AUTH_SECRET</code>, or through an OpenAI-compatible provider named by <code>JEDEN_MODEL_ENDPOINT</code>;",
           "model selection through <code>--model</code>, <code>JEDEN_MODEL</code>, or native config;",
           "jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;",
           "guarded file mutations using the digest or snapshot tag returned by <code>read_file</code>;",

@@ -83,7 +83,9 @@ pub struct ModelCatalog {
     pub catalog_revision: String,
     #[serde(default = "api_version")]
     pub version: String,
-    #[serde(default)]
+    /// Brama answers `models`; an OpenAI-compatible provider named by
+    /// `JEDEN_MODEL_ENDPOINT` answers `data`, whose entries carry the same `id`.
+    #[serde(default, alias = "data")]
     pub models: Vec<ModelEntry>,
     #[serde(default)]
     pub degraded: bool,

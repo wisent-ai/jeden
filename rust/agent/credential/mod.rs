@@ -26,6 +26,28 @@ pub(crate) const BEARER: &str = "BRAMA_TOKEN";
 const SECRET_ITEM: (&str, &str) = ("agent:wisent-app", "value");
 /// The Skarbiec item and field that hold the gateway bearer.
 const BEARER_ITEM: (&str, &str) = ("jeden-model-router", "token");
+/// An OpenAI-compatible provider that answers `/v1/models` and
+/// `/v1/chat/completions` itself, named in place of Brama by a user who does
+/// not run Brama.
+pub(crate) const DIRECT_URL: &str = "JEDEN_MODEL_ENDPOINT";
+/// That provider's API key, sent as the bearer; a local server that takes
+/// none leaves it unset.
+pub(crate) const DIRECT_KEY: &str = "JEDEN_MODEL_KEY";
+
+/// The provider named by `JEDEN_MODEL_ENDPOINT`, when the user chose one.
+///
+/// Only an explicit setting turns Brama off: a workstation that lost Brama
+/// still fails with Brama's own sentence instead of silently calling someone
+/// else.
+pub(crate) fn direct_provider() -> Option<(String, Option<String>)> {
+    let read = |name: &str| {
+        env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    read(DIRECT_URL).map(|url| (url, read(DIRECT_KEY)))
+}
 
 /// What one resolution attempt did, for `/setup`, `doctor` and the run's own
 /// refusal sentence.
@@ -37,6 +59,9 @@ pub(crate) enum Source {
     Stado,
     /// Stado could not answer, and this is what it said.
     Refused(String),
+    /// `JEDEN_MODEL_ENDPOINT` names a provider that is called without Brama,
+    /// so no Brama credential is needed and Stado was not asked.
+    NotNeeded,
 }
 
 impl Source {
@@ -45,6 +70,7 @@ impl Source {
             Self::Environment => "environment",
             Self::Stado => "stado",
             Self::Refused(_) => "refused",
+            Self::NotNeeded => "not-needed",
         }
     }
 
@@ -134,6 +160,9 @@ fn resolve_one(variable: &str, (item, field): (&str, &str)) -> Source {
 /// most once per process however many requests a turn makes.
 pub(crate) fn ensure() -> &'static (Source, Source) {
     static RESOLVED: LazyLock<(Source, Source)> = LazyLock::new(|| {
+        if direct_provider().is_some() {
+            return (Source::NotNeeded, Source::NotNeeded);
+        }
         (
             resolve_one(SECRET, SECRET_ITEM),
             resolve_one(BEARER, BEARER_ITEM),
