@@ -3,8 +3,6 @@ use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -183,15 +181,11 @@ pub(crate) fn ensure_mode_state_dir(directory: &Path) -> Result<(), String> {
     }
 }
 
+// The kernel's advisory lock on the lock file: a second writer blocks until the
+// first one's file closes, which also happens when its process dies, so there
+// is no retry count, no pause between tries and no stale lock file.
 struct ModeStateLock {
-    path: PathBuf,
     _file: File,
-}
-
-impl Drop for ModeStateLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
 }
 
 impl ModeStateLock {
@@ -200,23 +194,15 @@ impl ModeStateLock {
         if let Some(parent) = path.parent() {
             ensure_mode_state_dir(parent)?;
         }
-        for _ in 0..500 {
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(mut file) => {
-                    writeln!(file, "{}", std::process::id()).map_err(|error| error.to_string())?;
-                    file.sync_all().map_err(|error| error.to_string())?;
-                    return Ok(Self { path, _file: file });
-                }
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                    thread::sleep(Duration::from_millis(10));
-                }
-                Err(error) => return Err(error.to_string()),
-            }
-        }
-        Err(format!(
-            "timed out waiting for mode-state lock {}",
-            path.display()
-        ))
+        let file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|error| format!("mode-state lock {} cannot open: {error}", path.display()))?;
+        file.lock()
+            .map_err(|error| format!("mode-state lock {} refused: {error}", path.display()))?;
+        Ok(Self { _file: file })
     }
 }
 

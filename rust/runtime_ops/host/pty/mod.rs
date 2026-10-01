@@ -3,8 +3,7 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, MutexGuard, TryLockError};
-use std::thread;
+use std::sync::{LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
 pub(super) const POLL: Duration = Duration::from_millis(10);
@@ -214,21 +213,21 @@ fn validate_dimensions(cols: u16, rows: u16) -> Result<(), PtyError> {
     Ok(())
 }
 
+/// The registry mutex is held only for map edits, so the call blocks on the
+/// lock itself; cancellation is honoured before the wait and once it returns.
 fn lock_registry_cancellable(
     context: &OperationContext<'_>,
 ) -> Result<MutexGuard<'static, PtyRegistry>, PtyError> {
-    loop {
-        if context.cancellation().is_cancelled() {
-            return Err(PtyError::OperationCancelled);
-        }
-        match SESSIONS.try_lock() {
-            Ok(registry) => return Ok(registry),
-            Err(TryLockError::WouldBlock) => thread::sleep(POLL),
-            Err(TryLockError::Poisoned(_)) => {
-                return Err(PtyError::System("PTY registry lock poisoned".into()))
-            }
-        }
+    if context.cancellation().is_cancelled() {
+        return Err(PtyError::OperationCancelled);
     }
+    let registry = SESSIONS
+        .lock()
+        .map_err(|_| PtyError::System("PTY registry lock poisoned".into()))?;
+    if context.cancellation().is_cancelled() {
+        return Err(PtyError::OperationCancelled);
+    }
+    Ok(registry)
 }
 pub fn probe(cwd: &Path) -> Result<(), String> {
     let mut session = PtyProcess::spawn(cwd, 0)?;
