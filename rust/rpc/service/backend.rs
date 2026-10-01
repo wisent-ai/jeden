@@ -57,20 +57,21 @@ impl SessionBackend for AgentSessionFacade {
     ) -> Result<Value, String> {
         let session = self.session(tenant, session_id)?;
         let subscription = session.subscribe()?;
+        let subscription_id = subscription.id();
         let forwarding_request = request_id.to_owned();
         let forward_emit = emit.clone();
-        let forwarder = thread::spawn(move || loop {
-            match subscription.recv_timeout(Duration::from_millis(250)) {
-                Ok(event) if event.request_id == forwarding_request => {
-                    let (kind, payload, terminal) = map_event(event.event);
-                    forward_emit(kind, payload, terminal);
-                    if terminal {
-                        break;
-                    }
+        // Blocks on the subscription; stops at this request's terminal event or
+        // once the prompt has returned and the subscription is ended below.
+        let forwarder = thread::spawn(move || {
+            while let Ok(event) = subscription.recv() {
+                if event.request_id != forwarding_request {
+                    continue;
                 }
-                Ok(_) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                let (kind, payload, terminal) = map_event(event.event);
+                forward_emit(kind, payload, terminal);
+                if terminal {
+                    break;
+                }
             }
         });
         let result = if continuing {
@@ -82,6 +83,7 @@ impl SessionBackend for AgentSessionFacade {
                 goal: None,
             })
         };
+        session.end_subscription(subscription_id)?;
         if let Err(error) = &result {
             emit("error".into(), json!({"message": error}), true);
         }

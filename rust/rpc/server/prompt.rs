@@ -7,11 +7,8 @@ use super::operations::{error_response, string_param, success_response, wire_id}
 use super::{ServerState, WireRequest};
 use crate::sdk::{PromptRequest, SessionEventKind};
 use serde_json::{json, Value};
-use std::sync::atomic::AtomicBool;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 pub(super) fn handle_prompt(state: Arc<ServerState>, request: WireRequest) -> Result<(), String> {
     let id = request.id.clone();
@@ -53,33 +50,27 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         .cloned()
         .ok_or_else(|| format!("unknown session: {}", session_id))?;
     let subscription = session.subscribe()?;
+    let subscription_id = subscription.id();
     let event_writer = state.writer.clone();
     let event_request_id = request_id.clone();
-    let prompt_done = Arc::new(AtomicBool::new(false));
-    let forward_done = prompt_done.clone();
+    // The forwarder blocks on the subscription. It stops at this request's
+    // terminal event, or when the prompt has returned and the subscription is
+    // ended below, after draining what was already queued.
     let forwarder = thread::spawn(move || -> Result<(), String> {
-        loop {
-            match subscription.recv_timeout(Duration::from_secs(1)) {
-                Ok(event) if event.request_id == event_request_id => {
-                    let terminal = matches!(
-                        &event.event,
-                        SessionEventKind::Result { .. } | SessionEventKind::Error { .. }
-                    );
-                    event_writer.send(&json!({"method": "session/event", "params": event}))?;
-                    if terminal {
-                        return Ok(());
-                    }
-                }
-                Ok(_) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                    if forward_done.load(Ordering::Acquire) =>
-                {
-                    return Ok(())
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Ok(()),
+        while let Ok(event) = subscription.recv() {
+            if event.request_id != event_request_id {
+                continue;
+            }
+            let terminal = matches!(
+                &event.event,
+                SessionEventKind::Result { .. } | SessionEventKind::Error { .. }
+            );
+            event_writer.send(&json!({"method": "session/event", "params": event}))?;
+            if terminal {
+                return Ok(());
             }
         }
+        Ok(())
     });
     let result = if continuing {
         session.continue_work(request_id)
@@ -90,7 +81,7 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
             goal,
         })
     };
-    prompt_done.store(true, Ordering::Release);
+    session.end_subscription(subscription_id)?;
     forwarder
         .join()
         .map_err(|_| "event forwarder panicked".to_string())??;

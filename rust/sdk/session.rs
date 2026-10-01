@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
-use std::time::Duration;
 
 const EVENT_BUFFER: usize = 1024;
 static NEXT_INTERACTION_ID: AtomicU64 = AtomicU64::new(1);
@@ -38,12 +37,17 @@ pub struct EventSubscription {
 }
 
 impl EventSubscription {
-    pub fn recv(&self) -> Result<SessionEvent, mpsc::RecvError> {
-        self.receiver.recv()
+    /// The id `AgentSession::end_subscription` takes to end this subscription
+    /// from another thread.
+    pub fn id(&self) -> u64 {
+        self.id
     }
 
-    pub fn recv_timeout(&self, timeout: Duration) -> Result<SessionEvent, mpsc::RecvTimeoutError> {
-        self.receiver.recv_timeout(timeout)
+    /// Blocks until the next event. Once the session drops this subscription's
+    /// sender (`end_subscription`, `dispose`), the events already queued are
+    /// returned and then `RecvError`, so a reader never needs a clock to stop.
+    pub fn recv(&self) -> Result<SessionEvent, mpsc::RecvError> {
+        self.receiver.recv()
     }
 
     pub fn try_recv(&self) -> Result<SessionEvent, mpsc::TryRecvError> {
@@ -186,6 +190,18 @@ impl AgentSession {
             receiver,
             owner: Arc::downgrade(&self.inner),
         })
+    }
+
+    /// Ends a subscription from outside the thread that reads it: its sender is
+    /// dropped, so the reader's `recv` drains what is queued and then returns
+    /// `RecvError`.
+    pub fn end_subscription(&self, id: u64) -> Result<(), String> {
+        self.inner
+            .subscribers
+            .lock()
+            .map_err(|_| "event subscription lock poisoned".to_string())?
+            .remove(&id);
+        Ok(())
     }
 
     pub fn set_interaction_handler(

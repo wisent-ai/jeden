@@ -11,11 +11,12 @@ use agent_client_protocol::schema::v1::*;
 use agent_client_protocol::Client;
 use agent_client_protocol::ConnectionTo;
 use agent_client_protocol::Responder;
-use std::sync::atomic::AtomicBool;
+use futures::channel::oneshot;
+use futures::executor::block_on;
+use futures::future::{self, Either};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 
 impl AcpState {
     pub(super) fn start_prompt(
@@ -77,48 +78,45 @@ impl AcpState {
 
         let state = Arc::clone(self);
         thread::spawn(move || {
-            let forward_session = session.clone();
             let forward_session_id = session_id.clone();
             let forward_request_id = request_id.clone();
             let forward_client = client.clone();
-            let forward_cancellation = cancellation.clone();
-            let forward_operation_token = operation_token.clone();
+            let subscription_id = subscription.id();
 
-            let prompt_done = Arc::new(AtomicBool::new(false));
-            let forward_done = Arc::clone(&prompt_done);
+            // The peer's `$/cancel_request` is a future the protocol resolves;
+            // this thread waits on it or on the prompt finishing, whichever
+            // comes first, and turns a cancellation into the session abort.
+            let (finished_tx, finished_rx) = oneshot::channel::<()>();
+            let watch_session = session.clone();
+            let watch_request_id = request_id.clone();
+            let watch_cancellation = cancellation.clone();
+            let watch_operation_token = operation_token.clone();
+            let watcher = thread::spawn(move || {
+                let cancelled = Box::pin(watch_cancellation.cancelled());
+                if let Either::Left(_) = block_on(future::select(cancelled, finished_rx)) {
+                    watch_operation_token.cancel();
+                    let _ = watch_session.abort(&watch_request_id);
+                }
+            });
+
+            // Blocks on the subscription; stops at this request's terminal
+            // event or once the prompt has returned and the subscription is
+            // ended below.
             let forwarder = thread::spawn(move || {
                 let mut streamed = false;
-                let mut cancellation_sent = false;
-                loop {
-                    if !cancellation_sent
-                        && (forward_cancellation.is_cancelled()
-                            || operation_expired(&forward_operation_token))
-                    {
-                        forward_operation_token.cancel();
-                        let _ = forward_session.abort(&forward_request_id);
-                        cancellation_sent = true;
+                while let Ok(event) = subscription.recv() {
+                    if event.request_id != forward_request_id {
+                        continue;
                     }
-                    match subscription.recv_timeout(Duration::from_millis(50)) {
-                        Ok(event) if event.request_id == forward_request_id => {
-                            let mapped = map_session_event(event.event, &mut streamed);
-                            if let Some(update) = mapped.update {
-                                let _ = forward_client.send_notification(SessionNotification::new(
-                                    forward_session_id.clone(),
-                                    update,
-                                ));
-                            }
-                            if mapped.terminal {
-                                break;
-                            }
-                        }
-                        Ok(_) => {}
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                            if forward_done.load(Ordering::Acquire) =>
-                        {
-                            break
-                        }
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
-                        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                    let mapped = map_session_event(event.event, &mut streamed);
+                    if let Some(update) = mapped.update {
+                        let _ = forward_client.send_notification(SessionNotification::new(
+                            forward_session_id.clone(),
+                            update,
+                        ));
+                    }
+                    if mapped.terminal {
+                        break;
                     }
                 }
             });
@@ -128,7 +126,9 @@ impl AcpState {
                 prompt,
                 goal: None,
             });
-            prompt_done.store(true, Ordering::Release);
+            let _ = finished_tx.send(());
+            let _ = session.end_subscription(subscription_id);
+            let _ = watcher.join();
             let _ = forwarder.join();
             let _ = session.set_interaction_handler(None);
             if let Ok(mut active) = state.active.lock() {
