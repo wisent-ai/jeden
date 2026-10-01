@@ -9,13 +9,11 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
 use manifest::{ReleaseManifestV2, TrustRoot};
 use transaction::{read_installed_state, InstallPaths};
 
 const MAX_DOWNLOAD_BYTES: usize = 256 * 1024 * 1024;
-const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 const CANARY_RELEASE_KEY_ID: &str = "jeden-canary-2026-07-13";
 const CANARY_RELEASE_PUBLIC_KEY: &str = "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=";
 const STABLE_RELEASE_KEY_ID: &str = "jeden-stable-2026-07-13";
@@ -189,32 +187,18 @@ fn extract_release_executable(archive: &[u8], target_triple: &str) -> Result<Vec
 }
 
 pub fn run_health(binary: &Path, cwd: &Path) -> Result<(), String> {
-    let started = Instant::now();
-    let mut child = Command::new(binary)
+    let status = Command::new(binary)
         .args(["capabilities", "--cwd"])
         .arg(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("health probe failed to start {}: {error}", binary.display()))?;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(status)) => return Err(format!("health probe failed with {status}")),
-            Ok(None) if started.elapsed() < PROBE_TIMEOUT => {
-                std::thread::sleep(Duration::from_millis(20))
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("health probe timed out".into());
-            }
-            Err(error) => {
-                let _ = child.kill();
-                return Err(format!("health probe failed: {error}"));
-            }
-        }
+        .status()
+        .map_err(|error| format!("health probe failed to run {}: {error}", binary.display()))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("health probe failed with {status}"))
     }
 }
 
