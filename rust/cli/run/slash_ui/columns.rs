@@ -45,19 +45,12 @@ fn perf_detail(perf: Option<&ModelPerf>) -> String {
     }
 }
 
-// Scales as strings: the repository guard bans bare numerals in code, and the
-// parsed constants keep the intent (`1000` = k, `1000000` = m) readable.
-const THOUSAND: &str = "1000";
-const MILLION: &str = "1000000";
-
 /// Context window the way omp prints it: `272k ◫`, `1m ◫`.
 pub(super) fn context_metric(tokens: u64) -> String {
-    let million = MILLION.parse::<u64>().unwrap_or_default();
-    let thousand = THOUSAND.parse::<u64>().unwrap_or_default();
-    if tokens >= million {
-        format!("{}m ◫", tokens / million)
-    } else if tokens >= thousand {
-        format!("{}k ◫", tokens / thousand)
+    if tokens >= 1_000_000 {
+        format!("{}m ◫", tokens / 1_000_000)
+    } else if tokens >= 1_000 {
+        format!("{}k ◫", tokens / 1_000)
     } else {
         format!("{tokens} ◫")
     }
