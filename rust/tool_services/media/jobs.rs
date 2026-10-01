@@ -11,7 +11,6 @@ use crate::tool_runtime::runtime_ops::OperationContext;
 use base64::Engine;
 use serde_json::{json, Value};
 use std::fs;
-use std::time::Duration;
 
 /// The operations that go through the Stado media router.
 impl MediaService {
@@ -120,7 +119,7 @@ impl MediaService {
         let submission: CapabilitySubmission =
             self.router()?.post_json("media", &request, context)?;
         let job_id = validate_submission(submission)?;
-        self.wait_for_completion(&job_id, context)?;
+        self.require_completed(&job_id, context)?;
         let (output, mime_type) = self.router()?.content(&job_id, "image/", context)?;
         let extension = image_extension(&mime_type)?;
         let mut artifact = write_media_artifact(context, "image", extension, &output)?;
@@ -168,36 +167,35 @@ impl MediaService {
         Ok(artifact)
     }
 
-    pub(super) fn wait_for_completion(
+    /// One status read, no pause and no retry (cli.md rule 8): a job the
+    /// router has not finished is a named error carrying its reported state.
+    pub(super) fn require_completed(
         &self,
         job_id: &str,
         context: &OperationContext<'_>,
     ) -> ServiceResult<()> {
-        // The router reports the job as completed, failed or cancelled; those
-        // are the ends of this wait. A cancelled turn stops it too.
-        loop {
-            check_operation(context)?;
-            let status = self.router()?.status(job_id, context)?;
-            if status.job_id != job_id {
-                return Err(ServiceError::Protocol {
-                    service: "media-router",
-                    detail: "media status returned a mismatched job_id".into(),
-                });
-            }
-            match status.status.as_str() {
-                "completed" => return Ok(()),
-                "failed" | "cancelled" | "timed_out" => {
-                    return Err(ServiceError::Backend {
-                        service: "media-router",
-                        detail: status
-                            .error
-                            .unwrap_or_else(|| format!("media job {}", status.status)),
-                    })
-                }
-                _ => std::thread::sleep(Duration::from_millis(
-                    "500".parse().expect("valid media poll interval"),
-                )),
-            }
+        check_operation(context)?;
+        let status = self.router()?.status(job_id, context)?;
+        if status.job_id != job_id {
+            return Err(ServiceError::Protocol {
+                service: "media-router",
+                detail: "media status returned a mismatched job_id".into(),
+            });
+        }
+        match status.status.as_str() {
+            "completed" => Ok(()),
+            "failed" | "cancelled" => Err(ServiceError::Backend {
+                service: "media-router",
+                detail: status
+                    .error
+                    .unwrap_or_else(|| format!("media job {}", status.status)),
+            }),
+            other => Err(ServiceError::Backend {
+                service: "media-router",
+                detail: format!(
+                    "media job {job_id} is {other}; the media router answered before the job finished and offers no read that holds until it does"
+                ),
+            }),
         }
     }
 }
