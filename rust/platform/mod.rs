@@ -203,7 +203,10 @@ pub trait ProcessPlatform: Sync {
 pub trait PtySession: Send {
     fn process_id(&self) -> u32;
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()>;
-    fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize>;
+    /// Hands the terminal's output to one blocking reader; from then on the
+    /// output is read only through it (`threaded_pipe` turns it into a
+    /// `PipeReader` that blocks and can be woken).
+    fn take_output(&mut self) -> Result<Box<dyn io::Read + Send>, PlatformError>;
     fn resize(&mut self, cols: u16, rows: u16) -> Result<(), PlatformError>;
     fn alive(&mut self) -> Result<bool, PlatformError>;
     fn exit_status(&mut self) -> Result<Option<ExitStatus>, PlatformError>;

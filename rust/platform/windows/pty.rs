@@ -59,38 +59,16 @@ impl PtySession for WindowsPty {
         }
         Ok(())
     }
-    fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        let mut available = 0;
-        if unsafe {
-            PeekNamedPipe(
-                self.output,
-                null_mut(),
-                0,
-                null_mut(),
-                &mut available,
-                null_mut(),
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
+    fn take_output(&mut self) -> Result<Box<dyn io::Read + Send>, PlatformError> {
+        // The output pipe moves to the reader; this session no longer reads
+        // or closes it (`close_handle` skips the null left behind).
+        let handle = std::mem::replace(&mut self.output, null_mut());
+        if handle.is_null() {
+            return Err(PlatformError::Process(
+                "PTY output was already handed to a reader".into(),
+            ));
         }
-        if available == 0 {
-            return Err(io::ErrorKind::WouldBlock.into());
-        }
-        let mut read = 0;
-        if unsafe {
-            ReadFile(
-                self.output,
-                buffer.as_mut_ptr() as _,
-                available.min(buffer.len() as u32),
-                &mut read,
-                null_mut(),
-            )
-        } == 0
-        {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(read as usize)
+        Ok(Box::new(PipeRead(handle)))
     }
     fn resize(&mut self, cols: u16, rows: u16) -> Result<(), PlatformError> {
         let size = Coord {
@@ -139,6 +117,38 @@ impl Drop for WindowsPty {
         unsafe { ClosePseudoConsole(self.pseudo) };
         close_handle(self.process);
         close_handle(self.job)
+    }
+}
+
+/// The pseudo-console's output pipe, read with blocking `ReadFile`.
+struct PipeRead(Handle);
+unsafe impl Send for PipeRead {}
+impl io::Read for PipeRead {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let mut read = 0;
+        if unsafe {
+            ReadFile(
+                self.0,
+                buffer.as_mut_ptr() as _,
+                buffer.len().min(u32::MAX as usize) as u32,
+                &mut read,
+                null_mut(),
+            )
+        } == 0
+        {
+            let error = io::Error::last_os_error();
+            // ERROR_BROKEN_PIPE: the console closed its end, which is end of file.
+            if error.raw_os_error() == Some(109) {
+                return Ok(0);
+            }
+            return Err(error);
+        }
+        Ok(read as usize)
+    }
+}
+impl Drop for PipeRead {
+    fn drop(&mut self) {
+        close_handle(self.0);
     }
 }
 impl PtyPlatform for NativePlatform {

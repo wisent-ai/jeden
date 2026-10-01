@@ -4,19 +4,18 @@
 //! Split out of `runtime_ops/host/pty.rs`, which had grown past the module
 //! line cap.
 
-use super::super::super::platform::{native, ProcessSignal, PtySession};
+use super::super::super::platform::{native, threaded_pipe, PipeReader, ProcessSignal, PtySession};
 use super::super::super::{BoundedOutput, OperationContext, OperationProgress};
-use super::{
-    PtyError, PtySessionMetadata, PtySessionState, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS, POLL,
-};
+use super::{PtyError, PtySessionMetadata, PtySessionState, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS};
 use crate::tool_runtime::runtime_ops::host::pty::PtyResult;
 use std::io;
 use std::path::Path;
-use std::thread;
-use std::time::{Duration, Instant};
 
 pub(super) struct PtyProcess {
     session: Box<dyn PtySession>,
+    // The terminal's output, read on its own thread: reads block until bytes
+    // arrive, the shell goes away, or an announced cancellation wakes them.
+    output: Box<dyn PipeReader>,
     sequence: u64,
     pub(super) metadata: PtySessionMetadata,
 }
@@ -26,15 +25,18 @@ impl PtyProcess {
         let mut session = native()
             .spawn_shell(cwd, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS)
             .map_err(|error| error.to_string())?;
+        let mut output = threaded_pipe(session.take_output().map_err(|error| error.to_string())?);
+        crate::tool_runtime::runtime_ops::wake_on_cancellation(output.waker());
         let group = session.process_id();
         let (startup, ready_marker) = native().startup_handshake();
         session
             .write_all(startup)
             .map_err(|error| error.to_string())?;
-        wait_for_bytes(session.as_mut(), ready_marker)?;
-        drain(session.as_mut());
+        wait_for_bytes(output.as_mut(), ready_marker)?;
+        drain(output.as_mut());
         Ok(Self {
             session,
+            output,
             sequence: 0,
             metadata: PtySessionMetadata {
                 session_id: format!("pty-{group}-{id_sequence}"),
@@ -83,11 +85,9 @@ impl PtyProcess {
                 ));
             }
             let mut chunk = [0u8; 8192];
-            match self.session.read_available(&mut chunk) {
+            match self.output.read_blocking(&mut chunk) {
                 Ok(0) => {
-                    if !self.alive() {
-                        return Err("PTY shell exited before command completed".into());
-                    }
+                    return Err("PTY shell exited before command completed".into());
                 }
                 Ok(count) => {
                     pending.extend_from_slice(&chunk[..count]);
@@ -125,7 +125,9 @@ impl PtyProcess {
                         total_bytes: progress_total,
                     });
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(POLL),
+                // A cancellation (this turn's or another's) woke the read; the
+                // loop's first check decides which.
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
                 Err(error) => return Err(error.to_string()),
             }
         }
@@ -139,15 +141,8 @@ impl PtyProcess {
         self.metadata.rows = rows;
         Ok(())
     }
+    /// A shell holds nothing worth flushing, so its group is killed.
     pub(super) fn terminate(&mut self) {
-        let _ = self.session.signal(ProcessSignal::Terminate);
-        let until = Instant::now() + Duration::from_millis(300);
-        while Instant::now() < until {
-            if !self.alive() {
-                return;
-            }
-            thread::sleep(POLL);
-        }
         let _ = self.session.signal(ProcessSignal::Kill);
     }
 }
@@ -155,12 +150,13 @@ impl PtyProcess {
 /// Read until the startup marker arrives. The shell prints it once it is
 /// ready; a shell that never prints it has failed, and its exit ends the
 /// read below with an error rather than a guess.
-fn wait_for_bytes(session: &mut dyn PtySession, marker: &[u8]) -> Result<(), String> {
+fn wait_for_bytes(output: &mut dyn PipeReader, marker: &[u8]) -> Result<(), String> {
     let mut pending = Vec::with_capacity(4096);
     loop {
         let mut buffer = [0u8; 4096];
-        match session.read_available(&mut buffer) {
-            Ok(count) if count > 0 => {
+        match output.read_blocking(&mut buffer) {
+            Ok(0) => return Err("PTY shell exited before it was ready".into()),
+            Ok(count) => {
                 pending.extend_from_slice(&buffer[..count]);
                 if find_bytes(&pending, marker).is_some() {
                     return Ok(());
@@ -169,8 +165,7 @@ fn wait_for_bytes(session: &mut dyn PtySession, marker: &[u8]) -> Result<(), Str
                     pending.drain(..4096);
                 }
             }
-            Ok(_) => thread::sleep(POLL),
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => thread::sleep(POLL),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(error) => return Err(error.to_string()),
         }
     }
@@ -189,10 +184,10 @@ fn parse_marker_code(suffix: &[u8]) -> Option<i32> {
         .parse()
         .ok()
 }
-fn drain(session: &mut dyn PtySession) {
+fn drain(output: &mut dyn PipeReader) {
     let mut buffer = [0u8; 4096];
     loop {
-        match session.read_available(&mut buffer) {
+        match output.read_available(&mut buffer) {
             Ok(0) | Err(_) => break,
             Ok(_) => {}
         }

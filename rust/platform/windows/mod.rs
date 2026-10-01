@@ -237,14 +237,6 @@ extern "system" {
     fn TerminateProcess(h: Handle, c: u32) -> i32;
     fn WriteFile(h: Handle, b: *const c_void, n: u32, w: *mut u32, o: *mut c_void) -> i32;
     fn ReadFile(h: Handle, b: *mut c_void, n: u32, r: *mut u32, o: *mut c_void) -> i32;
-    fn PeekNamedPipe(
-        h: Handle,
-        b: *mut c_void,
-        n: u32,
-        r: *mut u32,
-        a: *mut u32,
-        left: *mut u32,
-    ) -> i32;
     fn ReplaceFileW(
         d: *const u16,
         s: *const u16,

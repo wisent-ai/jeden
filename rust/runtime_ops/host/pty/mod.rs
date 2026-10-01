@@ -4,9 +4,6 @@ use std::error::Error;
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard};
-use std::time::Duration;
-
-pub(super) const POLL: Duration = Duration::from_millis(10);
 pub const MIN_PTY_COLS: u16 = 1;
 pub const MAX_PTY_COLS: u16 = 1_000;
 pub const MIN_PTY_ROWS: u16 = 1;

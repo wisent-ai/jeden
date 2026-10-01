@@ -77,8 +77,17 @@ impl PtySession for UnixPtySession {
             .write_all(bytes)
             .and_then(|_| self.master.flush())
     }
-    fn read_available(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
-        self.master.read(buffer)
+    fn take_output(&mut self) -> Result<Box<dyn Read + Send>, PlatformError> {
+        // The master was opened non-blocking for the old polling reads; the
+        // reader thread blocks on it instead.
+        let fd = duplicate(self.master_fd())?;
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
+            let error = io::Error::last_os_error();
+            unsafe { libc::close(fd) };
+            return Err(error.into());
+        }
+        Ok(Box::new(unsafe { File::from_raw_fd(fd) }))
     }
     fn resize(&mut self, cols: u16, rows: u16) -> Result<(), PlatformError> {
         set_window_size(self.master_fd(), cols, rows)?;
