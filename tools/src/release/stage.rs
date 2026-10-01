@@ -10,10 +10,10 @@ use std::fs;
 /// each `qualifications` integration test's ignored journeys against that
 /// staged candidate.
 ///
-/// The journeys used to be the recipe's `tests` key. Stado 0.21.48, the
-/// worker installed on ubuntu-server-rtx-pro-6000, predates that key and
-/// refused jeden 0.1.23's recipe with `unknown recipe keys for this Stado:
-/// tests`, so the build step runs them, as Stado's own recipe does.
+/// The journeys used to be the recipe's `tests` key. A builder running an
+/// older Stado predates that key and refuses the recipe with `unknown recipe
+/// keys for this Stado: tests`, so the build step runs them, as Stado's own
+/// recipe does.
 pub(super) fn stage(binaries: &[String], qualifications: &[String]) -> Result<u8, String> {
     let Some(configured) = setting(OUTPUT_ENV) else {
         return Err(format!("{OUTPUT_ENV} is required for native staging"));
