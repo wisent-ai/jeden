@@ -68,20 +68,32 @@ struct ExecutionOptions {
     max_steps: Option<u32>,
 }
 
-fn emit(response: &Response) -> Result<String, String> {
-    serde_json::to_string_pretty(response)
-        .map(|v| v + "\n")
-        .map_err(|e| e.to_string())
+/// One value as `--json` prints it, or as `key: value` lines for a reader:
+/// a string as itself, null as `-`, anything nested as compact JSON.
+fn emit(value: &impl Serialize, json: bool) -> Result<String, String> {
+    let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
+    if json {
+        return serde_json::to_string_pretty(&value)
+            .map(|v| v + "\n")
+            .map_err(|e| e.to_string());
+    }
+    let Some(fields) = value.as_object() else {
+        return Ok(format!("{value}\n"));
+    };
+    Ok(fields
+        .iter()
+        .map(|(key, field)| match field {
+            serde_json::Value::String(text) => format!("{key}: {text}\n"),
+            serde_json::Value::Null => format!("{key}: -\n"),
+            other => format!("{key}: {other}\n"),
+        })
+        .collect())
 }
 
 pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
     let (store, request, resume) = match mode {
-        Mode::Status(id) => return emit(&Store::existing(id)?.response()?),
-        Mode::State(id) => {
-            return serde_json::to_string_pretty(&Store::existing(id)?.saved()?)
-                .map(|v| v + "\n")
-                .map_err(|e| e.to_string())
-        }
+        Mode::Status(id) => return emit(&Store::existing(id)?.response()?, args.json),
+        Mode::State(id) => return emit(&Store::existing(id)?.saved()?, args.json),
         Mode::Resume(id) => {
             let store = Store::existing(id)?;
             let request = store
@@ -103,7 +115,7 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
     };
     validate(&request)?;
     let Some(_claim) = store.claim()? else {
-        return emit(&store.response()?);
+        return emit(&store.response()?, args.json);
     };
     let mut response = store.get::<Response>("response")?.unwrap_or(Response {
         schema_version: SCHEMA_VERSION,
@@ -126,7 +138,7 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
         || response.state == State::Indeterminate
         || (response.state == State::Blocked && !resume)
     {
-        return emit(&response);
+        return emit(&response, args.json);
     }
     let execution = match store.get::<ExecutionOptions>("execution_options")? {
         Some(options) => options,
@@ -164,7 +176,7 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
     }
     response.spent_usd = budget::spent(store.id())?;
     store.set("response", &response)?;
-    emit(&response)
+    emit(&response, args.json)
 }
 
 fn validate(request: &Request) -> Result<(), String> {
