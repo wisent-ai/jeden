@@ -235,27 +235,29 @@ pub fn main() -> ExitCode {
             collab::serve(&addr).map(|_| String::new())
         }
         "import" => session_import::command(&args),
-        "sessions" => Ok(list_sessions(
-            args.positionals.first().and_then(|s| s.parse().ok()),
-        )),
+        "sessions" => match args.positionals.first() {
+            None => Ok(list_sessions(None)),
+            Some(raw) => raw.parse().map(|limit| list_sessions(Some(limit))).map_err(|_| {
+                cli::invocation::refusal::usage(format!(
+                    "sessions takes a whole number of sessions to list, not {raw:?}"
+                ))
+            }),
+        },
         "copy" => cli::clipboard::copy_command(&args),
-        "show" => args
-            .positionals
-            .first()
-            .map(|id| {
-                render_session_export(
-                    &read_session_value(id).unwrap_or_else(|e| json!({"error": e})),
-                    "json",
-                )
-                .unwrap_or_default()
-            })
-            .ok_or("show requires a session id".into()),
+        // A session that cannot be read or rendered is a failure with its
+        // cause, never an exit 0 carrying an error object or nothing.
+        "show" => match args.positionals.first() {
+            Some(id) => read_session_value(id)
+                .map_err(|error| format!("session {id} cannot be read: {error}"))
+                .and_then(|session| render_session_export(&session, "json")),
+            None => Err(cli::invocation::refusal::usage("show requires a session id")),
+        },
         "export" => export_session_command(&args),
         "artifacts" => args
             .positionals
             .first()
             .map(|id| list_artifacts_command(id))
-            .unwrap_or_else(|| Err("artifacts requires a session id".into())),
+            .unwrap_or_else(|| Err(cli::invocation::refusal::usage("artifacts requires a session id"))),
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
         "search-sessions" => search_sessions_command(&args),

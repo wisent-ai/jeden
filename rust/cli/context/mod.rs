@@ -30,6 +30,7 @@ struct Options {
 /// Flags may appear before or after the task text; the task is whatever is
 /// left, joined, so an unquoted sentence still works.
 fn options(rest: &[String]) -> Result<Options, String> {
+    use crate::cli::invocation::refusal::usage;
     let mut options = Options {
         query: String::new(),
         limit: None,
@@ -40,18 +41,18 @@ fn options(rest: &[String]) -> Result<Options, String> {
     while let Some(token) = iter.next() {
         match token.as_str() {
             "--limit" => {
-                let value = iter.next().ok_or("--limit requires a number")?;
+                let value = iter.next().ok_or_else(|| usage("--limit requires a number"))?;
                 options.limit = Some(
                     value
                         .parse()
-                        .map_err(|_| format!("--limit must be a number, not {value}"))?,
+                        .map_err(|_| usage(format!("--limit must be a number, not {value}")))?,
                 );
             }
             "--source" | "--sources" => {
-                options.sources = Some(iter.next().ok_or("--source requires a list")?.clone());
+                options.sources = Some(iter.next().ok_or_else(|| usage("--source requires a list"))?.clone());
             }
             other if other.starts_with("--") => {
-                return Err(format!("unknown context option: {other}\n{USAGE}"))
+                return Err(usage(format!("unknown context option: {other}\n{USAGE}")))
             }
             other => words.push(other.to_string()),
         }
@@ -78,7 +79,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             all.extend_from_slice(rest);
             recommend(args, &all)
         }
-        _ => Err(USAGE.into()),
+        _ => Err(crate::cli::invocation::refusal::usage(USAGE)),
     }
 }
 
@@ -87,7 +88,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
 fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
     let options = options(rest)?;
     if options.query.is_empty() {
-        return Err(format!("context prompt requires a task\n{USAGE}"));
+        return Err(crate::cli::invocation::refusal::usage(format!("context prompt requires a task\n{USAGE}")));
     }
     let config = crate::load_config(&args.cwd);
     let settings = advisor::settings(&args.cwd, &config);
@@ -119,7 +120,7 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
 fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
     let options = options(rest)?;
     if options.query.is_empty() {
-        return Err(format!("context recommend requires a task\n{USAGE}"));
+        return Err(crate::cli::invocation::refusal::usage(format!("context recommend requires a task\n{USAGE}")));
     }
     let settings = advisor::settings(&args.cwd, &crate::load_config(&args.cwd));
     let mut request = advisor::Request::from_settings(&options.query, &settings);

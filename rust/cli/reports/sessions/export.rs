@@ -76,7 +76,7 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
     let (id, rest) = args
         .positionals
         .split_first()
-        .ok_or("export requires a session id or path")?;
+        .ok_or_else(|| crate::cli::invocation::refusal::usage("export requires a session id or path"))?;
     let mut format = "json".to_string();
     let mut output = None;
     for arg in rest {
@@ -84,6 +84,12 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
             format = "html".into();
         } else if arg == "--markdown" {
             format = "markdown".into();
+        } else if arg.starts_with("--") || output.is_some() {
+            // An unknown flag is not a file name, and a second path is not
+            // silently preferred over the first.
+            return Err(crate::cli::invocation::refusal::usage(format!(
+                "export: unexpected argument {arg:?}; usage: jeden export <session-id-or-path> [output] [--html|--markdown]"
+            )));
         } else {
             output = Some(arg.clone());
         }
@@ -123,8 +129,8 @@ pub(crate) fn list_artifacts_command(id_or_path: &str) -> Result<String, String>
 
 pub(crate) fn artifact_command(args: &Args) -> Result<String, String> {
     let mut it = args.positionals.iter();
-    let id = it.next().ok_or("artifact requires a session id or path")?;
-    let name = it.next().ok_or("artifact requires an artifact name")?;
+    let id = it.next().ok_or_else(|| crate::cli::invocation::refusal::usage("artifact requires a session id or path"))?;
+    let name = it.next().ok_or_else(|| crate::cli::invocation::refusal::usage("artifact requires an artifact name"))?;
     let output = it.next();
     let root = session_dir_for(id).join("artifacts");
     let file = root.join(name);

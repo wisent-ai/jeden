@@ -114,6 +114,7 @@ pub(crate) fn execute(
     mut json: bool,
     run_args: Option<&Args>,
 ) -> Result<String, String> {
+    use crate::cli::invocation::refusal::usage;
     let mut selected = None;
     let mut revision = None;
     let mut reason = None;
@@ -126,7 +127,7 @@ pub(crate) fn execute(
                 selected = Some(
                     arguments
                         .next()
-                        .ok_or("--session requires an id or path")?
+                        .ok_or_else(|| usage("--session requires an id or path"))?
                         .as_str(),
                 )
             }
@@ -134,16 +135,16 @@ pub(crate) fn execute(
                 revision = Some(
                     arguments
                         .next()
-                        .ok_or("--revision requires a number")?
+                        .ok_or_else(|| usage("--revision requires a number"))?
                         .parse::<u64>()
-                        .map_err(|_| "revision must be an unsigned integer")?,
+                        .map_err(|_| usage("--revision must be an unsigned integer"))?,
                 )
             }
             "--reason" => {
                 reason = Some(
                     arguments
                         .next()
-                        .ok_or("--reason requires an explanation")?
+                        .ok_or_else(|| usage("--reason requires an explanation"))?
                         .as_str(),
                 )
             }
@@ -151,13 +152,13 @@ pub(crate) fn execute(
                 text = Some(
                     arguments
                         .next()
-                        .ok_or("--text requires the answer")?
+                        .ok_or_else(|| usage("--text requires the answer"))?
                         .as_str(),
                 )
             }
             "--json" => json = true,
             "--help" => return Ok(USAGE.into()),
-            flag if flag.starts_with("--") => return Err(format!("unknown todo option: {flag}")),
+            flag if flag.starts_with("--") => return Err(usage(format!("unknown todo option: {flag}\n{USAGE}"))),
             _ => words.push(argument.as_str()),
         }
     }
@@ -169,7 +170,7 @@ pub(crate) fn execute(
         action,
         "list" | "add" | "pause" | "resume" | "cancel" | "defect" | "answer" | "continue"
     ) {
-        return Err(format!("{USAGE}\nTask completion requires independent verification; there is no operator done command."));
+        return Err(usage(format!("unknown todo action: {action}\n{USAGE}\nTask completion requires independent verification; there is no operator done command.")));
     }
     if selected.is_none() {
         super::migrate_workspace(cwd, None)?;

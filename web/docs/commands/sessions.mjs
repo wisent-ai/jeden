@@ -137,7 +137,7 @@ export const sessionCommands = [
     ],
     effect: "Reads session directory names and prints one per line; it does not mutate session data. An empty or unreadable root prints <code>No sessions found.</code>.",
     refusals: [
-      "There is no command-specific hard refusal: a non-numeric limit is ignored because parsing uses an optional integer conversion.",
+      "A limit that is not a whole number is refused as <code>sessions takes a whole number of sessions to list, not \"VALUE\"</code>.",
       "Unknown global options are refused before dispatch.",
     ],
   },
@@ -149,7 +149,7 @@ export const sessionCommands = [
     effect: "Reads the session state and validated transcript ledger, then prints its id, path, ledger version, active leaf, recovery flag, and exported events. It does not mutate the session.",
     refusals: [
       "A missing selector is refused as <code>show requires a session id</code>.",
-      "A missing or unreadable session is represented in the printed JSON error object by this dispatcher rather than changing files.",
+      "A session that cannot be read is refused as <code>session ID cannot be read: CAUSE</code>; nothing is printed on stdout.",
     ],
   },
   {
@@ -158,11 +158,12 @@ export const sessionCommands = [
     purpose: "Export a recorded session as JSON, HTML, or Markdown.",
     inputs: [
       "Required: a session identifier or path.",
-      "Optional: <code>--html</code> or <code>--markdown</code>; JSON is the default. A non-flag trailing value is the output file.",
+      "Optional: <code>--html</code> or <code>--markdown</code>; JSON is the default. One non-flag trailing value is the output file.",
     ],
     effect: "Prints the serialized session when no output path is supplied; otherwise writes the payload to that path and prints the path.",
     refusals: [
       "A missing selector is refused as <code>export requires a session id or path</code>.",
+      "Any other flag, or a second output path, is refused as <code>export: unexpected argument \"ARG\"; usage: jeden export &lt;session-id-or-path&gt; [output] [--html|--markdown]</code>.",
       "Missing sessions, invalid ledgers, unsupported renderer formats, and output write errors are returned without a partial successful result.",
     ],
   },

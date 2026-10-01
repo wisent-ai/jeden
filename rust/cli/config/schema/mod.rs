@@ -57,7 +57,13 @@ pub(crate) fn settings_schema() -> &'static [SettingSpec] {
     &SETTINGS_SCHEMA
 }
 
+/// A key the schema does not declare, refused with where the declared ones are listed.
+fn unknown_key(key: &str) -> String {
+    crate::cli::invocation::refusal::usage(format!("unknown config key: {key}; `jeden config list` shows every key"))
+}
+
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {
+    use crate::cli::invocation::refusal::usage;
     let (verb, rest) = args
         .positionals
         .split_first()
@@ -73,8 +79,8 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
         }),
         "path" => Ok(format!("{}\n", user_config_path().display())),
         "get" => {
-            let key = rest.first().ok_or("config get requires a key")?;
-            let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+            let key = rest.first().ok_or_else(|| usage("config get requires a key"))?;
+            let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
             let config = merged_config_value(&args.cwd);
             let value = effective_setting_value(&config, spec);
             Ok(if args.json {
@@ -88,13 +94,13 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
             })
         }
         "set" => {
-            let (key, value_tokens) = rest.split_first().ok_or("config set requires a key")?;
-            let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+            let (key, value_tokens) = rest.split_first().ok_or_else(|| usage("config set requires a key"))?;
+            let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
             if value_tokens.is_empty() {
-                return Err("config set requires a value".into());
+                return Err(usage(format!("config set requires a value for {key}")));
             }
             let raw = value_tokens.join(" ");
-            let parsed = parse_setting_value(spec, &raw)?;
+            let parsed = parse_setting_value(spec, &raw).map_err(usage)?;
             let mut config = read_user_writable_config();
             config_set_value(&mut config, key, parsed.clone())?;
             let path = write_user_config(&config)?;
@@ -105,8 +111,8 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
             })
         }
         "reset" => {
-            let key = rest.first().ok_or("config reset requires a key")?;
-            let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+            let key = rest.first().ok_or_else(|| usage("config reset requires a key"))?;
+            let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
             let default_value = setting_default(spec);
             let mut config = read_user_writable_config();
             config_set_value(&mut config, key, default_value.clone())?;
@@ -118,8 +124,8 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
             })
         }
         "unset" => {
-            let key = rest.first().ok_or("config unset requires a key")?;
-            let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
+            let key = rest.first().ok_or_else(|| usage("config unset requires a key"))?;
+            let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
             let mut config = read_user_writable_config();
             let removed = config_remove_value(&mut config, key)?;
             let path = write_user_config(&config)?;
@@ -136,10 +142,9 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
                 format!("{key} was not written in {}\n", path.display())
             })
         }
-        _ => Err(
-            "Usage: jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] \
+        other => Err(usage(format!(
+            "unknown config verb: {other}; usage: jeden config [list|path|get <key>|set <key> <value>|reset <key>|unset <key>] \
              [--json]"
-                .into(),
-        ),
+        ))),
     }
 }

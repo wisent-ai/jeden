@@ -81,19 +81,22 @@ pub(crate) fn search_sessions_command(args: &Args) -> Result<String, String> {
     let query = args
         .positionals
         .first()
-        .ok_or("search-sessions requires a query")?
+        .ok_or_else(|| crate::cli::invocation::refusal::usage("search-sessions requires a query"))?
         .trim()
         .to_ascii_lowercase();
     if query.is_empty() {
-        return Err("search-sessions requires a non-empty query".into());
+        return Err(crate::cli::invocation::refusal::usage("search-sessions requires a non-empty query"));
     }
     // Optional positional limit; absent means scan every session (the prior
     // default/clamp were unconsented numeric literals and are dropped).
-    let limit = args
-        .positionals
-        .split_first()
-        .and_then(|(_, rest)| rest.first())
-        .and_then(|value| value.parse::<usize>().ok());
+    let limit = match args.positionals.get(1) {
+        None => None,
+        Some(raw) => Some(raw.parse::<usize>().map_err(|_| {
+            crate::cli::invocation::refusal::usage(format!(
+                "search-sessions takes a whole number of sessions to scan after the query, not {raw:?}"
+            ))
+        })?),
+    };
     let mut rows = Vec::new();
     if let Ok(entries) = fs::read_dir(session_root()) {
         let mut entries = entries

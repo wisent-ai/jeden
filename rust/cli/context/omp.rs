@@ -32,17 +32,17 @@ pub(super) fn target(rest: &[String]) -> Result<Target, String> {
                 })
             }
             "--file" => {
-                let path = iter.next().ok_or("--file requires a path")?;
+                let path = iter.next().ok_or_else(|| crate::cli::invocation::refusal::usage("--file requires a path"))?;
                 target = Some(Target {
                     name: "file",
                     file: PathBuf::from(path),
                 })
             }
-            other => return Err(format!("unknown context option: {other}")),
+            other => return Err(crate::cli::invocation::refusal::usage(format!("unknown context option: {other}"))),
         }
     }
     target.ok_or_else(|| {
-        "context install and context installed require --omp or --file <path>".to_string()
+        crate::cli::invocation::refusal::usage("context install and context installed require --omp or --file <path>")
     })
 }
 

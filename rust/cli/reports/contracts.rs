@@ -98,17 +98,17 @@ fn target(rest: &[String]) -> Result<Target, String> {
                 })
             }
             "--file" => {
-                let path = iter.next().ok_or("--file requires a path")?;
+                let path = iter.next().ok_or_else(|| crate::cli::invocation::refusal::usage("--file requires a path"))?;
                 target = Some(Target {
                     name: "file",
                     file: PathBuf::from(path),
                 })
             }
-            other => return Err(format!("unknown contracts option: {other}\n{USAGE}")),
+            other => return Err(crate::cli::invocation::refusal::usage(format!("unknown contracts option: {other}\n{USAGE}"))),
         }
     }
     target.ok_or_else(|| {
-        format!("contracts install and status require --omp or --file <path>\n{USAGE}")
+        crate::cli::invocation::refusal::usage(format!("contracts install and status require --omp or --file <path>\n{USAGE}"))
     })
 }
 
@@ -121,7 +121,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     match verb {
         "render" => {
             if !rest.is_empty() {
-                return Err(USAGE.into());
+                return Err(crate::cli::invocation::refusal::usage(USAGE));
             }
             let rendered = render(&args.cwd);
             Ok(if args.json {
@@ -196,6 +196,6 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 format!("{path} already carries the Jeden contracts\n")
             })
         }
-        _ => Err(USAGE.into()),
+        _ => Err(crate::cli::invocation::refusal::usage(USAGE)),
     }
 }

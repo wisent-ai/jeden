@@ -5,7 +5,7 @@ import { completionCommands } from "./commands/completion.mjs";
 import { contextCommands } from "./commands/context.mjs";
 const ORIGIN = "https://jeden.wisent.com";
 // The exit status every command shares, stated once rather than per page.
-const EXIT_STATUS = "A command line that does not parse, or names an unknown command, prints the error and the usage and exits <code>2</code>; any other refusal or failure exits <code>1</code>.";
+const EXIT_STATUS = "A command line that does not parse, names an unknown command, or that a command refuses as its own invocation (a missing, unexpected or invalid argument, a missing confirmation) prints the error and exits <code>2</code>; any other refusal or failure exits <code>1</code>.";
 
 function commandPage({ path, invocation, purpose, inputs, effect, refusals }) {
   const command = path.split("/").join(" ");
