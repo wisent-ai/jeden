@@ -103,28 +103,33 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
     }
 }
 
-pub(crate) fn list_artifacts_command(id_or_path: &str) -> Result<String, String> {
+/// `jeden artifacts <session> [--json]`: each artifact's name and size in
+/// bytes, one per line or as a JSON array.
+pub(crate) fn list_artifacts_command(id_or_path: &str, json: bool) -> Result<String, String> {
     let dir = session_dir_for(id_or_path).join("artifacts");
-    let mut rows = vec![];
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            if let Ok(meta) = entry.metadata() {
-                if meta.is_file() {
-                    rows.push(format!(
-                        "{}\t{}",
-                        entry.file_name().to_string_lossy(),
-                        meta.len()
-                    ));
+    let mut rows: Vec<(String, u64)> = vec![];
+    match fs::read_dir(&dir) {
+        Ok(entries) => {
+            for entry in entries.flatten() {
+                if let Ok(meta) = entry.metadata() {
+                    if meta.is_file() {
+                        rows.push((entry.file_name().to_string_lossy().to_string(), meta.len()));
+                    }
                 }
             }
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("the artifacts of {id_or_path} at {} cannot be read: {error}", dir.display())),
     }
     rows.sort();
-    Ok(if rows.is_empty() {
-        String::new()
-    } else {
-        rows.join("\n") + "\n"
-    })
+    if json {
+        let listed: Vec<Value> = rows
+            .iter()
+            .map(|(name, bytes)| serde_json::json!({ "name": name, "bytes": bytes }))
+            .collect();
+        return serde_json::to_string_pretty(&listed).map(|text| text + "\n").map_err(|error| error.to_string());
+    }
+    Ok(rows.iter().map(|(name, bytes)| format!("{name}\t{bytes}\n")).collect())
 }
 
 pub(crate) fn artifact_command(args: &Args) -> Result<String, String> {

@@ -63,18 +63,25 @@ struct SessionLedger {
 use crate::{agent, read_json, session_root, Args};
 use ledger::export_event;
 
-pub(crate) fn list_sessions(limit: Option<usize>) -> String {
+/// `jeden sessions [limit] [--json]`: the session directories, one per line
+/// or as a JSON array. A session root that exists but cannot be read is that
+/// error, not "No sessions found".
+pub(crate) fn list_sessions(limit: Option<usize>, json: bool) -> Result<String, String> {
+    let root = session_root();
     let mut rows = vec![];
-    if let Ok(entries) = fs::read_dir(session_root()) {
-        for entry in entries.flatten().take(limit.unwrap_or(usize::MAX)) {
-            rows.push(entry.file_name().to_string_lossy().to_string());
+    match fs::read_dir(&root) {
+        Ok(entries) => {
+            for entry in entries.flatten().take(limit.unwrap_or(usize::MAX)) {
+                rows.push(entry.file_name().to_string_lossy().to_string());
+            }
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("the session root {} cannot be read: {error}", root.display())),
     }
-    if rows.is_empty() {
-        "No sessions found.\n".into()
-    } else {
-        rows.join("\n") + "\n"
+    if json {
+        return serde_json::to_string_pretty(&rows).map(|text| text + "\n").map_err(|error| error.to_string());
     }
+    Ok(if rows.is_empty() { "No sessions found.\n".into() } else { rows.join("\n") + "\n" })
 }
 
 pub(crate) fn search_sessions_command(args: &Args) -> Result<String, String> {

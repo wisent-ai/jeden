@@ -236,27 +236,31 @@ pub fn main() -> ExitCode {
         }
         "import" => session_import::command(&args),
         "sessions" => match args.positionals.first() {
-            None => Ok(list_sessions(None)),
-            Some(raw) => raw.parse().map(|limit| list_sessions(Some(limit))).map_err(|_| {
-                cli::invocation::refusal::usage(format!(
-                    "sessions takes a whole number of sessions to list, not {raw:?}"
-                ))
-            }),
+            None => list_sessions(None, args.json),
+            Some(raw) => raw
+                .parse()
+                .map_err(|_| {
+                    cli::invocation::refusal::usage(format!(
+                        "sessions takes a whole number of sessions to list, not {raw:?}"
+                    ))
+                })
+                .and_then(|limit| list_sessions(Some(limit), args.json)),
         },
         "copy" => cli::clipboard::copy_command(&args),
         // A session that cannot be read or rendered is a failure with its
-        // cause, never an exit 0 carrying an error object or nothing.
+        // cause, never an exit 0 carrying an error object or nothing. Text is
+        // the session's events one heading each; --json is the whole record.
         "show" => match args.positionals.first() {
             Some(id) => read_session_value(id)
                 .map_err(|error| format!("session {id} cannot be read: {error}"))
-                .and_then(|session| render_session_export(&session, "json")),
+                .and_then(|session| render_session_export(&session, if args.json { "json" } else { "markdown" })),
             None => Err(cli::invocation::refusal::usage("show requires a session id")),
         },
         "export" => export_session_command(&args),
         "artifacts" => args
             .positionals
             .first()
-            .map(|id| list_artifacts_command(id))
+            .map(|id| list_artifacts_command(id, args.json))
             .unwrap_or_else(|| Err(cli::invocation::refusal::usage("artifacts requires a session id"))),
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),

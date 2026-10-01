@@ -129,24 +129,26 @@ export const sessionCommands = [
   },
   {
     path: "sessions",
-    invocation: "jeden sessions [limit]",
+    invocation: "jeden sessions [limit] [--json]",
     purpose: "List locally stored Jeden session identifiers.",
     inputs: [
       "Optional: a positive integer-style positional limit. With no limit, every directory in the session root is considered.",
+      "Optional: <code>--json</code> prints the identifiers as one JSON array.",
       "The session root is <code>~/.jeden/sessions</code> unless <code>JEDEN_SESSION_ROOT</code> overrides it.",
     ],
-    effect: "Reads session directory names and prints one per line; it does not mutate session data. An empty or unreadable root prints <code>No sessions found.</code>.",
+    effect: "Reads session directory names and prints one per line, or the JSON array; it does not mutate session data. A root that does not exist prints <code>No sessions found.</code> (or <code>[]</code>).",
     refusals: [
       "A limit that is not a whole number is refused as <code>sessions takes a whole number of sessions to list, not \"VALUE\"</code>.",
+      "A session root that exists but cannot be read is refused as <code>the session root PATH cannot be read: CAUSE</code>.",
       "Unknown global options are refused before dispatch.",
     ],
   },
   {
     path: "show",
-    invocation: "jeden show <session-id-or-path>",
-    purpose: "Render one durable session export as JSON on stdout.",
-    inputs: ["Required: a session identifier under the session root or a session directory path containing a slash."],
-    effect: "Reads the session state and validated transcript ledger, then prints its id, path, ledger version, active leaf, recovery flag, and exported events. It does not mutate the session.",
+    invocation: "jeden show <session-id-or-path> [--json]",
+    purpose: "Print one durable session: each event under its own heading, or the whole record as JSON.",
+    inputs: ["Required: a session identifier under the session root or a session directory path containing a slash.", "Optional: <code>--json</code> prints the full export."],
+    effect: "Reads the session state and validated transcript ledger. Without <code>--json</code> it prints the session id and path and each event's time, type and data; with <code>--json</code> it prints its id, path, ledger version, active leaf, recovery flag, and exported events. It does not mutate the session.",
     refusals: [
       "A missing selector is refused as <code>show requires a session id</code>.",
       "A session that cannot be read is refused as <code>session ID cannot be read: CAUSE</code>; nothing is printed on stdout.",
@@ -169,13 +171,13 @@ export const sessionCommands = [
   },
   {
     path: "artifacts",
-    invocation: "jeden artifacts <session-id-or-path>",
+    invocation: "jeden artifacts <session-id-or-path> [--json]",
     purpose: "List files in one session's artifact directory.",
-    inputs: ["Required: a session identifier or path."],
-    effect: "Prints sorted <code>name&lt;TAB&gt;byte-size</code> rows for regular artifact files and prints nothing when the directory has no readable files. It does not mutate state.",
+    inputs: ["Required: a session identifier or path.", "Optional: <code>--json</code> prints <code>[{name, bytes}]</code>."],
+    effect: "Prints sorted <code>name&lt;TAB&gt;byte-size</code> rows for regular artifact files, or the JSON array, and prints nothing (or <code>[]</code>) when the session has no artifact directory. It does not mutate state.",
     refusals: [
       "A missing selector is refused as <code>artifacts requires a session id</code>.",
-      "Unreadable or absent artifact directories yield an empty listing rather than fabricating entries.",
+      "An artifact directory that exists but cannot be read is refused as <code>the artifacts of SESSION at PATH cannot be read: CAUSE</code>.",
     ],
   },
   {
