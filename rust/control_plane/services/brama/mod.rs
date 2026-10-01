@@ -16,6 +16,8 @@ mod catalog;
 mod error;
 #[path = "request/fetch.rs"]
 mod fetch;
+#[path = "request/media.rs"]
+mod media;
 
 use cache::{catalog_cache_key, CACHE};
 pub use catalog::{BramaReadiness, ModelCatalog, ModelEntry, ModelPerf, ModelPrice};

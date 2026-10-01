@@ -236,6 +236,19 @@ impl BramaClient {
         body: Option<Vec<u8>>,
         meta: &RequestMeta,
     ) -> Result<TransportResponse, BramaError> {
+        self.request_bounded(method, path, body, meta, MAX_RESPONSE_BYTES)
+    }
+
+    /// One versioned request whose answer may be as large as `max_response_bytes`:
+    /// a generated image or a spoken text is far larger than any JSON reply.
+    pub(super) fn request_bounded(
+        &self,
+        method: reqwest::Method,
+        path: &str,
+        body: Option<Vec<u8>>,
+        meta: &RequestMeta,
+        max_response_bytes: u64,
+    ) -> Result<TransportResponse, BramaError> {
         super::super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
@@ -257,7 +270,7 @@ impl BramaClient {
                 url: format!("{}/{API_VERSION}{path}", self.key()?),
                 headers,
                 body,
-                max_response_bytes: MAX_RESPONSE_BYTES,
+                max_response_bytes,
             })
             .map_err(BramaError::Transport)?;
         super::super::contract::negotiate_response(&response.headers).map_err(|error| {

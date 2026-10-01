@@ -238,8 +238,8 @@ pub(super) static PROBES: &[AreaProbe] = &[
         area: "image-inspect-generate-i-tts",
         sources: &[source!(
             "media-service",
-            "rust/tool_services/media.rs",
-            ["MediaService", "post_json_fallback", "image_metadata"]
+            "rust/tool_services/media/mod.rs",
+            ["MediaService", "image_generate", "image_metadata"]
         )],
     },
     AreaProbe {

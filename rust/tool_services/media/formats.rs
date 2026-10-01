@@ -1,6 +1,4 @@
 use super::super::types::{ServiceError, ServiceResult};
-use super::router::check_job_id;
-use super::CapabilitySubmission;
 use serde_json::Value;
 
 pub(super) fn optional_string(input: &Value, key: &str) -> Option<String> {
@@ -26,45 +24,6 @@ pub(super) fn dimensions(size: Option<&str>) -> ServiceResult<(Option<u32>, Opti
         .parse()
         .map_err(|_| ServiceError::InvalidInput("invalid image height".into()))?;
     Ok((Some(width), Some(height)))
-}
-
-pub(super) fn aspect_ratio(size: Option<&str>) -> ServiceResult<Option<String>> {
-    let (width, height) = dimensions(size)?;
-    Ok(width
-        .zip(height)
-        .map(|(width, height)| format!("{width}:{height}")))
-}
-
-pub(super) fn image_extension(mime_type: &str) -> ServiceResult<&'static str> {
-    match mime_type.trim().to_ascii_lowercase().as_str() {
-        "image/png" => Ok("png"),
-        "image/jpeg" | "image/jpg" => Ok("jpg"),
-        "image/webp" => Ok("webp"),
-        "image/gif" => Ok("gif"),
-        other => Err(ServiceError::Protocol {
-            service: "media-router",
-            detail: format!("unsupported image Content-Type {other}"),
-        }),
-    }
-}
-
-pub(super) fn validate_submission(submission: CapabilitySubmission) -> ServiceResult<String> {
-    if !submission.success {
-        return Err(ServiceError::Backend {
-            service: "media-router",
-            detail: submission
-                .error
-                .unwrap_or_else(|| "media submission reported failure".into()),
-        });
-    }
-    check_job_id(&submission.job_id)?;
-    if submission.status.trim().is_empty() {
-        return Err(ServiceError::Protocol {
-            service: "media-router",
-            detail: "media submission lacks status".into(),
-        });
-    }
-    Ok(submission.job_id)
 }
 
 pub(super) fn image_metadata(bytes: &[u8]) -> ServiceResult<(&'static str, u32, u32)> {
