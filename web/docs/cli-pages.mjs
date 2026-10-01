@@ -100,7 +100,7 @@ export const cliIndexPage = {
     {
       title: "Interactive root and global options",
       paragraphs: [
-        "Running <code>jeden</code> without a command opens the interactive terminal. <code>--cwd path</code>, <code>--model name</code>, <code>--max-tokens n</code>, <code>--max-steps n</code>, <code>--allow-write</code>, <code>--allow-command</code>, and <code>--yolo</code>/<code>--auto-approve</code> configure that root invocation. <code>--version</code>/<code>-V</code> prints the compiled version and <code>--help</code>/<code>-h</code> prints usage.",
+        "Running <code>jeden</code> without a command opens the interactive terminal. <code>--cwd path</code>, <code>--model name</code>, <code>--max-tokens n</code>, <code>--max-steps n</code>, <code>--allow-write</code>, <code>--allow-command</code>, and <code>--yolo</code>/<code>--auto-approve</code> configure that root invocation. <code>--version</code>/<code>-V</code> prints the compiled version and <code>--help</code>/<code>-h</code> prints usage. <code>--help</code> or <code>-h</code> after any subcommand prints that subcommand's usage lines and never runs it.",
         "Unknown commands and unknown global options fail instead of falling through. Environment files load from the selected workspace before dispatched commands run.",
       ],
       commands: [{ label: "Interactive", code: "jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]" }],

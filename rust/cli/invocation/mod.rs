@@ -102,6 +102,25 @@ pub(crate) fn usage() -> String {
     .to_string()
 }
 
+/// The usage lines that name one subcommand, or the whole usage when none
+/// does: what `jeden <subcommand> --help` prints.
+pub(crate) fn command_usage(command: Option<&str>) -> String {
+    let whole = usage();
+    let Some(command) = command else {
+        return whole;
+    };
+    let prefix = format!("  jeden {command}");
+    let lines: Vec<&str> = whole
+        .lines()
+        .filter(|line| *line == prefix || line.starts_with(&format!("{prefix} ")))
+        .collect();
+    if lines.is_empty() {
+        whole
+    } else {
+        format!("Usage:\n{}\n", lines.join("\n"))
+    }
+}
+
 pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let mut rest = argv.into_iter();
     let first = rest.next();
@@ -138,6 +157,19 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             .into_iter();
         command = "interactive".into();
     }
+    // `--help` or `-h` after a subcommand answers with that subcommand's
+    // usage lines and never runs it: `jeden roadmap drop --help` used to read
+    // `--help` as the value of an option, and `jeden config --help` refused it.
+    let rest_words: Vec<String> = rest.collect();
+    if command != "interactive" && rest_words.iter().any(|word| word == "--help" || word == "-h") {
+        return Ok(Args {
+            command: "help".into(),
+            cwd: env::current_dir().unwrap_or_default(),
+            positionals: vec![command],
+            ..Default::default()
+        });
+    }
+    let mut rest = rest_words.into_iter();
     let mut args = Args {
         command,
         cwd: env::current_dir().map_err(|e| e.to_string())?,

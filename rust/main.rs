@@ -214,7 +214,7 @@ pub fn main() -> ExitCode {
         };
     }
     let result = match args.command.as_str() {
-        "help" => Ok(usage()),
+        "help" => Ok(cli::invocation::command_usage(args.positionals.first().map(String::as_str))),
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
         "pursue" => autonomy::command(&args),
