@@ -14,7 +14,7 @@ pub(super) fn read_mode_state(cwd: &Path) -> Value {
 pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
     let path = mode_state_path(cwd);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        crate::slash::state::ensure_mode_state_dir(parent)?;
     }
     fs::write(
         path,

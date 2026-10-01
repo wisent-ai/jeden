@@ -163,6 +163,26 @@ pub(crate) fn mode_state_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/mode-state.json")
 }
 
+/// Create the directory that holds mode state and keep that state out of
+/// version control. Mode state names the working directory, which includes the
+/// operator's home path, so a checkout that commits it publishes that path.
+/// The ignore file is written once, beside the state, so it holds in every
+/// checkout Jeden works in without each repository listing it.
+pub(crate) fn ensure_mode_state_dir(directory: &Path) -> Result<(), String> {
+    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(directory.join(".gitignore"))
+    {
+        Ok(mut file) => file
+            .write_all(b"mode-state.json\n.mode-state*\n")
+            .map_err(|error| error.to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
 struct ModeStateLock {
     path: PathBuf,
     _file: File,
@@ -178,7 +198,7 @@ impl ModeStateLock {
     fn acquire(cwd: &Path) -> Result<Self, String> {
         let path = cwd.join(".jeden/.mode-state.lock");
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+            ensure_mode_state_dir(parent)?;
         }
         for _ in 0..500 {
             match OpenOptions::new().write(true).create_new(true).open(&path) {
@@ -222,7 +242,7 @@ pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), Stri
     let parent = path
         .parent()
         .ok_or_else(|| "mode-state path has no parent".to_string())?;
-    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    ensure_mode_state_dir(parent)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
