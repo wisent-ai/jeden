@@ -44,8 +44,15 @@ const handlePageAction = async (action, input, state) => {
       case "goto": {
         const url = String(input.url ?? "").trim();
         if (!url) throw new Error("url is required");
-        await client.send("Page.navigate", { url });
-        await waitReady(client);
+        // The page's own DOMContentLoaded event ends this request; a failed
+        // navigation is reported with Chromium's errorText.
+        const loaded = client.next("Page.domContentEventFired");
+        // A same-document navigation fires no load event; the socket closing
+        // later must not surface as an unhandled rejection.
+        loaded.catch(() => {});
+        const navigation = await client.send("Page.navigate", { url });
+        if (navigation.errorText) throw new Error(`navigation to ${url} failed: ${navigation.errorText}`);
+        if (navigation.loaderId) await loaded;
         value = { url: await evaluate(client, "location.href"), title: await evaluate(client, "document.title") };
         break;
       }
@@ -85,8 +92,9 @@ const handlePageAction = async (action, input, state) => {
         break;
       }
       case "wait": {
-        if (input.selector) await waitSelector(client, String(input.selector));
-        else await sleep(Math.max(0, Number(input.ms ?? input.milliseconds ?? 250)));
+        const selector = String(input.selector ?? "").trim();
+        if (!selector) throw new Error("selector is required: the page is observed until it renders that element; a fixed pause is not offered");
+        await untilSelector(client, selector);
         value = true;
         break;
       }

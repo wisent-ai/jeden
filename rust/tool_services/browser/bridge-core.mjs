@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { watch } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const argv = process.argv.slice(2);
@@ -20,7 +21,6 @@ const profile = option("--user-data-dir", join(root, "profile"));
 const statePath = join(root, "state.json");
 const endpoint = `http://127.0.0.1:${port}`;
 
-const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
 const readStdin = async () => {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
@@ -51,10 +51,15 @@ const browserReady = async () => {
     return false;
   }
 };
+// Chromium writes DevToolsActivePort into the profile once CDP listens. The
+// directory watch reports that write, and the child's exit is the failure;
+// there is no retry loop and no deadline (cli.md rule 8).
 const ensureBrowser = async () => {
   if (await browserReady()) return;
   if (!chrome) throw new Error("Chromium executable is not configured");
   await mkdir(profile, { recursive: true });
+  const activePort = join(profile, "DevToolsActivePort");
+  await rm(activePort, { force: true });
   const browserTmp = join(root, "tmp");
   await mkdir(browserTmp, { recursive: true });
   const args = [
@@ -73,20 +78,36 @@ const ensureBrowser = async () => {
   ];
   if (!visible) args.push("--headless=new", "--disable-gpu");
   args.push("about:blank");
+  const watcher = watch(profile);
+  const listening = new Promise((resolve, reject) => {
+    watcher.on("change", (_, name) => {
+      if (String(name) === "DevToolsActivePort") resolve();
+    });
+    watcher.on("error", reject);
+  });
   const child = spawn(chrome, args, {
     detached: true,
     stdio: "ignore",
     env: { ...process.env, TMPDIR: browserTmp },
   });
+  const exited = new Promise((_, reject) => {
+    child.once("error", error => reject(new Error(`Chromium could not start: ${error.message}`)));
+    child.once("exit", (code, signal) => reject(new Error(
+      `Chromium exited (code ${code ?? "none"}, signal ${signal ?? "none"}) before exposing CDP on ${endpoint}`,
+    )));
+  });
   const state = await readState();
   state.browserPid = child.pid;
   await saveState(state);
-  child.unref();
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await browserReady()) return;
-    await sleep(100);
+  try {
+    await Promise.race([listening, exited]);
+  } finally {
+    watcher.close();
+    child.removeAllListeners("exit");
+    child.removeAllListeners("error");
+    child.unref();
   }
-  throw new Error(`Chromium did not expose CDP on ${endpoint}`);
+  if (!(await browserReady())) throw new Error(`Chromium wrote DevToolsActivePort but CDP on ${endpoint} did not answer`);
 };
 const listTabs = async () => (await requestJson("/json/list"))
   .filter(target => target.type === "page")
@@ -114,36 +135,51 @@ class CdpClient {
     this.socket = null;
     this.sequence = 1;
     this.pending = new Map();
+    this.events = new Map();
   }
   async connect() {
     this.socket = new WebSocket(this.url);
     this.socket.addEventListener("message", event => {
       const message = JSON.parse(String(event.data));
-      if (!message.id) return;
+      if (!message.id) {
+        const listeners = this.events.get(message.method);
+        if (!listeners) return;
+        this.events.delete(message.method);
+        for (const listener of listeners) listener.resolve(message.params ?? {});
+        return;
+      }
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
       if (message.error) pending.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
       else pending.resolve(message.result ?? {});
     });
+    // A closed socket fails every call and event still outstanding on it.
+    this.socket.addEventListener("close", () => {
+      const closed = new Error("CDP WebSocket closed");
+      for (const pending of this.pending.values()) pending.reject(closed);
+      this.pending.clear();
+      for (const listeners of this.events.values()) for (const listener of listeners) listener.reject(closed);
+      this.events.clear();
+    });
     await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error("CDP WebSocket connection timed out")), 5000);
-      this.socket.addEventListener("open", () => { clearTimeout(timer); resolve(); }, { once: true });
-      this.socket.addEventListener("error", () => { clearTimeout(timer); reject(new Error("CDP WebSocket connection failed")); }, { once: true });
+      this.socket.addEventListener("open", () => resolve(), { once: true });
+      this.socket.addEventListener("error", () => reject(new Error("CDP WebSocket connection failed")), { once: true });
     });
   }
   send(method, params = {}) {
     const id = this.sequence++;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`${method} timed out`));
-      }, 30000);
-      this.pending.set(id, {
-        resolve: value => { clearTimeout(timer); resolve(value); },
-        reject: error => { clearTimeout(timer); reject(error); },
-      });
+      this.pending.set(id, { resolve, reject });
       this.socket.send(JSON.stringify({ id, method, params }));
+    });
+  }
+  // Resolves with the params of the next `method` event on this target.
+  next(method) {
+    return new Promise((resolve, reject) => {
+      const listeners = this.events.get(method) ?? [];
+      listeners.push({ resolve, reject });
+      this.events.set(method, listeners);
     });
   }
   close() {
@@ -164,22 +200,16 @@ const evaluate = async (client, expression, awaitPromise = true) => {
   return result.result?.value;
 };
 const jsString = value => JSON.stringify(String(value));
-// A page loads when it loads and an element appears when the page renders it;
-// the turn's own cancellation is what ends a wait that should not continue.
-const waitReady = async client => {
-  for (;;) {
-    const ready = await evaluate(client, "document.readyState");
-    if (ready === "complete" || ready === "interactive") return;
-    await sleep(50);
-  }
-};
-const waitSelector = async (client, selector) => {
-  for (;;) {
-    const found = await evaluate(client, `Boolean(document.querySelector(${jsString(selector)}))`);
-    if (found) return;
-    await sleep(50);
-  }
-};
+// An element appears when the page renders it: the page's own MutationObserver
+// reports it, and the turn's own cancellation ends a request that should stop.
+const untilSelector = (client, selector) => evaluate(client, `new Promise(resolve => {
+  const selector = ${jsString(selector)};
+  if (document.querySelector(selector)) { resolve(true); return; }
+  const observer = new MutationObserver(() => {
+    if (document.querySelector(selector)) { observer.disconnect(); resolve(true); }
+  });
+  observer.observe(document, { childList: true, subtree: true, attributes: true });
+})`);
 const pageSnapshotExpression = `(() => {
   const visible = element => {
     const style = getComputedStyle(element);
