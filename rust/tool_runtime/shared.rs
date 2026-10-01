@@ -15,7 +15,7 @@ pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// An absolute path inside the workspace is the same file as its relative
 /// form, so it resolves rather than being refused. The bare refusal used to
-/// leave the caller guessing: on 2026-09-10 a turn asked to write
+/// leave the caller guessing: a turn asked to write
 /// `<workspace>/alpha.txt`, read `absolute path rejected`, guessed the
 /// relative form by keeping the last two segments, and created a phantom
 /// `workspace/` directory inside the workspace that then satisfied nothing

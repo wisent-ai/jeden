@@ -15,10 +15,9 @@ BIN="$ROOT/target/release/jeden"
 
 # The binary resolves its own credential: on the first control-plane read it
 # asks Stado for `agent:wisent-app/value` and `jeden-model-router/token` when
-# the environment does not carry them. This launcher used to exec
-# `scripts/run-with-stado.sh` for that, and the scripts purge on 2026-09-06
-# deleted the file while leaving the exec behind, so a configured workstation
-# fell straight through to `BRAMA_URL is required`.
+# the environment does not carry them. This launcher used to exec a helper
+# script for that; when the script was removed the exec was left behind, so
+# a configured workstation fell straight through to `BRAMA_URL is required`.
 run_jeden() {
     exec "$BIN" "$@"
 }

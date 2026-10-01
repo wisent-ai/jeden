@@ -62,10 +62,10 @@ pub(crate) struct UserCancellation {
 }
 
 /// The two arrays a review returns. A request verdict the verifier filed
-/// inside `tasks` is still a request verdict: on 2026-09-18 one model put
-/// `{"requestId":…,"covered":…}` as the last element of `tasks` in four
-/// reviews out of ten, and each was refused as `missing field status` on
-/// a task that was never a task. An entry naming a request and its
+/// inside `tasks` is still a request verdict: a model can put
+/// `{"requestId":…,"covered":…}` as the last element of `tasks` in a good
+/// share of reviews, and each used to be refused as `missing field status`
+/// on a task that was never a task. An entry naming a request and its
 /// coverage is unambiguous wherever it sits, so it is read as one; every
 /// field it needs is still required.
 #[derive(Debug, Deserialize)]
@@ -167,17 +167,13 @@ pub(crate) struct RequestReview {
 /// A refusal a person can act on: the parser's own sentence plus the piece of
 /// the answer it stopped at.
 ///
-/// Twice on 2026-09-15 a finished run ended on `invalid acceptance review:
-/// missing field \`taskId\` at line 1 column 2408`, and finding out what the
-/// verifier had actually written meant reading the retained inspection session
-/// by hand. The column is only useful beside the text it points into.
+/// A finished run can end on `invalid acceptance review: missing field
+/// \`taskId\` at line 1 column 2408`, and finding out what the verifier
+/// actually wrote then means reading the retained inspection session by
+/// hand. The column is only useful beside the text it points into.
 pub(crate) fn unreadable(kind: &str, answer: &str, error: &serde_json::Error) -> String {
     let reach = super::super::constants::REFUSAL_EXCERPT_CHARS;
     let start = error.column().saturating_sub(reach);
     let near: String = answer.chars().skip(start).take(reach * 2).collect();
     format!("invalid {kind}: {error}; the answer reads: {near}")
 }
-
-
-
-

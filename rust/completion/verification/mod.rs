@@ -34,8 +34,8 @@ pub(crate) fn apply_review(
             .map(|task| task.id.as_str())
             .collect();
         // A verifier that answers about the only open task and does not repeat
-        // its identifier has still answered about it. Real reviews omitted
-        // `taskId` on 2026-09-15 and left finished work unverified, so the one
+        // its identifier has still answered about it. Real reviews omit
+        // `taskId` and leave finished work unverified, so the one
         // unambiguous case is bound here; with more than one task open the
         // verdict must say which, and the refusal lists the identifiers.
         let mut review = review;

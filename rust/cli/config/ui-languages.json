@@ -1,5 +1,5 @@
 {
-  "why": "The languages a conversation can be pinned to: the set wisent-app offers under src/locales, which this CLI mirrors so an operator can pin the same language here. Declared as data because a list of words inside code is the shape the operator refused on 2026-09-19; the schema builds its choices from this list, so what config set accepts and what config list advertises cannot drift.",
+  "why": "The languages a conversation can be pinned to: the set wisent-app offers under src/locales, which this CLI mirrors so an operator can pin the same language here. Declared as data because the set belongs to the product's locales, not to this code; the schema builds its choices from this list, so what config set accepts and what config list advertises cannot drift.",
   "words": [
     "am",
     "ar",

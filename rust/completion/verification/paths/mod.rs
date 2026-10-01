@@ -2,7 +2,7 @@
 //!
 //! An acceptance criterion usually names the file it is about. Reading the
 //! prose is the independent reviewer's job. The place is not, because a place
-//! is decidable, and on 2026-09-10 the reviewer twice accepted a file that sat
+//! is decidable, and a reviewer will accept a file that sits
 //! next to the named path instead of at it: a run whose criterion asked for
 //! `alpha.txt` in the workspace root was accepted by a write that landed in
 //! `workspace/alpha.txt` underneath it.
@@ -264,6 +264,3 @@ fn ends_with(observed: &Path, wanted: &Path) -> bool {
     let wanted: Vec<_> = wanted.components().collect();
     observed.len() >= wanted.len() && observed[observed.len() - wanted.len()..] == wanted[..]
 }
-
-
-

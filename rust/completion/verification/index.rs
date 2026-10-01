@@ -70,10 +70,10 @@ impl EvidenceIndex {
     }
 
     /// A failed operation of the execution itself. The reviewer's own
-    /// failed lookups do not count: on 2026-09-18 a review cited its own
+    /// failed lookups do not count: a review can cite its own
     /// `task_evidence` miss on a made-up id as the failed operation behind a
-    /// block, when the task was waiting on a value only the operator held
-    /// and should have asked for it.
+    /// block, when the task is waiting on a value only the operator holds
+    /// and should ask for it.
     pub(super) fn failure(&self, reference: &EvidenceReference) -> Result<bool, String> {
         self.get(reference)
             .map(|(receipt, independent)| !independent && receipt["failed"] == true)
