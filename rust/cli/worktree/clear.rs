@@ -97,49 +97,49 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
             ));
             continue;
         }
-        let via_git = worktree
-            .parent_repo
-            .as_ref()
-            .map(|repo| {
-                Command::new("git")
-                    .args(["worktree", "remove"])
-                    .arg(&worktree.path)
-                    .current_dir(repo)
-                    .output()
-                    .map(|output| output.status.success())
-                    .unwrap_or(false)
-            })
-            .unwrap_or(false);
-        if via_git {
-            removed.push(serde_json::json!({"path": row.path, "via": "git worktree remove"}));
-            lines.push(format!(
-                "  removed {} · {} · {} (via git worktree remove)",
-                row.path, row.branch, row.age
-            ));
-            continue;
-        }
-        match fs::remove_dir_all(&worktree.path) {
-            Ok(()) => {
-                // Drop the stale administrative entry left in the parent repo.
-                if let Some(admin) = &worktree.admin_dir {
-                    if admin.starts_with(
-                        worktree
-                            .parent_repo
-                            .as_ref()
-                            .map(|repo| repo.join(".git"))
-                            .unwrap_or_default(),
-                    ) {
-                        let _ = fs::remove_dir_all(admin);
-                    }
-                }
-                removed.push(serde_json::json!({"path": row.path, "via": "rm -rf"}));
+        // `git worktree remove` refuses a checkout with modified or untracked
+        // files; that refusal is the reason it stays, never a cue to delete
+        // it another way. A checkout no repository claims is deleted only
+        // when `git status` in it answers and reports nothing uncommitted.
+        let removal = match worktree.parent_repo.as_ref() {
+            Some(repo) => match Command::new("git")
+                .args(["worktree", "remove"])
+                .arg(&worktree.path)
+                .current_dir(repo)
+                .output()
+            {
+                Ok(output) if output.status.success() => Ok("git worktree remove"),
+                Ok(output) => Err(format!(
+                    "git worktree remove refused: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )),
+                Err(error) => Err(format!("git could not be run in {}: {error}", repo.display())),
+            },
+            None => match git(&worktree.path, &["status", "--porcelain"]) {
+                Some(status) if status.is_empty() => fs::remove_dir_all(&worktree.path)
+                    .map(|()| {
+                        if let Some(admin) = &worktree.admin_dir {
+                            let _ = fs::remove_dir_all(admin);
+                        }
+                        "rm -rf (clean checkout, no parent repository)"
+                    })
+                    .map_err(|error| format!("removal failed: {error}")),
+                Some(status) => Err(format!(
+                    "uncommitted changes in a checkout no repository claims: {}",
+                    status.lines().take(3).collect::<Vec<_>>().join("; ")
+                )),
+                None => Err("git status does not answer in it, so its changes are unknown".to_string()),
+            },
+        };
+        match removal {
+            Ok(via) => {
+                removed.push(serde_json::json!({"path": row.path, "via": via}));
                 lines.push(format!(
-                    "  removed {} · {} · {} (via rm -rf)",
+                    "  removed {} · {} · {} (via {via})",
                     row.path, row.branch, row.age
                 ));
             }
-            Err(error) => {
-                let reason = format!("removal failed: {error}");
+            Err(reason) => {
                 skipped.push(serde_json::json!({"path": row.path, "reason": reason}));
                 lines.push(format!(
                     "  skipped {} · {} · {} ({reason})",

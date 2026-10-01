@@ -1,3 +1,5 @@
+pub(crate) mod refusal;
+
 use std::env;
 use std::path::PathBuf;
 #[derive(Debug, Clone, Default)]
@@ -53,7 +55,7 @@ pub(crate) fn usage() -> String {
         "  jeden probierz [args...] — run Probierz discovery, evidence, and gate commands for Jeden\n",
         "  jeden capabilities [--json] [--cwd path]\n",
         "  jeden completions <bash|zsh|fish>\n",
-        "  jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]\n",
+        "  jeden worktree [list|clear] [--dry-run] [--yes] [--json] [--cwd path]\n",
         "  jeden token [--list] [--reveal] [--json] — print the agent Brama credential (redacted by default)\n",
         "  jeden stats [--json|--summary|--serve [--port N]] — usage/quota snapshot or local web dashboard\n",
         "  jeden gallery [--theme NAME|--all] [--color] — render TUI components across themes (dev tool)\n\n",

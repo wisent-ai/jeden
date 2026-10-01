@@ -263,11 +263,14 @@ fn render_list(args: &Args) -> String {
 }
 
 pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
+    const USAGE: &str = "usage: jeden worktree [list|clear] [--dry-run] [--yes] [--json]";
     let mut action: Option<&str> = None;
     let mut dry_run = false;
+    let mut confirmed = false;
     for token in &args.positionals {
         match token.as_str() {
             "--dry-run" => dry_run = true,
+            "--yes" => confirmed = true,
             "--json" => {} // handled globally by parse_args
             "list" | "clear" if action.is_none() => {
                 action = Some(match token.as_str() {
@@ -276,13 +279,18 @@ pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
                 })
             }
             other => {
-                return Err(format!(
-                    "unexpected argument '{other}': usage: jeden worktree [list|clear] [--dry-run] [--json]"
-                ))
+                return Err(crate::cli::invocation::refusal::usage(format!(
+                    "unexpected argument '{other}': {USAGE}"
+                )))
             }
         }
     }
     match action.unwrap_or("list") {
+        // Removing a worktree deletes its checkout; what it held is gone.
+        // The list `clear --dry-run` prints is what `clear --yes` removes.
+        "clear" if !dry_run && !confirmed => Err(crate::cli::invocation::refusal::usage(format!(
+            "worktree clear deletes stale worktree checkouts permanently; run `jeden worktree clear --dry-run` to see them, then `jeden worktree clear --yes`: {USAGE}"
+        ))),
         "clear" => Ok(render_clear(args, dry_run)),
         _ => Ok(render_list(args)),
     }

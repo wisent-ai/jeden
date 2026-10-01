@@ -294,7 +294,13 @@ pub fn main() -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error: {}", e);
-            ExitCode::FAILURE
+            // A command's refusal of its own invocation exits 2, every other
+            // failure 1 (cli.md rule 10).
+            if cli::invocation::refusal::is_usage(&e) {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }
