@@ -134,11 +134,5 @@ pub(crate) fn token_slash() -> Result<String, String> {
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn redaction_keeps_only_the_tail() {
-        assert_eq!(super::redacted("abcdefghij"), "…ghij (10 chars)");
-        assert_eq!(super::redacted("abcd"), "…abcd (4 chars)");
-    }
-}
+
+

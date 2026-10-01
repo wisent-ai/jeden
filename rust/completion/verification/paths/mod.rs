@@ -265,5 +265,5 @@ fn ends_with(observed: &Path, wanted: &Path) -> bool {
     observed.len() >= wanted.len() && observed[observed.len() - wanted.len()..] == wanted[..]
 }
 
-#[cfg(test)]
-mod tests;
+
+

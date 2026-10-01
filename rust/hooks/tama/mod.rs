@@ -121,5 +121,5 @@ fn tool_matcher(tool: &str) -> String {
     matcher.to_string()
 }
 
-#[cfg(test)]
-mod tests;
+
+

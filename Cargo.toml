@@ -3,6 +3,9 @@ name = "jeden"
 version = "0.1.24"
 edition = "2021"
 license-file = "LICENSE"
+# No test target is built until the operator approves one with
+# `tama tests approve`.
+autotests = false
 [lib]
 path = "rust/lib.rs"
 

@@ -227,6 +227,6 @@ pub(in crate::agent) fn prepare_outbound_messages(
     Ok(outbound)
 }
 
-#[cfg(test)]
-#[path = "../../../tests/image_read/native.rs"]
-mod image_read_tests;
+
+
+

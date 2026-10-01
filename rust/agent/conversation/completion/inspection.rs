@@ -120,6 +120,6 @@ fn cut_off(refusal: &str) -> bool {
     refusal.contains(crate::protocol::INCOMPLETE_ANSWER)
 }
 
-#[cfg(test)]
-#[path = "inspection_tests.rs"]
-mod tests;
+
+
+

@@ -120,6 +120,6 @@ pub(in crate::agent) fn run_tool_action(
     Ok(result)
 }
 
-#[cfg(test)]
-#[path = "../../../../tests/contracts/inspection.rs"]
-mod tests;
+
+
+

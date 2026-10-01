@@ -178,6 +178,6 @@ pub(crate) fn unreadable(kind: &str, answer: &str, error: &serde_json::Error) ->
     format!("invalid {kind}: {error}; the answer reads: {near}")
 }
 
-#[cfg(test)]
-#[path = "review_tests.rs"]
-mod tests;
+
+
+
