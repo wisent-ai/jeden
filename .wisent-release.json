@@ -97,52 +97,36 @@
   },
   "deliveries": [
     {
-      "name": "macbook-jeden",
+      "name": "darwin-jeden",
       "platform": "darwin-arm64",
       "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
       "required": true,
       "secret_env": {},
-      "target": "lukasz-macbook"
+      "target": { "product": "jeden" }
     },
     {
-      "name": "macbook-sandbox-helper",
+      "name": "darwin-sandbox-helper",
       "platform": "darwin-arm64",
       "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
       "required": true,
       "secret_env": {},
-      "target": "lukasz-macbook"
+      "target": { "product": "jeden" }
     },
     {
-      "name": "mini-jeden",
-      "platform": "darwin-arm64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
-      "required": true,
-      "secret_env": {},
-      "target": "charless-mac-mini"
-    },
-    {
-      "name": "mini-sandbox-helper",
-      "platform": "darwin-arm64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
-      "required": true,
-      "secret_env": {},
-      "target": "charless-mac-mini"
-    },
-    {
-      "name": "rtx-jeden",
+      "name": "linux-jeden",
       "platform": "linux-amd64",
       "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
       "required": true,
       "secret_env": {},
-      "target": "ubuntu-server-rtx-pro-6000"
+      "target": { "product": "jeden" }
     },
     {
-      "name": "rtx-sandbox-helper",
+      "name": "linux-sandbox-helper",
       "platform": "linux-amd64",
       "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
       "required": true,
       "secret_env": {},
-      "target": "ubuntu-server-rtx-pro-6000"
+      "target": { "product": "jeden" }
     }
   ],
   "promotion": {
