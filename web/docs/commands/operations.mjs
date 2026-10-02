@@ -186,11 +186,15 @@ export const operationCommands = [
     inputs: [
       "No mode prints the full text snapshot; <code>--json</code> prints structured data and <code>--summary</code> prints one project summary line.",
       "<code>--serve</code> binds <code>127.0.0.1</code>; <code>--port N</code> selects a <code>u16</code> port, defaulting to 3847 when absent or unparsable.",
+      "Quota entries preserve the provider's explicit <code>state</code> and nullable numeric fields. A <code>null</code> balance or percentage is not evidence of an unlimited allowance. An entry that failed to load keeps its own <code>error</code>; text output reports it as unavailable.",
+      "<code>node tests/stats/snapshot.mjs</code> checks the real native snapshot, loopback routes and occupied-port refusal without building. <code>JEDEN_BIN</code> can select the installed executable. The runner requires its reported source revision to resolve to the checkout revision and retains commands, exit statuses and responses under <code>build/real-tests/stats/</code>. It does not qualify graphical interactions or account-specific quota outcomes.",
     ],
-    effect: "Reads project/user usage ledgers, platform quota availability, and recent local sessions. Serve mode exposes only <code>/</code> and <code>/api/stats</code> on loopback until stopped.",
+    effect: "Reads project/user usage ledgers, platform quota availability, and recent local sessions. Serve mode exposes only <code>/</code> and <code>/api/stats</code> on loopback until stopped. The page reads once when opened; later reads require <strong>Refresh</strong>. There is no periodic refresh. The button is disabled during a read. Each successful snapshot shows its generation timestamp.",
     refusals: [
       "Serve mode refuses a loopback bind failure as <code>cannot bind 127.0.0.1:&lt;port&gt;: ...</code>.",
       "Unknown HTTP paths return 404. Unavailable quota is reported in the snapshot rather than represented as available.",
+      "A failed dashboard request displays <code>GET /api/stats failed:</code> with the actual fetch or decoding error, or the HTTP status and response body. The page keeps the previous complete snapshot and labels it as previous; if none succeeded, it says no snapshot is available. A later successful read clears the error.",
+      "Qualification refuses an unreported, unresolved or different installed revision as <code>JEDEN_REVISION_NOT_REPORTED</code>, <code>JEDEN_REVISION_NOT_RESOLVED</code> or <code>JEDEN_REVISION_NOT_INSTALLED</code>. Such a run is blocked, not passed, and does not exercise the changed dashboard.",
     ],
   },
   {
