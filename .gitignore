@@ -5,10 +5,7 @@ coverage/
 !.env.example
 .DS_Store
 *.log
-# Runtime session ledgers written at the repository root. Anchored: the
-# unanchored `sessions/` also matched rust/cli/reports/sessions/, so the split
-# of the session commands (bc01c61) committed the deletion of sessions.rs and
-# silently left its five replacement modules out of Git.
+# Anchor runtime ledgers so source modules named `sessions` remain tracked.
 /sessions/
 artifacts/
 .jeden/
@@ -19,6 +16,8 @@ target/
 # Throwaway state a local run keeps inside the checkout (for example the
 # migration adoption check's session ledgers); never source.
 /.build/
+# Real CLI journey reports retain private local observations.
+/build/real-tests/
 *.rmeta
 packages/*/dist/
 .worktrees/
