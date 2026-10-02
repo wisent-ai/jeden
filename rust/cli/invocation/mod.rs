@@ -58,7 +58,7 @@ pub(crate) fn usage() -> String {
         "  jeden token [--list] [--json] — which Brama credential this agent uses, redacted, and its Skarbiec item\n",
         "  jeden stats [--json|--summary|--serve [--port N]] — usage/quota snapshot or local web dashboard\n",
         "  jeden gallery [--theme NAME|--all] [--color] — render TUI components across themes (dev tool)\n\n",
-        "  jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]\n\n",
+        "  jeden roadmap <list|show|add|edit|drop|start|implemented|block|unblock|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]\n\n",
         "Slash commands:\n",
         "  /login [provider]      inspect entitlements-router login/reauth plan\n",
         "  /logout [provider]     show Weles-managed logout ownership\n",

@@ -9,10 +9,12 @@ use serde_json::json;
 use std::{path::Path, str::FromStr};
 
 mod acceptance;
+mod edit;
 mod options;
 mod status;
 
 use acceptance::{acceptance_command, work_command};
+use edit::{dependency_command, edit_command, unblock_command};
 use options::{expected_revision, format_json, ParsedOptions};
 use status::{mutate_status, mutate_status_explicit};
 
@@ -184,6 +186,8 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 ))
             }
         }
+        "edit" => edit_command(&store, &options, json_output),
+        "unblock" => unblock_command(&store, &options, json_output),
         "drop" => mutate_status(
             &store,
             &options,
@@ -231,52 +235,7 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 .parse()?;
             mutate_status_explicit(&store, &options, id, status, false, 2, json_output)
         }
-        "depends" | "undepends" => {
-            let id = options.positionals.first().ok_or_else(|| {
-                RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
-            })?;
-            let dependency = options.positionals.get(1).ok_or_else(|| {
-                RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
-            })?;
-            let revision = expected_revision(&store, &options)?;
-            let add = command == "depends";
-            // Attach and detach are the same item mutation; the payload's
-            // `operation` is what tells a reader which way it went.
-            let event = "roadmap_item_updated";
-            let roadmap = store.mutate(
-                revision,
-                event,
-                json!({"itemId": id, "dependencyId": dependency, "operation": command}),
-                |roadmap| {
-                    if find_item(roadmap, dependency).is_err() {
-                        return Err(RoadmapError::NotFound(dependency.clone()));
-                    }
-                    let item = find_item_mut(roadmap, id)?;
-                    if add {
-                        item.depends_on.push(dependency.to_ascii_uppercase());
-                    } else {
-                        let before = item.depends_on.len();
-                        item.depends_on
-                            .retain(|value| !value.eq_ignore_ascii_case(dependency));
-                        if before == item.depends_on.len() {
-                            return Err(RoadmapError::Invalid(format!(
-                                "{} does not depend on {}",
-                                item.id, dependency
-                            )));
-                        }
-                    }
-                    Ok(())
-                },
-            )?;
-            if json_output {
-                format_json(find_item(&roadmap, id)?)
-            } else {
-                Ok(format!(
-                    "Updated {} at roadmap revision {}.\n",
-                    id, roadmap.revision
-                ))
-            }
-        }
+        "depends" | "undepends" => dependency_command(&store, &options, command, json_output),
         "acceptance" => acceptance_command(&store, &options, json_output),
         "check" => {
             let report = store.check();
@@ -293,7 +252,7 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
         }
         "work" => work_command(&store, &options, json_output),
         other => Err(RoadmapError::Usage(format!(
-            "unknown roadmap command: {other}; expected list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|work"
+            "unknown roadmap command: {other}; expected list|show|add|edit|drop|start|implemented|block|unblock|pass|status|depends|undepends|graph|acceptance|check|work"
         ))),
     }
 }

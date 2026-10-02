@@ -2,7 +2,7 @@ export const managementCommands = [
   {
     path: "roadmap",
     group: "Roadmap",
-    invocation: "jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]",
+    invocation: "jeden roadmap <list|show|add|edit|drop|start|implemented|block|unblock|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]",
     purpose: "Read and transactionally mutate the repository-owned Jeden roadmap.",
     inputs: [
       "Required for non-default use: one listed action; no action defaults to <code>list</code>.",
@@ -149,6 +149,15 @@ export const managementCommands = [
       "Invalid priority, status, duplicate or missing IDs/dependencies, invalid acceptance/evidence, cycles, and stale revisions are refused without committing.",
     ],
   },
+  {
+    path: "roadmap/edit",
+    group: "Roadmap",
+    invocation: "jeden roadmap edit <id> [--title TEXT] [--area AREA] [--priority P0|P1|P2|P3] [--summary TEXT] [--implementation TEXT] [--rationale TEXT] [--implementation-order TEXT] [--revision N] [--json]",
+    purpose: "Replace the text fields of one existing item: the counterpart of add.",
+    inputs: ["Required: the item ID and at least one field flag. Status, dependencies, acceptance and evidence have their own commands and are not edited here."],
+    effect: "Replaces exactly the named fields, records an update event naming them, validates the roadmap, and commits a new revision.",
+    refusals: ["A call with no field flag is refused as <code>roadmap edit &lt;id&gt; changes nothing; name at least one field</code>; an empty <code>--title</code>, an unknown ID and a stale revision are refused."],
+  },
   ...[
     ["drop", "jeden roadmap drop <id> [reason|--reason TEXT] [--revision N] [--json]", "Mark an item dropped.", "Sets status to dropped, records an optional reason and roadmap event, and commits a new revision.", "The ID is required; drop is refused when another roadmap item depends on the target."],
     ["start", "jeden roadmap start <id> [reason|--reason TEXT] [--revision N] [--json]", "Mark an item in progress.", "Sets status to in_progress, records an optional reason and roadmap event, and commits a new revision.", "The ID is required; unknown IDs, invalid roadmap state, and stale revisions are refused."],
@@ -171,6 +180,15 @@ export const managementCommands = [
     inputs: ["Required: item ID plus a positional reason or at least one <code>--external-prerequisite</code>. Optional evidence, revision, and JSON output."],
     effect: "Sets status to external_blocked, merges prerequisites, appends evidence, records a blocked event, validates, and commits a new revision.",
     refusals: ["A missing reason and missing prerequisite are refused as <code>roadmap block requires a reason or --external-prerequisite</code>; unknown IDs and stale revisions are refused."],
+  },
+  {
+    path: "roadmap/unblock",
+    group: "Roadmap",
+    invocation: "jeden roadmap unblock <id> [reason|--reason TEXT] [--revision N] [--json]",
+    purpose: "Lift an external block once what the item waited on is there: the counterpart of block.",
+    inputs: ["Required: the item ID. Optional: a reason saying what arrived, the expected revision, JSON output."],
+    effect: "Returns the item to planned, clears its external prerequisites, records the reason and an update event, validates, and commits a new revision.",
+    refusals: ["An item that is not external_blocked is refused with its actual status (<code>&lt;id&gt; is &lt;status&gt;, not external_blocked; there is no block to lift</code>); unknown IDs and stale revisions are refused."],
   },
   {
     path: "roadmap/status",
