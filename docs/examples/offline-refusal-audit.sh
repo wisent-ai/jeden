@@ -27,13 +27,28 @@ SID="$("$JEDEN" sessions | head -1)"
 jq -r '.payload.type' "$HOME/.jeden/sessions/$SID/transcript.jsonl"
 
 echo "== 2. same refusal over RPC"
-{ printf '%s\n' '{"id":1,"method":"initialize"}'
-  printf '%s\n' "{\"id\":2,\"method\":\"session/new\",\"params\":{\"cwd\":\"$HOME/project\"}}"
-  printf '%s\n' '{"id":3,"method":"session/prompt","params":{"sessionId":"session-1","prompt":"Respond exactly: OK"}}'
-  sleep 2
-  printf '%s\n' '{"id":4,"method":"session/status","params":{"sessionId":"session-1"}}'
-  printf '%s\n' '{"id":5,"method":"shutdown"}'
-} | "$JEDEN" rpc
+# status and shutdown follow the prompt's own answer (id 3), so shutdown never
+# cancels the turn whose refusal this step shows.
+mkfifo "$HOME/rpc-requests"
+exec 3<>"$HOME/rpc-requests"
+printf '%s\n' '{"id":1,"method":"initialize"}' >&3
+printf '%s\n' "{\"id\":2,\"method\":\"session/new\",\"params\":{\"cwd\":\"$HOME/project\"}}" >&3
+printf '%s\n' '{"id":3,"method":"session/prompt","params":{"sessionId":"session-1","prompt":"Respond exactly: OK"}}' >&3
+"$JEDEN" rpc <"$HOME/rpc-requests" | {
+  while IFS= read -r frame; do
+    printf '%s\n' "$frame"
+    case "$frame" in
+      '{"id":3,'*)
+        printf '%s\n' '{"id":4,"method":"session/status","params":{"sessionId":"session-1"}}' >&3
+        printf '%s\n' '{"id":5,"method":"shutdown"}' >&3
+        ;;
+      '{"id":5,'*) exit 0 ;;
+    esac
+  done
+  echo "jeden rpc closed before answering the prompt and shutdown" >&2
+  exit 1
+}
+exec 3>&-
 
 echo "== RPC error surface"
 { printf '%s\n' '{"id":10,"method":"bogus"}'
