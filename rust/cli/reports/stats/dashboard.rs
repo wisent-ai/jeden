@@ -10,7 +10,7 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
-const DASHBOARD_HTML: &str = r#"<!doctype html>
+const DASHBOARD_HTML: &str = concat!(r#"<!doctype html>
 <html><head><meta charset="utf-8"><title>jeden stats</title>
 <style>
 body{background:#0d1117;color:#e6edf3;font:14px/1.5 -apple-system,monospace;margin:2em auto;max-width:900px;padding:0 1em}
@@ -20,30 +20,19 @@ h1{font-size:1.3em}h2{font-size:1em;color:#8b949e;text-transform:uppercase;lette
 .bar>div{height:100%;background:#3fb950}
 .row{display:flex;justify-content:space-between;gap:1em}
 .dim{color:#8b949e}.num{font-variant-numeric:tabular-nums}
+.error{color:#ff7b72;white-space:pre-wrap;overflow-wrap:anywhere}
+button{background:#21262d;color:inherit;border:1px solid #8b949e;border-radius:5px;padding:.4em .8em;cursor:pointer}button:disabled{opacity:.5;cursor:default}
 </style></head><body>
 <h1>jeden stats <span class="dim" id="ver"></span></h1>
+<button id="refresh-stats" type="button">Refresh</button>
+<p id="feedback" class="dim" role="status" aria-live="polite">No snapshot available.</p>
+<p id="failure" class="error" role="alert"></p>
 <h2>Quota</h2><div id="quota"></div>
+<p class="dim">Null quota fields mean no value was reported, not an unlimited allowance. The quota state comes from the provider.</p>
 <h2>Usage</h2><div id="usage"></div>
 <h2>Sessions</h2><div id="sessions" class="card"></div>
 <script>
-async function refresh(){
-  const s = await (await fetch('/api/stats')).json();
-  ver.textContent = 'v'+s.version;
-  quota.innerHTML = s.quota.available
-    ? s.quota.providers.map(p=>'<div class="card"><b>'+p.provider+'</b>'+p.entries.map(e=>{
-        const pct = e.percentFree==null?null:e.percentFree;
-        const bar = pct==null?'':'<div class="bar"><div style="width:'+pct+'%"></div></div>';
-        const amt = e.remaining==null?'unmetered':e.remaining+(e.limit?' / '+e.limit:'')+(pct==null?'':' · '+pct+'% free');
-        return '<div class="row"><span>'+e.label+'</span><span class="num dim">'+amt+'</span></div>'+bar;
-      }).join('')+'</div>').join('')
-    : '<div class="card dim">quota unavailable: '+(s.quota.reason||'')+'</div>';
-  usage.innerHTML = ['project','user'].map(k=>{const u=s.usage[k];
-    return '<div class="card"><b>'+k+'</b><div class="row"><span>'+u.events+' events</span><span class="num">'+Math.round(u.tokens)+' tokens</span><span class="num dim">cost '+u.cost.toFixed(4)+'</span></div></div>';
-  }).join('');
-  sessions.innerHTML = s.sessions.count+' sessions'+(s.sessions.recent.length?'<br><span class="dim">latest: '+s.sessions.recent.join(', ')+'</span>':'');
-}
-refresh(); setInterval(refresh, 5000);
-</script></body></html>"#;
+"#, include_str!("dashboard.js"), r#"</script></body></html>"#);
 
 fn write_response(stream: &mut std::net::TcpStream, status: &str, content_type: &str, body: &str) {
     let _ = write!(

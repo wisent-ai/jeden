@@ -1,7 +1,7 @@
 //! `jeden stats` — local usage/quota/session snapshot as text, `--json`, or a
 //! self-contained local web dashboard (`--serve [--port N]`, default 3847 like
 //! omp's stats dashboard). The dashboard binds 127.0.0.1 only, serves a single
-//! HTML page plus a `/api/stats` JSON endpoint, and refreshes itself.
+//! HTML page plus a `/api/stats` JSON endpoint, with explicit snapshot refresh.
 
 mod dashboard;
 
@@ -97,6 +97,7 @@ fn quota_json() -> Value {
                                 let bucket = &labeled.bucket;
                                 json!({
                                     "label": labeled.label,
+                                    "state": bucket.state,
                                     "remaining": bucket.remaining,
                                     "limit": bucket.limit,
                                     "percentFree": match (bucket.remaining, bucket.limit) {
@@ -174,17 +175,14 @@ fn stats_text(cwd: &Path) -> String {
         ));
     }
     if stats["quota"]["available"].as_bool() == Some(true) {
-        for provider in stats["quota"]["providers"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default()
-        {
-            for entry in provider["entries"].as_array().cloned().unwrap_or_default() {
-                let amount = match (entry["remaining"].as_u64(), entry["limit"].as_u64()) {
-                    (Some(remaining), Some(limit)) if limit > 0 => {
-                        format!("{remaining}/{limit} ({}% free)", entry["percentFree"])
-                    }
-                    _ => "unmetered".into(),
+        for provider in stats["quota"]["providers"].as_array().into_iter().flatten() {
+            for entry in provider["entries"].as_array().into_iter().flatten() {
+                let amount = match entry.get("error").and_then(Value::as_str) {
+                    Some(error) => format!("unavailable: {error}"),
+                    None => format!(
+                        "state {} · remaining {} · limit {} · percent free {}",
+                        entry["state"], entry["remaining"], entry["limit"], entry["percentFree"]
+                    ),
                 };
                 lines.push(format!(
                     "quota {} · {}: {amount}",
