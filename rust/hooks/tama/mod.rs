@@ -1,8 +1,7 @@
 //! Tama hook-registry loader: native support for the shared cross-agent hook
-//! registry produced by hooks-rotator (`shared-hooks/registry.json`,
-//! `managedBy: "jeden-unified-hooks"`). The registry speaks claude-style event
-//! and tool names; this module maps them onto jeden's hook events and tool
-//! matchers so the same catalog runs natively.
+//! registry Tama installs (`~/.shared-hooks/registry.json`). The registry
+//! speaks claude-style event and tool names; this module maps them onto
+//! jeden's hook events and tool matchers so the same catalog runs natively.
 //!
 //! Registry shape: a `version` number, a `managedBy` name, and an `events`
 //! object keyed by claude-style event names such as `pre_tool_use:bash`. Each
@@ -11,9 +10,9 @@
 //! declares one, is the dispatcher's own data: jeden lets a guard finish.
 //!
 //! Source precedence: env `JEDEN_TAMA_REGISTRY` (path; empty string disables)
-//! > config key `hooks.tamaRegistry` (path; empty disables) > auto-discovery of
-//! > `~/Documents/CodingProjects/Wisent/hooks-rotator/shared-hooks/registry.json`
-//! > and `~/.shared-hooks/registry.json`. No registry found = no hooks, quietly.
+//! > config key `hooks.tamaRegistry` (path; empty disables) > the registry
+//! > Tama installed at `~/.shared-hooks/registry.json`. No registry found =
+//! > no hooks, quietly. No source checkout is looked at.
 
 mod command;
 mod events;
@@ -60,12 +59,8 @@ pub fn registry_path(cwd: &Path) -> Option<PathBuf> {
         return explicit_path(raw);
     }
     let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    [
-        home.join("Documents/CodingProjects/Wisent/hooks-rotator/shared-hooks/registry.json"),
-        home.join(".shared-hooks/registry.json"),
-    ]
-    .into_iter()
-    .find(|candidate| candidate.is_file())
+    let installed = home.join(".shared-hooks/registry.json");
+    installed.is_file().then_some(installed)
 }
 
 fn explicit_path(raw: &str) -> Option<PathBuf> {
