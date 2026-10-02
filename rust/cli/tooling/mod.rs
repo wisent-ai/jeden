@@ -7,5 +7,4 @@
 
 pub(crate) mod completions;
 pub(crate) mod gallery;
-pub(crate) mod probierz;
 pub(crate) mod token;

@@ -27,10 +27,8 @@ pub mod net;
 pub mod onboarding;
 
 // Moved to the modules that own them, under the paths every caller uses:
-// the action protocol the agent speaks, the terminal QR rendering, and the
-// Probierz runner the CLI offers.
+// the action protocol the agent speaks and the terminal QR rendering.
 pub use agent::protocol;
-pub(crate) use cli::tooling::probierz;
 pub use tui::qr;
 pub mod report;
 pub mod roadmap;
@@ -274,7 +272,6 @@ pub fn main() -> ExitCode {
         "context" => cli::context::command(&args),
         "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),
-        "probierz" => probierz::command(&args),
         "capabilities" => {
             if args.json {
                 capability::status_json(&args.cwd).map(|json| json + "\n")

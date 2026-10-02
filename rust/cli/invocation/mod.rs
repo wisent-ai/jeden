@@ -52,7 +52,6 @@ pub(crate) fn usage() -> String {
         "  jeden context install|status|uninstall [--omp|--file <path>] [--json] — the same advisor as an Omp tool\n",
         "  jeden doctor [--json] [--cwd path]\n",
         "  jeden conformance [--json] [--cwd path]\n",
-        "  jeden probierz [args...] — run Probierz discovery, evidence, and gate commands for Jeden\n",
         "  jeden capabilities [--json] [--cwd path]\n",
         "  jeden completions <bash|zsh|fish>\n",
         "  jeden worktree [list|clear] [--dry-run] [--yes] [--json] [--cwd path]\n",
@@ -143,7 +142,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     }
     if matches!(
         command.as_str(),
-        "resume" | "recall_conversation" | "search-sessions" | "probierz"
+        "resume" | "recall_conversation" | "search-sessions"
     ) {
         return Ok(Args {
             command,

@@ -10,6 +10,7 @@ const failures = [
 export const completionCommands = [
   {
     path: "todo",
+    group: "Retained tasks",
     invocation: 'jeden todo [list|add "request"|pause <id>|resume <id>|cancel <id>|defect <id>|answer <id> --text "answer"|continue] [--session <id-or-path>] [--revision <n> --reason "text"] [--json]',
     purpose: "Inspect and control every retained user request and its verified task state.",
     inputs: [selection, controls],
@@ -18,6 +19,7 @@ export const completionCommands = [
   },
   {
     path: "todo/list",
+    group: "Retained tasks",
     invocation: "jeden todo list [--session <id-or-path>] [--json]",
     purpose: "Read retained requests, tasks, acceptance requirements and completion evidence.",
     inputs: [selection],
@@ -26,6 +28,7 @@ export const completionCommands = [
   },
   {
     path: "todo/add",
+    group: "Retained tasks",
     invocation: 'jeden todo add "request" [--session <id-or-path>] [--json]',
     purpose: "Record a user request without executing it or inventing its acceptance result.",
     inputs: [selection, "Required: nonempty request text. When no active session exists, a new durable session is created."],
@@ -38,6 +41,7 @@ export const completionCommands = [
     ["cancel", "Withdraw exactly the work the operator selected.", "Records the operator's reason and cancellation without deleting the original request, completed evidence or other work. A cancelled request is not reported as verified implementation."],
   ].map(([action, purpose, effect]) => ({
     path: `todo/${action}`,
+    group: "Retained tasks",
     invocation: `jeden todo ${action} <task-or-request-id> --revision <n> --reason "text" [--session <id-or-path>] [--json]`,
     purpose,
     inputs: [selection, controls],
@@ -46,6 +50,7 @@ export const completionCommands = [
   })),
   {
     path: "todo/defect",
+    group: "Retained tasks",
     invocation: 'jeden todo defect <task-or-request-id> --revision <n> --reason "what failed" [--session <id-or-path>] [--json]',
     purpose: "Record a defect and reopen its original task for repair.",
     inputs: [selection, controls, "The selected original task may already be complete. An explicit defect report in a conversation is also linked to its original task during independent intake."],
@@ -59,6 +64,7 @@ export const completionCommands = [
   },
   {
     path: "todo/answer",
+    group: "Retained tasks",
     invocation: 'jeden todo answer <task-id> --revision <n> --text "answer" [--session <id-or-path>] [--json]',
     purpose: "Give a blocked task the one thing it asked you for.",
     inputs: [selection, "<code>--revision</code> must match the latest snapshot. <code>--text</code> is your answer: the value, the decision, or where you put the secret. Over RPC the same operation is <code>session/completion/control</code> with action <code>answer</code> and the answer in <code>reason</code>; Jeden Desktop shows a Your answer field under the task."],
@@ -71,6 +77,7 @@ export const completionCommands = [
   },
   {
     path: "todo/continue",
+    group: "Retained tasks",
     invocation: "jeden todo continue [--session <id-or-path>] [--allow-write] [--allow-command] [--model name] [--max-steps n] [--json]",
     purpose: "Inspect previous results and continue retained work without adding a synthetic user request.",
     inputs: [selection, "The recorded session workspace is used. Write and command permissions are explicit for this invocation; continuation never expands them."],

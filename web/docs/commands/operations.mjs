@@ -1,6 +1,7 @@
 export const operationCommands = [
   {
     path: "update",
+    group: "Runtime and operations",
     invocation: "JEDEN_UPDATE_MANIFEST=<https-or-local-dsse-manifest> jeden update",
     purpose: "Transactionally install a signed Jeden release and verify the activated binary before committing it.",
     inputs: [
@@ -15,6 +16,7 @@ export const operationCommands = [
   },
   {
     path: "workspace",
+    group: "Configuration",
     invocation: "jeden workspace [status|discover [path]|adopt <path>|forget] [--json]",
     purpose: "Inspect, validate, adopt or forget an existing local repository as Jeden's default workspace.",
     inputs: [
@@ -31,6 +33,7 @@ export const operationCommands = [
   },
   {
     path: "workspace/status",
+    group: "Configuration",
     invocation: "jeden workspace status [--json]",
     purpose: "Show the currently adopted workspace and the existing sessions associated with it.",
     inputs: ["No path is accepted. Optional: <code>--json</code> for the structured operation report."],
@@ -39,6 +42,7 @@ export const operationCommands = [
   },
   {
     path: "workspace/forget",
+    group: "Configuration",
     invocation: "jeden workspace forget [--json]",
     purpose: "Stop using the adopted workspace as the default, the inverse of adopt.",
     inputs: ["No path is accepted. Optional: <code>--json</code> returns <code>{\"status\":\"forgotten\"|\"not_adopted\",\"workspace\":…}</code>."],
@@ -47,6 +51,7 @@ export const operationCommands = [
   },
   {
     path: "workspace/discover",
+    group: "Configuration",
     invocation: "jeden workspace discover [path] [--json]",
     purpose: "Validate an existing workspace and preview the state Jeden would adopt.",
     inputs: ["Optional: an existing repository or directory path; the current directory is used when omitted."],
@@ -55,6 +60,7 @@ export const operationCommands = [
   },
   {
     path: "workspace/adopt",
+    group: "Configuration",
     invocation: "jeden workspace adopt <path> [--json]",
     purpose: "Persist an existing local repository as the default workspace used by the next Jeden task.",
     inputs: ["Required: one existing readable directory path. Optional: <code>--json</code>."],
@@ -63,6 +69,7 @@ export const operationCommands = [
   },
   {
     path: "config",
+    group: "Configuration",
     invocation: "jeden config [list|path|get <key>|set <key> <value>|reset <key>] [--json] [--cwd path]",
     purpose: "Inspect and change Jeden's schema-backed user configuration.",
     inputs: [
@@ -81,6 +88,7 @@ export const operationCommands = [
   },
   {
     path: "contracts",
+    group: "Configuration",
     invocation: "jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]",
     purpose: "Print Jeden's contracts as one text, and install them into another harness's system prompt.",
     inputs: [
@@ -95,6 +103,7 @@ export const operationCommands = [
   },
   {
     path: "doctor",
+    group: "Runtime and operations",
     invocation: "jeden doctor [--json] [--cwd path]",
     purpose: "Probe the live health of Jeden's configured runtime dependencies and local subsystems.",
     inputs: ["Optional: <code>--cwd</code>. The command always emits its structured doctor report; <code>--json</code> is accepted for CLI consistency."],
@@ -108,31 +117,19 @@ export const operationCommands = [
   },
   {
     path: "conformance",
+    group: "Runtime and operations",
     invocation: "jeden conformance [--json] [--cwd path]",
     purpose: "Evaluate Jeden's canonical completion areas, production scopes, evidence, and UI-honesty contract.",
     inputs: ["Optional: <code>--cwd</code>. Output is canonical compact JSON; <code>--json</code> is accepted but not required."],
-    effect: "Reads source/inventory evidence, computes every area and production-scope status plus UI-honesty findings, sorts the report deterministically, and prints it without changing product state.",
+    effect: "Reads source/inventory evidence, computes every area and production-scope status plus UI-honesty findings, sorts the report deterministically, and prints it without changing product state. The journey tests themselves belong to Probierz and run through its own CLI, <code>probierz status jeden</code> and the rest, with <code>TUI_CMD</code> naming the Jeden executable under test and <code>JEDEN_MODEL</code> its model; Jeden does not wrap another product's command line.",
     refusals: [
       "The command exits unsuccessfully when the report's <code>complete</code> field is false, including missing evidence, failed behavior/contracts, incomplete production scopes, or UI-honesty findings.",
       "Report construction or canonical serialization errors are returned and no passing verdict is emitted.",
     ],
   },
   {
-    path: "probierz",
-    invocation: "jeden probierz [args...]",
-    purpose: "Run Probierz discovery, evidence, and gate commands with the active Jeden executable and model configuration.",
-    inputs: [
-      "Optional: arguments forwarded verbatim to Probierz. With none, Jeden runs <code>probierz status jeden --text</code>.",
-      "<code>PROBIERZ_ROOT</code> may select a source checkout; otherwise a sibling checkout is preferred and then the installed <code>probierz</code> executable.",
-    ],
-    effect: "Sets <code>TUI_CMD</code> to the current Jeden executable when absent, propagates the selected model as <code>JEDEN_MODEL</code> when needed, and lets Probierz own its reports, artifacts, and gate output.",
-    refusals: [
-      "Launch failure is reported with the instruction to set <code>PROBIERZ_ROOT</code> or install the CLI.",
-      "Any non-success Probierz status is returned as <code>Probierz exited with ...</code>; Jeden never converts a failed gate into success.",
-    ],
-  },
-  {
     path: "capabilities",
+    group: "Runtime and operations",
     invocation: "jeden capabilities [--json] [--cwd path]",
     purpose: "Inspect Jeden's atomic capability-discovery and health snapshot.",
     inputs: ["Optional: <code>--cwd</code> for project capability discovery and <code>--json</code> for the full versioned descriptor snapshot."],
@@ -144,6 +141,7 @@ export const operationCommands = [
   },
   {
     path: "completions",
+    group: "Shell completions",
     invocation: "jeden completions <bash|zsh|fish>",
     purpose: "Generate a shell-completion program from Jeden's current CLI usage and builtin slash-command registry.",
     inputs: ["Required: exactly one supported shell name: <code>bash</code>, <code>zsh</code>, or <code>fish</code>."],
@@ -152,6 +150,7 @@ export const operationCommands = [
   },
   {
     path: "worktree",
+    group: "Managed worktrees",
     invocation: "jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]",
     purpose: "Inspect or safely clear stale Git worktrees owned by Jeden's task runtime.",
     inputs: [
@@ -166,6 +165,7 @@ export const operationCommands = [
   },
   {
     path: "token",
+    group: "Runtime and operations",
     invocation: "jeden token [--list] [--json]",
     purpose: "Report which Brama credential this agent uses: router URL, agent id, where the secret came from, a redacted form of it, and its Skarbiec item.",
     inputs: [
@@ -180,6 +180,7 @@ export const operationCommands = [
   },
   {
     path: "stats",
+    group: "Runtime and operations",
     invocation: "jeden stats [--json|--summary|--serve [--port N]]",
     purpose: "Show local usage, quota, and session totals or serve the same snapshot as a loopback dashboard.",
     inputs: [
@@ -194,6 +195,7 @@ export const operationCommands = [
   },
   {
     path: "gallery",
+    group: "Runtime and operations",
     invocation: "jeden gallery [--theme NAME|--all] [--color]",
     purpose: "Render the TUI component gallery under the effective theme or every bundled preset.",
     inputs: [
@@ -205,6 +207,7 @@ export const operationCommands = [
   },
   {
     path: "copy",
+    group: "Runtime and operations",
     invocation: "jeden copy <text> | jeden copy - [--json]",
     purpose: "Hand an exact payload to the operator's clipboard from outside an interactive session.",
     inputs: [

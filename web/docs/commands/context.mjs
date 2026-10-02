@@ -10,6 +10,7 @@ const unknownSource =
 export const contextCommands = [
   {
     path: "context",
+    group: "Context advisor",
     invocation:
       'jeden context [recommend] "<task>" [--limit n] [--source list] [--json] [--cwd path]',
     purpose: "Ask the context advisor what to read for a task instead of searching for it.",
@@ -28,6 +29,7 @@ export const contextCommands = [
   },
   {
     path: "context/recommend",
+    group: "Context advisor",
     invocation:
       'jeden context recommend "<task>" [--limit n] [--source list] [--json] [--cwd path]',
     purpose: "Return ranked locators for a task, with the state of every source that answered.",
@@ -43,6 +45,7 @@ export const contextCommands = [
   },
   {
     path: "context/prompt",
+    group: "Context advisor",
     invocation: 'jeden context prompt "<task>" [--json] [--cwd path]',
     purpose: "Print exactly the recommendation block a turn would append for this task.",
     inputs: [
@@ -59,6 +62,7 @@ export const contextCommands = [
   },
   {
     path: "context/sources",
+    group: "Context advisor",
     invocation: "jeden context sources [--json] [--cwd path]",
     purpose: "Report what each context source is configured to be and whether it answers now.",
     inputs: [
@@ -74,6 +78,7 @@ export const contextCommands = [
   },
   {
     path: "context/install",
+    group: "Context advisor",
     invocation: "jeden context install [--omp|--file <path>] [--json]",
     purpose: "Install the advisor into another harness as a custom tool.",
     inputs: [
@@ -90,6 +95,7 @@ export const contextCommands = [
   },
   {
     path: "context/status",
+    group: "Context advisor",
     invocation: "jeden context status [--omp|--file <path>] [--json]",
     purpose: "Say whether the installed tool is exactly what this binary renders.",
     inputs: [target, "<code>--json</code> returns <code>state</code> beside the target and path."],
@@ -102,6 +108,7 @@ export const contextCommands = [
   },
   {
     path: "context/uninstall",
+    group: "Context advisor",
     invocation: "jeden context uninstall [--omp|--file <path>] [--json]",
     purpose: "Remove the tool <code>context install</code> wrote.",
     inputs: [

@@ -54,29 +54,19 @@ const commands = [
   ...contextCommands,
 ];
 
-const groups = [
-  ["Run and automation", ["run", "pursue", "rpc", "headless", "acp", "collab-relay"]],
-  ["Sessions and artifacts", ["sessions", "import", "show", "export", "artifacts", "artifact", "search-sessions", "resume", "recall_conversation"]],
-  ["Runtime and operations", ["tools", "update", "doctor", "conformance", "probierz", "capabilities", "token", "stats", "gallery", "copy"]],
-  ["Configuration", ["workspace", "workspace/status", "workspace/discover", "workspace/adopt", "config", "config/list", "config/path", "config/get", "config/set", "config/reset", "config/unset", "contracts"]],
-  ["Shell completions", ["completions", "completions/bash", "completions/zsh", "completions/fish"]],
-  ["Retained tasks", completionCommands.map((command) => command.path)],
-  ["Managed worktrees", ["worktree", "worktree/list", "worktree/clear"]],
-  ["Context advisor", contextCommands.map((command) => command.path)],
-  ["Roadmap", [
-    "roadmap", "roadmap/list", "roadmap/show", "roadmap/add", "roadmap/drop", "roadmap/start", "roadmap/implemented", "roadmap/block", "roadmap/pass", "roadmap/status", "roadmap/depends", "roadmap/undepends", "roadmap/graph", "roadmap/acceptance", "roadmap/acceptance/list", "roadmap/acceptance/add", "roadmap/acceptance/evidence", "roadmap/check", "roadmap/work",
-  ]],
-];
-
+// Each command declares the navigation group it belongs to; the tree is the
+// groups in the order they first appear, so a page cannot be left out of the
+// navigation and the navigation cannot name a page that does not exist.
 const byPath = new Map(commands.map((entry) => [entry.path, entry]));
-for (const [, paths] of groups) {
-  for (const path of paths) {
-    if (!byPath.has(path)) throw new Error(`CLI navigation references unknown command path: ${path}`);
+for (const entry of commands) {
+  if (typeof entry.group !== "string" || entry.group.length === 0) {
+    throw new Error(`CLI command page ${entry.path} declares no navigation group`);
   }
 }
-if (new Set(groups.flatMap(([, paths]) => paths)).size !== commands.length) {
-  throw new Error("CLI command tree must link every command page exactly once");
-}
+const groups = [...new Set(commands.map((entry) => entry.group))].map((title) => [
+  title,
+  commands.filter((entry) => entry.group === title).map((entry) => entry.path),
+]);
 
 export const cliRouteContract = commands.map(({ path, invocation }) => ({
   path: `/docs/cli/${path}`,

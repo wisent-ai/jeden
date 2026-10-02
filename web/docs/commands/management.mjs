@@ -1,6 +1,7 @@
 export const managementCommands = [
   {
     path: "roadmap",
+    group: "Roadmap",
     invocation: "jeden roadmap <list|show|add|drop|start|implemented|block|pass|status|depends|undepends|graph|acceptance|check|work> [args] [--json] [--cwd path]",
     purpose: "Read and transactionally mutate the repository-owned Jeden roadmap.",
     inputs: [
@@ -18,6 +19,7 @@ export const managementCommands = [
   // Config leaves.
   {
     path: "config/list",
+    group: "Configuration",
     invocation: "jeden config list [--json] [--cwd path]",
     purpose: "List every schema-backed setting and its effective value.",
     inputs: ["Optional: <code>--cwd</code> for merged project-over-user values and <code>--json</code> for metadata objects."],
@@ -26,6 +28,7 @@ export const managementCommands = [
   },
   {
     path: "config/path",
+    group: "Configuration",
     invocation: "jeden config path",
     purpose: "Print the writable user configuration file path.",
     inputs: ["No key or value is accepted or required."],
@@ -34,6 +37,7 @@ export const managementCommands = [
   },
   {
     path: "config/get",
+    group: "Configuration",
     invocation: "jeden config get <key> [--json] [--cwd path]",
     purpose: "Read one effective schema-backed setting.",
     inputs: ["Required: an exact key from the setting schema, including <code>contracts.communication</code>, <code>contracts.functionality</code>, <code>communication.mode</code>, or one of the four <code>communication.*</code> overrides. Optional: <code>--json</code> for metadata and <code>--cwd</code> for the project layer."],
@@ -42,6 +46,7 @@ export const managementCommands = [
   },
   {
     path: "config/set",
+    group: "Configuration",
     invocation: "jeden config set <key> <value> [--json]",
     purpose: "Validate and persist one user configuration setting.",
     inputs: [
@@ -57,6 +62,7 @@ export const managementCommands = [
   },
   {
     path: "config/reset",
+    group: "Configuration",
     invocation: "jeden config reset <key> [--json]",
     purpose: "Persist one setting's schema default into the user configuration.",
     inputs: ["Required: an exact schema key. Optional: <code>--json</code> for the key, default value, type, description, and path."],
@@ -65,6 +71,7 @@ export const managementCommands = [
   },
   {
     path: "config/unset",
+    group: "Configuration",
     invocation: "jeden config unset <key> [--json]",
     purpose: "Remove one setting from the user configuration, so the file says nothing about it again.",
     inputs: ["Required: an exact schema key. Optional: <code>--json</code> for the key, whether anything was removed, the value it reads now, type, description, and path."],
@@ -75,6 +82,7 @@ export const managementCommands = [
   // Completion leaves.
   ...["bash", "zsh", "fish"].map((shell) => ({
     path: `completions/${shell}`,
+    group: "Shell completions",
     invocation: `jeden completions ${shell}`,
     purpose: `Generate Jeden completions for ${shell}.`,
     inputs: [`Required shell selector: <code>${shell}</code>; no output path is accepted because the script is written to stdout.`],
@@ -85,6 +93,7 @@ export const managementCommands = [
   // Worktree leaves.
   {
     path: "worktree/list",
+    group: "Managed worktrees",
     invocation: "jeden worktree list [--json] [--cwd path]",
     purpose: "List Git worktrees correlated with Jeden task records.",
     inputs: ["Optional: <code>--cwd</code> for the repository and <code>--json</code> for structured rows."],
@@ -93,6 +102,7 @@ export const managementCommands = [
   },
   {
     path: "worktree/clear",
+    group: "Managed worktrees",
     invocation: "jeden worktree clear (--dry-run | --yes) [--json] [--cwd path]",
     purpose: "Remove stale, safely bounded Git worktrees owned by Jeden.",
     inputs: ["Required: <code>--dry-run</code> to see the removal plan, or <code>--yes</code> to confirm the removal it lists. Optional: <code>--json</code> and repository <code>--cwd</code>."],
@@ -108,6 +118,7 @@ export const managementCommands = [
   // Roadmap direct leaves.
   {
     path: "roadmap/list",
+    group: "Roadmap",
     invocation: "jeden roadmap list [--status STATUS] [--area AREA] [--priority PRIORITY] [--json]",
     purpose: "List roadmap items, optionally filtered by exact status, area, or priority.",
     inputs: ["Optional filters: <code>--status</code>, <code>--area</code>, and <code>--priority</code>; optional structured <code>--json</code> output."],
@@ -116,6 +127,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/show",
+    group: "Roadmap",
     invocation: "jeden roadmap show <id> [--json]",
     purpose: "Show one roadmap item by case-insensitive ID.",
     inputs: ["Required: roadmap item ID. Optional: <code>--json</code>."],
@@ -124,6 +136,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/add",
+    group: "Roadmap",
     invocation: "jeden roadmap add <title> | --title <title> [--area AREA] [--priority P0|P1|P2|P3] [--summary TEXT] [--acceptance TEXT] [--depends-on ID] [--capability ID] [--external-prerequisite TEXT] [--status STATUS] [--revision N] [--json]",
     purpose: "Create a new validated roadmap item.",
     inputs: [
@@ -143,6 +156,7 @@ export const managementCommands = [
     ["pass", "jeden roadmap pass <id> [reason|--reason TEXT] [--evidence URI] [--revision N] [--json]", "Mark an item passed with evidence.", "Sets status to passed, appends repeatable evidence URIs, records the event, validates, and commits a new revision.", "The ID is required, and roadmap validation refuses passed items without any evidence."],
   ].map(([name, invocation, purpose, effect, refusal]) => ({
     path: `roadmap/${name}`,
+    group: "Roadmap",
     invocation,
     purpose,
     inputs: ["Required: roadmap item ID. Optional reason, expected revision, JSON output, and action-specific values shown in the invocation."],
@@ -151,6 +165,7 @@ export const managementCommands = [
   })),
   {
     path: "roadmap/block",
+    group: "Roadmap",
     invocation: "jeden roadmap block <id> <reason> [--external-prerequisite TEXT] [--evidence URI] [--revision N] [--json]",
     purpose: "Mark an item externally blocked and record what must change outside the repository.",
     inputs: ["Required: item ID plus a positional reason or at least one <code>--external-prerequisite</code>. Optional evidence, revision, and JSON output."],
@@ -159,6 +174,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/status",
+    group: "Roadmap",
     invocation: "jeden roadmap status <id> <status> [reason|--reason TEXT] [--external-prerequisite TEXT] [--evidence URI] [--revision N] [--json]",
     purpose: "Set an item's explicit roadmap status.",
     inputs: ["Required: item ID and one allowed status. Optional reason, prerequisites, evidence, revision, and JSON output."],
@@ -170,6 +186,7 @@ export const managementCommands = [
     ["undepends", "jeden roadmap undepends <id> <dependency-id> [--revision N] [--json]", "Remove a dependency edge.", "Removes the matching dependency edge, validates, records an update event, and commits."],
   ].map(([name, invocation, purpose, effect]) => ({
     path: `roadmap/${name}`,
+    group: "Roadmap",
     invocation,
     purpose,
     inputs: ["Required: source item ID and dependency item ID. Optional expected revision and JSON output."],
@@ -181,6 +198,7 @@ export const managementCommands = [
   })),
   {
     path: "roadmap/graph",
+    group: "Roadmap",
     invocation: "jeden roadmap graph [--json]",
     purpose: "Render the roadmap dependency graph.",
     inputs: ["Optional: <code>--json</code> for structured nodes, edges, and revision."],
@@ -189,6 +207,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/acceptance",
+    group: "Roadmap",
     invocation: "jeden roadmap acceptance <list|add|evidence> <item-id> ... [--revision N] [--json]",
     purpose: "Inspect acceptance criteria or attach new criteria and criterion-specific evidence.",
     inputs: ["Required: operation and item ID, followed by the criterion text or criterion/evidence identifiers required by the selected leaf."],
@@ -197,6 +216,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/acceptance/list",
+    group: "Roadmap",
     invocation: "jeden roadmap acceptance list <item-id> [--json]",
     purpose: "List one item's acceptance criteria and attached evidence counts.",
     inputs: ["Required: item ID. Optional: <code>--json</code>."],
@@ -205,6 +225,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/acceptance/add",
+    group: "Roadmap",
     invocation: "jeden roadmap acceptance add <item-id> <criterion> [--id ID] [--revision N] [--json]",
     purpose: "Append an acceptance criterion to one roadmap item.",
     inputs: ["Required: item ID and non-empty criterion text. Optional explicit criterion ID, expected revision, and JSON output."],
@@ -213,6 +234,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/acceptance/evidence",
+    group: "Roadmap",
     invocation: "jeden roadmap acceptance evidence <item-id> <acceptance-id> <artifact-uri> [--revision N] [--json]",
     purpose: "Attach one artifact URI to a specific acceptance criterion.",
     inputs: ["Required: item ID, acceptance ID, and artifact URI. Optional expected revision and JSON output."],
@@ -221,6 +243,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/check",
+    group: "Roadmap",
     invocation: "jeden roadmap check [--json]",
     purpose: "Validate the complete roadmap without mutating it.",
     inputs: ["Optional: <code>--json</code> for the structured validation report."],
@@ -229,6 +252,7 @@ export const managementCommands = [
   },
   {
     path: "roadmap/work",
+    group: "Roadmap",
     invocation: "jeden roadmap work <item-id> [--json]",
     purpose: "Activate one eligible roadmap item as the current goal, plan, todo set, and session work context.",
     inputs: ["Required: roadmap item ID. Optional: <code>--json</code>."],

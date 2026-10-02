@@ -1,6 +1,7 @@
 export const sessionCommands = [
   {
     path: "import",
+    group: "Sessions and artifacts",
     invocation: "jeden import <path>... [--refresh] [--json]",
     purpose: "Preserve sessions of another harness — their conversation history and interrupted requests — in native Jeden ledgers without executing work.",
     inputs: [
@@ -17,6 +18,7 @@ export const sessionCommands = [
   },
   {
     path: "run",
+    group: "Run and automation",
     invocation: 'jeden run "task" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]',
     purpose: "Run one concrete agent task through a durable Jeden conversation.",
     inputs: [
@@ -37,6 +39,7 @@ export const sessionCommands = [
   },
   {
     path: "pursue",
+    group: "Run and automation",
     invocation: 'jeden pursue "rough objective" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command]\njeden pursue --request-file request.json --allow-write --allow-command [--json]\njeden pursue --status REQUEST_ID [--json]\njeden pursue --state REQUEST_ID [--json]\njeden pursue --resume-run REQUEST_ID [--json]',
     purpose: "Turn a rough objective into a source-grounded autonomous contract, execution, independent review, verdict, and receipt.",
     inputs: [
@@ -58,6 +61,7 @@ export const sessionCommands = [
   },
   {
     path: "rpc",
+    group: "Run and automation",
     invocation: "jeden rpc",
     purpose: "Serve Jeden's newline-delimited JSON RPC interface on standard input and output.",
     inputs: [
@@ -77,6 +81,7 @@ export const sessionCommands = [
   },
   {
     path: "headless",
+    group: "Run and automation",
     invocation: "jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]",
     purpose: "Serve the multi-tenant Jeden RPC service over a TLS listener where each client proves itself with a client certificate or with its Wisent identity.",
     inputs: [
@@ -99,6 +104,7 @@ export const sessionCommands = [
   },
   {
     path: "acp",
+    group: "Run and automation",
     invocation: "jeden acp",
     purpose: "Serve Jeden as an Agent Client Protocol agent over standard input and output.",
     inputs: [
@@ -113,6 +119,7 @@ export const sessionCommands = [
   },
   {
     path: "collab-relay",
+    group: "Run and automation",
     invocation: "jeden collab-relay [addr]",
     purpose: "Run the encrypted collaboration-room relay used by interactive collaboration commands.",
     inputs: [
@@ -128,6 +135,7 @@ export const sessionCommands = [
   },
   {
     path: "sessions",
+    group: "Sessions and artifacts",
     invocation: "jeden sessions [limit] [--json]",
     purpose: "List locally stored Jeden session identifiers.",
     inputs: [
@@ -144,6 +152,7 @@ export const sessionCommands = [
   },
   {
     path: "show",
+    group: "Sessions and artifacts",
     invocation: "jeden show <session-id-or-path> [--json]",
     purpose: "Print one durable session: each event under its own heading, or the whole record as JSON.",
     inputs: ["Required: a session identifier under the session root or a session directory path containing a slash.", "Optional: <code>--json</code> prints the full export."],
@@ -155,6 +164,7 @@ export const sessionCommands = [
   },
   {
     path: "export",
+    group: "Sessions and artifacts",
     invocation: "jeden export <session-id-or-path> [output] [--html|--markdown]",
     purpose: "Export a recorded session as JSON, HTML, or Markdown.",
     inputs: [
@@ -170,6 +180,7 @@ export const sessionCommands = [
   },
   {
     path: "artifacts",
+    group: "Sessions and artifacts",
     invocation: "jeden artifacts <session-id-or-path> [--json]",
     purpose: "List files in one session's artifact directory.",
     inputs: ["Required: a session identifier or path.", "Optional: <code>--json</code> prints <code>[{name, bytes}]</code>."],
@@ -181,6 +192,7 @@ export const sessionCommands = [
   },
   {
     path: "artifact",
+    group: "Sessions and artifacts",
     invocation: "jeden artifact <session-id-or-path> <name> [output]",
     purpose: "Read one UTF-8 session artifact or copy it to a requested output file.",
     inputs: [
@@ -196,6 +208,7 @@ export const sessionCommands = [
   },
   {
     path: "tools",
+    group: "Runtime and operations",
     invocation: "jeden tools [--json] [--cwd path]",
     purpose: "Inspect the currently visible and executable Jeden tool registry.",
     inputs: [
@@ -210,6 +223,7 @@ export const sessionCommands = [
   },
   {
     path: "search-sessions",
+    group: "Sessions and artifacts",
     invocation: 'jeden search-sessions "query" [limit]',
     purpose: "Search durable session event payloads for a case-insensitive text fragment.",
     inputs: [
@@ -224,6 +238,7 @@ export const sessionCommands = [
   },
   {
     path: "resume",
+    group: "Sessions and artifacts",
     invocation: 'jeden resume <session-id-or-path> ["task"] [--allow-write] [--allow-command] [--yolo|--auto-approve]',
     purpose: "Seed a fresh Jeden session with the conversation turns from a recorded session and optionally continue it immediately.",
     inputs: [
@@ -238,6 +253,7 @@ export const sessionCommands = [
   },
   {
     path: "recall_conversation",
+    group: "Sessions and artifacts",
     invocation: "jeden recall_conversation <session-id-or-path>",
     purpose: "Render a recorded session's full event transcript as Markdown for recall or inspection.",
     inputs: [
