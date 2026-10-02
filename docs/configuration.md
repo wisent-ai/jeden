@@ -49,9 +49,7 @@ Before its first model call, every turn receives the top recommendations as a
 local state; `--source all` adds the archive and the index. Sources run
 concurrently and nothing cuts one short: there is no deadline setting and no
 `--timeout-ms` flag, because a guessed interval reports nothing and explains
-nothing. Measured here, one archive search took 30 s against 1 s for the two
-local sources, so choosing the source set is the decision that replaces that
-guess. `jeden context prompt "<task>"` prints exactly what the next turn would
+nothing. Choose the source set explicitly. `jeden context prompt "<task>"` prints exactly what the next turn would
 receive, `jeden context sources` reports what each source is and whether it
 answers now, and `context.advisor.enabled false` switches the block off.
 

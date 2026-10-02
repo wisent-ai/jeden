@@ -1,21 +1,8 @@
 //! Isolating and diffing a job workspace on unix.
 //!
-//! Split out of `unix.rs` because the operator's rule keeps every source file
-//! at three hundred lines or fewer, and the write guard answers an oversized
-//! file by refusing every edit to it in both directions — so the change below
-//! could not be made until the file was split.
-//!
-//! `git worktree add` is gone from this path. The operator's instruction was
-//! "MA BYC NIEMOZLIWE UZYCIE WORKTREES. ZERO SUBAGENTOW NA OSOBNYCH
-//! WORKTREES", and a job workspace is exactly the subagent case. Isolation is
-//! by copy: an APFS clone on macOS, a reflink on Linux, and a plain recursive
-//! copy when neither is available. None of them registers a worktree in the
-//! parent repository, so `jeden worktree` has nothing of ours to clean up.
-//!
-//! The removed branch was already unreachable on this machine, because the
-//! APFS clone above it always succeeds on an APFS volume. Removing it is
-//! still the point: a capability that still exists is one that returns the
-//! moment the filesystem underneath changes.
+//! Isolation uses an APFS clone on macOS, a reflink on Linux, or a recursive
+//! copy when neither is available. It never registers a Git worktree in the
+//! parent repository.
 
 use super::super::*;
 use super::UnixPlatform;
