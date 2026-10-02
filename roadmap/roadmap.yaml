@@ -290,7 +290,7 @@ context: |-
 
   ### 11. Stable Rust/TypeScript SDK
 
-  **Pliki/moduły:** wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie: operator 2026-09-22, „masz usunac calego pythona. tylko rust”.
+  **Pliki/moduły:** wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie.
 
   **Zmiana:** async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
 
@@ -847,7 +847,7 @@ items:
   priority: P1
   status: not_run
   summary: async client/session/prompt handle/events/result/cancel/reconnect/dispose; runtime validators w TS; Rust in-process implementuje ten sam trait; semver/minimum runtime policy; generated wire types, handwritten ergonomic API.
-  implementation: wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie (operator 2026-09-22).
+  implementation: wydzielić Cargo workspace/crates `crates/jeden-protocol`, `crates/jeden-sdk`; `packages/sdk-typescript/**`; generator z `protocol/schema/v1/**`; compatibility checker. Bez SDK w Pythonie.
   rationale: ''
   implementationOrder: ''
   acceptance:

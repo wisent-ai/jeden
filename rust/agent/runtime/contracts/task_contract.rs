@@ -80,11 +80,8 @@ impl Requirement {
 /// all state it.
 ///
 /// `interactive` is an operator-driven `jeden run`. `autonomous-execution` is
-/// the Pursuit execution stage, which changes the product exactly as an
-/// interactive turn does and was exempt until 2026-09-05: `report_required`
-/// excluded every autonomous stage, so the one stage that writes code
-/// delivered no report and no `task_report` event, and nothing checked that it
-/// had covered CLI, GUI, documentation or tests. Read-only Pursuit stages
+/// the Pursuit execution stage, which changes the product and must provide
+/// the same delivery report as an interactive turn. Read-only Pursuit stages
 /// (planner, contract reviewer, acceptance reviewer) keep their own output
 /// contracts and are not listed here.
 pub(crate) const APPLIES_TO: [&str; 2] = ["interactive", "autonomous-execution"];

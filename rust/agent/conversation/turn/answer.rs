@@ -19,14 +19,9 @@ const STOP_RULE: &str = "stop-hook";
 
 /// The correction one unusable answer is given.
 ///
-/// A cut answer needs a shorter answer; an unreadable one almost always
-/// carries a raw quote inside a JSON string, and on 2026-09-10 a model sent
-/// the identical malformed answer twice because the correction quoted serde's
-/// position without naming the rule it had broken. An answer the provider
-/// finished normally yet left with open brackets is a third shape: on
-/// 2026-09-18 a reviewer closed the criteria array and went straight to
-/// `requests` without closing the task and the tasks array, three runs in a
-/// row, and each time was told to be shorter. All three shapes are named.
+/// The correction distinguishes output-budget truncation, incomplete JSON
+/// nesting and malformed string escapes. Each needs different advice:
+/// shortening a complete provider response cannot repair unclosed brackets.
 fn repair_instruction(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> String {
     let budget = match max_tokens {
         Some(tokens) => format!(" of {tokens} tokens"),
@@ -62,14 +57,9 @@ fn answer_refusal(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> Stri
 impl Conversation {
     /// One bounded correction for an answer that never arrived usable.
     ///
-    /// A cut-off or unreadable answer used to end the turn where it was read.
-    /// In a completion-managed conversation that ended the whole assignment:
-    /// on 2026-09-10 a provider truncated one intake answer mid-string and the
-    /// user's retained request stopped at `Work remains open (task_intake):
-    /// EOF while parsing a string at line 1 column 1440`. The model now gets
-    /// the exact refusal back once, inside the same turn, and only an
-    /// exhausted correction budget ends it - with a sentence that says what
-    /// happened to the answer.
+    /// The model receives the exact refusal once inside the same turn.
+    /// Exhausting the correction budget ends the turn with the cause while
+    /// leaving the retained assignment open.
     ///
     /// `Ok(None)` means a correction was asked for and the turn continues;
     /// `Ok(Some(refusal))` is the sentence the turn must end with.
@@ -264,6 +254,11 @@ impl Conversation {
             return Ok(false);
         };
         prepared.stop_refused = true;
+        let completion_state = if prepared.tracks_completion {
+            Some(crate::completion::read_state(&session)?)
+        } else {
+            None
+        };
         self.recorder.record(
             task_contract::VIOLATION_EVENT,
             json!({
@@ -272,8 +267,22 @@ impl Conversation {
                 "outcome": "requested",
                 "message": &reason,
                 "prompt": &reason,
+                "completion": completion_state.as_ref().map(crate::completion::snapshot_value),
             }),
         )?;
+        if let Some(state) = completion_state.as_ref() {
+            self.publish_completion(state, hooks)?;
+            self.recorder.record(
+                "completion_stop_refusal",
+                json!({
+                    "step": step,
+                    "reason": &reason,
+                    "status": state.status(),
+                    "openTasks": state.tasks.iter().filter(|task| !task.status.terminal()).collect::<Vec<_>>(),
+                    "openRequests": state.open_requests(),
+                }),
+            )?;
+        }
         hooks.note("answer refused by a Stop hook; continuing the work");
         self.messages
             .push(json!({ "role": "user", "content": reason }));

@@ -30,8 +30,7 @@ web/vercel.json
 # The translation tables. Each is a table of (language code, key, text) rows
 # or one text per language that `i18n::tr` and the prompt assembly read after
 # their hand-written rows; they carry no logic, so their length is the number
-# of languages times strings, not a module that wants splitting. They were
-# first machine-translated by a tool not in this repository and are now the
-# source of their rows (defect b5d61f80).
+# of languages times strings, not a module that wants splitting. These
+# files are the canonical source of their translation rows.
 rust/cli/i18n/translations.rs
 rust/agent/runtime/contracts/language_prose.rs
