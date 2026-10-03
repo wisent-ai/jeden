@@ -4,7 +4,7 @@ mod fleet;
 mod local;
 mod scheduler;
 mod types;
-mod watch;
+pub(crate) mod watch;
 
 pub use fleet::{coordinator, placement, protocol, store, worker};
 pub(crate) use local::sandbox;

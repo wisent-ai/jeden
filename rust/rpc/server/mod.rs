@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 use super::interaction::RpcInteractionBridge;
 use crate::rpc::server::operations::wire::error_response;
 use crate::rpc::server::operations::wire::success_response;
-use crate::rpc::server::operations::workspace::import_sessions;
+use crate::rpc::server::operations::workspace::{import_sessions, restore_sessions};
 use crate::rpc::server::operations::workspace::workspace_adopt;
 use crate::rpc::server::operations::workspace::workspace_discover;
 use crate::rpc::server::operations::workspace::workspace_status;
@@ -220,6 +220,7 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),
         "session/import" => import_sessions(&request.params),
+        "session/restore" => restore_sessions(&request.params),
         "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
         "abort" | "session/cancel" => abort_session(state, &request.params),
         "status" | "session/status" => session_status(state, &request.params),

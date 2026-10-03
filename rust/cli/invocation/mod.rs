@@ -39,6 +39,8 @@ pub(crate) fn usage() -> String {
         "  jeden acp              serve ACP on stdio\n",
         "  jeden sessions [limit] [--json]\n",
         "  jeden import <path>... [--refresh] [--json] — preserve sessions of another harness in native ledgers without executing work\n",
+        "  jeden restore --since <today|YYYY-MM-DD|YYYY-MM-DDTHH:MM:SSZ> [--dry-run] [--sessions <dir>] [--json] — reopen every OMP session the operator wrote in since then and report each as already running, reopened, refused or stopped\n",
+        "  jeden restore open <transcript> [--run <dir>] — resume one OMP session in this terminal, in its own workspace\n",
         "  jeden show <session-id-or-path> [--json]\n",
         "  jeden export <session-id-or-path> [output.json]\n",
         "  jeden artifacts <session-id-or-path> [--json]\n",
@@ -248,6 +250,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "context"
                             | "workspace"
                             | "import"
+                            | "restore"
                             | "todo"
                             | "copy"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>

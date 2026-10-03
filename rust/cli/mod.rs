@@ -8,6 +8,7 @@ pub(crate) mod context;
 pub(crate) mod i18n;
 pub(crate) mod invocation;
 mod reports;
+pub(crate) mod restore;
 pub(crate) mod run;
 pub(crate) mod tooling;
 pub(crate) mod workspace;

@@ -233,6 +233,7 @@ pub fn main() -> ExitCode {
             collab::serve(&addr).map(|_| String::new())
         }
         "import" => session_import::command(&args),
+        "restore" => cli::restore::command(&args),
         "sessions" => match args.positionals.first() {
             None => list_sessions(None, args.json),
             Some(raw) => raw
