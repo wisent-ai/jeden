@@ -7,8 +7,6 @@
 use crate::model_router::{RetryPolicy, RouteDescriptor};
 use serde_json::Value;
 
-const MAX_CONFIGURED_ROUTES: usize = 16;
-
 pub(super) fn route_descriptors(
     value: Option<&Value>,
     key: &str,
@@ -19,11 +17,6 @@ pub(super) fn route_descriptors(
     let entries = value
         .as_array()
         .ok_or_else(|| format!("modelRouting.{key} must be an array"))?;
-    if entries.len() > MAX_CONFIGURED_ROUTES {
-        return Err(format!(
-            "modelRouting.{key} exceeds the {MAX_CONFIGURED_ROUTES}-route limit"
-        ));
-    }
     let mut routes = Vec::with_capacity(entries.len());
     for (index, entry) in entries.iter().enumerate() {
         let object = entry
@@ -70,8 +63,8 @@ pub(super) fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
         Some(raw) => raw
             .as_u64()
             .and_then(|value| usize::try_from(value).ok())
-            .filter(|value| (1..=8).contains(value))
-            .ok_or("modelRouting.retry.maxAttempts must be an integer from 1 through 8")?,
+            .filter(|value| *value >= 1)
+            .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?,
     };
     Ok(RetryPolicy { max_attempts })
 }
