@@ -122,6 +122,7 @@ export const overviewPages = [
           "session transcripts and artifacts under <code>~/.jeden/sessions/</code>;",
           "model routing through <code>BRAMA_URL</code>, <code>WISENT_APP_AGENT_ID</code>, and <code>WISENT_APP_AGENT_AUTH_SECRET</code>, or through an OpenAI-compatible provider named by <code>JEDEN_MODEL_ENDPOINT</code>;",
           "model selection through <code>--model</code>, <code>JEDEN_MODEL</code>, or native config;",
+          "goal-lifecycle classification of each prompt by the lifecycle model Brama serves under the alias <code>JEDEN_LIFECYCLE_MODEL_ALIAS</code> names, signed like every other model call; without the alias there is no classifier, and a refused call is recorded in the session ledger as <code>goal_lifecycle_refused</code> with Brama's reason;",
           "jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;",
           "guarded file mutations using the digest or snapshot tag returned by <code>read_file</code>;",
           "custom JavaScript tools, project and user lifecycle hooks, and native <code>.jeden</code> configuration paths;",
