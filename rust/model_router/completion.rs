@@ -222,7 +222,7 @@ pub(crate) fn parse_completion_response(text: &str) -> Result<Completion, String
 
 pub(crate) fn subscription_provider_for_model(model: &str) -> Option<&'static str> {
     match model.trim().to_ascii_lowercase().as_str() {
-        "claude-code-subscription" | "claude-opus-4-7" => Some("claude_code"),
+        "claude-code-subscription" => Some("claude_code"),
         "codex-subscription" => Some("codex"),
         "kimi-subscription" => Some("kimi"),
         "opencode-subscription" => Some("opencode"),
