@@ -17,22 +17,20 @@ use url::{Position, Url};
 /// .txt byte-identical to that file; do not add headers to it.
 const SYSTEM_PROMPT: &str = include_str!("prompt.txt");
 
-const DEFAULT_COMPLETIONS_URL: &str = "http://127.0.0.1:11439/v1/chat/completions";
-
 struct Endpoint {
     completions_url: String,
     model: String,
 }
 
-/// One-time availability probe. Resolves the completions URL (env override
-/// `JEDEN_LIFECYCLE_MODEL_URL`, loopback-only), asks `GET {base}/v1/models`
+/// One-time availability probe. Resolves the completions URL from
+/// `JEDEN_LIFECYCLE_MODEL_URL` (loopback-only), asks `GET {base}/v1/models`
 /// for the served model id, and caches both the id and the reachability
-/// verdict for the process lifetime.
+/// verdict for the process lifetime. No address is built in: a machine that
+/// declares none has no classifier, and the turn proceeds unchanged.
 static ENDPOINT: LazyLock<Option<Endpoint>> = LazyLock::new(|| {
     let raw = env::var("JEDEN_LIFECYCLE_MODEL_URL")
         .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_COMPLETIONS_URL.to_string());
+        .filter(|value| !value.trim().is_empty())?;
     let url = Url::parse(raw.trim()).ok()?;
     if !is_loopback(&url) {
         return None;
