@@ -125,11 +125,7 @@ pub fn chat_completion(
         .text()
         .map_err(crate::control_plane::transport::describe_reqwest)?;
     if !status.is_success() {
-        return Err(format!(
-            "model router {}: {}",
-            status.as_u16(),
-            text.chars().take(800).collect::<String>()
-        ));
+        return Err(format!("model router {}: {text}", status.as_u16()));
     }
     let completion = parse_completion_response(&text)?;
     crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())?;

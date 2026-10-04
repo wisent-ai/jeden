@@ -132,5 +132,5 @@ pub fn classify(router: &ChatConfig, request: &LifecycleRequest) -> Result<Optio
         .map_err(|error| format!("Brama refused the lifecycle alias {alias}: {error}"))?;
     parse_decision(&completion.content)
         .map(Some)
-        .ok_or_else(|| format!("the lifecycle alias {alias} answered no decision: {}", completion.content.chars().take(200).collect::<String>()))
+        .ok_or_else(|| format!("the lifecycle alias {alias} answered no decision: {}", completion.content))
 }

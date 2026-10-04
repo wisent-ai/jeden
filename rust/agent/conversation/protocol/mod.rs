@@ -44,10 +44,7 @@ pub fn is_incomplete_answer(message: &str) -> bool {
 }
 
 fn non_json(raw: &str) -> String {
-    format!(
-        "{NON_JSON_ANSWER}: {}",
-        raw.chars().take(200).collect::<String>()
-    )
+    format!("{NON_JSON_ANSWER}: {raw}")
 }
 
 /// The first complete JSON object in `text`, or why there is none.

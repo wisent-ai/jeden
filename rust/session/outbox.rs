@@ -152,7 +152,7 @@ pub(crate) fn complete(dir: &Path, item: &OutboxItem) -> Result<(), String> {
 
 #[allow(dead_code)]
 pub(crate) fn retry(dir: &Path, item: &OutboxItem, error: &str) -> Result<(), String> {
-    transition_terminal(dir, item, OutboxState::Pending, Some(bound_error(error)))
+    transition_terminal(dir, item, OutboxState::Pending, Some(error.to_string()))
 }
 
 #[allow(dead_code)]
@@ -280,7 +280,3 @@ fn append_transition(dir: &Path, transition: &OutboxTransition) -> Result<(), St
     file.sync_data().map_err(|e| e.to_string())
 }
 
-#[allow(dead_code)]
-fn bound_error(error: &str) -> String {
-    error.chars().take(512).collect()
-}

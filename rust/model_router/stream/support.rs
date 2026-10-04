@@ -60,10 +60,7 @@ pub(crate) fn http_error(status: u16, body: String, retry_after: Option<Duration
     };
     AttemptError {
         class,
-        message: format!(
-            "model router {status}: {}",
-            body.chars().take(800).collect::<String>()
-        ),
+        message: format!("model router {status}: {body}"),
         retry_after,
         visible_output: false,
     }
