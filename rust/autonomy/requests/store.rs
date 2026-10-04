@@ -8,8 +8,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-const MAX_REQUEST_ID_BYTES: usize = 100;
-
 /// The pursuit tables in the fleet database `jeden`, created by
 /// `crate::fleet` on connection.
 pub(crate) const SCHEMA: &str = "
@@ -72,7 +70,6 @@ pub(super) struct Claim {
 
 pub(super) fn identifier(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= MAX_REQUEST_ID_BYTES
         && id
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')

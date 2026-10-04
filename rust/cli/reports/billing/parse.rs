@@ -9,9 +9,6 @@ use super::model::{
 };
 use std::collections::BTreeMap;
 
-const MAX_POLICY_CAP_MICROUNITS: u64 = 1_000_000_000_000_000;
-const MAX_POLICY_ITEMS: usize = 128;
-
 fn flag_map(tokens: &[&str]) -> Result<BTreeMap<String, Option<String>>, BillingError> {
     let mut result = BTreeMap::new();
     let mut index = 0;
@@ -73,9 +70,9 @@ fn csv(flags: &BTreeMap<String, Option<String>>, key: &str) -> Result<Vec<String
         .filter(|v| !v.is_empty())
         .map(str::to_string)
         .collect::<Vec<_>>();
-    if values.is_empty() || values.len() > MAX_POLICY_ITEMS {
+    if values.is_empty() {
         Err(BillingError::InvalidCommand(format!(
-            "--{key} must contain 1..={MAX_POLICY_ITEMS} values"
+            "--{key} must contain at least one value"
         )))
     } else {
         Ok(values)
@@ -229,11 +226,10 @@ pub(super) fn validate_policy(policy: &BillingPolicy) -> Result<(), BillingError
     }
     if policy.max_single_microunits == 0
         || policy.max_single_microunits > policy.max_period_microunits
-        || policy.max_period_microunits > MAX_POLICY_CAP_MICROUNITS
     {
-        return Err(BillingError::InvalidCommand(format!(
-            "policy caps must satisfy 0 < max-single <= max-period <= {MAX_POLICY_CAP_MICROUNITS}"
-        )));
+        return Err(BillingError::InvalidCommand(
+            "policy caps must satisfy 0 < max-single <= max-period".into(),
+        ));
     }
     if !matches!(policy.period.as_str(), "day" | "month" | "billing-cycle") {
         return Err(BillingError::InvalidCommand(
