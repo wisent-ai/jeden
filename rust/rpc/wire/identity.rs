@@ -10,8 +10,6 @@
 use serde::Deserialize;
 use serde_json::json;
 
-const WISENT_SUPABASE_URL: &str = "https://alvaewvbyxpgwdpugnxy.supabase.co";
-const WISENT_SUPABASE_ANON_KEY: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImFsdmFld3ZieXhwZ3dkcHVnbnh5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEzOTc5NDcsImV4cCI6MjA5Njk3Mzk0N30.xkkJ36ZTwtqyVZLFju0vc9S25grTuKbj9ILKlsXdUPA";
 pub const WISENT_ORGANIZATION_HEADER: &str = "x-wisent-organization-id";
 /// An authority answer is read up to 64 KiB.
 const MAX_ANSWER_BYTES: usize = 64 * 1024;
@@ -69,9 +67,10 @@ struct OrganizationAuthorization {
     role: String,
 }
 
-/// Where Wisent Identity answers. `JEDEN_WISENT_AUTH_URL` and
-/// `JEDEN_WISENT_AUTH_ANON_KEY` choose another authority for a bench; unset,
-/// it is the shared Wisent identity project.
+/// Where Wisent Identity answers: `JEDEN_WISENT_AUTH_URL` and
+/// `JEDEN_WISENT_AUTH_ANON_KEY`, from the environment or `~/.jeden/.env`.
+/// Nothing is compiled in: a daemon that names no authority refuses every
+/// person-authenticated connection with the variable it lacks.
 #[derive(Clone)]
 pub struct WisentIdentityAuthority {
     client: reqwest::Client,
@@ -82,7 +81,9 @@ pub struct WisentIdentityAuthority {
 impl WisentIdentityAuthority {
     pub fn from_environment() -> Result<Self, String> {
         let origin = configured("JEDEN_WISENT_AUTH_URL")
-            .unwrap_or_else(|| WISENT_SUPABASE_URL.to_owned())
+            .ok_or_else(|| {
+                "JEDEN_WISENT_AUTH_URL is not set; Wisent Identity has no address".to_string()
+            })?
             .trim_end_matches('/')
             .to_owned();
         if !origin.starts_with("https://") {
@@ -91,7 +92,7 @@ impl WisentIdentityAuthority {
             ));
         }
         let anon_key = configured("JEDEN_WISENT_AUTH_ANON_KEY")
-            .unwrap_or_else(|| WISENT_SUPABASE_ANON_KEY.to_owned());
+            .ok_or_else(|| "JEDEN_WISENT_AUTH_ANON_KEY is not set".to_string())?;
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .build()
@@ -116,7 +117,10 @@ impl WisentIdentityAuthority {
         }
         let response = self
             .client
-            .post(format!("{}/rest/v1/rpc/authorize_organization", self.origin))
+            .post(format!(
+                "{}/rest/v1/rpc/authorize_organization",
+                self.origin
+            ))
             .header("apikey", &self.anon_key)
             .header("Accept", "application/vnd.pgrst.object+json")
             .header(WISENT_ORGANIZATION_HEADER, organization_id.to_string())
@@ -131,7 +135,8 @@ impl WisentIdentityAuthority {
         }
         // PostgREST answers 406 when the object request matched no row: the
         // user is real and simply not a member.
-        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_ACCEPTABLE {
+        if status == reqwest::StatusCode::FORBIDDEN || status == reqwest::StatusCode::NOT_ACCEPTABLE
+        {
             return Err(IdentityRefusal::Forbidden);
         }
         if !status.is_success() {
