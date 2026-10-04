@@ -1,6 +1,7 @@
 //! `jeden stats` — local usage/quota/session snapshot as text, `--json`, or a
-//! self-contained local web dashboard (`--serve [--port N]`, default 3847 like
-//! omp's stats dashboard). The dashboard binds 127.0.0.1 only, serves a single
+//! self-contained local web dashboard (`--serve [--port N]`). Without
+//! `--port` the operating system assigns a free port and the command prints
+//! the address it bound. The dashboard binds 127.0.0.1 only, serves a single
 //! HTML page plus a `/api/stats` JSON endpoint, with explicit snapshot refresh.
 
 mod dashboard;
@@ -15,8 +16,6 @@ use crate::control_plane::quota::{
 };
 use crate::read_json;
 use crate::Args;
-
-const DEFAULT_PORT: u16 = 3847;
 
 fn usage_file_totals(path: &Path) -> Value {
     let usage = read_json::<Value>(path);
@@ -208,13 +207,20 @@ fn stats_text(cwd: &Path) -> String {
 pub(crate) fn stats_command(args: &Args) -> Result<String, String> {
     let flag = |name: &str| args.positionals.iter().any(|part| part == name);
     if flag("--serve") {
-        let port = args
+        let named = args
             .positionals
             .iter()
             .position(|part| part == "--port")
-            .and_then(|index| args.positionals.get(index + 1))
-            .and_then(|value| value.parse::<u16>().ok())
-            .unwrap_or(DEFAULT_PORT);
+            .map(|index| args.positionals.get(index + 1));
+        let port = match named {
+            None => None,
+            Some(value) => Some(value.and_then(|value| value.parse::<u16>().ok()).ok_or_else(|| {
+                format!(
+                    "jeden stats --serve --port takes a port number from 0 to 65535, not {}",
+                    value.map_or("nothing", String::as_str)
+                )
+            })?),
+        };
         return serve(&args.cwd, port);
     }
     if args.json {

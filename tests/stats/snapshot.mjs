@@ -14,7 +14,7 @@ mkdirSync(runs, { recursive: true });
 const output = mkdtempSync(join(runs, 'run-'));
 const report = {
   started_at: new Date().toISOString(), binary, commands: [], requests: [], cases: [], verdict: 'failed',
-  scope: 'Real native snapshot, loopback HTTP routes and occupied-port refusal. Does not qualify graphical refresh, retained errors, or account-specific quota outcomes. Reads existing usage and quota without changing them.',
+  scope: 'Real native snapshot, loopback HTTP routes, an operating-system-assigned port, and occupied-port and malformed-port refusals. Does not qualify graphical refresh, retained errors, or account-specific quota outcomes. Reads existing usage and quota without changing them.',
 };
 let reservation;
 let server;
@@ -39,7 +39,7 @@ function blocked(code, message) {
 }
 
 function launch(port) {
-  const args = ['stats', '--serve', '--port', String(port)];
+  const args = port === undefined ? ['stats', '--serve'] : ['stats', '--serve', '--port', String(port)];
   const observation = { program: binary, args, stdout: '', stderr: '', exit_status: null, signal: null };
   report.commands.push(observation);
   const child = spawn(binary, args, { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -58,7 +58,8 @@ function launch(port) {
     child.once('close', () => reject(new Error(`Statistics server exited before readiness: ${observation.stderr}`)));
     child.stdout.on('data', chunk => {
       observation.stdout += chunk;
-      if (observation.stdout.includes(`jeden stats dashboard: http://127.0.0.1:${port} `)) resolve();
+      const bound = observation.stdout.match(/jeden stats dashboard: http:\/\/127\.0\.0\.1:(\d+) /);
+      if (bound && (port === undefined || Number(bound[1]) === port)) resolve(Number(bound[1]));
     });
     child.stderr.on('data', chunk => { observation.stderr += chunk; });
   });
@@ -105,6 +106,19 @@ try {
   const snapshot = JSON.parse(success(run(binary, ['stats', '--json'])));
   assert.equal(snapshot.cwd, root, 'CLI read a different project');
   report.cases.push({ name: 'native project snapshot', snapshot });
+
+  const malformed = run(binary, ['stats', '--serve', '--port', 'not-a-port']);
+  assert.equal(malformed.status, 1, `${malformed.stdout}\n${malformed.stderr}`);
+  assert.ok(malformed.stderr.includes('jeden stats --serve --port takes a port number from 0 to 65535, not not-a-port'), malformed.stderr);
+  report.cases.push({ name: 'malformed port refused', exit_status: malformed.status, stderr: malformed.stderr });
+
+  const assigned = launch();
+  const assignedPort = await assigned.ready;
+  const assignedApi = await request(`http://127.0.0.1:${assignedPort}/api/stats`);
+  assert.equal(assignedApi.status, 200);
+  report.cases.push({ name: 'operating-system-assigned port served and reported', port: assignedPort });
+  assigned.child.kill('SIGTERM');
+  await assigned.closed;
 
   reservation = createServer();
   await new Promise((resolve, reject) => {

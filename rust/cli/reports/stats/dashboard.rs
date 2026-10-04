@@ -42,10 +42,16 @@ fn write_response(stream: &mut std::net::TcpStream, status: &str, content_type: 
     );
 }
 
-pub(super) fn serve(cwd: &Path, port: u16) -> Result<String, String> {
-    let listener = TcpListener::bind(("127.0.0.1", port))
-        .map_err(|error| format!("cannot bind 127.0.0.1:{port}: {error}"))?;
-    println!("jeden stats dashboard: http://127.0.0.1:{port}  (Ctrl-C to stop)");
+/// Serve the dashboard on `port`, or on a port the operating system assigns
+/// when none is named, and print the address actually bound.
+pub(super) fn serve(cwd: &Path, port: Option<u16>) -> Result<String, String> {
+    let asked = port.unwrap_or_default();
+    let listener = TcpListener::bind(("127.0.0.1", asked))
+        .map_err(|error| format!("cannot bind 127.0.0.1:{asked}: {error}"))?;
+    let bound = listener
+        .local_addr()
+        .map_err(|error| format!("cannot read the address 127.0.0.1:{asked} was bound to: {error}"))?;
+    println!("jeden stats dashboard: http://{bound}  (Ctrl-C to stop)");
     let _ = std::io::stdout().flush();
     let cwd: PathBuf = cwd.to_path_buf();
     for stream in listener.incoming() {
