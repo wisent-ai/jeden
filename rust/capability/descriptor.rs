@@ -8,7 +8,6 @@ use super::shapes::{
     CapabilityBinding, CapabilityHealth, CapabilityKind, CapabilityPolicy, CapabilityProvenance,
     FunctionTarget, GrantId, UiAffordance,
 };
-use super::{MAX_DEPENDENCIES, MAX_ID_BYTES, MAX_OPERATIONS};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilityDescriptorV2 {
@@ -146,8 +145,6 @@ impl CapabilityDescriptorV2 {
     }
 
     pub(super) fn normalize(&mut self) {
-        self.operations.truncate(MAX_OPERATIONS);
-        self.dependencies.truncate(MAX_DEPENDENCIES);
         if !self.health.is_executable() {
             self.ui.executable = false;
             self.ui.action = None;
@@ -163,7 +160,6 @@ impl CapabilityDescriptorV2 {
     }
     pub(super) fn valid(&self) -> bool {
         !self.id.is_empty()
-            && self.id.len() <= MAX_ID_BYTES
             && self
                 .id
                 .chars()

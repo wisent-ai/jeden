@@ -6,10 +6,6 @@
 //! this build ships with.
 
 pub const REGISTRY_VERSION: u32 = 2;
-pub const MAX_CAPABILITIES: usize = 4_096;
-const MAX_ID_BYTES: usize = 256;
-const MAX_OPERATIONS: usize = 64;
-const MAX_DEPENDENCIES: usize = 64;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RegistryError {

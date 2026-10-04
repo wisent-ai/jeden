@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use super::builtin::{builtin_slash_descriptors, file_slash_descriptors, native_view_descriptors};
 use super::shapes::CapabilityKind;
-use super::{CapabilityDescriptor, RegistryError, MAX_CAPABILITIES, REGISTRY_VERSION};
+use super::{CapabilityDescriptor, RegistryError, REGISTRY_VERSION};
 use crate::capability::shapes::CapabilityHealth;
 use crate::capability::shapes::FunctionTarget;
 use std::collections::BTreeMap;
@@ -94,14 +94,6 @@ pub fn for_cwd(cwd: &Path) -> Arc<CapabilitySnapshot> {
     refresh(&cwd).unwrap_or(current)
 }
 
-fn extend_bounded(
-    target: &mut Vec<CapabilityDescriptor>,
-    provider: impl IntoIterator<Item = CapabilityDescriptor>,
-) {
-    let remaining = MAX_CAPABILITIES.saturating_sub(target.len());
-    target.extend(provider.into_iter().take(remaining));
-}
-
 pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
     let _guard = REBUILD.lock().map_err(|_| RegistryError::LockPoisoned)?;
     let cwd = canonical(cwd);
@@ -109,43 +101,21 @@ pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
     if !DIRTY.load(Ordering::Acquire) && previous.cwd == cwd {
         return Ok(previous);
     }
-    let mut candidates = Vec::with_capacity(256);
-    extend_bounded(
-        &mut candidates,
-        crate::tools::builtin_capability_descriptors(),
-    );
-    extend_bounded(
-        &mut candidates,
-        crate::tool_runtime::runtime_ops::capability_descriptors(&cwd),
-    );
-    extend_bounded(
-        &mut candidates,
-        crate::tool_services::capability_descriptors(&cwd),
-    );
-    extend_bounded(&mut candidates, builtin_slash_descriptors());
-    extend_bounded(&mut candidates, native_view_descriptors());
-    extend_bounded(
-        &mut candidates,
-        [crate::tui::external_editor_capability_descriptor(&cwd)],
-    );
-    extend_bounded(
-        &mut candidates,
-        crate::tui::attachment_capability_descriptors(&cwd),
-    );
-    extend_bounded(
-        &mut candidates,
-        [crate::tui::keymap_capability_descriptor()],
-    );
-    extend_bounded(
-        &mut candidates,
-        crate::roadmap::capability_descriptors(&cwd),
-    );
-    extend_bounded(&mut candidates, file_slash_descriptors(&cwd));
+    let mut candidates = Vec::new();
+    candidates.extend(crate::tools::builtin_capability_descriptors());
+    candidates.extend(crate::tool_runtime::runtime_ops::capability_descriptors(&cwd));
+    candidates.extend(crate::tool_services::capability_descriptors(&cwd));
+    candidates.extend(builtin_slash_descriptors());
+    candidates.extend(native_view_descriptors());
+    candidates.push(crate::tui::external_editor_capability_descriptor(&cwd));
+    candidates.extend(crate::tui::attachment_capability_descriptors(&cwd));
+    candidates.push(crate::tui::keymap_capability_descriptor());
+    candidates.extend(crate::roadmap::capability_descriptors(&cwd));
+    candidates.extend(file_slash_descriptors(&cwd));
     match crate::hooks::extension_capability_descriptors(&cwd) {
-        Ok(descriptors) => extend_bounded(&mut candidates, descriptors),
-        Err(error) => extend_bounded(
-            &mut candidates,
-            [CapabilityDescriptor::new(
+        Ok(descriptors) => candidates.extend(descriptors),
+        Err(error) => candidates.push(
+            CapabilityDescriptor::new(
                 "service/extensions",
                 CapabilityKind::Service,
                 "extension-runtime",
@@ -157,27 +127,25 @@ pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
             )
             .operation("discover")
             .operation("refresh")
-            .health(CapabilityHealth::unavailable(error))],
+            .health(CapabilityHealth::unavailable(error)),
         ),
     }
-    extend_bounded(&mut candidates, crate::mcp::capability_descriptors(&cwd));
-    if candidates.len() < MAX_CAPABILITIES {
-        candidates.push(
-            CapabilityDescriptor::new(
-                "service/capability-registry",
-                CapabilityKind::Service,
-                "jeden-core",
-                "Capability registry",
-                "Versioned atomic capability discovery and health snapshot",
-                FunctionTarget::Service {
-                    name: "capability-registry".into(),
-                },
-            )
-            .operation("discover")
-            .operation("refresh")
-            .operation("status"),
-        );
-    }
+    candidates.extend(crate::mcp::capability_descriptors(&cwd));
+    candidates.push(
+        CapabilityDescriptor::new(
+            "service/capability-registry",
+            CapabilityKind::Service,
+            "jeden-core",
+            "Capability registry",
+            "Versioned atomic capability discovery and health snapshot",
+            FunctionTarget::Service {
+                name: "capability-registry".into(),
+            },
+        )
+        .operation("discover")
+        .operation("refresh")
+        .operation("status"),
+    );
     build_and_publish(cwd, previous.generation.saturating_add(1), candidates)
 }
 
@@ -186,10 +154,10 @@ fn build_and_publish(
     generation: u64,
     candidates: Vec<CapabilityDescriptor>,
 ) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
-    let mut accepted = Vec::with_capacity(candidates.len().min(MAX_CAPABILITIES));
+    let mut accepted = Vec::with_capacity(candidates.len());
     let mut diagnostics = Vec::new();
     let mut by_id = BTreeMap::new();
-    for mut descriptor in candidates.into_iter().take(MAX_CAPABILITIES) {
+    for mut descriptor in candidates {
         descriptor.generation = generation;
         if descriptor.ui.executable
             && (!descriptor.binding.coherent() || !descriptor.health.is_executable())
@@ -235,16 +203,6 @@ fn build_and_publish(
         }
         by_id.insert(descriptor.id.clone(), accepted.len());
         accepted.push(descriptor);
-    }
-    if accepted.len() == MAX_CAPABILITIES {
-        diagnostics.push(ConflictDiagnostic {
-            id: "registry/limit".into(),
-            winner_source: "capability-registry".into(),
-            rejected_source: "remaining providers".into(),
-            message: format!(
-                "capability registry reached bounded limit of {MAX_CAPABILITIES} descriptors"
-            ),
-        });
     }
     let built = Arc::new(CapabilitySnapshot {
         registry_version: REGISTRY_VERSION,
