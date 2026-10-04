@@ -26,8 +26,8 @@
 # Requires: openssl (1.1.1+ for -alpn), a running `jeden headless`.
 set -eu
 
-MATERIAL="${1:?Usage: headless-drive.sh <material-dir> [addr] [session-id] [prompt] [request-id]}"
-ADDR="${2:-127.0.0.1:4433}"
+MATERIAL="${1:?Usage: headless-drive.sh <material-dir> <addr> [session-id] [prompt] [request-id]}"
+ADDR="${2:?Usage: headless-drive.sh <material-dir> <addr> [session-id] [prompt] [request-id]}"
 SESSION="${3:-}"
 PROMPT="${4:-Respond exactly: OK}"
 # The daemon names the request, so a replay has to be asked for by the id the
