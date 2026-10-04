@@ -1,73 +1,32 @@
-//! Asking the local qualified model what a prompt means for the goal a
-//! session is pursuing, and refusing to believe anything it is not sure of.
+//! Asking the lifecycle model, through Brama, what a prompt means for the goal
+//! a session is pursuing, and refusing to believe anything it is not sure of.
 //!
 //! Split out of `goal_lifecycle/mod.rs`, which had grown past the module line
 //! cap.
 
-use super::{LifecycleAction, LifecycleDecision, LifecycleRequest, LIFECYCLE_MODEL_LABEL};
+use super::{LifecycleAction, LifecycleDecision, LifecycleRequest};
+use crate::model_router::{chat_completion, ChatConfig};
 use serde_json::{json, Value};
 use std::env;
-use std::sync::LazyLock;
 use std::time::{SystemTime, UNIX_EPOCH};
-use url::{Position, Url};
+
+/// The Brama alias the lifecycle model is declared under on this machine. No
+/// alias is built in: a machine that declares none has no classifier, and the
+/// turn proceeds unchanged.
+pub(super) const ALIAS_VARIABLE: &str = "JEDEN_LIFECYCLE_MODEL_ALIAS";
+
+pub(super) fn alias() -> Option<String> {
+    env::var(ALIAS_VARIABLE)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
 
 /// Verbatim copy of the lifecycle system prompt. Source of truth:
 /// `training/lifecycle-model/lifecycle-system-prompt.txt` in the
 /// transcript-label-trainer checkout, the same file Oko vendors. Keep the
 /// .txt byte-identical to that file; do not add headers to it.
 const SYSTEM_PROMPT: &str = include_str!("prompt.txt");
-
-struct Endpoint {
-    completions_url: String,
-    model: String,
-}
-
-/// One-time availability probe. Resolves the completions URL from
-/// `JEDEN_LIFECYCLE_MODEL_URL` (loopback-only), asks `GET {base}/v1/models`
-/// for the served model id, and caches both the id and the reachability
-/// verdict for the process lifetime. No address is built in: a machine that
-/// declares none has no classifier, and the turn proceeds unchanged.
-static ENDPOINT: LazyLock<Option<Endpoint>> = LazyLock::new(|| {
-    let raw = env::var("JEDEN_LIFECYCLE_MODEL_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())?;
-    let url = Url::parse(raw.trim()).ok()?;
-    if !is_loopback(&url) {
-        return None;
-    }
-    let base = url[..Position::BeforePath].to_string();
-    let client = crate::net::blocking_builder().build().ok()?;
-    let models: Value = client
-        .get(format!("{base}/v1/models"))
-        .send()
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json()
-        .ok()?;
-    let model = models
-        .pointer("/data/0/id")
-        .and_then(Value::as_str)
-        .unwrap_or(LIFECYCLE_MODEL_LABEL)
-        .to_string();
-    Some(Endpoint {
-        completions_url: url.to_string(),
-        model,
-    })
-});
-
-fn is_loopback(url: &Url) -> bool {
-    match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        None => false,
-    }
-}
-
-fn endpoint() -> Option<&'static Endpoint> {
-    ENDPOINT.as_ref()
-}
 
 /// UTC RFC3339 timestamp and calendar day via Howard Hinnant's
 /// civil-from-days; no date crate is available here. The envelope's
@@ -154,32 +113,24 @@ fn parse_decision(content: &str) -> Option<LifecycleDecision> {
     })
 }
 
-/// Classify one user prompt. Any failure — service down, non-loopback URL,
-/// malformed reply — yields `None` and the turn proceeds unchanged.
-pub fn classify(request: &LifecycleRequest) -> Option<LifecycleDecision> {
-    let endpoint = endpoint()?;
-    let envelope =
-        serde_json::to_string(&build_envelope(request)).unwrap_or_else(|_| "{}".to_string());
-    let body = json!({
-        "model": endpoint.model,
-        "messages": [
-            { "role": "system", "content": SYSTEM_PROMPT },
-            { "role": "user", "content": envelope },
-        ],
-        "temperature": 0,
-        "max_tokens": 96,
-        "stream": false,
-        "chat_template_kwargs": { "enable_thinking": false },
-    });
-    let client = crate::net::blocking_builder().build().ok()?;
-    let response: Value = client
-        .post(&endpoint.completions_url)
-        .json(&body)
-        .send()
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .json()
-        .ok()?;
-    parse_decision(response.pointer("/choices/0/message/content")?.as_str()?)
+/// Classify one user prompt through Brama under the declared alias. No alias
+/// declared answers `Ok(None)`; a refused call or an answer that is not a
+/// decision answers why, for the ledger, and the turn proceeds unchanged.
+pub fn classify(router: &ChatConfig, request: &LifecycleRequest) -> Result<Option<LifecycleDecision>, String> {
+    let Some(alias) = alias() else {
+        return Ok(None);
+    };
+    let envelope = serde_json::to_string(&build_envelope(request)).map_err(|error| error.to_string())?;
+    let mut router = router.clone();
+    router.model = alias.clone();
+    router.fallbacks.clear();
+    let messages = vec![
+        json!({ "role": "system", "content": SYSTEM_PROMPT }),
+        json!({ "role": "user", "content": envelope }),
+    ];
+    let completion = chat_completion(&router, messages, Some(96), &[])
+        .map_err(|error| format!("Brama refused the lifecycle alias {alias}: {error}"))?;
+    parse_decision(&completion.content)
+        .map(Some)
+        .ok_or_else(|| format!("the lifecycle alias {alias} answered no decision: {}", completion.content.chars().take(200).collect::<String>()))
 }

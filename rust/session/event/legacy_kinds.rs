@@ -33,6 +33,7 @@ impl SessionPayloadV2 {
             "checkpoint" => Self::Checkpoint(data),
             "rewind" => Self::Rewind(data),
             "goal_lifecycle" => Self::GoalLifecycle(data),
+            "goal_lifecycle_refused" => Self::GoalLifecycleRefused(data),
             "memory_mutation" => Self::MemoryMutation(data),
             "memory_recall" => Self::MemoryRecall(data),
             "roadmap_item_created" => Self::RoadmapItemCreated(data),
@@ -127,6 +128,7 @@ impl SessionPayloadV2 {
             Self::Checkpoint(_) => "checkpoint",
             Self::Rewind(_) => "rewind",
             Self::GoalLifecycle(_) => "goal_lifecycle",
+            Self::GoalLifecycleRefused(_) => "goal_lifecycle_refused",
             Self::MemoryMutation(_) => "memory_mutation",
             Self::RoadmapItemCreated(_) => "roadmap_item_created",
             Self::RoadmapItemUpdated(_) => "roadmap_item_updated",
@@ -194,6 +196,7 @@ impl SessionPayloadV2 {
             | Self::Checkpoint(v)
             | Self::Rewind(v)
             | Self::GoalLifecycle(v)
+            | Self::GoalLifecycleRefused(v)
             | Self::MemoryMutation(v)
             | Self::RoadmapItemCreated(v)
             | Self::RoadmapItemUpdated(v)

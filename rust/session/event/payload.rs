@@ -47,6 +47,7 @@ pub(crate) enum SessionPayloadV2 {
     Checkpoint(Value),
     Rewind(Value),
     GoalLifecycle(Value),
+    GoalLifecycleRefused(Value),
     MemoryMutation(Value),
     RoadmapItemCreated(Value),
     RoadmapItemUpdated(Value),

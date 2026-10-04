@@ -101,7 +101,7 @@ pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, S
         "auto" => match rest.trim().to_ascii_lowercase().as_str() {
             "on" => {
                 state.goal.auto = true;
-                Ok("Goal auto lifecycle enabled: Oko's lifecycle model may start and finish goals from your prompts.".into())
+                Ok("Goal auto lifecycle enabled: the lifecycle model Brama serves under JEDEN_LIFECYCLE_MODEL_ALIAS may start and finish goals from your prompts.".into())
             }
             "off" => {
                 state.goal.auto = false;

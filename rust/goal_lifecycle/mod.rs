@@ -1,18 +1,15 @@
-//! Background goal-lifecycle classification via Oko's local qualified model.
-//!
-//! Each classified user prompt is sent to the loopback OpenAI-compatible
-//! endpoint Oko's one process (`com.wisent.oko`) serves for its qualified
-//! model. Everything here is fail-open: when the endpoint is unreachable the
-//! first probe caches the verdict for the process lifetime and every later
-//! call is a fast no-op, so a Jeden turn never blocks on Oko.
+//! Background goal-lifecycle classification by the lifecycle model, asked
+//! through Brama under the alias this machine declares in
+//! `JEDEN_LIFECYCLE_MODEL_ALIAS`, with the bearer and signature every other
+//! Jeden model call carries. A machine that declares no alias has no
+//! classifier; a refused call is written to the session ledger as
+//! `goal_lifecycle_refused` with Brama's own reason, and the turn proceeds.
 
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-/// Model label recorded in ledger events; also the served-id fallback when
-/// `GET {base}/v1/models` does not name the loaded model.
-pub const LIFECYCLE_MODEL_LABEL: &str = "oko-goal-lifecycle-v1";
+use crate::model_router::ChatConfig;
 
 mod classify;
 mod title;
@@ -70,6 +67,7 @@ pub(crate) type GoalEventSink = Arc<dyn Fn(&str, &str) + Send + Sync>;
 /// `startGoal` land after the judge and re-open a goal the judge just closed.
 pub(crate) fn spawn_turn_classification(
     cwd: PathBuf,
+    router: ChatConfig,
     prompt: String,
     session_dir: PathBuf,
     turn_index: u64,
@@ -84,13 +82,24 @@ pub(crate) fn spawn_turn_classification(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
-        let Some(mut decision) = classify(&LifecycleRequest {
+        let classified = classify(&router, &LifecycleRequest {
             prompt: prompt.clone(),
             session_id,
             turn_index,
             goal_objective: goal_objective.clone(),
-        }) else {
-            return;
+        });
+        let mut decision = match classified {
+            Ok(Some(decision)) => decision,
+            Ok(None) => return,
+            Err(reason) => {
+                let _ = crate::cli::sessions::append_ledger_entry(
+                    &session_dir,
+                    crate::agent::now_stamp(),
+                    "goal_lifecycle_refused",
+                    json!({ "alias": classify::alias(), "reason": reason }),
+                );
+                return;
+            }
         };
         // Prompt classification can suggest a title, but cannot independently
         // close retained work or outrank the native acceptance decision.
@@ -115,7 +124,7 @@ pub(crate) fn spawn_turn_classification(
                 "goal_ref": decision.goal_ref,
                 "lifecycle_evidence": decision.lifecycle_evidence,
                 "goal": resolved_goal,
-                "model": LIFECYCLE_MODEL_LABEL,
+                "model": classify::alias(),
             }),
         );
         match decision.action {

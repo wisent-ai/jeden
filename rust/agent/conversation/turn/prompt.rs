@@ -161,6 +161,7 @@ impl Conversation {
                 .count() as u64;
             classification = Some(crate::goal_lifecycle::spawn_turn_classification(
                 args.cwd.clone(),
+                router.clone(),
                 task.to_string(),
                 self.recorder.path(),
                 turn_index,

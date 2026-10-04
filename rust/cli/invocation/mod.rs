@@ -75,7 +75,7 @@ pub(crate) fn usage() -> String {
         "  /usage [show|reset]    show token/cost accounting\n",
         "  /browser [status|headless|visible]\n",
         "  /plan [on|off|status]  control plan mode\n",
-        "  /goal [set|done|drop|auto on|off]  control goal mode; auto lets Oko's lifecycle model start/finish goals\n",
+        "  /goal [set|done|drop|auto on|off]  control goal mode; auto lets the lifecycle model (Brama alias JEDEN_LIFECYCLE_MODEL_ALIAS) start/finish goals\n",
         "  /loop [on|off|status]  control continuation loop\n",
         "  /todo [list|add|pause|resume|cancel|continue]  manage retained session work\n",
         "  /roadmap              open the native roadmap picker\n",
