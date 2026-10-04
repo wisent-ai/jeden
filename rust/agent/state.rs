@@ -123,10 +123,6 @@ pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) {
     }
 }
 
-/// Hard ceiling on loop-mode auto-resubmissions in a single invocation, so an
-/// unbounded `/loop` can never spin forever.
-pub(crate) const MAX_LOOP_ITERS: u32 = 50;
-
 fn now_millis_u64() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

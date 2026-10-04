@@ -228,12 +228,9 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     }
     let mut text = result?;
     let _ = update_task_outcome(&args.cwd, &task, true);
-    // Loop mode: auto-resubmit the loop prompt until exhausted (bounded).
-    let mut iters = 0;
-    while iters < MAX_LOOP_ITERS {
-        let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) else {
-            break;
-        };
+    // Loop mode: auto-resubmit the loop prompt until the count or deadline
+    // `/loop` was given runs out, `/loop off`, a failed turn or cancellation.
+    while let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) {
         if hooks.cancelled() {
             break;
         }
@@ -246,7 +243,6 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
                 break;
             }
         }
-        iters += 1;
     }
     let session_path = Some(conversation.session_path());
     let result = RunResult {

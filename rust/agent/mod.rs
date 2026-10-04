@@ -76,7 +76,7 @@ pub(crate) use runtime::now_stamp;
 pub(crate) use runtime::specs::system_prompt_checked;
 pub(crate) use runtime::task_contract;
 pub(crate) use state::{
-    loop_next_prompt, record_branch, update_last_session_path, update_task_outcome, MAX_LOOP_ITERS,
+    loop_next_prompt, record_branch, update_last_session_path, update_task_outcome,
 };
 
 use approval::{resolve_tool_approval, ToolDecision};

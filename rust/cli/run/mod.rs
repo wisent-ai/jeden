@@ -32,13 +32,12 @@ pub(crate) fn run_turn_shared(
         }
     }
     let mut text = result.map(|text| text.trim().to_string())?;
-    // Loop mode: auto-resubmit until exhausted (bounded), same as the CLI path.
-    // The iteration cap comes from agent::MAX_LOOP_ITERS; a range walks it with
-    // no bare counter literal.
-    for _ in u32::MIN..agent::MAX_LOOP_ITERS {
-        let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task) else {
+    // Loop mode: auto-resubmit until the count or deadline `/loop` was given
+    // runs out, `/loop off`, a failed turn or cancellation, as the CLI path does.
+    while let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task) {
+        if hooks.cancelled() {
             break;
-        };
+        }
         match conv.run_turn(args, &loop_prompt, &[], hooks) {
             Ok(more) => {
                 let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
