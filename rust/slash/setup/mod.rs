@@ -7,8 +7,8 @@
 
 use std::path::{Path, PathBuf};
 
-use super::SlashContext;
 use super::common::split_head;
+use super::SlashContext;
 use crate::cli::config::{load_config, ui_language};
 use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
 
@@ -140,12 +140,12 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     if state.secret_configured {
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET configured",
-            "read by Jeden with `stado credentials get agent:wisent-app --field value`",
+            "read by Jeden with `stado credentials get --role wisent-app-agent --field value`",
         ));
     } else {
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET unavailable",
-            "`stado credentials get agent:wisent-app --field value` must answer for Stado's identity",
+            "`stado credentials get --role wisent-app-agent --field value` must answer for Stado's identity",
         ));
     }
     match &state.model {

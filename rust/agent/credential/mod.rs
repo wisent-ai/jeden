@@ -8,11 +8,14 @@
 //! product, so a configured workstation never answers `BRAMA_URL is required`
 //! with no way to satisfy it.
 //!
-//! Two items, each read one field at a time through `stado credentials get`:
-//! `agent:wisent-app/value` is the HMAC signing secret every request is signed
-//! with, and `jeden-model-router/token` is the gateway bearer. Neither value
-//! ever reaches a command line — `stado` writes it to stdout, this module
-//! keeps it in the process environment, and nothing writes it to disk.
+//! Two roles, each read one field at a time through `stado credentials get
+//! --role`: the item playing `wisent-app-agent` holds the HMAC signing secret
+//! every request is signed with in `value`, and the item playing
+//! `jeden-model-router` holds the gateway bearer in `token`. No item is named:
+//! the vault says which item plays each role, so replacing or renaming an item
+//! changes nothing here. Neither value ever reaches a command line — `stado`
+//! writes it to stdout, this module keeps it in the process environment, and
+//! nothing writes it to disk.
 
 use std::env;
 use std::process::Command;
@@ -22,10 +25,10 @@ use std::sync::LazyLock;
 pub(crate) const SECRET: &str = "WISENT_APP_AGENT_AUTH_SECRET";
 /// The gateway bearer's environment name.
 pub(crate) const BEARER: &str = "BRAMA_TOKEN";
-/// The Skarbiec item and field that hold the signing secret.
-const SECRET_ITEM: (&str, &str) = ("agent:wisent-app", "value");
-/// The Skarbiec item and field that hold the gateway bearer.
-const BEARER_ITEM: (&str, &str) = ("jeden-model-router", "token");
+/// The role whose item holds the signing secret, and the field.
+pub(crate) const SECRET_ROLE: (&str, &str) = ("wisent-app-agent", "value");
+/// The role whose item holds the gateway bearer, and the field.
+const BEARER_ROLE: (&str, &str) = ("jeden-model-router", "token");
 /// An OpenAI-compatible provider that answers `/v1/models` and
 /// `/v1/chat/completions` itself, named in place of Brama by a user who does
 /// not run Brama.
@@ -86,22 +89,22 @@ impl Source {
 /// The `stado` command group that reads credential fields.
 const CREDENTIALS_GROUP: &str = "credentials";
 
-/// Read one field of one Skarbiec item through the Stado CLI.
+/// Read one field of the item that plays `role` through the Stado CLI.
 ///
-/// `stado credentials get <item> --field <field>` prints the value and nothing
-/// else. A non-zero exit carries Stado's own sentence, which is the sentence a
-/// caller needs: an absent binary, an unauthorized consumer and an item that
-/// does not exist are three different problems, and Stado already words them
-/// apart.
-fn field_from_stado(item: &str, field: &str) -> Result<String, String> {
+/// `stado credentials get --role <role> --field <field>` prints the value and
+/// nothing else. A non-zero exit carries Stado's own sentence, which is the
+/// sentence a caller needs: an absent binary, an unauthorized consumer and a
+/// role no item plays are three different problems, and Stado already words
+/// them apart.
+fn field_from_stado(role: &str, field: &str) -> Result<String, String> {
     let output = Command::new("stado")
         .arg(CREDENTIALS_GROUP)
-        .args(["get", item, "--field", field])
+        .args(["get", "--role", role, "--field", field])
         .output()
         .map_err(|error| {
             format!(
-                "the Stado CLI could not be started to read {item}/{field}: {error}. Install \
-                 Stado, or carry {SECRET} and BRAMA_URL in this process's environment"
+                "the Stado CLI could not be started to read role {role} field {field}: {error}. \
+                 Install Stado, or carry {SECRET} and BRAMA_URL in this process's environment"
             )
         })?;
     if !output.status.success() {
@@ -112,15 +115,15 @@ fn field_from_stado(item: &str, field: &str) -> Result<String, String> {
             stderr
         };
         return Err(format!(
-            "stado credentials get {item} --field {field} exited {}: {said}",
+            "stado credentials get --role {role} --field {field} exited {}: {said}",
             output.status.code().unwrap_or(-1)
         ));
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if value.is_empty() {
         return Err(format!(
-            "stado credentials get {item} --field {field} printed nothing, so that field is empty in \
-             Skarbiec and no request can be signed with it"
+            "stado credentials get --role {role} --field {field} printed nothing, so that field is \
+             empty in Skarbiec and no request can be signed with it"
         ));
     }
     Ok(value)
@@ -128,14 +131,14 @@ fn field_from_stado(item: &str, field: &str) -> Result<String, String> {
 
 /// Put one credential in this process's environment, from Stado when the
 /// environment does not already carry it.
-fn resolve_one(variable: &str, (item, field): (&str, &str)) -> Source {
+fn resolve_one(variable: &str, (role, field): (&str, &str)) -> Source {
     if env::var(variable)
         .ok()
         .is_some_and(|value| !value.trim().is_empty())
     {
         return Source::Environment;
     }
-    match field_from_stado(item, field) {
+    match field_from_stado(role, field) {
         Ok(value) => {
             // This runs before the model runtime is built, while nothing else
             // in the process reads or writes the environment.
@@ -164,8 +167,8 @@ pub(crate) fn ensure() -> &'static (Source, Source) {
             return (Source::NotNeeded, Source::NotNeeded);
         }
         (
-            resolve_one(SECRET, SECRET_ITEM),
-            resolve_one(BEARER, BEARER_ITEM),
+            resolve_one(SECRET, SECRET_ROLE),
+            resolve_one(BEARER, BEARER_ROLE),
         )
     });
     &RESOLVED

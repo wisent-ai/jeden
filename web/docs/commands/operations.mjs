@@ -167,15 +167,15 @@ export const operationCommands = [
     path: "token",
     group: "Runtime and operations",
     invocation: "jeden token [--list] [--json]",
-    purpose: "Report which Brama credential this agent uses: router URL, agent id, where the secret came from, a redacted form of it, and its Skarbiec item.",
+    purpose: "Report which Brama credential this agent uses: router URL, agent id, where the secret came from, a redacted form of it, and the vault role whose item holds it.",
     inputs: [
       "Required environment: non-empty <code>BRAMA_URL</code> and <code>WISENT_APP_AGENT_AUTH_SECRET</code>. <code>WISENT_APP_AGENT_ID</code> is included when configured.",
-      "<code>--list</code> adds Weles accounts to text output; <code>--json</code> returns <code>bramaUrl</code>, <code>agentId</code>, the redacted <code>token</code>, <code>tokenSource</code> and <code>tokenItem</code>.",
+      "<code>--list</code> adds Weles accounts to text output; <code>--json</code> returns <code>bramaUrl</code>, <code>agentId</code>, the redacted <code>token</code>, <code>tokenSource</code> and <code>tokenRole</code>.",
     ],
-    effect: "Reads credentials from process memory and prints only the final four characters and length of the secret, never the value; it does not persist, rotate, or revoke credentials. A script that needs the value reads the Skarbiec item <code>agent:wisent-app</code> through its own grant.",
+    effect: "Reads credentials from process memory and prints only the final four characters and length of the secret, never the value; it does not persist, rotate, or revoke credentials. A script that needs the value reads role <code>wisent-app-agent</code> through its own grant. Jeden names no vault item: it reads the signing secret from the item playing <code>wisent-app-agent</code> (field <code>value</code>) and the gateway bearer from the item playing <code>jeden-model-router</code> (field <code>token</code>) with <code>stado credentials get --role</code>.",
     refusals: [
       "Missing router URL is refused as <code>BRAMA_URL is required; configure the Brama model-router service URL</code>.",
-      "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; Skarbiec item `agent:wisent-app` holds it and `stado credentials get agent:wisent-app --field value` is how this process reads it</code>, or with Stado's own refusal of that read after <code>is not configured:</code>.",
+      "Missing agent secret is refused as <code>WISENT_APP_AGENT_AUTH_SECRET is not configured; the vault item playing role `wisent-app-agent` holds it and `stado credentials get --role wisent-app-agent --field value` is how this process reads it</code>, or with Stado's own refusal of that read after <code>is not configured:</code>.",
     ],
   },
   {

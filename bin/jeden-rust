@@ -14,7 +14,8 @@ MANIFEST="$ROOT/Cargo.toml"
 BIN="$ROOT/target/release/jeden"
 
 # The binary resolves its own credential: on the first control-plane read it
-# asks Stado for `agent:wisent-app/value` and `jeden-model-router/token` when
+# asks Stado for roles `wisent-app-agent` (value) and `jeden-model-router`
+# (token) when
 # the environment does not carry them. This launcher used to exec a helper
 # script for that; when the script was removed the exec was left behind, so
 # a configured workstation fell straight through to `BRAMA_URL is required`.

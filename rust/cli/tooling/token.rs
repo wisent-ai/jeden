@@ -2,8 +2,9 @@
 //! the agent id, where the secret came from and a redacted form of it.
 //! Provider OAuth tokens live in Skarbiec/Brama and are never held by jeden.
 //! The secret itself is never printed (cli.md rule 15): outside the
-//! credential boundary only its Skarbiec item, `agent:wisent-app`, travels,
-//! and a script that needs the value reads that item through its own grant.
+//! credential boundary only the role whose vault item holds it,
+//! `wisent-app-agent`, travels, and a script that needs the value reads that
+//! role through its own grant.
 
 use std::env;
 
@@ -45,11 +46,12 @@ fn configured() -> Result<(String, String, String, &'static str), String> {
     let url = brama_url()?;
     let secret = env::var(SECRET_KEY).unwrap_or_default();
     if secret.is_empty() {
+        let (role, field) = crate::agent::credential::SECRET_ROLE;
         return Err(match secret_source.refusal() {
             Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
             None => format!(
-                "{SECRET_KEY} is not configured; Skarbiec item `agent:wisent-app` holds it and \
-                 `stado credentials get agent:wisent-app --field value` is how this process reads it"
+                "{SECRET_KEY} is not configured; the vault item playing role `{role}` holds it and \
+                 `stado credentials get --role {role} --field {field}` is how this process reads it"
             ),
         });
     }
@@ -63,20 +65,26 @@ fn configured() -> Result<(String, String, String, &'static str), String> {
 
 /// CLI `jeden token [--list] [--json]`.
 pub(crate) fn token_command(args: &Args) -> Result<String, String> {
-    if let Some(unknown) = args.positionals.iter().find(|part| *part != "--list" && *part != "list") {
+    let (role, field) = crate::agent::credential::SECRET_ROLE;
+    if let Some(unknown) = args
+        .positionals
+        .iter()
+        .find(|part| *part != "--list" && *part != "list")
+    {
         return Err(format!(
-            "jeden token takes --list and --json; got {unknown}. The secret is never printed: read the Skarbiec item agent:wisent-app through a grant of its own"
+            "jeden token takes --list and --json; got {unknown}. The secret is never printed: read role {role} through a grant of its own"
         ));
     }
     let list = !args.positionals.is_empty();
     let (brama, agent_id, secret, source) = configured()?;
     if args.json {
         return Ok(format!(
-            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{},\"tokenItem\":\"agent:wisent-app\"}}\n",
+            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{},\"tokenRole\":{}}}\n",
             serde_json::to_string(&brama).map_err(|error| error.to_string())?,
             serde_json::to_string(&agent_id).map_err(|error| error.to_string())?,
             serde_json::to_string(&redacted(&secret)).map_err(|error| error.to_string())?,
             serde_json::to_string(source).map_err(|error| error.to_string())?,
+            serde_json::to_string(role).map_err(|error| error.to_string())?,
         ));
     }
     let mut lines = vec![
@@ -84,7 +92,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
         format!("Agent:   {agent_id}"),
         match source {
             "stado" => format!(
-                "Token:   {} — read through Stado from the Skarbiec item agent:wisent-app",
+                "Token:   {} — read through Stado from the vault item playing role {role}",
                 redacted(&secret)
             ),
             _ => format!(
@@ -92,7 +100,9 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
                 redacted(&secret)
             ),
         },
-        "Item:    agent:wisent-app (the value stays in Skarbiec; read it through a grant of its own)".to_string(),
+        format!(
+            "Role:    {role} (the value stays in Skarbiec; read it through a grant of its own)"
+        ),
     ];
     if list {
         let client = crate::control_plane::weles::WelesClient::from_env();
@@ -114,7 +124,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
         }
     }
     lines.push(format!(
-        "Example: curl -H \"Authorization: Bearer $(stado credentials get agent:wisent-app --field value)\" {brama}/v1/models"
+        "Example: curl -H \"Authorization: Bearer $(stado credentials get --role {role} --field {field})\" {brama}/v1/models"
     ));
     Ok(lines.join("\n") + "\n")
 }
@@ -123,11 +133,9 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
 /// the full secret is never printed here by design.
 pub(crate) fn token_slash() -> Result<String, String> {
     let (brama, agent_id, secret, source) = configured()?;
+    let (role, _) = crate::agent::credential::SECRET_ROLE;
     Ok(format!(
-        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted, source: {source}).\nThe value stays in the Skarbiec item agent:wisent-app.\n",
+        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted, source: {source}).\nThe value stays in the vault item playing role {role}.\n",
         redacted(&secret)
     ))
 }
-
-
-
