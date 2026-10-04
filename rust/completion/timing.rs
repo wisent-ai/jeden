@@ -17,8 +17,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
-/// How much of a request's prompt names it when one answer reports several.
-const EXCERPT_CHARS: usize = 60;
 
 /// Seconds since the Unix epoch, the unit of every `*At` stamp in the state.
 pub(crate) fn now() -> u64 {
@@ -197,7 +195,7 @@ impl<'a> Entry<'a> {
         let estimate = duration(self.estimate_seconds());
         let took = duration(elapsed);
         let verdict = self.verdict(elapsed, polish);
-        let subject = several.then(|| excerpt(&self.request.prompt));
+        let subject = several.then(|| first_line(&self.request.prompt));
         if polish {
             let head = match subject {
                 Some(subject) => format!("Czas ukończenia „{subject}”"),
@@ -214,12 +212,10 @@ impl<'a> Entry<'a> {
     }
 }
 
-fn excerpt(prompt: &str) -> String {
-    let line = prompt.lines().next().unwrap_or(prompt).trim();
-    match line.char_indices().nth(EXCERPT_CHARS) {
-        Some((cut, _)) => format!("{}…", &line[..cut]),
-        None => line.to_string(),
-    }
+/// A request is named, when one answer reports several, by the first line of
+/// its prompt, whole.
+fn first_line(prompt: &str) -> &str {
+    prompt.lines().next().unwrap_or(prompt).trim()
 }
 
 /// The snapshot's `timing` array: one entry per request that carries an
