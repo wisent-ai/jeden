@@ -164,16 +164,17 @@ pub(crate) struct RequestReview {
     pub explanation: String,
 }
 
-/// A refusal a person can act on: the parser's own sentence plus the piece of
-/// the answer it stopped at.
+/// A refusal a person can act on: the parser's own sentence plus the line of
+/// the answer it stopped on, whole.
 ///
 /// A finished run can end on `invalid acceptance review: missing field
 /// \`taskId\` at line 1 column 2408`, and finding out what the verifier
 /// actually wrote then means reading the retained inspection session by
 /// hand. The column is only useful beside the text it points into.
 pub(crate) fn unreadable(kind: &str, answer: &str, error: &serde_json::Error) -> String {
-    let reach = super::super::constants::REFUSAL_EXCERPT_CHARS;
-    let start = error.column().saturating_sub(reach);
-    let near: String = answer.chars().skip(start).take(reach * 2).collect();
-    format!("invalid {kind}: {error}; the answer reads: {near}")
+    let line = answer
+        .lines()
+        .nth(error.line().saturating_sub(1))
+        .unwrap_or(answer);
+    format!("invalid {kind}: {error}; the answer reads: {line}")
 }

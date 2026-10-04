@@ -1,9 +1,5 @@
 use super::*;
 
-/// Transcript blocks for `!`/`$` escapes cap each output stream at this many
-/// lines; overflow is summarized with a truncation marker.
-const LOCAL_OUTPUT_MAX_LINES: usize = 200;
-
 impl Conversation {
     /// Run a `! <shell>` / `$ <python>` escape from the interactive prompt.
     /// The call goes through the same approval policy and tool runtime a
@@ -70,20 +66,14 @@ impl Conversation {
     }
 }
 
+/// Every line of one output stream, as the command wrote it.
 fn push_stream_lines(lines: &mut Vec<String>, text: &str) {
     if text.trim().is_empty() {
         return;
     }
     let stream = text.trim_end_matches(['\r', '\n']);
-    let total = stream.split('\n').count();
-    for line in stream.split('\n').take(LOCAL_OUTPUT_MAX_LINES) {
+    for line in stream.split('\n') {
         lines.push(line.trim_end_matches('\r').to_string());
-    }
-    if total > LOCAL_OUTPUT_MAX_LINES {
-        lines.push(format!(
-            "… {} more line(s) truncated",
-            total - LOCAL_OUTPUT_MAX_LINES
-        ));
     }
 }
 

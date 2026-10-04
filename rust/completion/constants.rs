@@ -26,7 +26,3 @@ pub(crate) const INSPECTION_OUTPUT_TOKENS: u32 = 16_384;
 /// after being cut a few thousand bytes in, with the files written and the
 /// review unread.
 pub(crate) const INSPECTION_RETRY_OUTPUT_TOKENS: u32 = 2 * INSPECTION_OUTPUT_TOKENS;
-/// How much of an unreadable model answer a refusal quotes on each side of the
-/// parser's position. Wide enough to show the object that failed, short enough
-/// to stay one readable sentence in a session ledger and a terminal.
-pub(crate) const REFUSAL_EXCERPT_CHARS: usize = 120;
