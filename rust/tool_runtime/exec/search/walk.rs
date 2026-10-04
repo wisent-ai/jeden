@@ -12,7 +12,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-const MAX_SEARCH_FILES: usize = 20_000;
 pub(crate) const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(super) fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
@@ -107,9 +106,6 @@ pub(super) fn discover(
                     return WalkState::Continue;
                 }
                 if let Ok(mut values) = output.lock() {
-                    if values.len() >= MAX_SEARCH_FILES {
-                        return WalkState::Quit;
-                    }
                     values.push((entry.into_path(), is_dir));
                 }
                 WalkState::Continue
@@ -130,6 +126,5 @@ pub(super) fn discover(
         .map_err(|_| "search result lock poisoned")?;
     values.sort_by(|left, right| left.0.cmp(&right.0));
     values.dedup_by(|left, right| left.0 == right.0);
-    values.truncate(MAX_SEARCH_FILES);
     Ok(values)
 }
