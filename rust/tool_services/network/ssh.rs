@@ -48,7 +48,7 @@ impl SshService {
             .or_else(|| config.pointer("/toolServices/ssh/hosts"))
             .and_then(Value::as_object)
         {
-            for (alias, value) in values.iter().take(64) {
+            for (alias, value) in values {
                 let host = if let Some(target) = value.as_str() {
                     Some(Host {
                         target: target.into(),

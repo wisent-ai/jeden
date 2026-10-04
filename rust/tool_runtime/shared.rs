@@ -222,14 +222,11 @@ pub(crate) fn simple_diff(path: &str, before: &str, after: &str) -> String {
         format!("+++ {path}"),
         format!("@@ -1,{} +1,{} @@", old_lines.len(), new_lines.len()),
     ];
-    for line in old_lines.iter().take(250) {
+    for line in &old_lines {
         out.push(format!("-{line}"));
     }
-    for line in new_lines.iter().take(250) {
+    for line in &new_lines {
         out.push(format!("+{line}"));
-    }
-    if old_lines.len() + new_lines.len() > 500 {
-        out.push("[diff truncated at 500 lines]".into());
     }
     out.join("\n")
 }
