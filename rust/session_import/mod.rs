@@ -15,6 +15,16 @@ pub(crate) use source::Format;
 /// plan file lived here once and was refused by the operator; this is the
 /// general surface that replaced it.
 pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
+    const USAGE: &str = "Usage: jeden import <path>... [--refresh] [--json]";
+    if let Some(option) = args
+        .positionals
+        .iter()
+        .find(|argument| argument.starts_with("--") && *argument != "--refresh")
+    {
+        return Err(crate::cli::invocation::refusal::usage(format!(
+            "unknown option for jeden import: {option}\n{USAGE}"
+        )));
+    }
     let refresh = args
         .positionals
         .iter()
@@ -26,7 +36,7 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
         .map(PathBuf::from)
         .collect();
     if paths.is_empty() {
-        return Err("Usage: jeden import <path>... [--refresh] [--json]".into());
+        return Err(crate::cli::invocation::refusal::usage(USAGE));
     }
     let result = import_paths(&paths, refresh)?;
     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
