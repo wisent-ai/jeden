@@ -64,7 +64,7 @@ impl RunHooks<'static> {
 }
 
 impl RunHooks<'_> {
-    pub(super) fn cancelled(&self) -> bool {
+    pub(crate) fn cancelled(&self) -> bool {
         self.cancel.load(std::sync::atomic::Ordering::Relaxed)
     }
 

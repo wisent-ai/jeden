@@ -271,19 +271,4 @@ export const sessionCommands = [
       "A nonexistent source is refused as <code>session not found: ...</code>; invalid session ledgers or model/tool errors also stop continuation.",
     ],
   },
-  {
-    path: "recall_conversation",
-    group: "Sessions and artifacts",
-    invocation: "jeden recall_conversation <session-id-or-path>",
-    purpose: "Render a recorded session's full event transcript as Markdown for recall or inspection.",
-    inputs: [
-      "Required: a session identifier or path.",
-      "The dispatcher also accepts the compatibility spelling <code>recall-conversation</code>; <code>recall_conversation</code> is the documented invocation.",
-    ],
-    effect: "Reads the validated ledger and prints a Markdown document containing the session identity and each exported event. It does not mutate the source session.",
-    refusals: [
-      "Missing input is refused with <code>Usage: jeden recall_conversation &lt;session-id-or-path&gt;</code>.",
-      "A missing session is refused as <code>session not found: ...</code>; invalid ledger data is returned as an error.",
-    ],
-  },
 ];

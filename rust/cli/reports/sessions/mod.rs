@@ -213,17 +213,6 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     ))
 }
 
-/// `jeden recall_conversation <id-or-path>`: render a recorded session's full
-/// transcript as markdown (recall/inspection).
-pub(crate) fn recall_conversation_command(args: &Args) -> Result<String, String> {
-    let id = args
-        .positionals
-        .first()
-        .ok_or("Usage: jeden recall_conversation <session-id-or-path>")?;
-    let value = read_session_value(id)?;
-    render_session_export(&value, "markdown")
-}
-
 /// Text-only transcript of a recorded session — user prompts and final answers
 /// only, with tool calls/results and images stripped. Mirrors the external
 /// `recall_conversation.sh` extraction, exposed so the agent `recall_conversation`

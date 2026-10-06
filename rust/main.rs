@@ -56,7 +56,7 @@ pub(crate) use cli::run::interactive::interactive;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
 pub(crate) use cli::sessions::{
     artifact_command, export_session_command, list_artifacts_command, list_sessions,
-    read_session_value, recall_conversation_command, recall_conversation_text,
+    read_session_value, recall_conversation_text,
     render_session_export, resume_command, search_sessions_command, session_conversation_turns,
 };
 pub(crate) use cli::stats::stats_command;
@@ -265,7 +265,6 @@ pub fn main() -> ExitCode {
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
         "search-sessions" => search_sessions_command(&args),
         "resume" => resume_command(&args),
-        "recall_conversation" => recall_conversation_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),
         "workspace" => workspace_command(&args),
