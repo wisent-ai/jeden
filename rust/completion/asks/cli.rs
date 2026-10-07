@@ -73,6 +73,7 @@ fn summary(register: &AskRegister, ask: &OperatorAsk) -> Value {
         "sessions": sessions,
         "follows": ask.follows,
         "answer": ask.answer,
+        "oko": ask.oko,
     })
 }
 
@@ -154,6 +155,12 @@ fn render_summary(ask: &Value) -> String {
             "\n  Answer with: jeden asks answer {} --text <answer>",
             ask["id"].as_str().unwrap_or_default()
         )),
+    }
+    if let Some(oko) = ask["oko"].as_object() {
+        text.push_str(&format!(
+            "\n  Oko: {}",
+            oko.get("detail").and_then(Value::as_str).unwrap_or_default()
+        ));
     }
     text
 }
