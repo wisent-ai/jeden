@@ -15,6 +15,7 @@
         "WISENT_CODESIGN_PRIVATE_KEY_PEM": "macos-development-signing#private_key"
       },
       "quality": [
+        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"]},
         {
           "name": "release-compile",
           "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
@@ -37,6 +38,7 @@
     "linux-amd64": {
       "runner_platform": "linux-amd64",
       "quality": [
+        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"]},
         {
           "name": "release-compile",
           "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
