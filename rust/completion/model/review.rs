@@ -141,10 +141,14 @@ pub(crate) struct TaskReview {
     pub criteria: Vec<CriterionReview>,
     /// For a `blocked` verdict: the exact value or decision only the operator
     /// holds, in one sentence, and where it goes. Absent when the block is a
-    /// dependency nobody has to be asked about. Recorded on the task as its
-    /// request to the operator and answered through `jeden todo answer`.
+    /// dependency nobody has to be asked about. Recorded in the operator ask
+    /// register and on the task, and answered through `jeden asks answer`.
     #[serde(default, alias = "operator_request", alias = "operatorRequest")]
     pub ask: Option<String>,
+    /// The register ask this one is, when the operator was already asked for
+    /// the same thing in other words; absent for an ask the register lacks.
+    #[serde(default, alias = "ask_id")]
+    pub ask_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

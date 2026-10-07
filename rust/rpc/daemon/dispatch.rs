@@ -178,6 +178,23 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     .map_err(service_error)?;
                 Ok(json!({"sessionId": session_id, "completion": completion}))
             }
+            "asks/list" => self
+                .service
+                .asks(&connection.identity)
+                .map_err(service_error),
+            "asks/get" => {
+                let ask_id = string_field(&request.params, "askId")?;
+                self.service
+                    .ask(&connection.identity, ask_id)
+                    .map_err(service_error)
+            }
+            "asks/answer" => {
+                let ask_id = string_field(&request.params, "askId")?;
+                let text = string_field(&request.params, "text")?;
+                self.service
+                    .answer_ask(&connection.identity, ask_id, text)
+                    .map_err(service_error)
+            }
             _ => Err(protocol_error("method_not_found", "unknown session method")),
         }
     }

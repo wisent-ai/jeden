@@ -279,7 +279,7 @@ impl Conversation {
                     "reason": &reason,
                     "status": state.status(),
                     "openTasks": state.tasks.iter().filter(|task| !task.status.terminal()).collect::<Vec<_>>(),
-                    "openRequests": state.open_asks(),
+                    "openRequests": crate::completion::open_asks(state, &session)?,
                 }),
             )?;
         }

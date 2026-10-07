@@ -9,14 +9,15 @@ const CONTEXT_PREFIX: &str = "[Jeden completion authority]";
 
 /// The open asks joined into the stop message, or nothing when the stop is
 /// not waiting on the operator; ends with a space so it sits before the
-/// session path.
-fn asks_sentence(state: &CompletionState) -> String {
-    let asks = state.open_asks();
-    if asks.is_empty() {
+/// session path. Each register ask appears once, however many tasks wait on
+/// it, with how often and since when it has been asked.
+fn asks_sentence(state: &CompletionState, session: &std::path::Path) -> Result<String, String> {
+    let asks = completion::open_asks(state, session)?;
+    Ok(if asks.is_empty() {
         String::new()
     } else {
         format!("{} ", asks.join(" "))
-    }
+    })
 }
 
 impl Conversation {
@@ -109,11 +110,11 @@ impl Conversation {
             return Err(format!(
                 "Work remains {}. {}Session: {}",
                 state.status(),
-                asks_sentence(&state),
+                asks_sentence(&state, &self.recorder.path())?,
                 self.recorder.path().display()
             ));
         }
-        let content = format!("{CONTEXT_PREFIX}\n{}", completion::model_context(&state));
+        let content = format!("{CONTEXT_PREFIX}\n{}", completion::model_context(&state)?);
         if let Some(message) = self.messages.iter_mut().find(|message| {
             message.get("role").and_then(Value::as_str) == Some("system")
                 && message
@@ -145,6 +146,7 @@ impl Conversation {
         let input = json!({
             "sourceSession": self.recorder.path(),
             "state": completion::snapshot_value(&state),
+            "operatorAsks": completion::asks_context()?,
             "executionEvidence": completion::review_evidence(&self.recorder.path())?,
             "proposedAnswer": answer,
             "deliveryReport": report,
@@ -219,14 +221,14 @@ impl Conversation {
                     .filter_map(|task| task.reason.as_deref())
                     .collect::<Vec<_>>()
                     .join("; "),
-                asks_sentence(&reviewed),
+                asks_sentence(&reviewed, &self.recorder.path())?,
                 self.recorder.path().display()
             ));
         }
         self.messages.push(json!({"role": "user", "content": format!(
             "Jeden withheld the final answer because work remains. Continue the concrete missing work below, \
              not a promise or a next-steps list. Preserve already verified results.\n{}",
-            completion::model_context(&reviewed)
+            completion::model_context(&reviewed)?
         )}));
         Ok(false)
     }
@@ -240,7 +242,9 @@ impl Conversation {
         args: &Args,
         hooks: &mut RunHooks<'_>,
     ) -> Result<String, String> {
-        let state = completion::read_state(&self.recorder.path())?;
+        // An answer given in another session, or through the register, is
+        // handed to this session's waiting tasks before anything runs.
+        let state = completion::deliver_answers(&self.recorder.path())?;
         if state.complete() {
             return Ok("No retained work remains.".into());
         }

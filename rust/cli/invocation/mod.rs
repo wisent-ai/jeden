@@ -34,6 +34,7 @@ pub(crate) fn usage() -> String {
         "  jeden pursue --state REQUEST_ID [--json]\n",
         "  jeden pursue --resume-run REQUEST_ID [--json]\n",
         "  jeden todo [list|add|pause|resume|cancel|defect|answer|continue] [--session id] [--revision n --reason text|--text answer] [--json]\n",
+        "  jeden asks [list|show|answer] [ask-id] [--text answer] [--json] — everything Jeden asked of you, in every session, and what you answered\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
@@ -252,6 +253,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                             | "import"
                             | "restore"
                             | "todo"
+                            | "asks"
                             | "copy"
                     ) || (args.command == "run" && !args.positionals.is_empty())) =>
             {

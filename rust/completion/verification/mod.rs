@@ -26,6 +26,7 @@ pub(crate) fn apply_review(
     if index.parent == index.reviewer {
         return Err("the execution conversation cannot verify its own completion".into());
     }
+    let mut linker = super::asks::Linker::new(super::asks::read()?);
     let (_, state) = store::update(session, Some(expected_revision), |state| {
         let expected: BTreeSet<_> = state
             .tasks
@@ -151,6 +152,32 @@ pub(crate) fn apply_review(
                 }
             }
             asks::check(task, verdict, observed_failure, failed_since_answer)?;
+            if let Some(ask) = asks::named(verdict) {
+                let workspace = state
+                    .requests
+                    .iter()
+                    .find(|request| request.id == task.request_id)
+                    .map(|request| request.cwd.clone())
+                    .unwrap_or_default();
+                let evidence = &verdict.evidence;
+                linker.resolve(
+                    &task.id,
+                    &workspace,
+                    verdict
+                        .ask_id
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|id| !id.is_empty()),
+                    ask,
+                    &mut |stamp| {
+                        let mut failed = false;
+                        for reference in evidence {
+                            failed |= index.failure_after(reference, stamp)?;
+                        }
+                        Ok(failed)
+                    },
+                )?;
+            }
         }
         if review
             .requests
@@ -171,7 +198,8 @@ pub(crate) fn apply_review(
                 ReviewStatus::Continue => TaskStatus::Pending,
                 ReviewStatus::Blocked => TaskStatus::Blocked,
             };
-            asks::record(task, &verdict);
+            let link = linker.link_for(&task.id);
+            asks::record(task, &verdict, link);
             let mut references = verdict.evidence;
             for criterion in &verdict.criteria {
                 for reference in &criterion.evidence {
@@ -244,5 +272,8 @@ pub(crate) fn apply_review(
         state.blocker = None;
         Ok(())
     })?;
+    // The session took the review; only now does the register record where
+    // each ask was put, so a refused review leaves no ask behind.
+    linker.commit(&super::asks::session_key(session))?;
     Ok(state)
 }

@@ -1,6 +1,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::io::{self, Write};
+use std::path::Path;
 
 use super::shared::{sha256_hex, string_input, u64_input, MAX_READ_BYTES};
 use super::ToolRuntime;
@@ -130,6 +131,9 @@ pub(crate) fn recall_conversation(
     )
 }
 
+/// A question for the operator. The operator ask register answers one the
+/// operator already answered in this workspace, in the same words, without
+/// asking again; every question asked and its answer go into the register.
 pub(crate) fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let question = string_input(input, "question").ok_or("ask_user requires question")?;
     let options = input
@@ -143,27 +147,51 @@ pub(crate) fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if let Some(ask_user) = runtime.ask_user {
-        let answer = ask_user(&question, &options)?;
-        return Ok(json!({"answer": answer}));
-    }
-    if !runtime.interactive {
-        return Err("ask_user requires an interactive question channel".into());
-    }
-    eprintln!("\n[ask_user] {question}");
-    if !options.is_empty() {
-        for (index, option) in options.iter().enumerate() {
-            eprintln!("  {}. {}", index + 1, option);
+    let session = runtime.artifact_dir.and_then(Path::parent);
+    if let Some(session) = session {
+        let recalled = crate::completion::recall_question(runtime.cwd, session, &question)?;
+        if let Some((ask, answer)) =
+            recalled.and_then(|ask| ask.answer.clone().map(|answer| (ask, answer)))
+        {
+            return Ok(json!({
+                "answer": answer.text,
+                "fromRegister": {
+                    "askId": ask.id,
+                    "askedAt": ask.asked_at,
+                    "answeredAt": answer.answered_at,
+                    "note": "The operator already answered this question; it was not asked again.",
+                },
+            }));
         }
     }
-    eprint!("Answer: ");
-    io::stderr().flush().map_err(|e| e.to_string())?;
-    let mut answer = String::new();
-    let bytes = io::stdin()
-        .read_line(&mut answer)
-        .map_err(|e| e.to_string())?;
-    if bytes == 0 {
-        return Err("ask_user requires interactive input".into());
+    let answer = if let Some(ask_user) = runtime.ask_user {
+        ask_user(&question, &options)?
+    } else {
+        if !runtime.interactive {
+            return Err("ask_user requires an interactive question channel".into());
+        }
+        eprintln!("\n[ask_user] {question}");
+        if !options.is_empty() {
+            for (index, option) in options.iter().enumerate() {
+                eprintln!("  {}. {}", index + 1, option);
+            }
+        }
+        eprint!("Answer: ");
+        io::stderr().flush().map_err(|e| e.to_string())?;
+        let mut answer = String::new();
+        let bytes = io::stdin()
+            .read_line(&mut answer)
+            .map_err(|e| e.to_string())?;
+        if bytes == 0 {
+            return Err("ask_user requires interactive input".into());
+        }
+        answer.trim_end_matches(['\r', '\n']).to_string()
+    };
+    let Some(session) = session else {
+        return Ok(json!({"answer": answer}));
+    };
+    match crate::completion::record_question(runtime.cwd, session, &question, &answer) {
+        Ok(id) => Ok(json!({"answer": answer, "askId": id})),
+        Err(error) => Ok(json!({"answer": answer, "registerError": error})),
     }
-    Ok(json!({"answer": answer.trim_end_matches(['\r', '\n']).to_string()}))
 }

@@ -87,6 +87,25 @@ pub(super) fn completion_request(
     Ok(json!({"sessionId": params["sessionId"], "completion": completion}))
 }
 
+/// The operator ask register: `asks/list`, `asks/get {askId}` and
+/// `asks/answer {askId,text}` return what `jeden asks list|show|answer --json`
+/// prints.
+pub(super) fn asks_request(params: &Value, method: &str) -> Result<Value, (&'static str, String)> {
+    match method {
+        "asks/list" => crate::completion::list_asks(),
+        "asks/get" => {
+            let id = string_param(params, "askId").map_err(|error| ("invalid_params", error))?;
+            crate::completion::show_ask(&id)
+        }
+        _ => {
+            let id = string_param(params, "askId").map_err(|error| ("invalid_params", error))?;
+            let text = string_param(params, "text").map_err(|error| ("invalid_params", error))?;
+            crate::completion::answer_ask(&id, &text)
+        }
+    }
+    .map_err(|error| ("ask_error", error))
+}
+
 pub(super) fn dispose_session(
     state: &Arc<ServerState>,
     params: &Value,

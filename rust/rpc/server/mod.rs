@@ -227,6 +227,7 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "session/completion/get" | "session/completion/control" | "session/completion/add" => {
             completion_request(state, &request.params, &request.method)
         }
+        "asks/list" | "asks/get" | "asks/answer" => asks_request(&request.params, &request.method),
         "dispose" | "session/dispose" => dispose_session(state, &request.params),
         "elicitation/resolve" | "session/input_response" => {
             resolve_elicitation(state, &request.params)

@@ -12,11 +12,11 @@ use std::path::{Path, PathBuf};
 pub(crate) const STATE_FILE: &str = "completion.json";
 const LOCK_FILE: &str = "completion.lock";
 
-fn regular_file_or_absent(path: &Path) -> Result<(), String> {
+pub(crate) fn regular_file_or_absent(path: &Path) -> Result<(), String> {
     match fs::symlink_metadata(path) {
         Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => Ok(()),
         Ok(_) => Err(format!(
-            "completion state path is not a regular file: {}",
+            "Jeden state path is not a regular file: {}",
             path.display()
         )),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -104,11 +104,13 @@ pub(crate) fn update<T>(
     Ok((output, state))
 }
 
-fn write_atomic(path: &Path, state: &CompletionState) -> Result<(), String> {
+/// Writes `value` as pretty JSON beside `path` and renames it into place, so a
+/// reader sees the previous document or the new one, never a torn write.
+pub(crate) fn write_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
     regular_file_or_absent(path)?;
     let parent = path
         .parent()
-        .ok_or("completion state has no parent directory")?;
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
     let staging = parent.join(format!(".completion-{}.new", uuid::Uuid::new_v4()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -119,7 +121,7 @@ fn write_atomic(path: &Path, state: &CompletionState) -> Result<(), String> {
     }
     let result = (|| {
         let mut file = options.open(&staging).map_err(|error| error.to_string())?;
-        serde_json::to_writer_pretty(&mut file, state).map_err(|error| error.to_string())?;
+        serde_json::to_writer_pretty(&mut file, value).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
         fs::rename(&staging, path).map_err(|error| error.to_string())?;

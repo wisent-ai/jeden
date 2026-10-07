@@ -28,7 +28,9 @@ pub(crate) fn active_session(cwd: &Path, selected: Option<&str>) -> Result<PathB
     Ok(path)
 }
 
-pub(crate) fn render(state: &CompletionState) -> String {
+pub(crate) fn render(state: &CompletionState, session: &Path) -> Result<String, String> {
+    let register = super::asks::read()?;
+    let key = super::asks::session_key(session);
     let mut lines = vec![format!(
         "Tasks: {} (revision {})",
         state.status(),
@@ -80,12 +82,16 @@ pub(crate) fn render(state: &CompletionState) -> String {
                 lines.push(format!("    {reason}"));
             }
             if let Some(request) = &task.operator_request {
-                match &request.answer {
-                    Some(answer) => lines.push(format!(
+                let ask = register.for_task(&key, &task.id);
+                match (&request.answer, ask) {
+                    (Some(answer), _) => lines.push(format!(
                         "    Asked of you: {}\n    Your answer ({}): {}",
                         request.ask, answer.answered_at, answer.text
                     )),
-                    None => lines.push(format!(
+                    (None, Some(ask)) if task.waits_for_operator() => {
+                        lines.push(format!("    {}", ask.waiting_line()))
+                    }
+                    (None, _) => lines.push(format!(
                         "    Waiting on you: {}\n    Answer with: jeden todo answer {} --text <answer> --revision {}",
                         request.ask, task.id, state.revision
                     )),
@@ -101,7 +107,7 @@ pub(crate) fn render(state: &CompletionState) -> String {
             }
         }
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
@@ -247,6 +253,6 @@ pub(crate) fn execute(
     if json {
         serde_json::to_string_pretty(&value).map_err(|error| error.to_string())
     } else {
-        Ok(render(&state))
+        render(&state, &session)
     }
 }

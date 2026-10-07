@@ -2,14 +2,14 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{CompletionState, TaskStatus, WorkTask};
+use super::{TaskStatus, WorkTask};
 
 /// The one thing a blocked task waits on that only the operator holds: a
 /// value, a credential, a decision. Recorded on the task in the operator's
-/// own words to read, answered by the operator through `jeden todo answer`,
-/// and shown wherever the task is. A block that names no such thing is not
-/// waiting on the operator and stays a plain blocker with its failed
-/// operation.
+/// own words to read and in the operator ask register, answered by the
+/// operator through `jeden asks answer` or `jeden todo answer`, and shown
+/// wherever the task is. A block that names no such thing is not waiting on
+/// the operator and stays a plain blocker with its failed operation.
 ///
 /// Without this record an agent sits behind the same blocker answering the
 /// Stop guard with the same paragraph until the operator asks what exactly it
@@ -42,24 +42,5 @@ impl WorkTask {
                 .operator_request
                 .as_ref()
                 .is_some_and(|request| request.answer.is_none())
-    }
-}
-
-impl CompletionState {
-    /// Every unanswered ask, each with the command that answers it, so a
-    /// stop on `waiting_for_operator` tells the operator what to do and not
-    /// only that something is waited on.
-    pub fn open_asks(&self) -> Vec<String> {
-        self.tasks
-            .iter()
-            .filter(|task| task.waits_for_operator())
-            .filter_map(|task| task.operator_request.as_ref().map(|request| (task, request)))
-            .map(|(task, request)| {
-                format!(
-                    "Waiting on you: {} Answer with: jeden todo answer {} --text <answer> --revision {}",
-                    request.ask, task.id, self.revision
-                )
-            })
-            .collect()
     }
 }

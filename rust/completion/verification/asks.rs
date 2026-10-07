@@ -1,9 +1,10 @@
 //! What a review may ask of the operator on a blocked task, and how that
 //! ask is kept on the task.
 
+use super::super::asks::Link;
 use super::super::model::{OperatorRequest, ReviewStatus, TaskReview, WorkTask};
 
-fn named(verdict: &TaskReview) -> Option<&str> {
+pub(super) fn named(verdict: &TaskReview) -> Option<&str> {
     verdict
         .ask
         .as_deref()
@@ -51,12 +52,19 @@ pub(super) fn check(
 }
 
 /// A blocked verdict that names what the operator must supply records that
-/// ask on the task; the same ask worded the same keeps its date. A verdict
-/// that is not blocked drops an unanswered ask, which is moot, and keeps an
-/// answered one beside the work it fed.
-pub(super) fn record(task: &mut WorkTask, verdict: &TaskReview) {
-    task.operator_request = match (named(verdict), task.operator_request.take()) {
-        (Some(ask), Some(existing)) if existing.ask == ask => Some(existing),
+/// ask on the task in the register's words, so every task waiting on one
+/// register ask shows the same sentence; the same ask keeps its date. A
+/// verdict that is not blocked drops an unanswered ask, which is moot, and
+/// keeps an answered one beside the work it fed. The register keeps every
+/// ask either way.
+pub(super) fn record(task: &mut WorkTask, verdict: &TaskReview, link: Option<&Link>) {
+    let ask = link
+        .map(|link| link.ask.as_str())
+        .or_else(|| named(verdict));
+    task.operator_request = match (ask, task.operator_request.take()) {
+        (Some(ask), Some(existing)) if existing.ask == ask && existing.answer.is_none() => {
+            Some(existing)
+        }
         (Some(ask), _) => Some(OperatorRequest {
             asked_at: crate::agent::now_stamp(),
             ask: ask.to_string(),

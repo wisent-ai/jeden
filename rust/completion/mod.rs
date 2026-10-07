@@ -3,6 +3,7 @@
 //! events retain decisions and reviewer tool receipts rather than another ledger
 //! that can independently decide whether the work is complete.
 
+mod asks;
 pub(crate) mod cli;
 mod constants;
 mod model;
@@ -12,6 +13,17 @@ pub(crate) mod timing;
 mod todo;
 mod verification;
 
+pub(crate) use asks::ask_user::{recall as recall_question, record as record_question};
+pub(crate) use asks::cli::command as asks_command;
+pub(crate) use asks::cli::{
+    answer_value as answer_ask, list_value as list_asks, show_value as show_ask,
+};
+pub(crate) use asks::{deliver_answers, open_asks, session_key as ask_session_key};
+
+/// The register as the models read it: every ask and its answer.
+pub(crate) fn asks_context() -> Result<Vec<serde_json::Value>, String> {
+    asks::read().map(|register| register.context())
+}
 pub(crate) use cli::command;
 pub use constants::SCHEMA_VERSION;
 pub(crate) use constants::{INSPECTION_OUTPUT_TOKENS, INSPECTION_RETRY_OUTPUT_TOKENS};

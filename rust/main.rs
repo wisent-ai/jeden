@@ -220,6 +220,7 @@ pub fn main() -> ExitCode {
         "run" => agent::run_command(&args),
         "pursue" => autonomy::command(&args),
         "todo" => completion::command(&args),
+        "asks" => completion::asks_command(&args),
         "rpc" => rpc::serve_stdio().map(|_| String::new()),
         "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
             .map(|_| String::new()),
