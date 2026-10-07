@@ -89,8 +89,8 @@
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/bb033e9223a1091f9b31750ca4291779077186084cd344c9be2c4e130a8edbff/private-cargo-sources.tar.gz",
-      "sha256": "bb033e9223a1091f9b31750ca4291779077186084cd344c9be2c4e130a8edbff",
+      "uri": "stado://sources/jeden/private-cargo-sources/2032a0c8cc4dadfc9a71872dec6a3a0e5270fb8a9160b09889de0ec9acb668f2/private-cargo-sources.tar.gz",
+      "sha256": "2032a0c8cc4dadfc9a71872dec6a3a0e5270fb8a9160b09889de0ec9acb668f2",
       "mount": "private-cargo-sources",
       "extract": true
     }
