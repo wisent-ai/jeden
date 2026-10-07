@@ -27,12 +27,13 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod describe;
 #[path = "../extensions/mod.rs"]
 pub(crate) mod extensions;
 mod run;
-mod describe;
 pub mod tama;
 
+pub use describe::describe_hooks;
 pub(crate) use extensions::{
     agent_dirs as extension_agent_dirs, capability_descriptors as extension_capability_descriptors,
     command_dirs as extension_command_dirs, execute_tool as execute_extension_tool,
@@ -47,7 +48,6 @@ pub use run::{
     answer_stop_block, fire_event, has_event_hooks, posttool, pretool_block, session_start,
     user_prompt_submit,
 };
-pub use describe::describe_hooks;
 
 /// One configured hook: an optional matcher (regex over the tool name; empty =
 /// match everything) and the shell command to run.
@@ -164,9 +164,11 @@ pub(crate) fn parse_hook_json(stdout: &str) -> Option<Value> {
 }
 
 /// A refusing hook decision (`PreToolUse` for a tool, `Stop` for an answer):
-/// `Some(reason)` refuses. A hook refuses either by exiting with code 2, or by
-/// printing JSON `{"decision":"block", "reason":"…"}` on stdout. The reason is
-/// the JSON `reason`, else stderr, else stdout, else `fallback`.
+/// `Some(reason)` refuses. A hook refuses by exiting with code 2, by printing
+/// JSON `{"decision":"block", "reason":"…"}`, or by failing to execute (the
+/// reserved negative infrastructure outcome). Other positive exits remain
+/// nonblocking. The reason is the JSON `reason`, else stderr, else stdout,
+/// else `fallback`.
 pub fn block_decision(outcomes: &[HookOutcome], fallback: &str) -> Option<String> {
     outcomes.iter().find_map(|o| {
         let json = parse_hook_json(&o.stdout);
@@ -176,7 +178,7 @@ pub fn block_decision(outcomes: &[HookOutcome], fallback: &str) -> Option<String
             .and_then(Value::as_str)
             .map(|d| d.eq_ignore_ascii_case("block"))
             .unwrap_or(false);
-        if o.exit_code != 2 && !json_block {
+        if !o.exit_code.is_negative() && o.exit_code != 2 && !json_block {
             return None;
         }
         let json_reason = json

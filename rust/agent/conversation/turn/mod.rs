@@ -172,6 +172,9 @@ impl Conversation {
                     }
                 }
                 Action::Message { text } => {
+                    if self.answer_refused(args, step, &text, &mut prepared, hooks)? {
+                        continue 'steps;
+                    }
                     self.recorder
                         .record("assistant_message", json!({ "step": step, "text": text }))?;
                     hooks.trace(&TraceEvent::Message { text: &text });

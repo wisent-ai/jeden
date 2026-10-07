@@ -230,7 +230,7 @@ impl Conversation {
     /// so an answer that a hook rejects (open work, a missing blocker id) is
     /// replaced by more work instead of reaching the operator first and being
     /// refused after. `max_steps`, when the operator set one, still bounds it.
-    fn answer_refused(
+    pub(super) fn answer_refused(
         &mut self,
         args: &Args,
         step: u32,

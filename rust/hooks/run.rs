@@ -38,7 +38,11 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
             return HookOutcome {
                 exit_code: -1,
                 stdout: String::new(),
-                stderr: format!("hook spawn failed: {e}"),
+                stderr: format!(
+                    "hook spawn failed for `{}` in {}: {e}",
+                    hook.command,
+                    cwd.display()
+                ),
             };
         }
     };
@@ -51,15 +55,29 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
             return HookOutcome {
                 exit_code: -1,
                 stdout: String::new(),
-                stderr: format!("hook output failed: {e}"),
+                stderr: format!(
+                    "hook output failed for `{}` in {}: {e}",
+                    hook.command,
+                    cwd.display()
+                ),
             }
         }
     };
-    HookOutcome {
+    let mut outcome = HookOutcome {
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    };
+    if outcome.exit_code.is_negative() {
+        outcome.stderr = format!(
+            "hook process `{}` in {} ended without an exit code ({}): {}",
+            hook.command,
+            cwd.display(),
+            output.status,
+            outcome.stderr
+        );
     }
+    outcome
 }
 
 /// Load merged config from disk (user + project) for one event, filter by tool,
@@ -182,7 +200,12 @@ pub fn posttool(cwd: &Path, tool: &str, result: &Value, allow_project: bool) {
 /// automatic continuation — so a hook that learns from the operator's words
 /// (Tama's frustration drafter, the adaptive bridge) does not take a stage
 /// instruction such as "do not execute commands" for his correction.
-pub fn user_prompt_submit(cwd: &Path, prompt: &str, automation: bool, allow_project: bool) -> String {
+pub fn user_prompt_submit(
+    cwd: &Path,
+    prompt: &str,
+    automation: bool,
+    allow_project: bool,
+) -> String {
     let author = if automation { "automation" } else { "operator" };
     let payload = json!({
         "event": event::USER_PROMPT_SUBMIT,
