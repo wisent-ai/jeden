@@ -17,7 +17,6 @@ mod sources;
 mod store;
 
 pub(crate) use answer::{answer, deliver_answers};
-pub(crate) use oko::put_waiting as put_waiting_on_oko;
 pub(crate) use sources::ask_user;
 pub(crate) use sources::review::{Link, Linker};
 pub(crate) use store::{path as register_path, read, update};

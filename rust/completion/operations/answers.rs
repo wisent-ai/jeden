@@ -110,5 +110,4 @@ fn adopt(
         Ok(id)
     })
     .map(|(id, _)| id)
-    .and_then(|id| asks::put_waiting_on_oko(std::slice::from_ref(&id)).map(|()| id))
 }
