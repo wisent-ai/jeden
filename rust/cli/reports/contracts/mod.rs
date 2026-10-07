@@ -6,11 +6,14 @@
 //! every system prompt verbatim. `install` writes the rendered text there
 //! between two marker lines, replacing the previous block and leaving the
 //! rest of the file alone; `status` says whether the installed block matches
-//! what the binary would render now.
+//! what the binary would render now and, for Omp, which sessions still answer
+//! under the text the file held before (`sessions`).
 
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+mod sessions;
 
 use crate::agent::{communication_contract, task_contract};
 use crate::cli::config::ui_language;
@@ -159,15 +162,42 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 Some(_) => "stale",
                 None => "absent",
             };
+            // Omp keeps the system prompt a session started with, so a
+            // current file still leaves earlier sessions on the old text.
+            let older = match (target.name, state) {
+                ("omp", "current") => sessions::on_older_text(
+                    &target.file,
+                    &sessions::omp_sessions_root(&target.file)?,
+                )?,
+                _ => Vec::new(),
+            };
             let path = target.file.display().to_string();
             if args.json {
                 return Ok(serde_json::to_string_pretty(&json!({
                     "target": target.name,
                     "path": path,
                     "state": state,
+                    "sessions_on_older_text": older
+                        .iter()
+                        .map(|session| session.display().to_string())
+                        .collect::<Vec<_>>(),
                 }))
                 .map_err(|error| error.to_string())?
                     + "\n");
+            }
+            if !older.is_empty() {
+                return Err(format!(
+                    "current: {path} carries the contracts this binary renders, but {} Omp \
+                     session(s) started before it was written and have answered since under the \
+                     text it held before; Omp reads it only when a session starts, so they keep \
+                     that text until they end:\n{}",
+                    older.len(),
+                    older
+                        .iter()
+                        .map(|session| format!("  {}", session.display()))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                ));
             }
             let text = match state {
                 "current" => format!("current: {path} carries the contracts this binary renders\n"),
