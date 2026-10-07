@@ -105,8 +105,10 @@ fn adopt(
             follows: None,
             occurrences: vec![occurrence],
             answer: None,
+            oko: None,
         });
         Ok(id)
     })
     .map(|(id, _)| id)
+    .and_then(|id| asks::put_waiting_on_oko(std::slice::from_ref(&id)).map(|()| id))
 }

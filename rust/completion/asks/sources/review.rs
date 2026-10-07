@@ -170,7 +170,15 @@ impl Linker {
                 });
             }
             Ok(())
-        })
-        .map(|_| ())
+        })?;
+        // Every ask this review put to the operator for the first time is
+        // also put where he looks.
+        let new: Vec<String> = self
+            .links
+            .iter()
+            .filter(|link| link.new.is_some())
+            .map(|link| link.ask_id.clone())
+            .collect();
+        super::super::oko::put_waiting(&new)
     }
 }

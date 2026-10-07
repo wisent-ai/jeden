@@ -12,10 +12,12 @@
 
 mod answer;
 pub(crate) mod cli;
+mod oko;
 mod sources;
 mod store;
 
 pub(crate) use answer::{answer, deliver_answers};
+pub(crate) use oko::put_waiting as put_waiting_on_oko;
 pub(crate) use sources::ask_user;
 pub(crate) use sources::review::{Link, Linker};
 pub(crate) use store::{path as register_path, read, update};
@@ -52,6 +54,10 @@ pub(crate) struct OperatorAsk {
     pub occurrences: Vec<AskOccurrence>,
     #[serde(default)]
     pub answer: Option<OperatorAnswer>,
+    /// The same ask put where the operator looks, in Oko; absent for an ask
+    /// answered on the spot (`ask_user`) or recorded before Oko asks existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oko: Option<oko::OkoAsk>,
 }
 
 /// One place the ask was put to the operator.

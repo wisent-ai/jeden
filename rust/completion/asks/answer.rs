@@ -25,19 +25,47 @@ pub(crate) struct Delivery {
     pub detail: String,
 }
 
+/// The `session_path` of the delivery line that answers the ask's Oko twin.
+pub(crate) const OKO_DELIVERY: &str = "oko";
+
 impl AnswerReport {
+    /// Waiting tasks the answer did not reach; `jeden todo continue` in each
+    /// session hands it over. The Oko line is not one of them: its failure is
+    /// printed with Oko's reason and the answer still stands.
     pub fn failures(&self) -> Vec<&Delivery> {
         self.deliveries
             .iter()
-            .filter(|delivery| delivery.outcome == "failed")
+            .filter(|delivery| delivery.outcome == "failed" && delivery.session_path != OKO_DELIVERY)
             .collect()
     }
 }
 
 /// Records `text` as the answer to ask `id` and hands it to every task that
 /// waits on it. `expected` is the session and revision an operator answered
-/// from, refused as stale before anything is written.
+/// from, refused as stale before anything is written. The ask's Oko twin is
+/// answered too, so Oko stops asking for it.
 pub(crate) fn answer(
+    id: &str,
+    text: &str,
+    expected: Option<(&Path, u64)>,
+) -> Result<AnswerReport, String> {
+    let mut report = record(id, text, expected)?;
+    if let Some(oko_id) = report.ask.oko.as_ref().and_then(|oko| oko.oko_id.clone()) {
+        let (outcome, detail) = match super::oko::mirror_answer(&oko_id, text.trim()) {
+            Ok(detail) => ("delivered", detail),
+            Err(error) => ("failed", error),
+        };
+        report.deliveries.push(Delivery {
+            session_path: OKO_DELIVERY.into(),
+            task_id: oko_id,
+            outcome,
+            detail,
+        });
+    }
+    Ok(report)
+}
+
+fn record(
     id: &str,
     text: &str,
     expected: Option<(&Path, u64)>,
@@ -121,6 +149,7 @@ pub(crate) fn answer(
 /// waiting on it: an answer given in another session, or one whose delivery
 /// failed, reaches the task before its work continues.
 pub(crate) fn deliver_answers(session: &Path) -> Result<CompletionState, String> {
+    take_answers_from_oko(session)?;
     let register = super::read()?;
     let key = session_key(session);
     let state = store::read(session)?;
@@ -145,6 +174,30 @@ pub(crate) fn deliver_answers(session: &Path) -> Result<CompletionState, String>
         Ok(())
     })
     .map(|(_, state)| state)
+}
+
+/// An answer the operator gave in Oko to an ask a task of `session` waits
+/// on is recorded in the register and handed to every waiting task, as if
+/// given with `jeden asks answer`. An Oko that cannot be asked leaves the
+/// ask waiting, and its reason is returned for the caller to show.
+fn take_answers_from_oko(session: &Path) -> Result<(), String> {
+    let register = super::read()?;
+    let key = session_key(session);
+    let state = store::read(session)?;
+    let waiting: Vec<(String, String)> = state
+        .tasks
+        .iter()
+        .filter(|task| task.waits_for_operator())
+        .filter_map(|task| register.for_task(&key, &task.id))
+        .filter(|ask| ask.answer.is_none())
+        .filter_map(|ask| Some((ask.id.clone(), ask.oko.as_ref()?.oko_id.clone()?)))
+        .collect();
+    for (id, oko_id) in waiting {
+        if let Some(text) = super::oko::answered(&oko_id)? {
+            record(&id, &text, None)?;
+        }
+    }
+    Ok(())
 }
 
 fn waiting_places(register: &AskRegister, ask: &OperatorAsk) -> Vec<(String, String)> {

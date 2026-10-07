@@ -72,6 +72,7 @@ pub(crate) fn record(
                 answered_at: stamp.clone(),
                 text: answer.to_string(),
             }),
+            oko: None,
         });
         Ok(())
     })?;

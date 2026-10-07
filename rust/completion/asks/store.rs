@@ -152,6 +152,7 @@ fn adopt() -> Result<AskRegister, String> {
                     follows: None,
                     occurrences: vec![occurrence],
                     answer: request.answer.clone(),
+                    oko: None,
                 }),
             }
         }
