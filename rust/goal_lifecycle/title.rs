@@ -10,13 +10,13 @@ use std::path::PathBuf;
 
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
 /// --stdin --json` when the executable is available, otherwise the prompt's
-/// first line trimmed to 100 characters.
+/// whole first line.
 pub fn resolve_goal_title(prompt: &str) -> String {
     if let Some(title) = transcript_lake_title(prompt) {
         return title;
     }
     let first_line = prompt.lines().next().unwrap_or("").trim();
-    let mut title: String = first_line.chars().take(100).collect();
+    let mut title = first_line.to_string();
     if title.is_empty() {
         title = "New goal".to_string();
     }
