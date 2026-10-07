@@ -2,9 +2,9 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 
+mod criterion;
 mod operator;
 mod review;
-mod criterion;
 pub use criterion::CriterionReview;
 
 pub use operator::{OperatorAnswer, OperatorRequest};

@@ -16,9 +16,8 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         frame: &[u8],
         trust_generation: u64,
     ) -> Result<(AuthenticatedConnection, Value), Value> {
-        let request: RequestEnvelopeV1 = serde_json::from_slice(frame).map_err(|error| {
-            refusal(Value::Null, "malformed_json", error.to_string(), false)
-        })?;
+        let request: RequestEnvelopeV1 = serde_json::from_slice(frame)
+            .map_err(|error| refusal(Value::Null, "malformed_json", error.to_string(), false))?;
         let id = Value::String(request.id.clone());
         if request.meta.protocol_version != PROTOCOL_VERSION {
             return Err(refusal(
@@ -55,29 +54,31 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 .to_owned()
         };
         let (token, organization) = (field("accessToken"), field("organizationId"));
-        let member = authority
-            .authorize(&token, &organization)
-            .await
-            .map_err(|refused: IdentityRefusal| {
+        let member = authority.authorize(&token, &organization).await.map_err(
+            |refused: IdentityRefusal| {
                 refusal(
                     id.clone(),
                     refused.code(),
                     refused.message(),
                     refused.retryable(),
                 )
-            })?;
-        let identity = self.directory.resolve_member(&member).map_err(|error| match error {
-            TenantError::IdentityNotMapped => refusal(
-                id.clone(),
-                "access_denied",
-                format!(
-                    "organization {} is not in this daemon's identity map",
-                    member.organization_id
+            },
+        )?;
+        let identity = self
+            .directory
+            .resolve_member(&member)
+            .map_err(|error| match error {
+                TenantError::IdentityNotMapped => refusal(
+                    id.clone(),
+                    "access_denied",
+                    format!(
+                        "organization {} is not in this daemon's identity map",
+                        member.organization_id
+                    ),
+                    false,
                 ),
-                false,
-            ),
-            other => refusal(id.clone(), "internal", format!("{other:?}"), true),
-        })?;
+                other => refusal(id.clone(), "internal", format!("{other:?}"), true),
+            })?;
         let response = json!({
             "id": id,
             "result": {

@@ -119,17 +119,25 @@ fn target(rest: &[String]) -> Result<Target, String> {
                 })
             }
             "--file" => {
-                let path = iter.next().ok_or_else(|| crate::cli::invocation::refusal::usage("--file requires a path"))?;
+                let path = iter.next().ok_or_else(|| {
+                    crate::cli::invocation::refusal::usage("--file requires a path")
+                })?;
                 target = Some(Target {
                     name: "file",
                     file: PathBuf::from(path),
                 })
             }
-            other => return Err(crate::cli::invocation::refusal::usage(format!("unknown contracts option: {other}\n{USAGE}"))),
+            other => {
+                return Err(crate::cli::invocation::refusal::usage(format!(
+                    "unknown contracts option: {other}\n{USAGE}"
+                )))
+            }
         }
     }
     target.ok_or_else(|| {
-        crate::cli::invocation::refusal::usage(format!("contracts install, uninstall and status require --omp or --file <path>\n{USAGE}"))
+        crate::cli::invocation::refusal::usage(format!(
+            "contracts install, uninstall and status require --omp or --file <path>\n{USAGE}"
+        ))
     })
 }
 
@@ -251,7 +259,9 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             let existing = match fs::read_to_string(&target.file) {
                 Ok(text) => text,
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-                Err(error) => return Err(format!("cannot read {}: {error}", target.file.display())),
+                Err(error) => {
+                    return Err(format!("cannot read {}: {error}", target.file.display()))
+                }
             };
             let next = unspliced(&existing);
             if let Some(next) = &next {

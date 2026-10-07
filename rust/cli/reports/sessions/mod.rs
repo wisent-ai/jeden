@@ -76,12 +76,23 @@ pub(crate) fn list_sessions(limit: Option<usize>, json: bool) -> Result<String, 
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("the session root {} cannot be read: {error}", root.display())),
+        Err(error) => {
+            return Err(format!(
+                "the session root {} cannot be read: {error}",
+                root.display()
+            ))
+        }
     }
     if json {
-        return serde_json::to_string_pretty(&rows).map(|text| text + "\n").map_err(|error| error.to_string());
+        return serde_json::to_string_pretty(&rows)
+            .map(|text| text + "\n")
+            .map_err(|error| error.to_string());
     }
-    Ok(if rows.is_empty() { "No sessions found.\n".into() } else { rows.join("\n") + "\n" })
+    Ok(if rows.is_empty() {
+        "No sessions found.\n".into()
+    } else {
+        rows.join("\n") + "\n"
+    })
 }
 
 pub(crate) fn search_sessions_command(args: &Args) -> Result<String, String> {
@@ -92,7 +103,9 @@ pub(crate) fn search_sessions_command(args: &Args) -> Result<String, String> {
         .trim()
         .to_ascii_lowercase();
     if query.is_empty() {
-        return Err(crate::cli::invocation::refusal::usage("search-sessions requires a non-empty query"));
+        return Err(crate::cli::invocation::refusal::usage(
+            "search-sessions requires a non-empty query",
+        ));
     }
     // Optional positional limit; absent means scan every session (the prior
     // default/clamp were unconsented numeric literals and are dropped).

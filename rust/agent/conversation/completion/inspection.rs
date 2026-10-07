@@ -119,7 +119,3 @@ impl Conversation {
 fn cut_off(refusal: &str) -> bool {
     refusal.contains(crate::protocol::INCOMPLETE_ANSWER)
 }
-
-
-
-

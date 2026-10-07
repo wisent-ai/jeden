@@ -226,7 +226,3 @@ pub(in crate::agent) fn prepare_outbound_messages(
     super::tool_images::attach(&mut outbound)?;
     Ok(outbound)
 }
-
-
-
-

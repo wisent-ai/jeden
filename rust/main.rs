@@ -15,8 +15,8 @@ pub mod completion;
 pub mod conformance;
 pub mod context;
 pub mod control_plane;
-pub(crate) mod fleet;
 pub mod eval;
+pub(crate) mod fleet;
 pub mod goal_lifecycle;
 pub mod hooks;
 pub mod marketplace;
@@ -56,8 +56,8 @@ pub(crate) use cli::run::interactive::interactive;
 pub(crate) use cli::run::slash::{handle_slash, is_builtin_slash, update_command};
 pub(crate) use cli::sessions::{
     artifact_command, export_session_command, list_artifacts_command, list_sessions,
-    read_session_value, recall_conversation_text,
-    render_session_export, resume_command, search_sessions_command, session_conversation_turns,
+    read_session_value, recall_conversation_text, render_session_export, resume_command,
+    search_sessions_command, session_conversation_turns,
 };
 pub(crate) use cli::stats::stats_command;
 pub(crate) use cli::token::token_command;
@@ -215,7 +215,9 @@ pub fn main() -> ExitCode {
         };
     }
     let result = match args.command.as_str() {
-        "help" => Ok(cli::invocation::command_usage(args.positionals.first().map(String::as_str))),
+        "help" => Ok(cli::invocation::command_usage(
+            args.positionals.first().map(String::as_str),
+        )),
         "interactive" => interactive(&args),
         "run" => agent::run_command(&args),
         "pursue" => autonomy::command(&args),
@@ -253,15 +255,23 @@ pub fn main() -> ExitCode {
         "show" => match args.positionals.first() {
             Some(id) => read_session_value(id)
                 .map_err(|error| format!("session {id} cannot be read: {error}"))
-                .and_then(|session| render_session_export(&session, if args.json { "json" } else { "markdown" })),
-            None => Err(cli::invocation::refusal::usage("show requires a session id")),
+                .and_then(|session| {
+                    render_session_export(&session, if args.json { "json" } else { "markdown" })
+                }),
+            None => Err(cli::invocation::refusal::usage(
+                "show requires a session id",
+            )),
         },
         "export" => export_session_command(&args),
         "artifacts" => args
             .positionals
             .first()
             .map(|id| list_artifacts_command(id, args.json))
-            .unwrap_or_else(|| Err(cli::invocation::refusal::usage("artifacts requires a session id"))),
+            .unwrap_or_else(|| {
+                Err(cli::invocation::refusal::usage(
+                    "artifacts requires a session id",
+                ))
+            }),
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
         "search-sessions" => search_sessions_command(&args),

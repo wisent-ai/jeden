@@ -35,7 +35,9 @@ impl AnswerReport {
     pub fn failures(&self) -> Vec<&Delivery> {
         self.deliveries
             .iter()
-            .filter(|delivery| delivery.outcome == "failed" && delivery.session_path != OKO_DELIVERY)
+            .filter(|delivery| {
+                delivery.outcome == "failed" && delivery.session_path != OKO_DELIVERY
+            })
             .collect()
     }
 }
@@ -65,11 +67,7 @@ pub(crate) fn answer(
     Ok(report)
 }
 
-fn record(
-    id: &str,
-    text: &str,
-    expected: Option<(&Path, u64)>,
-) -> Result<AnswerReport, String> {
+fn record(id: &str, text: &str, expected: Option<(&Path, u64)>) -> Result<AnswerReport, String> {
     let text = text.trim();
     if text.is_empty() {
         return Err("an answer requires nonempty text".into());

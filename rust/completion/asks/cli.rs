@@ -159,7 +159,9 @@ fn render_summary(ask: &Value) -> String {
     if let Some(oko) = ask["oko"].as_object() {
         text.push_str(&format!(
             "\n  Oko: {}",
-            oko.get("detail").and_then(Value::as_str).unwrap_or_default()
+            oko.get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
         ));
     }
     text

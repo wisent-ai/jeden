@@ -164,7 +164,9 @@ pub(crate) fn execute(
             }
             "--json" => json = true,
             "--help" => return Ok(USAGE.into()),
-            flag if flag.starts_with("--") => return Err(usage(format!("unknown todo option: {flag}\n{USAGE}"))),
+            flag if flag.starts_with("--") => {
+                return Err(usage(format!("unknown todo option: {flag}\n{USAGE}")))
+            }
             _ => words.push(argument.as_str()),
         }
     }

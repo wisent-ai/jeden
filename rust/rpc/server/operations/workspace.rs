@@ -78,11 +78,21 @@ pub(crate) fn import_sessions(params: &Value) -> Result<Value, (&'static str, St
 /// an error.
 pub(crate) fn restore_sessions(params: &Value) -> Result<Value, (&'static str, String)> {
     let since = string_param(params, "since").map_err(|error| ("invalid_params", error))?;
-    let dry_run = params.get("dryRun").and_then(Value::as_bool).unwrap_or(false);
+    let dry_run = params
+        .get("dryRun")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let root = match params.get("sessions").and_then(Value::as_str) {
         Some(root) => PathBuf::from(root),
         None => crate::cli::restore::default_root().map_err(|error| ("restore_error", error))?,
     };
-    crate::cli::restore::restore(&crate::cli::restore::Request { since, dry_run, root }, false)
-        .map_err(|error| ("restore_error", error))
+    crate::cli::restore::restore(
+        &crate::cli::restore::Request {
+            since,
+            dry_run,
+            root,
+        },
+        false,
+    )
+    .map_err(|error| ("restore_error", error))
 }

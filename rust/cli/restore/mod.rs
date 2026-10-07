@@ -67,22 +67,41 @@ fn restore_command(args: &crate::Args) -> Result<String, String> {
     while let Some(word) = words.next() {
         match word.as_str() {
             "--since" => {
-                since = Some(words.next().ok_or_else(|| refusal::usage("--since requires a value"))?.clone())
+                since = Some(
+                    words
+                        .next()
+                        .ok_or_else(|| refusal::usage("--since requires a value"))?
+                        .clone(),
+                )
             }
             "--sessions" => {
-                let dir = words.next().ok_or_else(|| refusal::usage("--sessions requires a directory"))?;
+                let dir = words
+                    .next()
+                    .ok_or_else(|| refusal::usage("--sessions requires a directory"))?;
                 root = Some(PathBuf::from(dir))
             }
             "--dry-run" => dry_run = true,
-            other => return Err(refusal::usage(format!("restore does not take {other:?}\n{USAGE}"))),
+            other => {
+                return Err(refusal::usage(format!(
+                    "restore does not take {other:?}\n{USAGE}"
+                )))
+            }
         }
     }
-    let since = since.ok_or_else(|| refusal::usage(format!("restore requires --since\n{USAGE}")))?;
+    let since =
+        since.ok_or_else(|| refusal::usage(format!("restore requires --since\n{USAGE}")))?;
     let root = match root {
         Some(root) => root,
         None => default_root()?,
     };
-    let report = restore(&Request { since, dry_run, root }, true)?;
+    let report = restore(
+        &Request {
+            since,
+            dry_run,
+            root,
+        },
+        true,
+    )?;
     let text = if args.json {
         serde_json::to_string_pretty(&report).map_err(|error| error.to_string())? + "\n"
     } else {
@@ -108,18 +127,26 @@ fn open_command(words: &[String]) -> Result<String, String> {
     while let Some(word) = words.next() {
         match word.as_str() {
             "--run" => {
-                let dir = words.next().ok_or_else(|| refusal::usage("--run requires a directory"))?;
+                let dir = words
+                    .next()
+                    .ok_or_else(|| refusal::usage("--run requires a directory"))?;
                 run = Some(PathBuf::from(dir))
             }
             other if other.starts_with("--") => {
-                return Err(refusal::usage(format!("restore open does not take {other:?}\n{USAGE}")))
+                return Err(refusal::usage(format!(
+                    "restore open does not take {other:?}\n{USAGE}"
+                )))
             }
             other if transcript.is_none() => transcript = Some(PathBuf::from(other)),
-            other => return Err(refusal::usage(format!("restore open takes one transcript, not also {other:?}"))),
+            other => {
+                return Err(refusal::usage(format!(
+                    "restore open takes one transcript, not also {other:?}"
+                )))
+            }
         }
     }
-    let transcript =
-        transcript.ok_or_else(|| refusal::usage(format!("restore open requires a transcript\n{USAGE}")))?;
+    let transcript = transcript
+        .ok_or_else(|| refusal::usage(format!("restore open requires a transcript\n{USAGE}")))?;
     #[cfg(unix)]
     {
         launch::open(&transcript, run.as_deref())

@@ -59,7 +59,9 @@ pub(crate) fn settings_schema() -> &'static [SettingSpec] {
 
 /// A key the schema does not declare, refused with where the declared ones are listed.
 fn unknown_key(key: &str) -> String {
-    crate::cli::invocation::refusal::usage(format!("unknown config key: {key}; `jeden config list` shows every key"))
+    crate::cli::invocation::refusal::usage(format!(
+        "unknown config key: {key}; `jeden config list` shows every key"
+    ))
 }
 
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {

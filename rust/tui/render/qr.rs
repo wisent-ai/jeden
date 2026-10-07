@@ -13,6 +13,3 @@ pub fn render(data: &str) -> Option<String> {
             .build(),
     )
 }
-
-
-

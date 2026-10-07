@@ -82,12 +82,15 @@ pub(crate) fn spawn_turn_classification(
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| "unknown".to_string());
-        let classified = classify(&router, &LifecycleRequest {
-            prompt: prompt.clone(),
-            session_id,
-            turn_index,
-            goal_objective: goal_objective.clone(),
-        });
+        let classified = classify(
+            &router,
+            &LifecycleRequest {
+                prompt: prompt.clone(),
+                session_id,
+                turn_index,
+                goal_objective: goal_objective.clone(),
+            },
+        );
         let mut decision = match classified {
             Ok(Some(decision)) => decision,
             Ok(None) => return,

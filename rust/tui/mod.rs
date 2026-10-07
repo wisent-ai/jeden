@@ -181,6 +181,3 @@ pub struct TurnCtx<'a> {
     /// Ask the user to approve a gated tool; returns true to allow.
     pub approve: &'a dyn Fn(&str, &str) -> bool,
 }
-
-
-

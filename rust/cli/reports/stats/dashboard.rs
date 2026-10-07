@@ -10,7 +10,8 @@ use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 
-const DASHBOARD_HTML: &str = concat!(r#"<!doctype html>
+const DASHBOARD_HTML: &str = concat!(
+    r#"<!doctype html>
 <html><head><meta charset="utf-8"><title>jeden stats</title>
 <style>
 body{background:#0d1117;color:#e6edf3;font:14px/1.5 -apple-system,monospace;margin:2em auto;max-width:900px;padding:0 1em}
@@ -32,7 +33,10 @@ button{background:#21262d;color:inherit;border:1px solid #8b949e;border-radius:5
 <h2>Usage</h2><div id="usage"></div>
 <h2>Sessions</h2><div id="sessions" class="card"></div>
 <script>
-"#, include_str!("dashboard.js"), r#"</script></body></html>"#);
+"#,
+    include_str!("dashboard.js"),
+    r#"</script></body></html>"#
+);
 
 fn write_response(stream: &mut std::net::TcpStream, status: &str, content_type: &str, body: &str) {
     let _ = write!(
@@ -48,9 +52,9 @@ pub(super) fn serve(cwd: &Path, port: Option<u16>) -> Result<String, String> {
     let asked = port.unwrap_or_default();
     let listener = TcpListener::bind(("127.0.0.1", asked))
         .map_err(|error| format!("cannot bind 127.0.0.1:{asked}: {error}"))?;
-    let bound = listener
-        .local_addr()
-        .map_err(|error| format!("cannot read the address 127.0.0.1:{asked} was bound to: {error}"))?;
+    let bound = listener.local_addr().map_err(|error| {
+        format!("cannot read the address 127.0.0.1:{asked} was bound to: {error}")
+    })?;
     println!("jeden stats dashboard: http://{bound}  (Ctrl-C to stop)");
     let _ = std::io::stdout().flush();
     let cwd: PathBuf = cwd.to_path_buf();

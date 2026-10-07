@@ -16,7 +16,11 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
         let label = mapping
             .san
             .clone()
-            .or_else(|| mapping.wisent_organization.map(|org| format!("wisent organization {org}")))
+            .or_else(|| {
+                mapping
+                    .wisent_organization
+                    .map(|org| format!("wisent organization {org}"))
+            })
             .unwrap_or_else(|| format!("tenant {}", mapping.tenant));
         let mapped = match (mapping.san, mapping.principal, mapping.wisent_organization) {
             (Some(san), Some(principal), None) => {

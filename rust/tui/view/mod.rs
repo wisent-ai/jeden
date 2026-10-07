@@ -47,6 +47,3 @@ pub enum PickerEvent {
         command: String,
     },
 }
-
-
-

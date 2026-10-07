@@ -159,7 +159,10 @@ impl std::io::Write for DigestSink<'_> {
     }
 }
 
-pub(crate) fn logical_request_keys(route: &RouteDescriptor, messages: &[Value]) -> (String, String, String) {
+pub(crate) fn logical_request_keys(
+    route: &RouteDescriptor,
+    messages: &[Value],
+) -> (String, String, String) {
     let mut hasher = Sha256::new();
     if serde_json::to_writer(DigestSink(&mut hasher), &(route, messages)).is_err() {
         hasher = Sha256::new();
@@ -189,7 +192,10 @@ pub(crate) fn nonempty(value: &str) -> Option<String> {
 }
 
 /// Merge streaming tool-call deltas (indexed) into a growing list.
-pub(crate) fn accumulate_tool_call_deltas(acc: &mut Vec<Value>, deltas: &[Value]) -> Result<(), String> {
+pub(crate) fn accumulate_tool_call_deltas(
+    acc: &mut Vec<Value>,
+    deltas: &[Value],
+) -> Result<(), String> {
     for delta in deltas {
         let raw_index = delta.get("index").and_then(Value::as_u64).unwrap_or(0);
         let index =

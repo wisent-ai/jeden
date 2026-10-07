@@ -2,9 +2,9 @@ mod answers;
 mod defects;
 mod requests;
 mod snapshot;
+pub(crate) use requests::capture_request;
 pub use snapshot::snapshot;
 pub(crate) use snapshot::{model_context, snapshot_value};
-pub(crate) use requests::capture_request;
 
 use super::{model::*, store};
 use serde_json::{json, Value};

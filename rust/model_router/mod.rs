@@ -16,9 +16,9 @@ mod completion;
 mod stream;
 
 pub(crate) use attachments::{with_attachments, ModelAttachment};
+use completion::*;
 pub use completion::{chat_completion, hmac_headers};
 pub use stream::chat_completion_streaming;
-use completion::*;
 use stream::*;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -147,7 +147,6 @@ impl StreamingCompletion {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub url: String,
@@ -184,4 +183,3 @@ pub struct Completion {
     pub content: String,
     pub usage: Option<CompletionUsage>,
 }
-

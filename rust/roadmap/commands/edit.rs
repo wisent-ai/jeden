@@ -37,14 +37,13 @@ pub(super) fn edit_command(
     }
     if let Some((_, title)) = changes.iter().find(|(field, _)| *field == "title") {
         if title.trim().is_empty() {
-            return Err(RoadmapError::Usage("roadmap edit: --title cannot be empty".into()));
+            return Err(RoadmapError::Usage(
+                "roadmap edit: --title cannot be empty".into(),
+            ));
         }
     }
     let revision = expected_revision(store, options)?;
-    let fields = changes
-        .iter()
-        .map(|(field, _)| *field)
-        .collect::<Vec<_>>();
+    let fields = changes.iter().map(|(field, _)| *field).collect::<Vec<_>>();
     let roadmap = store.mutate(
         revision,
         "roadmap_item_updated",
@@ -89,11 +88,7 @@ pub(super) fn unblock_command(
         .positionals
         .first()
         .ok_or_else(|| RoadmapError::Usage("Usage: roadmap unblock <id> [reason]".into()))?;
-    let positional_reason = options
-        .positionals
-        .get(1..)
-        .unwrap_or_default()
-        .join(" ");
+    let positional_reason = options.positionals.get(1..).unwrap_or_default().join(" ");
     let reason = options.one("reason").map(str::to_string).or_else(|| {
         (!positional_reason.trim().is_empty()).then(|| positional_reason.trim().to_string())
     });

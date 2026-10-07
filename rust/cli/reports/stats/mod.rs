@@ -214,12 +214,16 @@ pub(crate) fn stats_command(args: &Args) -> Result<String, String> {
             .map(|index| args.positionals.get(index + 1));
         let port = match named {
             None => None,
-            Some(value) => Some(value.and_then(|value| value.parse::<u16>().ok()).ok_or_else(|| {
-                format!(
+            Some(value) => Some(
+                value
+                    .and_then(|value| value.parse::<u16>().ok())
+                    .ok_or_else(|| {
+                        format!(
                     "jeden stats --serve --port takes a port number from 0 to 65535, not {}",
                     value.map_or("nothing", String::as_str)
                 )
-            })?),
+                    })?,
+            ),
         };
         return serve(&args.cwd, port);
     }

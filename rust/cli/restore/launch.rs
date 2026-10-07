@@ -32,8 +32,12 @@ pub(super) fn run_directory() -> Result<PathBuf, String> {
     let run = PathBuf::from(home)
         .join(".jeden/restore")
         .join(format!("{stamp}-{}", std::process::id()));
-    fs::create_dir_all(&run)
-        .map_err(|error| format!("cannot create the restore run directory {}: {error}", run.display()))?;
+    fs::create_dir_all(&run).map_err(|error| {
+        format!(
+            "cannot create the restore run directory {}: {error}",
+            run.display()
+        )
+    })?;
     Ok(run)
 }
 
@@ -41,7 +45,9 @@ pub(super) fn run_directory() -> Result<PathBuf, String> {
 /// --run <run>` and answers the window's terminal device.
 pub(super) fn open_window(jeden: &Path, transcript: &Path, run: &Path) -> Result<String, String> {
     if !cfg!(target_os = "macos") {
-        return Err("reopening a session opens a macOS Terminal window; this host is not macOS".into());
+        return Err(
+            "reopening a session opens a macOS Terminal window; this host is not macOS".into(),
+        );
     }
     let command = format!(
         "exec {} restore open {} --run {}",
@@ -53,12 +59,18 @@ pub(super) fn open_window(jeden: &Path, transcript: &Path, run: &Path) -> Result
     // no path needs AppleScript escaping.
     let output = Command::new("osascript")
         .args([
-            "-e", "on run argv",
-            "-e", "tell application \"Terminal\"",
-            "-e", "set opened to do script (item 1 of argv)",
-            "-e", "return tty of opened",
-            "-e", "end tell",
-            "-e", "end run",
+            "-e",
+            "on run argv",
+            "-e",
+            "tell application \"Terminal\"",
+            "-e",
+            "set opened to do script (item 1 of argv)",
+            "-e",
+            "return tty of opened",
+            "-e",
+            "end tell",
+            "-e",
+            "end run",
         ])
         .arg(&command)
         .output()
@@ -82,12 +94,20 @@ pub(super) fn open(transcript: &Path, run: Option<&Path>) -> Result<String, Stri
             record(run, &header.id, STARTED, &std::process::id().to_string())?;
         }
         let error = command.exec();
-        Err(format!("cannot start omp for session {}: {error}", header.id))
+        Err(format!(
+            "cannot start omp for session {}: {error}",
+            header.id
+        ))
     });
     if let (Err(error), Some(run)) = (&result, run) {
-        let id = select::header(transcript).map(|header| header.id).unwrap_or_else(|_| {
-            transcript.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default()
-        });
+        let id = select::header(transcript)
+            .map(|header| header.id)
+            .unwrap_or_else(|_| {
+                transcript
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_default()
+            });
         record(run, &id, FAILED, error)?;
     }
     result
@@ -95,13 +115,19 @@ pub(super) fn open(transcript: &Path, run: Option<&Path>) -> Result<String, Stri
 
 fn prepare(transcript: &Path) -> Result<(select::Header, Command), String> {
     let header = select::header(transcript)?;
-    let omp = on_path("omp").ok_or("omp is not on PATH in the new window, so the session cannot resume")?;
+    let omp = on_path("omp")
+        .ok_or("omp is not on PATH in the new window, so the session cannot resume")?;
     let workspace = Path::new(&header.cwd);
     if !workspace.is_dir() {
-        return Err(format!("the session's workspace {} is gone", workspace.display()));
+        return Err(format!(
+            "the session's workspace {} is gone",
+            workspace.display()
+        ));
     }
     let mut command = Command::new(omp);
-    command.arg(format!("--resume={}", header.id)).current_dir(workspace);
+    command
+        .arg(format!("--resume={}", header.id))
+        .current_dir(workspace);
     // OMP refuses to run in the home directory unless told to; a session
     // whose workspace is home was started that way.
     if std::env::var_os("HOME").is_some_and(|home| Path::new(&home) == workspace) {
@@ -143,9 +169,12 @@ pub(super) fn wait_started(
             );
             announced = true;
         }
-        watch
-            .wait()
-            .map_err(|error| format!("cannot wait for the Terminal windows in {}: {error}", run.display()))?;
+        watch.wait().map_err(|error| {
+            format!(
+                "cannot wait for the Terminal windows in {}: {error}",
+                run.display()
+            )
+        })?;
     }
 }
 

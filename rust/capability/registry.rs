@@ -103,7 +103,9 @@ pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
     }
     let mut candidates = Vec::new();
     candidates.extend(crate::tools::builtin_capability_descriptors());
-    candidates.extend(crate::tool_runtime::runtime_ops::capability_descriptors(&cwd));
+    candidates.extend(crate::tool_runtime::runtime_ops::capability_descriptors(
+        &cwd,
+    ));
     candidates.extend(crate::tool_services::capability_descriptors(&cwd));
     candidates.extend(builtin_slash_descriptors());
     candidates.extend(native_view_descriptors());

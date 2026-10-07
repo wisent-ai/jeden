@@ -119,7 +119,3 @@ pub(in crate::agent) fn run_tool_action(
     });
     Ok(result)
 }
-
-
-
-

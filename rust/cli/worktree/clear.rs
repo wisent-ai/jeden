@@ -113,7 +113,10 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
                     "git worktree remove refused: {}",
                     String::from_utf8_lossy(&output.stderr).trim()
                 )),
-                Err(error) => Err(format!("git could not be run in {}: {error}", repo.display())),
+                Err(error) => Err(format!(
+                    "git could not be run in {}: {error}",
+                    repo.display()
+                )),
             },
             None => match git(&worktree.path, &["status", "--porcelain"]) {
                 Some(status) if status.is_empty() => fs::remove_dir_all(&worktree.path)
@@ -128,7 +131,9 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
                     "uncommitted changes in a checkout no repository claims: {}",
                     status.lines().take(3).collect::<Vec<_>>().join("; ")
                 )),
-                None => Err("git status does not answer in it, so its changes are unknown".to_string()),
+                None => {
+                    Err("git status does not answer in it, so its changes are unknown".to_string())
+                }
             },
         };
         match removal {

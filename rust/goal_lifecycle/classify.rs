@@ -116,11 +116,15 @@ fn parse_decision(content: &str) -> Option<LifecycleDecision> {
 /// Classify one user prompt through Brama under the declared alias. No alias
 /// declared answers `Ok(None)`; a refused call or an answer that is not a
 /// decision answers why, for the ledger, and the turn proceeds unchanged.
-pub fn classify(router: &ChatConfig, request: &LifecycleRequest) -> Result<Option<LifecycleDecision>, String> {
+pub fn classify(
+    router: &ChatConfig,
+    request: &LifecycleRequest,
+) -> Result<Option<LifecycleDecision>, String> {
     let Some(alias) = alias() else {
         return Ok(None);
     };
-    let envelope = serde_json::to_string(&build_envelope(request)).map_err(|error| error.to_string())?;
+    let envelope =
+        serde_json::to_string(&build_envelope(request)).map_err(|error| error.to_string())?;
     let mut router = router.clone();
     router.model = alias.clone();
     router.fallbacks.clear();
@@ -132,5 +136,10 @@ pub fn classify(router: &ChatConfig, request: &LifecycleRequest) -> Result<Optio
         .map_err(|error| format!("Brama refused the lifecycle alias {alias}: {error}"))?;
     parse_decision(&completion.content)
         .map(Some)
-        .ok_or_else(|| format!("the lifecycle alias {alias} answered no decision: {}", completion.content))
+        .ok_or_else(|| {
+            format!(
+                "the lifecycle alias {alias} answered no decision: {}",
+                completion.content
+            )
+        })
 }

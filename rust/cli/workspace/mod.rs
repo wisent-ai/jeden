@@ -221,7 +221,8 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         }
         _ => {
             return Err(
-                "Usage: jeden workspace [status|discover [path]|adopt <path>|forget] [--json]".into(),
+                "Usage: jeden workspace [status|discover [path]|adopt <path>|forget] [--json]"
+                    .into(),
             )
         }
     };

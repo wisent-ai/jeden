@@ -143,10 +143,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             ..Default::default()
         });
     }
-    if matches!(
-        command.as_str(),
-        "resume" | "search-sessions"
-    ) {
+    if matches!(command.as_str(), "resume" | "search-sessions") {
         return Ok(Args {
             command,
             cwd: env::current_dir().map_err(|e| e.to_string())?,
@@ -165,7 +162,11 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     // usage lines and never runs it: `jeden roadmap drop --help` used to read
     // `--help` as the value of an option, and `jeden config --help` refused it.
     let rest_words: Vec<String> = rest.collect();
-    if command != "interactive" && rest_words.iter().any(|word| word == "--help" || word == "-h") {
+    if command != "interactive"
+        && rest_words
+            .iter()
+            .any(|word| word == "--help" || word == "-h")
+    {
         return Ok(Args {
             command: "help".into(),
             cwd: env::current_dir().unwrap_or_default(),

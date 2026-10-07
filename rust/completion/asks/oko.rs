@@ -50,7 +50,11 @@ fn run(arguments: &[&str]) -> Result<Value, String> {
         return Err(format!(
             "oko {} refused: {}",
             arguments.first().copied().unwrap_or_default(),
-            if said.is_empty() { output.status.to_string() } else { said }
+            if said.is_empty() {
+                output.status.to_string()
+            } else {
+                said
+            }
         ));
     }
     serde_json::from_slice(&output.stdout)
@@ -66,10 +70,22 @@ pub(crate) fn put(ask: &OperatorAsk) -> OkoAsk {
     let subject = format!("ask-{}", ask.id);
     let at = crate::agent::now_stamp();
     match run(&[
-        "asks", "ask", "--from", "jeden", "--subject", &subject, "--question", &ask.ask, "--detail", &detail,
+        "asks",
+        "ask",
+        "--from",
+        "jeden",
+        "--subject",
+        &subject,
+        "--question",
+        &ask.ask,
+        "--detail",
+        &detail,
     ]) {
         Ok(answer) => {
-            let oko_id = answer.pointer("/ask/id").and_then(Value::as_str).map(str::to_string);
+            let oko_id = answer
+                .pointer("/ask/id")
+                .and_then(Value::as_str)
+                .map(str::to_string);
             let deliveries = answer["deliveries"]
                 .as_array()
                 .map(|rows| {
@@ -90,13 +106,19 @@ pub(crate) fn put(ask: &OperatorAsk) -> OkoAsk {
                 at,
                 detail: match (&oko_id, deliveries) {
                     (Some(id), Some(deliveries)) => format!("asked in Oko as {id}: {deliveries}"),
-                    (Some(id), None) => format!("asked in Oko as {id}; `oko asks show {id}` lists its deliveries"),
+                    (Some(id), None) => {
+                        format!("asked in Oko as {id}; `oko asks show {id}` lists its deliveries")
+                    }
                     (None, _) => "oko asks ask answered without an ask id".to_string(),
                 },
                 oko_id,
             }
         }
-        Err(reason) => OkoAsk { at, oko_id: None, detail: reason },
+        Err(reason) => OkoAsk {
+            at,
+            oko_id: None,
+            detail: reason,
+        },
     }
 }
 
@@ -106,7 +128,10 @@ pub(crate) fn answered(oko_id: &str) -> Result<Option<String>, String> {
     if shown["standing"].as_str() != Some("answered") {
         return Ok(None);
     }
-    Ok(shown.pointer("/ask/answer").and_then(Value::as_str).map(str::to_string))
+    Ok(shown
+        .pointer("/ask/answer")
+        .and_then(Value::as_str)
+        .map(str::to_string))
 }
 
 /// Put each of `ids` that still waits and was never put on Oko there, and
@@ -122,7 +147,10 @@ pub(crate) fn put_waiting(ids: &[String]) -> Result<(), String> {
     if waiting.is_empty() {
         return Ok(());
     }
-    let put: Vec<(String, OkoAsk)> = waiting.iter().map(|ask| (ask.id.clone(), self::put(ask))).collect();
+    let put: Vec<(String, OkoAsk)> = waiting
+        .iter()
+        .map(|ask| (ask.id.clone(), self::put(ask)))
+        .collect();
     super::update(|register| {
         for (id, oko) in &put {
             if let Some(ask) = register.asks.iter_mut().find(|ask| &ask.id == id) {

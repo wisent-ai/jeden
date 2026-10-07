@@ -279,4 +279,3 @@ fn append_transition(dir: &Path, transition: &OutboxTransition) -> Result<(), St
     file.write_all(&encoded).map_err(|e| e.to_string())?;
     file.sync_data().map_err(|e| e.to_string())
 }
-

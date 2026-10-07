@@ -1,6 +1,5 @@
 use super::*;
 
-
 /// Human summary of configured hooks (for `/hooks`), split by trust origin,
 /// plus the resolved Tama registry source when one is active.
 /// Only lists the events the runtime actually fires.

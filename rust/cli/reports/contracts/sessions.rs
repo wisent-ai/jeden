@@ -29,7 +29,10 @@ pub(super) fn on_older_text(append_system: &Path, root: &Path) -> Result<Vec<Pat
     let written = fs::metadata(append_system)
         .and_then(|metadata| metadata.modified())
         .map_err(|error| {
-            format!("cannot read when {} was written: {error}", append_system.display())
+            format!(
+                "cannot read when {} was written: {error}",
+                append_system.display()
+            )
         })?;
     let mut transcripts = Vec::new();
     walk(root, &mut transcripts)?;
@@ -56,7 +59,10 @@ fn times(transcript: &Path) -> Result<(SystemTime, SystemTime), String> {
         )
     })?;
     let active = metadata.modified().map_err(|error| {
-        format!("cannot read when {} was last written: {error}", transcript.display())
+        format!(
+            "cannot read when {} was last written: {error}",
+            transcript.display()
+        )
     })?;
     Ok((started, active))
 }
@@ -75,7 +81,10 @@ fn walk(directory: &Path, found: &mut Vec<PathBuf>) -> Result<(), String> {
             .path();
         if path.is_dir() {
             walk(&path, found)?;
-        } else if path.extension().is_some_and(|extension| extension == "jsonl") {
+        } else if path
+            .extension()
+            .is_some_and(|extension| extension == "jsonl")
+        {
             found.push(path);
         }
     }

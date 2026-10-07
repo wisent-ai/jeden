@@ -73,10 +73,9 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
 }
 
 pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
-    let (id, rest) = args
-        .positionals
-        .split_first()
-        .ok_or_else(|| crate::cli::invocation::refusal::usage("export requires a session id or path"))?;
+    let (id, rest) = args.positionals.split_first().ok_or_else(|| {
+        crate::cli::invocation::refusal::usage("export requires a session id or path")
+    })?;
     let mut format = "json".to_string();
     let mut output = None;
     for arg in rest {
@@ -119,7 +118,12 @@ pub(crate) fn list_artifacts_command(id_or_path: &str, json: bool) -> Result<Str
             }
         }
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("the artifacts of {id_or_path} at {} cannot be read: {error}", dir.display())),
+        Err(error) => {
+            return Err(format!(
+                "the artifacts of {id_or_path} at {} cannot be read: {error}",
+                dir.display()
+            ))
+        }
     }
     rows.sort();
     if json {
@@ -127,15 +131,24 @@ pub(crate) fn list_artifacts_command(id_or_path: &str, json: bool) -> Result<Str
             .iter()
             .map(|(name, bytes)| serde_json::json!({ "name": name, "bytes": bytes }))
             .collect();
-        return serde_json::to_string_pretty(&listed).map(|text| text + "\n").map_err(|error| error.to_string());
+        return serde_json::to_string_pretty(&listed)
+            .map(|text| text + "\n")
+            .map_err(|error| error.to_string());
     }
-    Ok(rows.iter().map(|(name, bytes)| format!("{name}\t{bytes}\n")).collect())
+    Ok(rows
+        .iter()
+        .map(|(name, bytes)| format!("{name}\t{bytes}\n"))
+        .collect())
 }
 
 pub(crate) fn artifact_command(args: &Args) -> Result<String, String> {
     let mut it = args.positionals.iter();
-    let id = it.next().ok_or_else(|| crate::cli::invocation::refusal::usage("artifact requires a session id or path"))?;
-    let name = it.next().ok_or_else(|| crate::cli::invocation::refusal::usage("artifact requires an artifact name"))?;
+    let id = it.next().ok_or_else(|| {
+        crate::cli::invocation::refusal::usage("artifact requires a session id or path")
+    })?;
+    let name = it.next().ok_or_else(|| {
+        crate::cli::invocation::refusal::usage("artifact requires an artifact name")
+    })?;
     let output = it.next();
     let root = session_dir_for(id).join("artifacts");
     let file = root.join(name);

@@ -1,6 +1,5 @@
 use super::*;
 
-
 pub fn snapshot(session: &Path) -> Result<Value, String> {
     let state = store::read(session)?;
     Ok(snapshot_value(&state))

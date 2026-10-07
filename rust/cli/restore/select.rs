@@ -72,11 +72,19 @@ impl Record {
 /// transcripts of subagents a session spawned, which are not sessions the
 /// operator wrote in, and dot files are OMP's locks.
 pub(super) fn scan(root: &Path, since: i64) -> Result<Scan, String> {
-    let workspaces = fs::read_dir(root)
-        .map_err(|error| format!("cannot read the OMP session root {}: {error}", root.display()))?;
-    let mut scan = Scan { sessions: Vec::new(), unreadable: Vec::new() };
+    let workspaces = fs::read_dir(root).map_err(|error| {
+        format!(
+            "cannot read the OMP session root {}: {error}",
+            root.display()
+        )
+    })?;
+    let mut scan = Scan {
+        sessions: Vec::new(),
+        unreadable: Vec::new(),
+    };
     for workspace in workspaces {
-        let workspace = workspace.map_err(|error| format!("cannot read {}: {error}", root.display()))?;
+        let workspace =
+            workspace.map_err(|error| format!("cannot read {}: {error}", root.display()))?;
         let path = workspace.path();
         if hidden(&path) || !path.is_dir() {
             continue;
@@ -84,7 +92,8 @@ pub(super) fn scan(root: &Path, since: i64) -> Result<Scan, String> {
         let entries = fs::read_dir(&path)
             .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
         for entry in entries {
-            let entry = entry.map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            let entry =
+                entry.map_err(|error| format!("cannot read {}: {error}", path.display()))?;
             let transcript = entry.path();
             if hidden(&transcript)
                 || transcript.extension().and_then(|ext| ext.to_str()) != Some("jsonl")
@@ -109,7 +118,8 @@ pub(super) fn scan(root: &Path, since: i64) -> Result<Scan, String> {
             }
         }
     }
-    scan.sessions.sort_by(|a, b| a.last_operator_message.cmp(&b.last_operator_message));
+    scan.sessions
+        .sort_by(|a, b| a.last_operator_message.cmp(&b.last_operator_message));
     Ok(scan)
 }
 
@@ -128,8 +138,14 @@ pub(super) fn header(transcript: &Path) -> Result<Header, String> {
     })?;
     match found {
         Some(header) if !header.id.is_empty() && !header.cwd.is_empty() => Ok(header),
-        Some(_) => Err(format!("{}: its session header names no id or no workspace", transcript.display())),
-        None => Err(format!("{}: not an OMP transcript (no session header)", transcript.display())),
+        Some(_) => Err(format!(
+            "{}: its session header names no id or no workspace",
+            transcript.display()
+        )),
+        None => Err(format!(
+            "{}: not an OMP transcript (no session header)",
+            transcript.display()
+        )),
     }
 }
 
@@ -145,7 +161,9 @@ fn read(transcript: &Path, since: i64) -> Result<Option<Selected>, String> {
                     title = record.title.clone();
                 }
             }
-            Some("title") | Some("title_change") if record.title.is_some() => title = record.title.clone(),
+            Some("title") | Some("title_change") if record.title.is_some() => {
+                title = record.title.clone()
+            }
             _ => {}
         }
         if let Some(instant) = record.operator_instant() {
@@ -181,7 +199,11 @@ fn each_record(transcript: &Path, mut visit: impl FnMut(&Record) -> bool) -> Res
     let mut number = 0usize;
     loop {
         line.clear();
-        if reader.read_line(&mut line).map_err(|error| format!("cannot read: {error}"))? == 0 {
+        if reader
+            .read_line(&mut line)
+            .map_err(|error| format!("cannot read: {error}"))?
+            == 0
+        {
             return Ok(());
         }
         number += 1;

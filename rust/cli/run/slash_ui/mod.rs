@@ -102,6 +102,3 @@ pub(crate) fn interactive_view(
     };
     slash::interactive_picker(&context, input).map(|picker| picker.map(CommandOutcome::Picker))
 }
-
-
-

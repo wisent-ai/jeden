@@ -21,8 +21,12 @@ pub(super) fn restore(request: &Request, announce: bool) -> Result<Value, String
     // lsof names a held file by its real path, so the locks it is asked
     // about must be real paths too, or a running session behind a symlink
     // would read as stopped and be opened twice.
-    let root = std::fs::canonicalize(&request.root)
-        .map_err(|error| format!("cannot read the OMP session root {}: {error}", request.root.display()))?;
+    let root = std::fs::canonicalize(&request.root).map_err(|error| {
+        format!(
+            "cannot read the OMP session root {}: {error}",
+            request.root.display()
+        )
+    })?;
     let scan = select::scan(&root, since)?;
     let locks: Vec<PathBuf> = scan
         .sessions
@@ -39,8 +43,9 @@ pub(super) fn restore(request: &Request, announce: bool) -> Result<Value, String
     } else {
         Some(launch::run_directory()?)
     };
-    let jeden = std::env::current_exe()
-        .map_err(|error| format!("cannot name this jeden executable for the new windows: {error}"))?;
+    let jeden = std::env::current_exe().map_err(|error| {
+        format!("cannot name this jeden executable for the new windows: {error}")
+    })?;
 
     // What happened to each stopped session before the final look: the
     // window it was given, or why it got none.
@@ -76,17 +81,27 @@ pub(super) fn restore(request: &Request, announce: bool) -> Result<Value, String
         let row = if let Some(pids) = before.get(lock) {
             match after.get(lock) {
                 Some(pids) => row(session, ALREADY_RUNNING, json!({"pids": pids})),
-                None => row(session, STOPPED, json!({
-                    "pids": pids,
-                    "reason": "it was running when restore began and its process has ended since",
-                })),
+                None => row(
+                    session,
+                    STOPPED,
+                    json!({
+                        "pids": pids,
+                        "reason": "it was running when restore began and its process has ended since",
+                    }),
+                ),
             }
         } else if request.dry_run {
             row(session, WOULD_REOPEN, json!({}))
         } else if let Some(reason) = refusals.get(&index) {
             row(session, REFUSED, json!({"reason": reason}))
         } else {
-            reopened(session, lock, &after, windows.get(&index), outcomes.get(&session.id))
+            reopened(
+                session,
+                lock,
+                &after,
+                windows.get(&index),
+                outcomes.get(&session.id),
+            )
         };
         rows.push(row);
     }
@@ -133,12 +148,22 @@ fn reopened(
         Some(Outcome::Started(pid)) if after.contains_key(lock) || holders::alive(*pid) => {
             row(session, REOPENED, json!({"pids": [pid], "tty": tty}))
         }
-        Some(Outcome::Started(pid)) => row(session, STOPPED, json!({
-            "tty": tty,
-            "reason": format!("its process {pid} ended right after it started; the Terminal window {} shows why", tty.map(String::as_str).unwrap_or("it opened")),
-        })),
-        Some(Outcome::Failed(reason)) => row(session, REFUSED, json!({"tty": tty, "reason": reason})),
-        None => row(session, REFUSED, json!({"tty": tty, "reason": "its window recorded no start"})),
+        Some(Outcome::Started(pid)) => row(
+            session,
+            STOPPED,
+            json!({
+                "tty": tty,
+                "reason": format!("its process {pid} ended right after it started; the Terminal window {} shows why", tty.map(String::as_str).unwrap_or("it opened")),
+            }),
+        ),
+        Some(Outcome::Failed(reason)) => {
+            row(session, REFUSED, json!({"tty": tty, "reason": reason}))
+        }
+        None => row(
+            session,
+            REFUSED,
+            json!({"tty": tty, "reason": "its window recorded no start"}),
+        ),
     }
 }
 
