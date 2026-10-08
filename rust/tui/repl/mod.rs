@@ -101,6 +101,18 @@ pub(crate) fn message_block(message: &Message, columns: usize, color: bool) -> V
         .collect()
 }
 
+/// A message drawn as one row of its box: the header, the first row of its
+/// text cut to the terminal's width, and the footer. A tool's input or
+/// result is shown this way, so the terminal's width decides how much of it
+/// is seen; the session ledger keeps all of it.
+pub(crate) fn message_row(message: &Message, columns: usize, color: bool) -> Vec<String> {
+    let mut lines = message_block(message, columns, color).into_iter();
+    let header = lines.next();
+    let first = lines.next();
+    let footer = lines.next_back();
+    header.into_iter().chain(first).chain(footer).collect()
+}
+
 struct RawModeGuard;
 
 impl RawModeGuard {

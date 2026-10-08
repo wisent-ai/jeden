@@ -16,7 +16,7 @@ use crate::tui::{
 
 use super::input::{InputOrMessage, TerminalInput};
 use super::questions::prompt_user_question;
-use super::{message_block, ReplRenderer};
+use super::{message_block, message_row, ReplRenderer};
 
 mod events;
 mod live;
@@ -162,7 +162,11 @@ where
                                 scrollback_columns,
                                 color,
                             );
-                            blocks.extend(message_block(&message, scrollback_columns, color));
+                            if message.role == "tool" {
+                                blocks.extend(message_row(&message, scrollback_columns, color));
+                            } else {
+                                blocks.extend(message_block(&message, scrollback_columns, color));
+                            }
                         }
                         TurnMsg::Approve {
                             tool,

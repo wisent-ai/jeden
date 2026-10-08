@@ -38,20 +38,14 @@ pub(super) enum TurnMsg {
     },
 }
 
-const TOOL_INPUT_PREVIEW: usize = 320;
-const TOOL_RESULT_PREVIEW: usize = 640;
-
-/// One line of compact JSON, cut at `limit` characters.
-fn compact_preview(value: &serde_json::Value, limit: usize) -> String {
+/// One line of compact JSON, whole; the scrollback shows as much of it as
+/// one row of the terminal holds.
+fn compact(value: &serde_json::Value) -> String {
     let text = match value {
         serde_json::Value::String(text) => text.clone(),
         other => other.to_string(),
     };
-    let text = text.replace(['\r', '\n'], " ");
-    match text.char_indices().nth(limit) {
-        Some((cut, _)) => format!("{}…", &text[..cut]),
-        None => text,
-    }
+    text.replace(['\r', '\n'], " ")
 }
 
 /// The scrollback line for one trace event, or none for reasoning, which is
@@ -60,11 +54,11 @@ pub(super) fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
     match *event {
         TraceEvent::ToolCall { tool, input } => Some(Message::new(
             "tool",
-            format!("→ {tool} {}", compact_preview(input, TOOL_INPUT_PREVIEW)),
+            format!("→ {tool} {}", compact(input)),
         )),
         TraceEvent::ToolResult { tool, result } => Some(Message::new(
             "tool",
-            format!("← {tool} {}", compact_preview(result, TOOL_RESULT_PREVIEW)),
+            format!("← {tool} {}", compact(result)),
         )),
         TraceEvent::CompletionState { state } => Some(Message::new(
             "status",
