@@ -254,9 +254,6 @@ where
                             } else {
                                 editor.handle_key(key);
                             }
-                            if let Some(error) = editor.take_error() {
-                                note = error.to_string();
-                            }
                         }
                         Event::Resize(_, _) => {}
                         _ => {}

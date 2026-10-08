@@ -2,10 +2,6 @@
 
 use crossterm::event::KeyEvent;
 
-const MAX_UNDO_STEPS: usize = 64;
-const MAX_HISTORY_ITEMS: usize = 100;
-const MAX_BUFFER_BYTES: usize = 1024 * 1024;
-
 pub const EDITOR_KEYMAP_NAMESPACE: &str = "editor";
 pub const EXTERNAL_EDITOR_ACTION_ID: &str = "editor.external";
 
@@ -23,28 +19,34 @@ use input::{
 pub use input::{ActionKeyMap, EditorAction};
 use unicode_width::UnicodeWidthStr;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct EditorLimitError {
-    pub limit_bytes: usize,
-}
-
-impl std::fmt::Display for EditorLimitError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            formatter,
-            "Editor input limit exceeded ({} bytes)",
-            self.limit_bytes
-        )
-    }
-}
-
-impl std::error::Error for EditorLimitError {}
-
+/// The buffer, cursor and selection anchor as they stood, kept for the draft
+/// a history walk returns to.
 #[derive(Debug, Clone)]
 struct Snapshot {
     text: String,
     cursor: usize,
     anchor: Option<usize>,
+}
+
+/// Where a change landed: the whole buffer, or the bytes from an offset.
+#[derive(Debug, Clone, Copy)]
+enum Region {
+    Whole,
+    At(usize),
+}
+
+/// One change to the buffer and how to take it back: what was `removed`
+/// from `region` and what was `inserted` there, with the cursor and anchor
+/// before and after. Undo keeps changes, not copies of the buffer, so its
+/// memory grows with what was typed rather than with the buffer's length,
+/// and every step stays reachable.
+#[derive(Debug, Clone)]
+struct Edit {
+    region: Region,
+    removed: String,
+    inserted: String,
+    before: (usize, Option<usize>),
+    after: (usize, Option<usize>),
 }
 
 #[derive(Debug, Clone)]
@@ -53,13 +55,12 @@ pub struct EditorState {
     cursor: usize,
     anchor: Option<usize>,
     preferred_column: Option<usize>,
-    undo: Vec<Snapshot>,
-    redo: Vec<Snapshot>,
+    undo: Vec<Edit>,
+    redo: Vec<Edit>,
     history: Vec<String>,
     history_index: Option<usize>,
     history_draft: Option<Snapshot>,
     keymap: ActionKeyMap,
-    last_error: Option<EditorLimitError>,
 }
 
 impl Default for EditorState {
@@ -80,7 +81,6 @@ impl EditorState {
             history: Vec::new(),
             history_index: None,
             history_draft: None,
-            last_error: None,
             keymap,
         }
     }
@@ -94,21 +94,12 @@ impl EditorState {
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
-    pub fn take_error(&mut self) -> Option<EditorLimitError> {
-        self.last_error.take()
-    }
     pub fn action_for(&self, event: KeyEvent) -> Option<EditorAction> {
         self.keymap.action_for(event)
     }
 
     pub fn set_text(&mut self, text: impl Into<String>) {
         let text = text.into();
-        if text.len() > MAX_BUFFER_BYTES {
-            self.last_error = Some(EditorLimitError {
-                limit_bytes: MAX_BUFFER_BYTES,
-            });
-            return;
-        }
         self.text = text;
         self.cursor = self.text.len();
         self.anchor = None;
@@ -130,11 +121,7 @@ impl EditorState {
 
     pub fn clear(&mut self) {
         if !self.text.is_empty() {
-            self.record_undo();
-            self.text.clear();
-            self.cursor = 0;
-            self.anchor = None;
-            self.preferred_column = None;
+            self.replace_whole(String::new());
         }
     }
 
@@ -151,75 +138,77 @@ impl EditorState {
         if value.is_empty() {
             return;
         }
-        if !self.can_replace_selection_with(value.len()) {
-            self.last_error = Some(EditorLimitError {
-                limit_bytes: MAX_BUFFER_BYTES,
-            });
-            return;
-        }
-        self.record_undo();
         self.replace_selection(value);
     }
 
     pub fn paste(&mut self, value: &str) {
-        if !self.can_replace_selection_with(value.len()) {
-            self.last_error = Some(EditorLimitError {
-                limit_bytes: MAX_BUFFER_BYTES,
-            });
-            return;
-        }
         let normalized = normalize_paste(value);
         if normalized.is_empty() {
             return;
         }
-        self.record_undo();
         self.replace_selection(&normalized);
     }
 
     pub fn delete_backward(&mut self) {
         if self.selection().is_some() {
-            self.record_undo();
             self.replace_selection("");
             return;
         }
         let start = previous_boundary(&self.text, self.cursor);
         if start != self.cursor {
-            self.record_undo();
-            self.text.replace_range(start..self.cursor, "");
-            self.cursor = start;
-            self.preferred_column = None;
+            self.splice(start, self.cursor, "", start);
         }
     }
 
     pub fn delete_forward(&mut self) {
         if self.selection().is_some() {
-            self.record_undo();
             self.replace_selection("");
             return;
         }
         let end = next_boundary(&self.text, self.cursor);
         if end != self.cursor {
-            self.record_undo();
-            self.text.replace_range(self.cursor..end, "");
-            self.preferred_column = None;
+            self.splice(self.cursor, end, "", self.cursor);
         }
     }
 
-    fn can_replace_selection_with(&self, bytes: usize) -> bool {
-        let removed = self.selection().map_or(0, |(start, end)| end - start);
-        self.text
-            .len()
-            .saturating_sub(removed)
-            .saturating_add(bytes)
-            <= MAX_BUFFER_BYTES
+    /// Replace `start..end` with `value`, leave the cursor at `cursor` with no
+    /// selection, and record the change so undo can take it back.
+    fn splice(&mut self, start: usize, end: usize, value: &str, cursor: usize) {
+        let before = (self.cursor, self.anchor);
+        let removed = self.text[start..end].to_string();
+        self.text.replace_range(start..end, value);
+        self.cursor = cursor;
+        self.anchor = None;
+        self.preferred_column = None;
+        self.record(Edit {
+            region: Region::At(start),
+            removed,
+            inserted: value.to_string(),
+            before,
+            after: (cursor, None),
+        });
+    }
+
+    /// Replace the whole buffer with `value`, cursor at its end, recorded so
+    /// undo can take it back.
+    fn replace_whole(&mut self, value: String) {
+        let before = (self.cursor, self.anchor);
+        let removed = std::mem::replace(&mut self.text, value);
+        self.cursor = self.text.len();
+        self.anchor = None;
+        self.preferred_column = None;
+        self.record(Edit {
+            region: Region::Whole,
+            removed,
+            inserted: self.text.clone(),
+            before,
+            after: (self.cursor, None),
+        });
     }
 
     fn replace_selection(&mut self, value: &str) {
         let (start, end) = self.selection().unwrap_or((self.cursor, self.cursor));
-        self.text.replace_range(start..end, value);
-        self.cursor = start + value.len();
-        self.anchor = None;
-        self.preferred_column = None;
+        self.splice(start, end, value, start + value.len());
         self.history_index = None;
     }
 

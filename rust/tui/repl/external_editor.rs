@@ -130,9 +130,7 @@ fn external_editor_with(
         .map_err(|error| format!("read external editor file: {error}"))?;
     let text = String::from_utf8(bytes)
         .map_err(|_| "external editor produced invalid UTF-8".to_string())?;
-    editor
-        .replace_all_transaction(text)
-        .map_err(|error| error.to_string())
+    Ok(editor.replace_all_transaction(text))
 }
 
 struct TemporaryEditorFile {

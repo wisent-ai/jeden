@@ -3,17 +3,12 @@
 //!
 //! Split out of `tui/editor/mod.rs`, which had grown past the module line cap.
 
-use super::super::{EditorState, Snapshot, MAX_HISTORY_ITEMS, MAX_UNDO_STEPS};
-use crate::tui::editor::EditorLimitError;
-use crate::tui::editor::MAX_BUFFER_BYTES;
+use super::super::{Edit, EditorState, Region, Snapshot};
 
 impl EditorState {
     pub fn push_history(&mut self, value: String) {
         if value.is_empty() || self.history.last() == Some(&value) {
             return;
-        }
-        if self.history.len() == MAX_HISTORY_ITEMS {
-            self.history.remove(0);
         }
         self.history.push(value);
         self.history_index = None;
@@ -45,54 +40,47 @@ impl EditorState {
         }
     }
 
-    pub fn replace_all_transaction(&mut self, text: String) -> Result<bool, EditorLimitError> {
-        if text.len() > MAX_BUFFER_BYTES {
-            let error = EditorLimitError {
-                limit_bytes: MAX_BUFFER_BYTES,
-            };
-            self.last_error = Some(error);
-            return Err(error);
-        }
+    /// Replace the whole buffer as one undoable change; false when the text
+    /// is already what the buffer holds.
+    pub fn replace_all_transaction(&mut self, text: String) -> bool {
         if text == self.text {
-            return Ok(false);
+            return false;
         }
-        self.record_undo();
-        self.text = text;
-        self.cursor = self.text.len();
-        self.anchor = None;
-        self.preferred_column = None;
+        self.replace_whole(text);
         self.history_index = None;
-        Ok(true)
+        true
     }
 
-    pub(crate) fn record_undo(&mut self) {
-        if self.undo.len() == MAX_UNDO_STEPS {
-            self.undo.remove(0);
-        }
-        self.undo.push(self.snapshot());
+    pub(in crate::tui::editor) fn record(&mut self, edit: Edit) {
+        self.undo.push(edit);
         self.redo.clear();
     }
 
     pub(crate) fn undo(&mut self) {
-        let Some(snapshot) = self.undo.pop() else {
+        let Some(edit) = self.undo.pop() else {
             return;
         };
-        if self.redo.len() == MAX_UNDO_STEPS {
-            self.redo.remove(0);
-        }
-        self.redo.push(self.snapshot());
-        self.restore(snapshot);
+        self.put_back(edit.region, &edit.inserted, &edit.removed, edit.before);
+        self.redo.push(edit);
     }
 
     pub(crate) fn redo(&mut self) {
-        let Some(snapshot) = self.redo.pop() else {
+        let Some(edit) = self.redo.pop() else {
             return;
         };
-        if self.undo.len() == MAX_UNDO_STEPS {
-            self.undo.remove(0);
+        self.put_back(edit.region, &edit.removed, &edit.inserted, edit.after);
+        self.undo.push(edit);
+    }
+
+    /// Swap `present`, which `region` holds now, for `wanted`, and put the
+    /// cursor and anchor where they stood with `wanted` in place.
+    fn put_back(&mut self, region: Region, present: &str, wanted: &str, place: (usize, Option<usize>)) {
+        match region {
+            Region::Whole => wanted.clone_into(&mut self.text),
+            Region::At(start) => self.text.replace_range(start..start + present.len(), wanted),
         }
-        self.undo.push(self.snapshot());
-        self.restore(snapshot);
+        (self.cursor, self.anchor) = place;
+        self.preferred_column = None;
     }
 
     fn snapshot(&self) -> Snapshot {

@@ -102,9 +102,6 @@ where
                 if picker.is_none() && confirm.is_none() {
                     editor.paste(&text);
                     slash_selection = 0;
-                    if let Some(error) = editor.take_error() {
-                        messages.push(Message::new("error", error.to_string()));
-                    }
                     needs_render = true;
                 }
                 continue;
@@ -187,10 +184,6 @@ where
                     &mut status_provider,
                     &mut input,
                 )?;
-                if let Some(error) = editor.take_error() {
-                    messages.push(Message::new("error", error.to_string()));
-                    continue;
-                }
                 if !submit {
                     continue;
                 }
