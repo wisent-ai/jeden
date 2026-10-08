@@ -13,7 +13,6 @@ use std::process::{Command, Stdio};
 use manifest::{ReleaseManifestV2, TrustRoot};
 use transaction::{read_installed_state, InstallPaths};
 
-const MAX_DOWNLOAD_BYTES: usize = 256 * 1024 * 1024;
 const CANARY_RELEASE_KEY_ID: &str = "jeden-canary-2026-07-13";
 const CANARY_RELEASE_PUBLIC_KEY: &str = "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=";
 const STABLE_RELEASE_KEY_ID: &str = "jeden-stable-2026-07-13";
@@ -82,7 +81,7 @@ fn verify_evidence(
     if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return Err(format!("{kind} reference has invalid SHA-256"));
     }
-    let bytes = fetch(&resolve(base, location), 16 * 1024 * 1024)?;
+    let bytes = fetch(&resolve(base, location), None)?;
     let actual = hex::encode(Sha256::digest(&bytes));
     if actual != expected.to_ascii_lowercase() {
         return Err(format!(
@@ -170,15 +169,15 @@ fn extract_release_executable(archive: &[u8], target_triple: &str) -> Result<Vec
             return Err("release archive contains multiple executable entries".into());
         }
         let declared_size = entry.size();
-        if declared_size == 0 || declared_size > MAX_DOWNLOAD_BYTES as u64 {
-            return Err("release executable is empty or exceeds size limit".into());
-        }
-        let mut bytes = Vec::with_capacity(declared_size as usize);
+        let mut bytes = Vec::new();
         entry
-            .take(MAX_DOWNLOAD_BYTES as u64 + 1)
+            .take(declared_size)
             .read_to_end(&mut bytes)
             .map_err(|error| format!("read release executable: {error}"))?;
-        if bytes.len() as u64 != declared_size || bytes.len() > MAX_DOWNLOAD_BYTES {
+        if bytes.is_empty() {
+            return Err("release executable is empty".into());
+        }
+        if bytes.len() as u64 != declared_size {
             return Err("release executable size does not match its archive header".into());
         }
         executable = Some(bytes);
@@ -213,7 +212,7 @@ pub fn execute(request: UpdateRequest) -> Result<ReleaseManifestV2, String> {
             .map_err(|error| format!("invalid installed version state: {error}"))?,
         None => request.current_version,
     };
-    let envelope = fetch(&request.manifest_location, 1024 * 1024)?;
+    let envelope = fetch(&request.manifest_location, None)?;
     let manifest = manifest::verify_envelope(
         &envelope,
         &request.roots,
@@ -224,7 +223,7 @@ pub fn execute(request: UpdateRequest) -> Result<ReleaseManifestV2, String> {
     )?;
     let artifact = fetch(
         &resolve(&request.manifest_location, &manifest.artifact_url),
-        MAX_DOWNLOAD_BYTES,
+        Some(manifest.size),
     )?;
     manifest::verify_artifact(&manifest, &artifact)?;
     verify_evidence(

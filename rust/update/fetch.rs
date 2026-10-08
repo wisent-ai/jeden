@@ -107,16 +107,7 @@ fn github_release_asset_request(
             response.status()
         ));
     }
-    if response
-        .content_length()
-        .is_some_and(|size| size > 1024 * 1024)
-    {
-        return Err("private GitHub release metadata exceeds size limit".into());
-    }
     let bytes = response.bytes().map_err(|error| error.to_string())?;
-    if bytes.len() > 1024 * 1024 {
-        return Err("private GitHub release metadata exceeds size limit".into());
-    }
     let metadata: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid private GitHub release metadata: {error}"))?;
     let asset_url = github_asset_api_url(&metadata, &asset_name)
@@ -130,7 +121,10 @@ fn github_release_asset_request(
     ))
 }
 
-pub(super) fn fetch(location: &str, limit: usize) -> Result<Vec<u8>, String> {
+/// The bytes at `location`. With `expected`, the signed manifest's size, an
+/// answer that announces another length is refused before it is read; the
+/// caller checks the length and digest of what arrived either way.
+pub(super) fn fetch(location: &str, expected: Option<u64>) -> Result<Vec<u8>, String> {
     if location.starts_with("https://") {
         let client = crate::net::blocking_builder()
             .build()
@@ -149,23 +143,17 @@ pub(super) fn fetch(location: &str, limit: usize) -> Result<Vec<u8>, String> {
                 response.status()
             ));
         }
-        if response
-            .content_length()
-            .is_some_and(|size| size > limit as u64)
-        {
-            return Err(format!("download {location} exceeds size limit"));
+        if let Some((announced, expected)) = response.content_length().zip(expected) {
+            if announced != expected {
+                return Err(format!(
+                    "download {location} announces {announced} bytes; the signed manifest names {expected}"
+                ));
+            }
         }
         let bytes = response.bytes().map_err(|error| error.to_string())?;
-        if bytes.len() > limit {
-            return Err(format!("download {location} exceeds size limit"));
-        }
         return Ok(bytes.to_vec());
     }
     let path = location.strip_prefix("file://").unwrap_or(location);
-    let metadata = std::fs::metadata(path).map_err(|error| format!("read {path}: {error}"))?;
-    if metadata.len() > limit as u64 {
-        return Err(format!("read {path}: file exceeds size limit"));
-    }
     std::fs::read(path).map_err(|error| format!("read {path}: {error}"))
 }
 
