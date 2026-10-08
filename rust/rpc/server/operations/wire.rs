@@ -4,7 +4,6 @@
 //! Split out of `rpc/server/operations.rs`, which had grown past the module
 //! line cap.
 
-use crate::rpc::server::MAX_FRAME_BYTES;
 use serde_json::{json, Value};
 use std::io::BufRead;
 
@@ -39,48 +38,17 @@ pub(crate) fn error_response(id: Value, code: &str, message: &str) -> Value {
     json!({"id": id, "error": {"code": code, "message": message}})
 }
 
+/// One newline-delimited frame, whole, without its line ending; `None` once
+/// the peer has closed. The peer is the local process that started this
+/// server over stdio, so the frame is as long as it wrote it.
 pub(crate) fn read_frame<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
     let mut frame = Vec::new();
-    loop {
-        let available = input.fill_buf().map_err(|error| error.to_string())?;
-        if available.is_empty() {
-            return if frame.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(frame))
-            };
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let take = newline.map(|index| index + 1).unwrap_or(available.len());
-        if frame.len().saturating_add(take) > MAX_FRAME_BYTES {
-            input.consume(take);
-            if newline.is_none() {
-                discard_to_newline(input)?;
-            }
-            return Err(format!("frame exceeds {} bytes", MAX_FRAME_BYTES));
-        }
-        frame.extend_from_slice(&available[..take]);
-        input.consume(take);
-        if newline.is_some() {
-            while matches!(frame.last(), Some(b'\n' | b'\r')) {
-                frame.pop();
-            }
-            return Ok(Some(frame));
-        }
+    input.read_until(b'\n', &mut frame).map_err(|error| error.to_string())?;
+    if frame.is_empty() {
+        return Ok(None);
     }
-}
-
-fn discard_to_newline<R: BufRead>(input: &mut R) -> Result<(), String> {
-    loop {
-        let available = input.fill_buf().map_err(|error| error.to_string())?;
-        if available.is_empty() {
-            return Ok(());
-        }
-        if let Some(index) = available.iter().position(|byte| *byte == b'\n') {
-            input.consume(index + 1);
-            return Ok(());
-        }
-        let len = available.len();
-        input.consume(len);
+    while matches!(frame.last(), Some(b'\n' | b'\r')) {
+        frame.pop();
     }
+    Ok(Some(frame))
 }

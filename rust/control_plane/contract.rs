@@ -60,7 +60,6 @@ pub struct Readiness {
     pub ready: bool,
     pub schema_min: u32,
     pub schema_max: u32,
-    pub max_payload_bytes: u64,
     pub detail: String,
 }
 

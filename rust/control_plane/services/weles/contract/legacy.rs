@@ -7,7 +7,6 @@
 use super::super::{Account, OperationV1, Provider, WelesClient, WelesError};
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::contract::{self, RequestMeta};
-use crate::control_plane::services::weles::MAX_RESPONSE_BYTES;
 use crate::control_plane::{now_ms, ServiceHealth};
 use serde_json::json;
 use serde_json::Value;
@@ -26,7 +25,6 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
             ready: true,
             schema_min: 1,
             schema_max: 1,
-            max_payload_bytes: MAX_RESPONSE_BYTES,
             detail: format!("{} providers advertised", providers.len()),
         })
     }

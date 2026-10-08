@@ -5,7 +5,7 @@
 
 use super::{
     Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesClient, WelesError,
-    HOLD_QUERY, MAX_ACCOUNTS, MAX_PROVIDERS,
+    HOLD_QUERY,
 };
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::now_ms;
@@ -17,11 +17,6 @@ impl WelesClient {
         let providers: Vec<Provider> =
             serde_json::from_value(value.get("providers").cloned().unwrap_or(value))
                 .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
-        if providers.len() > MAX_PROVIDERS {
-            return Err(WelesError::InvalidResponse(format!(
-                "provider count exceeds {MAX_PROVIDERS}"
-            )));
-        }
         Ok(providers)
     }
 
@@ -38,11 +33,6 @@ impl WelesClient {
         let accounts: Vec<Account> =
             serde_json::from_value(value.get("accounts").cloned().unwrap_or(value))
                 .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
-        if accounts.len() > MAX_ACCOUNTS {
-            return Err(WelesError::InvalidResponse(format!(
-                "account count exceeds {MAX_ACCOUNTS}"
-            )));
-        }
         Ok(accounts)
     }
 

@@ -1,12 +1,12 @@
-//! Making one request to the platform billing service, and reading the answer
-//! within declared bounds.
+//! Making one request to the platform billing service and reading its
+//! answer whole.
 //!
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
 use super::super::contract::RequestMeta;
 use super::super::transport::{SecretRef, TransportRequest};
-use super::{WelesClient, WelesError, API_VERSION, MAX_RESPONSE_BYTES};
+use super::{WelesClient, WelesError, API_VERSION};
 use crate::control_plane::services::weles::contract::guards::reject_forbidden_payment_fields;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -68,7 +68,6 @@ impl WelesClient {
                 url: format!("{}/{API_VERSION}{path}", self.endpoint()?),
                 headers,
                 body,
-                max_response_bytes: MAX_RESPONSE_BYTES,
             })
             .map_err(WelesError::Transport)?;
         super::contract::negotiate_response(&response.headers).map_err(|error| {
@@ -140,7 +139,6 @@ impl WelesClient {
                 url: format!("{}/v2{path}", self.endpoint()?),
                 headers,
                 body,
-                max_response_bytes: MAX_RESPONSE_BYTES,
             })
             .map_err(WelesError::Transport)?;
         super::contract::negotiate_response(&response.headers)

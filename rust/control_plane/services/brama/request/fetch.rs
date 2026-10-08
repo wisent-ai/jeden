@@ -8,9 +8,7 @@ use super::super::contract::RequestMeta;
 use super::super::transport::{SecretRef, TransportRequest, TransportResponse};
 use super::cache::{catalog_cache_key, read_disk_cache, write_disk_cache, CachedCatalog, CACHE};
 use super::catalog::validate_catalog;
-use super::{
-    BramaClient, BramaError, BramaReadiness, ModelCatalog, MAX_CACHES, MAX_RESPONSE_BYTES,
-};
+use super::{BramaClient, BramaError, BramaReadiness, ModelCatalog};
 use crate::control_plane::now_ms;
 use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
 use crate::control_plane::services::brama::API_VERSION;
@@ -42,7 +40,6 @@ impl BramaClient {
                 url: format!("{endpoint}/readyz"),
                 headers,
                 body: None,
-                max_response_bytes: MAX_RESPONSE_BYTES,
             })
             .map_err(BramaError::Transport)?;
         let value: Value = serde_json::from_slice(&response.body).map_err(|error| {
@@ -150,7 +147,6 @@ impl BramaClient {
             url: format!("{endpoint}/{API_VERSION}/models"),
             headers,
             body: None,
-            max_response_bytes: MAX_RESPONSE_BYTES,
         }) {
             Ok(response) => response,
             Err(error) => {
@@ -210,15 +206,6 @@ impl BramaClient {
         let mut cache = CACHE
             .lock()
             .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
-        if cache.len() >= MAX_CACHES && !cache.contains_key(&key) {
-            if let Some(oldest) = cache
-                .iter()
-                .min_by_key(|(_, value)| value.fetched)
-                .map(|(key, _)| key.clone())
-            {
-                cache.remove(&oldest);
-            }
-        }
         cache.insert(
             key,
             CachedCatalog {
@@ -229,25 +216,14 @@ impl BramaClient {
         );
         Ok(catalog)
     }
+    /// One versioned request, its answer read whole: a JSON reply, a
+    /// generated image or a spoken text alike.
     pub(super) fn request_json(
         &self,
         method: reqwest::Method,
         path: &str,
         body: Option<Vec<u8>>,
         meta: &RequestMeta,
-    ) -> Result<TransportResponse, BramaError> {
-        self.request_bounded(method, path, body, meta, MAX_RESPONSE_BYTES)
-    }
-
-    /// One versioned request whose answer may be as large as `max_response_bytes`:
-    /// a generated image or a spoken text is far larger than any JSON reply.
-    pub(super) fn request_bounded(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-        body: Option<Vec<u8>>,
-        meta: &RequestMeta,
-        max_response_bytes: u64,
     ) -> Result<TransportResponse, BramaError> {
         super::super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
             BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
@@ -270,7 +246,6 @@ impl BramaClient {
                 url: format!("{}/{API_VERSION}{path}", self.key()?),
                 headers,
                 body,
-                max_response_bytes,
             })
             .map_err(BramaError::Transport)?;
         super::super::contract::negotiate_response(&response.headers).map_err(|error| {

@@ -6,8 +6,6 @@ use std::time::Duration;
 
 pub(super) const API_VERSION: &str = "v1";
 const DEFAULT_TTL: Duration = Duration::from_secs(300);
-pub(super) const MAX_CACHES: usize = 8;
-pub(super) const MAX_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[path = "request/auth.rs"]
 mod auth;
@@ -132,7 +130,6 @@ impl super::contract::BramaApiV1 for BramaClient {
             ready: true,
             schema_min: 1,
             schema_max: 1,
-            max_payload_bytes: MAX_RESPONSE_BYTES,
             detail: format!(
                 "{} routes available",
                 catalog

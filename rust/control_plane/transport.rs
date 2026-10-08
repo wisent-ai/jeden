@@ -47,7 +47,6 @@ pub struct TransportRequest {
     pub url: String,
     pub headers: BTreeMap<String, String>,
     pub body: Option<Vec<u8>>,
-    pub max_response_bytes: u64,
 }
 
 impl std::fmt::Debug for TransportRequest {
@@ -57,7 +56,6 @@ impl std::fmt::Debug for TransportRequest {
             .field("url", &self.url)
             .field("header_names", &self.headers.keys().collect::<Vec<_>>())
             .field("body_bytes", &self.body.as_ref().map(Vec::len))
-            .field("max_response_bytes", &self.max_response_bytes)
             .finish()
     }
 }
@@ -126,12 +124,6 @@ impl ControlPlaneTransport for ReqwestTransport {
         // connection, and without it every one of them reads as the network
         // being down.
         let response = builder.send().map_err(describe_reqwest)?;
-        if response
-            .content_length()
-            .is_some_and(|length| length > request.max_response_bytes)
-        {
-            return Err("response exceeds negotiated payload limit".into());
-        }
         let status = response.status().as_u16();
         let headers = response
             .headers()
@@ -144,13 +136,10 @@ impl ControlPlaneTransport for ReqwestTransport {
             })
             .collect();
         let mut body = Vec::new();
+        let mut response = response;
         response
-            .take(request.max_response_bytes + 1)
             .read_to_end(&mut body)
             .map_err(|error| error.to_string())?;
-        if body.len() as u64 > request.max_response_bytes {
-            return Err("response exceeds negotiated payload limit".into());
-        }
         Ok(TransportResponse {
             status,
             headers,

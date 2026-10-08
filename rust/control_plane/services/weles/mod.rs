@@ -9,9 +9,6 @@ const PLATFORM_BILLING_TOKEN_ENV: &str = "WISENT_PLATFORM_BILLING_TOKEN";
 /// The query a holding read of an operation carries: the server answers once
 /// the operation has events after the cursor or has ended, not before.
 pub(super) const HOLD_QUERY: &str = "wait=1";
-pub(super) const MAX_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
-pub(super) const MAX_PROVIDERS: usize = 128;
-pub(super) const MAX_ACCOUNTS: usize = 512;
 
 mod contract;
 mod login;

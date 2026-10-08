@@ -34,8 +34,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-const MAX_FRAME_BYTES: usize = 1024 * 1024;
-
 #[derive(Clone)]
 pub(crate) struct JsonWriter {
     inner: Arc<Mutex<Box<dyn Write + Send>>>,

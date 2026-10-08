@@ -8,9 +8,6 @@ use crate::control_plane::contract::RequestMeta;
 use crate::tool_runtime::runtime_ops::OperationContext;
 use serde_json::{json, Value};
 
-/// The longest text one speech request carries.
-const MAX_SPEECH_INPUT: usize = 32_000;
-
 /// Generation through Brama: one request, one answer, nothing to read back.
 impl MediaService {
     pub(super) fn image_generate(
@@ -43,11 +40,6 @@ impl MediaService {
     ) -> ServiceResult<Value> {
         check_operation(context)?;
         let text = nonempty(input.get("text"), "text")?;
-        if text.len() > MAX_SPEECH_INPUT {
-            return Err(ServiceError::OutputLimit {
-                limit: MAX_SPEECH_INPUT,
-            });
-        }
         let voice = optional_string(input, "voice")
             .or_else(|| optional_string(input, "voice_id"))
             .ok_or_else(|| ServiceError::InvalidInput("tts requires voice".into()))?;

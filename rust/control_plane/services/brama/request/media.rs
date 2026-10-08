@@ -7,9 +7,6 @@ use super::{BramaClient, BramaError};
 use base64::Engine;
 use serde_json::{json, Value};
 
-/// The largest generated image or spoken text Jeden accepts from Brama.
-const MAX_MEDIA_RESPONSE_BYTES: u64 = 64 * 1024 * 1024;
-
 impl BramaClient {
     /// One image from `model` (the deployment's `image-model` alias or a
     /// canonical image route). `size` is the provider's `WIDTHxHEIGHT`.
@@ -31,12 +28,11 @@ impl BramaClient {
         }
         let body = serde_json::to_vec(&request)
             .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        let response = self.request_bounded(
+        let response = self.request_json(
             reqwest::Method::POST,
             "/images/generations",
             Some(body),
             meta,
-            MAX_MEDIA_RESPONSE_BYTES,
         )?;
         let value: Value = serde_json::from_slice(&response.body).map_err(|error| {
             BramaError::InvalidResponse(format!("image response is not JSON: {error}"))
@@ -79,13 +75,8 @@ impl BramaClient {
             "response_format": response_format,
         }))
         .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        let response = self.request_bounded(
-            reqwest::Method::POST,
-            "/audio/speech",
-            Some(body),
-            meta,
-            MAX_MEDIA_RESPONSE_BYTES,
-        )?;
+        let response =
+            self.request_json(reqwest::Method::POST, "/audio/speech", Some(body), meta)?;
         let content_type = response
             .headers
             .get("content-type")

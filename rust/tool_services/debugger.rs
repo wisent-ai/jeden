@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver, TrySendError};
 
-const MAX_DAP_FRAME: usize = 8 * 1024 * 1024;
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
         "debug_session",
@@ -232,12 +231,10 @@ fn read_frame(reader: &mut BufReader<impl Read>) -> ServiceResult<Value> {
             length = raw.trim().parse::<usize>().ok();
         }
     }
-    let length = length
-        .filter(|v| *v <= MAX_DAP_FRAME)
-        .ok_or_else(|| ServiceError::Protocol {
-            service: "debugger",
-            detail: "missing or excessive Content-Length".into(),
-        })?;
+    let length = length.ok_or_else(|| ServiceError::Protocol {
+        service: "debugger",
+        detail: "the adapter's frame header carried no Content-Length".into(),
+    })?;
     let mut bytes = vec![0; length];
     reader.read_exact(&mut bytes)?;
     serde_json::from_slice(&bytes).map_err(|e| ServiceError::Protocol {

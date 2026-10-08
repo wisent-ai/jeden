@@ -11,8 +11,6 @@ use serde::Deserialize;
 use serde_json::json;
 
 pub const WISENT_ORGANIZATION_HEADER: &str = "x-wisent-organization-id";
-/// An authority answer is read up to 64 KiB.
-const MAX_ANSWER_BYTES: usize = 64 * 1024;
 
 /// A user Wisent Identity confirmed as a member of one organization.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -146,11 +144,6 @@ impl WisentIdentityAuthority {
             .bytes()
             .await
             .map_err(|error| IdentityRefusal::Unavailable(error.to_string()))?;
-        if bytes.len() > MAX_ANSWER_BYTES {
-            return Err(IdentityRefusal::Unavailable(format!(
-                "answer exceeds {MAX_ANSWER_BYTES} bytes"
-            )));
-        }
         let answer: OrganizationAuthorization = serde_json::from_slice(&bytes)
             .map_err(|error| IdentityRefusal::Unavailable(format!("unreadable answer: {error}")))?;
         if answer.organization_id != organization_id {
