@@ -13,7 +13,7 @@ use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
 
 pub(super) struct EventSubscriber {
-    pub(super) events: mpsc::Sender<Result<EventEnvelope, ClientError>>,
+    pub(super) events: mpsc::UnboundedSender<Result<EventEnvelope, ClientError>>,
     pub(super) terminal: Option<oneshot::Sender<ClientError>>,
 }
 
@@ -25,7 +25,6 @@ pub(super) struct ClientInner {
     pub(super) reader: Mutex<Option<JoinHandle<()>>>,
     pub(super) next_request_id: AtomicU64,
     pub(super) next_subscriber_id: AtomicU64,
-    pub(super) event_buffer: usize,
     pub(super) disposed: AtomicBool,
     pub(super) terminated: AtomicBool,
     pub(super) terminated_notify: Notify,
@@ -84,16 +83,9 @@ impl ClientInner {
             .subscribers
             .lock()
             .unwrap_or_else(|lock| lock.into_inner());
-        subscribers.retain(|_, subscriber| {
-            if subscriber.events.try_send(Ok(event.clone())).is_ok() {
-                true
-            } else {
-                if let Some(sender) = subscriber.terminal.take() {
-                    let _ = sender.send(ClientError::EventStreamLagged);
-                }
-                false
-            }
-        });
+        // Every event reaches every subscriber, however far behind it reads;
+        // only a subscriber whose stream is gone is dropped.
+        subscribers.retain(|_, subscriber| subscriber.events.send(Ok(event.clone())).is_ok());
     }
 }
 

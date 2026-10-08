@@ -50,7 +50,6 @@ pub enum ClientError {
     Protocol(ErrorEnvelope),
     DuplicateRequestId(String),
     Disposed,
-    EventStreamLagged,
     UnexpectedEnvelope(&'static str),
 }
 
@@ -66,7 +65,6 @@ impl fmt::Display for ClientError {
             ),
             Self::DuplicateRequestId(id) => write!(formatter, "duplicate request id: {id}"),
             Self::Disposed => formatter.write_str("session client is disposed"),
-            Self::EventStreamLagged => formatter.write_str("event subscriber lagged"),
             Self::UnexpectedEnvelope(kind) => {
                 write!(formatter, "unexpected inbound {kind} envelope")
             }

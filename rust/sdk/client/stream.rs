@@ -10,13 +10,13 @@ use std::pin::Pin;
 use std::sync::Weak;
 use std::task::{Context, Poll};
 use tokio::sync::oneshot;
-use tokio_stream::{wrappers::ReceiverStream, Stream};
+use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 /// Ordered event stream associated with one client subscription.
 pub struct EventStream {
     pub(super) id: u64,
     pub(super) owner: Weak<ClientInner>,
-    pub(super) events: ReceiverStream<Result<EventEnvelope, ClientError>>,
+    pub(super) events: UnboundedReceiverStream<Result<EventEnvelope, ClientError>>,
     pub(super) terminal: oneshot::Receiver<ClientError>,
     pub(super) terminated: bool,
 }

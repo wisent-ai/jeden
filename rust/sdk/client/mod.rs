@@ -8,7 +8,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot, Notify};
 
-const DEFAULT_EVENT_BUFFER: usize = 256;
 const CANCEL_METHOD: &str = "request.cancel";
 
 mod errors;
@@ -18,7 +17,7 @@ mod stream;
 pub use errors::{ClientError, SessionTransport, TransportError};
 use inner::{reader_loop, ClientInner, EventSubscriber};
 pub use stream::EventStream;
-use tokio_stream::wrappers::ReceiverStream;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 
 /// Cloneable asynchronous client for `jeden.session.v1`.
 #[derive(Clone)]
@@ -27,13 +26,9 @@ pub struct SessionClient {
 }
 
 impl SessionClient {
+    /// A client whose event subscribers each receive every event, in order,
+    /// however far behind they read.
     pub fn new(transport: Arc<dyn SessionTransport>) -> Self {
-        Self::with_event_buffer(transport, DEFAULT_EVENT_BUFFER)
-    }
-
-    /// Creates a client with a bounded per-subscriber event buffer.
-    pub fn with_event_buffer(transport: Arc<dyn SessionTransport>, event_buffer: usize) -> Self {
-        assert!(event_buffer > 0, "event buffer must be non-zero");
         let inner = Arc::new(ClientInner {
             transport,
             pending: Mutex::new(HashMap::new()),
@@ -42,7 +37,6 @@ impl SessionClient {
             reader: Mutex::new(None),
             next_request_id: AtomicU64::new(1),
             next_subscriber_id: AtomicU64::new(1),
-            event_buffer,
             disposed: AtomicBool::new(false),
             terminated: AtomicBool::new(false),
             terminated_notify: Notify::new(),
@@ -171,7 +165,7 @@ impl SessionClient {
 
     /// Subscribes to ordered events received after this call.
     pub fn events(&self) -> EventStream {
-        let (events_sender, events_receiver) = mpsc::channel(self.inner.event_buffer);
+        let (events_sender, events_receiver) = mpsc::unbounded_channel();
         let (terminal_sender, terminal_receiver) = oneshot::channel();
         let id = self
             .inner
@@ -199,7 +193,7 @@ impl SessionClient {
         EventStream {
             id,
             owner: Arc::downgrade(&self.inner),
-            events: ReceiverStream::new(events_receiver),
+            events: UnboundedReceiverStream::new(events_receiver),
             terminal: terminal_receiver,
             terminated: false,
         }
