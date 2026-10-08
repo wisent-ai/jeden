@@ -31,7 +31,7 @@ pub fn slash_matches(cwd: &Path, prefix: &str, limit: usize) -> Vec<CapabilityDe
                 .and_then(|action| action.strip_prefix('/'))
                 .is_some_and(|name| name.starts_with(&prefix))
         })
-        .take(limit.min(64))
+        .take(limit)
         .cloned()
         .collect()
 }

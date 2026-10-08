@@ -89,6 +89,5 @@ pub(crate) fn strings(config: &Value, path: &[&str]) -> Vec<String> {
         .flatten()
         .filter_map(Value::as_str)
         .map(str::to_owned)
-        .take(16)
         .collect()
 }

@@ -14,7 +14,7 @@ use serde_json::json;
 
 impl MemoryStore {
     pub fn list(&self, limit: usize) -> Result<Vec<MemoryRecord>, String> {
-        let limit = limit.min(500) as u64;
+        let limit = limit as u64;
         run_db(move |db| async move {
             Ok(memory::Entity::find()
                 .order_by_desc(memory::Column::UpdatedAt)

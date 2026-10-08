@@ -160,6 +160,5 @@ pub(super) fn quick_replies() -> Vec<Value> {
                 "source": descriptor.source,
             }))
         })
-        .take(64)
         .collect()
 }

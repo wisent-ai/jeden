@@ -130,7 +130,6 @@ pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
             tool,
             names
                 .iter()
-                .take(20)
                 .cloned()
                 .collect::<Vec<_>>()
                 .join(", ")

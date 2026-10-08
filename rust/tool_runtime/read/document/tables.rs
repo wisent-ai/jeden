@@ -64,7 +64,6 @@ pub(super) fn readable_text_from_delimited(raw: &str, delimiter: char) -> String
     let column_count = rows.iter().map(Vec::len).max().unwrap_or(0);
     let normalized = rows
         .iter()
-        .take(51)
         .map(|row| {
             (0..column_count)
                 .map(|idx| markdown_cell(row.get(idx).map(String::as_str).unwrap_or("")))
@@ -76,12 +75,6 @@ pub(super) fn readable_text_from_delimited(raw: &str, delimiter: char) -> String
     lines.push(format!("| {} |", vec!["---"; column_count].join(" | ")));
     for row in normalized.iter().skip(1) {
         lines.push(format!("| {} |", row.join(" | ")));
-    }
-    if rows.len() > 51 {
-        lines.push(format!(
-            "\n[truncated after 50 data rows; total rows: {}]",
-            rows.len()
-        ));
     }
     lines.join("\n")
 }

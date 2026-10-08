@@ -65,7 +65,7 @@ impl MemoryStore {
     }
 
     pub fn queue_status(&self, limit: usize) -> Result<MemoryQueueStatus, String> {
-        let limit = limit.min(200) as u64;
+        let limit = limit as u64;
         let (state_counts, rows) = run_db(move |db| async move {
             let counts = job::Entity::find()
                 .select_only()
