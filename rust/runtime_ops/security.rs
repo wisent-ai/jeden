@@ -80,14 +80,6 @@ pub enum SandboxRequirement {
     Enforced,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TelemetryPolicy {
-    Disabled,
-    LocalPrivate,
-    ExportPrivate,
-}
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionGrant {

@@ -38,7 +38,6 @@ pub mod sdk;
 mod session_import;
 pub mod slash;
 pub mod task_runtime;
-pub mod telemetry;
 pub mod tool_runtime;
 pub mod tool_services;
 pub mod tools;

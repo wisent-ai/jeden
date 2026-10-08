@@ -5,7 +5,6 @@
 
 use super::{ArtifactSink, ExecutionGrant, GrantError};
 use crate::tool_runtime::runtime_ops::output::OutputLimits;
-use crate::tool_runtime::runtime_ops::security::TelemetryPolicy;
 use crate::tool_runtime::runtime_ops::TraceContext;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -86,8 +85,6 @@ pub struct OperationContext<'a> {
     ledger_handle: Option<String>,
     trace_context: Option<TraceContext>,
     execution_grant: ExecutionGrant,
-    telemetry_policy: TelemetryPolicy,
-    telemetry: Option<crate::telemetry::TelemetryHandle>,
 }
 
 impl std::fmt::Debug for OperationContext<'_> {
@@ -128,8 +125,6 @@ impl<'a> OperationContext<'a> {
             ledger_handle: None,
             trace_context: None,
             execution_grant: ExecutionGrant::trusted_host("jeden-host", root),
-            telemetry_policy: TelemetryPolicy::Disabled,
-            telemetry: None,
         }
     }
     pub fn with_identity(
@@ -159,26 +154,6 @@ impl<'a> OperationContext<'a> {
         self.trace_context = Some(trace);
         self
     }
-    pub fn with_telemetry_policy(mut self, policy: TelemetryPolicy) -> Self {
-        self.telemetry_policy = policy;
-        if policy == TelemetryPolicy::Disabled {
-            self.telemetry = None;
-        }
-        self
-    }
-    pub fn with_telemetry(
-        mut self,
-        policy: TelemetryPolicy,
-        telemetry: crate::telemetry::TelemetryHandle,
-    ) -> Self {
-        self.telemetry_policy = policy;
-        self.telemetry = if policy == TelemetryPolicy::Disabled {
-            None
-        } else {
-            Some(telemetry)
-        };
-        self
-    }
     pub fn child(
         &self,
         operation_id: impl Into<String>,
@@ -186,10 +161,6 @@ impl<'a> OperationContext<'a> {
     ) -> Result<OperationContext<'a>, GrantError> {
         let grant = self.execution_grant.intersect(requested)?;
         let operation_id = operation_id.into();
-        let telemetry = self
-            .telemetry
-            .as_ref()
-            .map(|handle| handle.child(&operation_id));
         Ok(Self {
             operation_id,
             session_id: self.session_id.clone(),
@@ -203,8 +174,6 @@ impl<'a> OperationContext<'a> {
             ledger_handle: self.ledger_handle.clone(),
             trace_context: self.trace_context.clone(),
             execution_grant: grant,
-            telemetry_policy: self.telemetry_policy,
-            telemetry,
         })
     }
     pub fn with_progress(mut self, progress: ProgressSink<'a>) -> Self {
@@ -250,17 +219,5 @@ impl<'a> OperationContext<'a> {
     }
     pub fn execution_grant(&self) -> &ExecutionGrant {
         &self.execution_grant
-    }
-    pub fn telemetry_policy(&self) -> TelemetryPolicy {
-        self.telemetry_policy
-    }
-    pub fn telemetry(&self) -> Option<&crate::telemetry::TelemetryHandle> {
-        self.telemetry.as_ref()
-    }
-}
-
-impl crate::telemetry::TelemetryContextAdapter for OperationContext<'_> {
-    fn telemetry(&self) -> Option<&crate::telemetry::TelemetryHandle> {
-        self.telemetry()
     }
 }

@@ -20,7 +20,7 @@ pub use output::{ArtifactSink, BoundedOutput, OutputCapture, OutputLimits};
 pub use process::{ManagedCommand, ManagedProcessResult, ProcessManager, TerminationReason};
 pub use security::{
     ExecutionGrant, FsGrant, GrantError, NetworkGrant, Principal, PrincipalKind, ProcessGrant,
-    ResourceLimits, SandboxRequirement, SecretGrant, TelemetryPolicy,
+    ResourceLimits, SandboxRequirement, SecretGrant,
 };
 
 #[derive(Clone, Debug)]
