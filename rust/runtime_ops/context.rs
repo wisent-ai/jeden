@@ -80,7 +80,8 @@ pub struct OperationContext<'a> {
     cancellation: CancellationToken,
     progress: ProgressSink<'a>,
     artifacts: ArtifactSink,
-    output_limits: OutputLimits,
+    /// The output limits a caller stated; `None` keeps output whole.
+    output_limits: Option<OutputLimits>,
     approval_handle: Option<String>,
     ledger_handle: Option<String>,
     trace_context: Option<TraceContext>,
@@ -122,7 +123,7 @@ impl<'a> OperationContext<'a> {
             cancellation,
             progress: Arc::new(|_| {}),
             artifacts,
-            output_limits: OutputLimits::default(),
+            output_limits: None,
             approval_handle: None,
             ledger_handle: None,
             trace_context: None,
@@ -211,7 +212,7 @@ impl<'a> OperationContext<'a> {
         self
     }
     pub fn with_output_limits(mut self, limits: OutputLimits) -> Self {
-        self.output_limits = limits;
+        self.output_limits = Some(limits);
         self
     }
     pub fn operation_id(&self) -> &str {
@@ -235,7 +236,7 @@ impl<'a> OperationContext<'a> {
     pub fn artifacts(&self) -> &ArtifactSink {
         &self.artifacts
     }
-    pub fn output_limits(&self) -> OutputLimits {
+    pub fn output_limits(&self) -> Option<OutputLimits> {
         self.output_limits
     }
     pub fn approval_handle(&self) -> Option<&str> {

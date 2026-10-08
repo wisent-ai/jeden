@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, Sender};
 pub(super) fn capture_stream(
     stream: &'static str,
     mut reader: impl Read,
-    limits: super::OutputLimits,
+    limits: Option<super::OutputLimits>,
     artifacts: super::ArtifactSink,
     events: Sender<ProcessEvent>,
 ) -> Result<OutputCapture, String> {

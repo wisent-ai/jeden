@@ -19,15 +19,6 @@ impl OutputLimits {
     }
 }
 
-impl Default for OutputLimits {
-    fn default() -> Self {
-        Self {
-            head_bytes: 32 * 1024,
-            tail_bytes: 32 * 1024,
-        }
-    }
-}
-
 #[derive(Clone, Debug)]
 pub struct ArtifactSink {
     root: PathBuf,
@@ -141,9 +132,11 @@ impl OutputCapture {
     }
 }
 
+/// A stream's output: whole when no limits are stated, and with stated limits
+/// its head and tail inline and the whole of it in an artifact.
 pub struct BoundedOutput {
     stream: &'static str,
-    limits: OutputLimits,
+    limits: Option<OutputLimits>,
     artifacts: ArtifactSink,
     head: Vec<u8>,
     tail: Vec<u8>,
@@ -153,13 +146,13 @@ pub struct BoundedOutput {
 }
 
 impl BoundedOutput {
-    pub fn new(stream: &'static str, limits: OutputLimits, artifacts: ArtifactSink) -> Self {
+    pub fn new(stream: &'static str, limits: Option<OutputLimits>, artifacts: ArtifactSink) -> Self {
         Self {
             stream,
             limits,
             artifacts,
-            head: Vec::with_capacity(limits.head_bytes),
-            tail: Vec::with_capacity(limits.tail_bytes),
+            head: Vec::new(),
+            tail: Vec::new(),
             total_bytes: 0,
             digest: Sha256::new(),
             spill: None,
@@ -179,36 +172,39 @@ impl BoundedOutput {
         let previous_total = self.total_bytes;
         self.total_bytes = self.total_bytes.saturating_add(bytes.len() as u64);
         self.digest.update(bytes);
-
-        if self.spill.is_none() && self.total_bytes > self.limits.inline_bytes() as u64 {
+        let Some(limits) = self.limits else {
+            self.head.extend_from_slice(bytes);
+            return Ok(());
+        };
+        if self.spill.is_none() && self.total_bytes > limits.inline_bytes() as u64 {
             let (path, mut file) = self.artifacts.create_output(self.stream)?;
             file.write_all(&self.head)?;
             file.write_all(&self.tail)?;
             self.spill = Some((path, file));
         }
         if let Some((_, file)) = self.spill.as_mut() {
-            if previous_total > 0 && previous_total <= self.limits.inline_bytes() as u64 {
+            if previous_total > 0 && previous_total <= limits.inline_bytes() as u64 {
                 // Existing bounded bytes were copied when spill started; only append this chunk.
             }
             file.write_all(bytes)?;
         }
 
-        let head_remaining = self.limits.head_bytes.saturating_sub(self.head.len());
+        let head_remaining = limits.head_bytes.saturating_sub(self.head.len());
         let head_take = head_remaining.min(bytes.len());
         self.head.extend_from_slice(&bytes[..head_take]);
 
-        if self.limits.tail_bytes > 0 {
+        if limits.tail_bytes > 0 {
             let tail_input = &bytes[head_take..];
-            if tail_input.len() >= self.limits.tail_bytes {
+            if tail_input.len() >= limits.tail_bytes {
                 self.tail.clear();
                 self.tail
-                    .extend_from_slice(&tail_input[tail_input.len() - self.limits.tail_bytes..]);
+                    .extend_from_slice(&tail_input[tail_input.len() - limits.tail_bytes..]);
             } else if !tail_input.is_empty() {
                 let overflow = self
                     .tail
                     .len()
                     .saturating_add(tail_input.len())
-                    .saturating_sub(self.limits.tail_bytes);
+                    .saturating_sub(limits.tail_bytes);
                 if overflow > 0 {
                     self.tail.copy_within(overflow.., 0);
                     self.tail.truncate(self.tail.len() - overflow);

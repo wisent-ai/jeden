@@ -34,10 +34,10 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
         .map(ToString::to_string);
     let mut capture = BoundedOutput::new(
         "fetch",
-        OutputLimits {
+        Some(OutputLimits {
             head_bytes: max_bytes / 2,
             tail_bytes: max_bytes - (max_bytes / 2),
-        },
+        }),
         runtime.operation.artifacts().clone(),
     );
     let mut buffer = [0u8; 8192];
