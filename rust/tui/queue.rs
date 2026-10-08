@@ -2,8 +2,6 @@ use std::collections::VecDeque;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-const MAX_QUEUED_MESSAGES: usize = 64;
-
 pub(super) const DELIVERY_KEYMAP_NAMESPACE: &str = "delivery";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,16 +78,12 @@ pub struct QueuedMessage {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QueueError {
     Empty,
-    Capacity { limit: usize },
 }
 
 impl std::fmt::Display for QueueError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Empty => formatter.write_str("Queued message cannot be empty"),
-            Self::Capacity { limit } => {
-                write!(formatter, "Follow-up queue limit reached ({limit})")
-            }
         }
     }
 }
@@ -117,11 +111,6 @@ impl FollowUpQueue {
     pub fn push(&mut self, text: String, action: DeliveryAction) -> Result<u64, QueueError> {
         if text.trim().is_empty() {
             return Err(QueueError::Empty);
-        }
-        if self.messages.len() >= MAX_QUEUED_MESSAGES {
-            return Err(QueueError::Capacity {
-                limit: MAX_QUEUED_MESSAGES,
-            });
         }
         let id = self.next_id;
         self.next_id = self.next_id.wrapping_add(1);
