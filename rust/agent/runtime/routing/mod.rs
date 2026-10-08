@@ -131,7 +131,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     };
     let endpoint_error = endpoint.is_none().then(|| {
         let base = "BRAMA_URL is required; declare Jeden's route with `stado service directory \
-                    consumer-add brama jeden --capability model-routing --target <this host>`, \
+                    consumer add brama jeden --capability model-routing --target <this host>`, \
                     export BRAMA_URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible \
                     provider to run without Brama";
         match crate::agent::credential::brama_route().source.refusal() {

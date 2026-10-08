@@ -95,7 +95,7 @@ try {
   rmSync(join(workspace, '.env'));
   const refused = record(binary, ['run', 'Respond exactly: OK', '--model-only'], noStado, workspace);
   assert.ok(refused.status && !refused.error, `jeden run should have been refused: ${refused.stdout}`);
-  assert.match(refused.stderr, /BRAMA_URL is required; declare Jeden's route with `stado service directory consumer-add brama jeden/);
+  assert.match(refused.stderr, /BRAMA_URL is required; declare Jeden's route with `stado service directory consumer add brama jeden/);
   assert.match(refused.stderr, /Stado did not route it: the Stado CLI could not be started/);
 
   report.routed_url = routed;
