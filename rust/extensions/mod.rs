@@ -13,8 +13,6 @@ use crate::capability::{
 
 const ABI_VERSION: u32 = 1;
 
-const MAX_EXTENSION_FILES: usize = 256;
-const MAX_DESCRIPTOR_BYTES: usize = 2 * 1024 * 1024;
 const HOST: &str = include_str!("host.mjs");
 
 #[derive(Clone, Debug, Deserialize, Serialize)]

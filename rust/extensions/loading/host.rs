@@ -16,7 +16,6 @@ enum HostEvent {
 }
 
 use super::super::HOST;
-use crate::hooks::extensions::MAX_DESCRIPTOR_BYTES;
 use std::env;
 use std::path::PathBuf;
 
@@ -177,8 +176,7 @@ pub(crate) fn run_host(
                 break;
             }
             total = total.saturating_add(count as u64);
-            let remaining = (MAX_DESCRIPTOR_BYTES + 1).saturating_sub(bytes.len());
-            bytes.extend_from_slice(&buffer[..count.min(remaining)]);
+            bytes.extend_from_slice(&buffer[..count]);
             let _ = stdout_events.send(HostEvent::Progress(count as u64, total));
         }
         let _ = stdout_events.send(HostEvent::StdoutClosed);
@@ -192,8 +190,7 @@ pub(crate) fn run_host(
             if count == 0 {
                 break;
             }
-            let remaining = (MAX_DESCRIPTOR_BYTES + 1).saturating_sub(bytes.len());
-            bytes.extend_from_slice(&buffer[..count.min(remaining)]);
+            bytes.extend_from_slice(&buffer[..count]);
         }
         bytes
     });
@@ -244,9 +241,6 @@ pub(crate) fn run_host(
             .write_chunk(&stderr)
             .map_err(|error| error.to_string())?;
         output.finish().map_err(|error| error.to_string())?;
-    }
-    if stdout.len() > MAX_DESCRIPTOR_BYTES || stderr.len() > MAX_DESCRIPTOR_BYTES {
-        return Err("extension host output exceeded 2 MiB".into());
     }
     let stdout = String::from_utf8_lossy(&stdout);
     let stderr = String::from_utf8_lossy(&stderr);

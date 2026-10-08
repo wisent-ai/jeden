@@ -7,7 +7,7 @@ use std::fs;
 use std::hash::{DefaultHasher, Hash};
 use std::path::{Path, PathBuf};
 
-use super::{DeclarativeCapability, MAX_EXTENSION_FILES};
+use super::DeclarativeCapability;
 use std::env;
 use std::time::SystemTime;
 
@@ -71,9 +71,6 @@ pub(super) fn scan_modules(root: &Path, recursive_children: bool) -> Vec<PathBuf
             } else if recursive_children && path.is_dir() {
                 files.extend(scan_modules(&path, false));
             }
-            if files.len() >= MAX_EXTENSION_FILES {
-                break;
-            }
         }
     }
     files.sort();
@@ -120,11 +117,7 @@ pub(super) fn declarative_paths(root: &Path, precedence: usize) -> Vec<Declarati
     }
     values
 }
-pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher, remaining: &mut usize) {
-    if *remaining == 0 {
-        return;
-    }
-    *remaining -= 1;
+pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher) {
     path.hash(hasher);
     let Ok(metadata) = fs::metadata(path) else {
         return;
@@ -144,10 +137,7 @@ pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher, remaining:
             .collect::<Vec<_>>();
         children.sort();
         for child in children {
-            hash_path_tree(&child, hasher, remaining);
-            if *remaining == 0 {
-                break;
-            }
+            hash_path_tree(&child, hasher);
         }
     }
 }
