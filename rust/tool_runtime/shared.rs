@@ -86,6 +86,18 @@ pub(crate) fn u64_input(input: &Value, key: &str, default: u64) -> u64 {
     input.get(key).and_then(Value::as_u64).unwrap_or(default)
 }
 
+/// How many entries a tool answers with: the caller's own count, refused by
+/// name when it is missing or not a positive whole number. No tool picks a
+/// count for the model, and none caps the one it was given.
+pub(crate) fn count_input(input: &Value, key: &str, tool: &str) -> Result<u64, String> {
+    input
+        .get(key)
+        .and_then(Value::as_u64)
+        .and_then(std::num::NonZeroU64::new)
+        .map(std::num::NonZeroU64::get)
+        .ok_or_else(|| format!("{tool} requires {key}, a positive whole number: how many entries to answer"))
+}
+
 pub(crate) fn object_input(input: &Value, key: &str) -> Value {
     input
         .get(key)

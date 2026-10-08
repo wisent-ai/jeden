@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::memory::{scope_from_value, FtsBackend, MemorySource, MemoryStore};
-use crate::tool_runtime::shared::{string_input, u64_input};
+use crate::tool_runtime::shared::{count_input, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -48,7 +48,7 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             Ok(json!({"entry":entry,"backend":"fleet-postgres"}))
         }
         "list" => {
-            Ok(json!({"entries":store.list(u64_input(input,"limit",20).clamp(1,200) as usize)?}))
+            Ok(json!({"entries":store.list(count_input(input, "limit", "memory list")? as usize)?}))
         }
         "recall" => {
             let query = string_input(input, "query").unwrap_or_default();
@@ -56,7 +56,7 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 &FtsBackend,
                 &scope,
                 &query,
-                u64_input(input, "limit", 10).clamp(1, 100) as usize,
+                count_input(input, "limit", "memory recall")? as usize,
             )?;
             Ok(
                 json!({"entries":hits.iter().map(|h|&h.record).collect::<Vec<_>>(),"hits":hits,"query":query,"backend":"postgres-fts"}),

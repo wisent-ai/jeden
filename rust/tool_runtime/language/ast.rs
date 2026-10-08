@@ -9,7 +9,7 @@ use crate::cli::sessions::{
     PendingActionCreate,
 };
 use crate::tool_runtime::shared::{
-    jail_path, jail_write_path, sha256_hex, simple_diff, string_input, u64_input,
+    count_input, jail_path, jail_write_path, sha256_hex, simple_diff, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -113,7 +113,7 @@ pub(crate) fn ast_search(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         return Err("AST search cancelled".into());
     }
     let query_source = string_input(input, "query").ok_or("ast_search requires query")?;
-    let limit = u64_input(input, "limit", 100).clamp(1, MAX_MATCHES as u64) as usize;
+    let limit = count_input(input, "limit", "ast_search")? as usize;
     let (label, _, bytes, language) = source(runtime, input)?;
     let tree = parse(&bytes, &language)?;
     let query = Query::new(&language, &query_source)

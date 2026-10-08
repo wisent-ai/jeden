@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use rusqlite::{types::ValueRef as SqlValueRef, Connection};
 use serde_json::{json, Value};
 
-use crate::tool_runtime::shared::{jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{count_input, jail_path, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
 
 fn sql_json_value(value: SqlValueRef<'_>) -> Value {
@@ -49,7 +49,6 @@ fn sqlite_identifier(name: &str) -> Result<String, String> {
 pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("read_sqlite requires path")?;
     let file = jail_path(runtime.cwd, &path)?;
-    let limit = u64_input(input, "limit", 20).clamp(1, 100);
     let offset = u64_input(input, "offset", 0);
     let conn = Connection::open_with_flags(&file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| e.to_string())?;
@@ -62,6 +61,7 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         {
             return Err("read_sqlite query must be a single SELECT or WITH statement".into());
         }
+        let limit = count_input(input, "limit", "read_sqlite with a query")?;
         let rows = run_sql_rows(
             &conn,
             &format!("SELECT * FROM ({query}) LIMIT {limit} OFFSET {offset}"),
@@ -126,6 +126,7 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     if let Some(order) = string_input(input, "order") {
         clauses.push(format!("ORDER BY {order}"));
     }
+    let limit = count_input(input, "limit", "read_sqlite reading a table's rows")?;
     clauses.push(format!("LIMIT {limit}"));
     if offset > 0 {
         clauses.push(format!("OFFSET {offset}"));

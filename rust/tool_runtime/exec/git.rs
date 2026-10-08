@@ -4,7 +4,7 @@
 //! Split out of `tool_runtime/exec/mod.rs`, which had grown past the module
 //! line cap.
 
-use super::super::shared::{jail_path, run_read_process, string_input, u64_input};
+use super::super::shared::{count_input, jail_path, run_read_process, string_input};
 use super::super::ToolRuntime;
 use serde_json::{json, Value};
 
@@ -25,7 +25,7 @@ pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
 }
 
 pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let limit = u64_input(input, "limit", 20).clamp(1, 100);
+    let limit = count_input(input, "limit", "git_log")?;
     let mut args = vec![
         "log".to_string(),
         format!("-{limit}"),

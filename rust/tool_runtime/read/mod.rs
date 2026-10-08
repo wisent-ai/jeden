@@ -2,7 +2,7 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::Path;
 
-use super::shared::{jail_path, string_input, u64_input};
+use super::shared::{count_input, jail_path, string_input, u64_input};
 use super::ToolRuntime;
 
 mod archive;
@@ -132,7 +132,7 @@ fn walk_dir(
 
 pub(crate) fn list_dir(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").unwrap_or_else(|| ".".into());
-    let limit = u64_input(input, "limit", 200).clamp(1, 10_000) as usize;
+    let limit = count_input(input, "limit", "list_dir")? as usize;
     let depth = u64_input(input, "depth", 0).min(64) as usize;
     let dir = jail_path(runtime.cwd, &path)?;
     if !dir.is_dir() {

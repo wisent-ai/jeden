@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
-use crate::tool_runtime::shared::{bool_input, jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{bool_input, count_input, jail_path, string_input, u64_input};
 use crate::tool_runtime::ToolRuntime;
 
 mod literal;
@@ -36,11 +36,10 @@ pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         } else {
             line.to_lowercase().contains(&needle)
         };
+        // Every matching line of the one file is answered; no count is
+        // chosen for the model.
         if found {
             matches.push(json!({"line":index+1,"text":line}));
-            if matches.len() >= 50 {
-                break;
-            }
         }
     }
     Ok(json!({"ok":true,"path":label,"query":query,"matches":matches}))
@@ -50,7 +49,7 @@ pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     let query = string_input(input, "query").ok_or("search_files requires query")?;
     let case = bool_input(input, "caseSensitive", false);
     let skip = u64_input(input, "skip", 0).min(100_000) as usize;
-    let limit = u64_input(input, "limit", 500).clamp(1, 500) as usize;
+    let limit = count_input(input, "limit", "search_files")? as usize;
     let files = text_files(runtime, input)?;
     let needle = if case {
         query.clone()
@@ -63,7 +62,7 @@ pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
 }
 
 pub(crate) fn glob_paths(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let limit = u64_input(input, "limit", 200).clamp(1, 2000) as usize;
+    let limit = count_input(input, "limit", "glob_paths")? as usize;
     let skip = u64_input(input, "skip", 0) as usize;
     let raw = input
         .get("patterns")
@@ -108,13 +107,12 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .map_err(|error| error.to_string())?;
     let files = text_files(runtime, input)?;
     let skip = u64_input(input, "skip", 0).min(100_000) as usize;
-    let limit = u64_input(input, "limit", 500).clamp(1, 500) as usize;
+    let limit = count_input(input, "limit", "grep_regex")? as usize;
     let max_matches = skip.saturating_add(limit);
     let output = Mutex::new(Vec::<(usize, usize, String)>::new());
     let workers = std::thread::available_parallelism()
         .map(usize::from)
-        .unwrap_or(2)
-        .min(8);
+        .map_err(|error| format!("grep_regex could not read how many threads this machine runs: {error}"))?;
     let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
