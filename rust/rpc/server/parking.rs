@@ -20,9 +20,9 @@
 //! then sees its runtime end and releases the reservation; the session comes
 //! back whole with `--resume`.
 //!
-//! The check is a periodic schedule that looks at the process; it never
-//! interrupts anything. A turn that runs for an hour is work in flight for
-//! that hour, and nothing here ends it.
+//! The check is a periodic schedule at the declared park time that looks at
+//! the process; it never interrupts anything. A turn that runs for an hour is
+//! work in flight for that hour, and nothing here ends it.
 
 use super::operations::wire::read_frame;
 use super::ServerState;
@@ -38,11 +38,6 @@ use std::time::{Duration, Instant};
 /// The setting Stado's workload declaration fills from the kind's
 /// `park_after_seconds`.
 const PARK_AFTER_SETTING: &str = "JEDEN_PARK_AFTER_SECONDS";
-
-/// How often a parkable process looks at itself. Short enough that a blocked
-/// session gives its reservation back within a quarter of a minute, long
-/// enough that an idle process costs nothing to keep checking.
-const CHECK_EVERY_SECONDS: u64 = 15;
 
 pub(super) struct ParkPolicy {
     after: Duration,
@@ -69,7 +64,7 @@ impl ParkPolicy {
             })?;
         Ok(Some(Self {
             after: Duration::from_secs(seconds),
-            check_every: Duration::from_secs(seconds.min(CHECK_EVERY_SECONDS)),
+            check_every: Duration::from_secs(seconds),
         }))
     }
 }
