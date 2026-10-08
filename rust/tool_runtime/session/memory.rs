@@ -1,7 +1,7 @@
 use serde_json::{json, Value};
 
 use crate::memory::{scope_from_value, FtsBackend, MemorySource, MemoryStore};
-use crate::tool_runtime::shared::{count_input, string_input, u64_input};
+use crate::tool_runtime::shared::{count_input, string_input};
 use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -62,9 +62,12 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 json!({"entries":hits.iter().map(|h|&h.record).collect::<Vec<_>>(),"hits":hits,"query":query,"backend":"postgres-fts"}),
             )
         }
-        "context" => Ok(
-            json!({"context":store.pre_compaction_context(&scope,&string_input(input,"query").unwrap_or_default(),u64_input(input,"maxChars",12_000).clamp(256,12_000) as usize)?}),
-        ),
+        "context" => {
+            let query = string_input(input, "query")
+                .ok_or("memory context requires query, the text the context is gathered for")?;
+            let max_chars = count_input(input, "maxChars", "memory context")? as usize;
+            Ok(json!({"context":store.pre_compaction_context(&scope,&query,Some(max_chars))?}))
+        }
         "forget" => {
             if !runtime.allow_write {
                 return Err("memory forget requires --allow-write".into());

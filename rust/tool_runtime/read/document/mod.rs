@@ -5,8 +5,7 @@ use std::fs;
 use std::path::Path;
 
 use crate::tool_runtime::shared::{
-    count_input, jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input,
-    MAX_READ_BYTES,
+    count_input, jail_path, line_window, mime_type_for_path, sha256_hex, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -67,8 +66,7 @@ pub(super) fn readable_text_for_document(
 
 pub(crate) fn read_document(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("read_document requires path")?;
-    let max_bytes =
-        u64_input(input, "maxBytes", MAX_READ_BYTES).clamp(1_000, MAX_READ_BYTES) as usize;
+    let max_bytes = count_input(input, "maxBytes", "read_document")? as usize;
     let file = jail_path(runtime.cwd, &path)?;
     let bytes = fs::read(&file).map_err(|e| e.to_string())?;
     let readable = readable_text_for_document(&bytes, &file, None)?;

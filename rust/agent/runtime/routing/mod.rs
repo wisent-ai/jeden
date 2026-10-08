@@ -236,6 +236,6 @@ pub(in crate::agent) fn memory_guidance_for_prompt(cwd: &Path) -> Option<String>
         kind: "repo".into(),
         id: cwd.display().to_string(),
     };
-    let context = store.pre_compaction_context(&scope, "", 12_000).ok()?;
+    let context = store.pre_compaction_context(&scope, "", None).ok()?;
     (!context.is_empty()).then_some(context)
 }

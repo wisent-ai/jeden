@@ -5,7 +5,7 @@
 //! line cap.
 
 use super::walk::{check, discover};
-use crate::tool_runtime::exec::search::walk::MAX_SEARCH_FILE_BYTES;
+use crate::tool_runtime::shared::machine_parallelism;
 use crate::tool_runtime::ToolRuntime;
 use serde_json::Value;
 use std::fs;
@@ -27,10 +27,7 @@ pub(super) fn parallel_literal(
     max_matches: usize,
 ) -> Result<Vec<(usize, usize, String)>, String> {
     let output = Mutex::new(Vec::new());
-    let workers = std::thread::available_parallelism()
-        .map(usize::from)
-        .unwrap_or(2)
-        .min(8);
+    let workers = machine_parallelism("search_files")?;
     let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
@@ -45,12 +42,6 @@ pub(super) fn parallel_literal(
                     }
                     if cancellation.is_cancelled() {
                         break;
-                    }
-                    if fs::metadata(path)
-                        .map(|meta| meta.len() > MAX_SEARCH_FILE_BYTES)
-                        .unwrap_or(true)
-                    {
-                        continue;
                     }
                     let Ok(content) = fs::read_to_string(path) else {
                         continue;

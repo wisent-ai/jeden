@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
-use crate::tool_runtime::shared::{jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{count_input, jail_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 
 mod client;
@@ -15,7 +15,6 @@ use client::{await_response, ensure_open, file_uri, send, start, LspClient};
 use discovery::command_for;
 pub(super) use discovery::healthy_servers;
 
-const MAX_LSP_SERVERS: usize = 8;
 static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 static SERVERS: LazyLock<Mutex<BTreeMap<String, LspClient>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
@@ -33,7 +32,7 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         .map(|name| json!({"name":name,"healthy":healthy.iter().any(|item|item==name)}))
         .collect::<Vec<_>>();
         return Ok(
-            json!({"ok":true,"status":if healthy.is_empty(){"unavailable"}else{"healthy"},"servers":servers,"maxServers":MAX_LSP_SERVERS}),
+            json!({"ok":true,"status":if healthy.is_empty(){"unavailable"}else{"healthy"},"servers":servers}),
         );
     }
     let label = string_input(input, "path").ok_or("LSP action requires path")?;
@@ -47,9 +46,6 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
     );
     let mut servers = SERVERS.lock().map_err(|_| "LSP manager poisoned")?;
     if !servers.contains_key(&key) {
-        if servers.len() >= MAX_LSP_SERVERS {
-            return Err(format!("LSP server limit reached ({MAX_LSP_SERVERS})"));
-        }
         servers.insert(key.clone(), start(runtime, &program, &args)?);
     }
     let client = servers.get_mut(&key).ok_or("LSP server unavailable")?;
@@ -58,7 +54,6 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
     }
     ensure_open(client, &path)?;
     let uri = file_uri(&path)?;
-    let position = json!({"line":u64_input(input,"line",1).saturating_sub(1),"character":u64_input(input,"column",1).saturating_sub(1)});
     let (method, params) = match action.as_str() {
         "diagnostics" => (
             "textDocument/diagnostic",
@@ -66,24 +61,38 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         ),
         "definition" => (
             "textDocument/definition",
-            json!({"textDocument":{"uri":uri},"position":position}),
+            json!({"textDocument":{"uri":uri},"position":position(input, &action)?}),
         ),
         "references" => (
             "textDocument/references",
-            json!({"textDocument":{"uri":uri},"position":position,"context":{"includeDeclaration":true}}),
+            json!({"textDocument":{"uri":uri},"position":position(input, &action)?,"context":{"includeDeclaration":true}}),
         ),
         "rename" => (
             "textDocument/rename",
-            json!({"textDocument":{"uri":uri},"position":position,"newName":string_input(input,"newName").ok_or("LSP rename requires newName")?}),
+            json!({"textDocument":{"uri":uri},"position":position(input, &action)?,"newName":string_input(input,"newName").ok_or("LSP rename requires newName")?}),
         ),
-        "codeActions" => (
-            "textDocument/codeAction",
-            json!({"textDocument":{"uri":uri},"range":{"start":position,"end":position},"context":{"diagnostics":input.get("diagnostics").cloned().unwrap_or_else(||json!([]))}}),
-        ),
-        "format" => (
-            "textDocument/formatting",
-            json!({"textDocument":{"uri":uri},"options":{"tabSize":u64_input(input,"tabSize",4),"insertSpaces":input.get("insertSpaces").and_then(Value::as_bool).unwrap_or(true)}}),
-        ),
+        "codeActions" => {
+            let at = position(input, &action)?;
+            let diagnostics = input
+                .get("diagnostics")
+                .cloned()
+                .ok_or("LSP codeActions requires diagnostics, an array (empty when there are none)")?;
+            (
+                "textDocument/codeAction",
+                json!({"textDocument":{"uri":uri},"range":{"start":at,"end":at},"context":{"diagnostics":diagnostics}}),
+            )
+        }
+        "format" => {
+            let tab_size = count_input(input, "tabSize", "LSP format")?;
+            let insert_spaces = input
+                .get("insertSpaces")
+                .and_then(Value::as_bool)
+                .ok_or("LSP format requires insertSpaces, true or false")?;
+            (
+                "textDocument/formatting",
+                json!({"textDocument":{"uri":uri},"options":{"tabSize":tab_size,"insertSpaces":insert_spaces}}),
+            )
+        }
         other => return Err(format!("unsupported LSP action: {other}")),
     };
     let id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
@@ -93,4 +102,20 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
     )?;
     let result = await_response(runtime, client, id)?;
     Ok(json!({"ok":true,"action":action,"path":label,"server":program,"result":result}))
+}
+
+/// The caller's `line` and `character`, zero-based as the language server
+/// protocol counts them; refused by name when either is missing.
+fn position(input: &Value, action: &str) -> Result<Value, String> {
+    Ok(json!({
+        "line": zero_based(input, "line", action)?,
+        "character": zero_based(input, "character", action)?,
+    }))
+}
+
+fn zero_based(input: &Value, key: &str, action: &str) -> Result<u64, String> {
+    input
+        .get(key)
+        .and_then(Value::as_u64)
+        .ok_or_else(|| format!("LSP {action} requires {key}, a zero-based whole number"))
 }

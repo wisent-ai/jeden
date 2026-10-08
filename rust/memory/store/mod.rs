@@ -98,22 +98,26 @@ impl MemoryStore {
         })
     }
 
+    /// Every visible memory of `scope` ranked for `query`, one line each, up
+    /// to `max_chars` characters when the caller states a budget and whole
+    /// when it states none.
     pub fn pre_compaction_context(
         &self,
         scope: &MemoryScope,
         query: &str,
-        max_chars: usize,
+        max_chars: Option<usize>,
     ) -> Result<String, String> {
-        let hits = self.recall(&FtsBackend, scope, query, 100)?;
-        let cap = max_chars.min(MAX_CONTEXT_CHARS);
+        let hits = self.recall(&FtsBackend, scope, query, usize::MAX)?;
         let mut out = String::new();
         for hit in hits {
             let line = format!(
                 "[{}; {}; {}] {}\n",
                 hit.record.id, hit.provenance.backend, hit.record.source.origin, hit.record.text
             );
-            if out.chars().count() + line.chars().count() > cap {
-                break;
+            if let Some(cap) = max_chars {
+                if out.chars().count() + line.chars().count() > cap {
+                    break;
+                }
             }
             out.push_str(&line)
         }
@@ -126,7 +130,7 @@ impl MemoryStore {
         max_chars: usize,
     ) -> Result<MemoryRecord, String> {
         let candidates = self
-            .recall(&FtsBackend, scope, "", 100)?
+            .recall(&FtsBackend, scope, "", usize::MAX)?
             .into_iter()
             .map(|h| h.record)
             .collect::<Vec<_>>();

@@ -4,15 +4,13 @@
 //! Split out of `tool_runtime/exec/search.rs`, which had grown past the module
 //! line cap.
 
-use crate::tool_runtime::shared::{bool_input, jail_path, string_input};
+use crate::tool_runtime::shared::{bool_input, jail_path, machine_parallelism, string_input};
 use crate::tool_runtime::ToolRuntime;
 use ignore::{WalkBuilder, WalkState};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-
-pub(crate) const MAX_SEARCH_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(super) fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
     if runtime.operation.cancellation().is_cancelled() {
@@ -51,6 +49,7 @@ pub(super) fn discover(
     let hidden = bool_input(input, "hidden", false);
     let gitignore = bool_input(input, "gitignore", true);
     let output = Arc::new(Mutex::new(Vec::<(PathBuf, bool)>::new()));
+    let workers = machine_parallelism("search")?;
     let error = Arc::new(Mutex::new(None::<String>));
     for root in roots(runtime, input)? {
         let metadata = fs::metadata(&root).map_err(|value| value.to_string())?;
@@ -69,12 +68,7 @@ pub(super) fn discover(
             .ignore(gitignore)
             .parents(gitignore)
             .require_git(false)
-            .threads(
-                std::thread::available_parallelism()
-                    .map(usize::from)
-                    .unwrap_or(2)
-                    .min(8),
-            )
+            .threads(workers)
             .filter_entry({
                 let home = crate::dirs_home();
                 let root = root.clone();

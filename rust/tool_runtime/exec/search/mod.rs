@@ -7,14 +7,16 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 
-use crate::tool_runtime::shared::{bool_input, count_input, jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{
+    bool_input, count_input, jail_path, machine_parallelism, string_input, u64_input,
+};
 use crate::tool_runtime::ToolRuntime;
 
 mod literal;
 mod walk;
 
 use literal::{parallel_literal, text_files};
-use walk::{check, discover, rel_path, MAX_SEARCH_FILE_BYTES};
+use walk::{check, discover, rel_path};
 
 pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_text requires query")?;
@@ -48,7 +50,7 @@ pub(crate) fn search_text(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
 pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let query = string_input(input, "query").ok_or("search_files requires query")?;
     let case = bool_input(input, "caseSensitive", false);
-    let skip = u64_input(input, "skip", 0).min(100_000) as usize;
+    let skip = u64_input(input, "skip", 0) as usize;
     let limit = count_input(input, "limit", "search_files")? as usize;
     let files = text_files(runtime, input)?;
     let needle = if case {
@@ -106,13 +108,11 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .build()
         .map_err(|error| error.to_string())?;
     let files = text_files(runtime, input)?;
-    let skip = u64_input(input, "skip", 0).min(100_000) as usize;
+    let skip = u64_input(input, "skip", 0) as usize;
     let limit = count_input(input, "limit", "grep_regex")? as usize;
     let max_matches = skip.saturating_add(limit);
     let output = Mutex::new(Vec::<(usize, usize, String)>::new());
-    let workers = std::thread::available_parallelism()
-        .map(usize::from)
-        .map_err(|error| format!("grep_regex could not read how many threads this machine runs: {error}"))?;
+    let workers = machine_parallelism("grep_regex")?;
     let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
@@ -128,12 +128,6 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                     if cancellation.is_cancelled() {
                         break;
                     }
-                    if fs::metadata(path)
-                        .map(|meta| meta.len() > MAX_SEARCH_FILE_BYTES)
-                        .unwrap_or(true)
-                    {
-                        continue;
-                    }
                     let Ok(content) = fs::read_to_string(path) else {
                         continue;
                     };
@@ -148,14 +142,7 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                                 .filter(|byte| *byte == b'\n')
                                 .count()
                                 + 1;
-                            let text = found
-                                .as_str()
-                                .split_whitespace()
-                                .collect::<Vec<_>>()
-                                .join(" ")
-                                .chars()
-                                .take(500)
-                                .collect();
+                            let text = found.as_str().split_whitespace().collect::<Vec<_>>().join(" ");
                             if collected >= max_matches {
                                 break;
                             }

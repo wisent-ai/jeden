@@ -5,8 +5,6 @@ use std::path::{Path, PathBuf};
 
 use super::ToolRuntime;
 
-pub(crate) const MAX_READ_BYTES: u64 = 512_000;
-
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
@@ -97,6 +95,15 @@ pub(crate) fn count_input(input: &Value, key: &str, tool: &str) -> Result<u64, S
         .and_then(std::num::NonZeroU64::new)
         .map(std::num::NonZeroU64::get)
         .ok_or_else(|| format!("{tool} requires {key}, a positive whole number the caller states"))
+}
+
+/// How many threads this machine runs, read from the operating system and
+/// refused by name when it cannot be read; a search fans out across all of
+/// them.
+pub(crate) fn machine_parallelism(tool: &str) -> Result<usize, String> {
+    std::thread::available_parallelism()
+        .map(usize::from)
+        .map_err(|error| format!("{tool} could not read how many threads this machine runs: {error}"))
 }
 
 pub(crate) fn object_input(input: &Value, key: &str) -> Value {

@@ -133,7 +133,7 @@ fn walk_dir(
 pub(crate) fn list_dir(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").unwrap_or_else(|| ".".into());
     let limit = count_input(input, "limit", "list_dir")? as usize;
-    let depth = u64_input(input, "depth", 0).min(64) as usize;
+    let depth = u64_input(input, "depth", 0) as usize;
     let dir = jail_path(runtime.cwd, &path)?;
     if !dir.is_dir() {
         return Err(format!("not a directory: {path}"));

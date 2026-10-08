@@ -36,7 +36,7 @@ impl MemoryStore {
         query: &str,
         limit: usize,
     ) -> Result<Vec<RecallHit>, String> {
-        let ranked = backend.recall(scope, query, limit.min(100))?;
+        let ranked = backend.recall(scope, query, limit)?;
         let ids = ranked
             .iter()
             .map(|candidate| candidate.id.clone())

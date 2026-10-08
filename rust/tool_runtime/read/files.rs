@@ -6,8 +6,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::tool_runtime::shared::{
-    jail_path, mime_type_for_path, sha256_hex, snapshot_name, string_input, u64_input,
-    MAX_READ_BYTES,
+    count_input, jail_path, mime_type_for_path, sha256_hex, snapshot_name, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -116,14 +115,13 @@ fn ranged_text(
     runtime: &ToolRuntime<'_>,
     path: &Path,
     selected: Selector,
-) -> Result<(String, Vec<Value>, usize, bool), String> {
+) -> Result<(String, Vec<Value>, usize), String> {
     let mut reader = BufReader::new(File::open(path).map_err(|error| error.to_string())?);
     let mut line = String::new();
     let mut content = String::new();
     let mut visual = Vec::new();
     let mut line_number = 0usize;
     let mut conflict = false;
-    let mut truncated = false;
     loop {
         if runtime.operation.cancellation().is_cancelled() {
             return Err("read cancelled".into());
@@ -161,18 +159,13 @@ fn ranged_text(
         if !include {
             continue;
         }
-        let needed = text.len() + usize::from(!content.is_empty());
-        if content.len().saturating_add(needed) > MAX_READ_BYTES as usize {
-            truncated = true;
-            break;
-        }
         if !content.is_empty() {
             content.push('\n');
         }
         content.push_str(text);
         visual.push(json!({"line":line_number,"text":text}));
     }
-    Ok((content, visual, line_number, truncated))
+    Ok((content, visual, line_number))
 }
 
 pub(crate) fn read_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -181,28 +174,22 @@ pub(crate) fn read_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     if !meta.is_file() {
         return Err(format!("not a file: {label}"));
     }
-    if raw_selector.is_none() && meta.len() > MAX_READ_BYTES {
-        return Err(format!(
-            "file too large: {} bytes; provide a selector",
-            meta.len()
-        ));
-    }
     let selected = raw_selector
         .as_deref()
         .map(selector)
         .transpose()?
         .unwrap_or(Selector::Raw);
-    let (content, lines, scanned_lines, truncated) = ranged_text(runtime, &file, selected)?;
+    let (content, lines, scanned_lines) = ranged_text(runtime, &file, selected)?;
     let sha256 = hash_file(&file)?;
     std::str::from_utf8(content.as_bytes()).map_err(|_| format!("file is not UTF-8: {label}"))?;
     Ok(
-        json!({"ok":true,"path":label,"snapshot":snapshot_name(&label,&sha256),"bytes":meta.len(),"sha256":sha256,"selector":raw_selector,"content":content,"lines":lines,"scannedLines":scanned_lines,"truncated":truncated}),
+        json!({"ok":true,"path":label,"snapshot":snapshot_name(&label,&sha256),"bytes":meta.len(),"sha256":sha256,"selector":raw_selector,"content":content,"lines":lines,"scannedLines":scanned_lines}),
     )
 }
 
 pub(crate) fn read_binary_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("read_binary_file requires path")?;
-    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    let max_bytes = count_input(input, "maxBytes", "read_binary_file")? as usize;
     let file = jail_path(runtime.cwd, &path)?;
     let meta = fs::metadata(&file).map_err(|e| e.to_string())?;
     if !meta.is_file() {
@@ -266,7 +253,7 @@ pub(super) fn image_dimensions(bytes: &[u8]) -> Option<(u32, u32, &'static str)>
 
 pub(crate) fn read_image(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("read_image requires path")?;
-    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    let max_bytes = count_input(input, "maxBytes", "read_image")? as usize;
     let file = jail_path(runtime.cwd, &path)?;
     let bytes = fs::read(&file).map_err(|e| e.to_string())?;
     let Some((width, height, mime_type)) = image_dimensions(&bytes) else {

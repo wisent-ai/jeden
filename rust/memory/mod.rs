@@ -22,7 +22,6 @@ pub use store::MemoryStore;
 pub use worker::MAX_ATTEMPTS;
 
 pub const MAX_MEMORY_CHARS: usize = 2_000;
-pub const MAX_CONTEXT_CHARS: usize = 12_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]

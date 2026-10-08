@@ -247,7 +247,7 @@ fn rank(
         });
     }
     ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
-    ranked.truncate(limit.min(100));
+    ranked.truncate(limit);
     Ok(ranked)
 }
 

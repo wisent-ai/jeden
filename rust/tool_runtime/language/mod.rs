@@ -25,7 +25,7 @@ fn descriptors() -> Vec<DynamicToolDescriptor> {
         },
         {
             let servers = lsp::healthy_servers();
-            DynamicToolDescriptor { name:"lsp".into(), description:"Persistent bounded LSP diagnostics, navigation, rename, code actions, and formatting".into(), input:json!({"type":"object","required":["action"],"properties":{"action":{"enum":["health","diagnostics","definition","references","rename","codeActions","format"]},"path":{"type":"string"},"line":{"type":"number"},"column":{"type":"number"},"newName":{"type":"string"},"server":{"type":"string"},"serverArgs":{"type":"array"}}}), healthy:!servers.is_empty(), health:if servers.is_empty(){"no language server passed its probe".into()}else{format!("probed: {}",servers.join(", "))} }
+            DynamicToolDescriptor { name:"lsp".into(), description:"Persistent LSP diagnostics, navigation, rename, code actions, and formatting. Positions take line and character, zero-based as the protocol counts them; codeActions takes diagnostics (an array); format takes tabSize and insertSpaces. Each is required where its action uses it".into(), input:json!({"type":"object","required":["action"],"properties":{"action":{"enum":["health","diagnostics","definition","references","rename","codeActions","format"]},"path":{"type":"string"},"line":{"type":"number"},"character":{"type":"number"},"diagnostics":{"type":"array"},"tabSize":{"type":"number"},"insertSpaces":{"type":"boolean"},"newName":{"type":"string"},"server":{"type":"string"},"serverArgs":{"type":"array"}}}), healthy:!servers.is_empty(), health:if servers.is_empty(){"no language server passed its probe".into()}else{format!("probed: {}",servers.join(", "))} }
         },
     ]
 }

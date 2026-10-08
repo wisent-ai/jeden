@@ -53,7 +53,6 @@ impl MemoryStore {
             "provenance": true,
             "bounded": {
                 "memoryChars": MAX_MEMORY_CHARS,
-                "contextChars": MAX_CONTEXT_CHARS,
                 "attempts": MAX_ATTEMPTS,
             },
         }))

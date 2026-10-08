@@ -7,7 +7,7 @@ use std::path::Path;
 use super::document::readable_text_for_document;
 use super::files::image_dimensions;
 use crate::tool_runtime::shared::{
-    jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input, MAX_READ_BYTES,
+    count_input, jail_path, line_window, mime_type_for_path, sha256_hex, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -173,7 +173,7 @@ pub(crate) fn read_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     if entry.kind != "file" {
         return Err(format!("archive entry is not a file: {entry_name}"));
     }
-    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).clamp(1, MAX_READ_BYTES) as usize;
+    let max_bytes = count_input(input, "maxBytes", "read_archive")? as usize;
     let mode = string_input(input, "mode").unwrap_or_else(|| "text".into());
     let sliced = &entry.content[..entry.content.len().min(max_bytes)];
     if mode == "binary" {

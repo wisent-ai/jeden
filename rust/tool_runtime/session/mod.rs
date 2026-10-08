@@ -3,7 +3,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::Path;
 
-use super::shared::{sha256_hex, string_input, u64_input, MAX_READ_BYTES};
+use super::shared::{count_input, sha256_hex, string_input};
 use super::ToolRuntime;
 
 mod context;
@@ -89,7 +89,7 @@ pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         return Err("read_artifact requires an active session artifact directory".into());
     };
     let name = string_input(input, "name").ok_or("read_artifact requires name")?;
-    let max_bytes = u64_input(input, "maxBytes", MAX_READ_BYTES).min(MAX_READ_BYTES) as usize;
+    let max_bytes = count_input(input, "maxBytes", "read_artifact")? as usize;
     if name.contains('/') || name.contains("..") {
         return Err(format!("invalid artifact name: {name}"));
     }
