@@ -59,7 +59,11 @@ try {
   const declared = packageText.match(/^version\s*=\s*"([^"]+)"/m);
   assert.ok(declared, 'Cargo.toml has no version');
   const [, expectedVersion] = declared;
-  assert.ok(version.split(/\s+/).includes(expectedVersion), `staged CLI reported ${version}, expected ${expectedVersion}`);
+  // build.rs stamps `<base>+dev.<commits>.<sha>` on a build from a Git checkout;
+  // SemVer build metadata after `+` does not change the version, so the core
+  // is what has to equal the declared one.
+  const reported = version.split(/\s+/).map((word) => word.replace(/\+.*$/, ''));
+  assert.ok(reported.includes(expectedVersion), `staged CLI reported ${version}, expected ${expectedVersion}`);
   const binaryDigest = digest(readFileSync(executable));
   const helperDigest = digest(readFileSync(helper));
   report.cases.push({ name: 'stage-and-execute', verdict: 'passed', version, binary_sha256: binaryDigest, helper_sha256: helperDigest });
