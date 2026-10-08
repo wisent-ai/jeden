@@ -10,17 +10,12 @@
 use super::super::types::{AgentDefinition, TaskError};
 use std::fs;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[cfg(unix)]
 use super::kill;
-
-/// Read size when draining a child's stdout or stderr. Eight kibibytes is a
-/// buffer size, not a policy: the retained volume is bounded separately by
-/// the caller's `max_bytes`.
-const PIPE_CHUNK_BYTES: usize = 8192;
 
 /// Root directory that holds the isolated workspaces for jobs of a scheduler
 /// with the given store and cwd. Mirrors `TaskScheduler::workspace_root` so
@@ -156,26 +151,16 @@ pub(super) fn validate_output(
     Ok(())
 }
 
+/// Keep the first `max_bytes` of `pipe` in `path` and drain the rest, so the
+/// child never blocks on a full pipe.
 pub(super) fn capture_pipe(
     mut pipe: impl Read,
     path: &Path,
     max_bytes: u64,
 ) -> Result<(), TaskError> {
     let mut file = fs::File::create(path)?;
-    let mut buffer = [0u8; PIPE_CHUNK_BYTES];
-    let mut written = 0u64;
-    loop {
-        let count = pipe.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        let remaining = max_bytes.saturating_sub(written) as usize;
-        let keep = remaining.min(count);
-        if keep > 0 {
-            file.write_all(&buffer[..keep])?;
-            written += keep as u64;
-        }
-    }
+    std::io::copy(&mut pipe.by_ref().take(max_bytes), &mut file)?;
+    std::io::copy(&mut pipe, &mut std::io::sink())?;
     Ok(())
 }
 
