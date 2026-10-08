@@ -74,6 +74,12 @@ pub(super) fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value
                 Err(format!("{} expects a JSON object", spec.key))
             }
         }
+        "task-limits" => {
+            let value = serde_json::from_str::<Value>(trimmed)
+                .map_err(|error| format!("{} expects a JSON object: {error}", spec.key))?;
+            crate::task_runtime::check_declaration(&value)?;
+            Ok(value)
+        }
         "string" => Ok(json!(trimmed)),
         _ => Ok(parse_config_literal(trimmed)),
     }

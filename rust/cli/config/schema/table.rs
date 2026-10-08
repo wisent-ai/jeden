@@ -222,7 +222,7 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     },
     SettingSpec {
         key: "taskScheduler",
-        typ: "record",
+        typ: "task-limits",
         description: "Limits delegated tasks run under, every one required: maxParallel (tasks at once), maxBatch (tasks in one batch), maxDepth (how deep tasks may nest), maxChildren (children one task may hold) and maxOutputBytes (bytes of a child's output kept). Unset, delegation is refused naming this key.",
         default_json: "null",
         enum_values: &[],

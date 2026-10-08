@@ -14,7 +14,7 @@ pub use local::{discovery, mailbox, workspace};
 pub use coordinator::Coordinator;
 pub use discovery::discover_agents;
 pub use dispatch::execute_delegate;
-pub use limits::{limits_from_config, limits_settings, set_limits};
+pub use limits::{check_declaration, limits_from_config, limits_settings, set_limits};
 pub use mailbox::Mailbox;
 pub use placement::{select_worker, PlacementDecision};
 pub use protocol::{
