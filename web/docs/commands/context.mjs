@@ -1,7 +1,7 @@
 const sources =
   "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>files,memory</code>.";
 const bounds =
-  "<code>--limit</code> caps the recommendations returned. Nothing cuts a source short: every source runs to completion. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
+  "<code>--limit</code> is how many recommendations to return; without it <code>context.advisor.limit</code> decides, and a request with neither is refused as <code>a context recommendation needs a limit: state how many recommendations, or declare context.advisor.limit</code>. Nothing cuts a source short: every source runs to completion. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply. Jeden Desktop's Context screen takes the same count in its Recommendations field.";
 const unknownSource =
   "An unknown source is refused as <code>unknown source(s): &lt;name&gt;. Known sources: files, ground-truth, memory, transcripts</code>; a typo never narrows the answer silently.";
 
@@ -51,7 +51,7 @@ export const contextCommands = [
       "<code>--json</code> returns <code>query</code>, <code>enabled</code>, <code>sources</code>, <code>maxChars</code> and <code>block</code>, where <code>block</code> is <code>null</code> when nothing would be appended.",
     ],
     effect:
-      "Renders the <code>[Context recommendations]</code> block, bounded by <code>context.advisor.maxChars</code>, including the list of sources that answered nothing. It calls no model and records no session; it is the way to see what the next turn will actually receive.",
+      "Renders the <code>[Context recommendations]</code> block, within <code>context.advisor.maxChars</code> when it is declared and whole when it is not, including the list of sources that answered nothing. It calls no model and records no session; it is the way to see what the next turn will actually receive.",
     refusals: [
       "A missing task is refused as <code>context prompt requires a task</code>.",
       "With the advisor switched off the command succeeds and says why: <code>The context advisor is off: context.advisor.enabled is false.</code>",

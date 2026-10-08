@@ -225,7 +225,7 @@ pub(super) fn run_turn(
                     let cwd = handler_cwd.lock().clone();
                     let config = crate::load_config(&cwd);
                     let settings = crate::context::advisor::settings(&cwd, &config);
-                    let request = crate::context::advisor::Request::from_settings(task, &settings);
+                    let request = crate::context::advisor::Request::new(task, None, &settings)?;
                     let advice = crate::context::advisor::recommend(&cwd, &config, &request);
                     return Ok(tui::CommandOutcome::text(
                         crate::context::advisor::render_text(&advice),

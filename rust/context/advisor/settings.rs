@@ -6,18 +6,17 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{
-    sources::files, DEFAULT_FILE_EXTENSIONS, DEFAULT_LIMIT, DEFAULT_MAX_CHARS, DEFAULT_SOURCES,
-    SOURCES,
-};
+use super::{sources::files, DEFAULT_FILE_EXTENSIONS, DEFAULT_SOURCES, SOURCES};
 use crate::cli::config::{AdvisorConfig, Config};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Settings {
     pub(crate) enabled: bool,
-    pub(crate) limit: usize,
-    pub(crate) max_chars: usize,
+    /// `context.advisor.limit`, when declared.
+    pub(crate) limit: Option<usize>,
+    /// `context.advisor.maxChars`, when declared.
+    pub(crate) max_chars: Option<usize>,
     pub(crate) sources: Vec<String>,
     pub(crate) roots: Vec<DocRoot>,
     pub(crate) file_extensions: Vec<String>,
@@ -41,8 +40,8 @@ pub(crate) fn settings(cwd: &Path, config: &Config) -> Settings {
     let (ground_truth_url, ground_truth_origin) = resolve_ground_truth(advisor);
     Settings {
         enabled: advisor.enabled,
-        limit: bounded_limit(advisor.limit),
-        max_chars: bounded_max_chars(advisor.max_chars),
+        limit: advisor.limit,
+        max_chars: advisor.max_chars,
         sources: parse_sources(&advisor.sources),
         roots: parse_roots(&advisor.roots, cwd),
         file_extensions: parse_extensions(&advisor.file_extensions),
@@ -58,25 +57,6 @@ fn declared_or(value: &str, declared_name: &str) -> String {
         declared_name.to_string()
     } else {
         value.to_string()
-    }
-}
-
-pub(crate) fn bounded_limit(limit: usize) -> usize {
-    const MAX: usize = 50;
-    if limit == 0 {
-        DEFAULT_LIMIT
-    } else {
-        limit.min(MAX)
-    }
-}
-
-pub(crate) fn bounded_max_chars(max_chars: usize) -> usize {
-    const MIN: usize = 400;
-    const MAX: usize = 60_000;
-    if max_chars == 0 {
-        DEFAULT_MAX_CHARS
-    } else {
-        max_chars.clamp(MIN, MAX)
     }
 }
 

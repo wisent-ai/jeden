@@ -115,6 +115,9 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
             "No context source is selected: context.advisor.sources resolved to nothing.\n"
                 .to_string(),
         ),
+        None if settings.limit.is_none() => Ok(
+            "No recommendations are added: context.advisor.limit is not declared.\n".to_string(),
+        ),
         None => Ok("No source had anything to recommend for this task.\n".to_string()),
     }
 }
@@ -127,10 +130,7 @@ fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
         )));
     }
     let settings = advisor::settings(&args.cwd, &crate::load_config(&args.cwd));
-    let mut request = advisor::Request::from_settings(&options.query, &settings);
-    if let Some(limit) = options.limit {
-        request.limit = advisor::bounded_limit(limit);
-    }
+    let mut request = advisor::Request::new(&options.query, options.limit, &settings)?;
     if let Some(declared) = &options.sources {
         let unknown = advisor::unknown_sources(declared);
         if !unknown.is_empty() {

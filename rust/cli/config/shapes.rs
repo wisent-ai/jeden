@@ -68,10 +68,12 @@ pub(crate) struct ContextConfig {
 pub(crate) struct AdvisorConfig {
     #[serde(default = "default_true")]
     pub(crate) enabled: bool,
-    #[serde(default = "default_advisor_limit")]
-    pub(crate) limit: usize,
-    #[serde(rename = "maxChars", default = "default_advisor_max_chars")]
-    pub(crate) max_chars: usize,
+    /// How many recommendations one answer carries, when declared.
+    #[serde(default)]
+    pub(crate) limit: Option<usize>,
+    /// The injected block's character budget, when declared.
+    #[serde(rename = "maxChars", default)]
+    pub(crate) max_chars: Option<usize>,
     #[serde(default = "default_advisor_sources")]
     pub(crate) sources: String,
     /// Colon-separated `path` or `path@depth` entries. Empty means the
@@ -90,8 +92,8 @@ impl Default for AdvisorConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            limit: default_advisor_limit(),
-            max_chars: default_advisor_max_chars(),
+            limit: None,
+            max_chars: None,
             sources: default_advisor_sources(),
             roots: String::new(),
             file_extensions: default_advisor_file_extensions(),
@@ -99,14 +101,6 @@ impl Default for AdvisorConfig {
             transcript_lake_bin: String::new(),
         }
     }
-}
-
-fn default_advisor_limit() -> usize {
-    crate::context::advisor::DEFAULT_LIMIT
-}
-
-fn default_advisor_max_chars() -> usize {
-    crate::context::advisor::DEFAULT_MAX_CHARS
 }
 
 fn default_advisor_sources() -> String {

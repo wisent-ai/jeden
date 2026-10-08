@@ -111,15 +111,15 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "context.advisor.limit",
         typ: "number",
-        description: "How many context recommendations one answer carries.",
-        default_json: "6",
+        description: "How many context recommendations one answer carries when the request states none. Unset, a task prompt gets no recommendations and a recommendation that states no limit is refused naming this key.",
+        default_json: "null",
         enum_values: &[],
     },
     SettingSpec {
         key: "context.advisor.maxChars",
         typ: "number",
-        description: "Character budget for the recommendation block added to a prompt.",
-        default_json: "6000",
+        description: "Character budget for the recommendation block added to a prompt, when you declare one; unset, the block is whole.",
+        default_json: "null",
         enum_values: &[],
     },
     SettingSpec {

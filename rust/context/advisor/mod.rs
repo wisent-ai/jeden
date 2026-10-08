@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 use crate::cli::config::Config;
 
 pub(crate) use render::{availability_word, probe_value, prompt_section, render_text};
-pub(crate) use settings::{bounded_limit, parse_sources, settings, unknown_sources, Settings};
+pub(crate) use settings::{parse_sources, settings, unknown_sources, Settings};
 use sources::{files, ground_truth, memory, transcripts};
 
 /// Source order is the presentation order: local and cited sources first,
@@ -33,8 +33,6 @@ use sources::{files, ground_truth, memory, transcripts};
 /// a tie for the first recommendation.
 pub(crate) const SOURCES: &[&str] = &["files", "ground-truth", "memory", "transcripts"];
 
-pub(crate) const DEFAULT_LIMIT: usize = 6;
-pub(crate) const DEFAULT_MAX_CHARS: usize = 6_000;
 /// What every run consults. The archive and the network index are not in it
 /// because nothing cuts a source short any more: one Transcript Lake search
 /// measured 30 s on this archive against 1 s for the two local sources, and a
@@ -135,12 +133,18 @@ pub(crate) struct Request {
 }
 
 impl Request {
-    pub(crate) fn from_settings(query: &str, settings: &Settings) -> Self {
-        Self {
+    /// A request for `query`, answering the `stated` number of
+    /// recommendations or, unstated, the declared `context.advisor.limit`;
+    /// refused by name when neither is given.
+    pub(crate) fn new(query: &str, stated: Option<usize>, settings: &Settings) -> Result<Self, String> {
+        let limit = stated.or(settings.limit).ok_or(
+            "a context recommendation needs a limit: state how many recommendations, or declare context.advisor.limit",
+        )?;
+        Ok(Self {
             query: query.trim().to_string(),
-            limit: settings.limit,
+            limit,
             sources: settings.sources.clone(),
-        }
+        })
     }
 }
 
@@ -274,7 +278,13 @@ pub(crate) fn advice_for_prompt(cwd: &Path, config: &Config, task: &str) -> Opti
     if !settings.enabled || settings.sources.is_empty() {
         return None;
     }
-    let request = Request::from_settings(task, &settings);
+    let request = match Request::new(task, None, &settings) {
+        Ok(request) => request,
+        Err(refusal) => {
+            eprintln!("jeden: no context recommendations are added: {refusal}");
+            return None;
+        }
+    };
     if request.query.is_empty() {
         return None;
     }

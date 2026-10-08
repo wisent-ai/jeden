@@ -16,10 +16,8 @@ pub(crate) fn context_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     }
     let config = crate::load_config(runtime.cwd);
     let settings = advisor::settings(runtime.cwd, &config);
-    let mut request = advisor::Request::from_settings(&query, &settings);
-    if let Some(limit) = input.get("limit").and_then(Value::as_u64) {
-        request.limit = advisor::bounded_limit(limit as usize);
-    }
+    let stated = input.get("limit").and_then(Value::as_u64).map(|limit| limit as usize);
+    let mut request = advisor::Request::new(&query, stated, &settings)?;
     if let Some(declared) = string_input(input, "sources") {
         let unknown = advisor::unknown_sources(&declared);
         if !unknown.is_empty() {

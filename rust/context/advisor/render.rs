@@ -49,9 +49,13 @@ pub(crate) fn render_text(advice: &Advice) -> String {
     out
 }
 
-/// The block appended to a turn's prompt. `None` when there is nothing to
-/// say, so an empty advisory never costs a token.
-pub(crate) fn prompt_section(advice: &Advice, max_chars: usize) -> Option<String> {
+/// The block appended to a turn's prompt, within `context.advisor.maxChars`
+/// when it is declared and whole when it is not. `None` when there is nothing
+/// to say, so an empty advisory never costs a token.
+pub(crate) fn prompt_section(advice: &Advice, max_chars: Option<usize>) -> Option<String> {
+    let fits = |out: &str, more: &str| {
+        max_chars.is_none_or(|budget| out.chars().count() + more.chars().count() <= budget)
+    };
     if advice.recommendations.is_empty() && advice.unavailable_sources().is_empty() {
         return None;
     }
@@ -66,7 +70,7 @@ pub(crate) fn prompt_section(advice: &Advice, max_chars: usize) -> Option<String
             hit.title,
             hit.snippet.replace('\n', " ")
         );
-        if out.chars().count() + line.chars().count() > max_chars {
+        if !fits(&out, &line) {
             break;
         }
         out.push_str(&line);
@@ -77,7 +81,7 @@ pub(crate) fn prompt_section(advice: &Advice, max_chars: usize) -> Option<String
         for status in missing {
             note.push_str(&format!("- {}: {}\n", status.source, status.detail));
         }
-        if out.chars().count() + note.chars().count() <= max_chars {
+        if fits(&out, &note) {
             out.push_str(&note);
         }
     }
