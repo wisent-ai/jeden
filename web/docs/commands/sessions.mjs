@@ -140,12 +140,12 @@ export const sessionCommands = [
     ],
   },
   {
-    path: "collab-relay",
+    path: "relay/serve",
     group: "Run and automation",
-    invocation: "jeden collab-relay [addr]",
+    invocation: "jeden relay serve <addr>",
     purpose: "Run the encrypted collaboration-room relay used by interactive collaboration commands.",
     inputs: [
-      "Optional: a listen address; the default is <code>127.0.0.1:8877</code>.",
+      "Required: the address to listen on, <code>host:port</code>. No address or port is assumed; <code>jeden relay serve</code> without one is refused with <code>relay serve takes the address to listen on: jeden relay serve &lt;host:port&gt;</code>. It replaces <code>jeden collab-relay [addr]</code>, which listened on a built-in address when none was given.",
       "Room payloads are opaque, client-encrypted blobs; mutation requests carry the room write token and role.",
     ],
     effect: "Binds an HTTP relay, keeps rooms, their role tokens and their blobs in the fleet database <code>jeden</code> (tables <code>relay_rooms</code>, <code>relay_room_tokens</code>, <code>relay_events</code>), so relays on every host serve the same rooms, prints the bound address and that location, and serves until stopped. <code>GET /health</code> reports <code>backend: fleet-postgres</code> with room, event and token counts.",

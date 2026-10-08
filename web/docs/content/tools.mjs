@@ -68,7 +68,7 @@ export const toolPages = [
       {
         title: "Network access",
         paragraphs: [
-          "Jeden initiates every connection. The terminal, <code>jeden run</code>, <code>jeden rpc</code>, and <code>jeden acp</code> are stdio-only and open no socket; listening sockets exist only in the opt-in <code>jeden headless <addr></code> (mutual TLS), <code>jeden collab-relay</code>, and <code>jeden stats --serve</code> (bound to <code>127.0.0.1</code>).",
+          "Jeden initiates every connection. The terminal, <code>jeden run</code>, <code>jeden rpc</code>, and <code>jeden acp</code> are stdio-only and open no socket; listening sockets exist only in the opt-in <code>jeden headless <addr></code> (mutual TLS), <code>jeden relay serve <addr></code>, and <code>jeden stats --serve</code> (bound to <code>127.0.0.1</code>).",
           "The one required outbound dependency is Brama, at the <code>BRAMA_URL</code> Stado's service directory routes the consumer <code>jeden</code> to on a Stado host, or the one the caller exports; optional dependencies — the fleet database <code>jeden</code> (resolved through Stado, its address read from Skarbiec) for memory, pursuit request state and collab-relay rooms, Wisent Platform Billing for subscription and quota decisions, the Stado integration and media APIs, and the release manifest host for <code>jeden update</code> — activate only when configured or first used. Tool-initiated network access (<code>fetch_url</code>, <code>fetch_readable_url</code>, SSH) is checked against the execution grant’s host and port allowlist with pinned addresses and re-authorized redirects.",
         ],
       },

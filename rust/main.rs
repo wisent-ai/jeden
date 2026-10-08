@@ -230,14 +230,12 @@ pub fn main() -> ExitCode {
         "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
             .map(|_| String::new()),
         "acp" => rpc::serve_acp_stdio().map(|_| String::new()),
-        "collab-relay" => {
-            let addr = args
-                .positionals
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "127.0.0.1:8877".to_string());
-            collab::serve(&addr).map(|_| String::new())
-        }
+        "relay" => match args.positionals.as_slice() {
+            [verb, addr] if verb == "serve" => collab::serve(addr).map(|_| String::new()),
+            _ => Err(cli::invocation::refusal::usage(
+                "relay serve takes the address to listen on: jeden relay serve <host:port>",
+            )),
+        },
         "import" => session_import::command(&args),
         "restore" => cli::restore::command(&args),
         "sessions" => match args.positionals.split_first() {

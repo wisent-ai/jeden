@@ -14,7 +14,7 @@ pub fn serve(addr: &str) -> Result<(), String> {
     let bound = listener.local_addr().map_err(|e| e.to_string())?;
     let store = std::sync::Arc::new(RelayStore::new());
     println!(
-        "jeden collab-relay listening on http://{bound} (durable {})",
+        "jeden relay listening on http://{bound} (durable {})",
         store.location()
     );
     for stream in listener.incoming().flatten() {

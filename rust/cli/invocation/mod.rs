@@ -38,6 +38,7 @@ pub(crate) fn usage() -> String {
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
+        "  jeden relay serve <addr>  run the encrypted collaboration-room relay on <addr>\n",
         "  jeden sessions [limit] [--json]\n",
         "  jeden sessions search <query> [limit] [--json] — the newest event of each session whose payload holds the query\n",
         "  jeden import <path>... [--refresh] [--json] — preserve sessions of another harness in native ledgers without executing work\n",
