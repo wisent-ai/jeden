@@ -1,7 +1,7 @@
 use super::*;
 use crate::fleet::{run_db, sql};
-use entities::{managed_skill, memory, scope_lock, workflow};
-use sea_orm::sea_query::{Expr, OnConflict};
+use entities::{managed_skill, memory, workflow};
+use sea_orm::sea_query::OnConflict;
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect,
     TransactionTrait,
@@ -40,62 +40,6 @@ impl MemoryStore {
     }
     pub fn rebuild_embeddings(&self, provider: &dyn EmbeddingProvider) -> Result<usize, String> {
         embeddings::rebuild(provider)
-    }
-
-    pub fn acquire_scope_lock(
-        &self,
-        scope: &MemoryScope,
-        owner: &str,
-        ttl_ms: i64,
-    ) -> Result<bool, String> {
-        let now = now_ms();
-        let lock = scope_lock::ActiveModel {
-            scope_kind: Set(scope.kind.clone()),
-            scope_id: Set(scope.id.clone()),
-            owner: Set(owner.to_owned()),
-            expires_at: Set(now + ttl_ms.clamp(1_000, 300_000)),
-        };
-        let owner = owner.to_owned();
-        run_db(move |db| async move {
-            let tx = db.begin().await.map_err(sql)?;
-            scope_lock::Entity::delete_many()
-                .filter(scope_lock::Column::ExpiresAt.lt(now))
-                .exec(&tx)
-                .await
-                .map_err(sql)?;
-            // Taken when free, or renewed when this owner already holds it.
-            let acquired = scope_lock::Entity::insert(lock)
-                .on_conflict(
-                    OnConflict::columns([
-                        scope_lock::Column::ScopeKind,
-                        scope_lock::Column::ScopeId,
-                    ])
-                    .update_columns([scope_lock::Column::Owner, scope_lock::Column::ExpiresAt])
-                    .action_and_where(
-                        Expr::col((scope_lock::Entity, scope_lock::Column::Owner)).eq(owner),
-                    )
-                    .to_owned(),
-                )
-                .exec_without_returning(&tx)
-                .await
-                .map_err(sql)?
-                == 1;
-            tx.commit().await.map_err(sql)?;
-            Ok(acquired)
-        })
-    }
-    pub fn release_scope_lock(&self, scope: &MemoryScope, owner: &str) -> Result<(), String> {
-        let (scope, owner) = (scope.clone(), owner.to_owned());
-        run_db(move |db| async move {
-            scope_lock::Entity::delete_many()
-                .filter(scope_lock::Column::ScopeKind.eq(scope.kind))
-                .filter(scope_lock::Column::ScopeId.eq(scope.id))
-                .filter(scope_lock::Column::Owner.eq(owner))
-                .exec(&db)
-                .await
-                .map_err(sql)?;
-            Ok(())
-        })
     }
 
     /// Every visible memory of `scope` ranked for `query`, one line each, up

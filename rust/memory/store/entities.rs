@@ -53,15 +53,6 @@ entity!(job, "memory_jobs", {
     pub updated_at: i64,
 });
 
-entity!(scope_lock, "memory_scope_locks", {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub scope_kind: String,
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub scope_id: String,
-    pub owner: String,
-    pub expires_at: i64,
-});
-
 entity!(workflow, "memory_workflows", {
     #[sea_orm(primary_key, auto_increment = false)]
     pub fingerprint: String,

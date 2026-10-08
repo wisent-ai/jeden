@@ -24,9 +24,6 @@ pub(crate) const SCHEMA: &str = "
         lease_until BIGINT, heartbeat_at BIGINT, last_error TEXT,
         created_at BIGINT NOT NULL, updated_at BIGINT NOT NULL);
     CREATE INDEX IF NOT EXISTS memory_jobs_claim ON memory_jobs(state,available_at,lease_until);
-    CREATE TABLE IF NOT EXISTS memory_scope_locks (
-        scope_kind TEXT NOT NULL, scope_id TEXT NOT NULL, owner TEXT NOT NULL,
-        expires_at BIGINT NOT NULL, PRIMARY KEY(scope_kind,scope_id));
     CREATE TABLE IF NOT EXISTS memory_workflows (
         fingerprint TEXT PRIMARY KEY, description TEXT NOT NULL, sessions_json TEXT NOT NULL,
         occurrences BIGINT NOT NULL, verified BOOLEAN NOT NULL DEFAULT FALSE,
