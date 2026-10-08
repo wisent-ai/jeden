@@ -8,7 +8,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-const MAX_MEDIA_BYTES: usize = 32 * 1024 * 1024;
 static ARTIFACT_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -66,9 +65,6 @@ pub enum ServiceError {
         service: &'static str,
         detail: String,
     },
-    OutputLimit {
-        limit: usize,
-    },
     Io(String),
 }
 
@@ -81,7 +77,6 @@ impl fmt::Display for ServiceError {
             Self::Cancelled => f.write_str("operation cancelled"),
             Self::Backend { service, detail } => write!(f, "{service} backend failed: {detail}"),
             Self::Protocol { service, detail } => write!(f, "{service} protocol error: {detail}"),
-            Self::OutputLimit { limit } => write!(f, "output exceeded {limit} bytes"),
             Self::Io(v) => write!(f, "I/O error: {v}"),
         }
     }
@@ -144,11 +139,6 @@ pub fn write_media_artifact(
     bytes: &[u8],
 ) -> ServiceResult<Value> {
     check_operation(context)?;
-    if bytes.len() > MAX_MEDIA_BYTES {
-        return Err(ServiceError::OutputLimit {
-            limit: MAX_MEDIA_BYTES,
-        });
-    }
     let extension = extension.trim_start_matches('.');
     if extension.is_empty() || !extension.bytes().all(|b| b.is_ascii_alphanumeric()) {
         return Err(ServiceError::InvalidInput(

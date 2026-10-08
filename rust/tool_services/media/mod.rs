@@ -12,7 +12,6 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-const MAX_INPUT_IMAGE: usize = 20 * 1024 * 1024;
 /// The deployment's media aliases in Brama; a configured model overrides each.
 const IMAGE_ALIAS: &str = "image-model";
 const VOICE_ALIAS: &str = "voice-model";
@@ -89,11 +88,6 @@ impl MediaService {
         check_operation(context)?;
         let path = self.jailed(input)?;
         let bytes = fs::read(&path)?;
-        if bytes.len() > MAX_INPUT_IMAGE {
-            return Err(ServiceError::OutputLimit {
-                limit: MAX_INPUT_IMAGE,
-            });
-        }
         let (format, width, height) = image_metadata(&bytes)?;
         bounded_json(
             context,
