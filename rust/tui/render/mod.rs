@@ -5,8 +5,8 @@ use super::{AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, A
 
 mod panels;
 mod prompt;
-// ca38dda moved qr.rs here from the crate root without declaring it; the
-// crate reaches it as `tui::qr`.
+// qr.rs lives here, beside the panels that draw it; the crate reaches it as
+// `tui::qr`.
 pub mod qr;
 
 use crate::tui::render::panels::boxes::input_prefix_width;

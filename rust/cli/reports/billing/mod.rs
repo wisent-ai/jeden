@@ -13,8 +13,8 @@ pub(crate) const BILLING_SLASH_HANDLERS: [(&str, &str); 9] = [
     ("/subscriptions renew", "subscriptions.renew"),
 ];
 
-/// The slash prefixes the billing backend answers. f3e10a9 kept the table
-/// and dropped this accessor, which cli/run/slash.rs calls to route input.
+/// The slash prefixes the billing backend answers; cli/run/slash.rs calls
+/// this to route input.
 pub(crate) fn billing_slash_handlers() -> &'static [(&'static str, &'static str)] {
     &BILLING_SLASH_HANDLERS
 }
