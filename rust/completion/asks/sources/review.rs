@@ -144,6 +144,7 @@ impl Linker {
                             follows: new.follows.clone(),
                             occurrences: Vec::new(),
                             answer: None,
+                            oko: None,
                         });
                     }
                 }
