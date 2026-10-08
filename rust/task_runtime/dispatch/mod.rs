@@ -23,7 +23,7 @@ pub fn execute_delegate(
     let scheduler = TaskScheduler::open(
         cwd,
         &default_store(cwd, artifact_dir),
-        limits_from_config(cwd),
+        limits_from_config(cwd)?,
     )?;
     let mut request: SpawnRequest =
         serde_json::from_value(input.clone()).map_err(|e| TaskError::Invalid(e.to_string()))?;

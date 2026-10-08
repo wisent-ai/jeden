@@ -14,12 +14,9 @@ fn task_scheduler(
     context: &SlashContext<'_>,
 ) -> Result<crate::task_runtime::TaskScheduler, String> {
     let session_dir = slash_session_dir(context, "")?;
-    crate::task_runtime::TaskScheduler::open(
-        context.cwd,
-        &session_dir.join("task-runtime"),
-        crate::task_runtime::limits_from_config(context.cwd),
-    )
-    .map_err(|error| error.to_string())
+    let limits = crate::task_runtime::limits_from_config(context.cwd).map_err(|error| error.to_string())?;
+    crate::task_runtime::TaskScheduler::open(context.cwd, &session_dir.join("task-runtime"), limits)
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<String, String> {

@@ -65,12 +65,10 @@ pub struct BatchTask {
 }
 
 impl TaskScheduler {
-    pub fn open(cwd: &Path, store: &Path, mut limits: TaskLimits) -> Result<Self, TaskError> {
-        limits.max_parallel = limits.max_parallel.clamp(1, 32);
-        limits.max_batch = limits.max_batch.clamp(1, 256);
-        limits.max_depth = limits.max_depth.min(16);
-        limits.max_children = limits.max_children.clamp(1, 256);
-        limits.max_output_bytes = limits.max_output_bytes.clamp(1_024, 64 * 1024 * 1024);
+    /// Opens the store under the operator's declared `limits`, used as they
+    /// were declared: `limits_from_config` already refused a missing or
+    /// non-positive one by name.
+    pub fn open(cwd: &Path, store: &Path, limits: TaskLimits) -> Result<Self, TaskError> {
         for path in [
             store.to_path_buf(),
             store.join("jobs"),
@@ -97,7 +95,7 @@ impl TaskScheduler {
         Ok(this)
     }
     pub fn mailbox(&self) -> Result<Mailbox, TaskError> {
-        Mailbox::new(&self.store, self.limits.max_children.saturating_mul(64))
+        Mailbox::new(&self.store)
     }
     fn workspace_root(&self) -> PathBuf {
         workspace_root_for(&self.store, &self.cwd)

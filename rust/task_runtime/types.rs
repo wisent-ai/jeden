@@ -3,26 +3,19 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// How the operator lets delegated tasks run: how many at once, how many in
+/// one batch, how deep they may nest, how many children one parent may hold
+/// and how many bytes of a child's output are kept. Every field is the
+/// operator's (`jeden config set taskScheduler '{…}'`); none has a default,
+/// and a declaration missing one is refused by name.
 #[derive(Clone, Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TaskLimits {
     pub max_parallel: usize,
     pub max_batch: usize,
     pub max_depth: u32,
     pub max_children: usize,
     pub max_output_bytes: u64,
-}
-
-impl Default for TaskLimits {
-    fn default() -> Self {
-        Self {
-            max_parallel: 4,
-            max_batch: 32,
-            max_depth: 4,
-            max_children: 16,
-            max_output_bytes: 2 * 1024 * 1024,
-        }
-    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]

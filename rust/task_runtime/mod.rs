@@ -118,7 +118,8 @@ fn dynamic_descriptors() -> Vec<crate::tool_runtime::DynamicToolDescriptor> {
     let health = std::env::current_dir()
         .map_err(|error| error.to_string())
         .and_then(|cwd| {
-            TaskScheduler::open(&cwd, &health_store, TaskLimits::default())
+            limits_from_config(&cwd)
+                .and_then(|limits| TaskScheduler::open(&cwd, &health_store, limits))
                 .map_err(|error| error.to_string())
         })
         .map(|scheduler| scheduler.health());
@@ -183,13 +184,35 @@ pub fn register_with_tool_runtime() -> Result<(), String> {
     })
 }
 
-pub fn limits_from_config(cwd: &Path) -> TaskLimits {
+/// The operator's task limits, `taskScheduler` in Jeden's merged config.
+/// Absent, incomplete or with a zero count where one task must fit, it is
+/// refused by name: delegation runs only under limits someone stated.
+pub fn limits_from_config(cwd: &Path) -> Result<TaskLimits, TaskError> {
     let config = crate::cli::config::merged_config_value(cwd);
-    config
-        .get("taskScheduler")
-        .cloned()
-        .and_then(|v| serde_json::from_value(v).ok())
-        .unwrap_or_default()
+    let declared = config.get("taskScheduler").cloned().ok_or_else(|| {
+        TaskError::Invalid(
+            "taskScheduler is not declared: state maxParallel, maxBatch, maxDepth, maxChildren and maxOutputBytes with jeden config set taskScheduler '{…}'".into(),
+        )
+    })?;
+    let limits: TaskLimits = serde_json::from_value(declared)
+        .map_err(|error| TaskError::Invalid(format!("taskScheduler cannot be read: {error}")))?;
+    let zero = [
+        ("maxParallel", limits.max_parallel),
+        ("maxBatch", limits.max_batch),
+        ("maxChildren", limits.max_children),
+    ]
+    .into_iter()
+    .filter(|(_, value)| std::num::NonZeroUsize::new(*value).is_none())
+    .map(|(name, _)| name)
+    .chain(std::num::NonZeroU64::new(limits.max_output_bytes).is_none().then_some("maxOutputBytes"))
+    .collect::<Vec<_>>();
+    if !zero.is_empty() {
+        return Err(TaskError::Invalid(format!(
+            "taskScheduler {} must be positive: no task could run under it",
+            zero.join(", ")
+        )));
+    }
+    Ok(limits)
 }
 
 pub fn default_store(cwd: &Path, artifact_dir: Option<&Path>) -> PathBuf {
@@ -208,7 +231,7 @@ pub fn execute_registered_tool(
     let scheduler = TaskScheduler::open(
         cwd,
         &default_store(cwd, artifact_dir),
-        limits_from_config(cwd),
+        limits_from_config(cwd)?,
     )?;
     match tool {
         "task" => dispatch::execute_task(&scheduler, input),

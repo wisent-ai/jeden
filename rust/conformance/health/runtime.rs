@@ -45,11 +45,9 @@ pub(super) fn task_probe(cwd: &Path) -> HealthProbe {
     let store = std::env::var_os("JEDEN_TASK_STORE")
         .map(PathBuf::from)
         .unwrap_or_else(|| cwd.join(".jeden/tasks"));
-    match crate::task_runtime::TaskScheduler::open(
-        cwd,
-        &store,
-        crate::task_runtime::limits_from_config(cwd),
-    ) {
+    match crate::task_runtime::limits_from_config(cwd).and_then(|limits| {
+        crate::task_runtime::TaskScheduler::open(cwd, &store, limits)
+    }) {
         Ok(scheduler) => {
             let health = scheduler.health();
             if health.healthy {

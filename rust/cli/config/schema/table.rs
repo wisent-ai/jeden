@@ -221,6 +221,13 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
         enum_values: &[],
     },
     SettingSpec {
+        key: "taskScheduler",
+        typ: "record",
+        description: "Limits delegated tasks run under, every one required: maxParallel (tasks at once), maxBatch (tasks in one batch), maxDepth (how deep tasks may nest), maxChildren (children one task may hold) and maxOutputBytes (bytes of a child's output kept). Unset, delegation is refused naming this key.",
+        default_json: "null",
+        enum_values: &[],
+    },
+    SettingSpec {
         key: "hooks.tamaRegistry",
         typ: "string",
         description: "Path to the Tama hook registry (shared-hooks registry.json). Empty disables Tama hooks; unset auto-discovers known locations.",

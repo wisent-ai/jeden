@@ -17,11 +17,6 @@ use std::process::Command;
 #[cfg(unix)]
 use super::kill;
 
-/// An assembled agent context above this size is refused rather than sent.
-/// One mebibyte is the ceiling the scheduler already enforced inline; it is
-/// named here so the refusal and the number live in one place.
-const MAX_CONTEXT_BYTES: usize = 1024 * 1024;
-
 /// Read size when draining a child's stdout or stderr. Eight kibibytes is a
 /// buffer size, not a policy: the retained volume is bounded separately by
 /// the caller's `max_bytes`.
@@ -94,12 +89,6 @@ pub(super) fn agent_task_context(
     }
     context.push_str("Assigned task:\n");
     context.push_str(task);
-    if context.len() > MAX_CONTEXT_BYTES {
-        return Err(TaskError::Capacity {
-            running: context.len(),
-            limit: MAX_CONTEXT_BYTES,
-        });
-    }
     Ok(context)
 }
 
