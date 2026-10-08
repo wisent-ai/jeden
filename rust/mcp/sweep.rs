@@ -179,7 +179,6 @@ pub fn reconnect(cwd: &Path, server_name: &str) -> Result<Value, String> {
         connection.disconnect();
         connection.config = config;
         connection.failures = 0;
-        connection.retry_after = None;
         connection.connect(cwd, true)?;
         crate::capability::invalidate();
         Ok(

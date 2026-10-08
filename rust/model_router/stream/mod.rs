@@ -171,9 +171,13 @@ pub fn chat_completion_streaming(
                             if let Some(target) = target {
                                 exhausted_targets.insert(target.identity());
                             }
-                            if let (Some(store), Some(target)) = (cooldown_store.as_ref(), target) {
+                            // A cooldown is persisted only for the wait the provider
+                            // stated (Retry-After); without one the subscription is
+                            // skipped for this turn alone and asked again next turn.
+                            if let (Some(store), Some(target), Some(delay)) =
+                                (cooldown_store.as_ref(), target, error.retry_after)
+                            {
                                 let now_ms = epoch_millis();
-                                let delay = error.retry_after.unwrap_or(Duration::from_secs(60));
                                 let until_ms = now_ms.saturating_add(duration_millis(delay).max(1));
                                 if let Err(message) =
                                     store.record(target.identity(), until_ms, now_ms)

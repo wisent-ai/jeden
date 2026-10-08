@@ -8,18 +8,16 @@ use crate::mcp::validate::validate_resources;
 use crate::mcp::validate::validate_tools;
 use serde_json::{json, Value};
 use std::path::Path;
-use std::time::{Duration, Instant};
 
-const CIRCUIT_FAILURE_LIMIT: u32 = 5;
-const CIRCUIT_OPEN: Duration = Duration::from_secs(30);
-
+/// Where one server's connection stands. A failed start or exchange is
+/// reported with its count and last error; the next request tries again,
+/// because no wait or failure count here would be anything but a guess.
 #[derive(Clone, Copy)]
 pub(crate) enum ConnectionState {
     Disconnected,
     Connecting,
     Ready,
-    Backoff,
-    CircuitOpen,
+    Failed,
 }
 
 impl ConnectionState {
@@ -28,8 +26,7 @@ impl ConnectionState {
             Self::Disconnected => "disconnected",
             Self::Connecting => "connecting",
             Self::Ready => "ready",
-            Self::Backoff => "backoff",
-            Self::CircuitOpen => "circuit-open",
+            Self::Failed => "failed",
         }
     }
 }
@@ -39,7 +36,6 @@ pub(super) struct ServerConnection {
     pub(super) client: Option<McpClient>,
     pub(super) state: ConnectionState,
     pub(super) failures: u32,
-    pub(super) retry_after: Option<Instant>,
     pub(super) last_error: Option<String>,
     pub(super) initialize: Value,
     pub(super) tools: Value,
@@ -54,7 +50,6 @@ impl ServerConnection {
             client: None,
             state: ConnectionState::Disconnected,
             failures: 0,
-            retry_after: None,
             last_error: None,
             initialize: Value::Null,
             tools: json!({"tools": []}),
@@ -74,14 +69,7 @@ impl ServerConnection {
         self.disconnect();
         self.failures = self.failures.saturating_add(1);
         self.last_error = Some(error);
-        let delay = if self.failures >= CIRCUIT_FAILURE_LIMIT {
-            self.state = ConnectionState::CircuitOpen;
-            CIRCUIT_OPEN
-        } else {
-            self.state = ConnectionState::Backoff;
-            Duration::from_millis(100_u64.saturating_mul(1 << self.failures.min(4)))
-        };
-        self.retry_after = Some(Instant::now() + delay);
+        self.state = ConnectionState::Failed;
     }
 
     pub(super) fn connect(&mut self, cwd: &Path, force: bool) -> Result<(), String> {
@@ -89,17 +77,6 @@ impl ServerConnection {
             return Ok(());
         }
         self.disconnect();
-        if !force {
-            if let Some(retry_after) = self.retry_after {
-                if retry_after > Instant::now() && self.failures >= CIRCUIT_FAILURE_LIMIT {
-                    self.state = ConnectionState::CircuitOpen;
-                    return Err(format!(
-                        "MCP circuit is open for {}ms",
-                        retry_after.duration_since(Instant::now()).as_millis()
-                    ));
-                }
-            }
-        }
         self.state = ConnectionState::Connecting;
         let result: Result<(), String> = (|| {
             let mut client = McpClient::start(&self.config, cwd)?;
@@ -140,7 +117,6 @@ impl ServerConnection {
             Ok(()) => {
                 self.state = ConnectionState::Ready;
                 self.failures = 0;
-                self.retry_after = None;
                 self.last_error = None;
                 Ok(())
             }
