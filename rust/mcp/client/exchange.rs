@@ -4,8 +4,7 @@
 //! Split out of `mcp/client.rs`, which had grown past the module line cap.
 
 use super::framing::encode_message;
-use super::{McpClient, Transport, MAX_NOTIFICATIONS, MAX_SESSION_ID_BYTES, MCP_SESSION_ID};
-use crate::mcp::client::framing::MAX_MESSAGE_BYTES;
+use super::{McpClient, Transport, MCP_SESSION_ID};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::Value;
 use std::io::{Read, Write};
@@ -68,9 +67,6 @@ impl McpClient {
                     let value = value
                         .to_str()
                         .map_err(|_| "invalid MCP session id header")?;
-                    if value.len() > MAX_SESSION_ID_BYTES {
-                        return Err("MCP session id exceeds 1024 byte limit".into());
-                    }
                     transport.session_id = Some(value.to_string());
                 }
                 if response.status().as_u16() == 202 || response.content_length() == Some(0) {
@@ -82,23 +78,19 @@ impl McpClient {
                     .and_then(|value| value.to_str().ok())
                     .unwrap_or("")
                     .to_string();
+                // The server the operator configured answers as much as the
+                // call produced; it is read to its end.
                 let mut body = Vec::new();
+                let mut response = response;
                 response
-                    .take((MAX_MESSAGE_BYTES + 1) as u64)
                     .read_to_end(&mut body)
                     .map_err(|error| format!("MCP HTTP read failed: {error}"))?;
-                if body.len() > MAX_MESSAGE_BYTES {
-                    return Err("MCP HTTP response exceeds 8 MiB limit".into());
-                }
                 if content_type.starts_with("text/event-stream") {
                     let text = std::str::from_utf8(&body)
                         .map_err(|error| format!("invalid MCP event stream UTF-8: {error}"))?;
                     let mut messages = Vec::new();
                     for line in text.lines() {
                         if let Some(data) = line.strip_prefix("data:") {
-                            if messages.len() >= MAX_NOTIFICATIONS {
-                                return Err("MCP event stream exceeds event limit".into());
-                            }
                             messages.push(
                                 serde_json::from_str(data.trim())
                                     .map_err(|error| format!("invalid MCP event data: {error}"))?,

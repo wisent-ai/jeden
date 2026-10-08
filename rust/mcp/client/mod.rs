@@ -16,8 +16,6 @@ mod exchange;
 mod framing;
 mod launch;
 
-const MAX_NOTIFICATIONS: usize = 256;
-const MAX_SESSION_ID_BYTES: usize = 1024;
 const MCP_SESSION_ID: &str = "mcp-session-id";
 
 pub(super) struct StdioTransport {
@@ -94,14 +92,10 @@ impl McpClient {
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         loop {
             let messages = self.exchange(&message)?;
+            // Notifications wait in order until the sweep drains them
+            // (`poll_notifications`); none is dropped and no count ends the
+            // connection.
             for response in messages {
-                if response.get("method").is_some()
-                    && response.get("id").is_none()
-                    && self.notifications.len() >= MAX_NOTIFICATIONS
-                {
-                    self.transport_failed = true;
-                    return Err("MCP notification queue limit exceeded".into());
-                }
                 if response.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
                     return Err("MCP response has invalid jsonrpc version".into());
                 }
@@ -145,10 +139,6 @@ impl McpClient {
         let message = json!({"jsonrpc": "2.0", "method": method, "params": params});
         for response in self.exchange(&message)? {
             if response.get("method").is_some() && response.get("id").is_none() {
-                if self.notifications.len() >= MAX_NOTIFICATIONS {
-                    self.transport_failed = true;
-                    return Err("MCP notification queue limit exceeded".into());
-                }
                 self.notifications.push_back(response);
             }
         }

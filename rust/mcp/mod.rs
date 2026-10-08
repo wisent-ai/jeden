@@ -20,7 +20,6 @@ pub use sweep::{live_tools, reconnect, refresh_all};
 use validate::{validate_prompts, validate_resources, validate_tools};
 
 const MCP_PROTOCOL_VERSION: &str = "2024-11-05";
-const MAX_STDERR_BYTES: usize = 100_000;
 
 #[derive(Default)]
 pub(super) struct McpManager {
