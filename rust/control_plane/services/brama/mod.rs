@@ -34,9 +34,7 @@ pub struct BramaClient {
 impl BramaClient {
     pub fn from_env() -> Self {
         Self::with_secret_ref(
-            std::env::var("BRAMA_URL")
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
+            crate::agent::credential::brama_url(),
             Some(SecretRef::environment("BRAMA_TOKEN")),
             DEFAULT_TTL,
             ReqwestTransport::production(),

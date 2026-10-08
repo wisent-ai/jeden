@@ -26,11 +26,15 @@ fn redacted(value: &str) -> String {
 }
 
 fn brama_url() -> Result<String, String> {
-    env::var("BRAMA_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .ok_or_else(|| {
-            "BRAMA_URL is required; configure the Brama model-router service URL".to_string()
+    let route = crate::agent::credential::brama_route();
+    route
+        .url
+        .clone()
+        .ok_or_else(|| match route.source.refusal() {
+            Some(said) => format!("BRAMA_URL is required; Stado did not route it: {said}"),
+            None => {
+                "BRAMA_URL is required; configure the Brama model-router service URL".to_string()
+            }
         })
 }
 

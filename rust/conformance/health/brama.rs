@@ -28,12 +28,15 @@ pub(super) fn brama_probe(
 ) -> HealthProbe {
     let started = Instant::now();
     let health = client.health();
+    let origin = crate::agent::credential::route_origin();
     if !health.available {
-        return HealthProbe::unavailable("brama", started, health.detail.clone());
+        return HealthProbe::unavailable("brama", started, format!("{} ({origin})", health.detail));
     }
     let catalog = match client.catalog(false) {
         Ok(catalog) => catalog,
-        Err(error) => return HealthProbe::unavailable("brama", started, error.to_string()),
+        Err(error) => {
+            return HealthProbe::unavailable("brama", started, format!("{error} ({origin})"))
+        }
     };
     let readiness = client.readiness();
     let configured = configured_model(cwd);
@@ -53,6 +56,7 @@ pub(super) fn brama_probe(
         "health": health,
         "probe": {"version": catalog.version, "models": catalog.models.len()},
         "configuredModel": configured,
+        "route": origin,
         "readiness": readiness.as_ref().ok(),
     });
     // Fatal, not degraded: `available()` is what the report's verdict and the

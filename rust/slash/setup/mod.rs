@@ -55,7 +55,10 @@ fn setup_state(context: &SlashContext<'_>) -> SetupState {
         Err(error) => (None, Some(error)),
     };
     SetupState {
-        brama_url: configured_value(BRAMA_URL_KEY),
+        // The route this process resolved, or an address /setup wrote to
+        // ~/.jeden/.env after the process resolved it (the next start reads it).
+        brama_url: crate::agent::credential::brama_url()
+            .or_else(|| configured_value(BRAMA_URL_KEY)),
         agent_id: configured_value(AGENT_ID_KEY),
         secret_configured: configured_value(AGENT_SECRET_KEY).is_some(),
         model,
@@ -106,7 +109,7 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     match &state.brama_url {
         Some(url) => items.push(configured_row(
             "2. BRAMA_URL configured",
-            format!("{url} · stored in ~/.jeden/.env"),
+            format!("{url} · {}", crate::agent::credential::route_origin()),
         )),
         None => {
             let prefill = example_prefill(context.cwd, BRAMA_URL_KEY)
@@ -114,7 +117,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 .unwrap_or_else(|| " ".into());
             items.push(
                 PickerItem::action("2. Set BRAMA_URL", format!("/setup brama-url{prefill}"))
-                    .detail("required Brama model-router endpoint · stored in ~/.jeden/.env")
+                    .detail(format!(
+                        "{} · without Stado, the address is stored in ~/.jeden/.env",
+                        crate::agent::credential::route_origin()
+                    ))
                     .badge("INPUT")
                     .prefill(),
             );

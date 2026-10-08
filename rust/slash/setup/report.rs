@@ -25,8 +25,9 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
         "Setup checklist (guided wizard: run /setup in the interactive TUI):".to_string(),
         workspace_line,
         format!(
-            "2. BRAMA_URL {} — required; set: jeden run \"/setup brama-url <https-url>\" (or: echo 'BRAMA_URL=<url>' >> ~/.jeden/.env)",
-            mark(state.brama_url.is_some())
+            "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado service directory connect brama --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
+            mark(state.brama_url.is_some()),
+            crate::agent::credential::route_origin()
         ),
         format!(
             "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",

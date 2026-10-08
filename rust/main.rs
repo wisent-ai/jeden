@@ -176,9 +176,12 @@ pub fn main() -> ExitCode {
             }
         }
     }
-    if let Err(error) = load_env_files(&args.cwd) {
-        eprintln!("Error: failed to load environment files: {}", error);
-        return ExitCode::FAILURE;
+    match load_env_files(&args.cwd) {
+        Ok(loaded) => agent::credential::record_file_supplied(loaded),
+        Err(error) => {
+            eprintln!("Error: failed to load environment files: {}", error);
+            return ExitCode::FAILURE;
+        }
     }
     tui::theme::init(&args.cwd);
     if args.command == "doctor" {

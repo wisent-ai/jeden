@@ -59,10 +59,11 @@ pub(super) fn configured_value(key: &str) -> Option<String> {
         .or_else(|| env_file_value(&env_file_path(), key))
 }
 
-/// True when the required Brama model-router endpoint is available
-/// from the process environment or `~/.jeden/.env`. Drives the welcome tip.
+/// True when Brama's address resolves for this process: from the caller's
+/// environment, Stado's service directory, or `~/.jeden/.env`. Drives the
+/// welcome tip.
 pub(crate) fn brama_router_configured(_cwd: &Path) -> bool {
-    configured_value(BRAMA_URL_KEY).is_some()
+    crate::agent::credential::brama_url().is_some()
 }
 
 /// Prefill for an INPUT row, read best-effort from the repository's

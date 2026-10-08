@@ -19,9 +19,7 @@ pub(crate) fn model_picker(
 ) -> Result<PickerSpec, String> {
     let config = load_config(cwd);
     let lang = ui_language(&config).code().to_string();
-    let endpoint = std::env::var("BRAMA_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
+    let endpoint = crate::agent::credential::brama_url();
     let active = current_model
         .map(str::to_string)
         .or(config.model)

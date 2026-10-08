@@ -47,7 +47,11 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let (endpoint, bearer_token, secret) = match &direct {
         Some((url, key)) => (Some(url.clone()), key.clone(), String::new()),
         None => (
-            brama_variable("BRAMA_URL", "STADO_MODEL_ROUTER_URL"),
+            crate::agent::credential::brama_url().or_else(|| {
+                env::var("STADO_MODEL_ROUTER_URL")
+                    .ok()
+                    .filter(|value| !value.trim().is_empty())
+            }),
             brama_variable("BRAMA_TOKEN", "STADO_MODEL_ROUTER_TOKEN"),
             env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
         ),
@@ -126,9 +130,14 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         })
     };
     let endpoint_error = endpoint.is_none().then(|| {
-        "BRAMA_URL is required; configure the Brama model-router service URL, or set \
-         JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider to run without Brama"
-            .to_string()
+        let base = "BRAMA_URL is required; declare Jeden's route with `stado service directory \
+                    consumer-add brama jeden --capability model-routing --target <this host>`, \
+                    export BRAMA_URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible \
+                    provider to run without Brama";
+        match crate::agent::credential::brama_route().source.refusal() {
+            Some(said) => format!("{base} (Stado did not route it: {said})"),
+            None => base.to_string(),
+        }
     });
     let token_error = (direct.is_none() && bearer_token.is_none()).then(|| {
         "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential".to_string()

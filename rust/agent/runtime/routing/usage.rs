@@ -16,9 +16,7 @@ pub(in crate::agent) fn usage_cost(
     model: &str,
     usage: &CompletionUsage,
 ) -> Option<Value> {
-    let endpoint = env::var("BRAMA_URL")
-        .ok()
-        .filter(|value| !value.trim().is_empty());
+    let endpoint = crate::agent::credential::brama_url();
     let client = crate::control_plane::brama::BramaClient::configured(
         endpoint,
         env::var("BRAMA_TOKEN").ok(),

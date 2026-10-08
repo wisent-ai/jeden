@@ -72,9 +72,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let initial_model_picker = if model.is_none() {
         // Brama unconfigured: skip the startup picker so the REPL still opens;
         // the welcome tip points at /setup to connect a router.
-        let endpoint = env::var("BRAMA_URL")
-            .ok()
-            .filter(|value| !value.trim().is_empty());
+        let endpoint = crate::agent::credential::brama_url();
         let brama = crate::control_plane::brama::BramaClient::configured(
             endpoint,
             env::var("BRAMA_TOKEN").ok(),
