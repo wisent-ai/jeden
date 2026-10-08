@@ -96,9 +96,19 @@ impl Corpus {
     }
 
     fn collect_root(&mut self, root: &Path, depth: usize, settings: &Settings) {
+        let home = crate::dirs_home();
+        let walked_root = root.to_path_buf();
         let walk = WalkBuilder::new(root)
             .max_depth(Some(depth))
             .follow_links(false)
+            .filter_entry(move |entry| {
+                !crate::tool_runtime::runtime_ops::platform::guarded::walk_skips(
+                    &home,
+                    &walked_root,
+                    entry.path(),
+                    entry.file_type().is_some_and(|kind| kind.is_dir()),
+                )
+            })
             .build();
         for entry in walk.flatten() {
             if self.files >= MAX_FILES || self.sections.len() >= MAX_CHUNKS {

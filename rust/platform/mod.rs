@@ -5,6 +5,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus};
 
+pub mod guarded;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "macos")]

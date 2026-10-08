@@ -74,7 +74,19 @@ pub(super) fn discover(
                     .map(usize::from)
                     .unwrap_or(2)
                     .min(8),
-            );
+            )
+            .filter_entry({
+                let home = crate::dirs_home();
+                let root = root.clone();
+                move |entry| {
+                    !crate::tool_runtime::runtime_ops::platform::guarded::walk_skips(
+                        &home,
+                        &root,
+                        entry.path(),
+                        entry.file_type().is_some_and(|kind| kind.is_dir()),
+                    )
+                }
+            });
         let output = Arc::clone(&output);
         let error = Arc::clone(&error);
         let cancellation = runtime.operation.cancellation().clone();
