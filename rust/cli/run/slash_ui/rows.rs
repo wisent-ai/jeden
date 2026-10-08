@@ -47,10 +47,14 @@ pub(super) fn model_row(
     widths: &[usize],
 ) -> PickerItem {
     let selected = active == Some(model.id.as_str());
+    let declared = |tokens: Option<u64>| match tokens {
+        Some(tokens) => tokens.to_string(),
+        None => "not declared".to_string(),
+    };
     let detail = format!(
         "context {} · output {} · {}{}",
-        model.context_window,
-        model.max_output_tokens,
+        declared(model.context_window),
+        declared(model.max_output_tokens),
         if model.tools { "tools" } else { "no tools" },
         if model.reasoning { " · reasoning" } else { "" }
     );

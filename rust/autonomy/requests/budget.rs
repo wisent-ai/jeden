@@ -102,26 +102,30 @@ pub(crate) fn reserve(
         decimal(entry.price.cache_read)?,
         decimal(entry.price.cache_write)?,
     ];
-    if entry.context_window == 0
-        || entry.max_output_tokens == 0
-        || rates[0] <= Decimal::ZERO
-        || rates[1] <= Decimal::ZERO
-    {
-        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} has incomplete pricing or capacity"));
+    let (Some(context_window), Some(ceiling)) = (
+        entry.context_window.filter(|tokens| *tokens > 0),
+        entry.max_output_tokens.filter(|tokens| *tokens > 0),
+    ) else {
+        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} declares no context window or output ceiling"));
+    };
+    if rates[0] <= Decimal::ZERO || rates[1] <= Decimal::ZERO {
+        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} has incomplete pricing"));
     }
-    let output = max_tokens
-        .map(|v| v as u64)
-        .unwrap_or(entry.max_output_tokens);
-    if output > entry.max_output_tokens {
+    // The caller's own cap when it set one; the route's declared ceiling is
+    // what an uncapped request may spend.
+    let output = match max_tokens {
+        Some(requested) => requested as u64,
+        None => ceiling,
+    };
+    if output > ceiling {
         return Err(format!(
             "requested output exceeds {model}'s advertised token ceiling"
         ));
     }
     let input_rate = rates[0] + rates[2] + rates[3];
     let million = Decimal::from(1_000_000u64);
-    let upper = (Decimal::from(entry.context_window) * input_rate
-        + Decimal::from(output) * rates[1])
-        / million;
+    let upper =
+        (Decimal::from(context_window) * input_rate + Decimal::from(output) * rates[1]) / million;
     let _ledger = budget
         .ledger
         .lock()

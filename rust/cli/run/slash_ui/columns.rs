@@ -45,14 +45,14 @@ fn perf_detail(perf: Option<&ModelPerf>) -> String {
     }
 }
 
-/// Context window the way omp prints it: `272k ◫`, `1m ◫`.
-pub(super) fn context_metric(tokens: u64) -> String {
-    if tokens >= 1_000_000 {
-        format!("{}m ◫", tokens / 1_000_000)
-    } else if tokens >= 1_000 {
-        format!("{}k ◫", tokens / 1_000)
-    } else {
-        format!("{tokens} ◫")
+/// Context window the way omp prints it: `272k ◫`, `1m ◫`; a route that
+/// declares none shows `? ◫`.
+pub(super) fn context_metric(tokens: Option<u64>) -> String {
+    match tokens {
+        None => "? ◫".to_string(),
+        Some(tokens) if tokens >= 1_000_000 => format!("{}m ◫", tokens / 1_000_000),
+        Some(tokens) if tokens >= 1_000 => format!("{}k ◫", tokens / 1_000),
+        Some(tokens) => format!("{tokens} ◫"),
     }
 }
 

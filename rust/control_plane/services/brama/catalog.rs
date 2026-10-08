@@ -48,10 +48,12 @@ pub struct ModelEntry {
     pub id: String,
     #[serde(default = "default_true")]
     pub available: bool,
+    /// Brama answers `null` for a route whose registry declares no ceiling;
+    /// that is "not declared", which a caller has to treat as such.
     #[serde(default)]
-    pub context_window: u64,
+    pub context_window: Option<u64>,
     #[serde(default)]
-    pub max_output_tokens: u64,
+    pub max_output_tokens: Option<u64>,
     #[serde(default)]
     pub input_modalities: Vec<String>,
     #[serde(default)]
