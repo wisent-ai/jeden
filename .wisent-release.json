@@ -26,11 +26,11 @@
         }
       ],
       "build": {
-        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["stado", "product", "cargo", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "stage": {
-        "bin/jeden": "bin/jeden",
-        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
+        "jeden": "bin/jeden",
+        "jeden-sandbox-helper": "bin/jeden-sandbox-helper",
         "release-tests": "evidence/release-tests"
       }
     },
@@ -48,11 +48,11 @@
         }
       ],
       "build": {
-        "argv": ["cargo", "run", "--quiet", "--locked", "--manifest-path", "tools/Cargo.toml", "--", "release", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": ["stado", "product", "cargo", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
       },
       "stage": {
-        "bin/jeden": "bin/jeden",
-        "bin/jeden-sandbox-helper": "bin/jeden-sandbox-helper",
+        "jeden": "bin/jeden",
+        "jeden-sandbox-helper": "bin/jeden-sandbox-helper",
         "release-tests": "evidence/release-tests"
       }
     },

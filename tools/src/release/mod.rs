@@ -1,8 +1,8 @@
-//! Native qualification, artifact facts and signed release manifests.
-//! Stado owns private Cargo source publication and selection.
+//! Artifact facts and signed release manifests. Stado owns private Cargo
+//! source publication and selection, and native staging
+//! (`stado product cargo stage`).
 
 mod dsse;
-mod stage;
 
 use sha2::{Digest, Sha256};
 use std::fs::File;
@@ -11,47 +11,17 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str =
-    "usage: jeden-tools release <stage --bin NAME... [--qualify TEST...] | facts FILE | dsse ...>";
-const PREFIX: &str = "native stage: ";
+const USAGE: &str = "usage: jeden-tools release <facts FILE | dsse ...>";
 
 pub(crate) fn run(arguments: &[String]) -> Result<u8, String> {
     let Some((action, rest)) = arguments.split_first() else {
         return Err(USAGE.into());
     };
-    let outcome = match action.as_str() {
-        "stage" => {
-            let (binaries, qualifications) = stage_arguments(rest)?;
-            stage::stage(&binaries, &qualifications)
-        }
-        "facts" => return facts(rest),
-        "dsse" => return dsse::run(rest),
-        other => return Err(format!("unknown release action `{other}`; {USAGE}")),
-    };
-    outcome.map_err(|message| format!("{PREFIX}{message}"))
-}
-
-/// `--bin NAME` pairs name what is staged; `--qualify TEST` pairs name the
-/// ignored integration tests run against the staged candidate afterwards.
-fn stage_arguments(arguments: &[String]) -> Result<(Vec<String>, Vec<String>), String> {
-    let mut names = Vec::new();
-    let mut qualifications = Vec::new();
-    let mut remaining = arguments.iter();
-    while let Some(flag) = remaining.next() {
-        match (flag.as_str(), remaining.next()) {
-            ("--bin", Some(name)) if !name.is_empty() => names.push(name.clone()),
-            ("--qualify", Some(test)) if !test.is_empty() => qualifications.push(test.clone()),
-            _ => {
-                return Err(format!(
-                    "{PREFIX}stage takes only --bin NAME and --qualify TEST pairs"
-                ))
-            }
-        }
+    match action.as_str() {
+        "facts" => facts(rest),
+        "dsse" => dsse::run(rest),
+        other => Err(format!("unknown release action `{other}`; {USAGE}")),
     }
-    if names.is_empty() {
-        return Err(format!("{PREFIX}stage requires at least one --bin NAME"));
-    }
-    Ok((names, qualifications))
 }
 
 /// `name=`, `sha256=` and `size=` lines for one file, in the form a GitHub

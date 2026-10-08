@@ -109,9 +109,10 @@ identity through Stado: …; without Stado set JEDEN_CODESIGN_IDENTITY to a
 codesign identity, or - for ad-hoc`. With `JEDEN_CODESIGN_IDENTITY` set it
 signs the new build with `/usr/bin/codesign --force --sign <identity>` and asks
 Stado nothing; it does not compare that identity with the running one.
-The release recipe uses `cargo run --locked --manifest-path tools/Cargo.toml --
-release stage --bin jeden --bin jeden-sandbox-helper` to build and stage both
-executables through Stado's shared Cargo source handling. Its native staging
+The release recipe uses `stado product cargo stage --bin jeden --bin
+jeden-sandbox-helper` to build both executables through Stado's shared Cargo
+source handling and place them in `WISENT_OUTPUT_DIR`, from where the recipe
+archives them as `bin/jeden` and `bin/jeden-sandbox-helper`. Its native staging
 qualification is `tests/release/stage.mjs`. The Stado running the release job,
 or `stado product install` during local installation,
 signs the declared native stage before archiving or installing it. Stado's signed
@@ -206,7 +207,7 @@ For model calls, Jeden discovers active Weles subscriptions and their quota snap
 
 ## Release automation
 
-The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies `WISENT_OUTPUT_DIR` to `jeden-tools release stage`; no run number or provider identity participates in the release version.
+The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies `WISENT_OUTPUT_DIR` to `stado product cargo stage`; no run number or provider identity participates in the release version.
 
 The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
 
@@ -220,9 +221,9 @@ changing only Jeden's version does not invalidate it. See
 [private Cargo build inputs](https://stado.wisent.com/docs/builds#private-cargo-build-inputs)
 for commands, desktop controls, refusals and the real publication journey.
 
-Release quality uses `stado product cargo build`; `jeden-tools release stage`
-uses that same executor and retains Jeden's native staging and qualification
-orchestration. It copies successful outputs into `WISENT_OUTPUT_DIR/bin`.
+Release quality uses `stado product cargo build`, and the build step is
+`stado product cargo stage`, the same executor: it builds each `--bin` with the
+locked sources and places it at `WISENT_OUTPUT_DIR/<name>`.
 Missing output or private input, stale private packages and inconsistent source
 configuration are refusals, not reasons to fetch private repositories on the
 worker. Cargo verifies the vendored checksums and preserves the source lockfile.

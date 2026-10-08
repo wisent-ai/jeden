@@ -1,7 +1,7 @@
 //! Jeden's repository tooling, in the one language the product is written in.
 //!
-//! - `release`: stage and qualify native binaries through Stado's shared
-//!   Cargo source handling, and record artifact facts and signed manifests.
+//! - `release`: record artifact facts and signed manifests; native staging is
+//!   `stado product cargo stage`.
 //! - `surface`: print the public command vocabulary the binary answers to.
 //! - `versioning`: the fleet's versioning rule and the published baseline the
 //!   version gate compares against.

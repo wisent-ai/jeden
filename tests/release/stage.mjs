@@ -28,7 +28,7 @@ const lock = digest(readFileSync(join(source, 'Cargo.lock')));
 const provenance = readFileSync(join(input, 'provenance.json'));
 const report = { source_revision: sourceRevision, test_sha256: digest(readFileSync(fileURLToPath(import.meta.url))), started_at: new Date().toISOString(), commands: [], cases: [], verdict: 'failed' };
 const environment = { ...process.env, WISENT_OUTPUT_DIR: candidate };
-const stage = ['run', '--quiet', '--locked', '--manifest-path', join(source, 'tools', 'Cargo.toml'), '--', 'release', 'stage', '--bin', 'jeden', '--bin', 'jeden-sandbox-helper'];
+const stage = ['product', 'cargo', 'stage', '--bin', 'jeden', '--bin', 'jeden-sandbox-helper'];
 function command(program, args, env = environment) {
   const directory = join(output, 'commands', randomUUID());
   mkdirSync(directory, { recursive: true });
@@ -49,9 +49,9 @@ function success(program, args, env) {
 }
 try {
   report.stado_version = success('stado', ['--version']).stdout.trim();
-  success('cargo', stage);
-  const executable = join(candidate, 'bin', 'jeden');
-  const helper = join(candidate, 'bin', 'jeden-sandbox-helper');
+  success('stado', stage);
+  const executable = join(candidate, 'jeden');
+  const helper = join(candidate, 'jeden-sandbox-helper');
   assert.ok(statSync(executable).isFile());
   assert.ok(statSync(helper).isFile());
   const version = success(executable, ['--version']).stdout.trim();
@@ -72,7 +72,7 @@ try {
   const missingInput = { ...environment };
   delete missingInput.WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR;
   for (const [name, env] of [['missing-output', missingOutput], ['missing-private-input', missingInput]]) {
-    const result = command('cargo', stage, env);
+    const result = command('stado', stage, env);
     assert.ok(result.status !== null && result.status !== successExit, `${name} was accepted`);
     assert.equal(digest(readFileSync(executable)), binaryDigest, `${name} replaced the staged CLI`);
     assert.equal(digest(readFileSync(helper)), helperDigest, `${name} replaced the staged helper`);
@@ -84,7 +84,7 @@ try {
 } catch (error) {
   report.error = String(error.stack ?? error);
 } finally {
-  rmSync(join(candidate, 'bin'), { recursive: true, force: true });
+  rmSync(candidate, { recursive: true, force: true });
   report.finished_at = new Date().toISOString();
   writeFileSync(join(output, 'report.json'), JSON.stringify(report, null, '\t'));
   console.log(`${report.verdict}: ${join(output, 'report.json')}`);
