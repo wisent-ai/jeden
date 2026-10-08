@@ -57,10 +57,7 @@ pub(super) fn decode_v2<T: DeserializeOwned>(value: Value) -> Result<T, WelesErr
 }
 
 pub(super) fn validate_identifier(value: &str) -> Result<(), WelesError> {
-    if value.is_empty()
-        || value.len() > super::billing::MAX_BILLING_STRING_BYTES
-        || value.chars().any(char::is_control)
-    {
+    if value.is_empty() || value.chars().any(char::is_control) {
         return Err(WelesError::InvalidResponse(
             "billing identifier is invalid".into(),
         ));

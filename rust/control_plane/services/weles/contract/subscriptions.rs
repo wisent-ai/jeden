@@ -23,7 +23,6 @@ pub(super) fn quota(
         meta,
     )?;
     if quota.subscription_id != subscription_id
-        || quota.buckets.len() > billing::MAX_BILLING_ITEMS
         || quota.buckets.iter().any(|bucket| {
             matches!(
                 (bucket.remaining, bucket.limit),
@@ -32,7 +31,7 @@ pub(super) fn quota(
         })
     {
         return Err(WelesError::InvalidResponse(
-            "quota identity, count, or remaining amount is invalid".into(),
+            "quota identity or remaining amount is invalid".into(),
         ));
     }
     Ok(quota)

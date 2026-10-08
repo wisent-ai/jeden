@@ -4,7 +4,7 @@
 //! Split out of `agent/runtime/routing.rs`, which had grown past the module
 //! line cap.
 
-use crate::control_plane::billing::{AccountState, SubscriptionState, MAX_BILLING_ITEMS};
+use crate::control_plane::billing::{AccountState, SubscriptionState};
 use crate::control_plane::contract::{RequestMeta, WelesApiV2};
 use crate::control_plane::weles::{platform_billing_configured, WelesClient};
 use crate::routing::subscriptions::SubscriptionTarget;
@@ -22,7 +22,7 @@ pub(super) fn subscription_pool_from_platform_billing(
     })?;
     let mut targets = Vec::new();
     let mut revisions = Vec::new();
-    'accounts: for (account_index, account) in accounts.into_iter().enumerate() {
+    for (account_index, account) in accounts.into_iter().enumerate() {
         if account.status != "active" {
             continue;
         }
@@ -97,9 +97,6 @@ pub(super) fn subscription_pool_from_platform_billing(
                 valid_until_ms: u64::MAX,
                 policy_allowed: true,
             });
-            if targets.len() >= MAX_BILLING_ITEMS {
-                break 'accounts;
-            }
         }
     }
     if targets.is_empty() {

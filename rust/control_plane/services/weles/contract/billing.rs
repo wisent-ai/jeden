@@ -7,7 +7,6 @@
 use super::super::{encode_path_segment, WelesClient, WelesError};
 use super::guards::{decode_v2, read_v2, validate_identifier};
 use crate::control_plane::billing;
-pub(crate) use crate::control_plane::billing::MAX_BILLING_STRING_BYTES;
 use crate::control_plane::contract::RequestMeta;
 use serde_json::{json, Value};
 
@@ -27,10 +26,9 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         )?;
         validate_identifier(&status.account_id)?;
         validate_identifier(&status.provider_id)?;
-        if status.account_id != account_id || status.capabilities.len() > billing::MAX_BILLING_ITEMS
-        {
+        if status.account_id != account_id {
             return Err(WelesError::InvalidResponse(
-                "billing status identity or capability count is invalid".into(),
+                "billing status names another account".into(),
             ));
         }
         Ok(status)
@@ -51,11 +49,6 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         )?;
         let methods: Vec<billing::PaymentMethodReference> =
             decode_v2(value.get("paymentMethods").cloned().unwrap_or(value))?;
-        if methods.len() > billing::MAX_BILLING_ITEMS {
-            return Err(WelesError::InvalidResponse(
-                "payment method count exceeds limit".into(),
-            ));
-        }
         Ok(methods)
     }
 
@@ -189,13 +182,12 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         )?;
         let subscriptions: Vec<billing::SubscriptionV2> =
             decode_v2(value.get("subscriptions").cloned().unwrap_or(value))?;
-        if subscriptions.len() > billing::MAX_BILLING_ITEMS
-            || subscriptions
-                .iter()
-                .any(|subscription| subscription.account_id != account_id)
+        if subscriptions
+            .iter()
+            .any(|subscription| subscription.account_id != account_id)
         {
             return Err(WelesError::InvalidResponse(
-                "subscription count or account identity is invalid".into(),
+                "a subscription names another account".into(),
             ));
         }
         Ok(subscriptions)

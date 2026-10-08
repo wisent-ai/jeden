@@ -3,9 +3,6 @@
 
 use serde::{Deserialize, Serialize};
 
-pub const MAX_BILLING_ITEMS: usize = 512;
-pub const MAX_BILLING_STRING_BYTES: usize = 2_048;
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AccountState {
@@ -243,17 +240,17 @@ pub(crate) fn validate_policy(policy: &PurchasePolicy) -> Result<(), &'static st
     if !policy.enabled && policy.auto_renew {
         return Err("auto-renew requires an enabled purchase policy");
     }
-    if policy.allowed_products.is_empty() || policy.allowed_products.len() > MAX_BILLING_ITEMS {
-        return Err("allowed product count is invalid");
+    if policy.allowed_products.is_empty() {
+        return Err("the purchase policy allows no product");
     }
-    if policy.allowed_currencies.is_empty() || policy.allowed_currencies.len() > MAX_BILLING_ITEMS {
-        return Err("allowed currency count is invalid");
+    if policy.allowed_currencies.is_empty() {
+        return Err("the purchase policy allows no currency");
     }
     if policy.max_single_microunits > policy.max_period_microunits {
         return Err("single purchase limit exceeds period limit");
     }
-    if policy.revision.is_empty() || policy.revision.len() > MAX_BILLING_STRING_BYTES {
-        return Err("policy revision is invalid");
+    if policy.revision.is_empty() {
+        return Err("the purchase policy names no revision");
     }
     Ok(())
 }

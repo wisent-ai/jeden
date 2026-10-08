@@ -4,7 +4,6 @@
 //! Split out of `control_plane/billing.rs`, which had grown past the module
 //! line cap.
 
-use super::MAX_BILLING_STRING_BYTES;
 use serde::{de, Deserialize, Deserializer, Serialize, Serializer};
 use std::fmt;
 
@@ -61,9 +60,6 @@ impl<'de> Deserialize<'de> for BillingGrant {
 fn validate_opaque_reference(value: &str) -> Result<(), &'static str> {
     if value.is_empty() {
         return Err("opaque reference is empty");
-    }
-    if value.len() > MAX_BILLING_STRING_BYTES {
-        return Err("opaque reference is too long");
     }
     if value.chars().any(char::is_control) {
         return Err("opaque reference contains control characters");
