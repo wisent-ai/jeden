@@ -32,11 +32,23 @@ pub(crate) struct Request {
     pub(crate) root: PathBuf,
 }
 
+/// Where OMP keeps its state: `~/.omp`.
+fn omp_home() -> Result<PathBuf, String> {
+    std::env::var_os("HOME")
+        .map(|home| PathBuf::from(home).join(".omp"))
+        .ok_or_else(|| "HOME is not set, so the OMP state directory cannot be found".into())
+}
+
 /// Where OMP keeps its session transcripts.
 pub(crate) fn default_root() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .map(|home| PathBuf::from(home).join(".omp/agent/sessions"))
-        .ok_or_else(|| "HOME is not set, so the OMP session root cannot be found".into())
+    Ok(omp_home()?.join("agent/sessions"))
+}
+
+/// Where OMP keeps one `<session id>.lock` per session, held open by the
+/// process that owns the session. It does not move with `--sessions`.
+#[cfg(unix)]
+fn owner_locks() -> Result<PathBuf, String> {
+    Ok(omp_home()?.join("run/session-owners"))
 }
 
 pub(crate) fn command(args: &crate::Args) -> Result<String, String> {

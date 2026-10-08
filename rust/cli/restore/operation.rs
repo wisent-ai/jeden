@@ -18,9 +18,7 @@ const STOPPED: &str = "stopped";
 
 pub(super) fn restore(request: &Request, announce: bool) -> Result<Value, String> {
     let since = clock::since(&request.since)?;
-    // lsof names a held file by its real path, so the locks it is asked
-    // about must be real paths too, or a running session behind a symlink
-    // would read as stopped and be opened twice.
+    // The report and every reopened window name a transcript by its real path.
     let root = std::fs::canonicalize(&request.root).map_err(|error| {
         format!(
             "cannot read the OMP session root {}: {error}",
@@ -28,10 +26,11 @@ pub(super) fn restore(request: &Request, announce: bool) -> Result<Value, String
         )
     })?;
     let scan = select::scan(&root, since)?;
+    let owner_locks = holders::directory(&super::owner_locks()?)?;
     let locks: Vec<PathBuf> = scan
         .sessions
         .iter()
-        .map(|session| holders::owner_lock(&session.transcript))
+        .map(|session| owner_locks.join(format!("{}.lock", session.id)))
         .collect();
     let before = holders::holders(&locks)?;
 
@@ -184,21 +183,28 @@ fn row(session: &Selected, state: &str, detail: Value) -> Value {
     row
 }
 
-/// Which sessions run now. OMP keeps `.<transcript>.owner.lock` open for the
-/// whole life of a session process and leaves the file behind when the
-/// process dies, so the file proves nothing: a process holding it open is
+/// Which sessions run now. OMP keeps `<owner locks>/<session id>.lock` open
+/// for the whole life of a session process and leaves the file behind when
+/// the process dies, so the file proves nothing: a process holding it open is
 /// what says the session runs.
 mod holders {
     use std::collections::HashMap;
+    use std::io::ErrorKind;
     use std::path::{Path, PathBuf};
     use std::process::Command;
 
-    pub(super) fn owner_lock(transcript: &Path) -> PathBuf {
-        let name = transcript
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        transcript.with_file_name(format!(".{name}.owner.lock"))
+    /// The owner-lock directory by its real path, because lsof names a held
+    /// file by its real path. A directory OMP has not created yet holds no
+    /// lock, so no session runs, and its locks are named as OMP would.
+    pub(super) fn directory(owner_locks: &Path) -> Result<PathBuf, String> {
+        match std::fs::canonicalize(owner_locks) {
+            Ok(path) => Ok(path),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(owner_locks.to_path_buf()),
+            Err(error) => Err(format!(
+                "cannot read OMP's session owner locks in {}: {error}",
+                owner_locks.display()
+            )),
+        }
     }
 
     /// The processes holding each lock open, read in one `lsof` call. A lock
