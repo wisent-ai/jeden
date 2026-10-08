@@ -41,15 +41,14 @@ pub fn chat_completion_streaming(
         },
         service_tier: nonempty(&config.service_tier),
     };
-    let mut routes = Vec::with_capacity((config.fallbacks.len() + 1).min(MAX_ROUTES));
-    routes.push(primary.clone());
-    for route in config.fallbacks.iter().take(MAX_ROUTES.saturating_sub(1)) {
+    let mut routes = vec![primary.clone()];
+    for route in &config.fallbacks {
         if !routes.contains(route) {
             routes.push(route.clone());
         }
     }
 
-    let attempts = config.retry.max_attempts.clamp(1, MAX_RETRY_ATTEMPTS);
+    let attempts = config.retry.max_attempts;
     let (request_id, idempotency_key, sticky_key) = logical_request_keys(&primary, &messages);
     let cooldown_store = match config.subscription_cooldown_path.as_ref() {
         Some(path) => Some(

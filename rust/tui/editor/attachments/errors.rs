@@ -4,28 +4,9 @@
 //! Split out of `tui/editor/attachments.rs`, which had grown past the module
 //! line cap.
 
-pub const MAX_ATTACHMENTS: usize = 10;
-pub const MAX_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
-pub const MAX_TOTAL_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachmentError {
-    CountLimit {
-        limit: usize,
-    },
-    ItemLimit {
-        limit_bytes: usize,
-        actual_bytes: usize,
-    },
-    TotalLimit {
-        limit_bytes: usize,
-        actual_bytes: usize,
-    },
     Empty,
-    TextLimit {
-        limit_bytes: usize,
-        actual_bytes: usize,
-    },
     UnsupportedBinary {
         mime: String,
     },
@@ -37,29 +18,7 @@ pub enum AttachmentError {
 impl std::fmt::Display for AttachmentError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::CountLimit { limit } => write!(formatter, "Attachment limit reached ({limit})"),
-            Self::ItemLimit {
-                limit_bytes,
-                actual_bytes,
-            } => write!(
-                formatter,
-                "Attachment is {actual_bytes} bytes; per-item limit is {limit_bytes}"
-            ),
-            Self::TotalLimit {
-                limit_bytes,
-                actual_bytes,
-            } => write!(
-                formatter,
-                "Attachments total {actual_bytes} bytes; total limit is {limit_bytes}"
-            ),
             Self::Empty => write!(formatter, "Attachment is empty"),
-            Self::TextLimit {
-                limit_bytes,
-                actual_bytes,
-            } => write!(
-                formatter,
-                "Text attachment is {actual_bytes} bytes; text limit is {limit_bytes}"
-            ),
             Self::UnsupportedBinary { mime } => {
                 write!(formatter, "Unsupported binary attachment type `{mime}`")
             }

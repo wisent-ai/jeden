@@ -25,12 +25,6 @@ impl ModelAttachment {
         if bytes.is_empty() {
             return Err("text attachment is empty".into());
         }
-        if bytes.len() > MAX_TEXT_ATTACHMENT_BYTES {
-            return Err(format!(
-                "text attachment is {} bytes; limit is {MAX_TEXT_ATTACHMENT_BYTES}",
-                bytes.len()
-            ));
-        }
         std::str::from_utf8(bytes.as_ref())
             .map_err(|_| "text attachment is not valid UTF-8".to_string())?;
         Ok(Self::Text { bytes })

@@ -22,16 +22,12 @@ pub use stream::chat_completion_streaming;
 use stream::*;
 
 type HmacSha256 = Hmac<Sha256>;
-const MAX_ROUTES: usize = 16;
-const MAX_RETRY_ATTEMPTS: usize = 8;
 pub(crate) const AUTOMATIC_MODEL_ROUTE: &str = "any";
 pub(crate) const VISION_MODEL_ROUTE: &str = "any-vision-capable";
 
 pub(crate) fn is_virtual_model_route(model: &str) -> bool {
     matches!(model, AUTOMATIC_MODEL_ROUTE | VISION_MODEL_ROUTE)
 }
-pub(crate) const MAX_TEXT_ATTACHMENT_BYTES: usize = 256 * 1024;
-const MAX_TOOL_CALLS: usize = 128;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -41,6 +37,8 @@ pub struct RouteDescriptor {
     pub service_tier: Option<String>,
 }
 
+/// How many times one route is tried. Unstated (no `modelRouting.retry`),
+/// each route is tried once and a failure moves to the next route.
 #[derive(Debug, Clone)]
 pub struct RetryPolicy {
     pub max_attempts: usize,
@@ -48,7 +46,9 @@ pub struct RetryPolicy {
 
 impl Default for RetryPolicy {
     fn default() -> Self {
-        Self { max_attempts: 3 }
+        Self {
+            max_attempts: std::num::NonZeroUsize::MIN.get(),
+        }
     }
 }
 

@@ -200,12 +200,13 @@ pub(crate) fn accumulate_tool_call_deltas(
         let raw_index = delta.get("index").and_then(Value::as_u64).unwrap_or(0);
         let index =
             usize::try_from(raw_index).map_err(|_| "tool call index exceeds platform size")?;
-        if index >= MAX_TOOL_CALLS {
+        if index > acc.len() {
             return Err(format!(
-                "tool call index {index} exceeds limit {MAX_TOOL_CALLS}"
+                "tool call index {index} skips past the {} calls opened so far; a stream opens tool calls in order",
+                acc.len()
             ));
         }
-        while acc.len() <= index {
+        if index == acc.len() {
             acc.push(json!({"function": {"name": "", "arguments": ""}}));
         }
         let slot = &mut acc[index];

@@ -10,9 +10,7 @@ mod errors;
 mod sniff;
 
 use errors::format_bytes;
-pub use errors::{
-    AttachmentError, MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, MAX_TOTAL_ATTACHMENT_BYTES,
-};
+pub use errors::AttachmentError;
 use sniff::sniff_kind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -129,20 +127,11 @@ impl AttachmentTray {
             .ok_or_else(|| AttachmentError::Path("path has no UTF-8 basename".into()))?
             .to_string();
 
-        // Reject a full tray before opening the file, then read from one handle
-        // with limit+1 so a growing or metadata-racing file cannot bypass limits.
-        self.check_limits(1)?;
-        let file = File::open(&path).map_err(|error| AttachmentError::Io(error.to_string()))?;
+        let mut file =
+            File::open(&path).map_err(|error| AttachmentError::Io(error.to_string()))?;
         let mut bytes = Vec::new();
-        file.take((MAX_ATTACHMENT_BYTES as u64).saturating_add(1))
-            .read_to_end(&mut bytes)
+        file.read_to_end(&mut bytes)
             .map_err(|error| AttachmentError::Io(error.to_string()))?;
-        if bytes.len() > MAX_ATTACHMENT_BYTES {
-            return Err(AttachmentError::ItemLimit {
-                limit_bytes: MAX_ATTACHMENT_BYTES,
-                actual_bytes: bytes.len(),
-            });
-        }
         self.add_bytes(
             basename.clone(),
             AttachmentSource::File { basename },
@@ -168,17 +157,11 @@ impl AttachmentTray {
         source: AttachmentSource,
         bytes: Arc<[u8]>,
     ) -> Result<AttachmentId, AttachmentError> {
-        self.check_limits(bytes.len())?;
+        if bytes.is_empty() {
+            return Err(AttachmentError::Empty);
+        }
         let kind = sniff_kind(&bytes)?;
         match &kind {
-            AttachmentKind::Text { .. }
-                if bytes.len() > crate::model_router::MAX_TEXT_ATTACHMENT_BYTES =>
-            {
-                return Err(AttachmentError::TextLimit {
-                    limit_bytes: crate::model_router::MAX_TEXT_ATTACHMENT_BYTES,
-                    actual_bytes: bytes.len(),
-                });
-            }
             AttachmentKind::Binary { mime } => {
                 return Err(AttachmentError::UnsupportedBinary { mime: mime.clone() });
             }
@@ -202,30 +185,5 @@ impl AttachmentTray {
         let item = self.items.remove(index);
         self.total_bytes = self.total_bytes.saturating_sub(item.bytes.len());
         Some(item)
-    }
-
-    fn check_limits(&self, bytes: usize) -> Result<(), AttachmentError> {
-        if self.items.len() >= MAX_ATTACHMENTS {
-            return Err(AttachmentError::CountLimit {
-                limit: MAX_ATTACHMENTS,
-            });
-        }
-        if bytes == 0 {
-            return Err(AttachmentError::Empty);
-        }
-        if bytes > MAX_ATTACHMENT_BYTES {
-            return Err(AttachmentError::ItemLimit {
-                limit_bytes: MAX_ATTACHMENT_BYTES,
-                actual_bytes: bytes,
-            });
-        }
-        let total = self.total_bytes.saturating_add(bytes);
-        if total > MAX_TOTAL_ATTACHMENT_BYTES {
-            return Err(AttachmentError::TotalLimit {
-                limit_bytes: MAX_TOTAL_ATTACHMENT_BYTES,
-                actual_bytes: total,
-            });
-        }
-        Ok(())
     }
 }
