@@ -1,19 +1,15 @@
 //! `jeden contracts`: the task and communication contracts as one text, and
-//! that text installed into another harness's system prompt.
+//! that text installed into another harness's system prompt file.
 //!
-//! Jeden's own sessions get the contracts from the binary. Sessions run by
-//! Omp get them from `~/.omp/agent/APPEND_SYSTEM.md`, which Omp appends to
-//! every system prompt verbatim. `install` writes the rendered text there
-//! between two marker lines, replacing the previous block and leaving the
-//! rest of the file alone; `status` says whether the installed block matches
-//! what the binary would render now and, for Omp, which sessions still answer
-//! under the text the file held before (`sessions`).
+//! Jeden's own sessions get the contracts from the binary. `install` writes
+//! the rendered text into the file `--file` names, between two marker lines,
+//! replacing the previous block and leaving the rest of the file alone;
+//! `status` says whether the installed block matches what the binary would
+//! render now.
 
 use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-mod sessions;
 
 use crate::agent::{communication_contract, task_contract};
 use crate::cli::config::ui_language;
@@ -22,7 +18,7 @@ use crate::Args;
 const BLOCK_START: &str = "<!-- jeden contracts: start -->";
 const BLOCK_END: &str = "<!-- jeden contracts: end -->";
 const USAGE: &str =
-    "Usage: jeden contracts [render|status|install|uninstall] [--omp|--file <path>] [--json] [--cwd path]";
+    "Usage: jeden contracts [render|status|install|uninstall] [--file <path>] [--json] [--cwd path]";
 
 /// The text Jeden puts into every system prompt: the task contract and the
 /// communication contract in force, in the conversation language.
@@ -97,35 +93,17 @@ fn unspliced(existing: &str) -> Option<String> {
     Some(out)
 }
 
-fn omp_append_system_file() -> Result<PathBuf, String> {
-    let home = std::env::var_os("HOME").ok_or("HOME is not set")?;
-    Ok(PathBuf::from(home).join(".omp/agent/APPEND_SYSTEM.md"))
-}
-
-struct Target {
-    name: &'static str,
-    file: PathBuf,
-}
-
-fn target(rest: &[String]) -> Result<Target, String> {
+/// The file `--file` names, the only target there is.
+fn target(rest: &[String]) -> Result<PathBuf, String> {
     let mut iter = rest.iter();
     let mut target = None;
     while let Some(token) = iter.next() {
         match token.as_str() {
-            "--omp" => {
-                target = Some(Target {
-                    name: "omp",
-                    file: omp_append_system_file()?,
-                })
-            }
             "--file" => {
                 let path = iter.next().ok_or_else(|| {
                     crate::cli::invocation::refusal::usage("--file requires a path")
                 })?;
-                target = Some(Target {
-                    name: "file",
-                    file: PathBuf::from(path),
-                })
+                target = Some(PathBuf::from(path))
             }
             other => {
                 return Err(crate::cli::invocation::refusal::usage(format!(
@@ -136,9 +114,19 @@ fn target(rest: &[String]) -> Result<Target, String> {
     }
     target.ok_or_else(|| {
         crate::cli::invocation::refusal::usage(format!(
-            "contracts install, uninstall and status require --omp or --file <path>\n{USAGE}"
+            "contracts install, uninstall and status require --file <path>\n{USAGE}"
         ))
     })
+}
+
+/// The file's text, or nothing when it does not exist yet; any other read
+/// failure names the file.
+fn existing_text(file: &Path) -> Result<String, String> {
+    match fs::read_to_string(file) {
+        Ok(text) => Ok(text),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(error) => Err(format!("cannot read {}: {error}", file.display())),
+    }
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
@@ -162,60 +150,30 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             })
         }
         "status" => {
-            let target = target(rest)?;
+            let file = target(rest)?;
             let rendered = block(&render(&args.cwd));
-            let installed = installed_block(&target.file);
+            let installed = installed_block(&file);
             let state = match &installed {
                 Some(installed) if installed.trim() == rendered.trim() => "current",
                 Some(_) => "stale",
                 None => "absent",
             };
-            // Omp keeps the system prompt a session started with, so a
-            // current file still leaves earlier sessions on the old text.
-            let older = match (target.name, state) {
-                ("omp", "current") => sessions::on_older_text(
-                    &target.file,
-                    &sessions::omp_sessions_root(&target.file)?,
-                )?,
-                _ => Vec::new(),
-            };
-            let path = target.file.display().to_string();
+            let path = file.display().to_string();
             if args.json {
                 return Ok(serde_json::to_string_pretty(&json!({
-                    "target": target.name,
                     "path": path,
                     "state": state,
-                    "sessions_on_older_text": older
-                        .iter()
-                        .map(|session| session.display().to_string())
-                        .collect::<Vec<_>>(),
                 }))
                 .map_err(|error| error.to_string())?
                     + "\n");
             }
-            if !older.is_empty() {
-                return Err(format!(
-                    "current: {path} carries the contracts this binary renders, but {} Omp \
-                     session(s) started before it was written and have answered since under the \
-                     text it held before; Omp reads it only when a session starts, so they keep \
-                     that text until they end:\n{}",
-                    older.len(),
-                    older
-                        .iter()
-                        .map(|session| format!("  {}", session.display()))
-                        .collect::<Vec<_>>()
-                        .join("\n")
-                ));
-            }
             let text = match state {
                 "current" => format!("current: {path} carries the contracts this binary renders\n"),
                 "stale" => format!(
-                    "stale: {path} carries older contracts; run jeden contracts install --{}\n",
-                    target.name
+                    "stale: {path} carries older contracts; run jeden contracts install --file {path}\n"
                 ),
                 _ => format!(
-                    "absent: {path} carries no Jeden contracts; run jeden contracts install --{}\n",
-                    target.name
+                    "absent: {path} carries no Jeden contracts; run jeden contracts install --file {path}\n"
                 ),
             };
             if state == "current" {
@@ -225,22 +183,21 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             }
         }
         "install" => {
-            let target = target(rest)?;
+            let file = target(rest)?;
             let rendered = block(&render(&args.cwd));
-            let existing = fs::read_to_string(&target.file).unwrap_or_default();
+            let existing = existing_text(&file)?;
             let next = spliced(&existing, &rendered);
             let changed = next != existing;
             if changed {
-                if let Some(parent) = target.file.parent() {
+                if let Some(parent) = file.parent() {
                     fs::create_dir_all(parent)
                         .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
                 }
-                crate::cli::config::migrations::write_text_atomic(&target.file, &next)?;
+                crate::cli::config::migrations::write_text_atomic(&file, &next)?;
             }
-            let path = target.file.display().to_string();
+            let path = file.display().to_string();
             Ok(if args.json {
                 serde_json::to_string_pretty(&json!({
-                    "target": target.name,
                     "path": path,
                     "changed": changed,
                 }))
@@ -255,22 +212,15 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         // The inverse of install (cli.md rule 2): the block goes, the rest of
         // the file stays as it was.
         "uninstall" => {
-            let target = target(rest)?;
-            let existing = match fs::read_to_string(&target.file) {
-                Ok(text) => text,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
-                Err(error) => {
-                    return Err(format!("cannot read {}: {error}", target.file.display()))
-                }
-            };
+            let file = target(rest)?;
+            let existing = existing_text(&file)?;
             let next = unspliced(&existing);
             if let Some(next) = &next {
-                crate::cli::config::migrations::write_text_atomic(&target.file, next)?;
+                crate::cli::config::migrations::write_text_atomic(&file, next)?;
             }
-            let path = target.file.display().to_string();
+            let path = file.display().to_string();
             Ok(if args.json {
                 serde_json::to_string_pretty(&json!({
-                    "target": target.name,
                     "path": path,
                     "changed": next.is_some(),
                 }))

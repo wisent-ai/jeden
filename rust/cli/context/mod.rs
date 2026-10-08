@@ -1,10 +1,8 @@
 //! `jeden context`: the context advisor on the command line.
 //!
-//! `recommend` answers what to read for a task, `sources` says what each
-//! source is and whether it answers right now, and `install` puts the same
-//! advisor into an Omp session as a custom tool.
-
-mod omp;
+//! `recommend` answers what to read for a task, `prompt` prints the block a
+//! turn would receive, and `sources` says what each source is and whether it
+//! answers right now.
 
 use serde_json::json;
 
@@ -16,9 +14,6 @@ const USAGE: &str = concat!(
     "  jeden context recommend \"<task>\" [--limit n] [--source list] [--json] [--cwd path]\n",
     "  jeden context prompt \"<task>\" [--json] [--cwd path]\n",
     "  jeden context sources [--json] [--cwd path]\n",
-    "  jeden context install [--omp|--file <path>] [--json]\n",
-    "  jeden context status [--omp|--file <path>] [--json]\n",
-    "  jeden context uninstall [--omp|--file <path>] [--json]\n",
     "\n",
     "Sources: docs, ground-truth, memory, transcripts, or all.",
 );
@@ -78,9 +73,6 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         "recommend" => recommend(args, rest),
         "prompt" => prompt(args, rest),
         "sources" => sources(args, rest),
-        "install" => install(args, rest),
-        "status" => installed(args, rest),
-        "uninstall" => uninstall(args, rest),
         // A bare query is the common case: `jeden context "why does X fail"`.
         other if !other.starts_with("--") => {
             let mut all = vec![other.to_string()];
@@ -206,81 +198,4 @@ fn sources(args: &Args, rest: &[String]) -> Result<String, String> {
         }
     }
     Ok(out)
-}
-
-fn install(args: &Args, rest: &[String]) -> Result<String, String> {
-    let target = omp::target(rest)?;
-    let rendered = omp::rendered()?;
-    let changed = omp::install(&target.file, &rendered)?;
-    let path = target.file.display().to_string();
-    if args.json {
-        return Ok(serde_json::to_string_pretty(&json!({
-            "target": target.name,
-            "path": path,
-            "tool": "context_recommend",
-            "changed": changed,
-        }))
-        .map_err(|error| error.to_string())?
-            + "\n");
-    }
-    Ok(if changed {
-        format!("Installed the context_recommend tool into {path}\n")
-    } else {
-        format!("{path} already carries this binary's context_recommend tool\n")
-    })
-}
-
-/// The inverse of `install` (cli.md rule 2).
-fn uninstall(args: &Args, rest: &[String]) -> Result<String, String> {
-    let target = omp::target(rest)?;
-    let changed = omp::uninstall(&target.file)?;
-    let path = target.file.display().to_string();
-    if args.json {
-        return Ok(serde_json::to_string_pretty(&json!({
-            "target": target.name,
-            "path": path,
-            "tool": "context_recommend",
-            "changed": changed,
-        }))
-        .map_err(|error| error.to_string())?
-            + "\n");
-    }
-    Ok(if changed {
-        format!("Removed the context_recommend tool from {path}\n")
-    } else {
-        format!("{path} carries no context_recommend tool\n")
-    })
-}
-
-fn installed(args: &Args, rest: &[String]) -> Result<String, String> {
-    let target = omp::target(rest)?;
-    let rendered = omp::rendered()?;
-    let state = omp::state(&target.file, &rendered);
-    let path = target.file.display().to_string();
-    if args.json {
-        return Ok(serde_json::to_string_pretty(&json!({
-            "target": target.name,
-            "path": path,
-            "tool": "context_recommend",
-            "state": state,
-        }))
-        .map_err(|error| error.to_string())?
-            + "\n");
-    }
-    let text = match state {
-        "current" => format!("current: {path} carries this binary's context_recommend tool\n"),
-        "stale" => format!(
-            "stale: {path} carries a different context_recommend tool; run jeden context install --{}\n",
-            target.name
-        ),
-        _ => format!(
-            "absent: {path} carries no context_recommend tool; run jeden context install --{}\n",
-            target.name
-        ),
-    };
-    if state == "current" {
-        Ok(text)
-    } else {
-        Err(text.trim_end().to_string())
-    }
 }

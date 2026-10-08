@@ -2,8 +2,6 @@ const sources =
   "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>files,memory</code>.";
 const bounds =
   "<code>--limit</code> caps the recommendations returned. Nothing cuts a source short: every source runs to completion. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply.";
-const target =
-  "<code>--omp</code> resolves <code>~/.omp/agent/tools/jeden_context.ts</code>, Omp's own documented custom-tool directory. <code>--file &lt;path&gt;</code> addresses any other location. One of the two is required.";
 const unknownSource =
   "An unknown source is refused as <code>unknown source(s): &lt;name&gt;. Known sources: files, ground-truth, memory, transcripts</code>; a typo never narrows the answer silently.";
 
@@ -20,7 +18,7 @@ export const contextCommands = [
       bounds,
     ],
     effect:
-      "Prints ranked recommendations and then the state of every source consulted. It reads only: no session is created, no memory is written, and no configuration changes. The verbs are <code>recommend</code>, <code>prompt</code>, <code>sources</code>, <code>install</code> and <code>installed</code>.",
+      "Prints ranked recommendations and then the state of every source consulted. It reads only: no session is created, no memory is written, and no configuration changes. The verbs are <code>recommend</code>, <code>prompt</code> and <code>sources</code>.",
     refusals: [
       unknownSource,
       "A missing task is refused as <code>context recommend requires a task</code> followed by the usage block.",
@@ -74,52 +72,6 @@ export const contextCommands = [
     refusals: [
       "Extra arguments return the usage block.",
       "An unconfigured ground-truth endpoint is reported, not an error: <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code>. A configured endpoint nobody serves reports the URL it could not reach.",
-    ],
-  },
-  {
-    path: "context/install",
-    group: "Context advisor",
-    invocation: "jeden context install [--omp|--file <path>] [--json]",
-    purpose: "Install the advisor into another harness as a custom tool.",
-    inputs: [
-      target,
-      "<code>--json</code> returns <code>target</code>, <code>path</code>, <code>tool</code> and <code>changed</code>.",
-    ],
-    effect:
-      "Writes a <code>context_recommend</code> tool that calls <code>jeden context recommend --json</code> through the absolute path of the binary that rendered it, so an Omp session reaches the same advisor a Jeden session does. The write is atomic and idempotent: an already current file reports <code>changed: false</code> and is not rewritten. No Omp source is modified.",
-    refusals: [
-      "Without a target: <code>context install, status and uninstall require --omp or --file &lt;path&gt;</code>.",
-      "<code>--file</code> without a value is refused as <code>--file requires a path</code>; an unknown flag as <code>unknown context option: &lt;flag&gt;</code>.",
-      "<code>--omp</code> without <code>HOME</code> is refused as <code>HOME is not set</code> rather than guessing a directory.",
-    ],
-  },
-  {
-    path: "context/status",
-    group: "Context advisor",
-    invocation: "jeden context status [--omp|--file <path>] [--json]",
-    purpose: "Say whether the installed tool is exactly what this binary renders.",
-    inputs: [target, "<code>--json</code> returns <code>state</code> beside the target and path."],
-    effect:
-      "Compares the file with the rendered tool and reports <code>current</code>, <code>stale</code> or <code>absent</code>. Only <code>current</code> exits zero; the other two exit non-zero and name the repair, so an upgrade that changed the tool is visible instead of silent. It is the same verb <code>jeden contracts status</code> uses.",
-    refusals: [
-      "Without a target: <code>context install, status and uninstall require --omp or --file &lt;path&gt;</code>.",
-      "<code>stale: &lt;path&gt; carries a different context_recommend tool; run jeden context install --&lt;target&gt;</code> and <code>absent: &lt;path&gt; carries no context_recommend tool; run jeden context install --&lt;target&gt;</code> are refusals, not warnings.",
-    ],
-  },
-  {
-    path: "context/uninstall",
-    group: "Context advisor",
-    invocation: "jeden context uninstall [--omp|--file <path>] [--json]",
-    purpose: "Remove the tool <code>context install</code> wrote.",
-    inputs: [
-      target,
-      "<code>--json</code> returns <code>target</code>, <code>path</code>, <code>tool</code> and <code>changed</code>.",
-    ],
-    effect:
-      "Deletes the file when it is a <code>context_recommend</code> tool some Jeden binary rendered (the template with any binary path) and prints <code>Removed the context_recommend tool from &lt;path&gt;</code>; an absent file prints <code>&lt;path&gt; carries no context_recommend tool</code> with <code>changed: false</code>. No Omp source is modified.",
-    refusals: [
-      "Without a target: <code>context install, status and uninstall require --omp or --file &lt;path&gt;</code> (exit 2).",
-      "A file at the target that is not a rendered tool is kept and refused as <code>&lt;path&gt; is not a context_recommend tool Jeden rendered; it was left in place</code> (exit 1).",
     ],
   },
 ];

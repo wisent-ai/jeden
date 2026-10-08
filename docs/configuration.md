@@ -52,11 +52,6 @@ concurrently and nothing cuts one short: there is no deadline setting and no
 nothing. Choose the source set explicitly. `jeden context prompt "<task>"` prints exactly what the next turn would
 receive, `jeden context sources` reports what each source is and whether it
 answers now, and `context.advisor.enabled false` switches the block off.
-
-`jeden context install --omp` renders the same advisor into
-`~/.omp/agent/tools/jeden_context.ts`, Omp's own documented custom-tool
-directory, as the `context_recommend` tool bound to this binary; `jeden context
-status --omp` exits non-zero when that file is stale or absent. No Omp
-source is modified. The full contract is at
+The full contract is at
 [jeden.wisent.com/docs/context](https://jeden.wisent.com/docs/context).
 

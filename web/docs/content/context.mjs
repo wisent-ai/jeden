@@ -9,7 +9,7 @@ export const contextPages = [
         "Jeden's context advisor — what an agent should read before it searches, from every readable file, its own memory, the transcript archive and the Wisent ground-truth index, with every source's state reported.",
       ogTitle: "Context — Jeden documentation",
       ogDescription:
-        "Ranked context recommendations with exact locators, injected into every turn and callable from the CLI, the agent tool set, Jeden Desktop and an Omp session.",
+        "Ranked context recommendations with exact locators, injected into every turn and callable from the CLI, the agent tool set and Jeden Desktop.",
       canonical: "https://jeden.wisent.com/docs/context",
     },
     eyebrow: "Context management",
@@ -74,22 +74,9 @@ export const contextPages = [
         ],
       },
       {
-        title: "The same advisor in an Omp session",
-        paragraphs: [
-          "Omp is not Jeden's to patch, and it does not need to be: it loads custom tools from <code>~/.omp/agent/tools/*.ts</code>. <code>jeden context install --omp</code> renders a <code>context_recommend</code> tool into that directory, bound to the absolute path of the Jeden binary that rendered it, and that tool calls <code>jeden context recommend --json</code>. One implementation, two harnesses.",
-          "<code>jeden context status --omp</code> reports <code>current</code>, <code>stale</code> or <code>absent</code> and exits non-zero unless the installed file is exactly what this binary renders, so an upgrade that changes the tool is visible instead of silent. <code>jeden context uninstall --omp</code> removes it again. <code>--file &lt;path&gt;</code> writes or checks any other location, which is how the product's own tests drive it.",
-        ],
-        commands: [
-          {
-            label: "Install and verify",
-            code: "jeden context install --omp\njeden context status --omp",
-          },
-        ],
-      },
-      {
         title: "Every surface",
         paragraphs: [
-          "<strong>CLI:</strong> <code>jeden context recommend</code>, <code>prompt</code>, <code>sources</code>, <code>install</code>, <code>installed</code>. A bare first word is the task, so <code>jeden context \"why does signing fail\"</code> works.",
+          "<strong>CLI:</strong> <code>jeden context recommend</code>, <code>prompt</code>, <code>sources</code>. A bare first word is the task, so <code>jeden context \"why does signing fail\"</code> works.",
           "<strong>Interactive:</strong> <code>/context &lt;task&gt;</code> renders the same recommendations; bare <code>/context</code> keeps reporting the live window size.",
           "<strong>Agent tool:</strong> <code>context_recommend</code> takes <code>query</code>, and optionally <code>limit</code>, <code>sources</code>. It is a read-tier tool, because it does what the prologue already does unapproved.",
           "<strong>RPC and Jeden Desktop:</strong> <code>context/recommend</code> and <code>context/sources</code> answer the same objects the CLI prints with <code>--json</code>. Desktop's Context screen is that RPC, not a parsed command line.",
