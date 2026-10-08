@@ -11,14 +11,13 @@ use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
 
-const EVENT_BUFFER: usize = 1024;
 static NEXT_INTERACTION_ID: AtomicU64 = AtomicU64::new(1);
 
 struct SessionInner {
     options: SessionOptions,
     conversation: Mutex<Option<agent::Conversation>>,
     session_path: RwLock<PathBuf>,
-    subscribers: Mutex<HashMap<u64, mpsc::SyncSender<SessionEvent>>>,
+    subscribers: Mutex<HashMap<u64, mpsc::Sender<SessionEvent>>>,
     active: Mutex<HashMap<String, Arc<AtomicBool>>>,
     interactions: RwLock<Option<Arc<dyn InteractionHandler>>>,
     next_subscriber: AtomicU64,
@@ -73,12 +72,8 @@ impl SessionInner {
             .map_err(|_| "event subscription lock poisoned".to_string())?;
         let mut disconnected = Vec::new();
         for (id, subscriber) in subscribers.iter() {
-            match subscriber.try_send(event.clone()) {
-                Ok(()) => {}
-                Err(mpsc::TrySendError::Disconnected(_)) => disconnected.push(*id),
-                Err(mpsc::TrySendError::Full(_)) => {
-                    return Err(format!("event subscriber {} is not consuming events", id));
-                }
+            if subscriber.send(event.clone()).is_err() {
+                disconnected.push(*id);
             }
         }
         for id in disconnected {
@@ -179,7 +174,7 @@ impl AgentSession {
             return Err("session disposed".into());
         }
         let id = self.inner.next_subscriber.fetch_add(1, Ordering::Relaxed);
-        let (sender, receiver) = mpsc::sync_channel(EVENT_BUFFER);
+        let (sender, receiver) = mpsc::channel();
         self.inner
             .subscribers
             .lock()
