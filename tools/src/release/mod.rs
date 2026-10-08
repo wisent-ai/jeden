@@ -1,10 +1,7 @@
-//! The release side: Cargo against the declared private-source input, the
-//! export that produces that input, native staging, and the facts and signed
-//! manifests the release workflows record.
+//! Native qualification, artifact facts and signed release manifests.
+//! Stado owns private Cargo source publication and selection.
 
-mod cargo;
 mod dsse;
-mod export;
 mod stage;
 
 use sha2::{Digest, Sha256};
@@ -14,22 +11,15 @@ use std::path::Path;
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const USAGE: &str = "usage: jeden-tools release <export ARCHIVE | cargo ARGS... | stage --bin NAME... [--qualify TEST...] | facts FILE | dsse ...>";
-/// Every refusal from the private-source commands carries this prefix, so a
-/// release log names which layer refused.
-const PREFIX: &str = "private Cargo sources: ";
+const USAGE: &str =
+    "usage: jeden-tools release <stage --bin NAME... [--qualify TEST...] | facts FILE | dsse ...>";
+const PREFIX: &str = "native stage: ";
 
 pub(crate) fn run(arguments: &[String]) -> Result<u8, String> {
     let Some((action, rest)) = arguments.split_first() else {
         return Err(USAGE.into());
     };
     let outcome = match action.as_str() {
-        "export" => match rest {
-            [archive] => export::export(Path::new(archive)).map(|()| 0),
-            _ => Err("export requires exactly one archive path under .wisent-output".into()),
-        },
-        "cargo" if rest.is_empty() => Err("cargo requires a Cargo command".into()),
-        "cargo" => cargo::cargo(rest),
         "stage" => {
             let (binaries, qualifications) = stage_arguments(rest)?;
             stage::stage(&binaries, &qualifications)

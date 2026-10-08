@@ -1,10 +1,27 @@
 //! Native staging: the binaries a release worker packages, built with the
 //! declared private-source input, and the journeys that qualify them.
 
-use super::cargo::{cargo, setting, OUTPUT_ENV};
 use crate::repository_root;
 use std::env;
 use std::fs;
+use std::process::Command;
+
+const OUTPUT_ENV: &str = "WISENT_OUTPUT_DIR";
+
+fn cargo(arguments: &[String]) -> Result<u8, String> {
+    let status = Command::new("stado")
+        .args(["product", "cargo"])
+        .args(arguments)
+        .current_dir(repository_root())
+        .status()
+        .map_err(|error| format!("cannot start stado product cargo: {error}"))?;
+    match status.code().map(u8::try_from) {
+        Some(Ok(code)) => Ok(code),
+        _ => Err(format!(
+            "stado product cargo ended without an exit code: {status}"
+        )),
+    }
+}
 
 /// Build and copy the native binaries into `WISENT_OUTPUT_DIR/bin`, then run
 /// each `qualifications` integration test's ignored journeys against that
@@ -15,7 +32,10 @@ use std::fs;
 /// keys for this Stado: tests`, so the build step runs them, as Stado's own
 /// recipe does.
 pub(super) fn stage(binaries: &[String], qualifications: &[String]) -> Result<u8, String> {
-    let Some(configured) = setting(OUTPUT_ENV) else {
+    let Some(configured) = env::var(OUTPUT_ENV)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    else {
         return Err(format!("{OUTPUT_ENV} is required for native staging"));
     };
     let output = std::path::absolute(&configured)

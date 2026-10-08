@@ -110,7 +110,9 @@ codesign identity, or - for ad-hoc`. With `JEDEN_CODESIGN_IDENTITY` set it
 signs the new build with `/usr/bin/codesign --force --sign <identity>` and asks
 Stado nothing; it does not compare that identity with the running one.
 The release recipe uses `cargo run --locked --manifest-path tools/Cargo.toml --
-release stage --bin jeden --bin jeden-sandbox-helper --qualify pursuit` to build and stage both executables and then run the `tests/pursuit` journeys against the staged `bin/jeden`. The journeys run in the build step rather than a recipe `tests` key because Stado 0.21.48, still installed on the Linux builder, refuses that key (`unknown recipe keys for this Stado: tests`); a failing journey fails the build. The Stado running the release job,
+release stage --bin jeden --bin jeden-sandbox-helper` to build and stage both
+executables through Stado's shared Cargo source handling. Its native staging
+qualification is `tests/release/stage.mjs`. The Stado running the release job,
 or `stado product install` during local installation,
 signs the declared native stage before archiving or installing it. Stado's signed
 build and publication receipts describe those final bytes.
@@ -208,11 +210,31 @@ The exact release version is the SemVer in `Cargo.toml`. Stado reads it through 
 
 The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
 
-Release builders receive the locked private Git crates as the `private-cargo-sources` immutable input, without a GitHub credential or a sibling checkout. After a change to the private Git packages `Cargo.lock` locks (a new revision, version or crate), run `cargo run --locked --manifest-path tools/Cargo.toml -- release export .wisent-output/private-cargo-sources.tar.gz`, publish the returned archive with `stado storage put <input.uri> <archive> --if-absent`, and put the returned `input` object under `.wisent-release.json` → `inputs.private-cargo-sources`. Any other lockfile change, such as jeden's own version, keeps the published input valid. The exporter uses Cargo's real vendoring/checksums and includes only Git-source crates, not registry packages or repository history.
+Release builders receive locked private Git crates as the immutable
+`private-cargo-sources` input, without GitHub credentials or sibling checkouts.
+After changing those package names, versions or revisions, run
+`stado release catalog pin-input . --name private-cargo-sources --source . --revision HEAD --cargo --json`
+from the committed checkout, then commit the updated `.wisent-release.json`.
+Stado vendors, publishes and pins the input through one shared operation;
+changing only Jeden's version does not invalidate it. See
+[private Cargo build inputs](https://stado.wisent.com/docs/builds#private-cargo-build-inputs)
+for commands, desktop controls, refusals and the real publication journey.
 
-The release tooling is the Rust package in `tools/` (`jeden-tools`), its own Cargo workspace so it builds before the private sources are configured. Release quality uses `cargo run --locked --manifest-path tools/Cargo.toml -- release cargo ...`; the build uses `... -- release stage --bin jeden --bin jeden-sandbox-helper`. Staging names the tool it runs as, builds in the source's `target` directory and copies only successful build outputs into `WISENT_OUTPUT_DIR/bin`. Missing `WISENT_OUTPUT_DIR` is refused before compilation. Stado supplies `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`; a missing input, one whose private packages (name, version, source) differ from the Git packages `Cargo.lock` locks, or one whose `config.toml` disagrees with its own provenance is refused before Cargo runs. The mismatch refusal lists both sets: `private Cargo sources do not match Cargo.lock; export and publish a new input (the input carries …, Cargo.lock locks …)`. Cargo source replacement preserves `--locked` and verifies the vendored files. Public dependencies still use the ordinary Cargo registry.
+Release quality uses `stado product cargo build`; `jeden-tools release stage`
+uses that same executor and retains Jeden's native staging and qualification
+orchestration. It copies successful outputs into `WISENT_OUTPUT_DIR/bin`.
+Missing output or private input, stale private packages and inconsistent source
+configuration are refusals, not reasons to fetch private repositories on the
+worker. Cargo verifies the vendored checksums and preserves the source lockfile.
+Jeden has no separate private-source exporter or source-replacement wrapper.
 
-The wrapper finds Cargo on `PATH`, then in `$CARGO_HOME/bin`, else `$HOME/.cargo/bin`. It preserves the Cargo proxy's executable name, so Rustup still selects the Rust toolchain. A service does not need to load shell startup files. If neither location contains an executable, the refusal names the missing Cargo path and asks for toolchain provisioning; it does not install tools or change the host's environment.
+The recipe runs `JEDEN_TEST_SUCCESS_EXIT=0 node tests/release/stage.mjs` with
+the worker's `WISENT_SOURCE_DIR`, `WISENT_SOURCE_COMMIT`, `WISENT_OUTPUT_DIR`
+and `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`. This builds and executes the
+staged CLI, checks the helper's staged bytes, and verifies that missing output
+or input does not replace successful artifacts or change the lockfile.
+Reports and command logs are archived under `evidence/release-tests`.
+This check does not qualify signing, sandbox execution or a model-backed task.
 
 The version gate (`.github/workflows/version-check.yml`) compares the public command vocabulary with `released-surface.json` using the same tool: `jeden-tools surface` reads the dispatcher and the compiled slash catalogue, `jeden-tools versioning decide` is the Rust port of the fleet's AutoVersion rule, and `jeden-tools versioning baseline` regenerates the baseline from the newest published release.
 

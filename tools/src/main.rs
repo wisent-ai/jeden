@@ -1,8 +1,7 @@
 //! Jeden's repository tooling, in the one language the product is written in.
 //!
-//! - `release`: run Cargo against the declared private-source input, export
-//!   that input, stage native binaries, and the release workflows' artifact
-//!   facts and signed-manifest steps.
+//! - `release`: stage and qualify native binaries through Stado's shared
+//!   Cargo source handling, and record artifact facts and signed manifests.
 //! - `surface`: print the public command vocabulary the binary answers to.
 //! - `versioning`: the fleet's versioning rule and the published baseline the
 //!   version gate compares against.
