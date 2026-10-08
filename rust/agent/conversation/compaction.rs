@@ -8,14 +8,14 @@ impl Conversation {
         reason: &str,
         add_continue_prompt: bool,
     ) -> Result<bool, String> {
-        let Some(threshold) = Self::auto_compaction_threshold() else {
+        let Some(threshold) = Self::auto_compaction_threshold()? else {
             return Ok(false);
         };
         let mut tokens = self.approx_tokens();
         if tokens < threshold || self.turn_len() == 0 {
             return Ok(false);
         }
-        let _ = self.prune_tool_results_if_needed(threshold)?;
+        self.prune_tool_results_if_needed(threshold)?;
         tokens = self.approx_tokens();
         if tokens < threshold {
             return Ok(false);

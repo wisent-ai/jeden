@@ -19,7 +19,7 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
     ),
     (
         "github_search",
-        "Search GitHub repositories, code, issues, or pull requests",
+        "Search GitHub repositories, code, issues, or pull requests (kind, query and limit are required; repo narrows)",
     ),
     (
         "github_actions",
@@ -148,8 +148,11 @@ impl GithubService {
             input
                 .get("limit")
                 .and_then(Value::as_u64)
-                .unwrap_or(20)
-                .clamp(1, 100)
+                .ok_or_else(|| {
+                    ServiceError::InvalidInput(
+                        "search needs limit: how many results gh search returns".into(),
+                    )
+                })?
                 .to_string(),
         ];
         if let Some(repo) = input.get("repo").and_then(Value::as_str) {

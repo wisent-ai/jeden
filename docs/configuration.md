@@ -55,3 +55,21 @@ answers now, and `context.advisor.enabled false` switches the block off.
 The full contract is at
 [jeden.wisent.com/docs/context](https://jeden.wisent.com/docs/context).
 
+
+### Automatic compaction and tool-result pruning
+
+A conversation compacts on its own only at a token count the operator states.
+`JEDEN_COMPACTION_THRESHOLD` names that count directly; otherwise
+`JEDEN_CONTEXT_LIMIT` less `JEDEN_COMPACTION_RESERVE` does. With neither,
+compaction is `/compact` alone. A context limit stated without its reserve is
+refused by name (`JEDEN_CONTEXT_LIMIT is <n> but JEDEN_COMPACTION_RESERVE is not
+set`), and so is a reserve that leaves nothing of the limit: Jeden does not pick
+a share of the window for you.
+
+Before compacting, Jeden can replace old tool results with a one-line marker.
+That step runs only when all three of its bounds are stated:
+`JEDEN_TOOL_PRUNE_PROTECT_TOKENS` (the newest tool results kept whole),
+`JEDEN_TOOL_PRUNE_MIN_SAVINGS_TOKENS` (the least a prune must free) and
+`JEDEN_TOOL_PRUNE_MIN_TOOL_TOKENS` (the smallest result worth replacing). With
+none stated the step is skipped; with only some, the turn is refused with the
+names of the missing ones.

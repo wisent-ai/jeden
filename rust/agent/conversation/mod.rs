@@ -113,21 +113,57 @@ impl Conversation {
             .count()
     }
 
-    pub(super) fn auto_compaction_threshold() -> Option<usize> {
+    /// The token count at which automatic compaction runs: the stated
+    /// `JEDEN_COMPACTION_THRESHOLD`, or the stated `JEDEN_CONTEXT_LIMIT` less
+    /// the stated `JEDEN_COMPACTION_RESERVE`. With neither, compaction is the
+    /// operator's `/compact` alone; a limit without its reserve is refused by
+    /// name rather than given a share of the window nobody chose.
+    pub(super) fn auto_compaction_threshold() -> Result<Option<usize>, String> {
         if let Some(threshold) = env_usize("JEDEN_COMPACTION_THRESHOLD") {
-            return Some(threshold);
+            return Ok(Some(threshold));
         }
-        let limit = env_usize("JEDEN_CONTEXT_LIMIT")?;
-        // Compact before the context limit, reserving the larger of 15% of the
-        // window or the configured token reserve. Clamp tiny test and development
-        // windows to 85% when the reserve would consume the entire window.
-        let reserve = env_usize("JEDEN_COMPACTION_RESERVE").unwrap_or(16_384);
-        let fifteen_percent = ((limit as f64) * 0.15).ceil() as usize;
-        let margin = std::cmp::max(fifteen_percent, reserve);
-        if margin >= limit {
-            Some(std::cmp::max(1, ((limit as f64) * 0.85).floor() as usize))
-        } else {
-            Some(limit - margin)
+        let Some(limit) = env_usize("JEDEN_CONTEXT_LIMIT") else {
+            return Ok(None);
+        };
+        let reserve = env_usize("JEDEN_COMPACTION_RESERVE").ok_or_else(|| {
+            format!(
+                "JEDEN_CONTEXT_LIMIT is {limit} but JEDEN_COMPACTION_RESERVE is not set: state how many tokens compaction keeps free, or state JEDEN_COMPACTION_THRESHOLD"
+            )
+        })?;
+        if reserve >= limit {
+            return Err(format!(
+                "JEDEN_COMPACTION_RESERVE {reserve} leaves nothing of JEDEN_CONTEXT_LIMIT {limit} before compaction"
+            ));
+        }
+        Ok(Some(limit - reserve))
+    }
+
+    /// The three stated bounds of tool-result pruning, or `None` when none is
+    /// stated (pruning is then not part of compaction). Some but not all is
+    /// refused by name.
+    fn tool_prune_bounds() -> Result<Option<(usize, usize, usize)>, String> {
+        let names = [
+            "JEDEN_TOOL_PRUNE_PROTECT_TOKENS",
+            "JEDEN_TOOL_PRUNE_MIN_SAVINGS_TOKENS",
+            "JEDEN_TOOL_PRUNE_MIN_TOOL_TOKENS",
+        ];
+        let values = names.map(env_usize);
+        match values {
+            [Some(protect), Some(min_savings), Some(min_tool)] => Ok(Some((protect, min_savings, min_tool))),
+            [None, None, None] => Ok(None),
+            _ => {
+                let missing: Vec<&str> = names
+                    .iter()
+                    .zip(values)
+                    .filter(|(_, value)| value.is_none())
+                    .map(|(name, _)| *name)
+                    .collect();
+                Err(format!(
+                    "tool-result pruning needs all of {}; {} not set",
+                    names.join(", "),
+                    missing.join(", ")
+                ))
+            }
         }
     }
 
@@ -139,16 +175,13 @@ impl Conversation {
         Some(std::cmp::max(1, content.chars().count() / 4))
     }
 
-    pub(super) fn prune_tool_results_if_needed(
-        &mut self,
-        threshold: usize,
-    ) -> Result<usize, String> {
+    pub(super) fn prune_tool_results_if_needed(&mut self, threshold: usize) -> Result<(), String> {
         if self.approx_tokens() < threshold {
-            return Ok(0);
+            return Ok(());
         }
-        let protect_tokens = env_usize("JEDEN_TOOL_PRUNE_PROTECT_TOKENS").unwrap_or(40_000);
-        let min_savings = env_usize("JEDEN_TOOL_PRUNE_MIN_SAVINGS_TOKENS").unwrap_or(20_000);
-        let min_tool_tokens = env_usize("JEDEN_TOOL_PRUNE_MIN_TOOL_TOKENS").unwrap_or(50);
+        let Some((protect_tokens, min_savings, min_tool_tokens)) = Self::tool_prune_bounds()? else {
+            return Ok(());
+        };
         let mut protected_tokens = 0usize;
         let mut protected_latest = false;
         let mut candidates = Vec::new();
@@ -179,7 +212,7 @@ impl Conversation {
         let target_savings = std::cmp::max(needed_savings, min_savings);
         let potential_savings: usize = candidates.iter().map(|(_, tokens)| *tokens).sum();
         if potential_savings < target_savings {
-            return Ok(0);
+            return Ok(());
         }
         candidates.sort_by_key(|(idx, _)| *idx);
         let mut selected = Vec::new();
@@ -199,6 +232,6 @@ impl Conversation {
             "tool_prune",
             json!({ "pruned": selected.len(), "savedTokensApprox": saved, "threshold": threshold }),
         )?;
-        Ok(saved)
+        Ok(())
     }
 }
