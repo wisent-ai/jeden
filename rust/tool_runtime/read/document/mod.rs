@@ -5,7 +5,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::tool_runtime::shared::{
-    jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input, MAX_READ_BYTES,
+    count_input, jail_path, line_window, mime_type_for_path, sha256_hex, string_input, u64_input,
+    MAX_READ_BYTES,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -91,7 +92,7 @@ pub(crate) fn fetch_readable_url(
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("fetch_readable_url requires http(s) URL".into());
     }
-    let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
+    let max_bytes = count_input(input, "maxBytes", "fetch_readable_url")? as usize;
     let client = crate::net::blocking_builder()
         .build()
         .map_err(|e| e.to_string())?;

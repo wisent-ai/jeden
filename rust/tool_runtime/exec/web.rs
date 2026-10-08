@@ -3,7 +3,7 @@
 //! Split out of `tool_runtime/exec/mod.rs`, which had grown past the module
 //! line cap.
 
-use super::super::shared::{line_window, string_input, u64_input};
+use super::super::shared::{count_input, line_window, string_input};
 use super::super::ToolRuntime;
 use crate::tool_runtime::runtime_ops::context::OperationProgress;
 use crate::tool_runtime::runtime_ops::output::BoundedOutput;
@@ -16,7 +16,7 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err("fetch_url requires http(s) URL".into());
     }
-    let max_bytes = u64_input(input, "maxBytes", 200_000).clamp(1_000, 1_000_000) as usize;
+    let max_bytes = count_input(input, "maxBytes", "fetch_url")? as usize;
     if runtime.operation.cancellation().is_cancelled() {
         return Err("fetch_url cancelled".into());
     }
