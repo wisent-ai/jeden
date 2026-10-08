@@ -97,7 +97,7 @@ pub(super) async fn reject_overloaded(mut stream: TcpStream) {
             code: "backpressure".into(),
             message: "connection admission capacity exhausted".into(),
             retryable: true,
-            details: json!({"retryAfterMillis": 100}),
+            details: json!({}),
         },
     );
     let _ = write_async_frame(&mut stream, &response).await;

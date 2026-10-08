@@ -178,9 +178,7 @@ impl<B: SessionBackend> SessionService<B> {
             )?;
             return Err(match error {
                 SubmitError::NotReady => ServiceError::NotReady,
-                SubmitError::Backpressure { retry_after_millis } => {
-                    ServiceError::Backpressure { retry_after_millis }
-                }
+                SubmitError::Backpressure => ServiceError::Backpressure,
             });
         }
         Ok(SubmitOutcome::Started {

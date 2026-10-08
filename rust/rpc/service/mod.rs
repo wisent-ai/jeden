@@ -29,7 +29,7 @@ pub enum ServiceError {
     Tenant(TenantError),
     Idempotency(IdempotencyError),
     Replay(ReplayError),
-    Backpressure { retry_after_millis: u64 },
+    Backpressure,
     NotReady,
     Runtime(String),
 }

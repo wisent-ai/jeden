@@ -70,7 +70,8 @@ pub enum TenantError {
     InvalidStorageKey,
     InvalidWorkspace(String),
     StorageUnavailable,
-    QuotaExceeded { retry_after_millis: u64 },
+    /// The named quota (`activeRequests`, `sessions`, `storedBytes`) is spent.
+    QuotaExceeded { quota: &'static str },
 }
 
 #[derive(Debug, Clone)]

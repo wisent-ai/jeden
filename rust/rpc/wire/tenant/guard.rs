@@ -77,7 +77,7 @@ impl TenantGuard {
         let entry = usage.entry(tenant.clone()).or_default();
         if entry.active_requests >= self.limits.max_active_requests {
             return Err(TenantError::QuotaExceeded {
-                retry_after_millis: 250,
+                quota: "activeRequests",
             });
         }
         entry.active_requests += 1;
@@ -94,9 +94,7 @@ impl TenantGuard {
             .map_err(|_| TenantError::StorageUnavailable)?;
         let entry = usage.entry(tenant.clone()).or_default();
         if entry.sessions >= self.limits.max_sessions {
-            return Err(TenantError::QuotaExceeded {
-                retry_after_millis: 1000,
-            });
+            return Err(TenantError::QuotaExceeded { quota: "sessions" });
         }
         entry.sessions += 1;
         Ok(())
@@ -122,11 +120,11 @@ impl TenantGuard {
             .stored_bytes
             .checked_add(delta)
             .ok_or(TenantError::QuotaExceeded {
-                retry_after_millis: 1000,
+                quota: "storedBytes",
             })?;
         if updated > self.limits.max_stored_bytes {
             return Err(TenantError::QuotaExceeded {
-                retry_after_millis: 1000,
+                quota: "storedBytes",
             });
         }
         entry.stored_bytes = updated;

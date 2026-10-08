@@ -39,7 +39,7 @@ pub enum Readiness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmitError {
     NotReady,
-    Backpressure { retry_after_millis: u64 },
+    Backpressure,
 }
 
 struct ExecutorInner {
@@ -128,9 +128,7 @@ impl BoundedExecutor {
             .ok_or(SubmitError::NotReady)
             .and_then(|sender| {
                 sender.try_send(Box::new(job)).map_err(|error| match error {
-                    mpsc::TrySendError::Full(_) => SubmitError::Backpressure {
-                        retry_after_millis: 100,
-                    },
+                    mpsc::TrySendError::Full(_) => SubmitError::Backpressure,
                     mpsc::TrySendError::Disconnected(_) => SubmitError::NotReady,
                 })
             });

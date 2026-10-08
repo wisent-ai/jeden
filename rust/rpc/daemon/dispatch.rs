@@ -242,23 +242,25 @@ fn service_error(error: ServiceError) -> ErrorV1 {
     match error {
         ServiceError::AccessDenied => protocol_error("access_denied", "access denied"),
         ServiceError::InvalidRequest(message) => protocol_error("invalid_request", &message),
-        ServiceError::Backpressure { retry_after_millis } => ErrorV1 {
+        // Retryable refusals say what is exhausted; when to retry is the
+        // caller's, since no wait was ever measured here.
+        ServiceError::Backpressure => ErrorV1 {
             code: "backpressure".into(),
             message: "service capacity exhausted".into(),
             retryable: true,
-            details: json!({"retryAfterMillis": retry_after_millis}),
+            details: json!({}),
         },
         ServiceError::NotReady => ErrorV1 {
             code: "not_ready".into(),
             message: "service is not ready".into(),
             retryable: true,
-            details: json!({"retryAfterMillis": 100}),
+            details: json!({}),
         },
-        ServiceError::Tenant(TenantError::QuotaExceeded { retry_after_millis }) => ErrorV1 {
+        ServiceError::Tenant(TenantError::QuotaExceeded { quota }) => ErrorV1 {
             code: "quota_exceeded".into(),
-            message: "tenant quota exceeded".into(),
+            message: format!("tenant quota {quota} exceeded"),
             retryable: true,
-            details: json!({"retryAfterMillis": retry_after_millis}),
+            details: json!({"quota": quota}),
         },
         ServiceError::Tenant(_) => protocol_error("access_denied", "access denied"),
         ServiceError::Idempotency(error) => {
