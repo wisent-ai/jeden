@@ -11,5 +11,3 @@ pub(crate) const UPGRADED_SCHEMA_VERSIONS: [u32; 2] = [1, 2];
 pub(crate) const INITIAL_REVISION: u64 = 0;
 /// HTTP responses at or above this protocol boundary are failures, not evidence of success.
 pub(crate) const HTTP_ERROR_STATUS: u64 = 400;
-/// A preview bounds prompt copying; task_evidence retains access to the complete recorded result.
-pub(crate) const EVIDENCE_PREVIEW_CHARS: usize = 2048;

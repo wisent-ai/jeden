@@ -72,22 +72,18 @@ fn lineage_receipts(
     Ok(receipts)
 }
 
+/// The receipts an inspection may cite: each one's tool, input, failure and
+/// identity, without its result. The inspection reads a result whole with
+/// task_evidence; no part of it is cut into the prompt.
 pub(crate) fn review_evidence(session: &Path) -> Result<Value, String> {
     let entries = receipts(session)?;
     Ok(Value::Array(
         entries
             .into_values()
             .map(|mut entry| {
-                let result = entry["result"].to_string();
-                let preview: String = result
-                    .chars()
-                    .take(super::super::constants::EVIDENCE_PREVIEW_CHARS)
-                    .collect();
-                entry
-                    .as_object_mut()
-                    .expect("receipt object")
-                    .remove("result");
-                entry["resultPreview"] = json!(preview);
+                if let Some(fields) = entry.as_object_mut() {
+                    fields.remove("result");
+                }
                 entry
             })
             .collect(),
