@@ -112,12 +112,9 @@ pub(crate) fn discover_context(
     let root = project_root(&canonical_cwd)?;
     let mut budget = Budget {
         max_bytes: config.max_bytes,
-        max_tokens: config.max_tokens,
         used_bytes: 0,
-        used_tokens: 0,
         warnings: Vec::new(),
         warned_paths: BTreeSet::new(),
-        files_read: 0,
     };
     // Explicit sticky rules are load-bearing policy. Reserve their budget first,
     // while assigning their final precedence after discovered project files.

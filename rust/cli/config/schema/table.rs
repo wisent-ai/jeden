@@ -97,15 +97,8 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "context.maxBytes",
         typ: "number",
-        description: "Maximum UTF-8 bytes loaded from discovered context and rule files.",
-        default_json: "131072",
-        enum_values: &[],
-    },
-    SettingSpec {
-        key: "context.maxTokens",
-        typ: "number",
-        description: "Approximate token budget for discovered context and rule files.",
-        default_json: "32768",
+        description: "Byte budget for discovered context and rule files, when you declare one; unset, every file is included whole.",
+        default_json: "null",
         enum_values: &[],
     },
     SettingSpec {

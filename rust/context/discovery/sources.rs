@@ -72,13 +72,6 @@ pub(super) fn load_expanded(
             path.display()
         )
     })?;
-    budget.files_read = budget.files_read.saturating_add(1);
-    if budget.files_read > 256 {
-        return Err(format!(
-            "context import limit exceeded at {} (maximum 256 files)",
-            canonical.display()
-        ));
-    }
     if !canonical.starts_with(jail) {
         return Err(format!(
             "context import {} escapes path jail {}",

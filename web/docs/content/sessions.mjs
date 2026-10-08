@@ -103,7 +103,7 @@ export const sessionPages = [
         ],
         callout: {
           tone: "note",
-          text: "A context line such as <code>@./extra.md</code> imports another file under the same context root. Oversized context files are skipped. File-based custom commands load from project and user <code>.jeden/commands/</code> directories; native extensions load from <code>.jeden/extensions/</code>, and plugin and marketplace state lives under <code>~/.jeden/plugins/</code>.",
+          text: "A context line such as <code>@./extra.md</code> imports another file under the same context root; an import cycle or an import outside the root is refused by name. Every context file is included whole unless you declare a byte budget with <code>jeden config set context.maxBytes &lt;bytes&gt;</code>; with one, the file that reaches it is cut there and the run's warnings name it. File-based custom commands load from project and user <code>.jeden/commands/</code> directories; native extensions load from <code>.jeden/extensions/</code>, and plugin and marketplace state lives under <code>~/.jeden/plugins/</code>.",
         },
       },
       {

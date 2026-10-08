@@ -51,24 +51,14 @@ pub(crate) struct BillingPreferencesConfig {
     pub(crate) max_period_microunits: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ContextConfig {
-    #[serde(rename = "maxBytes", default = "default_context_max_bytes")]
-    pub(crate) max_bytes: usize,
-    #[serde(rename = "maxTokens", default = "default_context_max_tokens")]
-    pub(crate) max_tokens: usize,
+    /// The byte budget for discovered context and rule files, when the
+    /// operator declares one; absent, every file is included whole.
+    #[serde(rename = "maxBytes", default)]
+    pub(crate) max_bytes: Option<usize>,
     #[serde(default)]
     pub(crate) advisor: AdvisorConfig,
-}
-
-impl Default for ContextConfig {
-    fn default() -> Self {
-        Self {
-            max_bytes: default_context_max_bytes(),
-            max_tokens: default_context_max_tokens(),
-            advisor: AdvisorConfig::default(),
-        }
-    }
 }
 
 /// What the context advisor reads and how much of it reaches a prompt. The
@@ -109,14 +99,6 @@ impl Default for AdvisorConfig {
             transcript_lake_bin: String::new(),
         }
     }
-}
-
-fn default_context_max_bytes() -> usize {
-    131_072
-}
-
-fn default_context_max_tokens() -> usize {
-    32_768
 }
 
 fn default_advisor_limit() -> usize {
