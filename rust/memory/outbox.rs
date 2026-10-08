@@ -3,7 +3,7 @@
 
 use super::store::entities::{outbox, processed_event};
 use super::worker::DEFAULT_LEASE_MS;
-use super::{bounded_redacted, MemoryStore};
+use super::{redacted, MemoryStore};
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Expr, LockBehavior, LockType, OnConflict};
 use sea_orm::{
@@ -132,7 +132,7 @@ impl MemoryStore {
         };
         let id = row.id;
         if let Err(error) = consumer.consume(&event) {
-            let detail = bounded_redacted(&error, 500);
+            let detail = redacted(&error);
             run_db(move |db| async move {
                 outbox::Entity::update_many()
                     .col_expr(outbox::Column::State, Expr::value("pending"))

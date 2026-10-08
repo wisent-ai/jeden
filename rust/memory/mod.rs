@@ -21,8 +21,6 @@ pub(crate) use schema::SCHEMA;
 pub use store::MemoryStore;
 pub use worker::MAX_ATTEMPTS;
 
-pub const MAX_MEMORY_CHARS: usize = 2_000;
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryScope {
@@ -211,7 +209,8 @@ pub(super) fn now_ms() -> i64 {
         .as_millis()
         .min(i64::MAX as u128) as i64
 }
-pub(crate) fn bounded_redacted(value: &str, max: usize) -> String {
+/// `value` with credentials redacted and whitespace runs joined, whole.
+pub(crate) fn redacted(value: &str) -> String {
     let mut text = value.to_string();
     for pattern in [
         r"\b(?:sk|pk|rk)_[A-Za-z0-9_\-]{12,}\b",
@@ -223,15 +222,5 @@ pub(crate) fn bounded_redacted(value: &str, max: usize) -> String {
             text = re.replace_all(&text, "[REDACTED]").into_owned()
         }
     }
-    let normalized = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if normalized.chars().count() > max {
-        let mut out = normalized
-            .chars()
-            .take(max.saturating_sub(1))
-            .collect::<String>();
-        out.push('…');
-        out
-    } else {
-        normalized
-    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }

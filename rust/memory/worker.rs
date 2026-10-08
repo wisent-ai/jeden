@@ -1,6 +1,6 @@
 use super::store::entities::job;
 use super::{
-    bounded_redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
+    redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
     MemoryStore,
 };
 use crate::fleet::{run_db, sql};
@@ -208,7 +208,7 @@ impl MemoryStore {
         let (id, worker, error) = (
             id.to_owned(),
             worker.to_owned(),
-            bounded_redacted(error, 500),
+            redacted(error),
         );
         run_db(move |db| async move {
             let attempts = job::Entity::find_by_id(id.clone())

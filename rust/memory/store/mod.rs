@@ -137,10 +137,7 @@ impl MemoryStore {
         if candidates.len() < 2 {
             return Err("consolidation requires at least two memories".into());
         }
-        let text = bounded_redacted(
-            &model.consolidate(&candidates, max_chars.min(MAX_MEMORY_CHARS))?,
-            max_chars.min(MAX_MEMORY_CHARS),
-        );
+        let text = redacted(&model.consolidate(&candidates, max_chars)?);
         let source = MemorySource {
             origin: "model_consolidation".into(),
             session_id: None,
@@ -177,7 +174,7 @@ impl MemoryStore {
         verified: bool,
     ) -> Result<Option<String>, String> {
         let fingerprint = fingerprint.to_owned();
-        let description = bounded_redacted(description, MAX_MEMORY_CHARS);
+        let description = redacted(description);
         let session_id = session_id.to_owned();
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;

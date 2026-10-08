@@ -52,7 +52,6 @@ impl MemoryStore {
             "queue": queue,
             "provenance": true,
             "bounded": {
-                "memoryChars": MAX_MEMORY_CHARS,
                 "attempts": MAX_ATTEMPTS,
             },
         }))

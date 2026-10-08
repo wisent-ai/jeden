@@ -55,13 +55,13 @@ impl MemoryStore {
         source: &MemorySource,
         confidence: f64,
     ) -> Result<MemoryRecord, String> {
-        let redacted = bounded_redacted(text, MAX_MEMORY_CHARS);
-        let logical_key = logical_key(kind, scope, &redacted);
+        let kept = redacted(text);
+        let logical_key = logical_key(kind, scope, &kept);
         self.remember_with_key(
             kind,
             scope,
             &logical_key,
-            &redacted,
+            &kept,
             tags,
             source,
             confidence,
@@ -84,7 +84,7 @@ impl MemoryStore {
         confidence: f64,
         valid_from: Option<i64>,
     ) -> Result<MemoryRecord, String> {
-        let text = bounded_redacted(text, MAX_MEMORY_CHARS);
+        let text = redacted(text);
         if text.is_empty() {
             return Err("memory text is empty after redaction".into());
         }
