@@ -210,7 +210,10 @@ impl Default for HeadlessConfig {
         Self {
             max_frame_bytes: 1024 * 1024,
             max_connections: 128,
-            reconnect_key: vec![0; 32],
+            // No key: a daemon built from the default refuses to start
+            // ("reconnect key must contain at least 32 bytes") instead of
+            // signing reconnect tokens with a known all-zero key.
+            reconnect_key: Vec::new(),
             reconnect_ttl: Duration::from_secs(300),
         }
     }
