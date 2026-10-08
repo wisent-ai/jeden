@@ -1,26 +1,43 @@
 //! Changing one entry of an archive in place: the whole archive is rewritten
 //! beside the original and renamed over it, so a failed rewrite leaves the
-//! caller's archive exactly as it was.
+//! caller's archive exactly as it was. The original is read from one open
+//! handle, hashed and then rewritten as a stream, so an archive of any size
+//! is changed without being held in memory, and the bytes rewritten are the
+//! bytes whose digest was checked.
 
 use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::fs::{self, File};
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Read, Seek, Write};
 use std::path::Path;
 use zip::write::SimpleFileOptions;
 
-use super::{file_sha, safe_entry, MAX_ARCHIVE_WRITE_BYTES};
-use crate::tool_runtime::shared::{jail_write_path, string_input, verify_expected_sha};
+use super::{file_sha, safe_entry};
+use crate::tool_runtime::shared::{jail_write_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 
+/// A writer that only feeds a digest, so a file can be hashed by copying it.
+struct Hashing(Sha256);
+
+impl Write for Hashing {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
 fn rewrite_zip(
-    source: &[u8],
+    source: File,
     target: &Path,
     entry_name: &str,
     content: Option<&[u8]>,
 ) -> Result<(), String> {
-    let mut archive =
-        zip::ZipArchive::new(Cursor::new(source)).map_err(|error| error.to_string())?;
+    let mut archive = zip::ZipArchive::new(source).map_err(|error| error.to_string())?;
     let output = File::create(target).map_err(|error| error.to_string())?;
     let mut writer = zip::ZipWriter::new(output);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -56,16 +73,16 @@ fn rewrite_zip(
 }
 
 fn rewrite_tar(
-    source: &[u8],
+    source: File,
     target: &Path,
     entry_name: &str,
     content: Option<&[u8]>,
     gzip: bool,
 ) -> Result<(), String> {
     let reader: Box<dyn Read> = if gzip {
-        Box::new(GzDecoder::new(Cursor::new(source)))
+        Box::new(GzDecoder::new(source))
     } else {
-        Box::new(Cursor::new(source))
+        Box::new(source)
     };
     let output = File::create(target).map_err(|error| error.to_string())?;
     let sink: Box<dyn Write> = if gzip {
@@ -115,13 +132,16 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let expected =
         string_input(input, "expectedSha256").ok_or("write_archive requires expectedSha256")?;
     let path = jail_write_path(runtime.cwd, &label)?;
-    let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_ARCHIVE_WRITE_BYTES {
+    let mut source = File::open(&path).map_err(|error| error.to_string())?;
+    let mut hashing = Hashing(Sha256::new());
+    std::io::copy(&mut source, &mut hashing).map_err(|error| error.to_string())?;
+    let actual = hex::encode(hashing.0.finalize());
+    if actual != expected {
         return Err(format!(
-            "archive exceeds write limit of {MAX_ARCHIVE_WRITE_BYTES} bytes"
+            "expectedSha256 mismatch for {label}: expected {expected}, actual {actual}"
         ));
     }
-    let source = verify_expected_sha(&label, &path, &expected)?;
+    source.rewind().map_err(|error| error.to_string())?;
     let action = string_input(input, "action").unwrap_or_else(|| "upsert".into());
     let content = match action.as_str() {
         "upsert" => Some(
@@ -135,11 +155,11 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let temp = path.with_extension(format!("jeden-{}.tmp", std::process::id()));
     let lower = label.to_ascii_lowercase();
     let result = if lower.ends_with(".zip") {
-        rewrite_zip(&source, &temp, &entry, content.as_deref())
+        rewrite_zip(source, &temp, &entry, content.as_deref())
     } else if lower.ends_with(".tar") {
-        rewrite_tar(&source, &temp, &entry, content.as_deref(), false)
+        rewrite_tar(source, &temp, &entry, content.as_deref(), false)
     } else if lower.ends_with(".tar.gz") || lower.ends_with(".tgz") {
-        rewrite_tar(&source, &temp, &entry, content.as_deref(), true)
+        rewrite_tar(source, &temp, &entry, content.as_deref(), true)
     } else {
         Err("write_archive supports .zip, .tar, .tar.gz, and .tgz".into())
     };

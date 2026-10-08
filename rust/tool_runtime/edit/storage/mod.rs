@@ -14,8 +14,6 @@ mod database;
 pub(crate) use archive::write_archive;
 pub(crate) use database::write_sqlite;
 
-pub(super) const MAX_ARCHIVE_WRITE_BYTES: u64 = 128 * 1024 * 1024;
-
 /// The digest and byte count of a file, read in bounded chunks so a large
 /// archive is never held in memory to be hashed.
 pub(super) fn file_sha(path: &Path) -> Result<(String, u64), String> {
