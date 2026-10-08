@@ -3,9 +3,6 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAX_DEFINITIONS: usize = 512;
-const MAX_DEFINITION_BYTES: u64 = 256 * 1024;
-
 fn home() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
@@ -28,7 +25,7 @@ fn roots(cwd: &Path) -> Result<Vec<PathBuf>, TaskError> {
 }
 
 fn collect(root: &Path, out: &mut Vec<PathBuf>) {
-    if out.len() >= MAX_DEFINITIONS || !root.exists() {
+    if !root.exists() {
         return;
     }
     if root.is_file() {
@@ -50,9 +47,6 @@ fn collect(root: &Path, out: &mut Vec<PathBuf>) {
     paths.sort();
     for path in paths {
         collect(&path, out);
-        if out.len() >= MAX_DEFINITIONS {
-            break;
-        }
     }
 }
 
@@ -63,10 +57,6 @@ pub fn discover_agents(cwd: &Path) -> Result<Vec<AgentDefinition>, TaskError> {
     }
     let mut definitions = BTreeMap::new();
     for path in files {
-        let metadata = fs::metadata(&path)?;
-        if metadata.len() > MAX_DEFINITION_BYTES {
-            continue;
-        }
         let text = fs::read_to_string(&path)?;
         let parsed = match path.extension().and_then(|v| v.to_str()) {
             Some("yaml" | "yml") => serde_yaml::from_str::<AgentDefinition>(&text)

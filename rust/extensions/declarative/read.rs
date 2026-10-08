@@ -8,16 +8,11 @@ use super::parse::{
     parse_frontmatter, safe_assets, skill_file_id, string_list, valid_id, validate_matchers,
 };
 use super::shapes::{Agent, LoadedCapability, Rule, Skill};
-use super::MAX_DEFINITION_BYTES;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
 pub(super) fn load_skill(path: &Path, precedence: usize) -> Result<Skill, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_DEFINITION_BYTES {
-        return Err("skill definition exceeds 256 KiB".into());
-    }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let (frontmatter, body) = parse_frontmatter(&text)?;
     let id = frontmatter
@@ -69,10 +64,6 @@ pub(super) fn load_skill(path: &Path, precedence: usize) -> Result<Skill, String
 }
 
 pub(super) fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_DEFINITION_BYTES {
-        return Err("rule definition exceeds 256 KiB".into());
-    }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let (value, fallback_body) = match path.extension().and_then(|value| value.to_str()) {
         Some("json") => (
@@ -139,10 +130,6 @@ pub(super) fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> 
 }
 
 pub(super) fn load_agent(path: &Path, precedence: usize) -> Result<Agent, String> {
-    let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    if metadata.len() > MAX_DEFINITION_BYTES {
-        return Err("agent definition exceeds 256 KiB".into());
-    }
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let value = match path.extension().and_then(|value| value.to_str()) {
         Some("yaml" | "yml") => {

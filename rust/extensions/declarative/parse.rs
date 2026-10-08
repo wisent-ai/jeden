@@ -3,7 +3,6 @@
 //! Split out of `extensions/declarative.rs`, which had grown past the module
 //! line cap.
 
-use super::{MAX_ASSETS_PER_SKILL, MAX_DEFINITIONS};
 use regex::Regex;
 use serde_json::{Map, Value};
 use std::fs;
@@ -11,14 +10,13 @@ use std::path::{Path, PathBuf};
 
 pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()
-        && id.len() <= 80
         && id
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
 pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) {
-    if out.len() >= MAX_DEFINITIONS || !root.exists() {
+    if !root.exists() {
         return;
     }
     if root.is_file() {
@@ -41,9 +39,6 @@ pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) 
     paths.sort();
     for path in paths {
         collect(&path, extensions, out);
-        if out.len() >= MAX_DEFINITIONS {
-            break;
-        }
     }
 }
 
@@ -96,9 +91,6 @@ pub(super) fn matches(matchers: &[String], prompt: &str) -> bool {
 
 pub(super) fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<PathBuf>, String> {
     let relative = string_list(raw)?;
-    if relative.len() > MAX_ASSETS_PER_SKILL {
-        return Err(format!("skill exceeds {MAX_ASSETS_PER_SKILL} assets"));
-    }
     let root = skill_file.parent().unwrap_or_else(|| Path::new("."));
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let mut assets = Vec::new();

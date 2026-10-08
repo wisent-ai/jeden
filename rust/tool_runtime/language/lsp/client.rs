@@ -17,8 +17,6 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-const MAX_LSP_MESSAGE: usize = 8 * 1024 * 1024;
-
 pub(super) struct LspClient {
     pub(super) child: Child,
     pub(super) stdin: ChildStdin,
@@ -61,10 +59,6 @@ fn reader_thread(stdout: impl Read + Send + 'static, sender: mpsc::Sender<Result
             let Some(length) = content_length else {
                 continue;
             };
-            if length > MAX_LSP_MESSAGE {
-                let _ = sender.send(Err("LSP message exceeds 8 MiB".into()));
-                return;
-            }
             let mut bytes = vec![0; length];
             if let Err(error) = reader.read_exact(&mut bytes) {
                 let _ = sender.send(Err(error.to_string()));

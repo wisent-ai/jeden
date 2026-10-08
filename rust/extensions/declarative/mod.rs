@@ -15,10 +15,6 @@ pub(crate) use shapes::PromptContribution;
 pub(crate) use shapes::{Agent, Input, Loaded};
 use std::collections::BTreeSet;
 
-const MAX_DEFINITIONS: usize = 512;
-const MAX_DEFINITION_BYTES: u64 = 256 * 1024;
-const MAX_ASSETS_PER_SKILL: usize = 64;
-
 pub(super) fn load(inputs: &[Input]) -> Loaded {
     let mut loaded = Loaded::default();
     let mut ordered = inputs.to_vec();
