@@ -7,7 +7,7 @@
 use super::super::platform::{native, PipeReader, ProcessSignal, ProcessTree};
 use super::super::{BoundedOutput, OperationProgress};
 use super::bootstrap::{JAVASCRIPT_BOOTSTRAP, PYTHON_BOOTSTRAP};
-use super::{KernelLanguage, KernelResult, FRAME_LIMIT};
+use super::{KernelLanguage, KernelResult};
 use crate::tool_runtime::runtime_ops::context::OperationContext;
 use serde_json::{json, Value};
 use std::ffi::OsStr;
@@ -226,9 +226,6 @@ impl KernelProcess {
             }
             Ok(count) => {
                 self.pending.extend_from_slice(&chunk[..count]);
-                if self.pending.len() > FRAME_LIMIT {
-                    return Err("kernel protocol frame exceeded 64 KiB".into());
-                }
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(None),
             Err(error) => return Err(error.to_string()),

@@ -13,8 +13,6 @@ mod process;
 use crate::tool_runtime::runtime_ops::security::ExecutionGrant;
 use process::KernelProcess;
 
-const FRAME_LIMIT: usize = 64 * 1024;
-
 static KERNELS: LazyLock<Mutex<HashMap<KernelKey, KernelProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
