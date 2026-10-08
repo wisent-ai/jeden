@@ -10,10 +10,11 @@
 //! retry loop.
 //!
 //! One refusal cannot be repaired by wording alone. An answer the output
-//! budget cut mid-JSON was already longer than the budget allows, and the
-//! correction adds the refusal to what it must say, so that single correction
-//! is asked with `INSPECTION_RETRY_OUTPUT_TOKENS` and with the shortest form
-//! of the answer named in the instruction.
+//! budget cut mid-JSON was already longer than the budget allows, so every
+//! inspection is asked for the routed model's own declared output ceiling
+//! (Brama's catalog `max_output_tokens`), and the single correction names
+//! the shortest form of the answer. A model whose catalog states no ceiling
+//! is asked without one: the provider's own limit decides.
 
 use super::super::*;
 
@@ -24,7 +25,7 @@ impl Conversation {
         instruction: &str,
         input: &Value,
         hooks: &RunHooks<'_>,
-        budget: u32,
+        ceiling: Option<u32>,
     ) -> Result<(String, PathBuf), String> {
         let mut inspector = Conversation::new_inspection(&args.cwd)?;
         inspector.recorder.record(
@@ -41,7 +42,9 @@ impl Conversation {
         read_args.model_only = false;
         read_args.autonomous = true;
         read_args.goal = None;
-        read_args.max_tokens = Some(read_args.max_tokens.unwrap_or(budget).max(budget));
+        if let Some(ceiling) = ceiling {
+            read_args.max_tokens = Some(ceiling);
+        }
         let mut read_hooks = RunHooks {
             cancel: hooks.cancel.clone(),
             interactive: false,
@@ -74,6 +77,7 @@ impl Conversation {
         accept: &mut dyn FnMut(&str) -> Result<T, String>,
     ) -> Result<(T, PathBuf), String> {
         let mut correction: Option<String> = None;
+        let ceiling = output_ceiling(args);
         loop {
             let asked = match &correction {
                 None => instruction.to_string(),
@@ -87,14 +91,8 @@ impl Conversation {
                      Return only the corrected JSON object, complete and closed."
                 ),
             };
-            let budget = match &correction {
-                Some(refusal) if cut_off(refusal) => {
-                    crate::completion::INSPECTION_RETRY_OUTPUT_TOKENS
-                }
-                _ => crate::completion::INSPECTION_OUTPUT_TOKENS,
-            };
             let (text, inspector) = self
-                .inspect_completion(args, &asked, input, hooks, budget)
+                .inspect_completion(args, &asked, input, hooks, ceiling)
                 .map_err(|error| self.completion_failure(stage, &error, hooks))?;
             let refusal = match accept(&text) {
                 Ok(value) => return Ok((value, inspector)),
@@ -118,4 +116,33 @@ impl Conversation {
 /// the output budget and stopped mid-JSON.
 fn cut_off(refusal: &str) -> bool {
     refusal.contains(crate::protocol::INCOMPLETE_ANSWER)
+}
+
+/// The routed model's declared output ceiling from Brama's catalog. A catalog
+/// that cannot be read, or an entry that declares none, leaves the request
+/// without one, said on standard error, as every model read does.
+fn output_ceiling(args: &Args) -> Option<u32> {
+    let config = load_config(&args.cwd);
+    let router = model_router_config(&config, args);
+    let client = crate::control_plane::brama::BramaClient::configured(
+        Some(router.url.clone()),
+        Some(router.bearer_token.clone()),
+    );
+    let declared = client
+        .catalog(false)
+        .map_err(|error| error.to_string())
+        .and_then(|catalog| {
+            catalog.resolve(&router.model).map(|entry| entry.max_output_tokens).map_err(|error| error.to_string())
+        });
+    match declared {
+        Ok(Some(tokens)) => u32::try_from(tokens).ok(),
+        Ok(None) => {
+            eprintln!("jeden: {} declares no output ceiling; the inspection is asked without one", router.model);
+            None
+        }
+        Err(error) => {
+            eprintln!("jeden: the model catalog could not be read for the inspection's output ceiling: {error}");
+            None
+        }
+    }
 }

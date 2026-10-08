@@ -26,7 +26,6 @@ pub(crate) fn asks_context() -> Result<Vec<serde_json::Value>, String> {
 }
 pub(crate) use cli::command;
 pub use constants::SCHEMA_VERSION;
-pub(crate) use constants::{INSPECTION_OUTPUT_TOKENS, INSPECTION_RETRY_OUTPUT_TOKENS};
 pub use model::{
     CompletionBlocker, CompletionEstimate, CompletionState, CriterionReview, EvidenceReference,
     TaskKind, TaskOrigin, TaskStatus, TaskVerification, WorkRequest, WorkTask,
