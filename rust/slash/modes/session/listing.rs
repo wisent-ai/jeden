@@ -5,24 +5,10 @@
 //! cap.
 
 use super::dates::relative_age;
-use crate::slash::modes::session::dates::started_epoch;
 use crate::tui::PickerItem;
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
-
-const MESSAGE_PREVIEW_SESSIONS: usize = 50;
-const MESSAGE_PREVIEW_CHARS: usize = 60;
-
-fn truncate_chars(text: &str, max: usize) -> String {
-    let mut chars = text.chars();
-    let head: String = chars.by_ref().take(max).collect();
-    if chars.next().is_some() {
-        format!("{head}…")
-    } else {
-        head
-    }
-}
 
 /// First user task/message in the session transcript, reading only until the
 /// first `user` event line. Handles both V2 (`payload.type`) and legacy
@@ -44,7 +30,7 @@ fn first_user_task(session_dir: &Path) -> Option<String> {
             .find_map(|key| data.get(key).and_then(serde_json::Value::as_str))?;
         let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if !collapsed.is_empty() {
-            return Some(truncate_chars(&collapsed, MESSAGE_PREVIEW_CHARS));
+            return Some(collapsed);
         }
     }
     None
@@ -82,23 +68,14 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
             entries.push((path, id, name, workspace, started));
         }
     }
-    // Newest first by start time; only these get a transcript preview read.
-    let mut recency: Vec<usize> = (0..entries.len()).collect();
-    recency.sort_by(|left, right| {
-        started_epoch(&entries[*right].4).cmp(&started_epoch(&entries[*left].4))
-    });
-    let preview: std::collections::HashSet<usize> =
-        recency.into_iter().take(MESSAGE_PREVIEW_SESSIONS).collect();
     let mut items = Vec::new();
-    for (index, (path, id, name, workspace, started)) in entries.iter().enumerate() {
+    for (path, id, name, workspace, started) in &entries {
         let mut parts = vec![workspace.clone(), started.clone()];
         if let Some(age) = relative_age(started) {
             parts.push(age);
         }
-        if preview.contains(&index) {
-            if let Some(task) = first_user_task(path) {
-                parts.push(task);
-            }
+        if let Some(task) = first_user_task(path) {
+            parts.push(task);
         }
         let detail = parts
             .into_iter()
