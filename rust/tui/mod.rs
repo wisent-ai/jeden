@@ -111,19 +111,21 @@ pub struct FrameOptions {
     pub slash_selection: usize,
 }
 
-pub fn default_columns() -> usize {
-    std::env::var("COLUMNS")
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(100)
-}
-
-pub fn default_rows() -> usize {
-    std::env::var("LINES")
-        .or_else(|_| std::env::var("ROWS"))
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(30)
+/// The terminal's own size, columns then rows, as the terminal reports it.
+/// There is no guessed size: the interactive prompt draws only on a terminal
+/// that answers with a size it can draw on, and any other is refused with
+/// what it answered.
+pub fn terminal_dimensions() -> io::Result<(usize, usize)> {
+    let (columns, rows) = crossterm::terminal::size().map_err(|error| {
+        io::Error::new(error.kind(), format!("the terminal did not report its size: {error}"))
+    })?;
+    match (std::num::NonZeroU16::new(columns), std::num::NonZeroU16::new(rows)) {
+        (Some(columns), Some(rows)) => Ok((usize::from(columns.get()), usize::from(rows.get()))),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("the terminal reported {columns} columns and {rows} rows, which nothing can be drawn on"),
+        )),
+    }
 }
 
 pub fn stdout_supports_color() -> bool {

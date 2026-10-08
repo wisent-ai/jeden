@@ -92,10 +92,10 @@ pub(super) fn compose_repl(
     out
 }
 
-/// One finalized message rendered as scrollback lines (boxed, newline-split).
+/// One finalized message rendered as scrollback lines (boxed, newline-split),
+/// as wide as the terminal it is written to.
 pub(crate) fn message_block(message: &Message, columns: usize, color: bool) -> Vec<String> {
-    let width = columns.clamp(50, 120);
-    format_message(message, width, color)
+    format_message(message, columns, color)
         .into_iter()
         .flat_map(|line| line.split('\n').map(str::to_string).collect::<Vec<_>>())
         .collect()

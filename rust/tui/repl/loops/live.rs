@@ -26,7 +26,7 @@ pub(super) fn editor_live_lines(
     color: bool,
 ) -> (Vec<String>, usize) {
     let _capabilities = crate::capability::for_cwd(std::path::Path::new(&status.cwd));
-    let width = columns.clamp(1, 112);
+    let width = columns;
     let has_interactive_view = picker.is_some() || confirm.is_some() || view.is_some();
     let mut cursor_rows_below = 0;
     let prompt: Vec<String> = compact_prompt(width, status, editor.text(), false, color)
@@ -93,10 +93,10 @@ pub(super) fn draw_welcome(
     picker: Option<&PickerState>,
     renderer: &mut ReplRenderer,
 ) -> std::io::Result<()> {
-    let (columns, rows) = super::plain::terminal_dimensions();
+    let (columns, rows) = crate::tui::terminal_dimensions()?;
     let color = crate::tui::stdout_supports_color();
     let welcome = crate::tui::render::welcome_panel(
-        columns.min(112),
+        columns,
         &status.model,
         &status.cwd,
         &status.write_status,

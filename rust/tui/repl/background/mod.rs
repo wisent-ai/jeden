@@ -10,7 +10,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crate::agent::TraceEvent;
 use crate::tui::render::{busy_editor_lines, place_editor_cursor};
 use crate::tui::{
-    default_columns, stdout_supports_color, CommandOutcome, DeliveryAction, EditorAction,
+    stdout_supports_color, terminal_dimensions, CommandOutcome, DeliveryAction, EditorAction,
     EditorState, FollowUpQueue, TurnCtx,
 };
 
@@ -59,13 +59,11 @@ where
             }
         }
     };
-    let columns = default_columns();
+    // Committed blocks join the scrollback the main loop writes, at the
+    // terminal's own width.
+    let (columns, _) = terminal_dimensions()?;
+    let scrollback_columns = columns;
     let color = stdout_supports_color();
-    // Committed blocks join the scrollback the main loop writes, at its width.
-    let scrollback_columns = crossterm::terminal::size()
-        .map(|(width, _)| usize::from(width).max(1))
-        .unwrap_or(columns)
-        .min(112);
 
     let outcome = thread::scope(|scope| -> io::Result<Result<CommandOutcome, String>> {
         let worker_cancel = cancel.clone();

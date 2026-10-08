@@ -3,7 +3,7 @@ use std::io;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::super::view_render::picker_panel;
-use super::super::{default_rows, Message, PickerEvent, PickerItem, PickerSpec, PickerState};
+use super::super::{terminal_dimensions, Message, PickerEvent, PickerItem, PickerSpec, PickerState};
 use super::input::TerminalInput;
 use super::{message_block, ReplRenderer};
 
@@ -31,7 +31,8 @@ pub(super) fn prompt_user_question(
                     color,
                 ));
             }
-            lines.extend(picker_panel(&picker, columns, default_rows(), color));
+            let (_, rows) = terminal_dimensions()?;
+            lines.extend(picker_panel(&picker, columns, rows, color));
             renderer.flush(&[], &lines)?;
             let Event::Key(key) = input.read()? else {
                 continue;

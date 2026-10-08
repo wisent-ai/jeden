@@ -1,7 +1,5 @@
 //! Turning the terminal state into the lines a frame is made of.
 
-use std::io::{self, IsTerminal};
-
 use super::text::{paint, sanitize_terminal_text, wrap_line};
 use super::{AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, ASSISTANT_TITLE};
 
@@ -31,13 +29,6 @@ fn role_color(role: &str) -> &'static str {
 }
 
 pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Vec<String> {
-    let width = if io::stdout().is_terminal() {
-        crossterm::terminal::size()
-            .map(|(columns, _)| width.min(usize::from(columns)).max(1))
-            .unwrap_or(width.max(1))
-    } else {
-        width.max(1)
-    };
     let title = sanitize_terminal_text(if message.role == "assistant" {
         ASSISTANT_TITLE
     } else {
@@ -163,7 +154,7 @@ pub(super) fn busy_editor_lines(
 }
 
 pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
-    let width = options.columns.clamp(1, 112);
+    let width = options.columns;
     let prompt = compact_prompt(
         width,
         &options.status,

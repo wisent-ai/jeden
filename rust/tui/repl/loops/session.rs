@@ -11,14 +11,14 @@ use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use crate::tui::{
-    stdout_supports_color, Attachment, CommandOutcome, EditorState, FollowUpQueue, Message,
-    PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind, UiFeature, UiRuntimeAdapter,
+    stdout_supports_color, terminal_dimensions, Attachment, CommandOutcome, EditorState,
+    FollowUpQueue, Message, PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind,
+    UiFeature, UiRuntimeAdapter,
 };
 
 use super::super::background::run_background_turn;
 use super::super::input::TerminalInput;
 use super::super::{apply_turn_result, message_block, ReplRenderer};
-use super::plain::terminal_dimensions;
 
 /// Returns whether the session should end.
 #[allow(clippy::too_many_arguments)]
@@ -104,11 +104,11 @@ where
         active_from_view = false;
         editor.push_history(active_prompt.clone());
         messages.push(Message::new("user", active_prompt.clone()));
-        let (columns, _) = terminal_dimensions();
+        let (columns, _) = terminal_dimensions()?;
         let color = stdout_supports_color();
         let mut blocks = Vec::new();
         for message in &messages[*committed..] {
-            blocks.extend(message_block(message, columns.min(112), color));
+            blocks.extend(message_block(message, columns, color));
         }
         *committed = messages.len();
         renderer.flush(&blocks, &[])?;

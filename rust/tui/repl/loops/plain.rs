@@ -10,7 +10,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use crossterm::event::{DisableBracketedPaste, EnableBracketedPaste};
-use crossterm::terminal;
 
 use crate::tui::text::sanitize_terminal_text;
 use crate::tui::{
@@ -65,11 +64,6 @@ where
     stdout.flush()
 }
 
-pub(super) fn terminal_dimensions() -> (usize, usize) {
-    terminal::size()
-        .map(|(columns, rows)| (usize::from(columns).max(1), usize::from(rows).max(1)))
-        .unwrap_or((100, 30))
-}
 pub(super) fn attachment_command(
     input: &str,
     cwd: &Path,

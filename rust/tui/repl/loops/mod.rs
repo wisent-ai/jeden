@@ -6,9 +6,9 @@ use std::path::Path;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::tui::{
-    stdout_supports_color, AttachmentTray, CommandOutcome, ConfirmEvent, ConfirmState, EditorState,
-    FollowUpQueue, Message, PickerEvent, PickerSpec, PickerState, PromptStatus, RegistryUiRuntime,
-    TurnCtx, TurnKind,
+    stdout_supports_color, terminal_dimensions, AttachmentTray, CommandOutcome, ConfirmEvent,
+    ConfirmState, EditorState, FollowUpQueue, Message, PickerEvent, PickerSpec, PickerState,
+    PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind,
 };
 
 use super::input::TerminalInput;
@@ -21,7 +21,7 @@ mod session;
 
 use keys::handle_editing_key;
 use live::{draw_welcome, editor_live_lines};
-use plain::{attachment_command, old_read_line_loop, terminal_dimensions, BracketedPasteGuard};
+use plain::{attachment_command, old_read_line_loop, BracketedPasteGuard};
 use session::run_turn_chain;
 
 pub fn run_basic_loop<S, C, H>(
@@ -69,11 +69,11 @@ where
     loop {
         if needs_render {
             let status = status_provider();
-            let (columns, rows) = terminal_dimensions();
+            let (columns, rows) = terminal_dimensions()?;
             let color = stdout_supports_color();
             let mut new_blocks = Vec::new();
             for message in &messages[committed..] {
-                new_blocks.extend(message_block(message, columns.min(112), color));
+                new_blocks.extend(message_block(message, columns, color));
             }
             committed = messages.len();
             let (live, cursor_rows_below) = editor_live_lines(
@@ -234,11 +234,11 @@ where
                 }
 
                 {
-                    let (columns, _) = terminal_dimensions();
+                    let (columns, _) = terminal_dimensions()?;
                     let color = stdout_supports_color();
                     let mut blocks = Vec::new();
                     for message in &messages[committed..] {
-                        blocks.extend(message_block(message, columns.min(112), color));
+                        blocks.extend(message_block(message, columns, color));
                     }
                     committed = messages.len();
                     renderer.flush(&blocks, &[])?;
@@ -269,11 +269,11 @@ where
         }
     }
 
-    let (columns, _) = terminal_dimensions();
+    let (columns, _) = terminal_dimensions()?;
     let color = stdout_supports_color();
     let mut final_blocks = Vec::new();
     for message in &messages[committed..] {
-        final_blocks.extend(message_block(message, columns.min(112), color));
+        final_blocks.extend(message_block(message, columns, color));
     }
     renderer.flush(&final_blocks, &[])?;
     let mut stdout = io::stdout();
