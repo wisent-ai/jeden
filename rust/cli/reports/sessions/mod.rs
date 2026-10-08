@@ -1,4 +1,4 @@
-//! Session CLI subcommands: list, show, export, artifacts, resume, recall.
+//! Session CLI subcommands: list, search, show, export, artifacts, resume, recall.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -95,70 +95,105 @@ pub(crate) fn list_sessions(limit: Option<usize>, json: bool) -> Result<String, 
     })
 }
 
-pub(crate) fn search_sessions_command(args: &Args) -> Result<String, String> {
-    let query = args
-        .positionals
+/// `jeden sessions search QUERY [LIMIT] [--json]`: the newest event of each
+/// session whose payload holds QUERY, case-insensitively. `positionals` are
+/// the words after `search`. A store that cannot be read, or an event that
+/// lacks the fields every recorded event carries, is refused naming it.
+pub(crate) fn search_sessions_command(
+    positionals: &[String],
+    json: bool,
+) -> Result<String, String> {
+    use crate::cli::invocation::refusal::usage;
+    let query = positionals
         .first()
-        .ok_or_else(|| crate::cli::invocation::refusal::usage("search-sessions requires a query"))?
+        .ok_or_else(|| usage("sessions search requires a query"))?
         .trim()
         .to_ascii_lowercase();
     if query.is_empty() {
-        return Err(crate::cli::invocation::refusal::usage(
-            "search-sessions requires a non-empty query",
-        ));
+        return Err(usage("sessions search requires a non-empty query"));
     }
-    // Optional positional limit; absent means scan every session (the prior
-    // default/clamp were unconsented numeric literals and are dropped).
-    let limit = match args.positionals.get(1) {
+    let limit = match positionals.get(1) {
         None => None,
         Some(raw) => Some(raw.parse::<usize>().map_err(|_| {
-            crate::cli::invocation::refusal::usage(format!(
-                "search-sessions takes a whole number of sessions to scan after the query, not {raw:?}"
+            usage(format!(
+                "sessions search takes a whole number of sessions to scan after the query, not {raw:?}"
             ))
         })?),
     };
-    let mut rows = Vec::new();
-    if let Ok(entries) = fs::read_dir(session_root()) {
-        let mut entries = entries
-            .flatten()
+    let root = session_root();
+    let mut entries = match fs::read_dir(&root) {
+        Ok(entries) => entries
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| format!("cannot list sessions in {}: {error}", root.display()))?
+            .into_iter()
             .map(|entry| entry.path())
-            .collect::<Vec<_>>();
-        entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
-        for dir in entries.into_iter().take(limit.unwrap_or(usize::MAX)) {
-            let session = read_session_value(&dir.display().to_string())
-                .map_err(|error| format!("cannot search session {}: {}", dir.display(), error))?;
-            let id = session.get("id").and_then(Value::as_str).unwrap_or("");
-            let events = session
-                .get("events")
-                .and_then(Value::as_array)
-                .cloned()
-                .unwrap_or_default();
-            for event in events {
-                let text = serde_json::to_string(event.get("data").unwrap_or(&Value::Null))
-                    .unwrap_or_default();
-                let lower = text.to_ascii_lowercase();
-                if !lower.contains(&query) {
-                    continue;
-                }
-                // Whitespace-collapsed full event text (the prior fixed-width
-                // char window was an unconsented numeric literal).
-                let snippet = text.split_whitespace().collect::<Vec<_>>().join(" ");
-                rows.push(format!(
-                    "{}\t{}\t{}\t{}",
-                    id,
-                    event.get("ts").and_then(Value::as_str).unwrap_or(""),
-                    event.get("type").and_then(Value::as_str).unwrap_or(""),
-                    snippet
-                ));
-                break;
+            .collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => {
+            return Err(format!(
+                "cannot list sessions in {}: {error}",
+                root.display()
+            ))
+        }
+    };
+    entries.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+    if let Some(limit) = limit {
+        entries.truncate(limit);
+    }
+    let mut hits = Vec::new();
+    for dir in entries {
+        let session = read_session_value(&dir.display().to_string())
+            .map_err(|error| format!("cannot search session {}: {}", dir.display(), error))?;
+        let field = |value: &Value, name: &str| {
+            value
+                .get(name)
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| format!("session {} has a record without its {name}", dir.display()))
+        };
+        let id = field(&session, "id")?;
+        let events = session
+            .get("events")
+            .and_then(Value::as_array)
+            .ok_or_else(|| format!("session {id} has no events list"))?;
+        for event in events {
+            // An event that carries no payload has nothing to match.
+            let Some(data) = event.get("data") else {
+                continue;
+            };
+            let text = serde_json::to_string(data).map_err(|error| {
+                format!("session {id}: an event payload cannot be read: {error}")
+            })?;
+            if !text.to_ascii_lowercase().contains(&query) {
+                continue;
             }
+            hits.push(json!({
+                "session": id,
+                "ts": field(event, "ts")?,
+                "type": field(event, "type")?,
+                // Whitespace-collapsed full event text.
+                "snippet": text.split_whitespace().collect::<Vec<_>>().join(" "),
+            }));
+            break;
         }
     }
-    Ok(if rows.is_empty() {
-        String::new()
-    } else {
-        rows.join("\n") + "\n"
-    })
+    if json {
+        return serde_json::to_string_pretty(&hits)
+            .map(|text| text + "\n")
+            .map_err(|error| error.to_string());
+    }
+    Ok(hits
+        .iter()
+        .map(|hit| {
+            format!(
+                "{}\t{}\t{}\t{}\n",
+                hit["session"].as_str().map_or("-", |text| text),
+                hit["ts"].as_str().map_or("-", |text| text),
+                hit["type"].as_str().map_or("-", |text| text),
+                hit["snippet"].as_str().map_or("-", |text| text),
+            )
+        })
+        .collect())
 }
 
 pub(crate) fn session_dir_for(id_or_path: &str) -> PathBuf {

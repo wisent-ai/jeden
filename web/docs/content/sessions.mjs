@@ -45,12 +45,12 @@ export const sessionPages = [
       {
         title: "Inspect, export, resume",
         paragraphs: [
-          "<code>jeden export</code>, <code>show</code>, <code>artifacts</code>, <code>artifact</code>, <code>search-sessions</code> and <code>resume</code> inspect or reuse recorded work; inside a session the agent's <code>recall_conversation</code> tool reads the same text-only transcript <code>show</code> prints. Resume inherits both selected history and retained tasks into a child session. Without a new prompt it continues unfinished work, preserving the recorded workspace and requiring explicit execution grants.",
+          "<code>jeden sessions search</code>, <code>show</code>, <code>export</code>, <code>artifacts</code>, <code>artifact</code> and <code>resume</code> inspect or reuse recorded work; inside a session the agent's <code>recall_conversation</code> tool reads the same text-only transcript <code>show</code> prints. Resume inherits both selected history and retained tasks into a child session. Without a new prompt it continues unfinished work, preserving the recorded workspace and requiring explicit execution grants.",
         ],
         commands: [
           {
             label: "Session commands",
-            code: 'jeden sessions\njeden show <session>\njeden export <session> <output>\njeden artifacts <session>\njeden artifact <session> <name> <output>\njeden resume <session> "continue"\njeden search-sessions "query"',
+            code: 'jeden sessions\njeden sessions search "query"\njeden show <session>\njeden export <session> <output>\njeden artifacts <session>\njeden artifact <session> <name> <output>\njeden resume <session> "continue"',
           },
         ],
       },

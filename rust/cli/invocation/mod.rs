@@ -39,6 +39,7 @@ pub(crate) fn usage() -> String {
         "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
         "  jeden sessions [limit] [--json]\n",
+        "  jeden sessions search <query> [limit] [--json] — the newest event of each session whose payload holds the query\n",
         "  jeden import <path>... [--refresh] [--json] — preserve sessions of another harness in native ledgers without executing work\n",
         "  jeden restore --since <today|YYYY-MM-DD|YYYY-MM-DDTHH:MM:SSZ> [--dry-run] [--sessions <dir>] [--json] — reopen every OMP session the operator wrote in since then and report each as already running, reopened, refused or stopped\n",
         "  jeden restore open <transcript> [--run <dir>] — resume one OMP session in this terminal, in its own workspace\n",
@@ -142,7 +143,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             ..Default::default()
         });
     }
-    if matches!(command.as_str(), "resume" | "search-sessions") {
+    if command == "resume" {
         return Ok(Args {
             command,
             cwd: env::current_dir().map_err(|e| e.to_string())?,

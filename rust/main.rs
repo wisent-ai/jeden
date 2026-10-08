@@ -240,13 +240,14 @@ pub fn main() -> ExitCode {
         }
         "import" => session_import::command(&args),
         "restore" => cli::restore::command(&args),
-        "sessions" => match args.positionals.first() {
+        "sessions" => match args.positionals.split_first() {
             None => list_sessions(None, args.json),
-            Some(raw) => raw
+            Some((verb, query)) if verb == "search" => search_sessions_command(query, args.json),
+            Some((raw, _)) => raw
                 .parse()
                 .map_err(|_| {
                     cli::invocation::refusal::usage(format!(
-                        "sessions takes a whole number of sessions to list, not {raw:?}"
+                        "sessions takes a whole number of sessions to list, or search QUERY, not {raw:?}"
                     ))
                 })
                 .and_then(|limit| list_sessions(Some(limit), args.json)),
@@ -277,7 +278,6 @@ pub fn main() -> ExitCode {
             }),
         "artifact" => artifact_command(&args),
         "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
-        "search-sessions" => search_sessions_command(&args),
         "resume" => resume_command(&args),
         "update" => update_command(),
         "config" => config_command(&args),

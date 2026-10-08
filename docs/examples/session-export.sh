@@ -33,7 +33,7 @@ echo "== 3. artifacts (empty here)"
 "$JEDEN" artifacts "$SID" || true
 
 echo "== 4. search across sessions"
-"$JEDEN" search-sessions "BRAMA_URL"
+"$JEDEN" sessions search "BRAMA_URL"
 
 echo "== 5. resume forks a child session (refuses offline at the model boundary)"
 "$JEDEN" resume "$SID" "continue" || true

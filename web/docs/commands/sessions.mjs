@@ -244,18 +244,18 @@ export const sessionCommands = [
     ],
   },
   {
-    path: "search-sessions",
+    path: "sessions/search",
     group: "Sessions and artifacts",
-    invocation: 'jeden search-sessions "query" [limit]',
+    invocation: 'jeden sessions search "query" [limit] [--json]',
     purpose: "Search durable session event payloads for a case-insensitive text fragment.",
     inputs: [
-      "Required: a non-empty query as the first positional value.",
-      "Optional: a numeric session scan limit as the second positional value.",
+      "Required: a non-empty query after <code>search</code>.",
+      "Optional: a whole number of sessions to scan, newest first, after the query.",
     ],
-    effect: "Scans newest session directories first and prints at most one tab-separated matching event row per scanned session: id, timestamp, event type, and whitespace-collapsed event JSON. It does not mutate sessions.",
+    effect: "Scans newest session directories first and reports at most one matching event per scanned session: session id, timestamp, event type, and whitespace-collapsed event JSON — tab-separated lines, or a JSON array of {session, ts, type, snippet} with <code>--json</code>. It does not mutate sessions.",
     refusals: [
-      "Missing and blank queries are refused as <code>search-sessions requires a query</code> and <code>search-sessions requires a non-empty query</code>.",
-      "An unreadable matching session is reported as <code>cannot search session ...</code>; a non-numeric limit is ignored.",
+      "Missing and blank queries are refused as <code>sessions search requires a query</code> and <code>sessions search requires a non-empty query</code>; a limit that is not a whole number as <code>sessions search takes a whole number of sessions to scan after the query</code>.",
+      "A session store that exists but cannot be listed is refused as <code>cannot list sessions in ...</code>; an unreadable session as <code>cannot search session ...</code>; a record missing its id, ts or type as <code>session ... has a record without its ...</code>.",
     ],
   },
   {
