@@ -214,6 +214,15 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "config/contracts/set" => set_contract_settings(&request.params),
         "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
         "config/communication/set" => set_communication_settings(&request.params),
+        "config/task-limits/get" => Ok(crate::task_runtime::limits_settings()),
+        "config/task-limits/set" => request
+            .params
+            .get("limits")
+            .cloned()
+            .ok_or_else(|| ("invalid_params", "config/task-limits/set requires limits".to_string()))
+            .and_then(|limits| {
+                crate::task_runtime::set_limits(limits).map_err(|error| ("invalid_params", error.to_string()))
+            }),
         "context/recommend" => context::recommend(&request.params),
         "context/sources" => context::sources(&request.params),
         "workspace/status" => workspace_status(),
