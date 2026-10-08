@@ -142,7 +142,8 @@ impl MemoryStore {
                     )
                     .col_expr(outbox::Column::LeaseUntil, Expr::value(Option::<i64>::None))
                     .col_expr(outbox::Column::LastError, Expr::value(detail))
-                    .col_expr(outbox::Column::AvailableAt, Expr::value(now + 1_000))
+                    // Available to the next pass: no wait was ever measured.
+                    .col_expr(outbox::Column::AvailableAt, Expr::value(super::now_ms()))
                     .filter(outbox::Column::Id.eq(id))
                     .exec(&db)
                     .await
