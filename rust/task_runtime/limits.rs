@@ -39,13 +39,13 @@ fn checked(declared: Option<Value>) -> Result<TaskLimits, TaskError> {
     Ok(limits)
 }
 
-/// The limits in force for `cwd`: the merged config, project layer included.
-
 /// Whether `declared` is a usable declaration, for `jeden config set`, which
 /// refuses an unusable one before writing it as Settings does.
 pub fn check_declaration(declared: &Value) -> Result<(), String> {
     checked(Some(declared.clone())).map(drop).map_err(|refusal| refusal.to_string())
 }
+
+/// The limits in force for `cwd`: the merged config, project layer included.
 pub fn limits_from_config(cwd: &Path) -> Result<TaskLimits, TaskError> {
     checked(crate::cli::config::merged_config_value(cwd).get(KEY).cloned())
 }
