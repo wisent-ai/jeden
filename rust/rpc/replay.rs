@@ -151,7 +151,7 @@ impl ReplayStore {
         session_id: &str,
         stream_id: &str,
         after: EventCursor,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Vec<SessionEventV1>, ReplayError> {
         validate_name(session_id)?;
         validate_name(stream_id)?;
@@ -172,13 +172,16 @@ impl ReplayStore {
         if after.0.saturating_add(1) < earliest {
             return Err(ReplayError::CursorTooOld { earliest });
         }
-        Ok(state
+        let after_cursor = state
             .events
             .iter()
             .filter(|event| event.sequence > after.0)
-            .take(limit.max(1))
-            .cloned()
-            .collect())
+            .cloned();
+        // Every event after the cursor, or the first `limit` the caller asked for.
+        Ok(match limit {
+            Some(limit) => after_cursor.take(limit).collect(),
+            None => after_cursor.collect(),
+        })
     }
 
     pub fn latest_cursor(
@@ -187,7 +190,7 @@ impl ReplayStore {
         session_id: &str,
         stream_id: &str,
     ) -> Result<EventCursor, ReplayError> {
-        let events = self.replay(tenant, session_id, stream_id, EventCursor(0), usize::MAX);
+        let events = self.replay(tenant, session_id, stream_id, EventCursor(0), None);
         match events {
             Ok(events) => Ok(EventCursor(events.last().map_or(0, |event| event.sequence))),
             Err(ReplayError::CursorTooOld { earliest }) => {
@@ -196,7 +199,7 @@ impl ReplayStore {
                     session_id,
                     stream_id,
                     EventCursor(earliest.saturating_sub(1)),
-                    usize::MAX,
+                    None,
                 )?;
                 Ok(EventCursor(events.last().map_or(0, |event| event.sequence)))
             }

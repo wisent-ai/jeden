@@ -194,7 +194,7 @@ impl<B: SessionBackend> SessionService<B> {
         session_id: &str,
         request_id: &str,
         after: EventCursor,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Vec<SessionEventV1>, ServiceError> {
         self.authorize_session(caller, session_id)?;
         self.replay
@@ -208,7 +208,7 @@ impl<B: SessionBackend> SessionService<B> {
         session_id: &str,
         request_id: &str,
         cursor: Option<&str>,
-        limit: usize,
+        limit: Option<usize>,
     ) -> Result<Vec<Value>, ServiceError> {
         let cursor = match cursor {
             Some(token) => EventCursor::parse(token)?,

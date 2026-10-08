@@ -78,12 +78,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 let session_id = string_field(&request.params, "sessionId")?;
                 let request_id = string_field(&request.params, "requestId")?;
                 let cursor = request.params.get("cursor").and_then(Value::as_str);
-                let limit = request
-                    .params
-                    .get("limit")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(100)
-                    .min(1000) as usize;
+                // Every event after the cursor unless the client states how
+                // many it takes; the daemon has no window of its own.
+                let limit = positive_limit(&request.params)?;
                 let events = self
                     .service
                     .replay_from_token(&connection.identity, session_id, request_id, cursor, limit)
