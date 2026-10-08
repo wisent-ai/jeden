@@ -69,12 +69,13 @@ impl TaskScheduler {
             .arg(&child_task)
             .arg("--cwd")
             .arg(&isolated.path)
-            .arg("--max-steps")
-            .arg(request.max_steps.clamp(1, 64).to_string())
             .arg("--json")
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        if let Some(max_steps) = request.max_steps {
+            command.arg("--max-steps").arg(max_steps.to_string());
+        }
         if let Some(model) = request.model.as_ref().or(definition.model.as_ref()) {
             command.arg("--model").arg(model);
         }

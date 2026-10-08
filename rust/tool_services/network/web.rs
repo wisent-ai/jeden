@@ -10,7 +10,7 @@ use url::Url;
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[(
     "web_search",
-    "Search configured web providers with URL-bearing citations and fallback",
+    "Search configured web providers with URL-bearing citations and fallback; limit (required) is how many results to answer",
 )];
 #[derive(Clone)]
 struct Provider {
@@ -95,8 +95,13 @@ impl WebService {
         let count = input
             .get("limit")
             .and_then(Value::as_u64)
-            .unwrap_or(8)
-            .clamp(1, 20) as usize;
+            .and_then(std::num::NonZeroU64::new)
+            .ok_or_else(|| {
+                ServiceError::InvalidInput(
+                    "web search needs limit: how many results the provider returns".into(),
+                )
+            })?
+            .get() as usize;
         let mut failures = Vec::new();
         for provider in &self.providers {
             check_operation(context)?;

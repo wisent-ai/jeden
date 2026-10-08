@@ -130,7 +130,7 @@ impl TaskScheduler {
                     task: task.task,
                     agent: task.agent,
                     model: None,
-                    max_steps: default_steps(),
+                    max_steps: None,
                     parent_job: None,
                     isolate: Some(true),
                 })?;

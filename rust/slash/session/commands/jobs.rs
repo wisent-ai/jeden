@@ -33,7 +33,7 @@ pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<Strin
                 .model
                 .filter(|model| !model.trim().is_empty())
                 .map(str::to_string),
-            max_steps: 6,
+            max_steps: None,
             parent_job: std::env::var("JEDEN_TASK_JOB")
                 .ok()
                 .filter(|value| !value.is_empty()),

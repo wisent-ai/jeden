@@ -39,8 +39,10 @@ pub struct SpawnRequest {
     pub agent: String,
     #[serde(default)]
     pub model: Option<String>,
-    #[serde(default = "default_steps")]
-    pub max_steps: u64,
+    /// The child run's step bound when the caller states one; unstated, the
+    /// child runs until its work ends, as `jeden run` does.
+    #[serde(default)]
+    pub max_steps: Option<u64>,
     #[serde(default)]
     pub parent_job: Option<String>,
     #[serde(default)]
@@ -49,10 +51,6 @@ pub struct SpawnRequest {
 fn default_agent() -> String {
     "default".into()
 }
-fn default_steps() -> u64 {
-    6
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BatchTask {

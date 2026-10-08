@@ -28,7 +28,7 @@ impl Coordinator {
         Ok(Self {
             store,
             cas,
-            lease_ms: lease_ms.clamp(100, 300_000),
+            lease_ms,
         })
     }
     pub fn register_worker(
