@@ -12,8 +12,6 @@ use std::fs;
 use std::path::Path;
 use std::sync::atomic::Ordering;
 
-const MAX_PENDING_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
-
 #[derive(Debug, Clone)]
 pub(crate) struct PendingActionCreate {
     pub(crate) kind: String,
@@ -21,7 +19,6 @@ pub(crate) struct PendingActionCreate {
     pub(crate) expected_sha256: String,
     pub(crate) payload: Vec<u8>,
     pub(crate) preview: String,
-    pub(crate) ttl_seconds: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -54,9 +51,6 @@ pub(crate) fn create_pending_action(
     create: PendingActionCreate,
 ) -> Result<String, String> {
     operation_ready(operation)?;
-    if create.payload.len() > MAX_PENDING_PAYLOAD_BYTES {
-        return Err("pending action payload exceeds limit".into());
-    }
     let session_dir = pending_session_dir(artifact_dir)?;
     let now = now_epoch_seconds();
     let id = format!(
@@ -80,7 +74,6 @@ pub(crate) fn create_pending_action(
             "payloadPath": payload_path,
             "preview": create.preview,
             "createdAt": now,
-            "expiresAt": now.saturating_add(create.ttl_seconds),
         }),
     )?;
     Ok(id)
@@ -148,21 +141,9 @@ pub(crate) fn claim_pending_action(
         }
         return Err(format!("pending action not found: {id}"));
     };
-    let expires_at = entry
-        .data
-        .get("expiresAt")
-        .and_then(Value::as_u64)
-        .ok_or_else(|| format!("pending action {id} has invalid expiry"))?;
+    // A preview holds until it is applied or discarded; the file revision it
+    // was made against is what keeps a stale preview from landing.
     let now = now_epoch_seconds();
-    if now >= expires_at {
-        append_ledger_entry_unlocked(
-            session_dir,
-            now.to_string(),
-            "pending_expire",
-            json!({ "pendingId": id }),
-        )?;
-        return Err(format!("pending action expired: {id}"));
-    }
     let payload_path = artifact_dir
         .join("pending-actions")
         .join(format!("{id}.payload"));

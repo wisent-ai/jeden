@@ -1,7 +1,6 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 use tree_sitter::{Language, Parser, Query, QueryCursor, StreamingIterator};
 
 use crate::cli::sessions::{
@@ -12,9 +11,6 @@ use crate::tool_runtime::shared::{
     count_input, jail_path, jail_write_path, sha256_hex, simple_diff, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
-
-const MAX_AST_BYTES: u64 = 4 * 1024 * 1024;
-const PENDING_TTL: Duration = Duration::from_secs(600);
 
 fn language(name: &str, path: &Path) -> Result<Language, String> {
     let inferred = path
@@ -48,10 +44,8 @@ fn source(
     let label = string_input(input, "path").ok_or("AST tool requires path")?;
     let path = jail_path(runtime.cwd, &label)?;
     let metadata = fs::metadata(&path).map_err(|error| error.to_string())?;
-    if !metadata.is_file() || metadata.len() > MAX_AST_BYTES {
-        return Err(format!(
-            "AST input must be a file no larger than {MAX_AST_BYTES} bytes"
-        ));
+    if !metadata.is_file() {
+        return Err(format!("AST input must be a file: {label}"));
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
     std::str::from_utf8(&bytes).map_err(|_| "AST input is not UTF-8".to_string())?;
@@ -221,10 +215,9 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             expected_sha256: expected_sha256.clone(),
             payload: rewritten,
             preview: diff.clone(),
-            ttl_seconds: PENDING_TTL.as_secs(),
         },
     )?;
     Ok(
-        json!({"ok": true, "preview": true, "pendingId": id, "expiresInMs": PENDING_TTL.as_millis(), "path": label, "expectedSha256": expected_sha256, "matchCount": selected.len(), "diff": diff}),
+        json!({"ok": true, "preview": true, "pendingId": id, "path": label, "expectedSha256": expected_sha256, "matchCount": selected.len(), "diff": diff}),
     )
 }
