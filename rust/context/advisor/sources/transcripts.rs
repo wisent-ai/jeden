@@ -17,9 +17,6 @@ use crate::context::advisor::{
     probe_value, Recommendation, Request, Settings, SourceOutcome, SourceStatus,
 };
 
-const SNIPPET_LINES: usize = 2;
-const SNIPPET_CHARS: usize = 300;
-
 pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -> SourceOutcome {
     let started = Instant::now();
     let mut command = Command::new(&settings.transcript_lake_bin);
@@ -85,7 +82,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             locator: format!("session:{session}"),
             score: rank,
             matched: matched_terms(body, terms),
-            snippet: snippet(body, terms, SNIPPET_LINES, SNIPPET_CHARS),
+            snippet: snippet(body, terms),
         });
         seen.push(session);
         if hits.len() >= request.limit {

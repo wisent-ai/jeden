@@ -26,13 +26,13 @@ pub(crate) struct Settings {
     pub(crate) transcript_lake_bin: String,
 }
 
-/// A documentation root and how deep the walk may go from it. Depth is part
-/// of the declaration because a root like `$HOME` is only usable bounded.
+/// A documentation root and, when `path@depth` declares one, how deep the
+/// walk may go from it; a root without a depth is walked whole.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DocRoot {
     pub(crate) path: PathBuf,
-    pub(crate) depth: usize,
+    pub(crate) depth: Option<usize>,
 }
 
 pub(crate) fn settings(cwd: &Path, config: &Config) -> Settings {
@@ -170,7 +170,6 @@ pub(crate) fn unknown_sources(raw: &str) -> Vec<String> {
 /// resolved against the working directory. The declared default pair is the
 /// project itself and the operator's own Jeden instructions.
 fn parse_roots(raw: &str, cwd: &Path) -> Vec<DocRoot> {
-    const MAX_DEPTH: usize = 32;
     let raw = raw.trim();
     let mut roots: Vec<DocRoot> = Vec::new();
     let declared: Vec<&str> = if raw.is_empty() {
@@ -194,22 +193,17 @@ fn parse_roots(raw: &str, cwd: &Path) -> Vec<DocRoot> {
         if roots.iter().any(|root| root.path == path) {
             continue;
         }
-        roots.push(DocRoot {
-            path,
-            depth: depth.clamp(1, MAX_DEPTH),
-        });
+        roots.push(DocRoot { path, depth });
     }
     roots
 }
 
-fn split_root_depth(entry: &str) -> (&str, usize) {
-    match entry.rsplit_once('@') {
-        Some((path, depth))
-            if !depth.is_empty() && depth.chars().all(|character| character.is_ascii_digit()) =>
-        {
-            (path, depth.parse().unwrap_or(files::DEFAULT_DEPTH))
-        }
-        _ => (entry, files::DEFAULT_DEPTH),
+/// `path@depth` splits when everything after the last `@` is a depth;
+/// otherwise the `@` belongs to the path and no depth is declared.
+fn split_root_depth(entry: &str) -> (&str, Option<usize>) {
+    match entry.rsplit_once('@').map(|(path, depth)| (path, depth.parse::<usize>())) {
+        Some((path, Ok(depth))) => (path, Some(depth)),
+        _ => (entry, None),
     }
 }
 

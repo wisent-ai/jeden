@@ -8,25 +8,21 @@
 //! from the corpus it just read, so "the" and "jak" fall out by measurement
 //! rather than by opinion.
 
+use std::num::NonZeroUsize;
 use std::process::{Command, Stdio};
 
-/// Searchable words of a query: lowercase, three characters or more, in first
-/// occurrence order, bounded so a pasted paragraph cannot become a thousand
-/// term scans.
+/// Searchable words of a query: lowercase, in first occurrence order. Which
+/// of them carry information is measured against the corpus, not decided by
+/// their length.
 pub(crate) fn terms(query: &str) -> Vec<String> {
-    const MIN_WORD: usize = 3;
-    const MAX_TERMS: usize = 24;
     let mut out: Vec<String> = Vec::new();
     for raw in query.split(|character: char| !character.is_alphanumeric()) {
         let word = raw.trim().to_lowercase();
-        if word.chars().count() < MIN_WORD {
+        if word.is_empty() {
             continue;
         }
         if !out.contains(&word) {
             out.push(word);
-        }
-        if out.len() >= MAX_TERMS {
-            break;
         }
     }
     out
@@ -46,44 +42,15 @@ pub(crate) fn stem(term: &str) -> String {
     term.chars().take(length - DROPPED).collect()
 }
 
-/// One snippet, bounded, preferring the lines that carry a query term or its
-/// stem.
-pub(crate) fn snippet(body: &str, terms: &[String], max_lines: usize, max_chars: usize) -> String {
-    const MIN_TAIL: usize = 16;
-    let mut lines: Vec<&str> = Vec::new();
-    for line in body.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if mentions(trimmed, terms) {
-            lines.push(trimmed);
-        }
-        if lines.len() >= max_lines {
-            break;
-        }
+/// The lines of `body` that carry a query term or its stem, whole; a body
+/// that mentions none is represented by its first non-empty line.
+pub(crate) fn snippet(body: &str, terms: &[String]) -> String {
+    let lines = body.lines().map(str::trim).filter(|line| !line.is_empty());
+    let mentioning: Vec<&str> = lines.clone().filter(|line| mentions(line, terms)).collect();
+    if mentioning.is_empty() {
+        return lines.take(NonZeroUsize::MIN.get()).collect();
     }
-    if lines.is_empty() {
-        lines = body
-            .lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty())
-            .take(max_lines)
-            .collect();
-    }
-    let mut out = String::new();
-    for line in lines {
-        let remaining = max_chars.saturating_sub(out.chars().count());
-        if remaining < MIN_TAIL {
-            break;
-        }
-        let clipped: String = line.chars().take(remaining).collect();
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        out.push_str(&clipped);
-    }
-    out
+    mentioning.join("\n")
 }
 
 /// Whether any term, or its stem, occurs in `text`.

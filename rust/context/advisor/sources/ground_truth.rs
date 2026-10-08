@@ -15,8 +15,6 @@ use crate::context::advisor::{
     probe_value, Recommendation, Request, Settings, SourceOutcome, SourceStatus,
 };
 
-const SNIPPET_LINES: usize = 3;
-const SNIPPET_CHARS: usize = 420;
 const NO_ENDPOINT: &str =
     "no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API";
 
@@ -136,7 +134,7 @@ fn citation(result: &Value, terms: &[String]) -> Recommendation {
             .and_then(Value::as_f64)
             .unwrap_or_default(),
         matched: matched_terms(content, terms),
-        snippet: snippet(content, terms, SNIPPET_LINES, SNIPPET_CHARS),
+        snippet: snippet(content, terms),
     }
 }
 

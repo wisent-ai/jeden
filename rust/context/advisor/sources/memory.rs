@@ -14,9 +14,6 @@ use crate::context::advisor::text::{matched_terms, snippet};
 use crate::context::advisor::{probe_value, Recommendation, SourceOutcome, SourceStatus};
 use crate::memory::{FtsBackend, MemoryScope, MemoryStore};
 
-const SNIPPET_LINES: usize = 3;
-const SNIPPET_CHARS: usize = 420;
-
 fn scope(cwd: &Path) -> MemoryScope {
     MemoryScope {
         kind: "repo".to_string(),
@@ -62,7 +59,7 @@ pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) ->
             locator: format!("memory:{}", hit.record.id),
             score: hit.score,
             matched: matched_terms(&hit.record.text, terms),
-            snippet: snippet(&hit.record.text, terms, SNIPPET_LINES, SNIPPET_CHARS),
+            snippet: snippet(&hit.record.text, terms),
         })
         .collect();
     let detail = if hits.is_empty() {

@@ -17,10 +17,6 @@ use crate::context::advisor::{
 use corpus::Corpus;
 use rank::NO_MATCH;
 
-pub(crate) const DEFAULT_DEPTH: usize = 6;
-const SNIPPET_LINES: usize = 3;
-const SNIPPET_CHARS: usize = 420;
-
 pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -> SourceOutcome {
     let started = Instant::now();
     if settings.roots.is_empty() {
@@ -67,7 +63,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
                 ),
                 score,
                 matched: matched_terms(&haystack, terms),
-                snippet: snippet(&section.body, &informative, SNIPPET_LINES, SNIPPET_CHARS),
+                snippet: snippet(&section.body, &informative),
             },
         ));
     }
@@ -97,9 +93,6 @@ fn detail(corpus: &Corpus) -> String {
         corpus.files,
         corpus.existing_roots.len()
     );
-    if corpus.truncated {
-        detail.push_str("; the walk stopped at its cap, so this is a partial corpus");
-    }
     if !corpus.missing_roots.is_empty() {
         detail.push_str(&format!(
             "; missing root(s): {}",
@@ -133,7 +126,6 @@ pub(crate) fn probe(settings: &Settings) -> Value {
             ("existingRoots", json!(corpus.existing_roots)),
             ("missingRoots", json!(corpus.missing_roots)),
             ("files", json!(corpus.files)),
-            ("truncated", json!(corpus.truncated)),
         ],
     )
 }

@@ -68,7 +68,7 @@ export const contextCommands = [
       "<code>--json</code> returns <code>settings</code> (every resolved advisor setting), <code>selected</code> (the sources every run consults) and <code>sources</code> (one probe per source).",
     ],
     effect:
-      "Each probe carries the shared <code>available</code>, <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> fields plus what only that source has: the walked roots, their declared extensions, which roots exist or are missing, the file count and whether the walk was cut short; the memory store path; the Transcript Lake command; and the ground-truth endpoint with the <code>origin</code> that supplied it — the configuration key, an environment variable name, or <code>unset</code>.",
+      "Each probe carries the shared <code>available</code>, <code>detail</code>, <code>considered</code>, <code>returned</code> and <code>elapsedMs</code> fields plus what only that source has: the walked roots with any declared depth, their declared extensions, which roots exist or are missing and the file count; the memory store path; the Transcript Lake command; and the ground-truth endpoint with the <code>origin</code> that supplied it — the configuration key, an environment variable name, or <code>unset</code>.",
     refusals: [
       "Extra arguments return the usage block.",
       "An unconfigured ground-truth endpoint is reported, not an error: <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code>. A configured endpoint nobody serves reports the URL it could not reach.",
