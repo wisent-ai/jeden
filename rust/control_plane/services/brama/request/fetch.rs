@@ -89,7 +89,7 @@ impl BramaClient {
             .cloned();
         if !force {
             if let Some(cached) = &prior {
-                if cached.fetched.elapsed() < self.ttl {
+                if self.ttl.is_some_and(|ttl| cached.fetched.elapsed() < ttl) {
                     return Ok(cached.catalog.clone());
                 }
             }
@@ -97,7 +97,7 @@ impl BramaClient {
             // inside the TTL, so a fresh `jeden` start skips the network
             // entirely (the in-memory cache above only covers one process).
             if let Some((catalog, etag, fetched_ms)) = read_disk_cache(&key) {
-                if now_ms().saturating_sub(fetched_ms) < self.ttl.as_millis() as u64 {
+                if self.ttl.is_some_and(|ttl| now_ms().saturating_sub(fetched_ms) < ttl.as_millis() as u64) {
                     CACHE
                         .lock()
                         .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?

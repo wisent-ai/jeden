@@ -5,7 +5,23 @@ use std::sync::Arc;
 use std::time::Duration;
 
 pub(super) const API_VERSION: &str = "v1";
-const DEFAULT_TTL: Duration = Duration::from_secs(300);
+/// Milliseconds a fetched catalog is served before it is asked for again.
+/// Unset, every read revalidates with the catalog's etag, which Brama
+/// answers with 304 when nothing changed.
+const CATALOG_TTL_ENV: &str = "BRAMA_CATALOG_TTL_MS";
+
+/// The declared catalog age, `None` when unset or not a whole number of
+/// milliseconds (the latter said on standard error).
+fn declared_catalog_ttl() -> Option<Duration> {
+    let value = std::env::var(CATALOG_TTL_ENV).ok()?;
+    match value.trim().parse::<u64>() {
+        Ok(millis) => Some(Duration::from_millis(millis)),
+        Err(_) => {
+            eprintln!("jeden: {CATALOG_TTL_ENV} must be a whole number of milliseconds; it is {value:?}, so every catalog read revalidates");
+            None
+        }
+    }
+}
 
 #[path = "request/auth.rs"]
 mod auth;
@@ -25,7 +41,8 @@ pub use error::BramaError;
 pub struct BramaClient {
     pub(super) endpoint: Option<String>,
     pub(super) authorization: Option<SecretRef>,
-    pub(super) ttl: Duration,
+    /// The declared catalog age; `None` revalidates on every read.
+    pub(super) ttl: Option<Duration>,
     transport: Arc<dyn ControlPlaneTransport>,
     pub(super) correlation: Arc<std::sync::atomic::AtomicU64>,
 }
@@ -34,29 +51,23 @@ impl BramaClient {
         Self::with_secret_ref(
             crate::agent::credential::brama_url(),
             Some(SecretRef::environment("BRAMA_TOKEN")),
-            DEFAULT_TTL,
+            declared_catalog_ttl(),
             ReqwestTransport::production(),
         )
     }
 
     pub fn configured(endpoint: Option<String>, bearer: Option<String>) -> Self {
-        let ttl = std::env::var("BRAMA_CATALOG_TTL_MS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|value| *value > 0)
-            .map(Duration::from_millis)
-            .unwrap_or(DEFAULT_TTL);
-        Self::new(endpoint, bearer, ttl)
+        Self::new(endpoint, bearer, declared_catalog_ttl())
     }
 
-    pub fn new(endpoint: Option<String>, bearer: Option<String>, ttl: Duration) -> Self {
+    pub fn new(endpoint: Option<String>, bearer: Option<String>, ttl: Option<Duration>) -> Self {
         Self::with_transport(endpoint, bearer, ttl, ReqwestTransport::production())
     }
 
     pub fn with_transport(
         endpoint: Option<String>,
         bearer: Option<String>,
-        ttl: Duration,
+        ttl: Option<Duration>,
         transport: Arc<dyn ControlPlaneTransport>,
     ) -> Self {
         Self::with_secret_ref(endpoint, bearer.map(SecretRef::inline), ttl, transport)
@@ -65,7 +76,7 @@ impl BramaClient {
     pub fn with_secret_ref(
         endpoint: Option<String>,
         authorization: Option<SecretRef>,
-        ttl: Duration,
+        ttl: Option<Duration>,
         transport: Arc<dyn ControlPlaneTransport>,
     ) -> Self {
         let endpoint = endpoint
@@ -74,7 +85,7 @@ impl BramaClient {
         Self {
             endpoint,
             authorization,
-            ttl: if ttl.is_zero() { DEFAULT_TTL } else { ttl },
+            ttl,
             transport,
             correlation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }

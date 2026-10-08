@@ -8,7 +8,6 @@ use super::super::contract::ContractError;
 use super::super::transport::{ReqwestTransport, SecretRef};
 use super::super::weles::WelesClient;
 use sha2::{Digest, Sha256};
-use std::time::Duration;
 
 const REQUIRED_ENV: &[(&str, &str)] = &[
     ("BRAMA_STAGING_URL", "Brama staging HTTPS endpoint"),
@@ -69,7 +68,7 @@ pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), Contra
     let brama = BramaClient::with_secret_ref(
         Some(required("BRAMA_STAGING_URL")),
         Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
-        Duration::from_secs(30),
+        None,
         ReqwestTransport::production(),
     );
     let weles = WelesClient::with_secret_ref(
