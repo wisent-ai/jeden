@@ -9,8 +9,14 @@ use super::{map_event, registry_path, TamaHook, BLOCK_EXIT, PASS_EXIT};
 use crate::hooks::{hook_matches, parse_hook_json, read_config, Hook, HookOutcome};
 
 /// Registry hooks for jeden `event` (`PreToolUse`, `UserPromptSubmit`, …),
-/// filtered to `tool` (empty = no tool filter). Empty vec when no registry.
-pub fn load_event_hooks(cwd: &Path, event: &str, tool: &str) -> Vec<TamaHook> {
+/// Filter by tool and, when dispatching SessionStart, the lifecycle source.
+/// An absent source lists all registrations for diagnostics.
+pub fn load_event_hooks(
+    cwd: &Path,
+    event: &str,
+    tool: &str,
+    source: Option<&str>,
+) -> Vec<TamaHook> {
     let Some(path) = registry_path(cwd) else {
         return Vec::new();
     };
@@ -26,6 +32,14 @@ pub fn load_event_hooks(cwd: &Path, event: &str, tool: &str) -> Vec<TamaHook> {
         };
         if mapped != event {
             continue;
+        }
+        if event == crate::hooks::event::SESSION_START {
+            if let Some(source) = source {
+                let compact = source == "compact";
+                if (tama_event == "session_start:compact") != compact {
+                    continue;
+                }
+            }
         }
         let event_blocking = spec
             .get("blocking")

@@ -3,9 +3,10 @@
 //! `UserPromptSubmit` hooks inject their stdout as extra context, and their
 //! payload's `prompt_author` is `automation` when Jeden wrote the prompt itself
 //! (a Pursuit stage, an automatic continuation) and `operator` otherwise;
-//! `PostToolUse`/`SessionStart` run best-effort. A `Stop` hook reads the
-//! finished answer and may refuse it the same way a `PreToolUse` hook refuses
-//! a tool; while any `Stop` hook is configured the turn streams no answer
+//! `PostToolUse` runs best-effort; session and prompt context failures refuse
+//! the model request. A `Stop` hook reads the finished answer and may refuse
+//! it like a `PreToolUse` hook refuses a tool; while any `Stop` hook is configured
+//! the turn streams no answer
 //! text, so a refused answer never reaches the operator before its refusal.
 //!
 //! Config lives in `.jeden/hooks.json` (project) and `~/.jeden/hooks.json`
@@ -204,35 +205,51 @@ pub fn block_decision(outcomes: &[HookOutcome], fallback: &str) -> Option<String
     })
 }
 
-/// Injected context across prompt/session hook outcomes: each hook contributes
-/// its JSON `additionalContext` field if present, else its raw stdout. Joined.
-pub fn prompt_context(outcomes: &[HookOutcome]) -> String {
-    outcomes
-        .iter()
-        .filter_map(|o| {
-            if let Some(json) = parse_hook_json(&o.stdout) {
-                let ctx = json
-                    .get("additionalContext")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                if ctx.is_empty() {
-                    None
-                } else {
-                    Some(ctx)
-                }
-            } else {
-                let s = o.stdout.trim();
-                if s.is_empty() {
-                    None
-                } else {
-                    Some(s.to_string())
-                }
+/// Collect both native and event-specific hook context without discarding either.
+/// An invalid context field is a protocol error, not an empty instruction.
+pub fn prompt_context(outcomes: &[HookOutcome]) -> Result<String, String> {
+    let mut context = Vec::new();
+    for (index, outcome) in outcomes.iter().enumerate() {
+        // POSIX successful command status:
+        // https://pubs.opengroup.org/onlinepubs/9799919799/utilities/V3_chap02.html#tag_19_08_02
+        if outcome.exit_code != 0 {
+            return Err(format!(
+                "context hook at index {index} exited {}: stderr: {}; stdout: {}",
+                outcome.exit_code, outcome.stderr.trim(), outcome.stdout.trim()
+            ));
+        }
+        let Some(json) = parse_hook_json(&outcome.stdout) else {
+            let text = outcome.stdout.trim();
+            if !text.is_empty() {
+                context.push(text.to_owned());
             }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+            continue;
+        };
+        if json.get("decision").and_then(Value::as_str) == Some("block") {
+            return Err(format!("context hook at index {index} refused: {json}"));
+        }
+        let mut append = |value: &Value, field: &str| -> Result<(), String> {
+            let text = value.as_str().ok_or_else(|| {
+                format!("context hook at index {index}: {field} must be a string; got {value}")
+            })?;
+            if !text.trim().is_empty() {
+                context.push(text.to_owned());
+            }
+            Ok(())
+        };
+        if let Some(value) = json.get("additionalContext") {
+            append(value, "additionalContext")?;
+        }
+        if let Some(output) = json.get("hookSpecificOutput") {
+            let output = output.as_object().ok_or_else(|| {
+                format!("context hook at index {index}: hookSpecificOutput must be an object; got {output}")
+            })?;
+            if let Some(value) = output.get("additionalContext") {
+                append(value, "hookSpecificOutput.additionalContext")?;
+            }
+        }
+    }
+    Ok(context.join("\n"))
 }
 
 /// The events this runtime fires, each name written once.

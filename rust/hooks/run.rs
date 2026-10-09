@@ -111,7 +111,8 @@ pub fn fire_event(
     // Tama registry hooks (claude-style shared catalog) run after jeden's own
     // hooks. The registry lives with the operator's other user-level config,
     // so it is trusted like user hooks and not gated on `allow_project`.
-    for tama in super::tama::load_event_hooks(cwd, event, tool) {
+    let source = payload.get("source").and_then(Value::as_str);
+    for tama in super::tama::load_event_hooks(cwd, event, tool, source) {
         // A registration whose file this machine does not have never reaches
         // `sh`: spawning it answers `No such file or directory`, which reads
         // like a verdict on the tool rather than a broken hook install.
@@ -161,7 +162,7 @@ pub fn has_event_hooks(cwd: &Path, event: &str, allow_project: bool) -> bool {
         || crate::slash::installed_plugin_hook_configs(cwd, allow_project)
             .iter()
             .any(|config| !parse_event_hooks(config, event).is_empty())
-        || !super::tama::load_event_hooks(cwd, event, "").is_empty()
+        || !super::tama::load_event_hooks(cwd, event, "", None).is_empty()
         || super::extensions::has_hooks(cwd, event)
 }
 
@@ -205,7 +206,7 @@ pub fn user_prompt_submit(
     prompt: &str,
     automation: bool,
     allow_project: bool,
-) -> String {
+) -> Result<String, String> {
     let author = if automation { "automation" } else { "operator" };
     let payload = json!({
         "event": event::USER_PROMPT_SUBMIT,
@@ -217,10 +218,22 @@ pub fn user_prompt_submit(
     prompt_context(&outcomes)
 }
 
-/// Fire `SessionStart` at the beginning of a session; returns joined hook
-/// stdout (a banner/context line the caller may surface).
-pub fn session_start(cwd: &Path, allow_project: bool) -> String {
-    let payload = json!({ "event": event::SESSION_START, "cwd": cwd });
+/// Fire SessionStart and return context for the model, not a terminal banner.
+pub fn session_start(
+    cwd: &Path,
+    allow_project: bool,
+    source: &str,
+    session_id: &str,
+    transcript_path: &Path,
+) -> Result<String, String> {
+    let payload = json!({
+        "event": event::SESSION_START,
+        "hook_event_name": event::SESSION_START,
+        "cwd": cwd,
+        "source": source,
+        "session_id": session_id,
+        "transcript_path": transcript_path,
+    });
     let outcomes = fire_event(cwd, event::SESSION_START, "", &payload, allow_project);
     prompt_context(&outcomes)
 }

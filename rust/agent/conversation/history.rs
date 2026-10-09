@@ -37,6 +37,7 @@ impl Conversation {
         self.recorder.ensure()?;
         crate::completion::inherit(&parent, &self.recorder.path())?;
         self.reconcile_completion = true;
+        self.session_context_pending = Some("reset");
         self.recorder.record_context("reset_seed", &self.messages)
     }
 
@@ -64,6 +65,7 @@ impl Conversation {
         self.recorder.ensure()?;
         crate::completion::inherit(source, &self.recorder.path())?;
         self.reconcile_completion = true;
+        self.session_context_pending = Some("resume");
         self.recorder.record_context("resume_seed", &self.messages)
     }
 
@@ -84,6 +86,7 @@ impl Conversation {
         }
         let (new_leaf, messages) = self.recorder.rewind(checkpoint_id)?;
         self.messages = messages;
+        self.session_context_pending = Some("rewind");
         Ok(format!(
             "Rewound to checkpoint {checkpoint_id}; new active leaf is {new_leaf}."
         ))
@@ -99,6 +102,7 @@ impl Conversation {
         self.recorder.ensure()?;
         crate::completion::inherit(&parent, &self.recorder.path())?;
         self.reconcile_completion = true;
+        self.session_context_pending = Some("fork");
         self.recorder.record_context("fork_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
@@ -111,6 +115,7 @@ impl Conversation {
         self.recorder.ensure()?;
         crate::completion::inherit(&parent, &self.recorder.path())?;
         self.reconcile_completion = true;
+        self.session_context_pending = Some("branch");
         self.recorder
             .record_context("branch_seed", &self.messages)?;
         Ok(self.recorder.path())

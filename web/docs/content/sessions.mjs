@@ -81,6 +81,19 @@ export const sessionPages = [
         ],
       },
       {
+        title: "Restore instructions after compaction",
+        paragraphs: [
+          "Lifecycle instructions belong in the model context, not a startup banner. Before an ordinary session's first model request, Jeden runs <code>SessionStart</code> hooks and records their context as system messages. After <code>/compact</code>, automatic compaction or handoff, it runs them again against the new window. Resume, reset, rewind, fork and branch restore them before the next model request. Model-only sessions do not run these hooks.",
+          "The hook receives <code>source</code>, <code>session_id</code>, <code>transcript_path</code> and <code>cwd</code>. Native <code>additionalContext</code> and event-specific <code>hookSpecificOutput.additionalContext</code> both contribute their complete text. This includes Tama's <code>inject-operator-rules</code> hook when the installed Tama registry declares it; Oko owns the standing rules and their original message references. Without Tama, ordinary user and project hooks use the same lifecycle.",
+          "A hook's nonzero exit or explicit refusal stops context restoration with its observed output. Invalid context fields identify their field and received value instead of becoming an empty instruction. The error begins <code>SessionStart (&lt;source&gt;) for &lt;session&gt;:</code>; the transition remains pending, so a later request cannot silently skip it. RPC clients receive the same failure, and <code>session_start</code> context snapshots in the exported ledger retain what was restored. No terminal banner is treated as proof that a model received a rule.",
+          "CLI, interactive sessions and the RPC-backed Desktop and mobile conversations share this model window. In a configured session, use <code>/compact</code> from the terminal or the conversation input, then export the session and inspect the context snapshots. A readable registry or a successful hook command alone does not prove post-compaction delivery.",
+        ],
+        commands: [{
+          label: "Keep project instructions while shortening a long investigation",
+          code: "jeden\n# In the conversation, after working on the investigation:\n/compact Preserve the investigation, evidence and unfinished work.\n# Inspect the retained context from another terminal:\njeden export <session> <output>",
+        }],
+      },
+      {
         title: "Durable memory",
         paragraphs: [
           "Durable memory lives in the fleet database <code>jeden</code> (tables <code>memories</code> and <code>memory_*</code>), so every host and session reads the same memories. Jeden resolves it through <code>stado database resolve jeden</code> and reads its address from Skarbiec as <code>jeden-database-client</code>; when that fails, <code>/memory stats</code> and <code>jeden doctor</code> report the failed step. Recall ranks with Postgres full-text search.",

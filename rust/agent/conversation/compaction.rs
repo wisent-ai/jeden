@@ -30,7 +30,7 @@ impl Conversation {
                 "auto_compaction_error",
                 json!({ "reason": reason, "error": error }),
             )?;
-            hooks.note(&format!("auto-compaction failed: {}", reason));
+            hooks.note(&format!("auto-compaction failed: {error}"));
             return Ok(false);
         }
         if add_continue_prompt {
@@ -59,6 +59,7 @@ impl Conversation {
         if hooks.cancelled() {
             return Err("Turn cancelled.".into());
         }
+        self.restore_session_context(args)?;
         hooks.note("compacting conversation");
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
@@ -114,6 +115,8 @@ impl Conversation {
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Prior conversation summary (compacted from {} messages):\n{}", before, summary) }),
         ];
+        self.session_context_pending = Some("compact");
+        self.restore_session_context(args)?;
         self.recorder.record_context("compaction", &self.messages)?;
         Ok(format!(
             "Compacted {} messages into a summary.\n\n{}",
@@ -136,6 +139,7 @@ impl Conversation {
         if hooks.cancelled() {
             return Err("Turn cancelled.".into());
         }
+        self.restore_session_context(args)?;
         hooks.note("generating handoff");
         let config = load_config(&args.cwd);
         let router = model_router_config(&config, args);
@@ -199,6 +203,8 @@ impl Conversation {
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),
         ];
+        self.session_context_pending = Some("handoff");
+        self.restore_session_context(args)?;
         self.recorder
             .record_context("handoff_seed", &self.messages)?;
         Ok(format!(

@@ -119,11 +119,6 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let conversation = Arc::new(Mutex::new(initial_conversation));
     let pending_relaunch = Arc::new(Mutex::new(None));
     let context_limit = status::context_limit();
-    // SessionStart hooks fire once when the interactive session opens.
-    let session_banner = hooks::session_start(&args.cwd, args.allow_command);
-    if !session_banner.trim().is_empty() {
-        println!("{}", session_banner.trim());
-    }
 
     // Shared working directory keeps /move changes synchronized across subsequent
     // turns, the status line, git prompt, and file-command resolution.

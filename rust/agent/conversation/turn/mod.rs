@@ -96,6 +96,9 @@ impl Conversation {
             if step > u32::from(true) {
                 let _ = self.maybe_auto_compact(args, hooks, "threshold", true)?;
             }
+            if !args.model_only {
+                self.restore_session_context(args)?;
+            }
             let outbound_messages =
                 prepare_outbound_messages(&args.cwd, &self.messages, attachments)?;
             let streaming = match step::call(

@@ -22,6 +22,7 @@ pub(crate) struct Conversation {
     pub(super) inspection: bool,
     pub(super) continuation: bool,
     pub(super) reconcile_completion: bool,
+    pub(super) session_context_pending: Option<&'static str>,
 }
 
 impl Conversation {
@@ -35,6 +36,7 @@ impl Conversation {
             inspection: false,
             continuation: false,
             reconcile_completion: false,
+            session_context_pending: Some("startup"),
         })
     }
 
@@ -51,6 +53,7 @@ impl Conversation {
             inspection: false,
             continuation: false,
             reconcile_completion: false,
+            session_context_pending: None,
         })
     }
 
@@ -65,6 +68,7 @@ impl Conversation {
             inspection: false,
             continuation: false,
             reconcile_completion: true,
+            session_context_pending: Some("resume"),
         })
     }
 
@@ -92,6 +96,38 @@ impl Conversation {
 
     pub(crate) fn session_path(&self) -> PathBuf {
         self.recorder.path()
+    }
+
+    /// Restore lifecycle context in the shared model window for every client.
+    /// Leave the transition pending on failure so a later turn cannot skip it.
+    pub(super) fn restore_session_context(&mut self, args: &Args) -> Result<(), String> {
+        if args.model_only {
+            return Ok(());
+        }
+        let Some(source) = self.session_context_pending else {
+            return Ok(());
+        };
+        let session = self.recorder.path();
+        let session_id = session.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+            format!("SessionStart cannot identify session directory {}", session.display())
+        })?;
+        let context = crate::hooks::session_start(
+            &args.cwd,
+            args.allow_command,
+            source,
+            session_id,
+            &session.join("transcript.jsonl"),
+        ).map_err(|reason| format!("SessionStart ({source}) for {session_id}: {reason}"))?;
+        let before = self.messages.len();
+        if !context.trim().is_empty() {
+            self.messages.push(json!({ "role": "system", "content": context }));
+        }
+        if let Err(reason) = self.recorder.record_context("session_start", &self.messages) {
+            self.messages.truncate(before);
+            return Err(format!("SessionStart ({source}) context persistence: {reason}"));
+        }
+        self.session_context_pending = None;
+        Ok(())
     }
 
     /// Rough token estimate (~4 chars/token) over the live message window, for
