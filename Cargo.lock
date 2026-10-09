@@ -523,8 +523,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1aa79e62e7697b8e29b513a68abacf485adcd1fe8284a4316c5ae868e6633327"
 dependencies = [
  "iana-time-zone",
+ "js-sys",
  "num-traits",
  "serde",
+ "wasm-bindgen",
  "windows-link",
 ]
 
@@ -1809,6 +1811,7 @@ dependencies = [
  "sha2",
  "shell-words",
  "stado-database",
+ "stado-wait",
  "tar",
  "tokio",
  "tokio-rustls",
@@ -3565,14 +3568,25 @@ checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 [[package]]
 name = "stado-database"
 version = "0.1.0"
-source = "git+https://github.com/wisent-ai/stado#194ae1d9bef4e27f3595f04c32b08014b29a6332"
+source = "git+https://github.com/wisent-ai/stado#692c0438d24117735c61373c0c178f1c1e21b080"
 dependencies = [
  "sea-orm",
  "sea-query-binder",
  "serde",
  "serde_json",
  "sqlx",
+ "stado-wait",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "stado-wait"
+version = "0.1.0"
+source = "git+https://github.com/wisent-ai/stado#692c0438d24117735c61373c0c178f1c1e21b080"
+dependencies = [
+ "chrono",
+ "reqwest",
  "tokio",
 ]
 

@@ -44,14 +44,14 @@ export const contextPages = [
       {
         title: "Every source answers, and each one runs to completion",
         paragraphs: [
-          "<code>context.advisor.sources</code> defaults to <code>files,memory</code>, the two that answer from local state, and the sources run concurrently, so a turn waits for the slowest rather than for their sum. <code>--source all</code> adds the archive and the ground-truth index to one call.",
-          "Nothing cuts a source short. There is no deadline setting and no <code>--timeout-ms</code> flag, because a guessed interval reports nothing and explains nothing: a search that takes ten seconds takes ten seconds and answers. On a large Transcript Lake archive that search is measured in seconds, and that is what a turn with <code>transcripts</code> selected pays. Choosing which sources a run consults is therefore the decision that replaces the guess a deadline used to make: measured here, one archive search took 30 s against 1 s for the two local sources.",
+          "<code>context.advisor.sources</code> defaults to <code>files,memory</code>. Files are local; memory opens the fleet database through Stado and Skarbiec. Sources run concurrently, so a turn waits for the slowest rather than for their sum. <code>--source all</code> also consults the archive and the ground-truth index.",
+          "Nothing cuts a source short. There is no deadline setting and no <code>--timeout-ms</code> flag. A selected source that is waiting on a dependency holds the answer until that dependency responds or fails; this is not model reasoning. Stado's shared wait diagnostics on standard error identify a database operation or child command before waiting and report its outcome. Standard output remains the recommendation JSON. A failed source retains the dependency's error, not just its first progress line.",
           "An unknown source name is refused rather than dropped: <code>unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts</code>. A narrowed answer is never the result of a typo.",
         ],
         commands: [
           {
-            label: "Ask every source, or only the fast ones",
-            code: 'jeden context recommend "why did the release agent quarantine that host" --limit 8\njeden context recommend "why did the release agent quarantine that host" --source files,memory',
+            label: "Select the sources to consult",
+            code: 'jeden context recommend "why did the release agent quarantine that host" --limit 8 --source all\njeden context recommend "why did the release agent quarantine that host" --limit 8 --source files,memory',
           },
         ],
       },

@@ -76,23 +76,23 @@ pub(crate) fn matched_terms(haystack: &str, terms: &[String]) -> Vec<String> {
 ///
 /// Nothing here cuts the work short. A search that takes ten seconds takes
 /// ten seconds and answers; a guessed interval would have reported nothing
-/// and told the reader nothing about why. A failure is the command's own
-/// failure, with the first line it wrote to stderr.
+/// and told the reader nothing about why. The shared wait diagnostic names
+/// the child before waiting; a failure retains all of its stderr, including
+/// the cause after progress messages.
 pub(crate) fn command_output(mut command: Command) -> Result<String, String> {
-    let output = command
+    command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .map_err(|error| error.to_string())?;
+        .stderr(Stdio::piped());
+    let output = stado_wait::output(&mut command).map_err(|error| error.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let detail = stderr
-            .lines()
-            .map(str::trim)
-            .find(|line| !line.is_empty())
-            .unwrap_or("no stderr")
-            .to_string();
+        let detail = stderr.trim();
+        let detail = if detail.is_empty() {
+            "no stderr"
+        } else {
+            detail
+        };
         return Err(format!("exited with {}: {detail}", output.status));
     }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
