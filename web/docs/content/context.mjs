@@ -84,6 +84,13 @@ export const contextPages = [
         ],
       },
       {
+        title: "Real dependency journey",
+        paragraphs: [
+          "<code>tests/context/dependencies.mjs</code> runs two concurrent <code>context recommend --source all</code> calls against the real fleet memory database and Transcript Lake, from a new workspace containing one searchable file. It checks that both calls return that file, that the new repository scope exposes no memory from another workspace, and that an unknown source is refused without returning narrowed advice. An unavailable memory database or archive fails the journey; neither is simulated.",
+          "Declare <code>JEDEN_BIN</code>, <code>JEDEN_TEST_SOURCE_REVISION</code> and <code>JEDEN_TEST_CONTEXT_LIMIT</code>, then run <code>node tests/context/dependencies.mjs</code> from the checkout. The candidate must be committed and its binary must embed that clean source revision. Reports, command exit statuses, binary and test hashes, and both output streams are retained under <code>.build/context-dependencies</code>. The optional ground-truth source reports its own state; the journey does not qualify an unconfigured index or a graphical client's rendering.",
+        ],
+      },
+      {
         title: "Configuration",
         paragraphs: [
           "Every key below is in <code>jeden config list</code> and can be set per user in <code>~/.jeden/config.yml</code> or per project in <code>&lt;cwd&gt;/.jeden/config.json</code>.",
