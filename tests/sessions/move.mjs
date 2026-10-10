@@ -17,13 +17,15 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   mkdirSync(child, { recursive: true });
   const savedState = join(session.sessionPath, `saved-state-${randomUUID()}.json`);
   renameSync(statePath, savedState);
-  mkdirSync(statePath);
+  let obstructionCreated = false;
   try {
+    mkdirSync(statePath);
+    obstructionCreated = true;
     await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
       error.message.includes(statePath) && error.message.includes('not a regular state file'));
     assert.deepEqual(readFileSync(savedState), originalState, 'refusal must not alter the saved state');
   } finally {
-    rmdirSync(statePath);
+    if (obstructionCreated) rmdirSync(statePath);
     renameSync(savedState, statePath);
   }
   await prompt(session, '/checkpoint after-refused-move');
