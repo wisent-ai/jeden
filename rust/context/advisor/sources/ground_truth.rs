@@ -78,11 +78,16 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             }
         }
     };
-    let results = document
-        .get("results")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+    let Some(results) = document.get("results").and_then(Value::as_array) else {
+        return SourceOutcome {
+            hits: Vec::new(),
+            status: SourceStatus::unavailable(
+                "ground-truth",
+                format!("{url} answered JSON without the required results array"),
+                started,
+            ),
+        };
+    };
     let considered = results.len();
     let hits: Vec<Recommendation> = results
         .iter()
