@@ -23,7 +23,7 @@ fail() {
 }
 # WANT=ok|refused run ARGS...: standard output and error together in $out.
 run() {
-  if out=$(set -o pipefail; "$BIN" "$@" </dev/null |& cat); then got=ok; else got=refused; fi
+  if out=$("$BIN" "$@" </dev/null &>/dev/stdout); then got=ok; else got=refused; fi
   printf '$ jeden %s\nresult: %s\noutput: %s\n\n' "$*" "$got" "$out" >>"$REPORT"
   [ "$got" = "$WANT" ] || fail "jeden $* was $got, expected $WANT: $out"
 }
