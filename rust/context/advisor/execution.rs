@@ -78,7 +78,9 @@ fn ask(
     } else {
         match source {
             "files" => files::search(settings, request, terms),
-            "memory" => memory::search(cwd, terms, &request.query, request.limit),
+            "memory" => crate::fleet::with_cancellation(&request.cancellation, || {
+                memory::search(cwd, terms, &request.query, request.limit)
+            }),
             "transcripts" => transcripts::search(settings, request, terms),
             "ground-truth" => ground_truth::search(settings, request, terms),
             other => SourceOutcome {

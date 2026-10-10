@@ -8,19 +8,43 @@
 //! shared synchronous client and hands it entity work with `run`; the
 //! process opens that client once, on first use.
 
+mod cancellation;
+pub(crate) use cancellation::with_cancellation;
+
 mod migration;
 
 use sea_orm::DatabaseConnection;
 use sea_orm_migration::MigratorTrait;
 use stado_database::sync::Client;
 use std::future::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 
 /// `HOME` holding `.stado/` when the process's own `HOME` is isolated, as in
 /// the pursuit journeys; Jeden then still reaches the fleet as this host.
 const STADO_HOME_VARIABLE: &str = "JEDEN_STADO_HOME";
 
-static CLIENT: Mutex<Option<Arc<Client>>> = Mutex::new(None);
+enum ConnectionState {
+    Closed,
+    Opening,
+    Ready(Arc<Client>),
+}
+
+static CLIENT: Mutex<ConnectionState> = Mutex::new(ConnectionState::Closed);
+static CONNECTION_CHANGED: Condvar = Condvar::new();
+
+/// A failed or panicking initializer must not leave its waiters stranded.
+struct Opening;
+
+impl Drop for Opening {
+    fn drop(&mut self) {
+        if let Ok(mut slot) = CLIENT.lock() {
+            if matches!(*slot, ConnectionState::Opening) {
+                *slot = ConnectionState::Closed;
+            }
+        }
+        CONNECTION_CHANGED.notify_all();
+    }
+}
 
 fn failed(step: &str, detail: impl std::fmt::Display) -> String {
     format!("jeden fleet database: {step}: {detail}")
@@ -39,15 +63,48 @@ fn open() -> Result<Client, String> {
 
 /// The process's client, opened on first use.
 fn client() -> Result<Arc<Client>, String> {
-    let mut slot = CLIENT
-        .lock()
-        .map_err(|_| failed("reading the connection", "its lock failed"))?;
-    if let Some(client) = slot.as_ref() {
-        return Ok(Arc::clone(client));
+    cancellation::check()?;
+    {
+        let slot = CLIENT
+            .lock()
+            .map_err(|_| failed("reading the connection", "its lock failed"))?;
+        if let ConnectionState::Ready(client) = &*slot {
+            return Ok(Arc::clone(client));
+        }
     }
-    let client = Arc::new(open()?);
-    *slot = Some(Arc::clone(&client));
-    Ok(client)
+    // Register before taking CLIENT: cancellation callbacks take that lock
+    // to synchronize notification with the condvar's atomic unlock-and-wait.
+    let _wake = cancellation::wake_when_cancelled(|| {
+        let _slot = CLIENT.lock();
+        CONNECTION_CHANGED.notify_all();
+    });
+    loop {
+        cancellation::check()?;
+        let mut slot = CLIENT
+            .lock()
+            .map_err(|_| failed("reading the connection", "its lock failed"))?;
+        match &*slot {
+            ConnectionState::Ready(client) => return Ok(Arc::clone(client)),
+            ConnectionState::Opening => {
+                cancellation::check()?;
+                drop(CONNECTION_CHANGED.wait(slot).map_err(|_| {
+                    failed("waiting for connection initialization", "its lock failed")
+                })?);
+            }
+            ConnectionState::Closed => {
+                *slot = ConnectionState::Opening;
+                drop(slot);
+                let _opening = Opening;
+                let client = Arc::new(open()?);
+                let mut slot = CLIENT
+                    .lock()
+                    .map_err(|_| failed("publishing the connection", "its lock failed"))?;
+                *slot = ConnectionState::Ready(Arc::clone(&client));
+                drop(slot);
+                return Ok(client);
+            }
+        }
+    }
 }
 
 /// Run `work` against the shared connection and wait for its answer.
@@ -56,7 +113,9 @@ where
     R: Send + 'static,
     F: Future<Output = Result<R, String>> + Send + 'static,
 {
-    client()?
+    let client = client()?;
+    cancellation::check()?;
+    client
         .run(work)
         .map_err(|error| failed("running an operation", error))?
 }

@@ -239,7 +239,7 @@ pub(crate) fn sources_report(
             match *source {
                 "files" => files::probe(&settings),
                 "ground-truth" => ground_truth::probe(&settings),
-                "memory" => memory::probe(),
+                "memory" => crate::fleet::with_cancellation(cancellation, memory::probe),
                 "transcripts" => transcripts::probe(&settings),
                 other => probe_value(
                     &SourceStatus::unavailable(other, "no such source", started),
