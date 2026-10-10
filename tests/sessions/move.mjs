@@ -130,6 +130,28 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
     error.message.includes('cannot move to') && error.message.includes(absent));
   assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(originalState).cwd);
 
+  const destinationContext = join(destination, '.jeden');
+  mkdirSync(destinationContext);
+  const cyclicContext = join(destinationContext, 'context.md');
+  const beforeContextFailure = readFileSync(statePath);
+  writeFileSync(cyclicContext, '@./context.md\n');
+  try {
+    await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
+      error.message.includes('context import cycle')
+        && error.message.includes(realpathSync(cyclicContext)));
+    assert.deepEqual(readFileSync(statePath), beforeContextFailure,
+      'failed context preparation must precede any working-directory state publication');
+  } finally {
+    unlinkSync(cyclicContext);
+  }
+  await prompt(session, '/checkpoint after-context-refusal');
+  assert.deepEqual(context(exported(session.sessionPath, 'move-context-refused')), originalContext,
+    'failed destination context preparation must preserve the prior model window');
+  await prompt(session, '/move .');
+  assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(beforeContextFailure).cwd,
+    'context preparation refusal must preserve the active directory');
+  report.cases.push({ name: 'move-context-cycle-refusal', verdict: 'passed', cyclicContext, statePath });
+
   await prompt(session, `/move ${destination}`);
   assert.equal(JSON.parse(readFileSync(statePath)).cwd, realpathSync(destination));
   await prompt(session, `/move ${relative(destination, child)}`);
