@@ -63,11 +63,7 @@ pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) ->
         })
         .collect();
     let detail = if hits.is_empty() {
-        format!(
-            "no memory in scope repo:{} matched; the store holds {}",
-            scope.id,
-            active_count(&store)
-        )
+        format!("no memory in scope repo:{} matched", scope.id)
     } else {
         format!("recalled from scope repo:{}", scope.id)
     };
@@ -84,27 +80,30 @@ pub(crate) fn probe() -> Value {
     let location = "fleet database jeden";
     let status = match MemoryStore::open() {
         Ok(store) => match store.health() {
-            Ok(health) => {
-                let memories = health
-                    .get("activeMemories")
-                    .and_then(Value::as_i64)
-                    .unwrap_or_default();
-                if memories > i64::default() {
-                    SourceStatus::available(
+            Ok(health) => match health.get("activeMemories").and_then(Value::as_u64) {
+                Some(memories) => match usize::try_from(memories) {
+                    Ok(considered) => SourceStatus::available(
                         "memory",
                         format!("{memories} active memory record(s)"),
-                        memories as usize,
+                        considered,
                         usize::default(),
                         started,
-                    )
-                } else {
-                    SourceStatus::unavailable(
+                    ),
+                    Err(error) => SourceStatus::unavailable(
                         "memory",
-                        "the store is reachable and holds no active memory record",
+                        format!("health activeMemories {memories} cannot be represented: {error}"),
                         started,
-                    )
-                }
-            }
+                    ),
+                },
+                None => SourceStatus::unavailable(
+                    "memory",
+                    format!(
+                        "health reply requires a non-negative integer activeMemories; observed {:?}",
+                        health.get("activeMemories")
+                    ),
+                    started,
+                ),
+            },
             Err(error) => {
                 SourceStatus::unavailable("memory", format!("health read failed: {error}"), started)
             }
@@ -116,17 +115,4 @@ pub(crate) fn probe() -> Value {
         ),
     };
     probe_value(&status, vec![("store", json!(location))])
-}
-
-fn active_count(store: &MemoryStore) -> String {
-    match store.health() {
-        Ok(health) => format!(
-            "{} active record(s)",
-            health
-                .get("activeMemories")
-                .and_then(Value::as_i64)
-                .unwrap_or_default()
-        ),
-        Err(error) => format!("an unreadable health state ({error})"),
-    }
 }
