@@ -6,6 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { basename, delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startRpc } from '../hooks/rpc.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -19,6 +20,8 @@ assert.equal(basename(stado), 'stado', 'the dependency must be discoverable by i
 const dependencyPath = `${dirname(stado)}${delimiter}${required('PATH')}`;
 const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const model = required('JEDEN_TEST_MODEL');
+const maxSteps = Number(required('JEDEN_TEST_MAX_STEPS'));
+assert.ok(Number.isSafeInteger(maxSteps), 'JEDEN_TEST_MAX_STEPS must be an integer');
 const cause = required('JEDEN_TEST_TRANSPORT_CAUSE');
 const channelRefusal = process.env.JEDEN_TEST_CHANNEL_REFUSAL;
 const promptPath = resolve(required('JEDEN_TEST_PROMPT_FILE'));
@@ -33,7 +36,8 @@ const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('h
 const report = {
   revision, binary, binarySha256: hash(binary), stadoSha256: hash(stado),
   testSha256: hash(fileURLToPath(import.meta.url)), promptSha256: hash(promptPath),
-  model, cause, channelRefusal, sessions, commands: [], verdict: 'failed',
+  model, maxSteps, cause, channelRefusal, sessions, commands: [], frames: [], verdict: 'failed',
+  rpcClientSha256: hash(join(root, 'tests/hooks/rpc.mjs')),
 };
 function invoke(program, args, env = process.env) {
   const result = spawnSync(program, args, { cwd: root, env, encoding: 'utf8' });
@@ -109,6 +113,50 @@ try {
       'the retained observation must identify the failed adapter');
   }
   assert.ok(!events.some((event) => event.type === 'final'), 'a transport refusal must not manufacture completion');
+  const client = startRpc({ binary, cwd: workspace, env, report });
+  try {
+    const session = await client.rpc('session/new', { options: { cwd: workspace, model, maxSteps } });
+    const requestId = randomUUID();
+    let refused;
+    try {
+      await client.rpc('session/prompt', {
+        sessionId: session.sessionId, requestId, prompt: readFileSync(promptPath, 'utf8'),
+      });
+    } catch (error) {
+      refused = error;
+    }
+    assert.ok(refused instanceof Error, 'the real graphical-client request must refuse');
+    const notifications = report.frames
+      .filter(({ frame }) => frame.method === 'session/event' && frame.params?.requestId === requestId)
+      .map(({ frame }) => frame.params);
+    const notification = notifications.find((event) => event.kind === 'error');
+    assert.ok(notification, 'the graphical client must receive the actual refusal notification');
+    for (const text of [refused.message, notification.message]) {
+      assert.ok(text.includes(cause), 'the graphical-client refusal lost the observed transport cause');
+      assert.ok(text.includes(`${route.url.replace(/\/$/, '')}/v1/chat/completions`),
+        'the graphical-client refusal lost the failed model endpoint');
+      assert.ok(text.includes(`placed_on ${route.placed_on}`), 'the selected host was lost');
+      assert.ok(text.includes(`from ${route.from}`), 'the directory vantage was lost');
+      if (channelRefusal) {
+        assert.ok(text.includes(channelRefusal), 'the secondary observation refusal was lost');
+        assert.ok(text.includes(`stado resolver channels --bind ${bind}`),
+          'the failed observation command was lost');
+      }
+    }
+    const exported = succeeds(invoke(binary, ['export', session.sessionPath], env));
+    writeFileSync(join(area, 'rpc-session-export.json'), exported);
+    const retained = JSON.parse(exported).events;
+    assert.ok(retained.some((event) => event.type === 'run_error' && event.data?.message?.includes(cause)),
+      'the graphical-client refusal must remain in its own durable session');
+    assert.ok(!retained.some((event) => event.type === 'final'),
+      'the failed graphical-client turn must not manufacture completion');
+    report.rpc = { session, requestId, error: refused.message, notification };
+    await client.rpc('shutdown', {});
+  } finally {
+    const command = await client.end();
+    assert.ok(command.status !== null && !command.status,
+      `RPC process did not shut down successfully: ${JSON.stringify(command)}`);
+  }
   report.channelsAfter = channels();
   report.transcripts = paths;
   report.verdict = 'passed';
