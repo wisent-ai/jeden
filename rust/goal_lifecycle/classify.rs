@@ -132,7 +132,7 @@ pub fn classify(
         json!({ "role": "system", "content": SYSTEM_PROMPT }),
         json!({ "role": "user", "content": envelope }),
     ];
-    let completion = chat_completion(&router, messages, Some(96), &[])
+    let completion = chat_completion(&router, messages, output_ceiling(&router)?, &[])
         .map_err(|error| format!("Brama refused the lifecycle alias {alias}: {error}"))?;
     parse_decision(&completion.content)
         .map(Some)
@@ -142,4 +142,36 @@ pub fn classify(
                 completion.content
             )
         })
+}
+
+fn output_ceiling(router: &ChatConfig) -> Result<Option<usize>, String> {
+    let client = crate::control_plane::brama::BramaClient::configured(
+        Some(router.url.clone()),
+        Some(router.bearer_token.clone()),
+    );
+    let catalog = match client.catalog(false) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("jeden: lifecycle model catalog could not be read; requesting {} without a local output ceiling: {error}", router.model);
+            return Ok(None);
+        }
+    };
+    let model = catalog
+        .resolve(&router.model)
+        .map_err(|error| error.to_string())?;
+    match model.max_output_tokens {
+        Some(tokens) => usize::try_from(tokens).map(Some).map_err(|error| {
+            format!(
+                "lifecycle alias {} output ceiling {tokens} is not representable: {error}",
+                router.model
+            )
+        }),
+        None => {
+            eprintln!(
+                "jeden: lifecycle alias {} declares no output ceiling; the request carries none",
+                router.model
+            );
+            Ok(None)
+        }
+    }
 }
