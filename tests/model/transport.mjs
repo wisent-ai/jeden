@@ -20,6 +20,7 @@ const dependencyPath = `${dirname(stado)}${delimiter}${required('PATH')}`;
 const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const model = required('JEDEN_TEST_MODEL');
 const cause = required('JEDEN_TEST_TRANSPORT_CAUSE');
+const channelRefusal = process.env.JEDEN_TEST_CHANNEL_REFUSAL;
 const promptPath = resolve(required('JEDEN_TEST_PROMPT_FILE'));
 assert.ok(!process.env.JEDEN_MODEL_ENDPOINT, 'this journey requires the real Stado route, not direct-provider mode');
 assert.ok(!process.env.BRAMA_URL, 'an endpoint override must not replace the directory fixture');
@@ -32,7 +33,7 @@ const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('h
 const report = {
   revision, binary, binarySha256: hash(binary), stadoSha256: hash(stado),
   testSha256: hash(fileURLToPath(import.meta.url)), promptSha256: hash(promptPath),
-  model, cause, sessions, commands: [], verdict: 'failed',
+  model, cause, channelRefusal, sessions, commands: [], verdict: 'failed',
 };
 function invoke(program, args, env = process.env) {
   const result = spawnSync(program, args, { cwd: root, env, encoding: 'utf8' });
@@ -65,7 +66,15 @@ try {
   report.route = route;
   const bind = new URL(route.url).host;
   const channelArgs = ['resolver', 'channels', '--bind', bind, '--json'];
-  report.channelsBefore = JSON.parse(succeeds(invoke(stado, channelArgs)));
+  function channels() {
+    const result = invoke(stado, channelArgs);
+    if (!channelRefusal) return JSON.parse(succeeds(result));
+    assert.ok(result.status !== null && result.status, 'the declared reader refusal must occur');
+    assert.ok(`${result.stdout}\n${result.stderr}`.includes(channelRefusal),
+      'the reader must expose the previously observed secondary cause');
+    return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  }
+  report.channelsBefore = channels();
   const env = { ...process.env, PATH: dependencyPath, JEDEN_SESSION_ROOT: sessions };
   const result = invoke(binary, [
     'run', readFileSync(promptPath, 'utf8'), '--model-only', '--json',
@@ -84,12 +93,19 @@ try {
   });
   const failure = events.find((event) => event.type === 'run_error' && event.data?.message?.includes(cause));
   assert.ok(failure, 'the actual refusal must remain in the durable session');
-  assert.ok(failure.data.message.includes('"health_observed":false'),
-    'the retained local snapshot must not become a health claim');
-  assert.ok(failure.data.message.includes(`"bind":${JSON.stringify(bind)}`),
-    'the retained observation must identify the failed adapter');
+  if (channelRefusal) {
+    assert.ok(failure.data.message.includes(channelRefusal),
+      'a reader failure must retain its own cause as well as the original model failure');
+    assert.ok(failure.data.message.includes(`stado resolver channels --bind ${bind}`),
+      'the secondary refusal must identify the failed observation command');
+  } else {
+    assert.ok(failure.data.message.includes('"health_observed":false'),
+      'the retained local snapshot must not become a health claim');
+    assert.ok(failure.data.message.includes(`"bind":${JSON.stringify(bind)}`),
+      'the retained observation must identify the failed adapter');
+  }
   assert.ok(!events.some((event) => event.type === 'final'), 'a transport refusal must not manufacture completion');
-  report.channelsAfter = JSON.parse(succeeds(invoke(stado, channelArgs)));
+  report.channelsAfter = channels();
   report.transcripts = paths;
   report.verdict = 'passed';
 } catch (error) {
