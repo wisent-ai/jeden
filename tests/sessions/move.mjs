@@ -4,6 +4,22 @@ import { randomUUID } from 'node:crypto';
 import { chmodSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
+async function restored(body, ...cleanup) {
+  const failures = [];
+  try {
+    await body();
+  } catch (error) {
+    failures.push(error);
+  } finally {
+    for (const restore of cleanup) {
+      try { await restore(); } catch (error) { failures.push(error); }
+    }
+  }
+  if (failures.length) {
+    throw new AggregateError(failures, `move qualification failed: ${failures.map(String).join('; ')}`);
+  }
+}
+
 export async function exerciseMove({ rpc, prompt, options, output, exported, report }) {
   const session = await rpc('session/new', { options });
   await prompt(session, '/checkpoint before-move');
@@ -18,16 +34,15 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const savedState = join(session.sessionPath, `saved-state-${randomUUID()}.json`);
   renameSync(statePath, savedState);
   let obstructionCreated = false;
-  try {
+  await restored(async () => {
     mkdirSync(statePath);
     obstructionCreated = true;
     await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
       error.message.includes(statePath) && error.message.includes('not a regular state file'));
     assert.deepEqual(readFileSync(savedState), originalState, 'refusal must not alter the saved state');
-  } finally {
+  }, () => {
     if (obstructionCreated) rmdirSync(statePath);
-    renameSync(savedState, statePath);
-  }
+  }, () => renameSync(savedState, statePath));
   await prompt(session, '/checkpoint after-refused-move');
   assert.deepEqual(context(exported(session.sessionPath, 'move-refused')), originalContext,
     'a refused move must preserve the model-visible context');
@@ -41,7 +56,7 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const beforeStaging = readFileSync(statePath);
   const probe = join(session.sessionPath, `create-probe-${randomUUID()}`);
   let refusal;
-  try {
+  await restored(async () => {
     chmodSync(session.sessionPath, mode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
     try {
       closeSync(openSync(probe, 'wx'));
@@ -56,9 +71,7 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
         && error.message.includes(`os error ${Math.abs(refusal.errno)}`));
     assert.deepEqual(readFileSync(statePath), beforeStaging,
       'failed staging must preserve the exact prior state file');
-  } finally {
-    chmodSync(session.sessionPath, mode);
-  }
+  }, () => chmodSync(session.sessionPath, mode));
   await prompt(session, '/checkpoint after-staging-refusal');
   assert.deepEqual(context(exported(session.sessionPath, 'move-staging-refused')), originalContext);
   await prompt(session, '/move .');
@@ -70,7 +83,7 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const stateMode = statSync(statePath).mode;
   const beforeRead = readFileSync(statePath);
   let readRefusal;
-  try {
+  await restored(async () => {
     chmodSync(statePath, stateMode & ~(constants.S_IRUSR | constants.S_IRGRP | constants.S_IROTH));
     try {
       readFileSync(statePath);
@@ -82,9 +95,7 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
       error.message.includes('cannot read session state')
         && error.message.includes(statePath)
         && error.message.includes(`os error ${Math.abs(readRefusal.errno)}`));
-  } finally {
-    chmodSync(statePath, stateMode);
-  }
+  }, () => chmodSync(statePath, stateMode));
   assert.deepEqual(readFileSync(statePath), beforeRead,
     'failed state read must preserve the exact prior state file');
   await prompt(session, '/checkpoint after-state-read-refusal');
@@ -101,16 +112,14 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
     { name: 'move-invalid-state-shape', contents: '[]', cause: 'expected object' },
   ]) {
     const retainedState = readFileSync(statePath);
-    try {
+    await restored(async () => {
       writeFileSync(statePath, scenario.contents);
       await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
         error.message.includes(`invalid ${statePath}`)
           && error.message.includes(scenario.cause));
       assert.equal(readFileSync(statePath, 'utf8'), scenario.contents,
         'a refused move must not replace malformed state with a newly invented state');
-    } finally {
-      writeFileSync(statePath, retainedState);
-    }
+    }, () => writeFileSync(statePath, retainedState));
     await prompt(session, `/checkpoint after-${scenario.name}`);
     assert.deepEqual(context(exported(session.sessionPath, scenario.name)), originalContext,
       'state decoding refusals must preserve the live model context');
@@ -135,15 +144,13 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const cyclicContext = join(destinationContext, 'context.md');
   const beforeContextFailure = readFileSync(statePath);
   writeFileSync(cyclicContext, '@./context.md\n');
-  try {
+  await restored(async () => {
     await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
       error.message.includes('context import cycle')
         && error.message.includes(realpathSync(cyclicContext)));
     assert.deepEqual(readFileSync(statePath), beforeContextFailure,
       'failed context preparation must precede any working-directory state publication');
-  } finally {
-    unlinkSync(cyclicContext);
-  }
+  }, () => unlinkSync(cyclicContext));
   await prompt(session, '/checkpoint after-context-refusal');
   assert.deepEqual(context(exported(session.sessionPath, 'move-context-refused')), originalContext,
     'failed destination context preparation must preserve the prior model window');
