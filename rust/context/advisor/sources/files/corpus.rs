@@ -58,7 +58,10 @@ pub(super) struct Corpus {
 }
 
 impl Corpus {
-    pub(super) fn read(settings: &Settings) -> Self {
+    pub(super) fn read(
+        settings: &Settings,
+        cancellation: Option<&crate::tool_runtime::runtime_ops::CancellationToken>,
+    ) -> Self {
         let mut corpus = Self {
             sections: Vec::new(),
             files: usize::default(),
@@ -66,9 +69,12 @@ impl Corpus {
             missing_roots: Vec::new(),
         };
         for root in &settings.roots {
+            if cancellation.is_some_and(|token| token.is_cancelled()) {
+                break;
+            }
             if root.path.exists() {
                 corpus.existing_roots.push(root.path.display().to_string());
-                corpus.collect_root(&root.path, root.depth, settings);
+                corpus.collect_root(&root.path, root.depth, settings, cancellation);
             } else {
                 corpus.missing_roots.push(root.path.display().to_string());
             }
@@ -85,7 +91,13 @@ impl Corpus {
         }
     }
 
-    fn collect_root(&mut self, root: &Path, depth: Option<usize>, settings: &Settings) {
+    fn collect_root(
+        &mut self,
+        root: &Path,
+        depth: Option<usize>,
+        settings: &Settings,
+        cancellation: Option<&crate::tool_runtime::runtime_ops::CancellationToken>,
+    ) {
         let home = crate::dirs_home();
         let walked_root = root.to_path_buf();
         let walk = WalkBuilder::new(root)
@@ -101,6 +113,9 @@ impl Corpus {
             })
             .build();
         for entry in walk.flatten() {
+            if cancellation.is_some_and(|token| token.is_cancelled()) {
+                break;
+            }
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {
                 continue;
             }
@@ -167,10 +182,17 @@ impl Corpus {
     fn split_windows(&mut self, path: &Path, text: &str) {
         let lines: Vec<&str> = text.lines().collect();
         let mut first = usize::default();
-        for index in lines.iter().enumerate().skip(NonZeroUsize::MIN.get()).filter_map(|(index, line)| {
-            let opener = !line.is_empty() && !line.starts_with(char::is_whitespace);
-            (opener && lines[index - NonZeroUsize::MIN.get()].trim().is_empty()).then_some(index)
-        }).chain(std::iter::once(lines.len())) {
+        for index in lines
+            .iter()
+            .enumerate()
+            .skip(NonZeroUsize::MIN.get())
+            .filter_map(|(index, line)| {
+                let opener = !line.is_empty() && !line.starts_with(char::is_whitespace);
+                (opener && lines[index - NonZeroUsize::MIN.get()].trim().is_empty())
+                    .then_some(index)
+            })
+            .chain(std::iter::once(lines.len()))
+        {
             self.push_window(path, &lines[first..index], first);
             first = index;
         }
@@ -183,7 +205,13 @@ impl Corpus {
         }
         let first_line = start + NonZeroUsize::MIN.get();
         let last_line = start + window.len();
-        self.push(path, &window_title(path, window), first_line, last_line, body);
+        self.push(
+            path,
+            &window_title(path, window),
+            first_line,
+            last_line,
+            body,
+        );
     }
 
     fn push(

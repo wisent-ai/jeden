@@ -22,6 +22,7 @@ pub(crate) fn context_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
         .and_then(Value::as_u64)
         .map(|limit| limit as usize);
     let mut request = advisor::Request::new(&query, stated, &settings)?;
+    request.cancellation = runtime.operation.cancellation().clone();
     if let Some(declared) = string_input(input, "sources") {
         let unknown = advisor::unknown_sources(&declared);
         if !unknown.is_empty() {

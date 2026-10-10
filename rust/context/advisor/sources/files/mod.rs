@@ -29,7 +29,11 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             ),
         };
     }
-    let corpus = Corpus::read(settings);
+    let corpus = Corpus::read(settings, Some(&request.cancellation));
+    if let Some(mut cancelled) = request.cancelled_outcome("files", started) {
+        cancelled.status.considered = corpus.sections.len();
+        return cancelled;
+    }
     if corpus.sections.is_empty() {
         return SourceOutcome {
             hits: Vec::new(),
@@ -39,7 +43,11 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
     let weighed = rank::weigh(&corpus.sections, terms);
     let informative = rank::informative_terms(&weighed);
     let mut scored: Vec<(f64, Recommendation)> = Vec::new();
-    for section in &corpus.sections {
+    for (considered, section) in corpus.sections.iter().enumerate() {
+        if let Some(mut cancelled) = request.cancelled_outcome("files", started) {
+            cancelled.status.considered = considered;
+            return cancelled;
+        }
         let score = rank::score_section(section, &weighed);
         if score <= NO_MATCH {
             continue;
@@ -106,7 +114,7 @@ fn detail(corpus: &Corpus) -> String {
 /// they actually carry.
 pub(crate) fn probe(settings: &Settings) -> Value {
     let started = Instant::now();
-    let corpus = Corpus::read(settings);
+    let corpus = Corpus::read(settings, None);
     let status = if corpus.sections.is_empty() {
         SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {

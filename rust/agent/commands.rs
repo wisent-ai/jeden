@@ -101,7 +101,10 @@ fn run_session_command(
         "/context" if !rest.trim().is_empty() => {
             let config = crate::load_config(&args.cwd);
             let settings = crate::context::advisor::settings(&args.cwd, &config);
-            let request = crate::context::advisor::Request::new(rest.trim(), None, &settings)?;
+            let mut request = crate::context::advisor::Request::new(rest.trim(), None, &settings)?;
+            request.cancellation = crate::tool_runtime::runtime_ops::CancellationToken::from_flag(
+                hooks.cancel.clone(),
+            );
             Ok(crate::context::advisor::render_text(
                 &crate::context::advisor::recommend(&args.cwd, &config, &request),
             ))
@@ -128,11 +131,7 @@ pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
         return Err(format!(
             "Unknown or unavailable tool: {}. Visible tools: {}",
             tool,
-            names
-                .iter()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", ")
+            names.iter().cloned().collect::<Vec<_>>().join(", ")
         ));
     }
     let mut state = read_mode_state(cwd);

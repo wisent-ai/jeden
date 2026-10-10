@@ -127,6 +127,7 @@ pub(crate) struct Request {
     pub(crate) query: String,
     pub(crate) limit: usize,
     pub(crate) sources: Vec<String>,
+    pub(crate) cancellation: crate::tool_runtime::runtime_ops::CancellationToken,
 }
 
 impl Request {
@@ -145,6 +146,22 @@ impl Request {
             query: query.trim().to_string(),
             limit,
             sources: settings.sources.clone(),
+            cancellation: crate::tool_runtime::runtime_ops::CancellationToken::new(),
+        })
+    }
+
+    pub(super) fn cancelled_outcome(
+        &self,
+        source: &str,
+        started: Instant,
+    ) -> Option<SourceOutcome> {
+        self.cancellation.is_cancelled().then(|| SourceOutcome {
+            hits: Vec::new(),
+            status: SourceStatus::unavailable(
+                source,
+                "context recommendation cancelled by its caller",
+                started,
+            ),
         })
     }
 }

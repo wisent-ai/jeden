@@ -87,6 +87,7 @@ export const contextPages = [
           "<strong>Agent tool:</strong> <code>context_recommend</code> takes <code>query</code>, and optionally <code>limit</code>, <code>sources</code>. It is a read-tier tool, because it does what the prologue already does unapproved.",
           "<strong>RPC and Jeden Desktop:</strong> <code>context/recommend</code> and <code>context/sources</code> answer the same objects the CLI prints with <code>--json</code>. Desktop's Context screen is that RPC, not a parsed command line.",
           "RPC context requests run as tracked workers, so a slow source does not prevent the connection from receiving unrelated control requests. The worker remains in the server's lifecycle until its sources finish; this does not itself introduce cancellation or a deadline.",
+          "Agent-tool and interactive requests carry their caller's cancellation flag. A source cancelled before execution answers unavailable with that cause; file traversal and ranking also check cancellation between entries and sections. This cooperative check does not interrupt a kernel read already in progress, or establish cancellation of an already-running database or external-source operation.",
         ],
       },
       {

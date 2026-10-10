@@ -64,7 +64,9 @@ fn ask(
         format!("context advisor source {source}"),
         cwd.display(),
     );
-    let outcome = if terms.is_empty() {
+    let outcome = if let Some(cancelled) = request.cancelled_outcome(source, started) {
+        cancelled
+    } else if terms.is_empty() {
         SourceOutcome {
             hits: Vec::new(),
             status: SourceStatus::unavailable(
