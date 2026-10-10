@@ -1,7 +1,7 @@
 // Real RPC session transitions and filesystem refusals; called by the lifecycle journey.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
+import { chmodSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 export async function exerciseMove({ rpc, prompt, options, output, exported, report }) {
@@ -60,6 +60,29 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   assert.deepEqual(context(exported(session.sessionPath, 'move-staging-refused')), originalContext);
   report.cases.push({ name: 'move-staging-refusal', verdict: 'passed', statePath,
     cause: refusal.message, errno: refusal.errno });
+
+  for (const scenario of [
+    { name: 'move-invalid-json', contents: '{', cause: 'EOF while parsing an object' },
+    { name: 'move-invalid-state-shape', contents: '[]', cause: 'expected object' },
+  ]) {
+    const retainedState = readFileSync(statePath);
+    try {
+      writeFileSync(statePath, scenario.contents);
+      await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
+        error.message.includes(`invalid ${statePath}`)
+          && error.message.includes(scenario.cause));
+      assert.equal(readFileSync(statePath, 'utf8'), scenario.contents,
+        'a refused move must not replace malformed state with a newly invented state');
+    } finally {
+      writeFileSync(statePath, retainedState);
+    }
+    await prompt(session, `/checkpoint after-${scenario.name}`);
+    assert.deepEqual(context(exported(session.sessionPath, scenario.name)), originalContext,
+      'state decoding refusals must preserve the live model context');
+    assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(retainedState).cwd);
+    report.cases.push({ name: scenario.name, verdict: 'passed', statePath,
+      cause: scenario.cause, destination });
+  }
 
   await assert.rejects(prompt(session, '/move'), /Usage: \/move <directory>/);
   await assert.rejects(prompt(session, `/move ${statePath}`), (error) =>
