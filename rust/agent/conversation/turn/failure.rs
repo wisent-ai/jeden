@@ -16,13 +16,17 @@ impl Conversation {
         hooks: &mut RunHooks,
     ) -> Result<(), String> {
         let router = &mut prepared.router;
-        for result in &failure.route_results {
-            self.recorder.record(
-                "model_route_result",
-                json!({ "step": step, "result": result }),
-            )?;
-        }
         let error = failure.message;
+        for result in &failure.route_results {
+            self.recorder
+                .record(
+                    "model_route_result",
+                    json!({ "step": step, "result": result }),
+                )
+                .map_err(|record_error| {
+                    format!("{error}; recording model_route_result failed: {record_error}")
+                })?;
+        }
         let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow;
         if overflow && !failure.visible_output {
             while !router.context_promotions.is_empty() {
@@ -45,7 +49,9 @@ impl Conversation {
                 self.recorder.record(
                     "model_route_result",
                     json!({ "step": step, "result": result }),
-                )?;
+                ).map_err(|record_error| {
+                    format!("{error}; recording context promotion model_route_result failed: {record_error}")
+                })?;
                 hooks.note("context overflow: promoted model route");
                 return Ok(());
             }
@@ -64,7 +70,9 @@ impl Conversation {
             self.recorder.record(
                 "run_error",
                 json!({ "message": error, "recovering": true, "reason": reason }),
-            )?;
+            ).map_err(|record_error| {
+                format!("{error}; recording run_error before context {reason} recovery failed: {record_error}")
+            })?;
             let instructions = format!("Automatic {reason} recovery. Preserve the active user request, decisions, files, tool results, and next action.");
             match self.compact(args, &instructions, hooks) {
                 Ok(_) => {
@@ -72,20 +80,27 @@ impl Conversation {
                     self.recorder.record(
                         "auto_continue",
                         json!({ "reason": reason, "prompt": prompt }),
-                    )?;
+                    ).map_err(|record_error| {
+                        format!("{error}; recording auto_continue after context {reason} recovery failed: {record_error}")
+                    })?;
                     self.messages
                         .push(json!({ "role": "user", "content": prompt }));
                     return Ok(());
                 }
                 Err(recovery_error) => {
-                    self.recorder.record(
-                        "auto_compaction_error",
-                        json!({ "reason": reason, "error": recovery_error }),
-                    )?;
-                    return Err(format!(
-                        "Context {} recovery failed: {}",
-                        reason, recovery_error
-                    ));
+                    let refusal =
+                        format!("{error}; context {reason} recovery failed: {recovery_error}");
+                    self.recorder
+                        .record(
+                            "auto_compaction_error",
+                            json!({ "reason": reason, "error": recovery_error }),
+                        )
+                        .map_err(|record_error| {
+                            format!(
+                                "{refusal}; recording auto_compaction_error failed: {record_error}"
+                            )
+                        })?;
+                    return Err(refusal);
                 }
             }
         }
@@ -111,7 +126,10 @@ impl Conversation {
             });
         }
         self.recorder
-            .record("run_error", json!({ "message": error }))?;
+            .record("run_error", json!({ "message": error }))
+            .map_err(|record_error| {
+                format!("{error}; recording run_error failed: {record_error}")
+            })?;
         Err(if prepared.tracks_completion {
             self.completion_failure("model_request", &error, hooks)
         } else {
