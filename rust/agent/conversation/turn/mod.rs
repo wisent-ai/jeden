@@ -138,14 +138,18 @@ impl Conversation {
                     // and repeated-failure detection.
                     self.messages
                         .push(json!({ "role": "assistant", "content": content.clone() }));
-                    let Some(refusal) = self.repair_unusable_answer(
-                        args,
-                        step,
-                        &refusal,
-                        answer::AnswerFailure::Malformed(&content),
-                        &mut repairs,
-                        hooks,
-                    )?
+                    let Some(refusal) = self
+                        .repair_unusable_answer(
+                            args,
+                            step,
+                            &refusal,
+                            answer::AnswerFailure::Malformed(&content),
+                            &mut repairs,
+                            hooks,
+                        )
+                        .map_err(|recovery_error| {
+                            format!("{refusal}; answer recovery failed: {recovery_error}")
+                        })?
                     else {
                         continue 'steps;
                     };
