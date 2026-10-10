@@ -19,8 +19,6 @@ pub(crate) use relay::SCHEMA as RELAY_SCHEMA;
 
 /// Max size of a single relay blob (base64 E2EE payload). Rejects larger POSTs.
 pub const MAX_BLOB_BYTES: usize = 1024 * 1024;
-/// Max buffered events per room before the relay applies backpressure.
-pub const MAX_ROOM_EVENTS: usize = 10_000;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]

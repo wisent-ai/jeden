@@ -54,8 +54,7 @@ pub(super) fn relay_response_authorized(
                 );
             }
             match store.post_authorized(target, blob.to_string(), token) {
-                Ok(Some(seq)) => (200, json!({"ok":true,"seq":seq}).to_string()),
-                Ok(None) => (429, json!({"ok":false,"error":"room is full"}).to_string()),
+                Ok(seq) => (200, json!({"ok":true,"seq":seq}).to_string()),
                 Err(e) => (403, json!({"ok":false,"error":e}).to_string()),
             }
         }

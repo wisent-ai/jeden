@@ -1,4 +1,3 @@
-use super::MAX_ROOM_EVENTS;
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
@@ -42,7 +41,7 @@ impl RelayStore {
         room: &str,
         blob: String,
         token: Option<&str>,
-    ) -> Result<Option<usize>, String> {
+    ) -> Result<usize, String> {
         let token = token.ok_or("write token required")?;
         let role = token_role(token)
             .ok_or("invalid role-bound token")?
@@ -97,10 +96,14 @@ impl RelayStore {
                 .count(&tx)
                 .await
                 .map_err(sql)?;
-            if count >= MAX_ROOM_EVENTS as u64 {
-                return Ok(None);
+            if count >= i64::MAX as u64 {
+                return Err(
+                    "collaboration event sequence exceeds the database integer range".into(),
+                );
             }
             let seq = count as i64 + 1;
+            let response_seq = usize::try_from(seq)
+                .map_err(|_| "collaboration event sequence exceeds the host address range")?;
             event::Entity::insert(event::ActiveModel {
                 room_id: Set(room),
                 seq: Set(seq),
@@ -111,7 +114,7 @@ impl RelayStore {
             .await
             .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
-            Ok(Some(seq as usize))
+            Ok(response_seq)
         })
     }
     pub fn get(&self, room: &str, since: usize) -> Result<(Vec<String>, usize), String> {
