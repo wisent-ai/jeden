@@ -181,8 +181,8 @@ class CdpClient {
       else pending.resolve(message.result ?? {});
     });
     // A closed socket fails every call and event still outstanding on it.
-    this.socket.addEventListener("close", () => {
-      const closed = new Error("CDP WebSocket closed");
+    this.socket.addEventListener("close", event => {
+      const closed = new Error(`CDP WebSocket ${this.url} closed: code=${event.code}, reason=${JSON.stringify(event.reason)}, clean=${event.wasClean}`);
       this.closed = closed;
       for (const pending of this.pending.values()) pending.reject(closed);
       this.pending.clear();
@@ -191,7 +191,12 @@ class CdpClient {
     });
     await new Promise((resolve, reject) => {
       this.socket.addEventListener("open", () => resolve(), { once: true });
-      this.socket.addEventListener("error", () => reject(new Error("CDP WebSocket connection failed")), { once: true });
+      this.socket.addEventListener("error", event => reject(new Error(
+        `CDP WebSocket ${this.url} connection failed: ${inspect(event, {
+          depth: null, maxArrayLength: null, maxStringLength: null,
+        })}`,
+      )), { once: true });
+      this.socket.addEventListener("close", () => reject(this.closed), { once: true });
     });
   }
   send(method, params = {}) {
