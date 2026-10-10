@@ -70,12 +70,19 @@ impl Conversation {
     /// Refresh the system prompt for a new working directory (keeps live turns)
     /// so tools/commands visible from the new cwd are reflected — backs /move.
     pub(crate) fn rebase(&mut self, cwd: &Path) -> Result<(), String> {
-        if let Some(first) = self.messages.first_mut() {
-            if first.get("role").and_then(Value::as_str) == Some("system") {
-                first["content"] = json!(system_prompt_checked(cwd)?);
+        let prompt = self
+            .messages
+            .first()
+            .filter(|first| first.get("role").and_then(Value::as_str) == Some("system"))
+            .map(|_| system_prompt_checked(cwd).map(|prompt| json!(prompt)))
+            .transpose()?;
+        self.recorder.set_cwd(cwd)?;
+        if let Some(prompt) = prompt {
+            if let Some(first) = self.messages.first_mut() {
+                first["content"] = prompt;
             }
         }
-        self.recorder.set_cwd(cwd)
+        Ok(())
     }
 
     /// Resume the selected source, including its acceptance state and evidence lineage.

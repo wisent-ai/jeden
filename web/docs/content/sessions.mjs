@@ -78,6 +78,8 @@ export const sessionPages = [
         paragraphs: [
           "<code>/checkpoint [label]</code> records the exact model-visible context, <code>/checkpoint list</code> prints durable checkpoint event IDs, and <code>/rewind <checkpoint-event-id></code> appends a new active lineage without deleting abandoned history.",
           "A session transcript with a truncated tail is read up to the last valid event, refuses further appends, and must be continued in a child session. In the interactive attachment tray, <code>/attach <relative-path></code>, <code>/attachments</code>, and <code>/detach <id|all></code> manage bounded, workspace-jailed text and PNG, JPEG, GIF, or WebP inputs consumed by the next submitted turn.",
+          "Interactive <code>/move &lt;directory&gt;</code> prepares the new system prompt and persists the session's working directory before publishing either in memory. It writes and syncs a separate state file, preserves the original file permissions, then replaces <code>state.json</code> by rename. A refusal before replacement leaves the prior state file, active prompt and working directory intact; the error identifies the inspection, read, encoding, staging, permission, write, sync or publication operation and its path and cause. A failed staging cleanup is reported alongside the original error. This is an atomic replacement, not a directory-fsync durability guarantee.",
+          "Workspace adoption also uses this active-context transition, but adoption saves the configured workspace before rebasing the conversation. A rebase refusal does not undo that saved default: the current conversation remains at its prior working directory while the configured default may already name the new workspace.",
         ],
       },
       {
