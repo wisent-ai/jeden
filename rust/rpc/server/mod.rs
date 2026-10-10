@@ -168,6 +168,16 @@ where
                 let _in_flight = in_flight;
                 handle_prompt(worker_state, request)
             }));
+        } else if matches!(request.method.as_str(), "context/recommend" | "context/sources") {
+            let worker_state = state.clone();
+            let in_flight = activity.begin();
+            workers.push(thread::spawn(move || {
+                let _in_flight = in_flight;
+                match handle_request(&worker_state, request) {
+                    Ok(()) => Ok(()),
+                    Err(error) => worker_state.writer.send(&error),
+                }
+            }));
         } else if let Err(error) = handle_request(&state, request) {
             writer.send(&error)?;
         }

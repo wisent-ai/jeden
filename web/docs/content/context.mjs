@@ -83,6 +83,7 @@ export const contextPages = [
           "<strong>Interactive:</strong> <code>/context &lt;task&gt;</code> renders the same recommendations; bare <code>/context</code> keeps reporting the live window size.",
           "<strong>Agent tool:</strong> <code>context_recommend</code> takes <code>query</code>, and optionally <code>limit</code>, <code>sources</code>. It is a read-tier tool, because it does what the prologue already does unapproved.",
           "<strong>RPC and Jeden Desktop:</strong> <code>context/recommend</code> and <code>context/sources</code> answer the same objects the CLI prints with <code>--json</code>. Desktop's Context screen is that RPC, not a parsed command line.",
+          "RPC context requests run as tracked workers, so a slow source does not prevent the connection from receiving unrelated control requests. The worker remains in the server's lifecycle until its sources finish; this does not itself introduce cancellation or a deadline.",
         ],
       },
       {
