@@ -254,6 +254,15 @@ try {
   assert.ok(!failureEvents.some((event) => event.type === 'action'),
     'a model action must not execute after the context hook fails');
   report.cases.push({ name: 'missing-executable-refusal', verdict: 'passed', sessionPath: refused.sessionPath });
+  const failedTranscript = join(refused.sessionPath, 'transcript.jsonl');
+  const beforeRetirement = hash(failedTranscript);
+  const retirement = await rpc('session/retire', { sessionId: refused.sessionId });
+  assert.deepEqual(retirement, { disposed: true }, 'failed prompt cleanup must leave the owning session retirable');
+  await assert.rejects(rpc('session/status', { sessionId: refused.sessionId }),
+    (error) => error.message.includes('unknown_session') && error.message.includes(refused.sessionId));
+  assert.equal(hash(failedTranscript), beforeRetirement, 'idle retirement must preserve the actual failure ledger');
+  report.cases.push({ name: 'idle-retirement-after-real-hook-refusal', verdict: 'passed',
+    sessionPath: refused.sessionPath, transcriptSha256: beforeRetirement });
   await rpc('shutdown', {});
   await client.end();
   assert.ok(command.status !== null && !command.status, command.stderr);
