@@ -104,6 +104,20 @@ try {
   assert.match(refused.stderr, /unknown source\(s\): not-a-source/);
   assert.equal(refused.stdout.trim(), '', 'a source typo must not return narrowed advice');
   report.cases.push({ case: 'unknown-source-refusal', verdict: 'passed' });
+  const probe = await invoke(binary, ['context', 'sources', '--json', '--cwd', workspace]);
+  const inspection = JSON.parse(succeeds(probe));
+  for (const source of inspection.sources) {
+    assert.ok(probe.stderr.includes(`context advisor probe ${source.source};`),
+      `source inspection hid its pending operation: ${source.source}`);
+    assert.equal(typeof source.available, 'boolean');
+    if (!source.available) {
+      assert.ok(source.detail.trim(), `source refusal omitted its cause: ${source.source}`);
+      assert.ok(probe.stderr.includes(`blad czekania: context advisor probe ${source.source};`), probe.stderr);
+    }
+  }
+  const memoryProbe = inspection.sources.find(source => source.source === 'memory');
+  assert.equal(memoryProbe?.available, true, JSON.stringify(inspection));
+  report.cases.push({ case: 'real-source-inspection', verdict: 'passed', result: inspection });
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
