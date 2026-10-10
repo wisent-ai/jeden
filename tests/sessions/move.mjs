@@ -1,7 +1,7 @@
 // Real RPC session transitions and filesystem refusals; called by the lifecycle journey.
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, realpathSync, renameSync, rmdirSync } from 'node:fs';
+import { chmodSync, closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 export async function exerciseMove({ rpc, prompt, options, output, exported, report }) {
@@ -31,6 +31,33 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
     'a refused move must preserve the model-visible context');
   assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(originalState).cwd);
   report.cases.push({ name: 'move-state-refusal', verdict: 'passed', statePath, destination });
+
+  const mode = statSync(session.sessionPath).mode;
+  const beforeStaging = readFileSync(statePath);
+  const probe = join(session.sessionPath, `create-probe-${randomUUID()}`);
+  let refusal;
+  try {
+    chmodSync(session.sessionPath, mode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
+    try {
+      closeSync(openSync(probe, 'wx'));
+      unlinkSync(probe);
+    } catch (error) {
+      refusal = error;
+    }
+    assert.ok(refusal?.errno, 'the host must enforce the actual staging-file creation refusal');
+    await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
+      error.message.includes('cannot create session state staging file')
+        && error.message.includes(session.sessionPath)
+        && error.message.includes(`os error ${Math.abs(refusal.errno)}`));
+    assert.deepEqual(readFileSync(statePath), beforeStaging,
+      'failed staging must preserve the exact prior state file');
+  } finally {
+    chmodSync(session.sessionPath, mode);
+  }
+  await prompt(session, '/checkpoint after-staging-refusal');
+  assert.deepEqual(context(exported(session.sessionPath, 'move-staging-refused')), originalContext);
+  report.cases.push({ name: 'move-staging-refusal', verdict: 'passed', statePath,
+    cause: refusal.message, errno: refusal.errno });
 
   await assert.rejects(prompt(session, '/move'), /Usage: \/move <directory>/);
   await assert.rejects(prompt(session, `/move ${statePath}`), (error) =>
