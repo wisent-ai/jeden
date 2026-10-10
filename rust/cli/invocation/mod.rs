@@ -144,14 +144,6 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             ..Default::default()
         });
     }
-    if command == "resume" {
-        return Ok(Args {
-            command,
-            cwd: env::current_dir().map_err(|e| e.to_string())?,
-            positionals: rest.collect(),
-            ..Default::default()
-        });
-    }
     if command.starts_with("--") {
         rest = std::iter::once(command)
             .chain(rest)
@@ -172,6 +164,14 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             command: "help".into(),
             cwd: env::current_dir().unwrap_or_default(),
             positionals: vec![command],
+            ..Default::default()
+        });
+    }
+    if command == "resume" {
+        return Ok(Args {
+            command,
+            cwd: env::current_dir().map_err(|e| e.to_string())?,
+            positionals: rest_words,
             ..Default::default()
         });
     }
