@@ -96,7 +96,18 @@ try {
       snapshotId: snapshot.id, previousSnapshotId: previousSnapshot.id });
     previousSnapshot = snapshot;
   }
+  const idle = await rpc('session/status', { sessionId: session.sessionId });
+  assert.deepEqual(idle.activeRequestIds, [], 'finished maintenance left an active runtime request');
+  const beforeDispose = hash(join(session.sessionPath, 'transcript.jsonl'));
   await rpc('session/dispose', { sessionId: session.sessionId });
+  await assert.rejects(
+    rpc('session/prompt', { sessionId: session.sessionId, prompt: 'This disposed session must not execute another turn.' }),
+    (error) => error.message.includes('unknown_session') && error.message.includes(session.sessionId),
+  );
+  assert.equal(hash(join(session.sessionPath, 'transcript.jsonl')), beforeDispose,
+    'a refused prompt changed the disposed session ledger');
+  report.cases.push({ name: 'disposed-session-refuses-new-work', verdict: 'passed',
+    sessionPath: session.sessionPath, transcriptSha256: beforeDispose });
   const resumeRules = readRules('resume');
   const reopened = await rpc('session/open', { session: session.sessionPath, options });
   await prompt(reopened, 'Read the standing instructions again without editing files.');

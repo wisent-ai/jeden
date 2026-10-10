@@ -15,9 +15,6 @@ impl AgentSession {
         if request.prompt.trim().is_empty() {
             return Err("prompt must not be empty".into());
         }
-        if self.inner.disposed.load(Ordering::Acquire) {
-            return Err("session disposed".into());
-        }
         let cancel = Arc::new(AtomicBool::new(false));
         {
             let mut active = self
@@ -25,6 +22,9 @@ impl AgentSession {
                 .active
                 .lock()
                 .map_err(|_| "active request lock poisoned")?;
+            if self.inner.disposed.load(Ordering::Acquire) {
+                return Err("session disposed".into());
+            }
             if active.contains_key(&request.request_id) {
                 return Err(format!("request already active: {}", request.request_id));
             }
