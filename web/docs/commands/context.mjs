@@ -38,7 +38,7 @@ export const contextCommands = [
       unknownSource,
       "A missing task is refused as <code>context recommend requires a task</code>.",
       "A resolved source list that is empty is refused as <code>no source selected: context.advisor.sources resolved to nothing</code>.",
-      "A source that cannot answer never fails the command: it is reported as <code>unavailable</code> with its reason, such as <code>no endpoint: set context.advisor.groundTruthUrl or WISENT_GROUND_TRUTH_API</code> or <code>exited with exit status: 1</code>.",
+      "A source that fails to answer does not discard completed recommendations: it is reported as <code>unavailable</code> with its actual reason in <code>sources</code> and <code>unanswered</code>. A successful search with no matches is not unanswered. An exit-zero recommendation command therefore does not prove that every source worked; inspect <code>unanswered</code>. This final-result contract does not impose a deadline on a source that is still running.",
     ],
   },
   {
