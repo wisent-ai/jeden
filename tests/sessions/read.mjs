@@ -13,6 +13,7 @@ export async function exerciseRead({ binary, env, rpc, prompt, options, exported
   const beforeState = readFileSync(state);
   const mode = statSync(transcript).mode;
   let refusal;
+  const failures = [];
   try {
     chmodSync(transcript, mode & ~(constants.S_IRUSR | constants.S_IRGRP | constants.S_IROTH));
     try { readFileSync(transcript); } catch (error) { refusal = error; }
@@ -33,8 +34,13 @@ export async function exerciseRead({ binary, env, rpc, prompt, options, exported
     }
     assert.deepEqual(readFileSync(state), beforeState,
       'a refused ledger read must not publish a new active leaf');
+  } catch (error) {
+    failures.push(error);
   } finally {
-    chmodSync(transcript, mode);
+    try { chmodSync(transcript, mode); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) {
+    throw new AggregateError(failures, `transcript read qualification failed: ${failures.map(String).join('; ')}`);
   }
   assert.deepEqual(readFileSync(transcript), beforeTranscript,
     'neither CLI nor RPC may append after failing to read the prior ledger');
