@@ -120,13 +120,21 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
             },
             None => match git(&worktree.path, &["status", "--porcelain"]) {
                 Some(status) if status.is_empty() => fs::remove_dir_all(&worktree.path)
-                    .map(|()| {
-                        if let Some(admin) = &worktree.admin_dir {
-                            let _ = fs::remove_dir_all(admin);
-                        }
-                        "rm -rf (clean checkout, no parent repository)"
+                    .map_err(|error| {
+                        format!("removal of {} failed: {error}", worktree.path.display())
                     })
-                    .map_err(|error| format!("removal failed: {error}")),
+                    .and_then(|()| {
+                        if let Some(admin) = &worktree.admin_dir {
+                            fs::remove_dir_all(admin).map_err(|error| {
+                                format!(
+                                    "checkout {} was removed, but removing its administrative directory {} failed: {error}",
+                                    worktree.path.display(),
+                                    admin.display()
+                                )
+                            })?;
+                        }
+                        Ok("rm -rf (clean checkout, no parent repository)")
+                    }),
                 Some(status) => Err(format!(
                     "uncommitted changes in a checkout no repository claims: {}",
                     status.lines().collect::<Vec<_>>().join("; ")
