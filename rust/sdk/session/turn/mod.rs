@@ -2,6 +2,7 @@ use super::*;
 
 mod args;
 mod commands;
+mod finish;
 use args::args_from_options;
 impl AgentSession {
     pub(super) fn dispatch_prompt(
@@ -31,18 +32,7 @@ impl AgentSession {
             active.insert(request.request_id.clone(), cancel.clone());
         }
         let result = self.run_prompt(&request, cancel, continuing);
-        if let Ok(mut active) = self.inner.active.lock() {
-            active.remove(&request.request_id);
-        }
-        if let Err(message) = &result {
-            let _ = self.inner.emit(SessionEvent {
-                request_id: request.request_id,
-                event: SessionEventKind::Error {
-                    message: message.clone(),
-                },
-            });
-        }
-        result
+        self.finish_prompt(request.request_id, result)
     }
     fn run_prompt(
         &self,
