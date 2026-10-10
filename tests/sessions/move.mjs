@@ -61,6 +61,32 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   report.cases.push({ name: 'move-staging-refusal', verdict: 'passed', statePath,
     cause: refusal.message, errno: refusal.errno });
 
+  const stateMode = statSync(statePath).mode;
+  const beforeRead = readFileSync(statePath);
+  let readRefusal;
+  try {
+    chmodSync(statePath, stateMode & ~(constants.S_IRUSR | constants.S_IRGRP | constants.S_IROTH));
+    try {
+      readFileSync(statePath);
+    } catch (error) {
+      readRefusal = error;
+    }
+    assert.ok(readRefusal?.errno, 'the host must enforce the actual state-file read refusal');
+    await assert.rejects(prompt(session, `/move ${destination}`), (error) =>
+      error.message.includes('cannot read session state')
+        && error.message.includes(statePath)
+        && error.message.includes(`os error ${Math.abs(readRefusal.errno)}`));
+  } finally {
+    chmodSync(statePath, stateMode);
+  }
+  assert.deepEqual(readFileSync(statePath), beforeRead,
+    'failed state read must preserve the exact prior state file');
+  await prompt(session, '/checkpoint after-state-read-refusal');
+  assert.deepEqual(context(exported(session.sessionPath, 'move-state-read-refused')), originalContext,
+    'state read refusal must preserve the live model context');
+  report.cases.push({ name: 'move-state-read-refusal', verdict: 'passed', statePath,
+    cause: readRefusal.message, errno: readRefusal.errno });
+
   for (const scenario of [
     { name: 'move-invalid-json', contents: '{', cause: 'EOF while parsing an object' },
     { name: 'move-invalid-state-shape', contents: '[]', cause: 'expected object' },
