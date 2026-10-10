@@ -43,7 +43,7 @@ impl IsolatedWorkspace {
         fs::write(destination, snapshot)?;
         Ok(())
     }
-    pub fn merge(&self, capture: &Path) -> Result<(), TaskError> {
+    pub fn merge(&self, capture: &Path, max_output_bytes: u64) -> Result<(), TaskError> {
         if !capture.exists() {
             return Err(TaskError::NotFound(format!(
                 "capture not found: {}",
@@ -52,7 +52,7 @@ impl IsolatedWorkspace {
         }
         let data = fs::read(capture)?;
         native()
-            .apply_snapshot(&self.parent, &data, 64 * 1024)
+            .apply_snapshot(&self.parent, &data, max_output_bytes)
             .map_err(|error| TaskError::Conflict(error.to_string()))
     }
 }

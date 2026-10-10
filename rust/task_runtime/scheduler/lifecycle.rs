@@ -86,7 +86,7 @@ impl TaskScheduler {
             strategy: job.isolation.clone(),
             parent: job.cwd.clone(),
         }
-        .merge(&job.capture)?;
+        .merge(&job.capture, self.limits.max_output_bytes)?;
         job.metadata.insert("mergedAt".into(), json!(now_millis()));
         job.updated_at = now_millis();
         self.write_job(&job)?;
