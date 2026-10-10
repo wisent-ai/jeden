@@ -150,16 +150,29 @@ pub(crate) fn artifact_command(args: &Args) -> Result<String, String> {
         crate::cli::invocation::refusal::usage("artifact requires an artifact name")
     })?;
     let output = it.next();
+    if let Some(argument) = it.next() {
+        return Err(crate::cli::invocation::refusal::usage(format!(
+            "artifact: unexpected argument {argument:?}; usage: jeden artifact <session-id-or-path> <name> [output]"
+        )));
+    }
     let root = session_dir_for(id).join("artifacts");
     let file = root.join(name);
-    let canonical_root = fs::canonicalize(&root).map_err(|e| e.to_string())?;
-    let canonical_file = fs::canonicalize(&file).map_err(|e| e.to_string())?;
+    let canonical_root = fs::canonicalize(&root)
+        .map_err(|error| format!("cannot resolve artifact root {}: {error}", root.display()))?;
+    let canonical_file = fs::canonicalize(&file)
+        .map_err(|error| format!("cannot resolve artifact {}: {error}", file.display()))?;
     if !canonical_file.starts_with(&canonical_root) {
         return Err(format!("artifact path escapes session: {}", name));
     }
-    let content = fs::read_to_string(&canonical_file).map_err(|e| e.to_string())?;
+    let content = fs::read_to_string(&canonical_file).map_err(|error| {
+        format!(
+            "cannot read artifact {} as UTF-8: {error}",
+            canonical_file.display()
+        )
+    })?;
     if let Some(output) = output {
-        fs::write(output, &content).map_err(|e| e.to_string())?;
+        fs::write(output, &content)
+            .map_err(|error| format!("cannot write artifact to {output}: {error}"))?;
         Ok(format!("{}\n", output))
     } else {
         Ok(if content.ends_with('\n') {

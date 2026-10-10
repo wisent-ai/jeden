@@ -233,8 +233,9 @@ export const sessionCommands = [
     effect: "Canonicalizes the session artifact root and selected file, reads the artifact as text, and either prints it or writes the same text to the output path.",
     refusals: [
       "Missing selectors are refused as <code>artifact requires a session id or path</code> or <code>artifact requires an artifact name</code>.",
+      "An argument after the optional output path is refused as <code>artifact: unexpected argument</code> with the exact invocation, before reading or writing any file.",
       "A canonical artifact path outside the session root is refused as <code>artifact path escapes session: &lt;name&gt;</code>.",
-      "Missing, non-UTF-8, or unwritable files return their filesystem error.",
+      "Missing, non-UTF-8, or unwritable files return the failed resolve, read or write operation, the actual artifact root/file/output path and the original filesystem cause.",
     ],
   },
   {
