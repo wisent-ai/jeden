@@ -14,6 +14,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod attachments;
 mod completion;
 mod stream;
+mod transport;
 
 pub(crate) use attachments::{with_attachments, ModelAttachment};
 use completion::*;
@@ -152,6 +153,7 @@ pub struct ChatConfig {
     pub url: String,
     /// Provenance of the selected endpoint, retained with this configuration.
     pub endpoint_origin: String,
+    pub endpoint_via_stado: bool,
     pub bearer_token: String,
     pub agent_id: String,
     pub secret: String,
@@ -169,20 +171,6 @@ pub struct ChatConfig {
     /// request (`BramaError::left_unanswered`), set where the typed error is
     /// still in hand so no caller reads that from the sentence.
     pub catalog_unanswered: bool,
-}
-
-impl ChatConfig {
-    pub(crate) fn endpoint_failure(
-        &self,
-        operation: &str,
-        cause: impl std::fmt::Display,
-    ) -> String {
-        format!(
-            "{operation} at {}/v1/chat/completions ({}) failed: {cause}",
-            self.url.trim_end_matches('/'),
-            self.endpoint_origin
-        )
-    }
 }
 
 #[derive(Debug, Clone)]

@@ -63,8 +63,9 @@ try {
   assert.equal(route.consumer, 'jeden');
   assert.ok(route.url, 'the real directory must name the observed adapter');
   report.route = route;
-  // Status is retained even when its unhealthy exit is the expected fixture state.
-  invoke(stado, ['resolver', 'status', '--json']);
+  const bind = new URL(route.url).host;
+  const channelArgs = ['resolver', 'channels', '--bind', bind, '--json'];
+  report.channelsBefore = JSON.parse(succeeds(invoke(stado, channelArgs)));
   const env = { ...process.env, PATH: dependencyPath, JEDEN_SESSION_ROOT: sessions };
   const result = invoke(binary, [
     'run', readFileSync(promptPath, 'utf8'), '--model-only', '--json',
@@ -81,10 +82,14 @@ try {
     writeFileSync(join(dirname(path), 'qualification-export.json'), exported);
     return JSON.parse(exported).events;
   });
-  assert.ok(events.some((event) => event.type === 'run_error' && event.data?.message?.includes(cause)),
-    'the actual refusal must remain in the durable session');
+  const failure = events.find((event) => event.type === 'run_error' && event.data?.message?.includes(cause));
+  assert.ok(failure, 'the actual refusal must remain in the durable session');
+  assert.ok(failure.data.message.includes('"health_observed":false'),
+    'the retained local snapshot must not become a health claim');
+  assert.ok(failure.data.message.includes(`"bind":${JSON.stringify(bind)}`),
+    'the retained observation must identify the failed adapter');
   assert.ok(!events.some((event) => event.type === 'final'), 'a transport refusal must not manufacture completion');
-  invoke(stado, ['resolver', 'status', '--json']);
+  report.channelsAfter = JSON.parse(succeeds(invoke(stado, channelArgs)));
   report.transcripts = paths;
   report.verdict = 'passed';
 } catch (error) {
