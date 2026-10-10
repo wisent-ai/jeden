@@ -146,7 +146,13 @@ pub(crate) fn streaming_attempt(
         on_delta,
         on_reasoning,
         cancelled,
-    )?;
+    )
+    .map_err(|mut error| {
+        if error.class != StreamErrorClass::Cancelled {
+            error.message = config.endpoint_failure("stream model request", &error.message);
+        }
+        error
+    })?;
     crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())
         .map_err(AttemptError::permanent)?;
     Ok(completion)

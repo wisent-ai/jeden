@@ -200,6 +200,19 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         .map(|_| args.cwd.join(".jeden/subscription-cooldowns.json"));
     ChatConfig {
         url: endpoint.unwrap_or_default(),
+        endpoint_origin: if direct.is_some() {
+            format!(
+                "OpenAI-compatible provider selected by {}",
+                crate::agent::credential::DIRECT_URL
+            )
+        } else if crate::agent::credential::brama_route().url.is_none() {
+            format!(
+                "Brama endpoint from STADO_MODEL_ROUTER_URL; {}",
+                crate::agent::credential::route_origin()
+            )
+        } else {
+            format!("Brama; {}", crate::agent::credential::route_origin())
+        },
         bearer_token: bearer_token.unwrap_or_default(),
         agent_id: env::var("WISENT_APP_AGENT_ID")
             .ok()

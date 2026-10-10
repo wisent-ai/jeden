@@ -101,9 +101,12 @@ pub fn chat_completion(
     }
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
     let signed = agent_headers(&body_text, &config.agent_id, &config.secret)?;
-    let client = crate::net::blocking_builder()
-        .build()
-        .map_err(crate::control_plane::transport::describe_reqwest)?;
+    let client = crate::net::blocking_builder().build().map_err(|error| {
+        config.endpoint_failure(
+            "create HTTP client",
+            crate::control_plane::transport::describe_reqwest(error),
+        )
+    })?;
     let reservation =
         crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
     let mut request = client
@@ -116,16 +119,24 @@ pub fn chat_completion(
     for (name, value) in signed {
         request = request.header(name, value);
     }
-    let response = request
-        .body(body_text)
-        .send()
-        .map_err(crate::control_plane::transport::describe_reqwest)?;
+    let response = request.body(body_text).send().map_err(|error| {
+        config.endpoint_failure(
+            "POST model request",
+            crate::control_plane::transport::describe_reqwest(error),
+        )
+    })?;
     let status = response.status();
-    let text = response
-        .text()
-        .map_err(crate::control_plane::transport::describe_reqwest)?;
+    let text = response.text().map_err(|error| {
+        config.endpoint_failure(
+            "read model response body",
+            crate::control_plane::transport::describe_reqwest(error),
+        )
+    })?;
     if !status.is_success() {
-        return Err(format!("model router {}: {text}", status.as_u16()));
+        return Err(config.endpoint_failure(
+            "POST model request",
+            format!("HTTP {}: {text}", status.as_u16()),
+        ));
     }
     let completion = parse_completion_response(&text)?;
     crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())?;

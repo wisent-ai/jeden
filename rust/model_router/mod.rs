@@ -150,6 +150,8 @@ impl StreamingCompletion {
 #[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub url: String,
+    /// Provenance of the selected endpoint, retained with this configuration.
+    pub endpoint_origin: String,
     pub bearer_token: String,
     pub agent_id: String,
     pub secret: String,
@@ -167,6 +169,20 @@ pub struct ChatConfig {
     /// request (`BramaError::left_unanswered`), set where the typed error is
     /// still in hand so no caller reads that from the sentence.
     pub catalog_unanswered: bool,
+}
+
+impl ChatConfig {
+    pub(crate) fn endpoint_failure(
+        &self,
+        operation: &str,
+        cause: impl std::fmt::Display,
+    ) -> String {
+        format!(
+            "{operation} at {}/v1/chat/completions ({}) failed: {cause}",
+            self.url.trim_end_matches('/'),
+            self.endpoint_origin
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
