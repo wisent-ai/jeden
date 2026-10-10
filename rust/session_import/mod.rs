@@ -19,7 +19,7 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
     if let Some(option) = args
         .positionals
         .iter()
-        .find(|argument| argument.starts_with("--") && *argument != "--refresh")
+        .find(|argument| argument.starts_with('-') && *argument != "--refresh")
     {
         return Err(crate::cli::invocation::refusal::usage(format!(
             "unknown option for jeden import: {option}\n{USAGE}"
