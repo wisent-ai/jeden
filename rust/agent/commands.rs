@@ -206,7 +206,16 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     };
     let result = conversation.run_turn(args, &task, &[], hooks);
     if !args.model_only {
-        update_last_session_path(&args.cwd, &conversation.session_path())?;
+        update_last_session_path(&args.cwd, &conversation.session_path()).map_err(|error| {
+            let cause = format!(
+                "cannot persist last session for workspace {}: {error}",
+                args.cwd.display()
+            );
+            match &result {
+                Err(initiating) => format!("{initiating}; {cause}"),
+                Ok(_) => cause,
+            }
+        })?;
     }
     if args.model_only {
         let text = result?;
@@ -220,12 +229,26 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         }
         return Ok(text);
     }
-    if let Err(error) = &result {
-        let _ = update_task_outcome(&args.cwd, &task, false);
-        return Err(error.clone());
-    }
-    let mut text = result?;
-    let _ = update_task_outcome(&args.cwd, &task, true);
+    let mut text = match result {
+        Err(error) => {
+            return Err(match update_task_outcome(&args.cwd, &task, false) {
+                Ok(()) => error,
+                Err(recording) => format!(
+                    "{error}; cannot persist failed task outcome for workspace {}: {recording}",
+                    args.cwd.display()
+                ),
+            });
+        }
+        Ok(text) => {
+            update_task_outcome(&args.cwd, &task, true).map_err(|error| {
+                format!(
+                    "cannot persist successful task outcome for workspace {}: {error}",
+                    args.cwd.display()
+                )
+            })?;
+            text
+        }
+    };
     // Loop mode: auto-resubmit the loop prompt until the count or deadline
     // `/loop` was given runs out, `/loop off`, a failed turn or cancellation.
     while let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) {
@@ -248,7 +271,13 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         session_path: session_path.clone(),
     };
     if let Some(path) = &session_path {
-        let _ = update_last_session_path(&args.cwd, path);
+        update_last_session_path(&args.cwd, path).map_err(|error| {
+            format!(
+                "cannot persist final session {} for workspace {}: {error}",
+                path.display(),
+                args.cwd.display()
+            )
+        })?;
     }
     if args.json {
         return Ok(serde_json::to_string_pretty(&json!({
