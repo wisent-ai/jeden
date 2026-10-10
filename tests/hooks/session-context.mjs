@@ -77,6 +77,7 @@ function assertRuleSnapshot(events, reason, rules) {
     .map((message) => message.content).join('\n');
   for (const rule of rules) assert.ok(system.includes(rule.text),
     `lost complete rule ${rule.sessionId} #${rule.ordinal} after ${reason}`);
+  return snapshot;
 }
 try {
   report.checkoutRevision = invoke('git', ['rev-parse', 'HEAD'], root).trim();
@@ -114,12 +115,16 @@ try {
   const session = await rpc('session/new', { options });
   const prompt = (target, text) => rpc('session/prompt', { sessionId: target.sessionId, prompt: text });
   await prompt(session, 'Read the standing instructions. Do not edit files. What constraints govern your work?');
-  assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', rules);
+  let previousSnapshot = assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', rules);
   report.cases.push({ name: 'startup', verdict: 'passed', sessionPath: session.sessionPath });
   for (const name of ['first-compaction', 'repeated-compaction']) {
     await prompt(session, '/compact Preserve instructions, original requests and unfinished work.');
-    assertRuleSnapshot(exported(session.sessionPath, name), 'compaction', rules);
-    report.cases.push({ name, verdict: 'passed', sessionPath: session.sessionPath });
+    const snapshot = assertRuleSnapshot(exported(session.sessionPath, name), 'compaction', rules);
+    assert.notEqual(snapshot.id, previousSnapshot.id,
+      `${name} reused an earlier model-context snapshot instead of restoring instructions again`);
+    report.cases.push({ name, verdict: 'passed', sessionPath: session.sessionPath,
+      snapshotId: snapshot.id, previousSnapshotId: previousSnapshot.id });
+    previousSnapshot = snapshot;
   }
   await rpc('session/dispose', { sessionId: session.sessionId });
   const reopened = await rpc('session/open', { session: session.sessionPath, options });
