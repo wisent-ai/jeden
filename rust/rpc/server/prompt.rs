@@ -81,10 +81,32 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
             goal,
         })
     };
-    session.end_subscription(subscription_id)?;
+    let completion_failure = |operation: &str, cause: String| {
+        let failure = format!("{operation} for RPC request {id}: {cause}");
+        match &result {
+            Ok(_) => failure,
+            Err(original) => format!("{original}; {failure}"),
+        }
+    };
+    session
+        .end_subscription(subscription_id)
+        .map_err(|error| completion_failure("ending event subscription failed", error))?;
     forwarder
         .join()
-        .map_err(|_| "event forwarder panicked".to_string())??;
+        .map_err(|panic| {
+            let cause = if let Some(message) = panic.downcast_ref::<String>() {
+                message.clone()
+            } else if let Some(message) = panic.downcast_ref::<&str>() {
+                (*message).to_string()
+            } else {
+                format!(
+                    "event forwarder panicked with non-string payload {:?}",
+                    panic.as_ref().type_id()
+                )
+            };
+            completion_failure("joining event forwarder failed", cause)
+        })?
+        .map_err(|error| completion_failure("forwarding session events failed", error))?;
     match result {
         Ok(value) => state.writer.send(&success_response(
             id,
