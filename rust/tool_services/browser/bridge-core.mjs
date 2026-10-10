@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { watch } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { inspect } from "node:util";
 
 const argv = process.argv.slice(2);
 const option = (name, fallback = undefined) => {
@@ -39,9 +40,16 @@ const saveState = async state => {
   await writeFile(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
 };
 const requestJson = async (path, init = undefined) => {
-  const response = await fetch(`${endpoint}${path}`, init);
-  if (!response.ok) throw new Error(`CDP HTTP ${response.status}: ${await response.text()}`);
-  return response.json();
+  const url = `${endpoint}${path}`;
+  try {
+    const response = await fetch(url, init);
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+    return await response.json();
+  } catch (error) {
+    throw new Error(`CDP request ${url} failed: ${inspect(error, {
+      depth: null, maxArrayLength: null, maxStringLength: null,
+    })}`);
+  }
 };
 const browserReady = async () => {
   try {
@@ -107,7 +115,10 @@ const ensureBrowser = async () => {
     child.removeAllListeners("error");
     child.unref();
   }
-  if (!(await browserReady())) throw new Error(`Chromium wrote DevToolsActivePort but CDP on ${endpoint} did not answer`);
+  const version = await requestJson("/json/version");
+  if (typeof version.webSocketDebuggerUrl !== "string") {
+    throw new Error(`CDP readiness at ${endpoint}/json/version returned no string webSocketDebuggerUrl`);
+  }
 };
 const listTabs = async () => (await requestJson("/json/list"))
   .filter(target => target.type === "page")
