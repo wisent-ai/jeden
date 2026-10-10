@@ -273,7 +273,8 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
             completion_request(state, &request.params, &request.method)
         }
         "asks/list" | "asks/get" | "asks/answer" => asks_request(&request.params, &request.method),
-        "dispose" | "session/dispose" => dispose_session(state, &request.params),
+        "dispose" | "session/dispose" => dispose_session(state, &request.params, false),
+        "session/retire" => dispose_session(state, &request.params, true),
         "elicitation/resolve" | "session/input_response" => {
             resolve_elicitation(state, &request.params)
         }

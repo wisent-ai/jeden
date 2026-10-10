@@ -109,6 +109,7 @@ pub(super) fn asks_request(params: &Value, method: &str) -> Result<Value, (&'sta
 pub(super) fn dispose_session(
     state: &Arc<ServerState>,
     params: &Value,
+    idle_only: bool,
 ) -> Result<Value, (&'static str, String)> {
     let session_id =
         string_param(params, "sessionId").map_err(|error| ("invalid_params", error))?;
@@ -129,10 +130,15 @@ pub(super) fn dispose_session(
                 format!("unknown session: {}", session_id),
             )
         })?;
-    session.dispose().map_err(|error| {
+    let cleanup = if idle_only {
+        session.retire()
+    } else {
+        session.dispose()
+    };
+    cleanup.map_err(|error| {
         (
             "session_error",
-            format!("cannot dispose session {session_id}: {error}"),
+            format!("cannot close session {session_id}: {error}"),
         )
     })?;
     state
