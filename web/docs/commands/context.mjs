@@ -1,7 +1,7 @@
 const sources =
   "<code>--source</code> takes any comma-separated subset of <code>files</code>, <code>ground-truth</code>, <code>memory</code>, <code>transcripts</code>, or <code>all</code>. Without it, <code>context.advisor.sources</code> decides, which defaults to <code>files,memory</code>.";
 const bounds =
-  "<code>--limit</code> is how many recommendations to return; without it <code>context.advisor.limit</code> decides, and a request with neither is refused as <code>a context recommendation needs a limit: state how many recommendations, or declare context.advisor.limit</code>. Nothing cuts a source short: every source runs to completion. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply. Jeden Desktop's Context screen takes the same count in its Recommendations field.";
+  "<code>--limit</code> is how many recommendations to return; without it <code>context.advisor.limit</code> decides, and a request with neither is refused as <code>a context recommendation needs a limit: state how many recommendations, or declare context.advisor.limit</code>. Every selected source is awaited until it answers, fails or observes its caller's cancellation; an acknowledgement alone does not mean that source has stopped. <code>--cwd</code> selects the workspace whose project configuration and memory scope apply. Jeden Desktop's Context screen takes the same count in its Recommendations field.";
 const unknownSource =
   "An unknown source is refused as <code>unknown source(s): &lt;name&gt;. Known sources: files, ground-truth, memory, transcripts</code>; a typo never narrows the answer silently.";
 
