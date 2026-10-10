@@ -119,8 +119,10 @@ try {
   const session = await rpc('session/new', { options });
   const prompt = (target, text) => rpc('session/prompt', { sessionId: target.sessionId, prompt: text });
   await prompt(session, 'Read the standing instructions. Do not edit files. What constraints govern your work?');
-  let previousSnapshot = assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', startupRules);
-  report.cases.push({ name: 'startup', verdict: 'passed', sessionPath: session.sessionPath });
+  const startupSnapshot = assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', startupRules);
+  let previousSnapshot = startupSnapshot;
+  report.cases.push({ name: 'startup', verdict: 'passed', sessionPath: session.sessionPath,
+    snapshotId: startupSnapshot.id });
   for (const name of ['first-compaction', 'repeated-compaction']) {
     const rules = readRules(name);
     await prompt(session, '/compact Preserve instructions, original requests and unfinished work.');
@@ -135,8 +137,11 @@ try {
   const resumeRules = readRules('resume');
   const reopened = await rpc('session/open', { session: session.sessionPath, options });
   await prompt(reopened, 'Read the standing instructions again without editing files.');
-  assertRuleSnapshot(exported(reopened.sessionPath, 'resume'), 'session_start', resumeRules);
-  report.cases.push({ name: 'resume', verdict: 'passed', sessionPath: reopened.sessionPath });
+  const resumedSnapshot = assertRuleSnapshot(exported(reopened.sessionPath, 'resume'), 'session_start', resumeRules);
+  assert.notEqual(resumedSnapshot.id, startupSnapshot.id,
+    'resume reused the original startup snapshot instead of restoring instructions again');
+  report.cases.push({ name: 'resume', verdict: 'passed', sessionPath: reopened.sessionPath,
+    snapshotId: resumedSnapshot.id, previousStartupSnapshotId: startupSnapshot.id });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
   const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
