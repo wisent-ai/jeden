@@ -93,6 +93,10 @@ try {
   });
   const failure = events.find((event) => event.type === 'run_error' && event.data?.message?.includes(cause));
   assert.ok(failure, 'the actual refusal must remain in the durable session');
+  assert.ok(failure.data.message.includes(`placed_on ${route.placed_on}`),
+    'the retained failure must identify the host selected by the real directory');
+  assert.ok(failure.data.message.includes(`from ${route.from}`),
+    'the retained failure must identify the actual directory vantage');
   if (channelRefusal) {
     assert.ok(failure.data.message.includes(channelRefusal),
       'a reader failure must retain its own cause as well as the original model failure');
