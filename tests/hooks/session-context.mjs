@@ -41,6 +41,13 @@ function invoke(program, args, directory = cwd) {
   assert.ok(result.status !== null && !result.status, result.stderr);
   return result.stdout;
 }
+function readRules(name) {
+  const rules = JSON.parse(invoke(oko, ['tasks', 'rules', '--all', '--json']));
+  assert.ok(Array.isArray(rules) && rules.some((rule) => rule.text?.trim()),
+    'qualification requires actual standing instructions in Oko');
+  writeFileSync(join(output, `${name}-rules.json`), JSON.stringify(rules));
+  return rules;
+}
 let child;
 let exited;
 const pending = new Map();
@@ -85,10 +92,7 @@ try {
   assert.equal(invoke('git', ['status', '--porcelain'], root).trim(), '',
     'commit the candidate and tests before qualification');
   report.binaryVersion = invoke(binary, ['--version']);
-  const rules = JSON.parse(invoke(oko, ['tasks', 'rules', '--all', '--json']));
-  assert.ok(Array.isArray(rules) && rules.some((rule) => rule.text?.trim()),
-    'qualification requires actual standing instructions in Oko');
-  writeFileSync(join(output, 'rules.json'), JSON.stringify(rules));
+  const startupRules = readRules('startup');
   child = spawn(binary, ['rpc'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
   const command = { program: binary, args: ['rpc'], cwd, stderr: '' };
   report.commands.push(command);
@@ -115,9 +119,10 @@ try {
   const session = await rpc('session/new', { options });
   const prompt = (target, text) => rpc('session/prompt', { sessionId: target.sessionId, prompt: text });
   await prompt(session, 'Read the standing instructions. Do not edit files. What constraints govern your work?');
-  let previousSnapshot = assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', rules);
+  let previousSnapshot = assertRuleSnapshot(exported(session.sessionPath, 'startup'), 'session_start', startupRules);
   report.cases.push({ name: 'startup', verdict: 'passed', sessionPath: session.sessionPath });
   for (const name of ['first-compaction', 'repeated-compaction']) {
+    const rules = readRules(name);
     await prompt(session, '/compact Preserve instructions, original requests and unfinished work.');
     const snapshot = assertRuleSnapshot(exported(session.sessionPath, name), 'compaction', rules);
     assert.notEqual(snapshot.id, previousSnapshot.id,
@@ -127,9 +132,10 @@ try {
     previousSnapshot = snapshot;
   }
   await rpc('session/dispose', { sessionId: session.sessionId });
+  const resumeRules = readRules('resume');
   const reopened = await rpc('session/open', { session: session.sessionPath, options });
   await prompt(reopened, 'Read the standing instructions again without editing files.');
-  assertRuleSnapshot(exported(reopened.sessionPath, 'resume'), 'session_start', rules);
+  assertRuleSnapshot(exported(reopened.sessionPath, 'resume'), 'session_start', resumeRules);
   report.cases.push({ name: 'resume', verdict: 'passed', sessionPath: reopened.sessionPath });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
