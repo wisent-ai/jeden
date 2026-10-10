@@ -266,6 +266,7 @@ export const sessionCommands = [
     effect: "Scans newest session directories first and reports at most one matching event per scanned session: session id, timestamp, event type, and whitespace-collapsed event JSON — tab-separated lines, or a JSON array of {session, ts, type, snippet} with <code>--json</code>. It does not mutate sessions.",
     refusals: [
       "Missing and blank queries are refused as <code>sessions search requires a query</code> and <code>sessions search requires a non-empty query</code>; a limit that is not a whole number as <code>sessions search takes a whole number of sessions to scan after the query</code>.",
+      "Arguments after the optional limit are usage errors naming the unexpected argument; the session store is not read for a malformed invocation.",
       "A session store that exists but cannot be listed is refused as <code>cannot list sessions in ...</code>; an unreadable session as <code>cannot search session ...</code>; a record missing its id, ts or type as <code>session ... has a record without its ...</code>.",
     ],
   },

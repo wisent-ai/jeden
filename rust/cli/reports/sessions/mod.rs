@@ -104,6 +104,11 @@ pub(crate) fn search_sessions_command(
     json: bool,
 ) -> Result<String, String> {
     use crate::cli::invocation::refusal::usage;
+    if let [_, _, unexpected, ..] = positionals {
+        return Err(usage(format!(
+            "sessions search: unexpected argument {unexpected:?}; usage: jeden sessions search QUERY [LIMIT] [--json]"
+        )));
+    }
     let query = positionals
         .first()
         .ok_or_else(|| usage("sessions search requires a query"))?
