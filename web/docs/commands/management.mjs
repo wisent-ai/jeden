@@ -114,7 +114,7 @@ export const managementCommands = [
       "Without <code>--dry-run</code> or <code>--yes</code> the command removes nothing and exits 2: <code>worktree clear deletes stale worktree checkouts permanently; run `jeden worktree clear --dry-run` to see them, then `jeden worktree clear --yes`</code>.",
       "The command refuses removal outside canonical Jeden-managed roots and never removes the current checkout or repository top level.",
       "Live or unknown task ownership is kept. When <code>git worktree remove</code> refuses (modified or untracked files), the worktree is kept and reported as skipped with git's own message; it is never deleted another way.",
-      "A checkout no repository claims is kept when it has uncommitted changes or when <code>git status</code> does not answer in it.",
+      "A checkout no repository claims is kept when it has uncommitted changes or when <code>git status</code> does not answer in it. The refusal includes every returned status row, in text and JSON alike, rather than hiding changes after a fixed preview count.",
     ],
   },
 

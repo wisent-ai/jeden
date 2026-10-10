@@ -129,7 +129,7 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
                     .map_err(|error| format!("removal failed: {error}")),
                 Some(status) => Err(format!(
                     "uncommitted changes in a checkout no repository claims: {}",
-                    status.lines().take(3).collect::<Vec<_>>().join("; ")
+                    status.lines().collect::<Vec<_>>().join("; ")
                 )),
                 None => {
                     Err("git status does not answer in it, so its changes are unknown".to_string())
