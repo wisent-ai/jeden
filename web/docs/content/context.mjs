@@ -46,6 +46,7 @@ export const contextPages = [
         paragraphs: [
           "<code>context.advisor.sources</code> defaults to <code>files,memory</code>. Files are local; memory opens the fleet database through Stado and Skarbiec. Sources run concurrently, so a turn waits for the slowest rather than for their sum. <code>--source all</code> also consults the archive and the ground-truth index.",
           "Nothing cuts a source short. There is no deadline setting and no <code>--timeout-ms</code> flag. A selected source that is waiting on a dependency holds the answer until that dependency responds or fails; this is not model reasoning. Stado's shared wait diagnostics on standard error identify a database operation or child command before waiting and report its outcome. Standard output remains the recommendation JSON. A failed source retains the dependency's error, not just its first progress line.",
+          "Each selected source emits its own <code>czekam</code> start and completion or failure line, naming the source and workspace, in addition to dependency-level waits. A source thread that panics keeps its source name and panic cause in the unavailable result instead of becoming an unknown source. These diagnostics do not impose a deadline or silently omit a selected source.",
           "An unknown source name is refused rather than dropped: <code>unknown source(s): nonsense. Known sources: files, ground-truth, memory, transcripts</code>. A narrowed answer is never the result of a typo.",
         ],
         commands: [

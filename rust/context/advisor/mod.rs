@@ -11,6 +11,7 @@
 //! because a recommendation list that is silently short is indistinguishable
 //! from one that is complete.
 
+mod execution;
 mod render;
 mod settings;
 mod sources;
@@ -157,34 +158,7 @@ impl Request {
 pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advice {
     let settings = settings(cwd, config);
     let terms = text::terms(&request.query);
-    let selected: Vec<&&str> = SOURCES
-        .iter()
-        .filter(|source| request.sources.iter().any(|want| want == *source))
-        .collect();
-    let outcomes: Vec<SourceOutcome> = std::thread::scope(|scope| {
-        let handles: Vec<_> = selected
-            .iter()
-            .map(|source| {
-                let source = **source;
-                let settings = &settings;
-                let terms = &terms;
-                scope.spawn(move || ask(source, cwd, settings, request, terms))
-            })
-            .collect();
-        handles
-            .into_iter()
-            .map(|handle| {
-                handle.join().unwrap_or_else(|_| SourceOutcome {
-                    hits: Vec::new(),
-                    status: SourceStatus::unavailable(
-                        "unknown",
-                        "the source thread ended without an answer",
-                        Instant::now(),
-                    ),
-                })
-            })
-            .collect()
-    });
+    let outcomes = execution::run(cwd, &settings, request, &terms);
     let mut statuses = Vec::with_capacity(outcomes.len());
     let mut per_source = Vec::with_capacity(outcomes.len());
     for outcome in outcomes {
@@ -199,35 +173,6 @@ pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advic
     }
 }
 
-fn ask(
-    source: &str,
-    cwd: &Path,
-    settings: &Settings,
-    request: &Request,
-    terms: &[String],
-) -> SourceOutcome {
-    let started = Instant::now();
-    if terms.is_empty() {
-        return SourceOutcome {
-            hits: Vec::new(),
-            status: SourceStatus::unavailable(
-                source,
-                "the query carries no searchable word of three characters or more",
-                started,
-            ),
-        };
-    }
-    match source {
-        "files" => files::search(settings, request, terms),
-        "memory" => memory::search(cwd, terms, &request.query, request.limit),
-        "transcripts" => transcripts::search(settings, request, terms),
-        "ground-truth" => ground_truth::search(settings, request, terms),
-        other => SourceOutcome {
-            hits: Vec::new(),
-            status: SourceStatus::unavailable(other, "no such source", started),
-        },
-    }
-}
 
 /// Round-robin across sources in `SOURCES` order. Scores are comparable
 /// inside one source and not across them, so a global sort would let a
