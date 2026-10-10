@@ -182,14 +182,21 @@ impl Conversation {
             return Err("Turn cancelled.".into());
         }
         let artifact_dir = self.recorder.artifact_dir();
-        fs::create_dir_all(&artifact_dir).map_err(|e| e.to_string())?;
+        fs::create_dir_all(&artifact_dir).map_err(|error| {
+            format!(
+                "handoff could not create artifact directory {}: {error}",
+                artifact_dir.display()
+            )
+        })?;
         let file = artifact_dir.join("handoff.md");
         let doc = if focus.trim().is_empty() {
             brief.clone()
         } else {
             format!("Focus: {}\n\n{}", focus.trim(), brief)
         };
-        fs::write(&file, &doc).map_err(|e| e.to_string())?;
+        fs::write(&file, &doc).map_err(|error| {
+            format!("handoff could not write brief {}: {error}", file.display())
+        })?;
         self.recorder.record(
             "handoff",
             json!({ "focus": focus, "brief": brief.clone(), "file": file }),

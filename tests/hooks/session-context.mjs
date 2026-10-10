@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -185,6 +185,43 @@ try {
   }
   report.cases.push({ name: 'lifecycle-child-preparation-refusals', verdict: 'passed',
     sessionPath: reopened.sessionPath, retainedBefore, retainedAfter });
+  const artifactDirectory = join(reopened.sessionPath, 'artifacts');
+  for (const scenario of [
+    { name: 'artifact-directory-refusal', path: artifactDirectory,
+      operation: 'handoff could not create artifact directory',
+      obstruct: (path) => writeFileSync(path, 'not a directory'),
+      probe: (path) => mkdirSync(path, { recursive: true }) },
+    { name: 'brief-write-refusal', path: join(artifactDirectory, 'handoff.md'),
+      operation: 'handoff could not write brief',
+      obstruct: (path) => mkdirSync(path),
+      probe: (path) => writeFileSync(path, '') },
+  ]) {
+    const saved = join(output, `saved-artifact-${randomUUID()}`);
+    renameSync(scenario.path, saved);
+    let cause;
+    try {
+      scenario.obstruct(scenario.path);
+      try { scenario.probe(scenario.path); } catch (error) { cause = error; }
+      assert.ok(cause?.errno, `${scenario.name} requires an actual filesystem refusal`);
+      const evidence = { name: scenario.name, verdict: 'pending', path: scenario.path,
+        operation: scenario.operation, cause: cause.message, errno: cause.errno };
+      report.cases.push(evidence);
+      await assert.rejects(prompt(reopened, '/handoff Preserve the original session and its work.'),
+        (error) => error.message.includes(scenario.operation)
+          && error.message.includes(scenario.path)
+          && error.message.includes(`os error ${Math.abs(cause.errno)}`),
+        `${scenario.name} must identify the operation, actual artifact path and OS cause`);
+      const retained = await rpc('session/completion/get', { sessionId: reopened.sessionId });
+      for (const request of retainedBefore.completion.requests) {
+        assert.deepEqual(retained.completion.requests.find((candidate) => candidate.id === request.id), request,
+          `${scenario.name} must leave the original requests owned by the active session`);
+      }
+      Object.assign(evidence, { verdict: 'passed', retained });
+    } finally {
+      rmSync(scenario.path, { recursive: true, force: true });
+      renameSync(saved, scenario.path);
+    }
+  }
   const transcript = join(reopened.sessionPath, 'transcript.jsonl');
   const transcriptMode = statSync(transcript).mode;
   const beforeTranscript = hash(transcript);
