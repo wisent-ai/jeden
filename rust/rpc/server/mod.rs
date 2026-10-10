@@ -214,7 +214,9 @@ where
     for session in &sessions {
         let active = session.status()?;
         for request_id in active {
-            let _ = session.abort(&request_id);
+            session.abort(&request_id).map_err(|error| {
+                format!("cannot cancel active RPC request {request_id} during shutdown: {error}")
+            })?;
         }
     }
     state.bridge.cancel_all()?;
