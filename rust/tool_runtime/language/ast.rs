@@ -71,14 +71,16 @@ fn ranges(
     query: &Query,
     capture: u32,
     limit: Option<usize>,
-) -> (Vec<(usize, usize, Value)>, bool) {
+) -> Result<(Vec<(usize, usize, Value)>, bool), String> {
     let mut cursor = QueryCursor::new();
     let mut stream = cursor.matches(query, tree.root_node(), source);
     let mut out = Vec::new();
-    while let Some(item) = stream.next() {
+    let mut truncated = false;
+    'matches: while let Some(item) = stream.next() {
         for found in item.captures.iter().filter(|found| found.index == capture) {
             if limit.is_some_and(|limit| out.len() == limit) {
-                return (out, true);
+                truncated = true;
+                break 'matches;
             }
             let node = found.node;
             let start = node.start_position();
@@ -98,7 +100,14 @@ fn ranges(
             ));
         }
     }
-    (out, false)
+    drop(stream);
+    if cursor.did_exceed_match_limit() {
+        return Err(format!(
+            "AST query exceeded the parser's in-progress match capacity ({}); refusing incomplete captures",
+            cursor.match_limit()
+        ));
+    }
+    Ok((out, truncated))
 }
 
 pub(crate) fn ast_search(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -112,7 +121,7 @@ pub(crate) fn ast_search(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let query = Query::new(&language, &query_source)
         .map_err(|error| format!("invalid AST query: {error}"))?;
     let capture = selected_capture(&query, input)?;
-    let (selected, truncated) = ranges(&bytes, &tree, &query, capture, Some(limit));
+    let (selected, truncated) = ranges(&bytes, &tree, &query, capture, Some(limit))?;
     let matches = selected
         .into_iter()
         .map(|(_, _, value)| value)
@@ -186,7 +195,7 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let capture = selected_capture(&query, input)?;
     // A rewrite covers every match: rewriting the first N and reporting the
     // file rewritten would leave the rest unchanged without a word.
-    let (mut selected, _) = ranges(&bytes, &tree, &query, capture, None);
+    let (mut selected, _) = ranges(&bytes, &tree, &query, capture, None)?;
     selected.sort_by_key(|(start, end, _)| (*start, *end));
     for pair in selected.windows(2) {
         if pair[0].1 > pair[1].0 {
