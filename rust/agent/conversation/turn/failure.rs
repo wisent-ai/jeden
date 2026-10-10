@@ -108,14 +108,18 @@ impl Conversation {
         // provider failure participates in repeated-failure detection.
         if cut_off && !failure.visible_output {
             let refusal = format!("model answer was cut off before it was complete ({error})");
-            let Some(refusal) = self.repair_unusable_answer(
-                args,
-                step,
-                &refusal,
-                super::answer::AnswerFailure::CutOff(&error),
-                repairs,
-                hooks,
-            )?
+            let Some(refusal) = self
+                .repair_unusable_answer(
+                    args,
+                    step,
+                    &refusal,
+                    super::answer::AnswerFailure::CutOff(&error),
+                    repairs,
+                    hooks,
+                )
+                .map_err(|recovery_error| {
+                    format!("{refusal}; answer recovery failed: {recovery_error}")
+                })?
             else {
                 return Ok(());
             };
