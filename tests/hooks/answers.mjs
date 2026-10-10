@@ -97,7 +97,7 @@ try {
         result = await rpcRefusal({ binary, cwd: workspace, env, report, model, maxSteps, prompt: task });
       } else {
         result = invoke(binary, ['run', task, '--cwd', workspace, '--model', model,
-          '--max-steps', maxSteps, '--json'], workspace, env);
+          '--max-steps', maxSteps, '--allow-command', '--json'], workspace, env);
       }
     } finally {
       const permissionReceipt = `${receipt}.recording.json`;
