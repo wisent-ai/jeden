@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { createServer } from 'node:net';
+import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -106,6 +107,13 @@ try {
   const snapshot = JSON.parse(success(run(binary, ['stats', '--json'])));
   assert.equal(snapshot.cwd, root, 'CLI read a different project');
   report.cases.push({ name: 'native project snapshot', snapshot });
+  const sessionRoot = join(homedir(), '.jeden/sessions');
+  const expectedSessions = readdirSync(sessionRoot)
+    .filter(name => statSync(join(sessionRoot, name)).isDirectory()).sort();
+  assert.deepEqual([...snapshot.sessions.recent].sort(), expectedSessions,
+    'native snapshot must include every persisted session directory, not only a newest subset');
+  assert.equal(snapshot.sessions.count, expectedSessions.length);
+  report.cases.push({ name: 'complete persisted session inventory', sessionRoot, expectedSessions });
 
   const malformed = run(binary, ['stats', '--serve', '--port', 'not-a-port']);
   assert.equal(malformed.status, 1, `${malformed.stdout}\n${malformed.stderr}`);
