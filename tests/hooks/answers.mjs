@@ -7,6 +7,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { rpcRefusal } from './refusal-rpc.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -28,7 +29,7 @@ const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('h
 const report = {
   startedAt: new Date().toISOString(), binary, declaredSourceRevision: revision,
   binarySha256: hash(binary), testSha256: hash(fileURLToPath(import.meta.url)),
-  fixtureSha256: hash(fixture), model, commands: [], cases: [], verdict: 'failed',
+  fixtureSha256: hash(fixture), model, commands: [], frames: [], cases: [], verdict: 'failed',
 };
 const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
 function invoke(program, args, cwd, env) {
@@ -49,15 +50,20 @@ try {
   assert.equal(succeeds(invoke('git', ['status', '--porcelain'], root, process.env)).trim(), '',
     'commit the candidate and tests before qualification');
   report.binaryVersion = succeeds(invoke(binary, ['--version'], root, process.env));
-  for (const [mode, expectedAction, failedOperation] of [
-    ['intermediate', 'message'], ['final', 'final'], ['extension', 'final'],
-    ['signal', 'final'], ['positive', 'final'],
-    ['recording', 'message', 'recording stop-hook violation'],
-    ['recording', 'final', 'recording stop-hook violation'],
-    ['completion-state', 'message', 'reading completion state'],
-    ['completion-state', 'final', 'reading completion state'],
+  for (const [mode, expectedAction, failedOperation, transport] of [
+    ['intermediate', 'message', null, 'cli'], ['final', 'final', null, 'cli'],
+    ['extension', 'final', null, 'cli'], ['signal', 'final', null, 'cli'],
+    ['positive', 'final', null, 'cli'],
+    ['recording', 'message', 'recording stop-hook violation', 'cli'],
+    ['recording', 'final', 'recording stop-hook violation', 'cli'],
+    ['completion-state', 'message', 'reading completion state', 'cli'],
+    ['completion-state', 'final', 'reading completion state', 'cli'],
+    ['recording', 'message', 'recording stop-hook violation', 'rpc'],
+    ['recording', 'final', 'recording stop-hook violation', 'rpc'],
+    ['completion-state', 'message', 'reading completion state', 'rpc'],
+    ['completion-state', 'final', 'reading completion state', 'rpc'],
   ]) {
-    const directory = join(output, `${mode}-${expectedAction}`);
+    const directory = join(output, `${transport}-${mode}-${expectedAction}`);
     const workspace = join(directory, 'workspace');
     const config = join(workspace, '.jeden');
     mkdirSync(config, { recursive: true });
@@ -83,8 +89,12 @@ try {
     const task = `This is a real native hook qualification. Do not modify files or run tools. ${instruction} If a hook refuses or fails, continue with a final answer containing ${accepted} instead. Never repeat refused text after a refusal.`;
     let result;
     try {
-      result = invoke(binary, ['run', task, '--cwd', workspace, '--model', model,
-        '--max-steps', maxSteps, '--json'], workspace, env);
+      if (transport === 'rpc') {
+        result = await rpcRefusal({ binary, cwd: workspace, env, report, model, maxSteps, prompt: task });
+      } else {
+        result = invoke(binary, ['run', task, '--cwd', workspace, '--model', model,
+          '--max-steps', maxSteps, '--json'], workspace, env);
+      }
     } finally {
       const permissionReceipt = `${receipt}.recording.json`;
       if (existsSync(permissionReceipt)) {
@@ -105,19 +115,34 @@ try {
     if (failedOperation) {
       const failure = JSON.parse(readFileSync(`${receipt}.recording.json`, 'utf8'));
       const cause = JSON.parse(readFileSync(`${receipt}.cause.json`, 'utf8'));
-      assert.ok(result.status !== null && result.status, 'failed refusal persistence must fail the turn');
-      const visible = `${result.stdout}\n${result.stderr}`;
+      let visible;
+      if (transport === 'rpc') {
+        assert.ok(result.error instanceof Error, 'failed refusal handling must reject the RPC prompt');
+        assert.equal(result.session.sessionPath, session, 'the refusal must belong to the requested session');
+        visible = result.error.message;
+        const notification = result.events.find((event) => event.kind === 'error');
+        assert.ok(notification && visible.includes(notification.message),
+          'the RPC error notification must retain the same failure as the prompt response');
+        assert.ok(notification.message.includes(failure.reason)
+          && notification.message.includes(failedOperation)
+          && notification.message.includes(failure.path)
+          && notification.message.includes(`os error ${Math.abs(cause.errno)}`),
+          'the graphical-client event lost part of the actual cause chain');
+      } else {
+        assert.ok(result.status !== null && result.status, 'failed refusal persistence must fail the turn');
+        visible = `${result.stdout}\n${result.stderr}`;
+      }
       assert.ok(visible.includes(failure.reason), 'the initiating Stop reason was lost');
       assert.ok(visible.includes(failedOperation), 'the failed operation was lost');
       assert.ok(visible.includes(failure.path), 'the refused file path was lost');
       assert.ok(Number.isInteger(cause.errno), 'the actual filesystem refusal must expose an OS error');
       assert.ok(visible.includes(`os error ${Math.abs(cause.errno)}`), 'the actual OS cause was lost');
-      assert.ok(!visible.includes(rejected), 'refused candidate text reached a CLI output channel');
+      assert.ok(!visible.includes(rejected), 'refused candidate text reached the caller');
       assert.deepEqual(readFileSync(failure.path), readFileSync(`${receipt}.before`),
         'failed refusal handling must not change the affected file');
       assert.ok(!events.some((event) => (event.type === 'assistant_message' || event.type === 'final')
         && event.data.text.includes(rejected)), 'the refused candidate was published');
-      report.cases.push({ mode, expectedAction, failedOperation, session, failure, cause, verdict: 'passed' });
+      report.cases.push({ mode, expectedAction, failedOperation, transport, session, failure, cause, verdict: 'passed' });
       continue;
     }
     succeeds(result);
@@ -137,7 +162,7 @@ try {
       if (mode === 'signal') assert.ok(events.some((event) =>
         event.data?.message?.includes('ended without an exit code')));
     }
-    report.cases.push({ mode, session, rejected, accepted, verdict: 'passed' });
+    report.cases.push({ mode, transport, session, rejected, accepted, verdict: 'passed' });
   }
   report.verdict = 'passed';
 } catch (error) {

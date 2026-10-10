@@ -3,15 +3,15 @@
 // Required inputs use the same JEDEN_TEST_* contract as answers.mjs, plus
 // TAMA_OKO_CLI and JEDEN_TAMA_REGISTRY for the real installed integrations.
 import assert from 'node:assert/strict';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { exerciseMove } from '../sessions/move.mjs';
 import { exerciseRead } from '../sessions/read.mjs';
 import { exerciseMirror } from '../sessions/mirror.mjs';
+import { startRpc } from './rpc.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -51,27 +51,7 @@ function readRules(name) {
   writeFileSync(join(output, `${name}-rules.json`), JSON.stringify(rules));
   return rules;
 }
-let child;
-let exited;
-const pending = new Map();
-let processFailure;
-function fail(error) {
-  processFailure = error;
-  for (const request of pending.values()) request.reject(error);
-  pending.clear();
-}
-function rpc(method, params) {
-  if (processFailure) return Promise.reject(processFailure);
-  const id = randomUUID();
-  const frame = { id, method, params };
-  report.frames.push({ direction: 'request', frame });
-  return new Promise((resolveRequest, reject) => {
-    pending.set(id, { resolve: resolveRequest, reject });
-    child.stdin.write(`${JSON.stringify(frame)}\n`, (error) => {
-      if (error) fail(error);
-    });
-  });
-}
+let client;
 function exported(sessionPath, name) {
   const text = invoke(binary, ['export', sessionPath]);
   writeFileSync(join(output, `${name}.json`), text);
@@ -96,28 +76,8 @@ try {
     'commit the candidate and tests before qualification');
   report.binaryVersion = invoke(binary, ['--version']);
   const startupRules = readRules('startup');
-  child = spawn(binary, ['rpc'], { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
-  const command = { program: binary, args: ['rpc'], cwd, stderr: '' };
-  report.commands.push(command);
-  child.stderr.setEncoding('utf8');
-  child.stderr.on('data', (text) => { command.stderr += text; });
-  child.on('error', fail);
-  exited = new Promise((resolveExit) => child.on('close', (status, signal) => {
-    Object.assign(command, { status, signal });
-    fail(new Error(`RPC process ended: status=${status}, signal=${signal}; ${command.stderr}`));
-    resolveExit();
-  }));
-  createInterface({ input: child.stdout }).on('line', (line) => {
-    try {
-      const frame = JSON.parse(line);
-      report.frames.push({ direction: 'response', frame });
-      const request = pending.get(frame.id);
-      if (!request) return;
-      pending.delete(frame.id);
-      if (frame.error) request.reject(new Error(`${frame.error.code}: ${frame.error.message}`));
-      else request.resolve(frame.result);
-    } catch (error) { fail(error); }
-  });
+  client = startRpc({ binary, cwd, env, report });
+  const { rpc, command } = client;
   const options = { cwd, model, maxSteps, allowCommand: true };
   const session = await rpc('session/new', { options });
   const prompt = (target, text) => rpc('session/prompt', { sessionId: target.sessionId, prompt: text });
@@ -281,18 +241,14 @@ try {
     'a model action must not execute after the context hook fails');
   report.cases.push({ name: 'missing-executable-refusal', verdict: 'passed', sessionPath: refused.sessionPath });
   await rpc('shutdown', {});
-  child.stdin.end();
-  await exited;
+  await client.end();
   assert.ok(command.status !== null && !command.status, command.stderr);
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
   throw error;
 } finally {
-  if (child && child.exitCode === null && child.signalCode === null) {
-    child.stdin.end();
-    await exited;
-  }
+  if (client) await client.end();
   report.finishedAt = new Date().toISOString();
   writeFileSync(join(output, 'report.json'), JSON.stringify(report));
   console.log(`${report.verdict}: ${join(output, 'report.json')}`);
