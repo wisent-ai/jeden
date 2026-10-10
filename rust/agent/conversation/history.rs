@@ -27,18 +27,44 @@ pub(super) fn normalized_history(cwd: &Path, mut turns: Vec<Value>) -> Result<Ve
     }
 }
 
+/// Prepare durable child state before any live recorder or model window changes.
+pub(super) fn prepare_child(
+    cwd: &Path,
+    parent: &Path,
+    leaf: Option<String>,
+    transition: &str,
+) -> Result<SessionRecorder, String> {
+    let mut recorder = SessionRecorder::child(cwd, parent.to_path_buf(), leaf);
+    let destination = recorder.path();
+    recorder.ensure().map_err(|reason| {
+        format!(
+            "{transition} could not prepare child session {}: {reason}",
+            destination.display()
+        )
+    })?;
+    crate::completion::inherit(parent, &destination).map_err(|reason| {
+        format!(
+            "{transition} could not inherit retained work from {} into {}: {reason}",
+            parent.display(),
+            destination.display()
+        )
+    })?;
+    Ok(recorder)
+}
+
 impl Conversation {
     /// Clear the model window, not the operator's retained obligations.
     pub(crate) fn reset(&mut self, cwd: &Path) -> Result<(), String> {
-        self.messages = vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
+        let messages = vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })];
         let parent = self.recorder.path();
         let leaf = self.recorder.active_leaf()?;
-        self.recorder = SessionRecorder::child(cwd, parent.clone(), leaf);
-        self.recorder.ensure()?;
-        crate::completion::inherit(&parent, &self.recorder.path())?;
+        let mut recorder = prepare_child(cwd, &parent, leaf, "reset")?;
+        recorder.record_context("reset_seed", &messages)?;
+        self.recorder = recorder;
+        self.messages = messages;
         self.reconcile_completion = true;
         self.session_context_pending = Some("reset");
-        self.recorder.record_context("reset_seed", &self.messages)
+        Ok(())
     }
 
     /// Refresh the system prompt for a new working directory (keeps live turns)
@@ -59,14 +85,15 @@ impl Conversation {
         turns: Vec<Value>,
         source: &Path,
     ) -> Result<(), String> {
-        self.messages = normalized_history(cwd, turns)?;
+        let messages = normalized_history(cwd, turns)?;
         let leaf = crate::cli::sessions::session_active_leaf(source)?;
-        self.recorder = SessionRecorder::child(cwd, source.to_path_buf(), leaf);
-        self.recorder.ensure()?;
-        crate::completion::inherit(source, &self.recorder.path())?;
+        let mut recorder = prepare_child(cwd, source, leaf, "resume")?;
+        recorder.record_context("resume_seed", &messages)?;
+        self.recorder = recorder;
+        self.messages = messages;
         self.reconcile_completion = true;
         self.session_context_pending = Some("resume");
-        self.recorder.record_context("resume_seed", &self.messages)
+        Ok(())
     }
 
     pub(crate) fn checkpoint(&mut self, label: &str) -> Result<String, String> {
@@ -98,12 +125,11 @@ impl Conversation {
     pub(crate) fn fork(&mut self, cwd: &Path) -> Result<PathBuf, String> {
         let parent = self.recorder.path();
         let parent_entry = self.recorder.active_leaf()?;
-        self.recorder = SessionRecorder::child(cwd, parent.clone(), parent_entry);
-        self.recorder.ensure()?;
-        crate::completion::inherit(&parent, &self.recorder.path())?;
+        let mut recorder = prepare_child(cwd, &parent, parent_entry, "fork")?;
+        recorder.record_context("fork_seed", &self.messages)?;
+        self.recorder = recorder;
         self.reconcile_completion = true;
         self.session_context_pending = Some("fork");
-        self.recorder.record_context("fork_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
 
@@ -111,13 +137,11 @@ impl Conversation {
     pub(crate) fn branch(&mut self, cwd: &Path) -> Result<PathBuf, String> {
         let parent = self.recorder.path();
         let parent_entry = self.recorder.active_leaf()?;
-        self.recorder = SessionRecorder::child(cwd, parent.clone(), parent_entry);
-        self.recorder.ensure()?;
-        crate::completion::inherit(&parent, &self.recorder.path())?;
+        let mut recorder = prepare_child(cwd, &parent, parent_entry, "branch")?;
+        recorder.record_context("branch_seed", &self.messages)?;
+        self.recorder = recorder;
         self.reconcile_completion = true;
         self.session_context_pending = Some("branch");
-        self.recorder
-            .record_context("branch_seed", &self.messages)?;
         Ok(self.recorder.path())
     }
 }

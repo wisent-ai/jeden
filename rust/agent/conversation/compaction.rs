@@ -199,21 +199,8 @@ impl Conversation {
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),
         ];
-        let mut recorder = SessionRecorder::child(&args.cwd, parent_session.clone(), parent_entry);
-        let destination = recorder.path();
-        recorder.ensure().map_err(|reason| {
-            format!(
-                "handoff could not prepare child session {}: {reason}",
-                destination.display()
-            )
-        })?;
-        crate::completion::inherit(&parent_session, &destination).map_err(|reason| {
-            format!(
-                "handoff could not inherit retained work from {} into {}: {reason}",
-                parent_session.display(),
-                destination.display()
-            )
-        })?;
+        let recorder =
+            super::history::prepare_child(&args.cwd, &parent_session, parent_entry, "handoff")?;
         self.recorder = recorder;
         self.reconcile_completion = true;
         self.messages = messages;

@@ -163,6 +163,11 @@ try {
         && error.message.includes(sessionRoot)
         && error.message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`),
       'handoff must report its actual child-creation path and operating-system cause');
+    await assert.rejects(rpc('session/open', { session: reopened.sessionPath, options }),
+      (error) => error.message.includes('resume could not prepare child session')
+        && error.message.includes(sessionRoot)
+        && error.message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`),
+      'resume must report the same actual child-creation refusal without replacing active work');
   } finally {
     chmodSync(sessionRoot, originalMode);
   }
@@ -171,7 +176,7 @@ try {
     assert.deepEqual(retainedAfter.completion.requests.find((candidate) => candidate.id === request.id), request,
       'a refused child preparation must leave the active session owning every original request');
   }
-  report.cases.push({ name: 'handoff-child-preparation-refusal', verdict: 'passed',
+  report.cases.push({ name: 'handoff-and-resume-child-preparation-refusals', verdict: 'passed',
     sessionPath: reopened.sessionPath, retainedBefore, retainedAfter });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
