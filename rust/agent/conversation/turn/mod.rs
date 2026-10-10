@@ -70,7 +70,6 @@ impl Conversation {
             None => Box::new(u32::from(true)..),
         };
         let mut repairs = u32::default();
-        let mut recoveries = u32::default();
         // A `Stop` hook reads the finished answer and may refuse it. Streaming
         // the text first showed the operator an answer the hook then refused,
         // so the turn looked ended while the work went on; with a `Stop` hook
@@ -82,8 +81,9 @@ impl Conversation {
         // on it spent an operator's whole budget on a flapping gateway and
         // ended the assignment with `max steps exceeded`, a sentence about the
         // budget rather than about the connection that kept dropping. The step
-        // now advances only once an answer has been read, and the separate
-        // recovery budget in `failure.rs` ends the turn with the real failure.
+        // advances only once an answer has been read. Recovery proceeds only
+        // after changing the route, compacting history or repairing an answer;
+        // an unrecoverable failure ends the turn with its original cause.
         let mut current = step_iter.next();
         'steps: while let Some(step) = current {
             if tracks_completion {
@@ -117,7 +117,6 @@ impl Conversation {
                         failure,
                         &mut prepared,
                         &mut repairs,
-                        &mut recoveries,
                         hooks,
                     )?;
                     continue 'steps;
