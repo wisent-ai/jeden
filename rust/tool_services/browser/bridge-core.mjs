@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { watch } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { inspect } from "node:util";
 
@@ -59,15 +58,16 @@ const browserReady = async () => {
     return false;
   }
 };
-// Chromium writes DevToolsActivePort into the profile once CDP listens. The
-// directory watch reports that write, and the child's exit is the failure;
-// there is no retry loop and no deadline (cli.md rule 8).
+// Chromium announces "DevTools listening on ws://…" on stderr once CDP accepts
+// connections on the requested port. DevToolsActivePort is written only for a
+// requested port of zero, so it never appears for the session's fixed port.
+// The announcement is the readiness event and the child's exit, with the
+// stderr it wrote, is the failure; there is no retry loop and no deadline
+// (cli.md rule 8).
 const ensureBrowser = async () => {
   if (await browserReady()) return;
   if (!chrome) throw new Error("Chromium executable is not configured");
   await mkdir(profile, { recursive: true });
-  const activePort = join(profile, "DevToolsActivePort");
-  await rm(activePort, { force: true });
   const browserTmp = join(root, "tmp");
   await mkdir(browserTmp, { recursive: true });
   const args = [
@@ -86,17 +86,22 @@ const ensureBrowser = async () => {
   ];
   if (!visible) args.push("--headless=new", "--disable-gpu");
   args.push("about:blank");
-  const watcher = watch(profile);
-  const listening = new Promise((resolve, reject) => {
-    watcher.on("change", (_, name) => {
-      if (String(name) === "DevToolsActivePort") resolve();
-    });
-    watcher.on("error", reject);
-  });
   const child = spawn(chrome, args, {
     detached: true,
-    stdio: "ignore",
+    stdio: "pipe",
     env: { ...process.env, TMPDIR: browserTmp },
+  });
+  // Nothing is written to the browser and its stdout is not read, so both are
+  // released; stderr carries the readiness announcement and the failure cause.
+  child.stdin.end();
+  child.stdout.resume();
+  let stderr = "";
+  const listening = new Promise(resolve => {
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", chunk => {
+      stderr += chunk;
+      if (stderr.includes("DevTools listening on ")) resolve();
+    });
   });
   const exited = new Promise((_, reject) => {
     child.once("error", error => reject(new Error(`Chromium could not start: ${error.message}`)));
@@ -109,10 +114,17 @@ const ensureBrowser = async () => {
   await saveState(state);
   try {
     await Promise.race([listening, exited]);
+  } catch (error) {
+    throw new Error(`${error.message}; stderr: ${stderr}`);
   } finally {
-    watcher.close();
     child.removeAllListeners("exit");
     child.removeAllListeners("error");
+    // Later output is drained without holding this process open, so the
+    // detached browser outlives the bridge call that started it.
+    child.stderr.removeAllListeners("data");
+    child.stderr.resume();
+    child.stdout.unref();
+    child.stderr.unref();
     child.unref();
   }
   const version = await requestJson("/json/version");
@@ -147,6 +159,9 @@ class CdpClient {
     this.sequence = 1;
     this.pending = new Map();
     this.events = new Map();
+    // The error the socket closed with; a call or event subscription made
+    // after that is refused with it instead of waiting on a dead socket.
+    this.closed = null;
   }
   async connect() {
     this.socket = new WebSocket(this.url);
@@ -168,6 +183,7 @@ class CdpClient {
     // A closed socket fails every call and event still outstanding on it.
     this.socket.addEventListener("close", () => {
       const closed = new Error("CDP WebSocket closed");
+      this.closed = closed;
       for (const pending of this.pending.values()) pending.reject(closed);
       this.pending.clear();
       for (const listeners of this.events.values()) for (const listener of listeners) listener.reject(closed);
@@ -179,14 +195,21 @@ class CdpClient {
     });
   }
   send(method, params = {}) {
+    if (this.closed) return Promise.reject(new Error(`${method}: ${this.closed.message}`));
     const id = this.sequence++;
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
-      this.socket.send(JSON.stringify({ id, method, params }));
+      try {
+        this.socket.send(JSON.stringify({ id, method, params }));
+      } catch (error) {
+        this.pending.delete(id);
+        reject(new Error(`CDP ${method} could not be sent: ${error.message}`));
+      }
     });
   }
   // Resolves with the params of the next `method` event on this target.
   next(method) {
+    if (this.closed) return Promise.reject(new Error(`${method}: ${this.closed.message}`));
     return new Promise((resolve, reject) => {
       const listeners = this.events.get(method) ?? [];
       listeners.push({ resolve, reject });
