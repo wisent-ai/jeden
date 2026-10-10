@@ -65,6 +65,7 @@ pub(super) struct WireRequest {
 
 pub(super) struct ServerState {
     pub(super) sessions: Mutex<HashMap<String, AgentSession>>,
+    context_requests: context::Requests,
     pub(super) bridge: Arc<RpcInteractionBridge>,
     pub(super) writer: JsonWriter,
     next_session: AtomicU64,
@@ -106,6 +107,7 @@ where
     let bridge = RpcInteractionBridge::new(writer.clone());
     let state = Arc::new(ServerState {
         sessions: Mutex::new(HashMap::new()),
+        context_requests: context::Requests::default(),
         bridge,
         writer: writer.clone(),
         next_session: AtomicU64::new(1),
@@ -172,10 +174,14 @@ where
             request.method.as_str(),
             "context/recommend" | "context/sources"
         ) {
+            let Some(context_request) = context::begin(&state, &request)? else {
+                continue;
+            };
             let worker_state = state.clone();
             let in_flight = activity.begin();
             workers.push(thread::spawn(move || {
                 let _in_flight = in_flight;
+                let _context_request = context_request;
                 match handle_request(&worker_state, request) {
                     Ok(()) => Ok(()),
                     Err(error) => worker_state.writer.send(&error),
@@ -201,6 +207,7 @@ where
         }
     }
     state.bridge.cancel_all()?;
+    state.context_requests.cancel_all();
     for worker in workers {
         worker
             .join()
@@ -240,8 +247,9 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
                 crate::task_runtime::set_limits(limits)
                     .map_err(|error| ("invalid_params", error.to_string()))
             }),
-        "context/recommend" => context::recommend(&request.params),
-        "context/sources" => context::sources(&request.params),
+        "context/recommend" => context::recommend(state, &request),
+        "context/sources" => context::sources(state, &request),
+        "context/cancel" => context::cancel(state, &request.params),
         "workspace/status" => workspace_status(),
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),

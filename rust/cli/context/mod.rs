@@ -158,7 +158,8 @@ fn sources(args: &Args, rest: &[String]) -> Result<String, String> {
     if !rest.is_empty() {
         return Err(USAGE.into());
     }
-    let report = advisor::sources_report(&args.cwd, &crate::load_config(&args.cwd));
+    let cancellation = crate::tool_runtime::runtime_ops::CancellationToken::new();
+    let report = advisor::sources_report(&args.cwd, &crate::load_config(&args.cwd), &cancellation);
     if args.json {
         return Ok(
             serde_json::to_string_pretty(&report).map_err(|error| error.to_string())? + "\n",

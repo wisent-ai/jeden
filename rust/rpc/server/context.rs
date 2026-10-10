@@ -4,6 +4,9 @@
 //! the graphical surface the same way configuration does: one operation per
 //! question, answering the object the CLI prints with `--json`.
 
+mod requests;
+pub(super) use requests::{Lease, Requests};
+
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
@@ -20,7 +23,12 @@ fn cwd(params: &Value) -> PathBuf {
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
 }
 
-pub(super) fn recommend(params: &Value) -> Result<Value, (&'static str, String)> {
+pub(super) fn recommend(
+    state: &super::ServerState,
+    wire: &super::WireRequest,
+) -> Result<Value, (&'static str, String)> {
+    let cancellation = state.context_requests.token(&wire.id)?;
+    let params = &wire.params;
     let query = params
         .get("query")
         .and_then(Value::as_str)
@@ -38,6 +46,7 @@ pub(super) fn recommend(params: &Value) -> Result<Value, (&'static str, String)>
         .map(|limit| limit as usize);
     let mut request =
         advisor::Request::new(query, stated, &settings).map_err(|refusal| (INVALID, refusal))?;
+    request.cancellation = cancellation;
     if let Some(declared) = params.get("sources").and_then(Value::as_str) {
         let unknown = advisor::unknown_sources(declared);
         if !unknown.is_empty() {
@@ -62,13 +71,39 @@ pub(super) fn recommend(params: &Value) -> Result<Value, (&'static str, String)>
     serde_json::to_value(&advice).map_err(|error| ("internal_error", error.to_string()))
 }
 
-pub(super) fn sources(params: &Value) -> Result<Value, (&'static str, String)> {
-    let cwd = cwd(params);
-    let report = advisor::sources_report(&cwd, &crate::load_config(&cwd));
-    Ok(json!({
-        "cwd": cwd.display().to_string(),
-        "settings": report.get("settings").cloned().unwrap_or(Value::Null),
-        "selected": report.get("selected").cloned().unwrap_or(Value::Null),
-        "sources": report.get("sources").cloned().unwrap_or(Value::Null),
-    }))
+pub(super) fn sources(
+    state: &super::ServerState,
+    wire: &super::WireRequest,
+) -> Result<Value, (&'static str, String)> {
+    let cancellation = state.context_requests.token(&wire.id)?;
+    let cwd = cwd(&wire.params);
+    let mut report = advisor::sources_report(&cwd, &crate::load_config(&cwd), &cancellation);
+    report["cwd"] = json!(cwd.display().to_string());
+    Ok(report)
+}
+
+pub(super) fn begin(
+    state: &super::ServerState,
+    wire: &super::WireRequest,
+) -> Result<Option<Lease>, String> {
+    match state.context_requests.begin(&wire.id) {
+        Ok(lease) => Ok(Some(lease)),
+        Err((code, detail)) => {
+            state
+                .writer
+                .send(&super::error_response(wire.id.clone(), code, &detail))?;
+            Ok(None)
+        }
+    }
+}
+
+pub(super) fn cancel(
+    state: &super::ServerState,
+    params: &Value,
+) -> Result<Value, (&'static str, String)> {
+    let id = params
+        .get("requestId")
+        .ok_or((INVALID, "context/cancel requires requestId".to_string()))?;
+    state.context_requests.token(id)?.cancel();
+    Ok(json!({"requestId": id, "cancellationRequested": true}))
 }

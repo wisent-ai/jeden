@@ -216,14 +216,38 @@ fn interleave(per_source: Vec<Vec<Recommendation>>, limit: usize) -> Vec<Recomme
 
 /// The advisor's own state, with no query: what each source is configured to
 /// be and whether it answers right now.
-pub(crate) fn sources_report(cwd: &Path, config: &Config) -> Value {
+pub(crate) fn sources_report(
+    cwd: &Path,
+    config: &Config,
+    cancellation: &crate::tool_runtime::runtime_ops::CancellationToken,
+) -> Value {
     let settings = settings(cwd, config);
-    let probes = vec![
-        files::probe(&settings),
-        ground_truth::probe(&settings),
-        memory::probe(),
-        transcripts::probe(&settings),
-    ];
+    let probes: Vec<_> = SOURCES
+        .iter()
+        .map(|source| {
+            let started = Instant::now();
+            if cancellation.is_cancelled() {
+                return probe_value(
+                    &SourceStatus::unavailable(
+                        source,
+                        "context source probe cancelled by its caller",
+                        started,
+                    ),
+                    Vec::new(),
+                );
+            }
+            match *source {
+                "files" => files::probe(&settings),
+                "ground-truth" => ground_truth::probe(&settings),
+                "memory" => memory::probe(),
+                "transcripts" => transcripts::probe(&settings),
+                other => probe_value(
+                    &SourceStatus::unavailable(other, "no such source", started),
+                    Vec::new(),
+                ),
+            }
+        })
+        .collect();
     json!({
         "settings": settings,
         "selected": settings.sources,
