@@ -1,6 +1,7 @@
 use super::*;
 
 mod args;
+mod commands;
 use args::args_from_options;
 impl AgentSession {
     pub(super) fn dispatch_prompt(
@@ -239,24 +240,7 @@ impl AgentSession {
                 });
             })),
         };
-        let result = if continuing {
-            conversation.continue_work(&args, &mut hooks)
-        } else if request.prompt.split_whitespace().next() == Some("/todo") {
-            let mut parts =
-                shell_words::split(&request.prompt).map_err(|error| error.to_string())?;
-            parts.remove(usize::default());
-            if parts.first().map(String::as_str) == Some("continue") {
-                conversation.continue_work(&args, &mut hooks)
-            } else {
-                parts.extend([
-                    "--session".into(),
-                    conversation.session_path().display().to_string(),
-                ]);
-                crate::completion::cli::execute(&args.cwd, &parts, false, Some(&args))
-            }
-        } else {
-            conversation.run_turn(&args, &request.prompt, &[], &mut hooks)
-        };
+        let result = commands::run(conversation, &args, &request.prompt, continuing, &mut hooks);
         *self
             .inner
             .session_path

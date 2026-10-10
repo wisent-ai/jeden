@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -168,6 +168,13 @@ try {
         && error.message.includes(sessionRoot)
         && error.message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`),
       'resume must report the same actual child-creation refusal without replacing active work');
+    for (const [command, transition] of [['/clear', 'reset'], ['/fork', 'fork'], ['/branch preserved-work', 'branch']]) {
+      await assert.rejects(prompt(reopened, command),
+        (error) => error.message.includes(`${transition} could not prepare child session`)
+          && error.message.includes(sessionRoot)
+          && error.message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`),
+        `${transition} must preserve the active conversation on actual child-creation failure`);
+    }
   } finally {
     chmodSync(sessionRoot, originalMode);
   }
@@ -176,8 +183,27 @@ try {
     assert.deepEqual(retainedAfter.completion.requests.find((candidate) => candidate.id === request.id), request,
       'a refused child preparation must leave the active session owning every original request');
   }
-  report.cases.push({ name: 'handoff-and-resume-child-preparation-refusals', verdict: 'passed',
+  report.cases.push({ name: 'lifecycle-child-preparation-refusals', verdict: 'passed',
     sessionPath: reopened.sessionPath, retainedBefore, retainedAfter });
+  const transcript = join(reopened.sessionPath, 'transcript.jsonl');
+  const transcriptMode = statSync(transcript).mode;
+  const beforeTranscript = hash(transcript);
+  let appendRefusal;
+  try {
+    chmodSync(transcript, transcriptMode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
+    try { closeSync(openSync(transcript, 'a')); } catch (error) { appendRefusal = error; }
+    assert.ok(appendRefusal?.errno, 'the host must enforce the actual transcript append refusal');
+    await assert.rejects(prompt(reopened, '/checkpoint retained-context'),
+      (error) => error.message.includes('cannot open transcript')
+        && error.message.includes(transcript)
+        && error.message.includes(`os error ${Math.abs(appendRefusal.errno)}`),
+      'checkpoint persistence must report its actual append operation, file and operating-system cause');
+  } finally {
+    chmodSync(transcript, transcriptMode);
+  }
+  assert.equal(hash(transcript), beforeTranscript, 'a refused checkpoint must leave the durable transcript unchanged');
+  report.cases.push({ name: 'checkpoint-append-refusal', verdict: 'passed', transcript,
+    cause: appendRefusal.message, errno: appendRefusal.errno });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
   const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;

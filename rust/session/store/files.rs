@@ -18,27 +18,77 @@ pub(super) fn rewrite_v2(dir: &Path, events: &[SessionEventV2]) -> Result<(), St
         .write(true)
         .create_new(true)
         .open(&temp)
-        .map_err(|e| e.to_string())?;
+        .map_err(|error| {
+            format!(
+                "cannot create transcript migration file {}: {error}",
+                temp.display()
+            )
+        })?;
     for event in events {
-        let mut encoded = serde_json::to_vec(event).map_err(|e| e.to_string())?;
+        let mut encoded = serde_json::to_vec(event).map_err(|error| {
+            format!(
+                "cannot encode event {} for {}: {error}",
+                event.event_id,
+                path.display()
+            )
+        })?;
         encoded.push(b'\n');
-        file.write_all(&encoded).map_err(|e| e.to_string())?;
+        file.write_all(&encoded).map_err(|error| {
+            format!(
+                "cannot write transcript migration file {}: {error}",
+                temp.display()
+            )
+        })?;
     }
-    file.sync_all().map_err(|e| e.to_string())?;
-    fs::rename(&temp, &path).map_err(|e| e.to_string())?;
+    file.sync_all().map_err(|error| {
+        format!(
+            "cannot sync transcript migration file {}: {error}",
+            temp.display()
+        )
+    })?;
+    fs::rename(&temp, &path).map_err(|error| {
+        format!(
+            "cannot publish transcript migration {} as {}: {error}",
+            temp.display(),
+            path.display()
+        )
+    })?;
     sync_directory(dir)
 }
 
 pub(super) fn append_event_line(dir: &Path, event: &SessionEventV2) -> Result<(), String> {
-    let mut encoded = serde_json::to_vec(event).map_err(|e| e.to_string())?;
+    let path = dir.join(TRANSCRIPT_FILE);
+    let mut encoded = serde_json::to_vec(event).map_err(|error| {
+        format!(
+            "cannot encode event {} for {}: {error}",
+            event.event_id,
+            path.display()
+        )
+    })?;
     encoded.push(b'\n');
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
-        .open(dir.join(TRANSCRIPT_FILE))
-        .map_err(|e| e.to_string())?;
-    file.write_all(&encoded).map_err(|e| e.to_string())?;
-    file.sync_data().map_err(|e| e.to_string())
+        .open(&path)
+        .map_err(|error| {
+            format!(
+                "cannot open transcript {} for append: {error}",
+                path.display()
+            )
+        })?;
+    file.write_all(&encoded).map_err(|error| {
+        format!(
+            "cannot append event {} to {}: {error}",
+            event.event_id,
+            path.display()
+        )
+    })?;
+    file.sync_data().map_err(|error| {
+        format!(
+            "cannot sync appended transcript {}: {error}",
+            path.display()
+        )
+    })
 }
 
 pub(super) fn read_session_id(dir: &Path) -> Result<String, String> {
@@ -86,13 +136,38 @@ pub(super) fn mirror_active_leaf(dir: &Path, active_leaf: Option<&str>) -> Resul
         .write(true)
         .create_new(true)
         .open(&temp)
-        .map_err(|error| error.to_string())?;
-    let mut encoded = serde_json::to_vec_pretty(&state).map_err(|error| error.to_string())?;
+        .map_err(|error| {
+            format!(
+                "cannot create active-leaf state file {}: {error}",
+                temp.display()
+            )
+        })?;
+    let mut encoded = serde_json::to_vec_pretty(&state).map_err(|error| {
+        format!(
+            "cannot encode active-leaf state for {}: {error}",
+            path.display()
+        )
+    })?;
     encoded.push(b'\n');
-    file.write_all(&encoded)
-        .map_err(|error| error.to_string())?;
-    file.sync_all().map_err(|error| error.to_string())?;
-    fs::rename(&temp, &path).map_err(|error| error.to_string())?;
+    file.write_all(&encoded).map_err(|error| {
+        format!(
+            "cannot write active-leaf state file {}: {error}",
+            temp.display()
+        )
+    })?;
+    file.sync_all().map_err(|error| {
+        format!(
+            "cannot sync active-leaf state file {}: {error}",
+            temp.display()
+        )
+    })?;
+    fs::rename(&temp, &path).map_err(|error| {
+        format!(
+            "cannot publish active-leaf state {} as {}: {error}",
+            temp.display(),
+            path.display()
+        )
+    })?;
     sync_directory(dir)
 }
 
@@ -107,9 +182,15 @@ pub(super) fn fresh_event_id(timestamp: &str) -> String {
 
 #[cfg(unix)]
 pub(super) fn sync_directory(dir: &Path) -> Result<(), String> {
-    std::fs::File::open(dir)
-        .and_then(|file| file.sync_all())
-        .map_err(|e| e.to_string())
+    let directory = std::fs::File::open(dir).map_err(|error| {
+        format!(
+            "cannot open session directory {} for sync: {error}",
+            dir.display()
+        )
+    })?;
+    directory
+        .sync_all()
+        .map_err(|error| format!("cannot sync session directory {}: {error}", dir.display()))
 }
 #[cfg(not(unix))]
 pub(super) fn sync_directory(_dir: &Path) -> Result<(), String> {
