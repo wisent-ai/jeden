@@ -17,10 +17,23 @@ pub fn serve(addr: &str) -> Result<(), String> {
         "jeden relay listening on http://{bound} (durable {})",
         store.location()
     );
-    for stream in listener.incoming().flatten() {
+    for stream in listener.incoming() {
+        let stream = match stream {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!("jeden relay on {bound}: accepting a connection failed: {error}");
+                continue;
+            }
+        };
         let store = store.clone();
         std::thread::spawn(move || {
-            let _ = handle_conn(stream, &store);
+            let peer = match stream.peer_addr() {
+                Ok(peer) => peer.to_string(),
+                Err(error) => format!("a peer whose address could not be read ({error})"),
+            };
+            if let Err(error) = handle_conn(stream, &store) {
+                eprintln!("jeden relay request from {peer} failed: {error}");
+            }
         });
     }
     Ok(())
@@ -34,17 +47,26 @@ pub(super) fn handle_conn(mut stream: TcpStream, store: &RelayStore) -> std::io:
         }
         let n = stream.read(&mut chunk)?;
         if n == 0 {
-            break buf.len();
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "the request ended after {} bytes, before the blank line that ends its header",
+                    buf.len()
+                ),
+            ));
         }
         buf.extend_from_slice(&chunk[..n]);
-        if buf.len() > 64 * 1024 {
+        // The relay's declared request policy (MAX_BLOB_BYTES) bounds the
+        // header as it bounds the body; a header that outgrows it is refused
+        // as too large below, never parsed as if it were complete.
+        if buf.len() > MAX_BLOB_BYTES {
             break buf.len();
         }
     };
     let header = String::from_utf8_lossy(&buf[..header_end.min(buf.len())]).to_string();
     let (method, path, query) = parse_request_line(&header);
     let length = parse_content_length(&header);
-    if length > MAX_BLOB_BYTES {
+    if length > MAX_BLOB_BYTES || find_subsequence(&buf[..header_end], b"\r\n\r\n").is_none() {
         write_response(
             &mut stream,
             413,
@@ -55,7 +77,13 @@ pub(super) fn handle_conn(mut stream: TcpStream, store: &RelayStore) -> std::io:
     while buf.len() < header_end + length {
         let n = stream.read(&mut chunk)?;
         if n == 0 {
-            break;
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "{method} {path}: the request ended after {} of its {length} declared body bytes",
+                    buf.len() - header_end
+                ),
+            ));
         }
         buf.extend_from_slice(&chunk[..n])
     }
