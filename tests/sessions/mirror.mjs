@@ -15,6 +15,7 @@ export async function exerciseMirror({ rpc, prompt, options, exported, report })
   const probe = join(session.sessionPath, `mirror-probe-${randomUUID()}`);
   let refusal;
   let diagnostic;
+  const failures = [];
   try {
     chmodSync(session.sessionPath, mode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
     try {
@@ -32,8 +33,13 @@ export async function exerciseMirror({ rpc, prompt, options, exported, report })
     });
     assert.deepEqual(readFileSync(statePath), originalState,
       'a failed mirror must leave the previous state bytes unchanged');
+  } catch (error) {
+    failures.push(error);
   } finally {
-    chmodSync(session.sessionPath, mode);
+    try { chmodSync(session.sessionPath, mode); } catch (error) { failures.push(error); }
+  }
+  if (failures.length) {
+    throw new AggregateError(failures, `active-leaf mirror qualification failed: ${failures.map(String).join('; ')}`);
   }
   const after = exported(session.sessionPath, 'mirror-committed');
   const committed = after.filter((event) => event.type === 'checkpoint'
