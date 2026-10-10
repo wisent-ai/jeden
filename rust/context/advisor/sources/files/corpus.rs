@@ -60,7 +60,7 @@ pub(super) struct Corpus {
 impl Corpus {
     pub(super) fn read(
         settings: &Settings,
-        cancellation: Option<&crate::tool_runtime::runtime_ops::CancellationToken>,
+        cancellation: &crate::tool_runtime::runtime_ops::CancellationToken,
     ) -> Self {
         let mut corpus = Self {
             sections: Vec::new(),
@@ -69,7 +69,7 @@ impl Corpus {
             missing_roots: Vec::new(),
         };
         for root in &settings.roots {
-            if cancellation.is_some_and(|token| token.is_cancelled()) {
+            if cancellation.is_cancelled() {
                 break;
             }
             if root.path.exists() {
@@ -96,7 +96,7 @@ impl Corpus {
         root: &Path,
         depth: Option<usize>,
         settings: &Settings,
-        cancellation: Option<&crate::tool_runtime::runtime_ops::CancellationToken>,
+        cancellation: &crate::tool_runtime::runtime_ops::CancellationToken,
     ) {
         let home = crate::dirs_home();
         let walked_root = root.to_path_buf();
@@ -113,7 +113,7 @@ impl Corpus {
             })
             .build();
         for entry in walk.flatten() {
-            if cancellation.is_some_and(|token| token.is_cancelled()) {
+            if cancellation.is_cancelled() {
                 break;
             }
             if !entry.file_type().is_some_and(|kind| kind.is_file()) {

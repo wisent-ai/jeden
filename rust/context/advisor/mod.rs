@@ -238,7 +238,7 @@ pub(crate) fn sources_report(
                 );
             }
             match *source {
-                "files" => files::probe(&settings),
+                "files" => files::probe(&settings, cancellation),
                 "ground-truth" => ground_truth::probe(&settings),
                 "memory" => crate::fleet::with_cancellation(cancellation, memory::probe),
                 "transcripts" => transcripts::probe(&settings),

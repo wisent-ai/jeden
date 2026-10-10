@@ -29,7 +29,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             ),
         };
     }
-    let corpus = Corpus::read(settings, Some(&request.cancellation));
+    let corpus = Corpus::read(settings, &request.cancellation);
     if let Some(mut cancelled) = request.cancelled_outcome("files", started) {
         cancelled.status.considered = corpus.sections.len();
         return cancelled;
@@ -112,10 +112,19 @@ fn detail(corpus: &Corpus) -> String {
 
 /// What the source is, without a query: which roots exist and how much text
 /// they actually carry.
-pub(crate) fn probe(settings: &Settings) -> Value {
+pub(crate) fn probe(
+    settings: &Settings,
+    cancellation: &crate::tool_runtime::runtime_ops::CancellationToken,
+) -> Value {
     let started = Instant::now();
-    let corpus = Corpus::read(settings, None);
-    let status = if corpus.sections.is_empty() {
+    let corpus = Corpus::read(settings, cancellation);
+    let status = if cancellation.is_cancelled() {
+        SourceStatus::unavailable(
+            "files",
+            "context source probe cancelled by its caller",
+            started,
+        )
+    } else if corpus.sections.is_empty() {
         SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {
         SourceStatus::available(
