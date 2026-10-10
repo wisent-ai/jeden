@@ -11,6 +11,11 @@
 set -eu
 cd "$(dirname "$0")/../.."
 BIN=${JEDEN:?JEDEN names the jeden binary under test, such as target/debug/jeden}
+# Keep the selected candidate when run() changes into an isolated workspace.
+case "$BIN" in
+  /*) ;;
+  *) BIN="$PWD/$BIN" ;;
+esac
 RUN="$(date -u +%Y%m%dT%H%M%SZ)-$$"
 ROOT="$PWD/target/real-tests/context/$RUN"
 REPORT="$ROOT/report.txt"
