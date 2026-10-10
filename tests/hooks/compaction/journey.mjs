@@ -74,7 +74,6 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
         assert.equal(after.filter((event) => event.type === 'action').length, actions,
           'a model action ran after the instruction restoration failed');
       }
-      evidence.verdict = 'passed';
     } finally {
       try {
         if (existsSync(`${control}.lock.json`)) {
@@ -85,5 +84,6 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
         await client.end();
       }
     }
+    evidence.verdict = 'passed';
   }
 }
