@@ -62,6 +62,10 @@ try {
     ['recording', 'final', 'recording stop-hook violation', 'rpc'],
     ['completion-state', 'message', 'reading completion state', 'rpc'],
     ['completion-state', 'final', 'reading completion state', 'rpc'],
+    ['open-requests', 'message', 'reading open completion requests', 'cli'],
+    ['open-requests', 'final', 'reading open completion requests', 'cli'],
+    ['open-requests', 'message', 'reading open completion requests', 'rpc'],
+    ['open-requests', 'final', 'reading open completion requests', 'rpc'],
   ]) {
     const directory = join(output, `${transport}-${mode}-${expectedAction}`);
     const workspace = join(directory, 'workspace');

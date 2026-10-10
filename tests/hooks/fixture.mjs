@@ -7,10 +7,14 @@ import { pathToFileURL } from 'node:url';
 function refuseRecording(receipt, reason, boundary) {
   const root = process.env.JEDEN_SESSION_ROOT;
   if (!root) throw new Error('recording refusal requires an isolated JEDEN_SESSION_ROOT');
+  const isolated = realpathSync(dirname(receipt));
+  if (dirname(realpathSync(root)) !== isolated) {
+    throw new Error(`the session root ${root} is not beside the isolated hook receipt ${receipt}`);
+  }
   const path = realpathSync(boundary.path);
-  const within = relative(realpathSync(root), path);
+  const within = relative(isolated, path);
   if (!within || isAbsolute(within) || within.split(sep).includes('..')) {
-    throw new Error(`refusing to change permissions outside ${root}: ${path}`);
+    throw new Error(`refusing to change permissions outside ${isolated}: ${path}`);
   }
   const mode = statSync(path).mode;
   writeFileSync(`${receipt}.before`, readFileSync(path));
@@ -51,6 +55,14 @@ export function decide(payload) {
   if (mode === 'completion-state') {
     refuseRecording(receipt, reason, {
       path: join(dirname(payload.transcript_path), 'completion.json'), flags: 'r',
+      permission: files.S_IRUSR | files.S_IRGRP | files.S_IROTH,
+    });
+  }
+  if (mode === 'open-requests') {
+    const root = process.env.JEDEN_SESSION_ROOT;
+    if (!root) throw new Error('open-request refusal requires an isolated JEDEN_SESSION_ROOT');
+    refuseRecording(receipt, reason, {
+      path: join(dirname(root), 'operator-asks.json'), flags: 'r',
       permission: files.S_IRUSR | files.S_IRGRP | files.S_IROTH,
     });
   }
