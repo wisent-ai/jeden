@@ -42,6 +42,7 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
     const evidence = { name, verdict: 'pending', workspace, control, marker, threshold };
     report.cases.push(evidence);
     const client = startRpc({ binary, cwd: workspace, env: { ...env, JEDEN_COMPACTION_THRESHOLD: threshold }, report });
+    const failures = [];
     try {
       const options = { cwd: workspace, model, maxSteps, allowCommand: true };
       const session = await client.rpc('session/new', { options });
@@ -74,15 +75,30 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
         assert.equal(after.filter((event) => event.type === 'action').length, actions,
           'a model action ran after the instruction restoration failed');
       }
+    } catch (error) {
+      failures.push(error);
+      evidence.failure = String(error);
     } finally {
       try {
         if (existsSync(`${control}.lock.json`)) {
           const lock = JSON.parse(readFileSync(`${control}.lock.json`, 'utf8'));
           chmodSync(lock.path, lock.mode);
         }
+      } catch (error) {
+        failures.push(error);
+        evidence.restorationFailure = String(error);
       } finally {
-        await client.end();
+        try {
+          await client.end();
+        } catch (error) {
+          failures.push(error);
+          evidence.shutdownFailure = String(error);
+        }
       }
+    }
+    if (failures.length) {
+      evidence.verdict = 'failed';
+      throw new AggregateError(failures, `${name}: ${failures.map(String).join('; ')}`);
     }
     evidence.verdict = 'passed';
   }
