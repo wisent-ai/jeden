@@ -12,7 +12,7 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const before = exported(session.sessionPath, 'move-before');
   const context = (events) => events.findLast((event) => event.type === 'checkpoint').data.messages;
   const originalContext = context(before);
-  const destination = join(output, `workspace-${randomUUID()}`);
+  const destination = join(output, `workspace with spaces ${randomUUID()}`);
   const child = join(destination, randomUUID());
   mkdirSync(child, { recursive: true });
   const savedState = join(session.sessionPath, `saved-state-${randomUUID()}.json`);
