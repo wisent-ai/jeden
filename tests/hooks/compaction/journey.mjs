@@ -42,7 +42,6 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
     const evidence = { name, verdict: 'pending', workspace, control, marker, threshold };
     report.cases.push(evidence);
     const client = startRpc({ binary, cwd: workspace, env: { ...env, JEDEN_COMPACTION_THRESHOLD: threshold }, report });
-    let lock;
     try {
       const options = { cwd: workspace, model, maxSteps, allowCommand: true };
       const session = await client.rpc('session/new', { options });
@@ -55,7 +54,7 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
       }, 'an answer past the compaction threshold must report the failed instruction restoration and its cause');
       assert.ok(existsSync(`${control}.startup.payload.json`), 'startup restoration must have run through the same hook');
       if (lockTranscript) {
-        lock = JSON.parse(readFileSync(`${control}.lock.json`, 'utf8'));
+        const lock = JSON.parse(readFileSync(`${control}.lock.json`, 'utf8'));
         const cause = JSON.parse(readFileSync(`${control}.cause.json`, 'utf8'));
         evidence.cause = cause;
         assert.ok(evidence.error.includes('recording the failure also failed'), evidence.error);
@@ -77,8 +76,14 @@ export async function exerciseAutoCompaction({ binary, model, maxSteps, output, 
       }
       evidence.verdict = 'passed';
     } finally {
-      if (lock) chmodSync(lock.path, lock.mode);
-      await client.end();
+      try {
+        if (existsSync(`${control}.lock.json`)) {
+          const lock = JSON.parse(readFileSync(`${control}.lock.json`, 'utf8'));
+          chmodSync(lock.path, lock.mode);
+        }
+      } finally {
+        await client.end();
+      }
     }
   }
 }
