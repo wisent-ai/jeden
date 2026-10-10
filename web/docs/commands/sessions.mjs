@@ -219,6 +219,7 @@ export const sessionCommands = [
     refusals: [
       "A missing selector is refused as <code>artifacts requires a session id</code>.",
       "An artifact directory that exists but cannot be read is refused as <code>the artifacts of SESSION at PATH cannot be read: CAUSE</code>.",
+      "A failed directory-entry read or artifact metadata lookup refuses the entire inventory and names the failed operation, path and operating-system cause. Unreadable entries are not silently omitted from a successful list.",
     ],
   },
   {

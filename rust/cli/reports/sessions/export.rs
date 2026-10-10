@@ -109,11 +109,21 @@ pub(crate) fn list_artifacts_command(id_or_path: &str, json: bool) -> Result<Str
     let mut rows: Vec<(String, u64)> = vec![];
     match fs::read_dir(&dir) {
         Ok(entries) => {
-            for entry in entries.flatten() {
-                if let Ok(meta) = entry.metadata() {
-                    if meta.is_file() {
-                        rows.push((entry.file_name().to_string_lossy().to_string(), meta.len()));
-                    }
+            for entry in entries {
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "read artifact directory entry at {}: {error}",
+                        dir.display()
+                    )
+                })?;
+                let meta = entry.metadata().map_err(|error| {
+                    format!(
+                        "read artifact metadata at {}: {error}",
+                        entry.path().display()
+                    )
+                })?;
+                if meta.is_file() {
+                    rows.push((entry.file_name().to_string_lossy().to_string(), meta.len()));
                 }
             }
         }
