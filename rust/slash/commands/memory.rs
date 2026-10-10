@@ -1,3 +1,5 @@
+use std::num::{NonZeroI64, NonZeroUsize};
+
 use serde_json::{json, Value};
 
 use crate::memory::{scope_from_value, FtsBackend, MemoryStore};
@@ -5,7 +7,8 @@ use crate::slash::common::split_args;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 
-const MEMORY_USAGE: &str = "Usage: /memory [view [query]|stats|queue [status|run [limit]]|enqueue [reindex]|rebuild|clear]";
+const MEMORY_USAGE: &str =
+    "Usage: /memory [view [query]|stats|queue [status|run LIMIT LEASE_MS|drain LIMIT LEASE_MS]|enqueue [reindex]|rebuild|clear]";
 
 pub(crate) fn memory_picker() -> Result<PickerSpec, String> {
     let store = MemoryStore::open()?;
@@ -108,33 +111,51 @@ fn enqueue_maintenance(
         &json!({"requestedBy":"slash","scope":scope,"operation":"reindex"}),
     )?;
     Ok(format!(
-        "Enqueued durable full-text reindex job {id}. Inspect it with /memory queue; execute queued work with /memory queue run."
+        "Enqueued durable full-text reindex job {id}. Inspect it with /memory queue; execute queued work with /memory queue run LIMIT LEASE_MS."
     ))
 }
 
+/// The queue verbs, parsed by their declaration rather than compared as words.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum QueueVerb {
+    Status,
+    Run,
+    Drain,
+}
+
+const QUEUE_USAGE: &str =
+    "Usage: /memory queue [status | run LIMIT LEASE_MS | drain LIMIT LEASE_MS]";
+
+/// `run` and `drain` process at most LIMIT jobs, each claimed for LEASE_MS
+/// milliseconds: the time this worker promises to hold a job before another
+/// worker may reclaim it. Both are the caller's; neither has a default.
 fn handle_queue(store: &MemoryStore, args: &[String]) -> Result<String, String> {
-    let action = args.first().map(String::as_str).unwrap_or("status");
-    match action {
-        "status" if args.len() == 1 || args.is_empty() => {
-            serde_json::to_string_pretty(&store.queue_status(100)?).map_err(|e| e.to_string())
+    let Some((action, inputs)) = args.split_first() else {
+        return serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string());
+    };
+    let verb: QueueVerb = serde_json::from_value(Value::String(action.clone()))
+        .map_err(|_| format!("unknown memory queue action {action:?}; {QUEUE_USAGE}"))?;
+    match (verb, inputs) {
+        (QueueVerb::Status, []) => {
+            serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string())
         }
-        "run" | "drain" if args.len() <= 2 => {
-            let limit = args
-                .get(1)
-                .map(|value| {
-                    value.parse::<usize>().map_err(|_| {
-                        "memory queue run limit must be a positive integer".to_string()
-                    })
-                })
-                .transpose()?
-                .unwrap_or(1);
-            if !(1..=100).contains(&limit) {
-                return Err("memory queue run limit must be between 1 and 100".into());
+        (QueueVerb::Run | QueueVerb::Drain, [limit, lease]) => {
+            let limit: NonZeroUsize = limit.parse().map_err(|error| {
+                format!("memory queue LIMIT {limit:?} must be a positive integer: {error}; {QUEUE_USAGE}")
+            })?;
+            let lease_ms: NonZeroI64 = lease.parse().map_err(|error| {
+                format!("memory queue LEASE_MS {lease:?} must be a positive integer: {error}; {QUEUE_USAGE}")
+            })?;
+            if !lease_ms.get().is_positive() {
+                return Err(format!(
+                    "memory queue LEASE_MS {lease} must be positive: it is how long this worker holds a claimed job before another worker may reclaim it"
+                ));
             }
             let worker = format!("slash-memory-{}", std::process::id());
             let mut processed = 0;
-            while processed < limit {
-                match store.process_one(&worker) {
+            while processed < limit.get() {
+                match store.process_one(&worker, lease_ms.get()) {
                     Ok(true) => processed += 1,
                     Ok(false) => break,
                     Err(error) => {
@@ -144,12 +165,12 @@ fn handle_queue(store: &MemoryStore, args: &[String]) -> Result<String, String> 
                     }
                 }
             }
-            let status = store.queue_status(20)?;
+            let status = store.queue_status()?;
             Ok(format!(
                 "Processed {processed} memory job(s); {} pending, {} failed.",
                 status.pending, status.failed
             ))
         }
-        _ => Err("Usage: /memory queue [status|run [limit]]".into()),
+        _ => Err(QUEUE_USAGE.into()),
     }
 }

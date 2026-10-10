@@ -110,7 +110,7 @@ export const sessionPages = [
         title: "Durable memory",
         paragraphs: [
           "Durable memory lives in the fleet database <code>jeden</code> (tables <code>memories</code> and <code>memory_*</code>), so every host and session reads the same memories. Jeden resolves it through <code>stado database resolve jeden</code> and reads its address from Skarbiec as <code>jeden-database-client</code>; when that fails, <code>/memory stats</code> and <code>jeden doctor</code> report the failed step. Recall ranks with Postgres full-text search.",
-          "<code>/memory enqueue</code>, <code>/memory queue</code>, <code>/memory queue run</code>, <code>/memory queue drain</code>, and <code>/memory rebuild</code> expose durable worker and index maintenance; <code>/memory rebuild</code> reconstructs the memory index.",
+          "<code>/memory enqueue</code>, <code>/memory queue</code>, <code>/memory queue run LIMIT LEASE_MS</code>, <code>/memory queue drain LIMIT LEASE_MS</code>, and <code>/memory rebuild</code> expose durable worker and index maintenance; <code>/memory rebuild</code> reconstructs the memory index. <code>run</code> and <code>drain</code> process at most LIMIT jobs and claim each for LEASE_MS milliseconds, the time this worker holds a job before another worker may reclaim it; both are required positive integers with no default, and a missing or invalid one is refused by name. A failed job returns to the queue at once with its error and is claimable on the next pass; there is no attempt count or backoff. <code>/memory queue</code> lists every job.",
         ],
       },
       {

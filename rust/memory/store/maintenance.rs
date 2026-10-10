@@ -36,7 +36,7 @@ impl MemoryStore {
                 .await
                 .map_err(sql)
         })?;
-        let queue = self.queue_status(20)?;
+        let queue = self.queue_status()?;
         let embedding = embeddings::health(None)?;
         let healthy = queue.failed == 0;
         Ok(json!({
@@ -51,9 +51,6 @@ impl MemoryStore {
             "failedJobs": queue.failed,
             "queue": queue,
             "provenance": true,
-            "bounded": {
-                "attempts": MAX_ATTEMPTS,
-            },
         }))
     }
 }

@@ -2,7 +2,7 @@
 //! consumer through `memory_processed_events`.
 
 use super::store::entities::{outbox, processed_event};
-use super::worker::DEFAULT_LEASE_MS;
+use super::worker::lease_until;
 use super::{redacted, MemoryStore};
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Expr, LockBehavior, LockType, OnConflict};
@@ -68,8 +68,13 @@ impl MemoryStore {
         })
     }
 
-    pub fn consume_outbox_one(&self, consumer: &dyn OutboxConsumer) -> Result<bool, String> {
+    pub fn consume_outbox_one(
+        &self,
+        consumer: &dyn OutboxConsumer,
+        lease_ms: i64,
+    ) -> Result<bool, String> {
         let now = super::now_ms();
+        let until = lease_until(now, lease_ms)?;
         let name = consumer.name().to_owned();
         let owner = name.clone();
         // Ok(event) to deliver, or Err(outcome): false when nothing was
@@ -110,10 +115,7 @@ impl MemoryStore {
                 .col_expr(outbox::Column::State, Expr::value("processing"))
                 .col_expr(outbox::Column::Attempts, Expr::value(event.attempts + 1))
                 .col_expr(outbox::Column::LeaseOwner, Expr::value(owner))
-                .col_expr(
-                    outbox::Column::LeaseUntil,
-                    Expr::value(now + DEFAULT_LEASE_MS),
-                )
+                .col_expr(outbox::Column::LeaseUntil, Expr::value(until))
                 .exec(&tx)
                 .await
                 .map_err(sql)?;

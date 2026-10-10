@@ -19,7 +19,6 @@ pub use ranking::{
 };
 pub(crate) use schema::SCHEMA;
 pub use store::MemoryStore;
-pub use worker::MAX_ATTEMPTS;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]

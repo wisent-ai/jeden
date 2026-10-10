@@ -1,7 +1,6 @@
 use super::store::entities::job;
 use super::{
-    redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource,
-    MemoryStore,
+    redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource, MemoryStore,
 };
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Condition, Expr, Order, SimpleExpr};
@@ -11,28 +10,31 @@ use sea_orm::{
 };
 use serde_json::Value;
 
-pub(super) const DEFAULT_LEASE_MS: i64 = 30_000;
-pub const MAX_ATTEMPTS: i64 = 5;
+pub(super) fn lease_until(now: i64, lease_ms: i64) -> Result<i64, String> {
+    if !lease_ms.is_positive() {
+        return Err("memory leaseMs must be a positive whole number of milliseconds".into());
+    }
+    now.checked_add(lease_ms)
+        .ok_or_else(|| "memory leaseMs exceeds the persisted timestamp range".into())
+}
 
-/// Set `id`'s columns in `changes` when `id` is leased to `worker`;
-/// true when the row was this worker's to change.
+/// Change `id` only while this worker still holds an unexpired lease.
 async fn update_leased(
     db: &sea_orm::DatabaseConnection,
     id: String,
     worker: String,
     changes: Vec<(job::Column, SimpleExpr)>,
-    leased_only: bool,
+    now: i64,
 ) -> Result<bool, String> {
     let mut update = job::Entity::update_many();
     for (column, value) in changes {
         update = update.col_expr(column, value);
     }
-    let mut update = update
+    let update = update
         .filter(job::Column::Id.eq(id))
-        .filter(job::Column::LeaseOwner.eq(worker));
-    if leased_only {
-        update = update.filter(job::Column::State.eq("leased"));
-    }
+        .filter(job::Column::LeaseOwner.eq(worker))
+        .filter(job::Column::State.eq("leased"))
+        .filter(job::Column::LeaseUntil.gt(now));
     Ok(update.exec(db).await.map_err(sql)?.rows_affected == 1)
 }
 
@@ -64,8 +66,7 @@ impl MemoryStore {
         Ok(id)
     }
 
-    pub fn queue_status(&self, limit: usize) -> Result<MemoryQueueStatus, String> {
-        let limit = limit as u64;
+    pub fn queue_status(&self) -> Result<MemoryQueueStatus, String> {
         let (state_counts, rows) = run_db(move |db| async move {
             let counts = job::Entity::find()
                 .select_only()
@@ -87,7 +88,6 @@ impl MemoryStore {
                 )
                 .order_by_desc(job::Column::UpdatedAt)
                 .order_by_asc(job::Column::Id)
-                .limit(limit)
                 .all(&db)
                 .await
                 .map_err(sql)?;
@@ -124,21 +124,20 @@ impl MemoryStore {
         })
     }
 
-    pub fn claim(&self, worker: &str, lease_ms: Option<i64>) -> Result<Option<LeasedJob>, String> {
+    pub fn claim(&self, worker: &str, lease_ms: i64) -> Result<Option<LeasedJob>, String> {
         let now = super::now_ms();
-        let until = now + lease_ms.unwrap_or(DEFAULT_LEASE_MS).clamp(1_000, 300_000);
+        let until = lease_until(now, lease_ms)?;
         let worker = worker.to_owned();
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
             // SKIP LOCKED lets workers on other hosts claim other jobs at once.
             let Some(found) = job::Entity::find()
-                .filter(job::Column::Attempts.lt(MAX_ATTEMPTS))
                 .filter(job::Column::AvailableAt.lte(now))
                 .filter(
                     Condition::any().add(job::Column::State.eq("queued")).add(
                         Condition::all()
                             .add(job::Column::State.eq("leased"))
-                            .add(job::Column::LeaseUntil.lt(now)),
+                            .add(job::Column::LeaseUntil.lte(now)),
                     ),
                 )
                 .order_by_asc(job::Column::CreatedAt)
@@ -154,6 +153,15 @@ impl MemoryStore {
                 tx.commit().await.map_err(sql)?;
                 return Ok(None);
             };
+            let payload = serde_json::from_str(&found.payload_json).map_err(|error| {
+                format!(
+                    "memory job {} has invalid stored payload JSON: {error}",
+                    found.id
+                )
+            })?;
+            if found.attempts == i64::MAX {
+                return Err("memory job attempt count exceeds the persisted integer range".into());
+            }
             let attempts = found.attempts + 1;
             job::Entity::update_many()
                 .col_expr(job::Column::State, Expr::value("leased"))
@@ -168,7 +176,7 @@ impl MemoryStore {
                 .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
             Ok(Some(LeasedJob {
-                payload: serde_json::from_str(&found.payload_json).unwrap_or(Value::Null),
+                payload,
                 id: found.id,
                 kind: found.kind,
                 attempts,
@@ -179,7 +187,7 @@ impl MemoryStore {
 
     pub fn heartbeat(&self, id: &str, worker: &str, lease_ms: i64) -> Result<bool, String> {
         let now = super::now_ms();
-        let until = now + lease_ms.clamp(1_000, 300_000);
+        let until = lease_until(now, lease_ms)?;
         let (id, worker) = (id.to_owned(), worker.to_owned());
         run_db(move |db| async move {
             let changes = vec![
@@ -187,7 +195,7 @@ impl MemoryStore {
                 (job::Column::LeaseUntil, Expr::value(until)),
                 (job::Column::UpdatedAt, Expr::value(now)),
             ];
-            update_leased(&db, id, worker, changes, true).await
+            update_leased(&db, id, worker, changes, now).await
         })
     }
     pub fn complete(&self, id: &str, worker: &str) -> Result<bool, String> {
@@ -200,46 +208,30 @@ impl MemoryStore {
                 (job::Column::LeaseUntil, Expr::value(Option::<i64>::None)),
                 (job::Column::UpdatedAt, Expr::value(now)),
             ];
-            update_leased(&db, id, worker, changes, true).await
+            update_leased(&db, id, worker, changes, now).await
         })
     }
     pub fn retry(&self, id: &str, worker: &str, error: &str) -> Result<bool, String> {
         let now = super::now_ms();
-        let (id, worker, error) = (
-            id.to_owned(),
-            worker.to_owned(),
-            redacted(error),
-        );
+        let (id, worker, error) = (id.to_owned(), worker.to_owned(), redacted(error));
         run_db(move |db| async move {
-            let attempts = job::Entity::find_by_id(id.clone())
-                .one(&db)
-                .await
-                .map_err(sql)?
-                .map(|row| row.attempts)
-                .ok_or_else(|| format!("memory job {id} does not exist"))?;
-            let state = if attempts >= MAX_ATTEMPTS {
-                "failed"
-            } else {
-                "queued"
-            };
-            let delay = (1_i64 << attempts.min(8)) * 1_000;
             let changes = vec![
-                (job::Column::State, Expr::value(state)),
-                (job::Column::AvailableAt, Expr::value(now + delay)),
+                (job::Column::State, Expr::value("queued")),
+                (job::Column::AvailableAt, Expr::value(now)),
                 (job::Column::LeaseOwner, Expr::value(Option::<String>::None)),
                 (job::Column::LeaseUntil, Expr::value(Option::<i64>::None)),
                 (job::Column::LastError, Expr::value(error)),
                 (job::Column::UpdatedAt, Expr::value(now)),
             ];
-            update_leased(&db, id, worker, changes, false).await
+            update_leased(&db, id, worker, changes, now).await
         })
     }
 
-    pub fn process_one(&self, worker: &str) -> Result<bool, String> {
-        let Some(job) = self.claim(worker, None)? else {
+    pub fn process_one(&self, worker: &str, lease_ms: i64) -> Result<bool, String> {
+        let Some(job) = self.claim(worker, lease_ms)? else {
             return Ok(false);
         };
-        if !self.heartbeat(&job.id, worker, DEFAULT_LEASE_MS)? {
+        if !self.heartbeat(&job.id, worker, lease_ms)? {
             return Err("memory job lease was lost before processing".into());
         }
         let outcome = (|| -> Result<(), String> {
@@ -285,7 +277,11 @@ impl MemoryStore {
                 Ok(true)
             }
             Err(error) => {
-                self.retry(&job.id, worker, &error)?;
+                if !self.retry(&job.id, worker, &error)? {
+                    return Err(format!(
+                        "{error}; memory job lease was lost before recording failure"
+                    ));
+                }
                 Err(error)
             }
         }
