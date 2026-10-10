@@ -17,7 +17,11 @@ pub(crate) fn availability_word(available: bool) -> &'static str {
 pub(crate) fn render_text(advice: &Advice) -> String {
     let mut out = String::new();
     if advice.recommendations.is_empty() {
-        out.push_str("No context recommendation matched this query.\n");
+        if advice.sources.iter().all(|source| source.available) {
+            out.push_str("No context recommendation matched this query.\n");
+        } else {
+            out.push_str("No recommendations were returned; unavailable sources do not establish that no match exists.\n");
+        }
     }
     for (index, hit) in advice.recommendations.iter().enumerate() {
         out.push_str(&format!(
@@ -86,9 +90,15 @@ pub(crate) fn prompt_section(advice: &Advice, max_chars: Option<usize>) -> Optio
         }
     }
     if advice.recommendations.is_empty() {
-        out.push_str(
-            "No documentation, memory, transcript or ground-truth match was found for this task.\n",
-        );
+        if advice.sources.iter().all(|source| source.available) {
+            out.push_str(
+                "No documentation, memory, transcript or ground-truth match was found for this task.\n",
+            );
+        } else {
+            out.push_str(
+                "No recommendations were returned. Sources that could not answer must not be treated as having no matching material.\n",
+            );
+        }
     }
     Some(out)
 }

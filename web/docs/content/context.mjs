@@ -60,6 +60,7 @@ export const contextPages = [
         title: "Reading a short list",
         paragraphs: [
           "Every answer carries a state for every source it consulted: <code>available</code> or <code>unavailable</code>, the observed reason, how much was considered, how much was returned, and how long it took. A list that is short because a source refused therefore looks different from a list that is short because nothing matched.",
+          "When recommendations are empty and any source was unavailable, the terminal and prompt report that sources could not answer; they do not claim that no matching material exists. Only a completed search across available sources can establish an empty match list.",
           "The files source reads every root it is given to the end, so its count of files and chunks is the whole corpus under the declared roots and depths.",
           "<code>jeden context sources</code> asks the same question with no query: which roots exist and how many chunks they hold, how many active memories the store carries, which runtime partitions the archive holds, and whether the ground-truth endpoint answers its health route. A configured endpoint nobody serves reports the URL it could not reach, not silence.",
         ],
