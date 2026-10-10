@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -142,6 +142,37 @@ try {
     'resume reused the original startup snapshot instead of restoring instructions again');
   report.cases.push({ name: 'resume', verdict: 'passed', sessionPath: reopened.sessionPath,
     snapshotId: resumedSnapshot.id, previousStartupSnapshotId: startupSnapshot.id });
+  const retainedBefore = await rpc('session/completion/get', { sessionId: reopened.sessionId });
+  assert.ok(retainedBefore.completion.requests.length,
+    'the real session must hold requests whose ownership a refused handoff must preserve');
+  const sessionRoot = env.JEDEN_SESSION_ROOT;
+  const originalMode = statSync(sessionRoot).mode;
+  const unwritableMode = originalMode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH);
+  const probe = join(sessionRoot, `permission-probe-${randomUUID()}`);
+  let filesystemRefusal;
+  try {
+    chmodSync(sessionRoot, unwritableMode);
+    try { mkdirSync(probe); } catch (error) { filesystemRefusal = error; }
+    if (!filesystemRefusal) rmdirSync(probe);
+    assert.ok(filesystemRefusal?.errno,
+      'this host must enforce the actual directory write refusal before exercising handoff');
+    report.filesystemRefusal = { code: filesystemRefusal.code, errno: filesystemRefusal.errno,
+      message: filesystemRefusal.message, path: probe };
+    await assert.rejects(prompt(reopened, '/handoff Preserve all retained work and standing instructions.'),
+      (error) => error.message.includes('handoff could not prepare child session')
+        && error.message.includes(sessionRoot)
+        && error.message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`),
+      'handoff must report its actual child-creation path and operating-system cause');
+  } finally {
+    chmodSync(sessionRoot, originalMode);
+  }
+  const retainedAfter = await rpc('session/completion/get', { sessionId: reopened.sessionId });
+  for (const request of retainedBefore.completion.requests) {
+    assert.deepEqual(retainedAfter.completion.requests.find((candidate) => candidate.id === request.id), request,
+      'a refused child preparation must leave the active session owning every original request');
+  }
+  report.cases.push({ name: 'handoff-child-preparation-refusal', verdict: 'passed',
+    sessionPath: reopened.sessionPath, retainedBefore, retainedAfter });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
   const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;

@@ -195,14 +195,28 @@ impl Conversation {
         )?;
         let parent_session = self.recorder.path();
         let parent_entry = self.recorder.active_leaf()?;
-        self.recorder = SessionRecorder::child(&args.cwd, parent_session.clone(), parent_entry);
-        self.recorder.ensure()?;
-        crate::completion::inherit(&parent_session, &self.recorder.path())?;
-        self.reconcile_completion = true;
-        self.messages = vec![
+        let messages = vec![
             json!({ "role": "system", "content": system_prompt_checked(&args.cwd)? }),
             json!({ "role": "system", "content": format!("Handoff brief from the prior session:\n{}", brief) }),
         ];
+        let mut recorder = SessionRecorder::child(&args.cwd, parent_session.clone(), parent_entry);
+        let destination = recorder.path();
+        recorder.ensure().map_err(|reason| {
+            format!(
+                "handoff could not prepare child session {}: {reason}",
+                destination.display()
+            )
+        })?;
+        crate::completion::inherit(&parent_session, &destination).map_err(|reason| {
+            format!(
+                "handoff could not inherit retained work from {} into {}: {reason}",
+                parent_session.display(),
+                destination.display()
+            )
+        })?;
+        self.recorder = recorder;
+        self.reconcile_completion = true;
+        self.messages = messages;
         self.session_context_pending = Some("handoff");
         self.restore_session_context(args)?;
         self.recorder
