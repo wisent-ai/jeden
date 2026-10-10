@@ -49,10 +49,13 @@ try {
   assert.equal(succeeds(invoke('git', ['status', '--porcelain'], root, process.env)).trim(), '',
     'commit the candidate and tests before qualification');
   report.binaryVersion = succeeds(invoke(binary, ['--version'], root, process.env));
-  for (const [mode, expectedAction] of [
+  for (const [mode, expectedAction, failedOperation] of [
     ['intermediate', 'message'], ['final', 'final'], ['extension', 'final'],
     ['signal', 'final'], ['positive', 'final'],
-    ['recording', 'message'], ['recording', 'final'],
+    ['recording', 'message', 'recording stop-hook violation'],
+    ['recording', 'final', 'recording stop-hook violation'],
+    ['completion-state', 'message', 'reading completion state'],
+    ['completion-state', 'final', 'reading completion state'],
   ]) {
     const directory = join(output, `${mode}-${expectedAction}`);
     const workspace = join(directory, 'workspace');
@@ -85,8 +88,8 @@ try {
     } finally {
       const permissionReceipt = `${receipt}.recording.json`;
       if (existsSync(permissionReceipt)) {
-        const { transcript, mode: originalMode } = JSON.parse(readFileSync(permissionReceipt, 'utf8'));
-        chmodSync(transcript, originalMode);
+        const { path, mode: originalMode } = JSON.parse(readFileSync(permissionReceipt, 'utf8'));
+        chmodSync(path, originalMode);
       }
     }
     const inputs = readFileSync(receipt, 'utf8').split('\n').filter(Boolean).map(JSON.parse);
@@ -99,22 +102,22 @@ try {
     const actions = events.filter((event) => event.type === 'action').map((event) => event.data.action);
     assert.ok(actions.some((action) => action.action === expectedAction && action.text?.includes(rejected)),
       'a real action of the requested kind must have been produced');
-    if (mode === 'recording') {
+    if (failedOperation) {
       const failure = JSON.parse(readFileSync(`${receipt}.recording.json`, 'utf8'));
       const cause = JSON.parse(readFileSync(`${receipt}.cause.json`, 'utf8'));
       assert.ok(result.status !== null && result.status, 'failed refusal persistence must fail the turn');
       const visible = `${result.stdout}\n${result.stderr}`;
       assert.ok(visible.includes(failure.reason), 'the initiating Stop reason was lost');
-      assert.ok(visible.includes('recording stop-hook violation'), 'the failed operation was lost');
-      assert.ok(visible.includes(failure.transcript), 'the refused transcript path was lost');
-      assert.ok(Number.isInteger(cause.errno), 'the actual append refusal must expose an OS error');
+      assert.ok(visible.includes(failedOperation), 'the failed operation was lost');
+      assert.ok(visible.includes(failure.path), 'the refused file path was lost');
+      assert.ok(Number.isInteger(cause.errno), 'the actual filesystem refusal must expose an OS error');
       assert.ok(visible.includes(`os error ${Math.abs(cause.errno)}`), 'the actual OS cause was lost');
       assert.ok(!visible.includes(rejected), 'refused candidate text reached a CLI output channel');
-      assert.deepEqual(readFileSync(failure.transcript), readFileSync(`${receipt}.before`),
-        'failed refusal persistence must not change the ledger');
+      assert.deepEqual(readFileSync(failure.path), readFileSync(`${receipt}.before`),
+        'failed refusal handling must not change the affected file');
       assert.ok(!events.some((event) => (event.type === 'assistant_message' || event.type === 'final')
         && event.data.text.includes(rejected)), 'the refused candidate was published');
-      report.cases.push({ mode, expectedAction, session, failure, cause, verdict: 'passed' });
+      report.cases.push({ mode, expectedAction, failedOperation, session, failure, cause, verdict: 'passed' });
       continue;
     }
     succeeds(result);
