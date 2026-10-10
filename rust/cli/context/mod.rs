@@ -94,7 +94,12 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
     }
     let config = crate::load_config(&args.cwd);
     let settings = advisor::settings(&args.cwd, &config);
-    let block = advisor::advice_for_prompt(&args.cwd, &config, &options.query);
+    let block = advisor::advice_for_prompt(
+        &args.cwd,
+        &config,
+        &options.query,
+        crate::tool_runtime::runtime_ops::CancellationToken::new(),
+    );
     if args.json {
         return Ok(serde_json::to_string_pretty(&json!({
             "query": options.query,

@@ -107,9 +107,15 @@ impl Conversation {
             // never verified answers, and a source that cannot answer says so
             // in the same block rather than shortening it silently.
             if !continuing {
-                if let Some(advice) =
-                    crate::context::advisor::advice_for_prompt(&args.cwd, &config, task)
-                {
+                let cancellation = crate::tool_runtime::runtime_ops::CancellationToken::from_flag(
+                    hooks.cancel.clone(),
+                );
+                if let Some(advice) = crate::context::advisor::advice_for_prompt(
+                    &args.cwd,
+                    &config,
+                    task,
+                    cancellation,
+                ) {
                     effective_task.push_str("\n\n");
                     effective_task.push_str(advice.trim_end());
                 }

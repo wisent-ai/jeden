@@ -24,6 +24,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::cli::config::Config;
+use crate::tool_runtime::runtime_ops::CancellationToken;
 
 pub(crate) use render::{availability_word, probe_value, prompt_section, render_text};
 pub(crate) use settings::{parse_sources, settings, unknown_sources, Settings};
@@ -258,18 +259,24 @@ pub(crate) fn sources_report(
 /// What a turn injects for `task`, or `None` when the advisor is disabled,
 /// configured to no source, or has nothing to offer. Never fails a turn: a
 /// broken source becomes a reported unavailability, not an error.
-pub(crate) fn advice_for_prompt(cwd: &Path, config: &Config, task: &str) -> Option<String> {
+pub(crate) fn advice_for_prompt(
+    cwd: &Path,
+    config: &Config,
+    task: &str,
+    cancellation: CancellationToken,
+) -> Option<String> {
     let settings = settings(cwd, config);
     if !settings.enabled || settings.sources.is_empty() {
         return None;
     }
-    let request = match Request::new(task, None, &settings) {
+    let mut request = match Request::new(task, None, &settings) {
         Ok(request) => request,
         Err(refusal) => {
             eprintln!("jeden: no context recommendations are added: {refusal}");
             return None;
         }
     };
+    request.cancellation = cancellation;
     if request.query.is_empty() {
         return None;
     }
