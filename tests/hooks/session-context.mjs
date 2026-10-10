@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, renameSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
@@ -151,6 +151,7 @@ try {
   const unwritableMode = originalMode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH);
   const probe = join(sessionRoot, `permission-probe-${randomUUID()}`);
   let filesystemRefusal;
+  const sessionsBeforeRefusal = readdirSync(sessionRoot).sort();
   try {
     chmodSync(sessionRoot, unwritableMode);
     try { mkdirSync(probe); } catch (error) { filesystemRefusal = error; }
@@ -159,6 +160,21 @@ try {
       'this host must enforce the actual directory write refusal before exercising handoff');
     report.filesystemRefusal = { code: filesystemRefusal.code, errno: filesystemRefusal.errno,
       message: filesystemRefusal.message, path: probe };
+    const initializationRefusal = (message) => message.includes('cannot create ')
+      && message.includes(sessionRoot) && message.includes('/artifacts')
+      && message.includes(`os error ${Math.abs(filesystemRefusal.errno)}`);
+    await assert.rejects(rpc('session/new', { options }),
+      (error) => initializationRefusal(error.message));
+    const args = ['run', 'Read the standing instructions.', '--model-only', '--cwd', cwd, '--model', model];
+    const creation = spawnSync(binary, args, { cwd, env, encoding: 'utf8' });
+    report.commands.push({ program: binary, args, cwd, status: creation.status,
+      signal: creation.signal, stdout: creation.stdout, stderr: creation.stderr, error: creation.error?.message });
+    assert.ifError(creation.error);
+    assert.equal(creation.signal, null);
+    assert.ok(creation.status !== null && creation.status);
+    assert.ok(initializationRefusal(`${creation.stdout}\n${creation.stderr}`));
+    assert.deepEqual(readdirSync(sessionRoot).sort(), sessionsBeforeRefusal,
+      'CLI and RPC initialization refusals must not create a partial session');
     await assert.rejects(prompt(reopened, '/handoff Preserve all retained work and standing instructions.'),
       (error) => error.message.includes('handoff could not prepare child session')
         && error.message.includes(sessionRoot)

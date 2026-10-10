@@ -82,16 +82,19 @@ impl SessionRecorder {
         if self.ready {
             return Ok(());
         }
-        fs::create_dir_all(self.dir.join("artifacts")).map_err(|e| e.to_string())?;
+        let artifacts = self.dir.join("artifacts");
+        fs::create_dir_all(&artifacts)
+            .map_err(|error| format!("cannot create {}: {error}", artifacts.display()))?;
         let state_path = self.dir.join("state.json");
         if !state_path.exists() {
             self.write_state(now_stamp())?;
         }
+        let transcript = self.dir.join("transcript.jsonl");
         OpenOptions::new()
             .create(true)
             .append(true)
-            .open(self.dir.join("transcript.jsonl"))
-            .map_err(|e| e.to_string())?;
+            .open(&transcript)
+            .map_err(|error| format!("cannot open {} for append: {error}", transcript.display()))?;
         self.ready = true;
         if let Some((parent_session, parent_entry)) = self.lineage.clone() {
             self.record(
@@ -114,11 +117,11 @@ impl SessionRecorder {
                 "parentEntry": entry,
             })),
         });
-        fs::write(
-            self.dir.join("state.json"),
-            serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n",
-        )
-        .map_err(|e| e.to_string())
+        let path = self.dir.join("state.json");
+        let encoded = serde_json::to_string_pretty(&state)
+            .map_err(|error| format!("cannot encode {}: {error}", path.display()))?;
+        fs::write(&path, encoded + "\n")
+            .map_err(|error| format!("cannot write {}: {error}", path.display()))
     }
 
     pub(in crate::agent) fn record(&mut self, event_type: &str, data: Value) -> Result<(), String> {
