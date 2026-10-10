@@ -29,9 +29,10 @@ impl Conversation {
             self.recorder.record(
                 "auto_compaction_error",
                 json!({ "reason": reason, "error": error }),
-            )?;
-            hooks.note(&format!("auto-compaction failed: {error}"));
-            return Ok(false);
+            ).map_err(|record_error| {
+                format!("auto-compaction ({reason}) failed: {error}; recording the failure also failed: {record_error}")
+            })?;
+            return Err(format!("auto-compaction ({reason}) failed: {error}"));
         }
         if add_continue_prompt {
             let prompt = "Continue the interrupted turn from the compacted summary. Do not repeat completed work; take the next required action.";
