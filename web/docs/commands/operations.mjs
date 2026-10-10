@@ -99,6 +99,7 @@ export const operationCommands = [
     refusals: [
       "<code>status</code>, <code>install</code> and <code>uninstall</code> without a target are refused as <code>contracts install, uninstall and status require --file &lt;path&gt;</code>; <code>--file</code> without a path is refused as <code>--file requires a path</code>. Both exit 2. An existing file that cannot be read is refused as <code>cannot read &lt;path&gt;: …</code>.",
       "Unmatched, reversed or duplicate contract markers are refused with the target path before installation or removal writes anything; status reports the same malformed-marker cause rather than calling it absent. Replacement and removal preserve every byte outside the matched block, including surrounding spaces and newlines.",
+      "Repeating <code>--file</code> is a usage refusal before reading or writing either target; the last path is never silently preferred.",
       "An unknown action or option is refused with the usage line; a stale or absent block makes <code>status</code> exit 1 and name the install command.",
     ],
   },

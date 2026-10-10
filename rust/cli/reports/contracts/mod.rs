@@ -103,6 +103,11 @@ fn target(rest: &[String]) -> Result<PathBuf, String> {
     while let Some(token) = iter.next() {
         match token.as_str() {
             "--file" => {
+                if target.is_some() {
+                    return Err(crate::cli::invocation::refusal::usage(
+                        "contracts accepts exactly one --file target",
+                    ));
+                }
                 let path = iter.next().ok_or_else(|| {
                     crate::cli::invocation::refusal::usage("--file requires a path")
                 })?;
