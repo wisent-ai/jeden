@@ -138,9 +138,12 @@ try {
     SessionStart: [{ command: `exec ${quote(missing)}` }],
   } }));
   const refused = await rpc('session/new', { options });
-  await assert.rejects(prompt(refused, 'Read the standing instructions.'), (error) =>
+  const isRestorationFailure = (error) =>
     error.message.includes('SessionStart (startup)') && error.message.includes(missing)
-      && error.message.includes('exited'));
+      && error.message.includes('exited');
+  await assert.rejects(prompt(refused, 'Read the standing instructions.'), isRestorationFailure);
+  await assert.rejects(prompt(refused, 'Continue after the failed instruction restoration.'), isRestorationFailure,
+    'a failed restoration must remain pending on the next request');
   const failureEvents = exported(refused.sessionPath, 'refusal');
   assert.ok(!failureEvents.some((event) => event.type === 'action'),
     'a model action must not execute after the context hook fails');
