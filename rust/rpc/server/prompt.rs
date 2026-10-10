@@ -15,7 +15,10 @@ pub(super) fn handle_prompt(state: Arc<ServerState>, request: WireRequest) -> Re
     if let Err(error) = handle_prompt_inner(&state, request) {
         state
             .writer
-            .send(&error_response(id, "prompt_failed", &error))?;
+            .send(&error_response(id, "prompt_failed", &error))
+            .map_err(|delivery| {
+                format!("{error}; returning the RPC failure response also failed: {delivery}")
+            })?;
     }
     Ok(())
 }
