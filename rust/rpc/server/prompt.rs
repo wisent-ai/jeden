@@ -117,6 +117,9 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         )),
         Err(error) => state
             .writer
-            .send(&error_response(id, "prompt_failed", &error)),
+            .send(&error_response(id, "prompt_failed", &error))
+            .map_err(|delivery| {
+                format!("{error}; sending the prompt failure response failed: {delivery}")
+            }),
     }
 }
