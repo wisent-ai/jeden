@@ -168,7 +168,10 @@ where
                 let _in_flight = in_flight;
                 handle_prompt(worker_state, request)
             }));
-        } else if matches!(request.method.as_str(), "context/recommend" | "context/sources") {
+        } else if matches!(
+            request.method.as_str(),
+            "context/recommend" | "context/sources"
+        ) {
             let worker_state = state.clone();
             let in_flight = activity.begin();
             workers.push(thread::spawn(move || {
@@ -227,9 +230,15 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
             .params
             .get("limits")
             .cloned()
-            .ok_or_else(|| ("invalid_params", "config/task-limits/set requires limits".to_string()))
+            .ok_or_else(|| {
+                (
+                    "invalid_params",
+                    "config/task-limits/set requires limits".to_string(),
+                )
+            })
             .and_then(|limits| {
-                crate::task_runtime::set_limits(limits).map_err(|error| ("invalid_params", error.to_string()))
+                crate::task_runtime::set_limits(limits)
+                    .map_err(|error| ("invalid_params", error.to_string()))
             }),
         "context/recommend" => context::recommend(&request.params),
         "context/sources" => context::sources(&request.params),

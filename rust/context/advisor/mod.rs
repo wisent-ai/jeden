@@ -109,8 +109,7 @@ pub(crate) struct SourceOutcome {
     pub(crate) status: SourceStatus,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub(crate) struct Advice {
     pub(crate) query: String,
     pub(crate) limit: usize,
@@ -119,11 +118,8 @@ pub(crate) struct Advice {
 }
 
 impl Advice {
-    pub(crate) fn unavailable_sources(&self) -> Vec<&SourceStatus> {
-        self.sources
-            .iter()
-            .filter(|status| !status.available)
-            .collect()
+    pub(crate) fn unavailable_sources(&self) -> impl Iterator<Item = &SourceStatus> {
+        self.sources.iter().filter(|status| !status.available)
     }
 }
 
@@ -137,7 +133,11 @@ impl Request {
     /// A request for `query`, answering the `stated` number of
     /// recommendations or, unstated, the declared `context.advisor.limit`;
     /// refused by name when neither is given.
-    pub(crate) fn new(query: &str, stated: Option<usize>, settings: &Settings) -> Result<Self, String> {
+    pub(crate) fn new(
+        query: &str,
+        stated: Option<usize>,
+        settings: &Settings,
+    ) -> Result<Self, String> {
         let limit = stated.or(settings.limit).ok_or(
             "a context recommendation needs a limit: state how many recommendations, or declare context.advisor.limit",
         )?;
@@ -172,7 +172,6 @@ pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advic
         sources: statuses,
     }
 }
-
 
 /// Round-robin across sources in `SOURCES` order. Scores are comparable
 /// inside one source and not across them, so a global sort would let a

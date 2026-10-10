@@ -32,7 +32,10 @@ pub(super) fn recommend(params: &Value) -> Result<Value, (&'static str, String)>
     let cwd = cwd(params);
     let config = crate::load_config(&cwd);
     let settings = advisor::settings(&cwd, &config);
-    let stated = params.get("limit").and_then(Value::as_u64).map(|limit| limit as usize);
+    let stated = params
+        .get("limit")
+        .and_then(Value::as_u64)
+        .map(|limit| limit as usize);
     let mut request =
         advisor::Request::new(query, stated, &settings).map_err(|refusal| (INVALID, refusal))?;
     if let Some(declared) = params.get("sources").and_then(Value::as_str) {

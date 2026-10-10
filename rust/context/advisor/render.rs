@@ -2,6 +2,8 @@
 //! person reads, the prompt block a model receives, and the probe object a
 //! GUI or script consumes.
 
+mod response;
+
 use serde_json::{Map, Value};
 
 use super::{Advice, SourceStatus};
@@ -60,7 +62,7 @@ pub(crate) fn prompt_section(advice: &Advice, max_chars: Option<usize>) -> Optio
     let fits = |out: &str, more: &str| {
         max_chars.is_none_or(|budget| out.chars().count() + more.chars().count() <= budget)
     };
-    if advice.recommendations.is_empty() && advice.unavailable_sources().is_empty() {
+    if advice.recommendations.is_empty() && advice.unavailable_sources().next().is_none() {
         return None;
     }
     let mut out = String::from(
@@ -79,8 +81,8 @@ pub(crate) fn prompt_section(advice: &Advice, max_chars: Option<usize>) -> Optio
         }
         out.push_str(&line);
     }
-    let missing = advice.unavailable_sources();
-    if !missing.is_empty() {
+    let mut missing = advice.unavailable_sources().peekable();
+    if missing.peek().is_some() {
         let mut note = String::from("Sources that answered nothing:\n");
         for status in missing {
             note.push_str(&format!("- {}: {}\n", status.source, status.detail));

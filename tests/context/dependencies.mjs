@@ -92,6 +92,8 @@ try {
     assert.ok(match?.locator.startsWith(`${fixture}:`), JSON.stringify(advice));
     assert.equal(match.snippet, fixtureText);
     assert.deepEqual(advice.recommendations.filter(hit => hit.source === 'memory'), expectedMemory);
+    assert.equal(advice.unanswered.some(source => source.source === 'memory'), false,
+      'a successful empty memory search must not be reported as unanswered');
     assert.equal(statuses.transcripts.available, true, statuses.transcripts.detail);
     assert.equal(typeof statuses['ground-truth'].available, 'boolean');
     assert.match(result.stderr, /czekam: .*rodzaj: baza;/, 'the database operation must identify its wait');
