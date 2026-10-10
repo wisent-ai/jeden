@@ -181,11 +181,22 @@ where
             let in_flight = activity.begin();
             workers.push(thread::spawn(move || {
                 let _in_flight = in_flight;
-                let _context_request = context_request;
-                match handle_request(&worker_state, request) {
-                    Ok(()) => Ok(()),
-                    Err(error) => worker_state.writer.send(&error),
-                }
+                let result = match request.method.as_str() {
+                    "context/recommend" => context::recommend(&worker_state, &request),
+                    "context/sources" => context::sources(&worker_state, &request),
+                    other => Err((
+                        "method_not_found",
+                        format!("unknown context method: {other}"),
+                    )),
+                };
+                let response = match result {
+                    Ok(value) => success_response(request.id, value),
+                    Err((code, detail)) => error_response(request.id, code, &detail),
+                };
+                // A client that has received the terminal response must be
+                // able to reuse the id without racing this worker's teardown.
+                drop(context_request);
+                worker_state.writer.send(&response)
             }));
         } else if let Err(error) = handle_request(&state, request) {
             writer.send(&error)?;
@@ -247,8 +258,6 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
                 crate::task_runtime::set_limits(limits)
                     .map_err(|error| ("invalid_params", error.to_string()))
             }),
-        "context/recommend" => context::recommend(state, &request),
-        "context/sources" => context::sources(state, &request),
         "context/cancel" => context::cancel(state, &request.params),
         "workspace/status" => workspace_status(),
         "workspace/discover" => workspace_discover(&request.params),
