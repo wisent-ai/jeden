@@ -232,11 +232,20 @@ impl AgentSession {
             })),
         };
         let result = commands::run(conversation, &args, &request.prompt, continuing, &mut hooks);
-        *self
-            .inner
-            .session_path
-            .write()
-            .map_err(|_| "session path lock poisoned")? = conversation.session_path();
+        let result = match self.inner.session_path.write() {
+            Ok(mut path) => {
+                *path = conversation.session_path();
+                result
+            }
+            Err(error) => {
+                let cause =
+                    format!("cannot retain session path after request {request_id}: {error}");
+                Err(match result {
+                    Ok(_) => cause,
+                    Err(initiating) => format!("{initiating}; {cause}"),
+                })
+            }
+        };
         let text = result?;
         // The filter holds the last unterminated line back until it knows the
         // line is not a fence; the turn is over, so let it out.
