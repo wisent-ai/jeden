@@ -69,7 +69,7 @@ impl Conversation {
             Some(max) => Box::new(u32::from(true)..=max),
             None => Box::new(u32::from(true)..),
         };
-        let mut repairs = u32::default();
+        let mut repairs = answer::AnswerRepairs::new();
         // A `Stop` hook reads the finished answer and may refuse it. Streaming
         // the text first showed the operator an answer the hook then refused,
         // so the turn looked ended while the work went on; with a `Stop` hook
@@ -134,17 +134,15 @@ impl Conversation {
             let action = match action_or_text(&content, self.inspection) {
                 Ok(action) => action,
                 Err(refusal) => {
-                    // The answer is not an action this run can execute. Keep it
-                    // in the history so the model reads what it sent, ask once
-                    // for a whole answer, and end the turn only after that.
+                    // Retain the exact response for both the correction prompt
+                    // and repeated-failure detection.
                     self.messages
                         .push(json!({ "role": "assistant", "content": content.clone() }));
                     let Some(refusal) = self.repair_unusable_answer(
                         args,
                         step,
                         &refusal,
-                        false,
-                        Some(content.len()),
+                        answer::AnswerFailure::Malformed(&content),
                         &mut repairs,
                         hooks,
                     )?

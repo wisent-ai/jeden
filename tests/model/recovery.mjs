@@ -67,7 +67,12 @@ try {
     const result = invoke(binary, ['run', prompt, '--cwd', workspace,
       '--model', scenario.model, '--model-only', '--json'], workspace, env);
     const paths = transcripts(home);
-    const events = paths.flatMap((path) => readFileSync(path, 'utf8').split('\n').filter(Boolean).map(JSON.parse));
+    const events = paths.flatMap((path) => {
+      const exported = invoke(binary, ['export', dirname(path)], workspace, env);
+      assert.ok(exported.status !== null && !exported.status, exported.stderr);
+      writeFileSync(join(dirname(path), 'qualification-export.json'), exported.stdout);
+      return JSON.parse(exported.stdout).events;
+    });
     const changes = events.filter((event) => event.type === 'model_route_result'
       && event.data?.result?.reason === 'context promotion').map((event) => event.data.result.to);
     assert.deepEqual(changes, promotions, 'every declared promotion must really be consumed, in order');

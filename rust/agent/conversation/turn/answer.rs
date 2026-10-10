@@ -1,14 +1,16 @@
-//! What a turn does with an answer: accept a proposed final only after its
-//! delivery report and the independent acceptance check, and ask once for a
-//! whole answer when the one that arrived is not usable.
+//! Accept proposed final answers after delivery and acceptance checks; correct
+//! unusable answers while they change, and retain the cause when they repeat.
 
 use super::super::*;
 use super::prompt::Prepared;
+use sha2::{Digest, Sha256};
 
-/// Corrections one turn asks for when an answer never arrives usable: one,
-/// then the turn ends. A correction, never a retry loop - the same bound the
-/// completion stages hold for a refused inspection answer.
-pub(super) const ANSWER_REPAIRS: u32 = 1;
+pub(super) type AnswerRepairs = std::collections::BTreeSet<sha2::digest::Output<Sha256>>;
+
+pub(super) enum AnswerFailure<'a> {
+    Malformed(&'a str),
+    CutOff(&'a str),
+}
 
 /// The rule name every unusable-answer correction is recorded under, beside
 /// the delivery-report rule of the same event.
@@ -55,11 +57,8 @@ fn answer_refusal(refusal: &str, cut_off: bool, max_tokens: Option<u32>) -> Stri
 }
 
 impl Conversation {
-    /// One bounded correction for an answer that never arrived usable.
-    ///
-    /// The model receives the exact refusal once inside the same turn.
-    /// Exhausting the correction budget ends the turn with the cause while
-    /// leaving the retained assignment open.
+    /// Corrections continue for distinct observed failures, within the caller's
+    /// step limit. A repeated failure ends the turn with its recorded cause.
     ///
     /// `Ok(None)` means a correction was asked for and the turn continues;
     /// `Ok(Some(refusal))` is the sentence the turn must end with.
@@ -69,12 +68,19 @@ impl Conversation {
         args: &Args,
         step: u32,
         refusal: &str,
-        cut_off: bool,
-        answer_bytes: Option<usize>,
-        repairs: &mut u32,
+        failure: AnswerFailure<'_>,
+        repairs: &mut AnswerRepairs,
         hooks: &RunHooks<'_>,
     ) -> Result<Option<String>, String> {
-        let repairable = *repairs < ANSWER_REPAIRS && args.max_steps.is_none_or(|max| step < max);
+        let (cut_off, observed, answer_bytes) = match failure {
+            AnswerFailure::Malformed(answer) => (false, answer, Some(answer.len())),
+            AnswerFailure::CutOff(cause) => (true, cause, None),
+        };
+        let mut identity = Sha256::new();
+        identity.update([u8::from(cut_off)]);
+        identity.update(observed.as_bytes());
+        let repeated = !repairs.insert(identity.finalize());
+        let repairable = !repeated && args.max_steps.is_none_or(|max| step < max);
         // Only the provider knows whether it stopped for length
         // (`StreamErrorClass::Incomplete`); an answer it finished normally
         // with brackets open is malformed, not cut.
@@ -88,16 +94,19 @@ impl Conversation {
                 "message": refusal,
                 "answerBytes": answer_bytes,
                 "cutOff": cut_off,
+                "repeatedFailure": repeated,
                 "prompt": repairable.then(|| instruction.clone()),
             }),
         )?;
         if !repairable {
-            let refusal = answer_refusal(refusal, cut_off, args.max_tokens);
+            let mut refusal = answer_refusal(refusal, cut_off, args.max_tokens);
+            if repeated {
+                refusal.push_str("; the same failure recurred after correction");
+            }
             self.recorder
                 .record("run_error", json!({ "message": &refusal }))?;
             return Ok(Some(refusal));
         }
-        *repairs += u32::from(true);
         hooks.note("model answer was not usable; asking for the complete answer");
         self.messages
             .push(json!({ "role": "user", "content": instruction }));

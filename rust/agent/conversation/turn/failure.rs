@@ -1,6 +1,6 @@
 //! What a turn does when the model call itself fails: promote the route out of
 //! a context overflow, recover a cut-off answer from a compacted history, or
-//! ask once for an answer that fits. `Ok(())` means the turn continues.
+//! ask for an answer that fits. `Ok(())` means the turn continues.
 
 use super::super::*;
 
@@ -12,7 +12,7 @@ impl Conversation {
         step: u32,
         failure: crate::model_router::StreamFailure,
         prepared: &mut super::prompt::Prepared,
-        repairs: &mut u32,
+        repairs: &mut super::answer::AnswerRepairs,
         hooks: &mut RunHooks,
     ) -> Result<(), String> {
         let router = &mut prepared.router;
@@ -89,17 +89,18 @@ impl Conversation {
                 }
             }
         }
-        // A first answer cut off by the output budget has no history to
-        // compact, and it used to end the turn - and with it a whole retained
-        // assignment - on the gateway's own `model response incomplete:
-        // length`. The budget is a bound on one answer, not on the work, so
-        // the model is asked once for an answer that fits.
+        // A cut-off first response has no history to compact. Its observed
+        // provider failure participates in repeated-failure detection.
         if cut_off && !failure.visible_output {
-            // The budget itself is named once, where every unusable answer is
-            // refused, so a caller never reads it twice.
             let refusal = format!("model answer was cut off before it was complete ({error})");
-            let Some(refusal) =
-                self.repair_unusable_answer(args, step, &refusal, true, None, repairs, hooks)?
+            let Some(refusal) = self.repair_unusable_answer(
+                args,
+                step,
+                &refusal,
+                super::answer::AnswerFailure::CutOff(&error),
+                repairs,
+                hooks,
+            )?
             else {
                 return Ok(());
             };
