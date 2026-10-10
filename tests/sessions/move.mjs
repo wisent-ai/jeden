@@ -32,6 +32,9 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   assert.deepEqual(context(exported(session.sessionPath, 'move-refused')), originalContext,
     'a refused move must preserve the model-visible context');
   assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(originalState).cwd);
+  await prompt(session, '/move .');
+  assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(originalState).cwd,
+    'a refused move must preserve the active directory used by the next relative move');
   report.cases.push({ name: 'move-state-refusal', verdict: 'passed', statePath, destination });
 
   const mode = statSync(session.sessionPath).mode;
@@ -58,6 +61,9 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   }
   await prompt(session, '/checkpoint after-staging-refusal');
   assert.deepEqual(context(exported(session.sessionPath, 'move-staging-refused')), originalContext);
+  await prompt(session, '/move .');
+  assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(beforeStaging).cwd,
+    'staging refusal must preserve the active directory used by the next relative move');
   report.cases.push({ name: 'move-staging-refusal', verdict: 'passed', statePath,
     cause: refusal.message, errno: refusal.errno });
 
@@ -84,6 +90,9 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   await prompt(session, '/checkpoint after-state-read-refusal');
   assert.deepEqual(context(exported(session.sessionPath, 'move-state-read-refused')), originalContext,
     'state read refusal must preserve the live model context');
+  await prompt(session, '/move .');
+  assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(beforeRead).cwd,
+    'state read refusal must preserve the active directory used by the next relative move');
   report.cases.push({ name: 'move-state-read-refusal', verdict: 'passed', statePath,
     cause: readRefusal.message, errno: readRefusal.errno });
 
@@ -106,6 +115,9 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
     assert.deepEqual(context(exported(session.sessionPath, scenario.name)), originalContext,
       'state decoding refusals must preserve the live model context');
     assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(retainedState).cwd);
+    await prompt(session, '/move .');
+    assert.equal(JSON.parse(readFileSync(statePath)).cwd, JSON.parse(retainedState).cwd,
+      'state decoding refusal must preserve the active directory used by the next relative move');
     report.cases.push({ name: scenario.name, verdict: 'passed', statePath,
       cause: scenario.cause, destination });
   }
