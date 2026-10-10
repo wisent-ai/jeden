@@ -67,6 +67,22 @@ impl Conversation {
         Ok(())
     }
 
+    pub(crate) fn move_to(&mut self, target: &str) -> Result<PathBuf, String> {
+        let target = target.trim();
+        if target.is_empty() {
+            return Err("Usage: /move <directory>".into());
+        }
+        let candidate = self.cwd().join(target);
+        let resolved = candidate
+            .canonicalize()
+            .map_err(|error| format!("cannot move to {}: {error}", candidate.display()))?;
+        if !resolved.is_dir() {
+            return Err(format!("not a directory: {}", resolved.display()));
+        }
+        self.rebase(&resolved)?;
+        Ok(resolved)
+    }
+
     /// Refresh the system prompt for a new working directory (keeps live turns)
     /// so tools/commands visible from the new cwd are reflected — backs /move.
     pub(crate) fn rebase(&mut self, cwd: &Path) -> Result<(), String> {

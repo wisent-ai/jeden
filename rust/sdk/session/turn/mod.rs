@@ -58,6 +58,7 @@ impl AgentSession {
         let conversation = conversation_guard.as_mut().ok_or("session disposed")?;
         let args = args_from_options(
             &self.inner.options,
+            conversation.cwd(),
             request.prompt.clone(),
             request.goal.clone(),
         );

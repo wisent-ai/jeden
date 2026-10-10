@@ -306,6 +306,10 @@ impl SessionRecorder {
         self.dir.join("artifacts")
     }
 
+    pub(in crate::agent) fn cwd(&self) -> &Path {
+        &self.cwd
+    }
+
     pub(in crate::agent) fn path(&self) -> PathBuf {
         self.dir.clone()
     }

@@ -9,12 +9,13 @@ use crate::Args;
 
 pub(super) fn args_from_options(
     options: &SessionOptions,
+    cwd: &std::path::Path,
     prompt: String,
     goal: Option<String>,
 ) -> Args {
     Args {
         command: "run".into(),
-        cwd: options.cwd.clone(),
+        cwd: cwd.to_path_buf(),
         cwd_explicit: true,
         model: options.model.clone(),
         max_tokens: options.max_tokens,

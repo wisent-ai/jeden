@@ -98,6 +98,10 @@ impl Conversation {
         self.recorder.path()
     }
 
+    pub(crate) fn cwd(&self) -> &Path {
+        self.recorder.cwd()
+    }
+
     /// Restore lifecycle context in the shared model window for every client.
     /// Leave the transition pending on failure so a later turn cannot skip it.
     pub(super) fn restore_session_context(&mut self, args: &Args) -> Result<(), String> {
@@ -108,23 +112,36 @@ impl Conversation {
             return Ok(());
         };
         let session = self.recorder.path();
-        let session_id = session.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
-            format!("SessionStart cannot identify session directory {}", session.display())
-        })?;
+        let session_id = session
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| {
+                format!(
+                    "SessionStart cannot identify session directory {}",
+                    session.display()
+                )
+            })?;
         let context = crate::hooks::session_start(
             &args.cwd,
             args.allow_command,
             source,
             session_id,
             &session.join("transcript.jsonl"),
-        ).map_err(|reason| format!("SessionStart ({source}) for {session_id}: {reason}"))?;
+        )
+        .map_err(|reason| format!("SessionStart ({source}) for {session_id}: {reason}"))?;
         let before = self.messages.len();
         if !context.trim().is_empty() {
-            self.messages.push(json!({ "role": "system", "content": context }));
+            self.messages
+                .push(json!({ "role": "system", "content": context }));
         }
-        if let Err(reason) = self.recorder.record_context("session_start", &self.messages) {
+        if let Err(reason) = self
+            .recorder
+            .record_context("session_start", &self.messages)
+        {
             self.messages.truncate(before);
-            return Err(format!("SessionStart ({source}) context persistence: {reason}"));
+            return Err(format!(
+                "SessionStart ({source}) context persistence: {reason}"
+            ));
         }
         self.session_context_pending = None;
         Ok(())
@@ -185,7 +202,9 @@ impl Conversation {
         ];
         let values = names.map(env_usize);
         match values {
-            [Some(protect), Some(min_savings), Some(min_tool)] => Ok(Some((protect, min_savings, min_tool))),
+            [Some(protect), Some(min_savings), Some(min_tool)] => {
+                Ok(Some((protect, min_savings, min_tool)))
+            }
             [None, None, None] => Ok(None),
             _ => {
                 let missing: Vec<&str> = names
@@ -215,7 +234,8 @@ impl Conversation {
         if self.approx_tokens() < threshold {
             return Ok(());
         }
-        let Some((protect_tokens, min_savings, min_tool_tokens)) = Self::tool_prune_bounds()? else {
+        let Some((protect_tokens, min_savings, min_tool_tokens)) = Self::tool_prune_bounds()?
+        else {
             return Ok(());
         };
         let mut protected_tokens = 0usize;

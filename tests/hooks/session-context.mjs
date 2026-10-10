@@ -9,6 +9,7 @@ import { chmodSync, closeSync, constants, mkdirSync, mkdtempSync, openSync, read
 import { dirname, join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
+import { exerciseMove } from '../sessions/move.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -241,6 +242,7 @@ try {
   assert.equal(hash(transcript), beforeTranscript, 'a refused checkpoint must leave the durable transcript unchanged');
   report.cases.push({ name: 'checkpoint-append-refusal', verdict: 'passed', transcript,
     cause: appendRefusal.message, errno: appendRefusal.errno });
+  await exerciseMove({ rpc, prompt, options, output, exported, report });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
   const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;

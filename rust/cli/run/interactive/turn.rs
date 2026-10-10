@@ -249,26 +249,7 @@ pub(super) fn run_turn(
                 ))
             }
             "/move" => {
-                let target = rest.trim();
-                if target.is_empty() {
-                    return Err("Usage: /move <directory>".into());
-                }
-                let base = handler_cwd.lock().clone();
-                let candidate = {
-                    let p = std::path::Path::new(target);
-                    if p.is_absolute() {
-                        p.to_path_buf()
-                    } else {
-                        base.join(p)
-                    }
-                };
-                let resolved = candidate
-                    .canonicalize()
-                    .map_err(|e| format!("cannot move to {}: {}", candidate.display(), e))?;
-                if !resolved.is_dir() {
-                    return Err(format!("not a directory: {}", resolved.display()));
-                }
-                handler_conv.lock().rebase(&resolved)?;
+                let resolved = handler_conv.lock().move_to(rest)?;
                 *handler_cwd.lock() = resolved.clone();
                 Ok(format!("Working directory moved to {}. Tools, git status, and file commands now resolve there.", resolved.display()))
             }

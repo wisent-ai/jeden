@@ -24,6 +24,10 @@ pub(super) fn run(
     match command {
         "/compact" => conversation.compact(args, rest, hooks),
         "/handoff" => conversation.handoff(args, rest, hooks),
+        "/move" => {
+            let resolved = conversation.move_to(rest)?;
+            Ok(format!("Working directory moved to {}. Tools, git status, and file commands now resolve there.", resolved.display()))
+        }
         "/checkpoint" if rest.trim() == "list" => conversation.list_checkpoints(),
         "/checkpoint" => conversation.checkpoint(rest),
         "/rewind" => conversation.rewind(rest),
