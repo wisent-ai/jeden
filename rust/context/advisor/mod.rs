@@ -239,9 +239,9 @@ pub(crate) fn sources_report(
             }
             match *source {
                 "files" => files::probe(&settings, cancellation),
-                "ground-truth" => ground_truth::probe(&settings),
+                "ground-truth" => ground_truth::probe(&settings, cancellation),
                 "memory" => crate::fleet::with_cancellation(cancellation, memory::probe),
-                "transcripts" => transcripts::probe(&settings),
+                "transcripts" => transcripts::probe(&settings, cancellation),
                 other => probe_value(
                     &SourceStatus::unavailable(other, "no such source", started),
                     Vec::new(),

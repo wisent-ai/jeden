@@ -59,6 +59,33 @@ impl CancellationToken {
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
+
+    /// Keep Stado's owned waits linked to this caller for the returned scope.
+    pub(crate) fn for_stado(&self) -> Arc<StadoCancellation> {
+        let scope = Arc::new(StadoCancellation {
+            caller: self.clone(),
+            event: stado_wait::Cancellation::new(),
+        });
+        let weak = Arc::downgrade(&scope);
+        wake_on_cancellation(move || {
+            let Some(scope) = weak.upgrade() else {
+                return false;
+            };
+            if scope.caller.is_cancelled() {
+                scope.event.cancel();
+            }
+            true
+        });
+        if self.is_cancelled() {
+            scope.event.cancel();
+        }
+        scope
+    }
+}
+
+pub(crate) struct StadoCancellation {
+    pub(crate) caller: CancellationToken,
+    pub(crate) event: stado_wait::Cancellation,
 }
 
 #[derive(Clone, Debug)]

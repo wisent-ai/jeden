@@ -53,11 +53,17 @@ fn failed(step: &str, detail: impl std::fmt::Display) -> String {
 fn open() -> Result<Client, String> {
     let database = stado_database::FleetDatabase::for_product("jeden", STADO_HOME_VARIABLE)
         .map_err(|error| error.to_string())?;
-    let client = Client::connect(&database).map_err(|error| error.to_string())?;
-    client
-        .run(|db| async move { migration::Migrator::up(&db, None).await })
-        .map_err(|error| failed("creating Jeden's tables", error))?
-        .map_err(|error| failed("creating Jeden's tables", error))?;
+    let cancellation = cancellation::database();
+    let client = match cancellation.as_ref() {
+        Some(cancellation) => Client::connect_cancellable(&database, cancellation),
+        None => Client::connect(&database),
+    }
+    .map_err(|error| error.to_string())?;
+    run_on_client(&client, |db| async move {
+        migration::Migrator::up(&db, None).await
+    })
+    .map_err(|error| failed("creating Jeden's tables", error))?
+    .map_err(|error| failed("creating Jeden's tables", error))?;
     Ok(client)
 }
 
@@ -115,9 +121,21 @@ where
 {
     let client = client()?;
     cancellation::check()?;
-    client
-        .run(work)
-        .map_err(|error| failed("running an operation", error))?
+    run_on_client(&client, work).map_err(|error| failed("running an operation", error))?
+}
+
+fn run_on_client<T, F>(
+    client: &Client,
+    work: impl FnOnce(DatabaseConnection) -> F,
+) -> stado_database::sync::Result<T>
+where
+    T: Send + 'static,
+    F: Future<Output = T> + Send + 'static,
+{
+    match cancellation::database() {
+        Some(cancellation) => client.run_cancellable(&cancellation, work),
+        None => client.run(work),
+    }
 }
 
 /// A database error as the text Jeden's surfaces show.

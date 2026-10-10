@@ -26,7 +26,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
         .arg("--limit")
         .arg(request.limit.to_string())
         .arg("--json");
-    let text = match command_output(command) {
+    let text = match command_output(command, &request.cancellation) {
         Ok(text) => text,
         Err(error) => {
             return SourceOutcome {
@@ -102,11 +102,14 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
 }
 
 /// The archive's own state: which runtimes it holds and how much of each.
-pub(crate) fn probe(settings: &Settings) -> Value {
+pub(crate) fn probe(
+    settings: &Settings,
+    cancellation: &crate::tool_runtime::runtime_ops::CancellationToken,
+) -> Value {
     let started = Instant::now();
     let mut command = Command::new(&settings.transcript_lake_bin);
     command.arg("status").arg("--json");
-    let status = match command_output(command) {
+    let status = match command_output(command, cancellation) {
         Ok(text) => match json_tail(&text) {
             Some(document) => {
                 let partitions = document

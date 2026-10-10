@@ -10,6 +10,28 @@
 
 use std::num::NonZeroUsize;
 use std::process::{Command, Stdio};
+use std::sync::{Arc, Mutex};
+
+use crate::tool_runtime::runtime_ops::CancellationToken;
+
+static PROCESS_RUNTIME: Mutex<Option<Arc<tokio::runtime::Runtime>>> = Mutex::new(None);
+
+pub(crate) fn process_runtime() -> Result<Arc<tokio::runtime::Runtime>, String> {
+    let mut slot = PROCESS_RUNTIME
+        .lock()
+        .map_err(|error| format!("context process runtime lock failed: {error}"))?;
+    if let Some(runtime) = &*slot {
+        return Ok(Arc::clone(runtime));
+    }
+    let runtime = Arc::new(
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("context process runtime creation failed: {error}"))?,
+    );
+    *slot = Some(Arc::clone(&runtime));
+    Ok(runtime)
+}
 
 /// Searchable words of a query: lowercase, in first occurrence order. Which
 /// of them carry information is measured against the corpus, not decided by
@@ -72,19 +94,29 @@ pub(crate) fn matched_terms(haystack: &str, terms: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Run `command` to completion and return its stdout.
-///
-/// Nothing here cuts the work short. A search that takes ten seconds takes
-/// ten seconds and answers; a guessed interval would have reported nothing
-/// and told the reader nothing about why. The shared wait diagnostic names
-/// the child before waiting; a failure retains all of its stderr, including
-/// the cause after progress messages.
-pub(crate) fn command_output(mut command: Command) -> Result<String, String> {
+/// Run the declared command with its original environment and directory.
+/// Caller cancellation ends the owned process group and reaps the child
+/// through Stado before this returns; ordinary failures retain all stderr.
+pub(crate) fn command_output(
+    mut command: Command,
+    cancellation: &CancellationToken,
+) -> Result<String, String> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let output = stado_wait::output(&mut command).map_err(|error| error.to_string())?;
+    if cancellation.is_cancelled() {
+        return Err("cancelled by its caller before the process started".to_string());
+    }
+    let runtime = process_runtime()?;
+    let cancellation = cancellation.for_stado();
+    let mut command = tokio::process::Command::from(command);
+    let output = runtime
+        .block_on(stado_wait::output_cancellable(
+            &mut command,
+            &cancellation.event,
+        ))
+        .map_err(|error| error.to_string())?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         let detail = stderr.trim();
