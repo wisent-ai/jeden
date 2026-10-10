@@ -21,14 +21,16 @@ export async function exerciseRead({ binary, env, rpc, prompt, options, exported
       && message.includes(`os error ${Math.abs(refusal.errno)}`);
     await assert.rejects(prompt(session, '/checkpoint refused-read'),
       (error) => identifiesFailure(error.message));
-    const args = ['export', session.sessionPath];
-    const result = spawnSync(binary, args, { cwd: options.cwd, env, encoding: 'utf8' });
-    report.commands.push({ program: binary, args, cwd: options.cwd, status: result.status,
-      signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
-    assert.ifError(result.error);
-    assert.equal(result.signal, null);
-    assert.ok(result.status !== null && result.status, 'export must refuse an unreadable ledger');
-    assert.ok(identifiesFailure(`${result.stdout}\n${result.stderr}`));
+    for (const command of ['show', 'export']) {
+      const args = [command, session.sessionPath];
+      const result = spawnSync(binary, args, { cwd: options.cwd, env, encoding: 'utf8' });
+      report.commands.push({ program: binary, args, cwd: options.cwd, status: result.status,
+        signal: result.signal, stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
+      assert.ifError(result.error);
+      assert.equal(result.signal, null);
+      assert.ok(result.status !== null && result.status, `${command} must refuse an unreadable ledger`);
+      assert.ok(identifiesFailure(`${result.stdout}\n${result.stderr}`));
+    }
     assert.deepEqual(readFileSync(state), beforeState,
       'a refused ledger read must not publish a new active leaf');
   } finally {
