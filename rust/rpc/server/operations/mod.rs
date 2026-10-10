@@ -115,17 +115,36 @@ pub(super) fn dispose_session(
     let session = state
         .sessions
         .lock()
-        .map_err(|_| ("internal_error", "sessions lock poisoned".into()))?
-        .remove(&session_id)
+        .map_err(|error| {
+            (
+                "internal_error",
+                format!("cannot look up session {session_id} for disposal: {error}"),
+            )
+        })?
+        .get(&session_id)
+        .cloned()
         .ok_or_else(|| {
             (
                 "unknown_session",
                 format!("unknown session: {}", session_id),
             )
         })?;
-    session
-        .dispose()
-        .map_err(|error| ("session_error", error))?;
+    session.dispose().map_err(|error| {
+        (
+            "session_error",
+            format!("cannot dispose session {session_id}: {error}"),
+        )
+    })?;
+    state
+        .sessions
+        .lock()
+        .map_err(|error| {
+            (
+                "internal_error",
+                format!("cannot remove disposed session {session_id}: {error}"),
+            )
+        })?
+        .remove(&session_id);
     Ok(json!({"disposed": true}))
 }
 

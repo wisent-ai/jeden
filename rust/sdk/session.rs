@@ -1,4 +1,5 @@
 mod completion;
+mod lifecycle;
 mod turn;
 
 use super::types::*;
@@ -170,16 +171,17 @@ impl AgentSession {
     }
 
     pub fn subscribe(&self) -> Result<EventSubscription, String> {
+        let mut subscribers = self
+            .inner
+            .subscribers
+            .lock()
+            .map_err(|error| format!("cannot register session subscription: {error}"))?;
         if self.inner.disposed.load(Ordering::Acquire) {
             return Err("session disposed".into());
         }
         let id = self.inner.next_subscriber.fetch_add(1, Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
-        self.inner
-            .subscribers
-            .lock()
-            .map_err(|_| "event subscription lock poisoned".to_string())?
-            .insert(id, sender);
+        subscribers.insert(id, sender);
         Ok(EventSubscription {
             id,
             receiver,
@@ -203,14 +205,15 @@ impl AgentSession {
         &self,
         handler: Option<Arc<dyn InteractionHandler>>,
     ) -> Result<(), String> {
-        if self.inner.disposed.load(Ordering::Acquire) {
-            return Err("session disposed".into());
-        }
-        *self
+        let mut interactions = self
             .inner
             .interactions
             .write()
-            .map_err(|_| "interaction handler lock poisoned".to_string())? = handler;
+            .map_err(|error| format!("cannot set session interaction handler: {error}"))?;
+        if self.inner.disposed.load(Ordering::Acquire) {
+            return Err("session disposed".into());
+        }
+        *interactions = handler;
         Ok(())
     }
 
@@ -253,38 +256,6 @@ impl AgentSession {
         let mut request_ids = active.keys().cloned().collect::<Vec<_>>();
         request_ids.sort();
         Ok(request_ids)
-    }
-
-    pub fn dispose(&self) -> Result<(), String> {
-        if self.inner.disposed.swap(true, Ordering::AcqRel) {
-            return Ok(());
-        }
-        for cancel in self
-            .inner
-            .active
-            .lock()
-            .map_err(|_| "active request lock poisoned")?
-            .values()
-        {
-            cancel.store(true, Ordering::Release);
-        }
-        crate::tool_runtime::runtime_ops::announce_cancellation();
-        self.inner
-            .subscribers
-            .lock()
-            .map_err(|_| "event subscription lock poisoned")?
-            .clear();
-        *self
-            .inner
-            .interactions
-            .write()
-            .map_err(|_| "interaction handler lock poisoned")? = None;
-        *self
-            .inner
-            .conversation
-            .lock()
-            .map_err(|_| "conversation lock poisoned")? = None;
-        Ok(())
     }
 }
 
