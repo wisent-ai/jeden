@@ -7,6 +7,7 @@
 use serde_json::json;
 
 use crate::context::advisor;
+use crate::tool_runtime::runtime_ops::CancellationToken;
 use crate::Args;
 
 const USAGE: &str = concat!(
@@ -64,20 +65,24 @@ fn options(rest: &[String]) -> Result<Options, String> {
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
+    let cancellation = CancellationToken::new();
+    let signal_cancellation = cancellation.clone();
+    ctrlc::try_set_handler(move || signal_cancellation.cancel())
+        .map_err(|error| format!("context cancellation signal registration failed: {error}"))?;
     let (verb, rest) = args
         .positionals
         .split_first()
         .map(|(verb, rest)| (verb.as_str(), rest))
         .unwrap_or(("help", &[]));
     match verb {
-        "recommend" => recommend(args, rest),
-        "prompt" => prompt(args, rest),
-        "sources" => sources(args, rest),
+        "recommend" => recommend(args, rest, &cancellation),
+        "prompt" => prompt(args, rest, &cancellation),
+        "sources" => sources(args, rest, &cancellation),
         // A bare query is the common case: `jeden context "why does X fail"`.
         other if !other.starts_with("--") => {
             let mut all = vec![other.to_string()];
             all.extend_from_slice(rest);
-            recommend(args, &all)
+            recommend(args, &all, &cancellation)
         }
         _ => Err(crate::cli::invocation::refusal::usage(USAGE)),
     }
@@ -85,7 +90,11 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
 
 /// The block a turn would append for `task`, and nothing else: the one way to
 /// see what the model will actually receive without running a turn.
-fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
+fn prompt(
+    args: &Args,
+    rest: &[String],
+    cancellation: &CancellationToken,
+) -> Result<String, String> {
     let options = options(rest)?;
     if options.query.is_empty() {
         return Err(crate::cli::invocation::refusal::usage(format!(
@@ -94,12 +103,8 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
     }
     let config = crate::load_config(&args.cwd);
     let settings = advisor::settings(&args.cwd, &config);
-    let block = advisor::advice_for_prompt(
-        &args.cwd,
-        &config,
-        &options.query,
-        crate::tool_runtime::runtime_ops::CancellationToken::new(),
-    );
+    let block =
+        advisor::advice_for_prompt(&args.cwd, &config, &options.query, cancellation.clone());
     if args.json {
         return Ok(serde_json::to_string_pretty(&json!({
             "query": options.query,
@@ -127,7 +132,11 @@ fn prompt(args: &Args, rest: &[String]) -> Result<String, String> {
     }
 }
 
-fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
+fn recommend(
+    args: &Args,
+    rest: &[String],
+    cancellation: &CancellationToken,
+) -> Result<String, String> {
     let options = options(rest)?;
     if options.query.is_empty() {
         return Err(crate::cli::invocation::refusal::usage(format!(
@@ -136,6 +145,7 @@ fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
     }
     let settings = advisor::settings(&args.cwd, &crate::load_config(&args.cwd));
     let mut request = advisor::Request::new(&options.query, options.limit, &settings)?;
+    request.cancellation = cancellation.clone();
     if let Some(declared) = &options.sources {
         let unknown = advisor::unknown_sources(declared);
         if !unknown.is_empty() {
@@ -159,12 +169,15 @@ fn recommend(args: &Args, rest: &[String]) -> Result<String, String> {
     Ok(advisor::render_text(&advice))
 }
 
-fn sources(args: &Args, rest: &[String]) -> Result<String, String> {
+fn sources(
+    args: &Args,
+    rest: &[String],
+    cancellation: &CancellationToken,
+) -> Result<String, String> {
     if !rest.is_empty() {
         return Err(USAGE.into());
     }
-    let cancellation = crate::tool_runtime::runtime_ops::CancellationToken::new();
-    let report = advisor::sources_report(&args.cwd, &crate::load_config(&args.cwd), &cancellation);
+    let report = advisor::sources_report(&args.cwd, &crate::load_config(&args.cwd), cancellation);
     if args.json {
         return Ok(
             serde_json::to_string_pretty(&report).map_err(|error| error.to_string())? + "\n",

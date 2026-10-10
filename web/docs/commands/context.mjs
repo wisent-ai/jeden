@@ -23,6 +23,7 @@ export const contextCommands = [
       unknownSource,
       "A missing task is refused as <code>context recommend requires a task</code> followed by the usage block.",
       "An unrecognised flag is refused as <code>unknown context option: &lt;flag&gt;</code> with the usage block.",
+      "Standalone context commands register cooperative Ctrl-C cancellation; on Unix they also receive SIGTERM and SIGHUP through the same token. Registration never overwrites an existing handler: a conflict or operating-system refusal fails before sources start as <code>context cancellation signal registration failed: &lt;cause&gt;</code>. A cancellation request is not proof of completed cleanup; inspect the terminal source results.",
     ],
   },
   {

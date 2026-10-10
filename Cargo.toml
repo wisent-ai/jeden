@@ -38,6 +38,7 @@ base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
 aes-gcm = "0.10"
 crossterm = { version = "0.28", features = ["event-stream"] }
+ctrlc = { version = "3.5.2", features = ["termination"] }
 hex = "0.4"
 flate2 = "1"
 futures = "0.3"
