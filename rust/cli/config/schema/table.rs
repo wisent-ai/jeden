@@ -237,8 +237,8 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "secrets.minLength",
         typ: "number",
-        description: "Minimum length for automatically discovered environment secrets.",
-        default_json: "8",
+        description: "Optional minimum byte length for automatically discovered environment secrets. Unset, every nonempty discovered secret is protected; explicitly configured values are always protected.",
+        default_json: "null",
         enum_values: &[],
     },
     SettingSpec {

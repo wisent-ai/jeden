@@ -35,6 +35,10 @@ pub(super) fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value
                 spec.key
             )),
         },
+        "number" if spec.key == "secrets.minLength" => trimmed
+            .parse::<usize>()
+            .map(|minimum| json!(minimum))
+            .map_err(|_| format!("{} expects a nonnegative whole byte length", spec.key)),
         "number" => {
             let number = trimmed
                 .parse::<f64>()

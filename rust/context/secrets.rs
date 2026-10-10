@@ -26,17 +26,21 @@ impl SecretPolicy {
         let root = project_root(cwd)?;
         let mut sources = Vec::new();
         for value in &config.values {
-            add_secret(&mut sources, value, 1);
+            add_secret(&mut sources, value);
         }
         for name in &config.environment {
             let value = env::var(name)
                 .map_err(|_| format!("configured secret environment variable {name} is not set"))?;
-            add_secret(&mut sources, &value, 1);
+            add_secret(&mut sources, &value);
         }
         if config.discover_environment {
             for (name, value) in env::vars() {
-                if looks_secret_name(&name) {
-                    add_secret(&mut sources, &value, config.min_length);
+                if looks_secret_name(&name)
+                    && config
+                        .min_length
+                        .is_none_or(|minimum| value.len() >= minimum)
+                {
+                    add_secret(&mut sources, &value);
                 }
             }
         }
@@ -55,7 +59,7 @@ impl SecretPolicy {
                     root.display()
                 ));
             }
-            load_secret_file(&canonical, 1, &mut sources)?;
+            load_secret_file(&canonical, &mut sources)?;
         }
         let mut seen = BTreeSet::new();
         sources.retain(|source| seen.insert(source.value.clone()));
@@ -108,8 +112,8 @@ impl SecretPolicy {
     }
 }
 
-fn add_secret(sources: &mut Vec<SecretSource>, value: &str, min_length: usize) {
-    if !value.is_empty() && value.len() >= min_length {
+fn add_secret(sources: &mut Vec<SecretSource>, value: &str) {
+    if !value.is_empty() {
         sources.push(SecretSource {
             value: value.to_string(),
         });
@@ -131,11 +135,7 @@ fn looks_secret_name(name: &str) -> bool {
     .any(|marker| upper.contains(marker))
 }
 
-fn load_secret_file(
-    path: &Path,
-    min_length: usize,
-    sources: &mut Vec<SecretSource>,
-) -> Result<(), String> {
+fn load_secret_file(path: &Path, sources: &mut Vec<SecretSource>) -> Result<(), String> {
     let text = fs::read_to_string(path)
         .map_err(|error| format!("cannot read secret file {}: {error}", path.display()))?;
     for line in text.lines() {
@@ -147,7 +147,7 @@ fn load_secret_file(
             .split_once('=')
             .map(|(_, value)| value.trim().trim_matches(['\'', '"']))
             .unwrap_or(trimmed);
-        add_secret(sources, value, min_length);
+        add_secret(sources, value);
     }
     Ok(())
 }

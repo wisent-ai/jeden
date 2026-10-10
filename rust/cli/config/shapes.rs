@@ -146,8 +146,8 @@ pub(crate) struct SecretsConfig {
     pub(crate) mode: SecretMode,
     #[serde(default = "default_secret_replacement")]
     pub(crate) replacement: String,
-    #[serde(rename = "minLength", default = "default_secret_min_length")]
-    pub(crate) min_length: usize,
+    #[serde(rename = "minLength", default)]
+    pub(crate) min_length: Option<usize>,
     #[serde(default)]
     pub(crate) values: Vec<String>,
     #[serde(default)]
@@ -163,7 +163,7 @@ impl Default for SecretsConfig {
         Self {
             mode: SecretMode::Redact,
             replacement: default_secret_replacement(),
-            min_length: default_secret_min_length(),
+            min_length: None,
             values: Vec::new(),
             environment: Vec::new(),
             files: Vec::new(),
@@ -174,10 +174,6 @@ impl Default for SecretsConfig {
 
 fn default_secret_replacement() -> String {
     "[REDACTED]".to_string()
-}
-
-fn default_secret_min_length() -> usize {
-    8
 }
 
 fn default_true() -> bool {

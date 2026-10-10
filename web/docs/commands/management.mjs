@@ -53,11 +53,13 @@ export const managementCommands = [
       "Required: exact schema key and value. Multi-token values are joined with spaces before type parsing; JSON arrays and records must be valid JSON.",
       "Use <code>contracts.communication</code> to say how Jeden writes to you: your text replaces Jeden's default (plain language, then what was done, blockers, next steps) and <code>none</code> turns it off. Use <code>contracts.functionality</code> for execution and completion instructions; quote each contract as one shell argument.",
       "Use <code>communication.mode</code> to choose <code>normal</code>, <code>debug</code>, or <code>quiet</code>, and <code>communication.toolCalls</code>, <code>communication.toolResults</code>, <code>communication.reasoning</code>, or <code>communication.code</code> with <code>auto</code>, <code>show</code>, or <code>hide</code> to override one item.",
+      "Automatically discovered secret-named environment values are protected regardless of their length unless you explicitly set <code>secrets.minLength</code> to a nonnegative whole byte length. A threshold deliberately leaves shorter discovered values unprotected; explicitly configured values, environment names and secret files remain protected. <code>jeden config reset secrets.minLength</code> removes the threshold by restoring <code>null</code>. The shared setting schema used by the terminal and RPC settings reports that unset default.",
     ],
     effect: "Parses the schema type, updates the nested user configuration object, atomically writes the user config, and prints the key/path or structured mutation result. A non-empty contract is added to every new or rebuilt system prompt; a communication setting applies from the next turn, including in a running session.",
     refusals: [
       "Missing input is refused as <code>config set requires a key</code> or <code>config set requires a value</code>; unknown keys are refused.",
       "Invalid booleans, non-finite numbers, out-of-enum values, non-array JSON, and non-object JSON are refused with a key-specific message before writing.",
+      "<code>secrets.minLength</code> refuses negative, fractional and nonnumeric values before writing. The real redaction journey is <code>node tests/secrets/discovery.mjs</code> with <code>JEDEN_BIN</code>, <code>JEDEN_TEST_SOURCE_REVISION</code>, <code>JEDEN_TEST_MODEL</code>, <code>JEDEN_TEST_MAX_STEPS</code>, <code>JEDEN_TEST_SECRET_MIN_LENGTH</code> above the synthetic secret's byte length and real Brama credentials. It checks a short discovered secret, an explicit threshold, an explicit protected value, reset and invalid-setting refusal; commands, replies and session exports remain under <code>.build/secret-discovery</code>.",
     ],
   },
   {
