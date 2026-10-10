@@ -5,6 +5,8 @@ use super::super::*;
 use super::prompt::Prepared;
 use sha2::{Digest, Sha256};
 
+mod stop;
+
 pub(super) type AnswerRepairs = std::collections::BTreeSet<sha2::digest::Output<Sha256>>;
 
 pub(super) enum AnswerFailure<'a> {
@@ -15,9 +17,6 @@ pub(super) enum AnswerFailure<'a> {
 /// The rule name every unusable-answer correction is recorded under, beside
 /// the delivery-report rule of the same event.
 const ANSWER_RULE: &str = "model-answer";
-
-/// The rule an answer refused by a `Stop` hook is recorded under.
-const STOP_RULE: &str = "stop-hook";
 
 /// The correction one unusable answer is given.
 ///
@@ -231,70 +230,5 @@ impl Conversation {
         let answer = self.maybe_advisor_review(args, text, hooks)?;
         let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
         Ok(Some(answer))
-    }
-
-    /// The last gate before an answer is shown: the `Stop` hooks read the exact
-    /// text the operator would receive. A refusal is never shown as the answer;
-    /// it goes back to the model as the next instruction and the turn goes on,
-    /// so an answer that a hook rejects (open work, a missing blocker id) is
-    /// replaced by more work instead of reaching the operator first and being
-    /// refused after. `max_steps`, when the operator set one, still bounds it.
-    pub(super) fn answer_refused(
-        &mut self,
-        args: &Args,
-        step: u32,
-        text: &str,
-        prepared: &mut Prepared,
-        hooks: &RunHooks,
-    ) -> Result<bool, String> {
-        let session = self.recorder.path();
-        let session_id = session
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let Some(reason) = crate::hooks::answer_stop_block(
-            &args.cwd,
-            &session_id,
-            &session.join("transcript.jsonl"),
-            text,
-            prepared.stop_refused,
-            args.allow_command,
-        ) else {
-            return Ok(false);
-        };
-        prepared.stop_refused = true;
-        let completion_state = if prepared.tracks_completion {
-            Some(crate::completion::read_state(&session)?)
-        } else {
-            None
-        };
-        self.recorder.record(
-            task_contract::VIOLATION_EVENT,
-            json!({
-                "step": step,
-                "rule": STOP_RULE,
-                "outcome": "requested",
-                "message": &reason,
-                "prompt": &reason,
-                "completion": completion_state.as_ref().map(crate::completion::snapshot_value),
-            }),
-        )?;
-        if let Some(state) = completion_state.as_ref() {
-            self.publish_completion(state, hooks)?;
-            self.recorder.record(
-                "completion_stop_refusal",
-                json!({
-                    "step": step,
-                    "reason": &reason,
-                    "status": state.status(),
-                    "openTasks": state.tasks.iter().filter(|task| !task.status.terminal()).collect::<Vec<_>>(),
-                    "openRequests": crate::completion::open_asks(state, &session)?,
-                }),
-            )?;
-        }
-        hooks.note("answer refused by a Stop hook; continuing the work");
-        self.messages
-            .push(json!({ "role": "user", "content": reason }));
-        Ok(true)
     }
 }
