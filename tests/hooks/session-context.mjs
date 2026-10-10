@@ -271,8 +271,18 @@ try {
   report.error = String(error.stack || error);
   throw error;
 } finally {
-  if (client) await client.end();
-  report.finishedAt = new Date().toISOString();
-  writeFileSync(join(output, 'report.json'), JSON.stringify(report));
-  console.log(`${report.verdict}: ${join(output, 'report.json')}`);
+  try {
+    if (client) await client.end();
+  } catch (error) {
+    report.verdict = 'failed';
+    report.shutdownError = String(error);
+    const cause = report.error
+      ? `${report.error}; RPC shutdown also failed: ${error}`
+      : `RPC shutdown failed: ${error}`;
+    throw new Error(cause, { cause: error });
+  } finally {
+    report.finishedAt = new Date().toISOString();
+    writeFileSync(join(output, 'report.json'), JSON.stringify(report));
+    console.log(`${report.verdict}: ${join(output, 'report.json')}`);
+  }
 }
