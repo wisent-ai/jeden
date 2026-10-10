@@ -1,7 +1,8 @@
 // Real Jeden RPC, Tama registry, Oko ledger and Brama route; no simulated provider.
 // Run only when qualification is authorized. This file never builds a binary.
 // Required inputs use the same JEDEN_TEST_* contract as answers.mjs, plus
-// TAMA_OKO_CLI and JEDEN_TAMA_REGISTRY for the real installed integrations.
+// TAMA_OKO_CLI and JEDEN_TAMA_REGISTRY for the real installed integrations and
+// JEDEN_TEST_COMPACTION_THRESHOLD for the automatic-compaction cases.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -11,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { exerciseMove } from '../sessions/move.mjs';
 import { exerciseRead } from '../sessions/read.mjs';
 import { exerciseMirror } from '../sessions/mirror.mjs';
+import { exerciseAutoCompaction } from './compaction/journey.mjs';
 import { startRpc } from './rpc.mjs';
 
 function required(name) {
@@ -234,6 +236,7 @@ try {
   await exerciseMove({ rpc, prompt, options, output, exported, report });
   await exerciseRead({ binary, env, rpc, prompt, options, exported, report });
   await exerciseMirror({ rpc, prompt, options, exported, report });
+  await exerciseAutoCompaction({ binary, model, maxSteps, output, env, report, exported });
   // A genuinely missing executable exercises the native process refusal, not a mock response.
   const missing = join(output, `missing-hook-${randomUUID()}`);
   const quote = (text) => `'${text.replaceAll("'", "'\\''")}'`;
