@@ -50,47 +50,50 @@ fn block(rendered: &str) -> String {
     format!("{BLOCK_START}\n{}\n{BLOCK_END}", rendered.trim_end())
 }
 
-/// The installed block of `file`, if it carries one.
-fn installed_block(file: &Path) -> Option<String> {
-    let text = fs::read_to_string(file).ok()?;
-    let start = text.find(BLOCK_START)?;
-    let end = text[start..].find(BLOCK_END)? + start + BLOCK_END.len();
-    Some(text[start..end].to_string())
+fn block_range(existing: &str) -> Result<Option<std::ops::Range<usize>>, String> {
+    match (existing.find(BLOCK_START), existing.find(BLOCK_END)) {
+        (None, None) => Ok(None),
+        (Some(start), Some(end))
+            if end >= start + BLOCK_START.len()
+                && !existing[start + BLOCK_START.len()..].contains(BLOCK_START)
+                && !existing[end + BLOCK_END.len()..].contains(BLOCK_END) =>
+        {
+            Ok(Some(start..end + BLOCK_END.len()))
+        }
+        _ => Err("malformed Jeden contract markers: expected one start followed by one end".into()),
+    }
 }
 
-/// `file` with its Jeden block replaced by `block`, or appended when absent.
-fn spliced(existing: &str, block: &str) -> String {
-    if let Some(start) = existing.find(BLOCK_START) {
-        if let Some(end) = existing[start..].find(BLOCK_END) {
-            let end = start + end + BLOCK_END.len();
-            return format!("{}{block}{}", &existing[..start], &existing[end..]);
-        }
+/// Read failures and malformed markers are not an absent installation.
+fn installed_block(file: &Path) -> Result<Option<String>, String> {
+    let text = existing_text(file)?;
+    block_range(&text)
+        .map(|range| range.map(|range| text[range].to_string()))
+        .map_err(|error| format!("{}: {error}", file.display()))
+}
+
+/// Replace a valid block or append one, preserving existing bytes outside it.
+fn spliced(existing: &str, block: &str) -> Result<String, String> {
+    if let Some(range) = block_range(existing)? {
+        return Ok(format!(
+            "{}{block}{}",
+            &existing[..range.start],
+            &existing[range.end..]
+        ));
     }
-    let mut out = existing.trim_end().to_string();
+    let mut out = existing.to_string();
     if !out.is_empty() {
         out.push_str("\n\n");
     }
     out.push_str(block);
     out.push('\n');
-    out
+    Ok(out)
 }
 
-/// `existing` without its Jeden block and the blank line `spliced` put before
-/// it; `None` when it carries no block.
-fn unspliced(existing: &str) -> Option<String> {
-    let start = existing.find(BLOCK_START)?;
-    let end = start + existing[start..].find(BLOCK_END)? + BLOCK_END.len();
-    let before = existing[..start].trim_end();
-    let after = existing[end..].trim_start_matches('\n');
-    let mut out = before.to_string();
-    if !before.is_empty() && !after.is_empty() {
-        out.push_str("\n\n");
-    }
-    out.push_str(after);
-    if !out.is_empty() && !out.ends_with('\n') {
-        out.push('\n');
-    }
-    Some(out)
+/// Remove only the matched block; surrounding whitespace belongs to the caller.
+fn unspliced(existing: &str) -> Result<Option<String>, String> {
+    Ok(block_range(existing)?
+        .map(|range| format!("{}{}", &existing[..range.start], &existing[range.end..])))
 }
 
 /// The file `--file` names, the only target there is.
@@ -152,7 +155,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         "status" => {
             let file = target(rest)?;
             let rendered = block(&render(&args.cwd));
-            let installed = installed_block(&file);
+            let installed = installed_block(&file)?;
             let state = match &installed {
                 Some(installed) if installed.trim() == rendered.trim() => "current",
                 Some(_) => "stale",
@@ -186,7 +189,8 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             let file = target(rest)?;
             let rendered = block(&render(&args.cwd));
             let existing = existing_text(&file)?;
-            let next = spliced(&existing, &rendered);
+            let next = spliced(&existing, &rendered)
+                .map_err(|error| format!("{}: {error}", file.display()))?;
             let changed = next != existing;
             if changed {
                 if let Some(parent) = file.parent() {
@@ -214,7 +218,8 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         "uninstall" => {
             let file = target(rest)?;
             let existing = existing_text(&file)?;
-            let next = unspliced(&existing);
+            let next =
+                unspliced(&existing).map_err(|error| format!("{}: {error}", file.display()))?;
             if let Some(next) = &next {
                 crate::cli::config::migrations::write_text_atomic(&file, next)?;
             }
