@@ -227,7 +227,13 @@ pub(crate) fn sources_report(
         .iter()
         .map(|source| {
             let started = Instant::now();
+            let waiting = stado_wait::begin(
+                stado_wait::Kind::Process,
+                format!("context advisor probe {source}"),
+                cwd.display(),
+            );
             if cancellation.is_cancelled() {
+                waiting.failed("context source probe cancelled by its caller");
                 return probe_value(
                     &SourceStatus::unavailable(
                         source,
@@ -237,7 +243,7 @@ pub(crate) fn sources_report(
                     Vec::new(),
                 );
             }
-            match *source {
+            let answer = match *source {
                 "files" => files::probe(&settings, cancellation),
                 "ground-truth" => ground_truth::probe(&settings, cancellation),
                 "memory" => crate::fleet::with_cancellation(cancellation, memory::probe),
@@ -246,7 +252,15 @@ pub(crate) fn sources_report(
                     &SourceStatus::unavailable(other, "no such source", started),
                     Vec::new(),
                 ),
+            };
+            if answer.get("available").and_then(Value::as_bool) == Some(true) {
+                waiting.done();
+            } else if let Some(detail) = answer.get("detail").and_then(Value::as_str) {
+                waiting.failed(detail);
+            } else {
+                waiting.failed("source probe returned no availability or failure detail");
             }
+            answer
         })
         .collect();
     json!({
