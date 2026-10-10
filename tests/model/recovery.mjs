@@ -22,6 +22,8 @@ const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const scenarioPath = resolve(required('JEDEN_TEST_RECOVERY_SCENARIO'));
 const scenario = JSON.parse(readFileSync(scenarioPath, 'utf8'));
 assert.ok(scenario.model && scenario.expectedText && scenario.promptFile);
+assert.ok(!process.env.JEDEN_MODEL_ENDPOINT, 'the journey requires the real Stado-selected Brama route');
+assert.ok(!process.env.BRAMA_URL, 'an endpoint override must not replace the directory fixture');
 assert.ok(Array.isArray(scenario.promotions) && scenario.promotions.length);
 const prompt = readFileSync(resolve(dirname(scenarioPath), scenario.promptFile), 'utf8');
 const runs = join(root, '.build/model-recovery');
@@ -52,21 +54,20 @@ try {
   assert.equal(state.stdout.trim(), '', 'commit the candidate before qualification');
   for (const success of [true, false]) {
     const directory = join(output, success ? 'promoted' : 'exhausted');
-    const home = join(directory, 'home');
+    const sessions = join(directory, 'sessions');
     const workspace = join(directory, 'workspace');
     const config = join(workspace, '.jeden');
-    mkdirSync(home, { recursive: true });
+    mkdirSync(sessions, { recursive: true });
     mkdirSync(config, { recursive: true });
     const promotions = [...scenario.promotions];
     if (!success) promotions.pop();
     writeFileSync(join(config, 'config.json'), JSON.stringify({ modelRouting: {
       contextPromotions: promotions, fallbacks: [],
     } }));
-    const env = { ...process.env, HOME: home };
-    delete env.JEDEN_MODEL_ENDPOINT;
+    const env = { ...process.env, JEDEN_SESSION_ROOT: sessions };
     const result = invoke(binary, ['run', prompt, '--cwd', workspace,
       '--model', scenario.model, '--model-only', '--json'], workspace, env);
-    const paths = transcripts(home);
+    const paths = transcripts(sessions);
     const events = paths.flatMap((path) => {
       const exported = invoke(binary, ['export', dirname(path)], workspace, env);
       assert.ok(exported.status !== null && !exported.status, exported.stderr);

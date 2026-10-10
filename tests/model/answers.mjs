@@ -18,6 +18,8 @@ const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const scenarioPath = resolve(required('JEDEN_TEST_ANSWER_SCENARIO'));
 const scenario = JSON.parse(readFileSync(scenarioPath, 'utf8'));
 assert.ok(scenario.model && Array.isArray(scenario.cases));
+assert.ok(!process.env.JEDEN_MODEL_ENDPOINT, 'the journey requires the real Stado-selected Brama route');
+assert.ok(!process.env.BRAMA_URL, 'an endpoint override must not replace the directory fixture');
 assert.deepEqual(scenario.cases.map((entry) => entry.name).sort(), ['limited', 'recovered', 'repeated']);
 const runs = join(root, '.build/answer-recovery');
 mkdirSync(runs, { recursive: true });
@@ -48,9 +50,9 @@ try {
     'commit the candidate before qualification');
   for (const entry of scenario.cases) {
     const directory = join(output, entry.name);
-    const home = join(directory, 'home');
+    const sessions = join(directory, 'sessions');
     const workspace = join(directory, 'workspace');
-    mkdirSync(home, { recursive: true });
+    mkdirSync(sessions, { recursive: true });
     mkdirSync(workspace, { recursive: true });
     const promptPath = resolve(dirname(scenarioPath), entry.promptFile);
     const prompt = readFileSync(promptPath, 'utf8');
@@ -59,10 +61,9 @@ try {
       assert.ok(entry.maxSteps, 'limited scenario requires an explicit caller limit');
       args.push('--max-steps', String(entry.maxSteps));
     }
-    const env = { ...process.env, HOME: home };
-    delete env.JEDEN_MODEL_ENDPOINT;
+    const env = { ...process.env, JEDEN_SESSION_ROOT: sessions };
     const result = invoke(binary, args, workspace, env);
-    const paths = transcripts(home);
+    const paths = transcripts(sessions);
     const events = paths.flatMap((path) => {
       const exported = succeeds(invoke(binary, ['export', dirname(path)], workspace, env));
       writeFileSync(join(dirname(path), 'qualification-export.json'), exported);
