@@ -13,11 +13,10 @@ use wisent_onboarding_client::{
     bundle_from_canonical, FileStorage, IntegrationTransport, JourneyClient, Transport,
 };
 
+/// The onboarding state under the user's home, resolved by the one home
+/// lookup: read against `.`, every project Jeden started in got its own state.
 pub(super) fn state_path() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join(".jeden/onboarding-state.json")
+    crate::slash::common::dirs_home().join(".jeden/onboarding-state.json")
 }
 
 pub(super) fn subject_hash() -> String {

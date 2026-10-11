@@ -16,10 +16,13 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::SystemTime;
 
 pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
-    let home = env::var_os("JEDEN_PLUGINS_HOME")
-        .or_else(|| env::var_os("HOME"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.to_path_buf());
+    // The user scope is JEDEN_PLUGINS_HOME when declared, else the one home
+    // lookup; read as the working directory, the project registry was loaded
+    // twice and the user's installed plugins not at all.
+    let home = match env::var_os("JEDEN_PLUGINS_HOME") {
+        Some(declared) => PathBuf::from(declared),
+        None => crate::slash::common::dirs_home(),
+    };
     let mut roots = Vec::new();
     for scope in [cwd.to_path_buf(), home] {
         let registry = read_json(&scope.join(".jeden/plugins.json"));
