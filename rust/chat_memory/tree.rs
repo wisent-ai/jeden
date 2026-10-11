@@ -50,6 +50,15 @@ impl Node {
     pub fn span(&self) -> u64 {
         self.last - self.first
     }
+
+    /// The node as a turn is given it: its id, the times it spans and its
+    /// summary. The view counts these bytes, so what it holds is what is sent.
+    pub fn line(&self) -> String {
+        format!(
+            "[{}] {}..{}\n{}\n",
+            self.id, self.from, self.to, self.summary
+        )
+    }
 }
 
 /// What writes a summary: the cheap model through Brama, given the text and

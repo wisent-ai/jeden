@@ -127,10 +127,7 @@ impl ChatMemory {
                  message word for word; with from and to (seconds since 1970) it answers the messages of that time.\n",
             );
             for node in &nodes {
-                block.push_str(&format!(
-                    "[{}] {}..{}\n{}\n",
-                    node.id, node.from, node.to, node.summary
-                ));
+                block.push_str(&node.line());
             }
             out.push(json!({ "role": "system", "content": block }));
         }

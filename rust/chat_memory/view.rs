@@ -111,11 +111,7 @@ impl View {
         loop {
             let tail = self.tail(entries)?;
             let tail_bytes = tail.iter().map(Entry::bytes).sum::<usize>();
-            let size = nodes
-                .iter()
-                .map(|node| node.id.len() + node.summary.len())
-                .sum::<usize>()
-                + tail_bytes;
+            let size = nodes.iter().map(|node| node.line().len()).sum::<usize>() + tail_bytes;
             if size <= view_bytes {
                 self.bytes = size;
                 self.log_len = entries.len() as u64;
