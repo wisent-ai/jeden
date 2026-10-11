@@ -61,6 +61,9 @@ export function startRpc({ binary, cwd, env, report }) {
   async function end() {
     if (child.exitCode === null && child.signalCode === null) child.stdin.end();
     await exited;
+    if (command.protocolErrors.length) {
+      throw new Error(`RPC protocol failed: ${command.protocolErrors.map(({ cause }) => cause).join('; ')}`);
+    }
     return command;
   }
   return { rpc, request, end, command };
