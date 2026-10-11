@@ -121,7 +121,7 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     Ok(output) if output.status.success() => {
                         let bytes = std::fs::read(&path)
                             .map_err(|error| format!("Clipboard image read failed: {error}"));
-                        let _ = std::fs::remove_file(&path);
+                        forget_clipboard_copy(&path);
                         return bytes.map(|bytes| {
                             Some(ClipboardContent::from(("clipboard.png".into(), bytes)))
                         });
@@ -132,7 +132,7 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     }
                     Err(error) => image_error = Some(error.to_string()),
                 }
-                let _ = std::fs::remove_file(&path);
+                forget_clipboard_copy(&path);
             }
             if text.available {
                 let output = std::process::Command::new("pbpaste")
@@ -198,5 +198,19 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
             }
         }
         status
+    }
+}
+
+/// Remove the copy of a clipboard image read through `osascript`; one that
+/// cannot be removed is said, since it holds what the operator copied.
+#[cfg(target_os = "macos")]
+fn forget_clipboard_copy(path: &Path) {
+    if let Err(error) = std::fs::remove_file(path) {
+        if error.kind() != std::io::ErrorKind::NotFound {
+            eprintln!(
+                "jeden: the clipboard image copy {} is left behind: {error}",
+                path.display()
+            );
+        }
     }
 }
