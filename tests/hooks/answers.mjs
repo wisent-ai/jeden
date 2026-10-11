@@ -92,6 +92,7 @@ try {
       : `Finish with text exactly ${rejected}.`;
     const task = `This is a real native hook qualification. Do not modify files or run tools. ${instruction} If a hook refuses or fails, continue with a final answer containing ${accepted} instead. Never repeat refused text after a refusal.`;
     let result;
+    const failures = [];
     try {
       if (transport === 'rpc') {
         result = await rpcRefusal({ binary, cwd: workspace, env, report, model, maxSteps, prompt: task });
@@ -99,12 +100,22 @@ try {
         result = invoke(binary, ['run', task, '--cwd', workspace, '--model', model,
           '--max-steps', maxSteps, '--allow-command', '--json'], workspace, env);
       }
+    } catch (error) {
+      failures.push(error);
     } finally {
-      const permissionReceipt = `${receipt}.recording.json`;
-      if (existsSync(permissionReceipt)) {
-        const { path, mode: originalMode } = JSON.parse(readFileSync(permissionReceipt, 'utf8'));
-        chmodSync(path, originalMode);
+      try {
+        const permissionReceipt = `${receipt}.recording.json`;
+        if (existsSync(permissionReceipt)) {
+          const { path, mode: originalMode } = JSON.parse(readFileSync(permissionReceipt, 'utf8'));
+          chmodSync(path, originalMode);
+        }
+      } catch (error) {
+        failures.push(error);
       }
+    }
+    if (failures.length) {
+      if (result?.error) failures.unshift(result.error);
+      throw new AggregateError(failures, `hook qualification failed: ${failures.map(String).join('; ')}`);
     }
     const inputs = readFileSync(receipt, 'utf8').split('\n').filter(Boolean).map(JSON.parse);
     const candidate = inputs.find((input) => input.last_assistant_message?.includes(rejected));
