@@ -67,6 +67,15 @@ try {
   assert.match(refused.stderr, /jeden lease release <lease-id>/);
   assert.match(refused.stderr, /jeden lease end <session-id>/);
 
+  // A lease handed in JEDEN_LEASE that is not Brama's lease document stops the
+  // run with its cause; it is never read as no lease. No session directory of
+  // the leased journey below is written by it.
+  const handed = invoke(binary, ['run', 'Respond exactly: OK', '--cwd', workspace, '--model', route,
+    '--model-only'], workspace, { ...env, JEDEN_SESSION_ROOT: join(output, 'handed-sessions'),
+    JEDEN_LEASE: '{"lease": "not a lease document"}' });
+  assert.ok(handed.status, 'an unreadable handed lease must refuse the run');
+  assert.match(handed.stderr, /JEDEN_LEASE does not hold Brama's lease document/);
+
   // Brama states a sessions limit for the route's provider, so its sessions are leased.
   const before = JSON.parse(succeeds(invoke(binary, ['lease', 'list', '--json'], workspace, env)));
   report.observations.registerBefore = before;

@@ -174,6 +174,9 @@ pub struct ChatConfig {
     /// The Jeden session the calls belong to; a leased route takes its
     /// account for this session.
     pub session_id: Option<String>,
+    /// The lease the program that started this session holds for it
+    /// (`JEDEN_LEASE`); the session runs on it and takes none of its own.
+    pub inherited_lease: Option<lease::SessionLease>,
     pub config_error: Option<String>,
     /// `config_error` is the catalog read that got no answer about the
     /// request (`BramaError::left_unanswered`), set where the typed error is

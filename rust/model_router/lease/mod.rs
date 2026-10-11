@@ -77,6 +77,30 @@ pub struct Taken {
     pub lease: SessionLease,
 }
 
+/// The variable a program that starts a Jeden session and holds its lease
+/// (Oko) hands that lease in, as Brama's lease document.
+pub(crate) const INHERITED: &str = "JEDEN_LEASE";
+
+/// The lease this process was started on, when its starter holds one: the
+/// session runs on it and takes none of its own, because the starter's
+/// proxy names the account on every request and relays no lease route.
+/// Unset is no such lease; a value that is not Unicode or not a lease
+/// document is refused with its cause, never read as no lease.
+pub(crate) fn inherited() -> Result<Option<SessionLease>, String> {
+    let raw = match std::env::var(INHERITED) {
+        Ok(raw) => raw,
+        Err(std::env::VarError::NotPresent) => return Ok(None),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(format!(
+                "{INHERITED} is not Unicode, so the lease it hands this session cannot be read"
+            ));
+        }
+    };
+    serde_json::from_str(&raw).map(Some).map_err(|error| {
+        format!("{INHERITED} does not hold Brama's lease document ({error}): {raw}")
+    })
+}
+
 /// The register as Brama shows it to Jeden's agent: its own live leases, the
 /// sessions each account carries, each provider's stated limit and the
 /// refusal of each provider whose declaration states none.

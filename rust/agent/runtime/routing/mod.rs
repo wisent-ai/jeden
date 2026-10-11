@@ -132,9 +132,11 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     });
     let secret_error = (direct.is_none() && secret.is_empty())
         .then(|| "WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama".to_string());
+    let inherited_lease = crate::model_router::lease::inherited();
     let precondition_error = endpoint_error
         .or(token_error)
         .or(secret_error)
+        .or_else(|| inherited_lease.as_ref().err().cloned())
         .or_else(|| retry.as_ref().err().cloned())
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned());
@@ -222,6 +224,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         // The conversation that makes the calls names its session; a call
         // outside one is not leased.
         session_id: None,
+        // An unreadable JEDEN_LEASE is the configuration's error above, so
+        // every call refuses with it before any lease is looked at.
+        inherited_lease: inherited_lease.ok().flatten(),
         config_error,
         catalog_unanswered,
     }

@@ -47,13 +47,19 @@ fn route_provider(model: &str) -> Option<&str> {
         .filter(|provider| !provider.is_empty())
 }
 
-/// The lease a call on `route` runs on: none when the configuration does not
-/// reach Brama, names no session, or the route's provider is not one Brama
-/// keeps a pool of accounts for (Brama serves it with its own credential).
-/// A provider Brama declares without a sessions limit is refused with
-/// Brama's own sentence: no lease can be taken for it, and the session is
-/// not run outside the pool instead.
+/// The lease a call on `route` runs on. A session its starter holds a lease
+/// for (`JEDEN_LEASE`) runs every call on that lease and asks Brama for
+/// none: the starter's proxy names that account on every request whatever
+/// the route, and relays no lease route. Otherwise none when the
+/// configuration does not reach Brama, names no session, or the route's
+/// provider is not one Brama keeps a pool of accounts for (Brama serves it
+/// with its own credential). A provider Brama declares without a sessions
+/// limit is refused with Brama's own sentence: no lease can be taken for it,
+/// and the session is not run outside the pool instead.
 pub(crate) fn for_route(config: &ChatConfig, route: &str) -> Result<Option<SessionLease>, String> {
+    if let Some(inherited) = &config.inherited_lease {
+        return Ok(Some(inherited.clone()));
+    }
     let Some(session_id) = config.session_id.as_deref().filter(|_| config.via_brama) else {
         return Ok(None);
     };
@@ -93,11 +99,16 @@ pub(crate) fn for_route(config: &ChatConfig, route: &str) -> Result<Option<Sessi
 /// session's account again. `Ok(Some)` is a different account with capacity
 /// to retry on; `Ok(None)` is the same account back, so the failure was not
 /// the account's. A refusal is Brama's document (a full pool, no usable
-/// member) and becomes the turn's error.
+/// member) and becomes the turn's error. A lease the session's starter
+/// holds is not Jeden's to release: the call's failure stands, and moving
+/// the session to another account is the starter's model policy.
 pub(crate) fn switch(
     config: &ChatConfig,
     lease: &SessionLease,
 ) -> Result<Option<SessionLease>, String> {
+    if config.inherited_lease.as_ref() == Some(lease) {
+        return Ok(None);
+    }
     let key = (lease.session_id.clone(), lease.provider.clone());
     release(config, &lease.id).map_err(|error| {
         format!(
