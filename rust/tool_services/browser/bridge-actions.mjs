@@ -1,7 +1,7 @@
 // Continuation of bridge-core.mjs; the browser service concatenates both files.
 const handleTabAction = async (action, input, state) => {
   if (action === "list") return { ok: true, action, tabs: await listTabs(), currentTab: state.currentTab ?? null };
-  if (action === "open" || action === "new") {
+  if (action === "open") {
     const tab = await openTab(input.url ?? "about:blank");
     state.currentTab = tab.id;
     await saveState(state);
@@ -9,7 +9,7 @@ const handleTabAction = async (action, input, state) => {
   }
   const tab = await resolveTab(input, state);
   if (!tab) throw new Error("no browser tab is available");
-  if (action === "focus" || action === "activate") {
+  if (action === "focus") {
     await activateTab(tab.id);
     state.currentTab = tab.id;
     await saveState(state);
@@ -21,7 +21,7 @@ const handleTabAction = async (action, input, state) => {
     await saveState(state);
     return { ok: true, action, tab };
   }
-  throw new Error(`unsupported browser_tab action: ${action}`);
+  throw new Error(`unsupported browser_tab action: ${action}; browser_tab takes list, open, focus or close`);
 };
 
 const handlePageAction = async (action, input, state) => {
@@ -126,20 +126,26 @@ const handlePageAction = async (action, input, state) => {
   }
 };
 
+// The browser this call found or started; every answer, a failure included,
+// names it, so the service that called the bridge keeps ownership of it.
+let owned = null;
 try {
   const request = await readStdin();
+  if (typeof request.action !== "string" || !request.action.trim()) {
+    throw new Error("the bridge request names no action: its action field must be the browser verb the service resolved");
+  }
   const input = request.input && typeof request.input === "object" ? request.input : request;
-  const action = String(request.action ?? input.action ?? "").trim().toLowerCase();
-  if (!action) throw new Error("action is required");
-  await ensureBrowser();
-  const state = await readState();
-  const tool = String(input.tool ?? request.tool ?? "");
-  const result = tool === "browser_tab" || ["list", "open", "new", "focus", "activate", "close"].includes(action)
-    ? await handleTabAction(action, input, state)
-    : await handlePageAction(action, input, state);
-  const latestState = await readState();
-  if (Number.isInteger(latestState.browserPid)) result.browserPid = latestState.browserPid;
+  const action = request.action.trim().toLowerCase();
+  owned = await ensureBrowser();
+  // The service names the tool every request is for: browser_tab manages
+  // tabs, browser_action and browser_screenshot act on a page.
+  const result = request.tool === "browser_tab"
+    ? await handleTabAction(action, input, owned)
+    : await handlePageAction(action, input, owned);
+  if (Number.isInteger(owned.browserPid)) result.browserPid = owned.browserPid;
   process.stdout.write(JSON.stringify(result));
 } catch (error) {
-  process.stdout.write(JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+  const failed = { ok: false, error: error instanceof Error ? error.message : String(error) };
+  if (Number.isInteger(owned?.browserPid)) failed.browserPid = owned.browserPid;
+  process.stdout.write(JSON.stringify(failed));
 }

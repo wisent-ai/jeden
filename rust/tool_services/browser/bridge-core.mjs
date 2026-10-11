@@ -66,9 +66,10 @@ const browserReady = async () => {
 // requested port of zero, so it never appears for the session's fixed port.
 // The announcement is the readiness event and the child's exit, with the
 // stderr it wrote, is the failure; there is no retry loop and no deadline
-// (cli.md rule 8).
+// (cli.md rule 8). It answers the session state that records the browser it
+// found or started, so a later action failure still reports that browser.
 const ensureBrowser = async () => {
-  if (await browserReady()) return;
+  if (await browserReady()) return await readState();
   if (!chrome) throw new Error("Chromium executable is not configured");
   const state = await readState();
   await mkdir(profile, { recursive: true });
@@ -123,6 +124,7 @@ const ensureBrowser = async () => {
     if (typeof version.webSocketDebuggerUrl !== "string") {
       throw new Error(`CDP readiness at ${endpoint}/json/version returned no string webSocketDebuggerUrl`);
     }
+    return state;
   } catch (error) {
     if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
       try {
@@ -265,10 +267,12 @@ const untilSelector = (client, selector) => evaluate(client, `new Promise(resolv
   observer.observe(document, { childList: true, subtree: true, attributes: true });
 })`);
 const pageSnapshotExpression = `(() => {
+  // The browser answers whether an element is rendered and visible
+  // (Element.checkVisibility, which covers display and visibility); an
+  // element with no box takes no click.
   const visible = element => {
-    const style = getComputedStyle(element);
     const rect = element.getBoundingClientRect();
-    return style.visibility !== "hidden" && style.display !== "none" && rect.width > 0 && rect.height > 0;
+    return element.checkVisibility({ visibilityProperty: true }) && rect.width > 0 && rect.height > 0;
   };
   const elements = [...document.querySelectorAll("a,button,input,textarea,select,[role],[contenteditable=true]")]
     .filter(visible).slice(0, 200).map((element, index) => ({
