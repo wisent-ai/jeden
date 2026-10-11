@@ -138,7 +138,11 @@ pub(super) fn atomic_write_new(path: &Path, bytes: &[u8]) -> Result<(), String> 
         fs::rename(&temporary, path).map_err(|error| error.to_string())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        if let Err(left) = fs::remove_file(&temporary) {
+            if left.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("jeden: {} is left behind: {left}", temporary.display());
+            }
+        }
     }
     result
 }
