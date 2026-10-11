@@ -139,9 +139,7 @@ impl IdempotencyStore {
         }
         fs::remove_file(&path).map_err(storage)?;
         if let Some(parent) = path.parent() {
-            if let Ok(directory) = OpenOptions::new().read(true).open(parent) {
-                let _ = directory.sync_all();
-            }
+            sync_directory(parent)?;
         }
         Ok(())
     }
@@ -214,10 +212,24 @@ fn atomic_write(path: &Path, record: &DurableRecord) -> Result<(), IdempotencyEr
     file.write_all(&bytes).map_err(storage)?;
     file.sync_all().map_err(storage)?;
     fs::rename(&temporary, path).map_err(storage)?;
-    if let Ok(directory) = OpenOptions::new().read(true).open(parent) {
-        let _ = directory.sync_all();
-    }
+    sync_directory(parent)?;
     Ok(())
+}
+
+/// Flushes `directory`'s entries, so a record written or removed in it
+/// survives a crash; a directory that cannot be opened or flushed fails the
+/// operation instead of leaving its durability unknown.
+fn sync_directory(directory: &Path) -> Result<(), IdempotencyError> {
+    OpenOptions::new()
+        .read(true)
+        .open(directory)
+        .and_then(|opened| opened.sync_all())
+        .map_err(|error| {
+            IdempotencyError::Storage(format!(
+                "idempotency directory {} cannot be flushed: {error}",
+                directory.display()
+            ))
+        })
 }
 
 fn storage(error: std::io::Error) -> IdempotencyError {
