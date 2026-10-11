@@ -131,6 +131,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             "2. BRAMA_URL configured",
             format!("{url} · {}", crate::agent::credential::route_origin()),
         )),
+        None if state.env_file_error.is_some() => items.push(error_row(
+            "2. BRAMA_URL state is unknown",
+            "Resolve the environment file read error before configuring this value.",
+        )),
         None => {
             let prefill = match example_prefill(context.cwd, BRAMA_URL_KEY) {
                 Ok(Some(url)) => format!(" {url}"),
@@ -156,6 +160,10 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             "3. WISENT_APP_AGENT_ID configured",
             format!("{id} · stored in ~/.jeden/.env"),
         )),
+        None if state.env_file_error.is_some() => items.push(error_row(
+            "3. WISENT_APP_AGENT_ID state is unknown",
+            "Resolve the environment file read error before configuring this value.",
+        )),
         None => items.push(
             PickerItem::action(
                 "3. Set WISENT_APP_AGENT_ID",
@@ -172,6 +180,11 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET configured",
             "read by Jeden with `stado credentials get --role wisent-app-agent --field value`",
+        ));
+    } else if state.env_file_error.is_some() {
+        items.push(error_row(
+            "4. WISENT_APP_AGENT_AUTH_SECRET state is unknown",
+            "Resolve the environment file read error before interpreting this value as unavailable.",
         ));
     } else {
         items.push(configured_row(

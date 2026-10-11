@@ -9,7 +9,15 @@ use crate::slash::setup::DEFAULT_AGENT_ID;
 
 pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     let state = setup_state(context);
-    let mark = |configured: bool| if configured { "[OK]" } else { "[missing]" };
+    let mark = |configured: bool| {
+        if configured {
+            "[OK]"
+        } else if state.env_file_error.is_some() {
+            "[unknown]"
+        } else {
+            "[missing]"
+        }
+    };
     let workspace_line = match (&state.workspace, &state.workspace_error) {
         (Some(path), _) => format!(
             "1. Workspace [OK] {} — existing files and matching Jeden sessions remain in place",
@@ -24,15 +32,23 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     let mut lines = vec![
         "Setup checklist (guided wizard: run /setup in the interactive TUI):".to_string(),
         workspace_line,
-        format!(
-            "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado service directory connect brama --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
-            mark(state.brama_url.is_some()),
-            crate::agent::credential::route_origin()
-        ),
-        format!(
-            "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",
-            mark(state.agent_id.is_some())
-        ),
+        if state.brama_url.is_none() && state.env_file_error.is_some() {
+            "2. BRAMA_URL [unknown] — resolve the environment file read error before configuring this value".to_string()
+        } else {
+            format!(
+                "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado service directory connect brama --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
+                mark(state.brama_url.is_some()),
+                crate::agent::credential::route_origin()
+            )
+        },
+        if state.agent_id.is_none() && state.env_file_error.is_some() {
+            "3. WISENT_APP_AGENT_ID [unknown] — resolve the environment file read error before configuring this value".to_string()
+        } else {
+            format!(
+                "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",
+                mark(state.agent_id.is_some())
+            )
+        },
         format!(
             "4. WISENT_APP_AGENT_AUTH_SECRET {} — the vault item playing role wisent-app-agent (field value), read by Jeden with `stado credentials get --role`",
             mark(state.secret_configured)
