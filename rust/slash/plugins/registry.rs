@@ -8,14 +8,30 @@ pub(crate) fn plugin_registry_path(cwd: &Path) -> PathBuf {
 }
 
 /// The plugin registry under `cwd`, normalised: absent is empty; one that
-/// cannot be read or does not parse is refused naming the file. Read as
-/// empty, every installed plugin vanished from the list.
+/// cannot be read, does not parse, or whose root, `sources`, `installed` or
+/// `reload` is not an object is refused naming the file and the field. Read
+/// as empty, every installed plugin vanished from the list, and the next save
+/// wrote that empty list over the file.
 pub(crate) fn plugin_registry(cwd: &Path) -> Result<Value, String> {
-    let raw = read_json_value(&plugin_registry_path(cwd))?;
+    let path = plugin_registry_path(cwd);
+    let raw = read_json_value(&path)?;
+    let root = raw
+        .as_object()
+        .ok_or_else(|| format!("{} does not hold a JSON object", path.display()))?;
+    // `null` is what this registry writes for a field that holds nothing
+    // (`reload` after no reload), so it reads back as that field's absence.
+    let field = |name: &str, absent: Value| match root.get(name) {
+        None | Some(Value::Null) => Ok(absent),
+        Some(value) if value.is_object() => Ok(value.clone()),
+        Some(other) => Err(format!(
+            "{}: {name} must be an object, not {other}",
+            path.display()
+        )),
+    };
     Ok(json!({
-        "sources": raw.get("sources").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
-        "installed": raw.get("installed").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
-        "reload": raw.get("reload").filter(|value| value.is_object()).cloned().unwrap_or(Value::Null),
+        "sources": field("sources", json!({}))?,
+        "installed": field("installed", json!({}))?,
+        "reload": field("reload", Value::Null)?,
     }))
 }
 
