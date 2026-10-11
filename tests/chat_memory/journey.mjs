@@ -16,6 +16,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { startRpc } from '../hooks/rpc.mjs';
 
 function required(name) {
   const value = process.env[name];
@@ -28,6 +29,9 @@ const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const model = required('JEDEN_TEST_MODEL');
 const summaryModel = required('JEDEN_TEST_SUMMARY_MODEL');
 const viewBytes = Number(required('JEDEN_TEST_VIEW_BYTES'));
+// The step limit an RPC session's turns run under, the operator's number as
+// the hook journeys take it.
+const maxSteps = Number(required('JEDEN_TEST_MAX_STEPS'));
 assert.ok(Number.isInteger(viewBytes), 'JEDEN_TEST_VIEW_BYTES is a whole number of bytes');
 assert.ok(!process.env.JEDEN_MODEL_ENDPOINT, 'the journey requires the real Brama route');
 // The summary size is the operator's number Jeden declares; the journey's
@@ -39,7 +43,7 @@ mkdirSync(runs, { recursive: true });
 const output = mkdtempSync(join(runs, 'run-'));
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const report = { revision, binary, binarySha256: hash(binary), model, summaryModel, viewBytes, summaryBytes,
-  testSha256: hash(fileURLToPath(import.meta.url)), commands: [], observations: {}, verdict: 'failed' };
+  testSha256: hash(fileURLToPath(import.meta.url)), commands: [], frames: [], observations: {}, verdict: 'failed' };
 
 function invoke(program, args, cwd, env) {
   const result = spawnSync(program, args, { cwd, env, encoding: 'utf8' });
@@ -153,6 +157,37 @@ try {
   const said = (marker) => kept.messages.some((message) => String(message.content).includes(marker));
   assert.ok(said('BEFORE-REWIND'), 'the log lost what was said before the rewind');
   assert.ok(said('AFTER-REWIND'), 'the log did not keep what was said after the rewind');
+
+  // A rewind inside one running session (an RPC session, as Jeden Desktop
+  // and the TUI run one) marks what it took back: the log keeps it, the
+  // view names its range under rewound, and no later tail gives it again.
+  const live = project('live', { summaryModel, viewBytes });
+  const client = startRpc({ binary, cwd: live.directory, env: live.env, report });
+  let liveSession;
+  try {
+    liveSession = await client.rpc('session/new', { options: { cwd: live.directory, model, maxSteps } });
+    const prompt = (text) => client.rpc('session/prompt', { sessionId: liveSession.sessionId, prompt: text });
+    await prompt('Respond exactly: LIVE-FIRST');
+    const marked = JSON.stringify(await prompt('/checkpoint live-journey'));
+    const created = /Checkpoint (\S+) created/.exec(marked);
+    assert.ok(created, `the in-session checkpoint names no id: ${marked}`);
+    const [, liveCheckpoint] = created;
+    await prompt('Respond exactly: LIVE-TAKEN-BACK');
+    report.observations.liveRewound = await prompt(`/rewind ${liveCheckpoint}`);
+    await prompt('Respond exactly: LIVE-AFTER');
+  } finally {
+    await client.end();
+  }
+  const liveShown = JSON.parse(succeeds(jeden(['chat-memory', 'show', liveSession.sessionPath, '--json'], live)));
+  report.observations.liveShown = liveShown.view;
+  assert.ok(liveShown.view.rewound.length, 'the in-session rewind marked no range');
+  const given = (marker) => liveShown.view.tail.some((message) => String(message.content).includes(marker));
+  assert.ok(!given('LIVE-TAKEN-BACK'), 'the tail still gives the turn the rewind took back');
+  assert.ok(given('LIVE-AFTER'), 'the tail lost what was said after the rewind');
+  const liveLog = JSON.parse(succeeds(jeden(['chat-memory', 'dates', liveSession.sessionPath, '0',
+    String(Number.MAX_SAFE_INTEGER), '--json'], live)));
+  assert.ok(liveLog.messages.some((message) => String(message.content).includes('LIVE-TAKEN-BACK')),
+    'the log lost the turn the rewind took back');
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
