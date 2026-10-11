@@ -37,9 +37,14 @@ async function refresh() {
         }).join('') + '</div>').join('')
       : '<div class="card dim">quota unavailable: ' + escapeText(stats.quota.reason) + '</div>';
     const usageHtml = Object.entries(stats.usage).map(([scope, usage]) => {
+      if (usage.error != null) {
+        return '<div class="card"><b>' + escapeText(scope) + '</b><div class="row"><span class="error">usage unreadable: ' + escapeText(usage.error) + '</span></div></div>';
+      }
       return '<div class="card"><b>' + escapeText(scope) + '</b><div class="row"><span>' + usage.events + ' events</span><span class="num">' + Math.round(usage.tokens) + ' tokens</span><span class="num dim">cost ' + usage.cost.toFixed(4) + '</span></div></div>';
     }).join('');
-    const sessionsHtml = stats.sessions.count + ' sessions' + (stats.sessions.recent.length ? '<br><span class="dim">latest: ' + escapeText(stats.sessions.recent.join(', ')) + '</span>' : '');
+    const sessionsHtml = stats.sessions.error != null
+      ? '<span class="error">sessions unreadable: ' + escapeText(stats.sessions.error) + '</span>'
+      : stats.sessions.count + ' sessions' + (stats.sessions.recent.length ? '<br><span class="dim">latest: ' + escapeText(stats.sessions.recent.join(', ')) + '</span>' : '');
     document.getElementById('ver').textContent = 'v' + stats.version;
     document.getElementById('quota').innerHTML = quotaHtml;
     document.getElementById('usage').innerHTML = usageHtml;

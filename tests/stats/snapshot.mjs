@@ -20,10 +20,10 @@ const report = {
 let reservation;
 let server;
 
-function run(program, args) {
-  const result = spawnSync(program, args, { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
+function run(program, args, cwd = root) {
+  const result = spawnSync(program, args, { cwd, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
   report.commands.push({
-    program, args, exit_status: result.status, signal: result.signal,
+    program, args, cwd, exit_status: result.status, signal: result.signal,
     stdout: result.stdout, stderr: result.stderr, error: result.error?.message,
   });
   return result;
@@ -114,6 +114,24 @@ try {
     'native snapshot must include every persisted session directory, not only a newest subset');
   assert.equal(snapshot.sessions.count, expectedSessions.length);
   report.cases.push({ name: 'complete persisted session inventory', sessionRoot, expectedSessions });
+
+  // A ledger holding an event of another shape is reported with its path
+  // and the decoder's reason; it is never counted as zero usage.
+  const brokenProject = join(output, 'broken-ledger');
+  mkdirSync(join(brokenProject, '.jeden'), { recursive: true });
+  const brokenLedger = join(brokenProject, '.jeden/usage.json');
+  writeFileSync(brokenLedger, JSON.stringify({ events: [{ model: 'recorded-model' }] }) + '\n');
+  const brokenSnapshot = JSON.parse(success(run(binary, ['stats', '--json'], brokenProject)));
+  assert.ok(brokenSnapshot.usage.project.error?.includes(`${brokenLedger} is not a usage ledger`),
+    JSON.stringify(brokenSnapshot.usage.project));
+  assert.ok(brokenSnapshot.usage.project.error.includes('totalTokens'), brokenSnapshot.usage.project.error);
+  assert.equal(brokenSnapshot.usage.project.events, undefined, 'an unreadable ledger must not report an event count');
+  const brokenSummary = run(binary, ['stats', '--summary'], brokenProject);
+  assert.throws(() => success(brokenSummary), 'a summary over an unreadable ledger must fail');
+  assert.ok(brokenSummary.stderr.includes('usage unreadable:'), brokenSummary.stderr);
+  const brokenText = success(run(binary, ['stats'], brokenProject));
+  assert.ok(brokenText.includes('usage (project) unreadable:'), brokenText);
+  report.cases.push({ name: 'unreadable usage ledger reported', ledger: brokenLedger, error: brokenSnapshot.usage.project.error });
 
   const malformed = run(binary, ['stats', '--serve', '--port', 'not-a-port']);
   assert.equal(malformed.status, 1, `${malformed.stdout}\n${malformed.stderr}`);

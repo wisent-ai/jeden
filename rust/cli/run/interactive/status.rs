@@ -4,7 +4,6 @@
 //! Split out of `cli/run/interactive.rs`, which had grown past the module line
 //! cap.
 
-use crate::read_json;
 use serde_json::Value;
 use std::env;
 use std::path::Path;
@@ -32,8 +31,14 @@ pub(super) fn git_prompt_status(cwd: &Path) -> (Option<String>, usize) {
     (branch, dirty_count)
 }
 
+/// The service tier the status line shows. A mode state that cannot be read
+/// or parsed is named on the line itself: read as empty it showed the
+/// environment's tier while the session's own fast mode was in force.
 pub(super) fn service_tier_prompt(cwd: &Path) -> String {
-    let mode: Value = read_json(&cwd.join(".jeden/mode-state.json"));
+    let mode = match crate::slash::state::read_mode_state_value(cwd) {
+        Ok(mode) => mode,
+        Err(error) => return format!("mode state unreadable: {error}"),
+    };
     if mode
         .pointer("/fast/enabled")
         .and_then(Value::as_bool)

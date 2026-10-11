@@ -1,4 +1,3 @@
-use serde::Deserialize;
 use serde_json::json;
 use std::env;
 use std::fs;
@@ -69,13 +68,6 @@ pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 
 fn version_text() -> String {
     format!("jeden {JEDEN_VERSION}")
-}
-
-fn read_json<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
 }
 
 fn parse_env_value(raw: &str) -> String {
