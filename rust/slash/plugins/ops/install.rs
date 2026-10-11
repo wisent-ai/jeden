@@ -58,7 +58,7 @@ pub(crate) fn install_one(
     if !valid_plugin_id(&id) {
         return Err(format!("Invalid plugin id: {id}"));
     }
-    let source = find_marketplace_source(cwd, mkt_name).ok_or_else(|| {
+    let source = find_marketplace_source(cwd, mkt_name)?.ok_or_else(|| {
         format!("Marketplace source not found: {mkt_name}. Add a signed source first.")
     })?;
     let cache = marketplace_cache_dir(mkt_name);

@@ -22,27 +22,28 @@ pub(crate) fn registry_scope_dir(cwd: &Path, scope: &str) -> PathBuf {
     }
 }
 
-/// Look up a marketplace source string by name across project then user scopes.
-pub(crate) fn find_marketplace_source(cwd: &Path, name: &str) -> Option<String> {
+/// Look up a marketplace source string by name across project then user
+/// scopes; a registry that cannot be read or does not parse is refused.
+pub(crate) fn find_marketplace_source(cwd: &Path, name: &str) -> Result<Option<String>, String> {
     for dir in [cwd.to_path_buf(), plugins_home()] {
-        if let Some(src) = plugin_registry(&dir)
+        if let Some(src) = plugin_registry(&dir)?
             .get("sources")
             .and_then(Value::as_object)
             .and_then(|s| s.get(name))
             .and_then(|s| s.get("source"))
             .and_then(Value::as_str)
         {
-            return Some(src.to_string());
+            return Ok(Some(src.to_string()));
         }
     }
-    None
+    Ok(None)
 }
 
 /// All configured marketplace sources (name -> source) across both scopes.
-pub(crate) fn all_marketplace_sources(cwd: &Path) -> Vec<(String, String)> {
+pub(crate) fn all_marketplace_sources(cwd: &Path) -> Result<Vec<(String, String)>, String> {
     let mut out: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     for dir in [cwd.to_path_buf(), plugins_home()] {
-        if let Some(map) = plugin_registry(&dir)
+        if let Some(map) = plugin_registry(&dir)?
             .get("sources")
             .and_then(Value::as_object)
         {
@@ -53,11 +54,16 @@ pub(crate) fn all_marketplace_sources(cwd: &Path) -> Vec<(String, String)> {
             }
         }
     }
-    out.into_iter().collect()
+    Ok(out.into_iter().collect())
 }
 
-/// Record the freshly fetched plugin list into whichever scope holds `name`.
-pub(crate) fn update_source_plugins(cwd: &Path, name: &str, plugins: &[Value]) {
+/// Record the freshly fetched plugin list into whichever scope holds `name`;
+/// a registry that cannot be read, parsed or written is refused naming it.
+pub(crate) fn update_source_plugins(
+    cwd: &Path,
+    name: &str,
+    plugins: &[Value],
+) -> Result<(), String> {
     let summary: Vec<Value> = plugins
         .iter()
         .map(|p| {
@@ -69,7 +75,7 @@ pub(crate) fn update_source_plugins(cwd: &Path, name: &str, plugins: &[Value]) {
         })
         .collect();
     for dir in [cwd.to_path_buf(), plugins_home()] {
-        let mut registry = plugin_registry(&dir);
+        let mut registry = plugin_registry(&dir)?;
         let has = registry
             .get("sources")
             .and_then(Value::as_object)
@@ -87,8 +93,9 @@ pub(crate) fn update_source_plugins(cwd: &Path, name: &str, plugins: &[Value]) {
             src.insert("plugins".into(), json!(summary));
             src.insert("updatedAt".into(), json!(now_text()));
         }
-        let _ = save_plugin_registry(&dir, &registry);
+        save_plugin_registry(&dir, &registry)?;
     }
+    Ok(())
 }
 
 /// Merge only verified active records. Legacy `installed` entries are inventory,

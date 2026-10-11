@@ -5,6 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
+use crate::tui::{PickerItem, PickerSpec};
+
 /// The user's home directory: `HOME` when it is set and not empty, else the
 /// home the user database records for this user (`std::env::home_dir`, which
 /// asks it when `HOME` is unset, as under launchd or a stripped environment).
@@ -28,18 +30,37 @@ pub(crate) fn project_config_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/config.json")
 }
 
-pub(crate) fn read_json_value(path: &Path) -> Value {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or_else(|| json!({}))
+/// A JSON state or configuration file a slash command reads (`mcp.json`, the
+/// plugin registry, collaboration and mode state, usage): a file that does
+/// not exist is an empty object; one that cannot be read or does not parse is
+/// refused naming the file and the cause. Read as empty, a typo in `mcp.json`
+/// made every server it declares vanish, its `disabledServers` too.
+pub(crate) fn read_json_value(path: &Path) -> Result<Value, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
+        Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
+    };
+    serde_json::from_str::<Value>(&text)
+        .map_err(|error| format!("{} is not valid JSON: {error}", path.display()))
+}
+
+/// A picker that can only say why it has nothing to offer: one disabled row
+/// naming the refused operation, its cause in the detail.
+pub(crate) fn refusal_picker(title: &str, operation: &str, cause: String) -> PickerSpec {
+    PickerSpec::new(
+        title,
+        vec![PickerItem::action(operation, "")
+            .detail(cause)
+            .badge("error")
+            .disabled(true)],
+    )
 }
 
 /// Writes `value` to `path`. A file already there that cannot be read or is
 /// not JSON is refused with its path and cause, never replaced: every caller
-/// edits what `read_json_value` gave it, which for such a file is an empty
-/// object, so writing would replace every entry the file holds with the one
-/// entry being changed.
+/// edits what `read_json_value` gave it; a file that changed under it since
+/// is still never replaced by one entry.
 pub(crate) fn write_json_value(path: &Path, value: &Value) -> Result<(), String> {
     match fs::read_to_string(path) {
         Ok(text) => {

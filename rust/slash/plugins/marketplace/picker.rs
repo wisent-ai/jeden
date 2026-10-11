@@ -7,16 +7,22 @@
 use super::super::fetch::{catalog_plugins, read_marketplace_catalog};
 use super::super::marketplace_cache_dir;
 use super::super::registry::{plugin_registry, sorted_object_values};
+use crate::slash::common::refusal_picker;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
 
 pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
-    let scoped_registries = [
-        ("project", plugin_registry(context.cwd)),
-        ("user", plugin_registry(&super::plugins_home())),
-    ];
+    let registries = plugin_registry(context.cwd)
+        .and_then(|project| Ok((project, plugin_registry(&super::plugins_home())?)));
+    let (project, user) = match registries {
+        Ok(registries) => registries,
+        Err(cause) => {
+            return refusal_picker("Marketplace", "Plugin registry cannot be read", cause)
+        }
+    };
+    let scoped_registries = [("project", project), ("user", user)];
     let mut items = Vec::new();
     for (source_scope, registry) in &scoped_registries {
         let mut sources = sorted_object_values(&registry["sources"]);

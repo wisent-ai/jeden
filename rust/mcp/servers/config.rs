@@ -6,21 +6,17 @@
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(super) use crate::slash::common::dirs_home;
+use crate::slash::common::read_json_value;
 
-pub(super) fn read_json_value(path: &Path) -> Value {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or(Value::Null)
-}
-
-pub fn load_config(cwd: &Path) -> Value {
-    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"));
-    let project = read_json_value(&cwd.join(".jeden/mcp.json"));
+/// The user's and the project's `mcp.json` merged. One that cannot be read or
+/// does not parse is refused naming the file: read as nothing, every server
+/// it declares and every server it disables vanished without a word.
+pub fn load_config(cwd: &Path) -> Result<Value, String> {
+    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"))?;
+    let project = read_json_value(&cwd.join(".jeden/mcp.json"))?;
     let mut servers = serde_json::Map::new();
     let mut disabled = Vec::new();
     for source in [&user, &project] {
@@ -45,11 +41,11 @@ pub fn load_config(cwd: &Path) -> Value {
             );
         }
     }
-    json!({"mcpServers": servers, "disabledServers": disabled})
+    Ok(json!({"mcpServers": servers, "disabledServers": disabled}))
 }
 
 pub(crate) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, String> {
-    let config = load_config(cwd);
+    let config = load_config(cwd)?;
     let disabled = config
         .get("disabledServers")
         .and_then(Value::as_array)
@@ -69,7 +65,7 @@ pub(crate) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, 
 }
 
 pub(crate) fn configured_server(cwd: &Path, server_name: &str) -> Result<Value, String> {
-    let config = load_config(cwd);
+    let config = load_config(cwd)?;
     let disabled = config
         .get("disabledServers")
         .and_then(Value::as_array)

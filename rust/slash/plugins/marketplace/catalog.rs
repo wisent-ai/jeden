@@ -47,7 +47,7 @@ pub(super) fn handle_catalog(
         }
         let mut removed_from = None;
         for dir in [context.cwd.to_path_buf(), dirs_home()] {
-            let mut scoped = plugin_registry(&dir);
+            let mut scoped = plugin_registry(&dir)?;
             let removed = scoped
                 .get_mut("installed")
                 .and_then(Value::as_object_mut)
@@ -70,9 +70,9 @@ pub(super) fn handle_catalog(
     }
     if verb == "discover" {
         let sources: Vec<(String, String)> = if first.is_empty() {
-            all_marketplace_sources(context.cwd)
+            all_marketplace_sources(context.cwd)?
         } else {
-            match find_marketplace_source(context.cwd, first) {
+            match find_marketplace_source(context.cwd, first)? {
                 Some(src) => vec![(first.to_string(), src)],
                 None => return Err(format!("Marketplace source not found: {first}")),
             }
@@ -125,9 +125,9 @@ pub(super) fn handle_catalog(
     }
     if verb == "update" {
         let sources: Vec<(String, String)> = if first.is_empty() {
-            all_marketplace_sources(context.cwd)
+            all_marketplace_sources(context.cwd)?
         } else {
-            match find_marketplace_source(context.cwd, first) {
+            match find_marketplace_source(context.cwd, first)? {
                 Some(src) => vec![(first.to_string(), src)],
                 None => return Err(format!("Marketplace source not found: {first}")),
             }
@@ -147,7 +147,7 @@ pub(super) fn handle_catalog(
                 Ok(catalog) => {
                     let plugins = catalog_plugins(&catalog);
                     counts.push(plugins.len());
-                    update_source_plugins(context.cwd, &name, &plugins);
+                    update_source_plugins(context.cwd, &name, &plugins)?;
                     updated.push(name);
                 }
                 Err(error) => errors.push(format!("- {name}: {error}")),

@@ -1,11 +1,14 @@
 //! What this workspace has used and what is left of the quotas that pay for
 //! it.
 
+use serde::Deserialize;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::slash::common::{now_text, read_json_value, split_head, write_json_value};
+use crate::slash::common::{
+    now_text, read_json_value, refusal_picker, split_head, write_json_value,
+};
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 
@@ -22,7 +25,16 @@ fn usage_path(cwd: &Path) -> PathBuf {
 pub(crate) fn usage_picker(context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
     let path = usage_path(context.cwd);
-    let usage = read_json_value(&path);
+    let usage = match read_json_value(&path) {
+        Ok(usage) => usage,
+        Err(cause) => {
+            return refusal_picker(
+                &crate::cli::i18n::tr(&lang, "view.usage.title"),
+                "Usage accounting cannot be read",
+                cause,
+            )
+        }
+    };
     let events = usage
         .get("events")
         .and_then(Value::as_array)
@@ -94,18 +106,27 @@ pub(crate) fn usage_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new(crate::cli::i18n::tr(&lang, "view.usage.title"), items).localized(&lang)
 }
 
+/// The `/usage` verbs; `status` is a second name for `show`.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum UsageVerb {
+    Show,
+    Status,
+    Reset,
+}
+
 pub(crate) fn handle_usage(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let (verb, _) = split_head(args);
     let verb = if verb.is_empty() { "show" } else { verb };
     let path = usage_path(context.cwd);
-    if verb == "reset" {
+    let Ok(verb) = serde_json::from_value::<UsageVerb>(Value::from(verb)) else {
+        return Err("Usage: /usage [show|reset]".into());
+    };
+    if let UsageVerb::Reset = verb {
         write_json_value(&path, &json!({"updatedAt": now_text(), "events": []}))?;
         return Ok(format!("Reset usage accounting: {}", path.display()));
     }
-    if verb != "show" && verb != "status" {
-        return Err("Usage: /usage [show|reset]".into());
-    }
-    let usage = read_json_value(&path);
+    let usage = read_json_value(&path)?;
     let events = usage
         .get("events")
         .and_then(Value::as_array)

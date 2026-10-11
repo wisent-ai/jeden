@@ -4,15 +4,28 @@
 //! module line cap.
 
 use crate::mcp;
-use crate::slash::common::{dirs_home, read_json_value};
+use crate::slash::common::{dirs_home, read_json_value, refusal_picker};
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
 
+/// The user's file, the project's and the merged view; any of them that
+/// cannot be read or does not parse refuses the picker naming the file.
+fn mcp_files(context: &SlashContext<'_>) -> Result<(Value, Value, Value), String> {
+    Ok((
+        read_json_value(&dirs_home().join(".jeden/mcp.json"))?,
+        read_json_value(&context.cwd.join(".jeden/mcp.json"))?,
+        mcp::load_config(context.cwd)?,
+    ))
+}
+
 pub(crate) fn mcp_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"));
-    let project = read_json_value(&context.cwd.join(".jeden/mcp.json"));
-    let merged = mcp::load_config(context.cwd);
+    let (user, project, merged) = match mcp_files(context) {
+        Ok(files) => files,
+        Err(cause) => {
+            return refusal_picker("MCP servers", "MCP configuration cannot be read", cause)
+        }
+    };
     let disabled = merged
         .get("disabledServers")
         .and_then(Value::as_array)
@@ -124,7 +137,9 @@ pub(crate) fn mcp_picker(context: &SlashContext<'_>) -> PickerSpec {
                         .disabled(status != "enabled"),
                 );
             }
-            if matches!(scope, "user" | "project") {
+            // A server defined in a file (not only in the merged view) can be
+            // removed from that file.
+            if scope != "merged" {
                 items.push(
                     PickerItem::action(
                         format!("Remove {name}"),

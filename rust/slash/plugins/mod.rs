@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::slash::common::{dirs_home, now_text, split_args};
+use crate::slash::common::{dirs_home, now_text, refusal_picker, split_args};
 use crate::slash::SlashContext;
 use crate::tools;
 use crate::tui::{PickerItem, PickerSpec};
@@ -136,7 +136,16 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
         ("project", context.cwd.to_path_buf()),
         ("user", plugins_home()),
     ] {
-        let registry = plugin_registry(&dir);
+        let registry = match plugin_registry(&dir) {
+            Ok(registry) => registry,
+            Err(cause) => {
+                return refusal_picker(
+                    "Extensions and plugins",
+                    "Plugin registry cannot be read",
+                    cause,
+                )
+            }
+        };
         for source in sorted_object_values(&registry["sources"]) {
             let Some(name) = source.get("name").and_then(Value::as_str) else {
                 continue;
@@ -254,7 +263,7 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
             ));
         }
         let reg_dir = registry_scope_dir(context.cwd, &scope);
-        let mut registry = plugin_registry(&reg_dir);
+        let mut registry = plugin_registry(&reg_dir)?;
         let installed = registry
             .get_mut("installed")
             .and_then(Value::as_object_mut)

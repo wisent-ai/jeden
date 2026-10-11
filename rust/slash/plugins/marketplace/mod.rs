@@ -68,7 +68,7 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
     let verb = argv.first().map(String::as_str).unwrap_or("help");
     let rest = argv.split_first().map(|(_, r)| r).unwrap_or(&[]);
     let first = rest.first().map(String::as_str).unwrap_or("");
-    let mut registry = plugin_registry(context.cwd);
+    let mut registry = plugin_registry(context.cwd)?;
     if verb == "help" {
         return Ok("Usage: /marketplace add <signed-source> | dev-link [--scope user|project] <id> <local-path> [entrypoint] | remove <name> | list | update [name] | discover [marketplace] | install [--force] [--scope user|project] <name@marketplace> | upgrade [--scope user|project] [name@marketplace] | installed | uninstall <name@marketplace>.".into());
     }

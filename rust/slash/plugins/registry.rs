@@ -7,18 +7,21 @@ pub(crate) fn plugin_registry_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/plugins.json")
 }
 
-pub(crate) fn plugin_registry(cwd: &Path) -> Value {
-    let raw = read_json_value(&plugin_registry_path(cwd));
-    json!({
+/// The plugin registry under `cwd`, normalised: absent is empty; one that
+/// cannot be read or does not parse is refused naming the file. Read as
+/// empty, every installed plugin vanished from the list.
+pub(crate) fn plugin_registry(cwd: &Path) -> Result<Value, String> {
+    let raw = read_json_value(&plugin_registry_path(cwd))?;
+    Ok(json!({
         "sources": raw.get("sources").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
         "installed": raw.get("installed").filter(|value| value.is_object()).cloned().unwrap_or_else(|| json!({})),
         "reload": raw.get("reload").filter(|value| value.is_object()).cloned().unwrap_or(Value::Null),
-    })
+    }))
 }
 
 pub(crate) fn save_plugin_registry(cwd: &Path, registry: &Value) -> Result<PathBuf, String> {
     let file = plugin_registry_path(cwd);
-    let mut normalized = plugin_registry(cwd);
+    let mut normalized = plugin_registry(cwd)?;
     if let Some(map) = registry.as_object() {
         if let Some(sources) = map.get("sources").filter(|value| value.is_object()) {
             normalized["sources"] = sources.clone();

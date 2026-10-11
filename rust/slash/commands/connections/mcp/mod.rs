@@ -1,6 +1,7 @@
 //! The external tool servers this workspace can talk to: declaring one,
 //! enabling it, and removing it.
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
@@ -39,10 +40,10 @@ fn mcp_write_file(path: &Path, mut config: Value) -> Result<PathBuf, String> {
     Ok(path.to_path_buf())
 }
 
-fn format_mcp_list(cwd: &Path) -> String {
-    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"));
-    let project = read_json_value(&cwd.join(".jeden/mcp.json"));
-    let merged = mcp::load_config(cwd);
+fn format_mcp_list(cwd: &Path) -> Result<String, String> {
+    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"))?;
+    let project = read_json_value(&cwd.join(".jeden/mcp.json"))?;
+    let merged = mcp::load_config(cwd)?;
     let disabled = merged
         .get("disabledServers")
         .and_then(Value::as_array)
@@ -51,10 +52,10 @@ fn format_mcp_list(cwd: &Path) -> String {
         .filter_map(Value::as_str)
         .collect::<std::collections::BTreeSet<_>>();
     let Some(servers) = merged.get("mcpServers").and_then(Value::as_object) else {
-        return "No MCP servers configured.".into();
+        return Ok("No MCP servers configured.".into());
     };
     if servers.is_empty() {
-        return "No MCP servers configured.".into();
+        return Ok("No MCP servers configured.".into());
     }
     let mut lines = Vec::new();
     for (name, server) in std::collections::BTreeMap::from_iter(servers.iter()) {
@@ -93,7 +94,7 @@ fn format_mcp_list(cwd: &Path) -> String {
                 });
         lines.push(format!("{name} [{status}, {source}, {transport}]"));
     }
-    lines.join("\n")
+    Ok(lines.join("\n"))
 }
 
 fn head_rest(parts: &[String]) -> (&str, &[String]) {
@@ -103,74 +104,174 @@ fn head_rest(parts: &[String]) -> (&str, &[String]) {
     }
 }
 
+/// The `/mcp` verbs. A word that names none of them is refused with the
+/// usage.
+#[derive(Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum McpVerb {
+    List,
+    Status,
+    Add,
+    Remove,
+    Enable,
+    Disable,
+    Tools,
+    Resources,
+    Prompts,
+    Test,
+    Notifications,
+    Reload,
+    Reconnect,
+}
+
+/// The file `scope` names, as it stands: absent is an empty object; one that
+/// cannot be read or does not parse is refused naming it, so an edit never
+/// replaces it with the one server being changed.
+fn mcp_scope_config(path: &Path) -> Result<Value, String> {
+    let config = read_json_value(path)?;
+    if config.is_object() {
+        Ok(config)
+    } else {
+        Err(format!(
+            "{} is not valid: its root must be an object",
+            path.display()
+        ))
+    }
+}
+
+const MCP_USAGE: &str = "Usage: /mcp list | status | add [--scope user|project] <name> [stdio <command> [args...] | http <url>] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | notifications <server> | test <server> | reload | reconnect <server>";
+
 pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let (verb, rest) = split_head(args);
     let verb = if verb.is_empty() { "list" } else { verb };
-    match verb {
-        "list" => Ok(format_mcp_list(context.cwd)),
-        "status" => serde_json::to_string_pretty(&mcp::manager_status(context.cwd)?).map_err(|error| error.to_string()),
-        "add" => {
+    let Ok(parsed) = serde_json::from_value::<McpVerb>(Value::from(verb)) else {
+        return Err(MCP_USAGE.into());
+    };
+    match parsed {
+        McpVerb::List => format_mcp_list(context.cwd),
+        McpVerb::Status => serde_json::to_string_pretty(&mcp::manager_status(context.cwd)?)
+            .map_err(|error| error.to_string()),
+        McpVerb::Add => {
             let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
             let scope = normalize_scope(scope)?;
             let (name, after_name) = head_rest(&parts);
-            if !valid_mcp_server_name(name) { return Err("Usage: /mcp add [--scope user|project] <name> [stdio <command> [args...] | http <url>]".into()); }
+            if !valid_mcp_server_name(name) {
+                return Err("Usage: /mcp add [--scope user|project] <name> [stdio <command> [args...] | http <url>]".into());
+            }
             let (transport_or_command, after_transport) = head_rest(after_name);
-            if transport_or_command.is_empty() { return Err("Usage: /mcp add [--scope user|project] <name> [stdio <command> [args...] | http <url>]".into()); }
+            if transport_or_command.is_empty() {
+                return Err("Usage: /mcp add [--scope user|project] <name> [stdio <command> [args...] | http <url>]".into());
+            }
             let server = match transport_or_command {
                 "http" | "streamable-http" => {
                     let (url, extra) = head_rest(after_transport);
-                    if url.is_empty() || !extra.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")) {
+                    if url.is_empty()
+                        || !extra.is_empty()
+                        || !(url.starts_with("http://") || url.starts_with("https://"))
+                    {
                         return Err(format!("Usage: /mcp add {name} http <http(s)-url>"));
                     }
                     json!({"type": "streamable-http", "url": url})
                 }
-                "sse" => return Err("Legacy SSE transport is not supported; use streamable HTTP.".into()),
+                "sse" => {
+                    return Err(
+                        "Legacy SSE transport is not supported; use streamable HTTP.".into(),
+                    )
+                }
                 "stdio" => {
                     let (command, after_command) = head_rest(after_transport);
-                    if command.is_empty() { return Err(format!("Usage: /mcp add {name} stdio <command> [args...]")); }
+                    if command.is_empty() {
+                        return Err(format!("Usage: /mcp add {name} stdio <command> [args...]"));
+                    }
                     json!({"type": "stdio", "command": command, "args": after_command.to_vec()})
                 }
-                command => json!({"type": "stdio", "command": command, "args": after_transport.to_vec()}),
+                command => {
+                    json!({"type": "stdio", "command": command, "args": after_transport.to_vec()})
+                }
             };
             let path = mcp_scope_file(context.cwd, &scope)?;
-            let mut config = read_json_value(&path);
-            if !config.is_object() { config = json!({}); }
-            config.as_object_mut().unwrap().entry("mcpServers").or_insert_with(|| json!({}));
+            let mut config = mcp_scope_config(&path)?;
+            config
+                .as_object_mut()
+                .expect("checked object")
+                .entry("mcpServers")
+                .or_insert_with(|| json!({}));
             config["mcpServers"][name] = server;
             let path = mcp_write_file(&path, config)?;
             mcp::manager_status(context.cwd)?;
-            Ok(format!("Added MCP server {name} in {scope} scope ({})", path.display()))
-        },
-        "remove" => {
+            Ok(format!(
+                "Added MCP server {name} in {scope} scope ({})",
+                path.display()
+            ))
+        }
+        McpVerb::Remove => {
             let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
             let scope = normalize_scope(scope)?;
-            let name = parts.first().map(String::as_str).unwrap_or("");
-            if name.is_empty() { return Err("Usage: /mcp remove [--scope user|project] <name>".into()); }
+            let Some(name) = parts
+                .first()
+                .map(String::as_str)
+                .filter(|name| !name.is_empty())
+            else {
+                return Err("Usage: /mcp remove [--scope user|project] <name>".into());
+            };
             let path = mcp_scope_file(context.cwd, &scope)?;
-            let mut config = read_json_value(&path);
-            let removed = config.get_mut("mcpServers").and_then(Value::as_object_mut).and_then(|servers| servers.remove(name)).is_some();
-            if let Some(disabled) = config.get_mut("disabledServers").and_then(Value::as_array_mut) {
+            let mut config = mcp_scope_config(&path)?;
+            let removed = config
+                .get_mut("mcpServers")
+                .and_then(Value::as_object_mut)
+                .and_then(|servers| servers.remove(name))
+                .is_some();
+            if let Some(disabled) = config
+                .get_mut("disabledServers")
+                .and_then(Value::as_array_mut)
+            {
                 disabled.retain(|value| value.as_str() != Some(name));
             }
             let path = mcp_write_file(&path, config)?;
             mcp::manager_status(context.cwd)?;
-            if removed { Ok(format!("Removed MCP server {name} from {scope} scope ({})", path.display())) } else { Err(format!("MCP server not found in {scope} scope: {name}")) }
-        },
-        "enable" | "disable" => {
+            if removed {
+                Ok(format!(
+                    "Removed MCP server {name} from {scope} scope ({})",
+                    path.display()
+                ))
+            } else {
+                Err(format!("MCP server not found in {scope} scope: {name}"))
+            }
+        }
+        McpVerb::Enable | McpVerb::Disable => {
+            let disable = matches!(parsed, McpVerb::Disable);
             let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
             let scope = normalize_scope(scope)?;
-            let name = parts.first().map(String::as_str).unwrap_or("");
-            if name.is_empty() { return Err(format!("Usage: /mcp {verb} [--scope user|project] <name>")); }
+            let Some(name) = parts
+                .first()
+                .map(String::as_str)
+                .filter(|name| !name.is_empty())
+            else {
+                return Err(format!("Usage: /mcp {verb} [--scope user|project] <name>"));
+            };
             let path = mcp_scope_file(context.cwd, &scope)?;
-            let mut config = read_json_value(&path);
-            if !config.is_object() { config = json!({}); }
-            config.as_object_mut().unwrap().entry("disabledServers").or_insert_with(|| json!([]));
-            let disabled = config.get_mut("disabledServers").and_then(Value::as_array_mut).ok_or("disabledServers must be an array")?;
-            if verb == "disable" {
-                if !disabled.iter().any(|value| value.as_str() == Some(name)) { disabled.push(json!(name)); }
+            let mut config = mcp_scope_config(&path)?;
+            config
+                .as_object_mut()
+                .expect("checked object")
+                .entry("disabledServers")
+                .or_insert_with(|| json!([]));
+            let disabled = config
+                .get_mut("disabledServers")
+                .and_then(Value::as_array_mut)
+                .ok_or("disabledServers must be an array")?;
+            if disable {
+                if !disabled.iter().any(|value| value.as_str() == Some(name)) {
+                    disabled.push(json!(name));
+                }
             } else {
                 disabled.retain(|value| value.as_str() != Some(name));
-                if let Some(server) = config.get_mut("mcpServers").and_then(Value::as_object_mut).and_then(|servers| servers.get_mut(name)).and_then(Value::as_object_mut) {
+                if let Some(server) = config
+                    .get_mut("mcpServers")
+                    .and_then(Value::as_object_mut)
+                    .and_then(|servers| servers.get_mut(name))
+                    .and_then(Value::as_object_mut)
+                {
                     if server.get("enabled").and_then(Value::as_bool) == Some(false) {
                         server.insert("enabled".into(), json!(true));
                     }
@@ -178,40 +279,51 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             }
             let path = mcp_write_file(&path, config)?;
             mcp::manager_status(context.cwd)?;
-            Ok(format!("{} MCP server {name} in {scope} scope ({})", if verb == "enable" { "Enabled" } else { "Disabled" }, path.display()))
-        },
-        "tools" | "resources" | "prompts" | "test" => {
+            Ok(format!(
+                "{} MCP server {name} in {scope} scope ({})",
+                if disable { "Disabled" } else { "Enabled" },
+                path.display()
+            ))
+        }
+        McpVerb::Tools | McpVerb::Resources | McpVerb::Prompts | McpVerb::Test => {
             let (server, _) = split_head(rest);
-            if server.is_empty() { return Err(format!("Usage: /mcp {} <server>", verb)); }
-            let result = match verb {
-                "tools" | "test" => mcp::list_tools(context.cwd, server),
-                "resources" => mcp::list_resources(context.cwd, server),
-                "prompts" => mcp::list_prompts(context.cwd, server),
-                _ => unreachable!(),
+            if server.is_empty() {
+                return Err(format!("Usage: /mcp {} <server>", verb));
+            }
+            let result = match parsed {
+                McpVerb::Resources => mcp::list_resources(context.cwd, server),
+                McpVerb::Prompts => mcp::list_prompts(context.cwd, server),
+                _ => mcp::list_tools(context.cwd, server),
             }?;
             serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
-        },
-        "notifications" => {
+        }
+        McpVerb::Notifications => {
             let (server, _) = split_head(rest);
-            if server.is_empty() { return Err("Usage: /mcp notifications <server>".into()); }
+            if server.is_empty() {
+                return Err("Usage: /mcp notifications <server>".into());
+            }
             let init = mcp::server_capabilities(context.cwd, server)?;
-            let capabilities = init.get("capabilities").cloned().unwrap_or_else(|| json!({}));
+            let capabilities = init.get("capabilities").ok_or_else(|| {
+                format!("MCP server {server} answered initialize without a capabilities object")
+            })?;
             Ok(format!(
                 "MCP notification capabilities for {} (live persistent connection):\n{}",
                 server,
-                serde_json::to_string_pretty(&capabilities).map_err(|e| e.to_string())?
+                serde_json::to_string_pretty(capabilities).map_err(|e| e.to_string())?
             ))
-        },
-        "reload" => {
+        }
+        McpVerb::Reload => {
             let status = mcp::refresh_all(context.cwd)?;
             Ok(format!(
                 "Reloaded MCP config and refreshed live connections:\n{}",
                 serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?
             ))
         }
-        "reconnect" => {
+        McpVerb::Reconnect => {
             let (server, _) = split_head(rest);
-            if server.is_empty() { return Err("Usage: /mcp reconnect <server>".into()); }
+            if server.is_empty() {
+                return Err("Usage: /mcp reconnect <server>".into());
+            }
             let status = mcp::reconnect(context.cwd, server)
                 .map_err(|error| format!("Reconnect to {server} failed: {error}"))?;
             Ok(format!(
@@ -219,6 +331,5 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
                 serde_json::to_string_pretty(&status).map_err(|error| error.to_string())?
             ))
         }
-        _ => Err("Usage: /mcp list | status | add [--scope user|project] <name> [stdio <command> [args...] | http <url>] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | notifications <server> | test <server> | reload | reconnect <server>".into()),
     }
 }
