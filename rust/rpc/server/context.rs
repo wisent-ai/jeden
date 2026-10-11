@@ -15,12 +15,21 @@ use crate::context::advisor;
 
 const INVALID: &str = "invalid_params";
 
-fn cwd(params: &Value) -> PathBuf {
-    params
-        .get("cwd")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_default())
+/// The workspace a context request reads from: its `cwd`, or this server's
+/// own working directory when the request names none. A `cwd` that is not a
+/// string, or a server whose own directory cannot be read, is refused with the
+/// cause instead of reading from an empty path.
+fn cwd(params: &Value) -> Result<PathBuf, (&'static str, String)> {
+    match params.get("cwd") {
+        Some(Value::String(path)) => Ok(PathBuf::from(path)),
+        Some(other) => Err((INVALID, format!("context cwd must be a path string; got {other}"))),
+        None => std::env::current_dir().map_err(|error| {
+            (
+                "internal_error",
+                format!("the request names no cwd and this server's working directory cannot be read: {error}"),
+            )
+        }),
+    }
 }
 
 pub(super) fn recommend(
@@ -29,21 +38,36 @@ pub(super) fn recommend(
 ) -> Result<Value, (&'static str, String)> {
     let cancellation = state.context_requests.token(&wire.id)?;
     let params = &wire.params;
-    let query = params
-        .get("query")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .unwrap_or_default();
-    if query.is_empty() {
-        return Err((INVALID, "context/recommend requires a query".to_string()));
-    }
-    let cwd = cwd(params);
+    let query = match params.get("query") {
+        Some(Value::String(query)) if !query.trim().is_empty() => query.trim(),
+        Some(Value::String(_)) | None => {
+            return Err((INVALID, "context/recommend requires a query".to_string()))
+        }
+        Some(other) => {
+            return Err((
+                INVALID,
+                format!("context/recommend query must be a string; got {other}"),
+            ))
+        }
+    };
+    let cwd = cwd(params)?;
     let config = crate::load_config(&cwd);
     let settings = advisor::settings(&cwd, &config);
-    let stated = params
-        .get("limit")
-        .and_then(Value::as_u64)
-        .map(|limit| limit as usize);
+    let stated = match params.get("limit") {
+        None => None,
+        Some(limit) => {
+            let count = limit
+                .as_u64()
+                .and_then(|count| usize::try_from(count).ok())
+                .ok_or_else(|| {
+                    (
+                        INVALID,
+                        format!("context/recommend limit must be a whole number; got {limit}"),
+                    )
+                })?;
+            Some(count)
+        }
+    };
     let mut request =
         advisor::Request::new(query, stated, &settings).map_err(|refusal| (INVALID, refusal))?;
     request.cancellation = cancellation;
@@ -76,7 +100,7 @@ pub(super) fn sources(
     wire: &super::WireRequest,
 ) -> Result<Value, (&'static str, String)> {
     let cancellation = state.context_requests.token(&wire.id)?;
-    let cwd = cwd(&wire.params);
+    let cwd = cwd(&wire.params)?;
     let mut report = advisor::sources_report(&cwd, &crate::load_config(&cwd), &cancellation);
     report["cwd"] = json!(cwd.display().to_string());
     Ok(report)

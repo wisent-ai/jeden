@@ -105,6 +105,15 @@ try {
   const inspection = await transport.rpc('context/sources', { cwd: workspace });
   assert.ok(Array.isArray(inspection.sources), JSON.stringify(inspection));
   report.cases.push({ case: 'connection-answers-after-cancellation', verdict: 'passed' });
+
+  // Malformed parameters are refused by name, never replaced.
+  await assert.rejects(transport.rpc('context/recommend', { query: { text: query }, cwd: workspace }),
+    /invalid_params: context\/recommend query must be a string/);
+  await assert.rejects(transport.rpc('context/recommend', { query, limit: 'many', cwd: workspace }),
+    /invalid_params: context\/recommend limit must be a whole number/);
+  await assert.rejects(transport.rpc('context/sources', { cwd: [workspace] }),
+    /invalid_params: context cwd must be a path string/);
+  report.cases.push({ case: 'malformed-parameters-refused', verdict: 'passed' });
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
