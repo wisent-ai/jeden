@@ -167,9 +167,19 @@ fn branch_of(path: &Path) -> String {
 }
 
 /// Parse a worktree gitfile (`gitdir: <repo>/.git/worktrees/<name>`) into the
-/// parent repository root and the administrative directory.
+/// parent repository root and the administrative directory. A gitfile that
+/// exists and cannot be read is named on stderr: answered as "no gitfile"
+/// without a word, the worktree was reported with no parent repository.
 fn parse_gitfile(path: &Path) -> Option<(PathBuf, PathBuf)> {
-    let content = fs::read_to_string(path.join(".git")).ok()?;
+    let gitfile = path.join(".git");
+    let content = match fs::read_to_string(&gitfile) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!("worktree: {} cannot be read: {error}", gitfile.display());
+            return None;
+        }
+    };
     let gitdir = content.trim().strip_prefix("gitdir:")?.trim();
     let marker = format!(
         "{}.git{}worktrees{}",
