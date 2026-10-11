@@ -62,6 +62,9 @@ impl Conversation {
         recorder.record_context("reset_seed", &messages)?;
         self.recorder = recorder;
         self.messages = messages;
+        // A new session directory: its chat memory is opened there at the
+        // next step, not appended to the one before the reset.
+        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("reset");
         Ok(())
@@ -114,6 +117,9 @@ impl Conversation {
         recorder.record_context("resume_seed", &messages)?;
         self.recorder = recorder;
         self.messages = messages;
+        // The resumed child is its own session directory; its chat memory is
+        // opened there at the next step with the resumed history.
+        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("resume");
         Ok(())
@@ -136,6 +142,11 @@ impl Conversation {
         }
         let (new_leaf, messages) = self.recorder.rewind(checkpoint_id)?;
         self.messages = messages;
+        // The log keeps every message said before the rewind; what is said
+        // from the checkpoint on is appended after it.
+        if let Some(memory) = &mut self.memory {
+            memory.replaced(&self.messages);
+        }
         self.session_context_pending = Some("rewind");
         Ok(format!(
             "Rewound to checkpoint {checkpoint_id}; new active leaf is {new_leaf}."
@@ -151,6 +162,9 @@ impl Conversation {
         let mut recorder = prepare_child(cwd, &parent, parent_entry, "fork")?;
         recorder.record_context("fork_seed", &self.messages)?;
         self.recorder = recorder;
+        // The fork records into its own session directory, whose chat memory
+        // is opened there at the next step with the history it carries.
+        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("fork");
         Ok(self.recorder.path())
@@ -163,6 +177,8 @@ impl Conversation {
         let mut recorder = prepare_child(cwd, &parent, parent_entry, "branch")?;
         recorder.record_context("branch_seed", &self.messages)?;
         self.recorder = recorder;
+        // As for a fork: the branch's own chat memory, opened at its next step.
+        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("branch");
         Ok(self.recorder.path())

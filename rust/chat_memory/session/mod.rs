@@ -59,11 +59,30 @@ impl ChatMemory {
         Ok(memory)
     }
 
+    /// The conversation's history was replaced (`/rewind` to a checkpoint,
+    /// `/reset`, a resumed source): the messages it holds now are counted as
+    /// taken, and what it says from here on is appended after everything the
+    /// log already keeps. Counted against the length before, every message
+    /// up to that length was skipped and never kept.
+    pub fn replaced(&mut self, messages: &[Value]) {
+        self.synced = messages
+            .iter()
+            .filter(|message| !is_system(message))
+            .count();
+    }
+
     /// Append the conversation's messages the log does not hold yet, each
     /// as the conversation holds it.
     pub fn sync(&mut self, messages: &[Value]) -> Result<(), String> {
         let log = Log::at(&self.dir);
         let _guard = busy()?;
+        // A history cut back by a path that did not say so (`replaced`)
+        // still has its next messages kept from its own length on.
+        let own = messages
+            .iter()
+            .filter(|message| !is_system(message))
+            .count();
+        self.synced = self.synced.min(own);
         let next = log.read()?.len() as u64;
         let mut fresh = Vec::new();
         for (message, index) in messages
