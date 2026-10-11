@@ -20,14 +20,19 @@ fn reload_request_path(cwd: &Path) -> PathBuf {
     cwd.join(RELOAD_REQUEST)
 }
 
-/// Consume a pending request, so one tool call reloads at most once.
-fn take_reload_request(cwd: &Path) -> bool {
+/// Consume a pending request, so one tool call reloads at most once. A
+/// request that cannot be removed is refused with its path and cause: left in
+/// place, it would reload the extensions again after every later tool call.
+fn take_reload_request(cwd: &Path) -> Result<bool, String> {
     let path = reload_request_path(cwd);
-    if !path.is_file() {
-        return false;
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "the extension reload request {} cannot be consumed: {error}",
+            path.display()
+        )),
     }
-    let _ = fs::remove_file(&path);
-    true
 }
 
 pub(crate) fn custom_tool(
@@ -35,7 +40,9 @@ pub(crate) fn custom_tool(
     tool: &str,
     input: &Value,
 ) -> Result<Value, String> {
-    let _ = take_reload_request(runtime.cwd);
+    // A request left from before this call is cleared first, so the answer
+    // never claims a reload this tool did not ask for.
+    take_reload_request(runtime.cwd)?;
     let answer = crate::hooks::execute_extension_tool(
         runtime.cwd,
         runtime.artifact_dir,
@@ -46,8 +53,15 @@ pub(crate) fn custom_tool(
         input,
     )?
     .ok_or_else(|| format!("custom or extension tool not found: {tool}"))?;
-    if !take_reload_request(runtime.cwd) {
-        return Ok(answer);
+    match take_reload_request(runtime.cwd) {
+        Ok(false) => return Ok(answer),
+        Ok(true) => {}
+        Err(error) => {
+            return Ok(serde_json::json!({
+                "result": answer,
+                "extensionReload": { "reloaded": false, "error": error },
+            }))
+        }
     }
     // The reload runs in this process because a registry rebuilt anywhere else
     // changes nothing about what this session dispatches. Its outcome travels
