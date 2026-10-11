@@ -30,8 +30,18 @@ fn md_files(dir: &Path, recursive: bool) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![dir.to_path_buf()];
     while let Some(current) = stack.pop() {
-        let Ok(entries) = fs::read_dir(&current) else {
-            continue;
+        // No directory is no commands; one that cannot be listed is said
+        // with its cause, so its commands are not read as never written.
+        let entries = match fs::read_dir(&current) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                eprintln!(
+                    "jeden: slash commands under {} were not loaded: {error}",
+                    current.display()
+                );
+                continue;
+            }
         };
         let mut paths = entries
             .flatten()

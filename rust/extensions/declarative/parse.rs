@@ -29,8 +29,18 @@ pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) 
         }
         return;
     }
-    let Ok(entries) = fs::read_dir(root) else {
-        return;
+    // A directory that exists but cannot be listed is said with its cause:
+    // skipped in silence, every definition under it vanished from the
+    // session as if it had never been written.
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) => {
+            eprintln!(
+                "jeden: declarative extensions under {} were not loaded: {error}",
+                root.display()
+            );
+            return;
+        }
     };
     let mut paths = entries
         .flatten()
