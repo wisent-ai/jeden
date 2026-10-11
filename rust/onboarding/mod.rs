@@ -132,7 +132,7 @@ pub(crate) fn text(action: &str, cwd: &Path) -> Result<String, String> {
 }
 
 pub(crate) fn observe_successful_turn() {
-    let _ = run(async {
+    let recorded = run(async {
         let mut client = start_client().await?;
         if client
             .progress()
@@ -157,4 +157,7 @@ pub(crate) fn observe_successful_turn() {
             .map_err(|error| error.to_string())?;
         Ok(())
     });
+    if let Err(cause) = recorded {
+        eprintln!("jeden: the successful turn is not recorded in onboarding: {cause}");
+    }
 }
