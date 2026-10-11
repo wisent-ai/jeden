@@ -280,7 +280,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                             Ok(permit) => permit,
                             Err(_) => { reject_overloaded(stream).await; return; }
                         };
-                        let _ = daemon.serve_connection(stream).await;
+                        if let Err(cause) = daemon.serve_connection(stream).await {
+                            eprintln!("jeden daemon: a connection ended on an error: {cause}");
+                        }
                     });
                 }
             }
@@ -290,7 +292,11 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             .await
             .map_err(|error| error.to_string())?
             .map_err(|error| format!("graceful drain failed: {error:?}"))?;
-        while connections.join_next().await.is_some() {}
+        while let Some(joined) = connections.join_next().await {
+            if let Err(error) = joined {
+                eprintln!("jeden daemon: a connection task did not finish: {error}");
+            }
+        }
         Ok(())
     }
 }
