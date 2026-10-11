@@ -92,7 +92,13 @@ fn write_env_keys(updates: &[(String, String)]) -> Result<PathBuf, String> {
             format!("{key}={value}")
         }
     };
-    let existing = fs::read_to_string(&path).unwrap_or_default();
+    // Only a missing file starts empty: rewriting one that could not be read
+    // would replace every line it holds with these keys alone.
+    let existing = match fs::read_to_string(&path) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
     let mut pending: Vec<&(String, String)> = updates.iter().collect();
     let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
     for line in lines.iter_mut() {
