@@ -59,7 +59,7 @@ pub(super) async fn edges(
     db: &impl ConnectionTrait,
     memory_id: &str,
 ) -> Result<Vec<MemoryEdge>, String> {
-    Ok(edge::Entity::find()
+    edge::Entity::find()
         .filter(
             Condition::any()
                 .add(edge::Column::FromId.eq(memory_id.to_owned()))
@@ -72,18 +72,30 @@ pub(super) async fn edges(
         .await
         .map_err(sql)?
         .into_iter()
-        .map(|row| MemoryEdge {
-            relation: MemoryRelation::parse(&row.relation).unwrap_or(MemoryRelation::Supports),
-            provenance: serde_json::from_str(&row.provenance_json).unwrap_or(MemorySource {
-                origin: "unknown".into(),
-                session_id: None,
-                entry_id: None,
-            }),
-            from_id: row.from_id,
-            to_id: row.to_id,
-            created_at: row.created_at,
+        .map(|row| {
+            // An edge whose relation or provenance does not read is damaged:
+            // read as "supports" it would turn a conflict into agreement.
+            let relation = MemoryRelation::parse(&row.relation).ok_or_else(|| {
+                format!(
+                    "memory edge {} -> {} has an unknown relation {:?}",
+                    row.from_id, row.to_id, row.relation
+                )
+            })?;
+            let provenance = serde_json::from_str(&row.provenance_json).map_err(|error| {
+                format!(
+                    "memory edge {} -> {} has provenance_json that does not parse ({error}): {}",
+                    row.from_id, row.to_id, row.provenance_json
+                )
+            })?;
+            Ok(MemoryEdge {
+                relation,
+                provenance,
+                from_id: row.from_id,
+                to_id: row.to_id,
+                created_at: row.created_at,
+            })
         })
-        .collect())
+        .collect()
 }
 
 pub(super) async fn conflict_groups(

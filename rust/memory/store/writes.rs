@@ -18,7 +18,7 @@ async fn live_revision(
     scope: &MemoryScope,
     logical_key: &str,
 ) -> Result<Option<MemoryRecord>, String> {
-    Ok(memory::Entity::find()
+    memory::Entity::find()
         .filter(memory::Column::ScopeKind.eq(scope.kind.clone()))
         .filter(memory::Column::ScopeId.eq(scope.id.clone()))
         .filter(memory::Column::LogicalKey.eq(logical_key.to_owned()))
@@ -29,7 +29,8 @@ async fn live_revision(
         .one(tx)
         .await
         .map_err(sql)?
-        .map(record))
+        .map(record)
+        .transpose()
 }
 
 /// Close `prior` at `at`; the next revision supersedes it.

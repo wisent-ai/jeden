@@ -192,20 +192,32 @@ pub(super) async fn load_record(
     db: &impl ConnectionTrait,
     id: &str,
 ) -> Result<Option<MemoryRecord>, String> {
-    Ok(memory::Entity::find_by_id(id.to_owned())
+    memory::Entity::find_by_id(id.to_owned())
         .one(db)
         .await
         .map_err(sql)?
-        .map(record))
+        .map(record)
+        .transpose()
 }
-pub(super) fn record(row: memory::Model) -> MemoryRecord {
-    MemoryRecord {
-        tags: serde_json::from_str(&row.tags_json).unwrap_or_default(),
-        source: serde_json::from_str(&row.source_json).unwrap_or(MemorySource {
-            origin: "unknown".into(),
-            session_id: None,
-            entry_id: None,
-        }),
+/// One stored memory. Its tags and source are written as JSON; a row whose
+/// JSON does not parse is damaged and refused with the column named, not
+/// read as untagged memory of "unknown" origin.
+pub(super) fn record(row: memory::Model) -> Result<MemoryRecord, String> {
+    let tags = serde_json::from_str(&row.tags_json).map_err(|error| {
+        format!(
+            "memory {} has tags_json that does not parse ({error}): {}",
+            row.id, row.tags_json
+        )
+    })?;
+    let source = serde_json::from_str(&row.source_json).map_err(|error| {
+        format!(
+            "memory {} has source_json that does not parse ({error}): {}",
+            row.id, row.source_json
+        )
+    })?;
+    Ok(MemoryRecord {
+        tags,
+        source,
         scope: MemoryScope {
             kind: row.scope_kind,
             id: row.scope_id,
@@ -223,7 +235,7 @@ pub(super) fn record(row: memory::Model) -> MemoryRecord {
         valid_to: row.valid_to,
         supersedes: row.supersedes,
         tombstone: row.tombstone,
-    }
+    })
 }
 pub(super) fn logical_key(kind: &str, scope: &MemoryScope, text: &str) -> String {
     let mut hash = Sha256::new();
