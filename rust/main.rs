@@ -5,6 +5,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+use slash::common::dirs_home;
+
 pub mod agent;
 pub mod autonomy;
 pub mod capability;
@@ -134,11 +136,6 @@ fn session_root() -> PathBuf {
     env::var_os("JEDEN_SESSION_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| dirs_home().join(".jeden/sessions"))
-}
-fn dirs_home() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 fn legacy_user_config_path() -> PathBuf {
     dirs_home().join(".jeden/config.json")

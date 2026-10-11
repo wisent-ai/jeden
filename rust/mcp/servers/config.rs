@@ -6,15 +6,10 @@
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) fn dirs_home() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-}
+pub(super) use crate::slash::common::dirs_home;
 
 pub(super) fn read_json_value(path: &Path) -> Value {
     fs::read_to_string(path)

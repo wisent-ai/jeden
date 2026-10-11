@@ -5,10 +5,23 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use url::Url;
 
+/// The user's home directory: `HOME` when it is set and not empty, else the
+/// home the user database records for this user (`std::env::home_dir`, which
+/// asks it when `HOME` is unset, as under launchd or a stripped environment).
+/// Never the working directory: read as `.`, every user-scope file — the
+/// `.env`, `config.json`, `mcp.json`, the plugin registry, the Brama catalogue
+/// cache — was read and written inside whatever project Jeden started in.
+/// When neither source names a home, Jeden stops with that cause.
 pub(crate) fn dirs_home() -> PathBuf {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
+    if let Some(home) = env::var_os("HOME").filter(|home| !home.is_empty()) {
+        return PathBuf::from(home);
+    }
+    #[allow(deprecated)]
+    let recorded = env::home_dir().filter(|home| !home.as_os_str().is_empty());
+    recorded.expect(
+        "HOME is unset or empty and the user database records no home directory for this user, \
+         so Jeden's user files (~/.jeden) cannot be found",
+    )
 }
 
 pub(crate) fn project_config_path(cwd: &Path) -> PathBuf {
