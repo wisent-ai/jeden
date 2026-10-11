@@ -30,16 +30,17 @@ const report = { revision, binary, binarySha256: hash(binary),
 const env = { ...process.env, HOME: home };
 const key = 'communication.mode';
 
-function invoke(args) {
-  const result = spawnSync(binary, [...args, '--cwd', project], {
-    cwd: project, env, encoding: 'utf8',
-  });
-  report.commands.push({ binary, args: [...args, '--cwd', project], cwd: project, home,
+function command(program, args, cwd) {
+  const result = spawnSync(program, args, { cwd, env, encoding: 'utf8' });
+  report.commands.push({ program, args, cwd, home,
     status: result.status, signal: result.signal, stdout: result.stdout,
     stderr: result.stderr, error: result.error?.message });
   assert.ifError(result.error);
   assert.equal(result.signal, null, 'configuration refusal must not terminate by signal');
   return result;
+}
+function invoke(args) {
+  return command(binary, [...args, '--cwd', project], project);
 }
 function setting() {
   const result = invoke(['config', 'get', key, '--json']);
@@ -68,6 +69,19 @@ function invalidFile(path, content) {
 try {
   mkdirSync(dirname(legacy), { recursive: true });
   mkdirSync(dirname(local), { recursive: true });
+  const checkout = command('git', ['rev-parse', 'HEAD'], root);
+  const short = command('git', ['rev-parse', '--short', revision], root);
+  const working = command('git', ['status', '--porcelain'], root);
+  const version = invoke(['--version']);
+  for (const result of [checkout, short, working, version]) {
+    assert.ok(result.status !== null && !result.status, result.stderr);
+  }
+  report.checkoutRevision = checkout.stdout.trim();
+  report.binaryVersion = version.stdout.trim();
+  assert.equal(report.checkoutRevision, revision, 'qualify the declared checkout');
+  assert.equal(working.stdout.trim(), '', 'commit the candidate and journey before qualification');
+  assert.ok(report.binaryVersion.endsWith(`.${short.stdout.trim()}`),
+    `candidate must embed the clean source revision: ${report.binaryVersion}`);
   const declaration = setting();
   assert.equal(declaration.type, 'enum');
   const choices = declaration.enum.filter((value) => value !== declaration.default);
