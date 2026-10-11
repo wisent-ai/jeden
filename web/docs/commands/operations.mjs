@@ -138,6 +138,7 @@ export const operationCommands = [
     effect: "Discovers tools, slash commands, views, extensions, plugins, MCP servers, skills, agents, rules, and services; prints per-kind availability in text or the complete descriptor, binding, health, diagnostics, and generation data in JSON.",
     refusals: [
       "Conflicts and unavailable capabilities are reported as diagnostics and are not exposed as executable.",
+      "Extension roots and disabledExtensions use the same configuration layer order as config get: legacy user config.json, canonical user config.yml, then project config.json. An unreadable or invalid layer refuses discovery with its file and cause; it is not an empty declaration that silently enables disabled extensions. A present plugin registry that cannot be read or parsed also refuses instead of hiding installed plugins.",
       "JSON serialization failure or a poisoned rebuild lock is returned as an error rather than a partial healthy snapshot.",
     ],
   },
