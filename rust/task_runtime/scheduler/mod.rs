@@ -111,13 +111,22 @@ impl TaskScheduler {
         }
         Ok(serde_json::from_slice(&fs::read(path)?)?)
     }
+    /// Every job record. An entry or record that cannot be read or parsed
+    /// is refused naming its file: dropped, a running job was never
+    /// recovered and never listed.
     pub fn list(&self) -> Result<Vec<JobRecord>, TaskError> {
         let mut jobs = Vec::new();
-        for entry in fs::read_dir(self.store.join("jobs"))?.flatten() {
-            if entry.path().extension().and_then(|v| v.to_str()) == Some("json") {
-                if let Ok(job) = serde_json::from_slice::<JobRecord>(&fs::read(entry.path())?) {
-                    jobs.push(job);
-                }
+        for entry in fs::read_dir(self.store.join("jobs"))? {
+            let path = entry?.path();
+            if path.extension().and_then(|v| v.to_str()) == Some("json") {
+                let job =
+                    serde_json::from_slice::<JobRecord>(&fs::read(&path)?).map_err(|error| {
+                        std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("job record {} is not a job: {error}", path.display()),
+                        )
+                    })?;
+                jobs.push(job);
             }
         }
         jobs.sort_by(|a, b| {

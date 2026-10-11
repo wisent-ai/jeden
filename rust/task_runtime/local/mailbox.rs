@@ -65,11 +65,13 @@ impl Mailbox {
         if !dir.exists() {
             return Ok(messages);
         }
-        let mut paths = fs::read_dir(&dir)?
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().and_then(|v| v.to_str()) == Some("json"))
-            .collect::<Vec<_>>();
+        let mut paths = Vec::new();
+        for entry in fs::read_dir(&dir)? {
+            let path = entry?.path();
+            if path.extension().and_then(|v| v.to_str()) == Some("json") {
+                paths.push(path);
+            }
+        }
         paths.sort();
         for path in paths {
             let mut message: MailMessage = serde_json::from_slice(&fs::read(&path)?)?;

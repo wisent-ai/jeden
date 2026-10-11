@@ -122,8 +122,8 @@ impl TaskScheduler {
         })
     }
     pub(super) fn clean_slots(&self) -> Result<(), TaskError> {
-        for entry in fs::read_dir(self.store.join("slots"))?.flatten() {
-            let path = entry.path();
+        for entry in fs::read_dir(self.store.join("slots"))? {
+            let path = entry?.path();
             // A slot that cannot be read names a holder nobody can check;
             // freed as dead, it admitted one task more than maxParallel.
             let text = match fs::read_to_string(&path) {
@@ -142,7 +142,20 @@ impl TaskScheduler {
                 .next()
                 .and_then(|line| line.parse::<u32>().ok());
             if !pid.map(process_alive).unwrap_or(false) {
-                let _ = fs::remove_file(path);
+                // A dead holder's slot that cannot be removed keeps counting
+                // against maxParallel, so the failure is the answer; one
+                // another cleaner already freed is gone either way.
+                match fs::remove_file(&path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => {
+                        return Err(std::io::Error::new(
+                            error.kind(),
+                            format!("cannot free admission slot {}: {error}", path.display()),
+                        )
+                        .into())
+                    }
+                }
             }
         }
         Ok(())
