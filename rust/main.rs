@@ -179,7 +179,9 @@ pub fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
-    if let Err(error) = cli::config::check_config(&args.cwd) {
+    if let Err(error) = cli::config::check_config(&args.cwd)
+        .and_then(|()| slash::state::check_mode_state(&args.cwd))
+    {
         eprintln!("Error: {error}");
         return ExitCode::FAILURE;
     }

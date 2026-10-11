@@ -63,7 +63,7 @@ pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> Pic
 
 /// Non-interactive `/roles`: the same hub rows rendered as text.
 pub(crate) fn handle_roles(context: &SlashContext<'_>) -> Result<String, String> {
-    let state = read_mode_state(context.cwd);
+    let state = crate::slash::state::try_read_mode_state(context.cwd)?;
     Ok(crate::tui::CommandOutcome::Picker(roles_picker(&state, context)).into_text())
 }
 

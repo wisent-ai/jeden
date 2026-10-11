@@ -11,20 +11,11 @@ use settings::{retry_policy, route_descriptors};
 pub(in crate::agent) use usage::{append_usage_event, usage_cost};
 
 pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
-    let mode_state = read_mode_state(&args.cwd);
-    let mode_service_tier = if mode_state
-        .pointer("/fast/enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
-        mode_state
-            .pointer("/fast/serviceTier")
-            .and_then(Value::as_str)
-            .filter(|value| !value.trim().is_empty())
-            .map(str::to_string)
-    } else {
-        None
-    };
+    // A mode state that broke during the run stops it naming the file; it is
+    // never read as fast mode being off (see `crate::slash::read_mode_state`).
+    let fast = crate::slash::read_mode_state(&args.cwd).fast;
+    let mode_service_tier =
+        Some(fast.service_tier).filter(|tier| fast.enabled && !tier.trim().is_empty());
     let merged = crate::cli::config::merged_config_value(&args.cwd);
     let routing = merged.get("modelRouting").unwrap_or(&Value::Null);
     let retry = retry_policy(routing);

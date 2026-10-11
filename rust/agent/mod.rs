@@ -98,7 +98,7 @@ pub(crate) fn record_roadmap_event(
                 .map(str::to_string)
         })
         .flatten();
-    let last_session = read_mode_state(cwd)
+    let last_session = read_mode_state(cwd)?
         .pointer("/lastSessionPath")
         .and_then(Value::as_str)
         .map(PathBuf::from)

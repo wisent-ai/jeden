@@ -235,7 +235,7 @@ impl Conversation {
         answer: String,
         hooks: &mut RunHooks,
     ) -> Result<String, String> {
-        let mut state = read_mode_state(&args.cwd);
+        let mut state = read_mode_state(&args.cwd)?;
         if !state
             .pointer("/advisor/enabled")
             .and_then(Value::as_bool)

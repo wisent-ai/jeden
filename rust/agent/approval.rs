@@ -146,8 +146,14 @@ pub(super) fn prompt_or_deny(tool: &str, detail: &str, hooks: &RunHooks) -> Tool
     }
 }
 
+/// A mode state that cannot be read denies the tool with the file and the
+/// cause: the approval policy and plan mode it holds are unknown, and reading
+/// it as empty would allow what plan mode or a tool policy forbids.
 pub(super) fn resolve_tool_approval(args: &Args, tool: &str, hooks: &RunHooks) -> ToolDecision {
-    let state = read_mode_state(&args.cwd);
+    let state = match read_mode_state(&args.cwd) {
+        Ok(state) => state,
+        Err(cause) => return ToolDecision::Deny(format!("tool {tool} denied: {cause}")),
+    };
     let tier = tool_tier(tool);
     let policy = tool_policy(&state, tool);
     let mode = approval_mode(args, &state);

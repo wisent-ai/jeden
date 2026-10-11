@@ -6,7 +6,10 @@ use std::path::Path;
 /// The workspace lock is held until the session copy is durable and the old
 /// fields have been cleared. A repeated migration recognizes the same request.
 pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), String> {
-    if crate::slash::read_mode_state(cwd).legacy_todos.is_empty() {
+    if crate::slash::state::try_read_mode_state(cwd)?
+        .legacy_todos
+        .is_empty()
+    {
         return Ok(());
     }
     crate::slash::mutate_mode_state(cwd, |mode| {

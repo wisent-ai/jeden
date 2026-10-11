@@ -90,6 +90,13 @@ try {
 
   writeFileSync(mode, '{"lastSessionPath":');
   refused('/dump', mode, 'not valid JSON');
+  // One field of the wrong type is the whole state refused, never every mode
+  // turned off and then written back as defaults by the next mode change.
+  writeFileSync(mode, JSON.stringify({ plan: { enabled: 'yes' }, goal: { objective: 'kept' } }));
+  refused('/roles', mode, 'is not a valid mode state');
+  refused('/plan on', mode, 'is not a valid mode state');
+  writeFileSync(mode, '[]');
+  refused('/roles', mode, 'does not hold a JSON object');
   rmSync(mode);
   const absent = invoke('/dump');
   assert.ok(absent.status !== null && absent.status, '/dump without a session was not refused');

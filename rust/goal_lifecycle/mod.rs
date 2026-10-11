@@ -181,7 +181,7 @@ pub(crate) fn finish_verified_goal(
     if !completion.complete() {
         return Err("cannot finish goal while retained work remains unverified".into());
     }
-    let state = crate::slash::read_mode_state(cwd);
+    let state = crate::slash::state::try_read_mode_state(cwd)?;
     let objective = state.goal.objective.trim();
     if !state.goal.enabled || objective.is_empty() {
         return Ok(());

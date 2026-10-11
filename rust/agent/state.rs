@@ -1,14 +1,14 @@
 use super::*;
 
 fn mode_state_path(cwd: &Path) -> PathBuf {
-    cwd.join(".jeden/mode-state.json")
+    crate::slash::state::mode_state_path(cwd)
 }
 
-pub(super) fn read_mode_state(cwd: &Path) -> Value {
-    fs::read_to_string(mode_state_path(cwd))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or_else(|| json!({}))
+/// The saved mode state as JSON, refused naming the file when it cannot be
+/// read, does not parse, or is not an object; read as empty, every mode was
+/// off and the next write replaced the file.
+pub(super) fn read_mode_state(cwd: &Path) -> Result<Value, String> {
+    crate::slash::state::read_mode_state_value(cwd)
 }
 
 pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
@@ -24,7 +24,7 @@ pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> 
 }
 
 pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
-    let state = read_mode_state(cwd);
+    let state = read_mode_state(cwd)?;
     let mut parts = Vec::new();
     // /force: one-shot forced tool for the next turn, then cleared.
     if let Some(tool) = state
@@ -104,23 +104,25 @@ pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, 
 }
 
 /// When plan mode is enabled, store `text` as the latest plan so `/plan-review`
-/// can surface it. Best-effort; a write failure never fails the turn.
-pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) {
-    let mut state = read_mode_state(cwd);
+/// can surface it. A mode state that cannot be read is the caller's error: it
+/// is never taken for plan mode being off.
+pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) -> Result<(), String> {
+    let mut state = read_mode_state(cwd)?;
     if !state
         .pointer("/plan/enabled")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return;
+        return Ok(());
     }
     if let Some(obj) = state.as_object_mut() {
         let plan = obj.entry("plan").or_insert_with(|| json!({}));
         if let Some(plan_obj) = plan.as_object_mut() {
             plan_obj.insert("latestPlan".into(), json!(text));
         }
-        let _ = write_mode_state(cwd, &state);
+        write_mode_state(cwd, &state)?;
     }
+    Ok(())
 }
 
 fn now_millis_u64() -> u64 {
@@ -133,21 +135,22 @@ fn now_millis_u64() -> u64 {
 /// If loop mode is active and not exhausted, return the stored prompt to
 /// resubmit and consume one iteration (decrement `remaining`; disable when the
 /// remaining count is exhausted or the `until` deadline passes). Returns `None`
-/// when the loop stops, including when `/loop` stored no explicit prompt.
-pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Option<String> {
-    let mut state = read_mode_state(cwd);
+/// when the loop stops, including when `/loop` stored no explicit prompt. A
+/// mode state that cannot be read is the error, not a stopped loop.
+pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option<String>, String> {
+    let mut state = read_mode_state(cwd)?;
     if !state
         .pointer("/loop_mode/enabled")
         .and_then(Value::as_bool)
         .unwrap_or(false)
     {
-        return None;
+        return Ok(None);
     }
     // Duration guard: stop once the deadline has passed.
     if let Some(until) = state.pointer("/loop_mode/until").and_then(Value::as_u64) {
         if now_millis_u64() >= until {
             disable_loop(cwd, &mut state);
-            return None;
+            return Ok(None);
         }
     }
     // Count guard: a remaining of 0 means exhausted.
@@ -156,7 +159,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Option<String
         .and_then(Value::as_u64);
     if remaining == Some(0) {
         disable_loop(cwd, &mut state);
-        return None;
+        return Ok(None);
     }
     let prompt = state
         .pointer("/loop_mode/prompt")
@@ -166,7 +169,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Option<String
         .to_string();
     if prompt.trim().is_empty() {
         disable_loop(cwd, &mut state);
-        return None;
+        return Ok(None);
     }
     // Consume one iteration.
     if let Some(n) = remaining {
@@ -178,7 +181,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Option<String
         }
         let _ = write_mode_state(cwd, &state);
     }
-    Some(prompt)
+    Ok(Some(prompt))
 }
 
 fn disable_loop(cwd: &Path, state: &mut Value) {
@@ -189,10 +192,7 @@ fn disable_loop(cwd: &Path, state: &mut Value) {
 }
 
 pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
-    let mut state = read_mode_state(cwd);
-    if !state.is_object() {
-        state = json!({});
-    }
+    let mut state = read_mode_state(cwd)?;
     let map = state.as_object_mut().expect("mode state object");
     if ok {
         map.insert("lastTask".into(), json!(task));
@@ -204,10 +204,7 @@ pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<()
 }
 
 pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), String> {
-    let mut state = read_mode_state(cwd);
-    if !state.is_object() {
-        state = json!({});
-    }
+    let mut state = read_mode_state(cwd)?;
     state
         .as_object_mut()
         .expect("mode state object")
@@ -218,10 +215,7 @@ pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), St
 /// Append a branch record to mode-state so `/tree` can list it and `/resume`
 /// can navigate to its session path. Backs a real fork-based `/branch`.
 pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<String, String> {
-    let mut state = read_mode_state(cwd);
-    if !state.is_object() {
-        state = json!({});
-    }
+    let mut state = read_mode_state(cwd)?;
     let map = state.as_object_mut().expect("mode state object");
     let roadmap_item = map
         .get("activeRoadmapItem")

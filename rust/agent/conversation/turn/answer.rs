@@ -226,7 +226,7 @@ impl Conversation {
         }
         // When plan mode is on, the final answer IS the plan; persist it so
         // `/plan-review` can surface it.
-        capture_plan_if_enabled(&args.cwd, &text);
+        capture_plan_if_enabled(&args.cwd, &text)?;
         let answer = self.maybe_advisor_review(args, text, hooks)?;
         let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
         Ok(Some(answer))

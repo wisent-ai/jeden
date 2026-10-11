@@ -34,7 +34,7 @@ pub(crate) fn run_turn_shared(
     let mut text = result.map(|text| text.trim().to_string())?;
     // Loop mode: auto-resubmit until the count or deadline `/loop` was given
     // runs out, `/loop off`, a failed turn or cancellation, as the CLI path does.
-    while let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task) {
+    while let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task)? {
         if hooks.cancelled() {
             break;
         }

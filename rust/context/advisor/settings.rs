@@ -201,7 +201,10 @@ fn parse_roots(raw: &str, cwd: &Path) -> Vec<DocRoot> {
 /// `path@depth` splits when everything after the last `@` is a depth;
 /// otherwise the `@` belongs to the path and no depth is declared.
 fn split_root_depth(entry: &str) -> (&str, Option<usize>) {
-    match entry.rsplit_once('@').map(|(path, depth)| (path, depth.parse::<usize>())) {
+    match entry
+        .rsplit_once('@')
+        .map(|(path, depth)| (path, depth.parse::<usize>()))
+    {
         Some((path, Ok(depth))) => (path, Some(depth)),
         _ => (entry, None),
     }

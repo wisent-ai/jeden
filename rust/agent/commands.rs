@@ -15,7 +15,7 @@ fn split_head(args: &str) -> (&str, &str) {
 /// interactive loop replay through the shared Conversation instead of a
 /// transient one.
 pub(crate) fn retry_task(args: &Args) -> Result<String, String> {
-    let state = read_mode_state(&args.cwd);
+    let state = read_mode_state(&args.cwd)?;
     let task = state
         .get("lastFailedTask")
         .and_then(Value::as_str)
@@ -40,7 +40,7 @@ pub(crate) fn btw_task(question: &str) -> Result<String, String> {
 }
 
 pub(crate) fn retry_command_with(args: &Args, hooks: &mut RunHooks) -> Result<String, String> {
-    let state = read_mode_state(&args.cwd);
+    let state = read_mode_state(&args.cwd)?;
     let task = state
         .get("lastFailedTask")
         .and_then(Value::as_str)
@@ -85,7 +85,7 @@ fn run_session_command(
     rest: &str,
     hooks: &mut RunHooks,
 ) -> Result<String, String> {
-    let last = read_mode_state(&args.cwd)
+    let last = read_mode_state(&args.cwd)?
         .pointer("/lastSessionPath")
         .and_then(Value::as_str)
         .map(PathBuf::from)
@@ -134,10 +134,7 @@ pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
             names.iter().cloned().collect::<Vec<_>>().join(", ")
         ));
     }
-    let mut state = read_mode_state(cwd);
-    if !state.is_object() {
-        state = json!({});
-    }
+    let mut state = read_mode_state(cwd)?;
     state
         .as_object_mut()
         .expect("mode state object")
@@ -251,7 +248,7 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     };
     // Loop mode: auto-resubmit the loop prompt until the count or deadline
     // `/loop` was given runs out, `/loop off`, a failed turn or cancellation.
-    while let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task) {
+    while let Some(loop_prompt) = loop_next_prompt(&args.cwd, &task)? {
         if hooks.cancelled() {
             break;
         }

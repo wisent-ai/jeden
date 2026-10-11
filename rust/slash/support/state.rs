@@ -211,16 +211,52 @@ pub(crate) fn mutate_mode_state(
     change: impl FnOnce(&mut ModeState) -> Result<(), String>,
 ) -> Result<(), String> {
     let _guard = ModeStateLock::acquire(cwd)?;
-    let mut state = read_mode_state(cwd);
+    let mut state = try_read_mode_state(cwd)?;
     change(&mut state)?;
     write_mode_state(cwd, &state)
 }
 
+/// The saved mode state; the default state when none was saved yet. A file
+/// that cannot be read, does not parse, or holds a value of the wrong type is
+/// refused naming the file: decoded as the default, one bad field turned off
+/// every mode and forgot the goal and the last session, and the next change
+/// wrote those defaults over the file.
+pub(crate) fn try_read_mode_state(cwd: &Path) -> Result<ModeState, String> {
+    let path = mode_state_path(cwd);
+    serde_json::from_value(read_mode_state_value(cwd)?)
+        .map_err(|error| format!("{} is not a valid mode state: {error}", path.display()))
+}
+
+/// The saved mode state for a reader that has no error to return. `jeden`
+/// refuses to start while the mode state is unreadable or invalid
+/// (`check_mode_state`), so a failure here means the file broke during the
+/// run; the run stops with the cause instead of continuing, or saving, with
+/// every mode off.
 pub(crate) fn read_mode_state(cwd: &Path) -> ModeState {
-    fs::read_to_string(mode_state_path(cwd))
-        .ok()
-        .and_then(|text| serde_json::from_str::<ModeState>(&text).ok())
-        .unwrap_or_default()
+    match try_read_mode_state(cwd) {
+        Ok(state) => state,
+        Err(error) => panic!("{error}"),
+    }
+}
+
+/// Refuse to start on a mode state that cannot be read, naming the file.
+pub(crate) fn check_mode_state(cwd: &Path) -> Result<(), String> {
+    try_read_mode_state(cwd).map(drop)
+}
+
+/// The saved mode state as JSON, for the readers that keep fields `ModeState`
+/// does not declare; an empty object when none was saved yet. Refused like
+/// `read_mode_state`, and when the root is not an object.
+pub(crate) fn read_mode_state_value(cwd: &Path) -> Result<Value, String> {
+    let path = mode_state_path(cwd);
+    let state = crate::slash::common::read_json_value(&path)?;
+    if !state.is_object() {
+        return Err(format!(
+            "{} does not hold a JSON object, so the mode state is unknown",
+            path.display()
+        ));
+    }
+    Ok(state)
 }
 
 pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), String> {
