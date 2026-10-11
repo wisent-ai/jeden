@@ -4,9 +4,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { constants as system } from 'node:os';
 
 function required(name) {
   const value = process.env[name];
@@ -118,6 +119,32 @@ try {
   const memoryProbe = inspection.sources.find(source => source.source === 'memory');
   assert.equal(memoryProbe?.available, true, JSON.stringify(inspection));
   report.cases.push({ case: 'real-source-inspection', verdict: 'passed', result: inspection });
+  const originalMode = statSync(fixture).mode;
+  const originalBytes = readFileSync(fixture);
+  let denial;
+  try {
+    chmodSync(fixture, originalMode & ~(constants.S_IRUSR | constants.S_IRGRP | constants.S_IROTH));
+    try { readFileSync(fixture); } catch (error) { denial = error; }
+    assert.equal(denial?.errno, -system.errno.EACCES,
+      'qualification requires an actual filesystem permission refusal, not a privileged readable fixture');
+    const refusedRead = await invoke(binary, ['context', 'recommend', query,
+      '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);
+    const advice = JSON.parse(succeeds(refusedRead));
+    const source = advice.sources.find(source => source.source === 'files');
+    assert.equal(source?.available, false, JSON.stringify(advice));
+    assert.ok(source.detail.includes(fixture) && source.detail.includes(`os error ${-denial.errno}`), source.detail);
+    assert.ok(advice.unanswered.some(source => source.source === 'files'), JSON.stringify(advice));
+    report.cases.push({ case: 'unreadable-files-source', verdict: 'passed', refusal: source });
+  } finally {
+    chmodSync(fixture, originalMode);
+  }
+  const restoredRead = await invoke(binary, ['context', 'recommend', query,
+    '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);
+  const restored = JSON.parse(succeeds(restoredRead));
+  assert.equal(restored.sources.find(source => source.source === 'files')?.available, true, JSON.stringify(restored));
+  assert.equal(restored.recommendations.find(hit => hit.source === 'files')?.snippet, fixtureText);
+  assert.deepEqual(readFileSync(fixture), originalBytes, 'advisor changed the recovered source');
+  report.cases.push({ case: 'restored-files-source', verdict: 'passed' });
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
