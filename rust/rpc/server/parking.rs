@@ -29,9 +29,8 @@ use super::ServerState;
 use crate::sdk::AgentSession;
 use serde_json::{json, Value};
 use std::io::BufRead;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -131,49 +130,71 @@ fn schedule_checks(sender: Sender<Inbound>, every: Duration) -> Result<(), Strin
     Ok(())
 }
 
-/// When this process last did anything, and how many prompts it is running.
+/// When this process last did anything, and the prompts it is running.
+///
+/// A request that panics while holding either lock poisons it; what the lock
+/// guards is still true, so it is read and written through the poison. Read
+/// as nothing instead, one panic made the process look busy or quiet for the
+/// rest of its life and it never parked again.
 pub(super) struct Activity {
-    in_flight: AtomicUsize,
+    running: Mutex<Vec<Weak<()>>>,
     last: Mutex<Instant>,
 }
 
-/// One running prompt. Counted from before its worker starts until the
-/// worker returns, so a prompt that has not reached its session yet is still
-/// work in flight.
-pub(super) struct InFlight(Arc<Activity>);
+/// One running prompt. Held from before its worker starts until the worker
+/// returns, so a prompt that has not reached its session yet is still work in
+/// flight; it stops counting when it is dropped.
+pub(super) struct InFlight {
+    activity: Arc<Activity>,
+    _prompt: Arc<()>,
+}
 
 impl Drop for InFlight {
     fn drop(&mut self) {
-        self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
-        self.0.touch();
+        self.activity.touch();
+    }
+}
+
+/// The guard of `lock`; a lock a panicking request poisoned still guards
+/// the value it held when it panicked.
+fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
+    match lock.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
 impl Activity {
     pub(super) fn new() -> Arc<Self> {
         Arc::new(Self {
-            in_flight: AtomicUsize::new(0),
+            running: Mutex::new(Vec::new()),
             last: Mutex::new(Instant::now()),
         })
     }
 
     pub(super) fn touch(&self) {
-        if let Ok(mut last) = self.last.lock() {
-            *last = Instant::now();
-        }
+        *held(&self.last) = Instant::now();
     }
 
     pub(super) fn begin(self: &Arc<Self>) -> InFlight {
-        self.in_flight.fetch_add(1, Ordering::SeqCst);
+        let prompt = Arc::new(());
+        held(&self.running).push(Arc::downgrade(&prompt));
         self.touch();
-        InFlight(self.clone())
+        InFlight {
+            activity: self.clone(),
+            _prompt: prompt,
+        }
+    }
+
+    /// Whether any prompt is still running; ended prompts are forgotten.
+    fn working(&self) -> bool {
+        let mut running = held(&self.running);
+        running.retain(|prompt| prompt.upgrade().is_some());
+        !running.is_empty()
     }
 
     fn quiet(&self) -> Duration {
-        self.last
-            .lock()
-            .map(|last| last.elapsed())
-            .unwrap_or_default()
+        held(&self.last).elapsed()
     }
 }
 
@@ -200,7 +221,7 @@ fn survey(
     activity: &Activity,
     policy: &ParkPolicy,
 ) -> Result<Option<Value>, String> {
-    if activity.in_flight.load(Ordering::SeqCst) > 0 {
+    if activity.working() {
         return Ok(None);
     }
     let sessions: Vec<(String, AgentSession)> = state
@@ -211,7 +232,8 @@ fn survey(
         .map(|(id, session)| (id.clone(), session.clone()))
         .collect();
     let mut open = Vec::with_capacity(sessions.len());
-    let mut blocked = 0;
+    // Whether every open session carries a completion blocker.
+    let mut every_blocked = !sessions.is_empty();
     for (id, session) in &sessions {
         if !session.status()?.is_empty() {
             activity.touch();
@@ -222,15 +244,15 @@ fn survey(
             .get("blocker")
             .cloned()
             .unwrap_or(Value::Null);
-        if !blocker.is_null() {
-            blocked += 1;
+        if blocker.is_null() {
+            every_blocked = false;
         }
         open.push(json!({"sessionId": id, "blocker": blocker}));
     }
     let quiet = activity.quiet();
     let reason = if quiet >= policy.after {
         "idle"
-    } else if !sessions.is_empty() && blocked == sessions.len() && quiet >= policy.check_every {
+    } else if every_blocked && quiet >= policy.check_every {
         "blocked"
     } else {
         return Ok(None);
