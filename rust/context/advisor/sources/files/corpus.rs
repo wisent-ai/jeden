@@ -76,11 +76,16 @@ impl Corpus {
             if cancellation.is_cancelled() {
                 break;
             }
-            if root.path.exists() {
-                corpus.existing_roots.push(root.path.display().to_string());
-                corpus.collect_root(&root.path, root.depth, settings, cancellation);
-            } else {
-                corpus.missing_roots.push(root.path.display().to_string());
+            match root.path.try_exists() {
+                Ok(true) => {
+                    corpus.existing_roots.push(root.path.display().to_string());
+                    corpus.collect_root(&root.path, root.depth, settings, cancellation);
+                }
+                Ok(false) => corpus.missing_roots.push(root.path.display().to_string()),
+                Err(error) => corpus.unreadable.push(format!(
+                    "inspect declared root {}: {error}",
+                    root.path.display()
+                )),
             }
         }
         corpus
@@ -88,6 +93,12 @@ impl Corpus {
 
     /// Why the corpus is empty, in the words an operator can act on.
     pub(super) fn empty_detail(&self) -> String {
+        if !self.unreadable.is_empty() {
+            return format!(
+                "declared files source could not be read: {}",
+                self.unreadable.join("; ")
+            );
+        }
         if self.existing_roots.is_empty() {
             format!("no declared root exists: {}", self.missing_roots.join(", "))
         } else {
