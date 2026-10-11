@@ -51,29 +51,34 @@ pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<Strin
     ))
 }
 
-fn tracked_jobs(context: &SlashContext<'_>) -> Option<(PathBuf, Vec<Value>)> {
-    let scheduler = task_scheduler(context).ok()?;
+/// The jobs directory and every tracked job, or why they cannot be listed.
+fn tracked_jobs(context: &SlashContext<'_>) -> Result<(PathBuf, Vec<Value>), String> {
+    let scheduler = task_scheduler(context)
+        .map_err(|error| format!("the task scheduler cannot be opened: {error}"))?;
     let dir = scheduler.store.join("jobs");
     let jobs = scheduler
         .list()
-        .ok()?
+        .map_err(|error| format!("the jobs in {} cannot be listed: {error}", dir.display()))?
         .into_iter()
-        .filter_map(|job| serde_json::to_value(job).ok())
-        .collect();
-    Some((dir, jobs))
+        .map(|job| {
+            serde_json::to_value(job).map_err(|error| format!("a job cannot be shown: {error}"))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((dir, jobs))
 }
 
 pub(crate) fn jobs_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let Some((dir, jobs)) = tracked_jobs(context) else {
-        return PickerSpec::new(
-            "Background jobs",
-            vec![
-                PickerItem::action("No Rust session tracks background jobs", "")
-                    .detail("Start a session and run `/tan <work>` manually.")
-                    .badge("empty")
-                    .disabled(true),
-            ],
-        );
+    let (dir, jobs) = match tracked_jobs(context) {
+        Ok(listed) => listed,
+        Err(cause) => {
+            return PickerSpec::new(
+                "Background jobs",
+                vec![PickerItem::action("Background jobs cannot be listed", "")
+                    .detail(cause)
+                    .badge("error")
+                    .disabled(true)],
+            );
+        }
     };
     let items = if jobs.is_empty() {
         vec![PickerItem::action("No tracked background jobs", "")
@@ -106,9 +111,7 @@ pub(crate) fn jobs_picker(context: &SlashContext<'_>) -> PickerSpec {
 }
 
 pub(crate) fn handle_jobs(context: &SlashContext<'_>) -> Result<String, String> {
-    let Some((dir, jobs)) = tracked_jobs(context) else {
-        return Ok("No background jobs are tracked for a Rust session yet.".into());
-    };
+    let (dir, jobs) = tracked_jobs(context)?;
     if jobs.is_empty() {
         Ok(format!(
             "No background jobs are tracked in {}.",
