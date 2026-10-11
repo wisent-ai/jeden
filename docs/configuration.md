@@ -91,7 +91,8 @@ With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
 - Over the log grows a tree of summaries in `chat-memory/tree.jsonl`: a leaf
   per message, a parent per two adjacent nodes of equal span, each at most the
   operator's summary size (declared in `rust/chat_memory/numeric-provenance.json`).
-  A message or pair that already fits is kept word for word; anything longer is
+  A message or pair that already fits is kept word for word (`by: verbatim`;
+  a pair whose halves include a model's summary is `joined`); anything longer is
   summarized by `summaryModel` through Brama, on the session's lease. Leaves the
   next fold needs are written on a background thread between steps.
 - Each step sends the conversation's system messages, the view's nodes as one

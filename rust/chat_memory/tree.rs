@@ -32,7 +32,9 @@ pub struct Node {
     pub from: String,
     pub to: String,
     pub summary: String,
-    /// `verbatim` when the text fit as it is, else `model`.
+    /// `verbatim` when the messages fit word for word, `joined` when two
+    /// halves' summaries (one of them a model's) fit side by side, else
+    /// `model`.
     pub by: String,
     /// The two nodes it was made of; none for a leaf.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -207,7 +209,14 @@ impl Tree {
         }
         let joined = format!("{}\n{}", left.summary, right.summary);
         let (summary, by, clipped) = if joined.len() <= bytes {
-            (joined, "verbatim".to_string(), false)
+            // Word for word only when both halves are; a model's summary set
+            // beside another stays a summary.
+            let by = if left.by == "verbatim" && right.by == left.by {
+                left.by.clone()
+            } else {
+                "joined".to_string()
+            };
+            (joined, by, false)
         } else {
             let written = summarize(&joined, bytes).map_err(|error| {
                 format!(
