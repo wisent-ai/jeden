@@ -188,12 +188,22 @@ impl TaskScheduler {
                 if reaper_job.status == JobStatus::Succeeded
                     && !definition_output_is_unconstrained(&reaper_job.metadata["outputSchema"])
                 {
-                    match fs::read_to_string(&reaper_job.stdout)
-                        .ok()
+                    // A stdout that cannot be read is not "not one JSON
+                    // value"; each failure says which it was.
+                    let output = fs::read_to_string(&reaper_job.stdout)
+                        .map_err(|error| {
+                            format!(
+                                "child stdout {} cannot be read: {error}",
+                                reaper_job.stdout.display()
+                            )
+                        })
                         .and_then(|text| {
-                            serde_json::from_str::<serde_json::Value>(text.trim()).ok()
-                        }) {
-                        Some(value) => {
+                            serde_json::from_str::<serde_json::Value>(text.trim()).map_err(
+                                |error| format!("child stdout is not one JSON value: {error}"),
+                            )
+                        });
+                    match output {
+                        Ok(value) => {
                             if let Err(error) =
                                 validate_output(&value, &reaper_job.metadata["outputSchema"], "$")
                             {
@@ -202,12 +212,10 @@ impl TaskScheduler {
                                     Some(format!("agent output contract failed: {error}"));
                             }
                         }
-                        None => {
+                        Err(cause) => {
                             reaper_job.status = JobStatus::Failed;
-                            reaper_job.error = Some(
-                                "agent output contract failed: child stdout is not one JSON value"
-                                    .into(),
-                            );
+                            reaper_job.error =
+                                Some(format!("agent output contract failed: {cause}"));
                         }
                     }
                 }
