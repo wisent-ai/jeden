@@ -146,8 +146,16 @@ pub(super) fn list_sessions(session_root: &Path) -> String {
             )
         }
     };
-    for entry in entries.flatten() {
-        rows.push(entry.file_name().to_string_lossy().to_string());
+    for entry in entries {
+        match entry {
+            Ok(entry) => rows.push(entry.file_name().to_string_lossy().to_string()),
+            Err(error) => {
+                return format!(
+                    "Sessions cannot be listed: {}: {error}",
+                    session_root.display()
+                )
+            }
+        }
     }
     if rows.is_empty() {
         "No sessions found.".into()

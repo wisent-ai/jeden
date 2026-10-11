@@ -71,7 +71,16 @@ pub(crate) fn list_sessions(limit: Option<usize>, json: bool) -> Result<String, 
     let mut rows = vec![];
     match fs::read_dir(&root) {
         Ok(entries) => {
-            for entry in entries.flatten().take(limit.unwrap_or(usize::MAX)) {
+            for (listed, entry) in entries.enumerate() {
+                if limit.is_some_and(|limit| listed >= limit) {
+                    break;
+                }
+                let entry = entry.map_err(|error| {
+                    format!(
+                        "the session root {} cannot be read: {error}",
+                        root.display()
+                    )
+                })?;
                 rows.push(entry.file_name().to_string_lossy().to_string());
             }
         }

@@ -74,7 +74,10 @@ impl<B: SessionBackend> SessionService<B> {
             let entries = std::fs::read_dir(&root).map_err(|error| {
                 ServiceError::Runtime(format!("cannot read {}: {}", root.display(), error))
             })?;
-            for entry in entries.flatten() {
+            for entry in entries {
+                let entry = entry.map_err(|error| {
+                    ServiceError::Runtime(format!("cannot read {}: {}", root.display(), error))
+                })?;
                 let dir = entry.path();
                 if !dir.is_dir() {
                     continue;
