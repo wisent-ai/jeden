@@ -67,9 +67,12 @@ pub fn register_dynamic_tools(registration: DynamicToolRegistration) -> Result<(
             registration.owner
         ));
     }
-    let mut registrations = DYNAMIC_TOOLS
-        .write()
-        .map_err(|_| "dynamic tool registry poisoned")?;
+    // A panic in another registration's descriptor function leaves the list
+    // whole, so the registry is used through a poisoned lock.
+    let mut registrations = match DYNAMIC_TOOLS.write() {
+        Ok(registrations) => registrations,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     if registrations
         .iter()
         .any(|current| current.owner == registration.owner)
@@ -93,24 +96,51 @@ pub fn register_dynamic_tools(registration: DynamicToolRegistration) -> Result<(
     Ok(())
 }
 
+/// Every registration that failed, each said once: a tool family that cannot
+/// register is missing from every turn, and the turn alone cannot say why.
+static REGISTRATION_FAILURES: LazyLock<std::sync::Mutex<std::collections::BTreeSet<String>>> =
+    LazyLock::new(|| std::sync::Mutex::new(std::collections::BTreeSet::new()));
+
 fn ensure_dynamic_registrations() {
-    let _ = crate::task_runtime::register_with_tool_runtime();
-    let _ = crate::tool_services::register_with_tool_runtime();
-    let _ = register_dynamic_tools(language::registration());
+    let attempts = [
+        (
+            "task runtime tools",
+            crate::task_runtime::register_with_tool_runtime(),
+        ),
+        (
+            "tool service tools",
+            crate::tool_services::register_with_tool_runtime(),
+        ),
+        (
+            "language tools",
+            register_dynamic_tools(language::registration()),
+        ),
+    ];
+    for (family, attempt) in attempts {
+        let Err(cause) = attempt else { continue };
+        let said = format!("{family} are not registered: {cause}");
+        let mut failures = match REGISTRATION_FAILURES.lock() {
+            Ok(failures) => failures,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if failures.insert(said.clone()) {
+            eprintln!("jeden: {said}");
+        }
+    }
 }
 
 pub fn dynamic_tool_descriptors() -> Vec<DynamicToolDescriptor> {
     ensure_dynamic_registrations();
-    DYNAMIC_TOOLS
-        .read()
-        .map(|registrations| {
-            registrations
-                .iter()
-                .flat_map(|registration| (registration.descriptors)())
-                .filter(|descriptor| descriptor.healthy)
-                .collect()
-        })
-        .unwrap_or_default()
+    let registrations = match DYNAMIC_TOOLS.read() {
+        Ok(registrations) => registrations,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let descriptors = registrations
+        .iter()
+        .flat_map(|registration| (registration.descriptors)())
+        .filter(|descriptor| descriptor.healthy)
+        .collect();
+    descriptors
 }
 
 fn execute_dynamic(
@@ -118,7 +148,10 @@ fn execute_dynamic(
     tool: &str,
     input: &Value,
 ) -> Option<Result<Value, String>> {
-    let registrations = DYNAMIC_TOOLS.read().ok()?;
+    let registrations = match DYNAMIC_TOOLS.read() {
+        Ok(registrations) => registrations,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     registrations
         .iter()
         .find_map(|registration| (registration.execute)(runtime, tool, input))
