@@ -3,7 +3,9 @@ use std::io;
 use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::super::view_render::picker_panel;
-use super::super::{terminal_dimensions, Message, PickerEvent, PickerItem, PickerSpec, PickerState};
+use super::super::{
+    terminal_dimensions, Message, PickerEvent, PickerItem, PickerSpec, PickerState,
+};
 use super::input::TerminalInput;
 use super::{message_block, ReplRenderer};
 

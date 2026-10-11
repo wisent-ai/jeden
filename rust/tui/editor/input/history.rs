@@ -74,10 +74,18 @@ impl EditorState {
 
     /// Swap `present`, which `region` holds now, for `wanted`, and put the
     /// cursor and anchor where they stood with `wanted` in place.
-    fn put_back(&mut self, region: Region, present: &str, wanted: &str, place: (usize, Option<usize>)) {
+    fn put_back(
+        &mut self,
+        region: Region,
+        present: &str,
+        wanted: &str,
+        place: (usize, Option<usize>),
+    ) {
         match region {
             Region::Whole => wanted.clone_into(&mut self.text),
-            Region::At(start) => self.text.replace_range(start..start + present.len(), wanted),
+            Region::At(start) => self
+                .text
+                .replace_range(start..start + present.len(), wanted),
         }
         (self.cursor, self.anchor) = place;
         self.preferred_column = None;

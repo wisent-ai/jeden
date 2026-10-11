@@ -127,8 +127,7 @@ impl AttachmentTray {
             .ok_or_else(|| AttachmentError::Path("path has no UTF-8 basename".into()))?
             .to_string();
 
-        let mut file =
-            File::open(&path).map_err(|error| AttachmentError::Io(error.to_string()))?;
+        let mut file = File::open(&path).map_err(|error| AttachmentError::Io(error.to_string()))?;
         let mut bytes = Vec::new();
         file.read_to_end(&mut bytes)
             .map_err(|error| AttachmentError::Io(error.to_string()))?;

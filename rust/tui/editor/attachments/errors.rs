@@ -7,9 +7,7 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AttachmentError {
     Empty,
-    UnsupportedBinary {
-        mime: String,
-    },
+    UnsupportedBinary { mime: String },
     Path(String),
     Io(String),
     InvalidImage(String),

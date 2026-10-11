@@ -73,10 +73,9 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         ),
         "codeActions" => {
             let at = position(input, &action)?;
-            let diagnostics = input
-                .get("diagnostics")
-                .cloned()
-                .ok_or("LSP codeActions requires diagnostics, an array (empty when there are none)")?;
+            let diagnostics = input.get("diagnostics").cloned().ok_or(
+                "LSP codeActions requires diagnostics, an array (empty when there are none)",
+            )?;
             (
                 "textDocument/codeAction",
                 json!({"textDocument":{"uri":uri},"range":{"start":at,"end":at},"context":{"diagnostics":diagnostics}}),

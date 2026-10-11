@@ -146,7 +146,11 @@ pub struct BoundedOutput {
 }
 
 impl BoundedOutput {
-    pub fn new(stream: &'static str, limits: Option<OutputLimits>, artifacts: ArtifactSink) -> Self {
+    pub fn new(
+        stream: &'static str,
+        limits: Option<OutputLimits>,
+        artifacts: ArtifactSink,
+    ) -> Self {
         Self {
             stream,
             limits,

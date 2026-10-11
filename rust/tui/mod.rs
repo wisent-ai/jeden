@@ -117,7 +117,10 @@ pub struct FrameOptions {
 /// what it answered.
 pub fn terminal_dimensions() -> io::Result<(usize, usize)> {
     let (columns, rows) = crossterm::terminal::size().map_err(|error| {
-        io::Error::new(error.kind(), format!("the terminal did not report its size: {error}"))
+        io::Error::new(
+            error.kind(),
+            format!("the terminal did not report its size: {error}"),
+        )
     })?;
     match (std::num::NonZeroU16::new(columns), std::num::NonZeroU16::new(rows)) {
         (Some(columns), Some(rows)) => Ok((usize::from(columns.get()), usize::from(rows.get()))),

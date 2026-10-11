@@ -43,7 +43,9 @@ pub(crate) fn error_response(id: Value, code: &str, message: &str) -> Value {
 /// server over stdio, so the frame is as long as it wrote it.
 pub(crate) fn read_frame<R: BufRead>(input: &mut R) -> Result<Option<Vec<u8>>, String> {
     let mut frame = Vec::new();
-    input.read_until(b'\n', &mut frame).map_err(|error| error.to_string())?;
+    input
+        .read_until(b'\n', &mut frame)
+        .map_err(|error| error.to_string())?;
     if frame.is_empty() {
         return Ok(None);
     }

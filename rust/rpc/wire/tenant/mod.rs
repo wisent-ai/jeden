@@ -71,7 +71,9 @@ pub enum TenantError {
     InvalidWorkspace(String),
     StorageUnavailable,
     /// The named quota (`activeRequests`, `sessions`, `storedBytes`) is spent.
-    QuotaExceeded { quota: &'static str },
+    QuotaExceeded {
+        quota: &'static str,
+    },
 }
 
 #[derive(Debug, Clone)]

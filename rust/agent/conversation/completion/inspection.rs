@@ -132,12 +132,18 @@ fn output_ceiling(args: &Args) -> Option<u32> {
         .catalog(false)
         .map_err(|error| error.to_string())
         .and_then(|catalog| {
-            catalog.resolve(&router.model).map(|entry| entry.max_output_tokens).map_err(|error| error.to_string())
+            catalog
+                .resolve(&router.model)
+                .map(|entry| entry.max_output_tokens)
+                .map_err(|error| error.to_string())
         });
     match declared {
         Ok(Some(tokens)) => u32::try_from(tokens).ok(),
         Ok(None) => {
-            eprintln!("jeden: {} declares no output ceiling; the inspection is asked without one", router.model);
+            eprintln!(
+                "jeden: {} declares no output ceiling; the inspection is asked without one",
+                router.model
+            );
             None
         }
         Err(error) => {

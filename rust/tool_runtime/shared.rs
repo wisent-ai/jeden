@@ -103,7 +103,9 @@ pub(crate) fn count_input(input: &Value, key: &str, tool: &str) -> Result<u64, S
 pub(crate) fn machine_parallelism(tool: &str) -> Result<usize, String> {
     std::thread::available_parallelism()
         .map(usize::from)
-        .map_err(|error| format!("{tool} could not read how many threads this machine runs: {error}"))
+        .map_err(|error| {
+            format!("{tool} could not read how many threads this machine runs: {error}")
+        })
 }
 
 pub(crate) fn object_input(input: &Value, key: &str) -> Value {

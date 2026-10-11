@@ -52,10 +52,9 @@ fn compact(value: &serde_json::Value) -> String {
 /// accumulated instead.
 pub(super) fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
     match *event {
-        TraceEvent::ToolCall { tool, input } => Some(Message::new(
-            "tool",
-            format!("→ {tool} {}", compact(input)),
-        )),
+        TraceEvent::ToolCall { tool, input } => {
+            Some(Message::new("tool", format!("→ {tool} {}", compact(input))))
+        }
         TraceEvent::ToolResult { tool, result } => Some(Message::new(
             "tool",
             format!("← {tool} {}", compact(result)),
