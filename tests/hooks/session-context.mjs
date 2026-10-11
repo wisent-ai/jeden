@@ -218,17 +218,27 @@ try {
   const transcriptMode = statSync(transcript).mode;
   const beforeTranscript = hash(transcript);
   let appendRefusal;
+  let appendProbe;
+  const appendFailures = [];
   try {
     chmodSync(transcript, transcriptMode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
-    try { closeSync(openSync(transcript, 'a')); } catch (error) { appendRefusal = error; }
+    try { appendProbe = openSync(transcript, 'a'); } catch (error) { appendRefusal = error; }
     assert.ok(appendRefusal?.errno, 'the host must enforce the actual transcript append refusal');
     await assert.rejects(prompt(reopened, '/checkpoint retained-context'),
       (error) => error.message.includes('cannot open transcript')
         && error.message.includes(transcript)
         && error.message.includes(`os error ${Math.abs(appendRefusal.errno)}`),
       'checkpoint persistence must report its actual append operation, file and operating-system cause');
+  } catch (error) {
+    appendFailures.push(error);
   } finally {
-    chmodSync(transcript, transcriptMode);
+    try { chmodSync(transcript, transcriptMode); } catch (error) { appendFailures.push(error); }
+    if (appendProbe !== undefined) {
+      try { closeSync(appendProbe); } catch (error) { appendFailures.push(error); }
+    }
+  }
+  if (appendFailures.length) {
+    throw new AggregateError(appendFailures, `checkpoint qualification failed: ${appendFailures.map(String).join('; ')}`);
   }
   assert.equal(hash(transcript), beforeTranscript, 'a refused checkpoint must leave the durable transcript unchanged');
   report.cases.push({ name: 'checkpoint-append-refusal', verdict: 'passed', transcript,
