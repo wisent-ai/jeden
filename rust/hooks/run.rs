@@ -7,8 +7,29 @@ use super::event;
 
 use super::{
     hook_matches, parse_event_hooks, project_hooks_path, prompt_context, read_config,
-    resolve_trusted_hooks, user_hooks_path, Hook, HookOutcome,
+    resolve_trusted_hooks, unreadable_config, user_hooks_path, Hook, HookOutcome,
 };
+
+/// The user and project configs, and why any config that applies could not
+/// be read. The project config applies only when `allow_project`.
+fn trusted_configs(cwd: &Path, allow_project: bool) -> (Value, Value, Vec<String>) {
+    let mut failures = Vec::new();
+    let mut loaded = |read: Result<Value, String>, applies: bool| match read {
+        Ok(config) => config,
+        Err(reason) => {
+            if applies {
+                failures.push(reason);
+            }
+            Value::Null
+        }
+    };
+    let project = loaded(read_config(&project_hooks_path(cwd)), allow_project);
+    let user = match user_hooks_path() {
+        Some(path) => loaded(read_config(&path), true),
+        None => Value::Null,
+    };
+    (user, project, failures)
+}
 
 /// Run one hook command via `sh -c`, feeding `payload` JSON on stdin. A hook
 /// decides when it has finished deciding: a guard that reads a transcript or
@@ -82,7 +103,9 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
 
 /// Load merged config from disk (user + project) for one event, filter by tool,
 /// run each matching hook, and collect outcomes. Project hooks run only when
-/// `allow_project` (see [`resolve_trusted_hooks`]). Missing configs = no hooks.
+/// `allow_project` (see [`resolve_trusted_hooks`]). A missing config is no
+/// hooks; a config that applies and cannot be read or is not JSON answers a
+/// refusal naming it, ahead of every hook that did load.
 pub fn fire_event(
     cwd: &Path,
     event: &str,
@@ -90,24 +113,29 @@ pub fn fire_event(
     payload: &Value,
     allow_project: bool,
 ) -> Vec<HookOutcome> {
-    let project = read_config(&project_hooks_path(cwd));
-    let user = user_hooks_path()
-        .map(|p| read_config(&p))
-        .unwrap_or(Value::Null);
+    let (user, project, mut failures) = trusted_configs(cwd, allow_project);
     let mut hooks = resolve_trusted_hooks(&user, &project, event, tool, allow_project);
     // Installed plugins contribute their own hooks.json. User-scope plugin hooks
     // always run; project-scope plugin hooks obey the same `allow_project` gate.
     for config in crate::slash::installed_plugin_hook_configs(cwd, allow_project) {
+        let config = match config {
+            Ok(config) => config,
+            Err(reason) => {
+                failures.push(reason);
+                continue;
+            }
+        };
         let mut plugin_hooks = parse_event_hooks(&config, event);
         if !tool.is_empty() {
             plugin_hooks.retain(|h| hook_matches(h, tool));
         }
         hooks.extend(plugin_hooks);
     }
-    let mut outcomes = hooks
-        .iter()
-        .map(|hook| run_hook(cwd, hook, payload))
+    let mut outcomes = failures
+        .into_iter()
+        .map(unreadable_config)
         .collect::<Vec<_>>();
+    outcomes.extend(hooks.iter().map(|hook| run_hook(cwd, hook, payload)));
     // Tama registry hooks (claude-style shared catalog) run after jeden's own
     // hooks. The registry lives with the operator's other user-level config,
     // so it is trusted like user hooks and not gated on `allow_project`.
@@ -154,14 +182,15 @@ pub fn fire_event(
 /// answer while a `Stop` hook can still refuse it, so that a refused answer
 /// is never streamed to the operator before the refusal.
 pub fn has_event_hooks(cwd: &Path, event: &str, allow_project: bool) -> bool {
-    let project = read_config(&project_hooks_path(cwd));
-    let user = user_hooks_path()
-        .map(|p| read_config(&p))
-        .unwrap_or(Value::Null);
-    !resolve_trusted_hooks(&user, &project, event, "", allow_project).is_empty()
+    let (user, project, failures) = trusted_configs(cwd, allow_project);
+    !failures.is_empty()
+        || !resolve_trusted_hooks(&user, &project, event, "", allow_project).is_empty()
         || crate::slash::installed_plugin_hook_configs(cwd, allow_project)
             .iter()
-            .any(|config| !parse_event_hooks(config, event).is_empty())
+            .any(|config| match config {
+                Ok(config) => !parse_event_hooks(config, event).is_empty(),
+                Err(_) => true,
+            })
         || !super::tama::load_event_hooks(cwd, event, "", None).is_empty()
         || super::extensions::has_hooks(cwd, event)
 }

@@ -2,12 +2,15 @@ use super::*;
 
 /// Human summary of configured hooks (for `/hooks`), split by trust origin,
 /// plus the resolved Tama registry source when one is active.
-/// Only lists the events the runtime actually fires.
+/// Only lists the events the runtime actually fires. A config that cannot be
+/// read or is not JSON is listed with its cause: the hooks it declares refuse
+/// every event until it is repaired.
 pub fn describe_hooks(cwd: &Path) -> String {
     let project = read_config(&project_hooks_path(cwd));
-    let user = user_hooks_path()
-        .map(|p| read_config(&p))
-        .unwrap_or(Value::Null);
+    let user = match user_hooks_path() {
+        Some(path) => read_config(&path),
+        None => Ok(Value::Null),
+    };
     let events = event::ALL;
     let mut lines = Vec::new();
     for (label, config) in [
@@ -17,6 +20,16 @@ pub fn describe_hooks(cwd: &Path) -> String {
             &project,
         ),
     ] {
+        let config = match config {
+            Ok(config) => config,
+            Err(reason) => {
+                lines.push(label.to_string());
+                lines.push(format!(
+                    "  unreadable; wherever these hooks apply, every event is refused: {reason}"
+                ));
+                continue;
+            }
+        };
         let mut section = Vec::new();
         for event in events {
             let hooks = parse_event_hooks(config, event);
@@ -32,6 +45,13 @@ pub fn describe_hooks(cwd: &Path) -> String {
         if !section.is_empty() {
             lines.push(label.to_string());
             lines.extend(section);
+        }
+    }
+    for config in crate::slash::installed_plugin_hook_configs(cwd, true) {
+        if let Err(reason) = config {
+            lines.push(format!(
+                "Plugin hooks unreadable; wherever they apply, every event is refused: {reason}"
+            ));
         }
     }
     // Tama registry section (claude-style shared catalog); absent entirely

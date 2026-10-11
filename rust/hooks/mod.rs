@@ -74,13 +74,33 @@ pub(crate) fn user_hooks_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".jeden/hooks.json"))
 }
 
-/// Read a hooks config file into a JSON `Value`; a missing or malformed file
-/// yields `Value::Null` (treated as "no hooks") rather than an error.
-pub(crate) fn read_config(path: &Path) -> Value {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or(Value::Null)
+/// Read a hooks config file into a JSON `Value`. A file that does not exist
+/// is `Value::Null`, no hooks; a file that cannot be read or is not JSON is an
+/// error naming it, because reading it as no hooks turned off every guard it
+/// declares without a word.
+pub(crate) fn read_config(path: &Path) -> Result<Value, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Value::Null),
+        Err(error) => {
+            return Err(format!(
+                "cannot read hooks config {}: {error}",
+                path.display()
+            ))
+        }
+    };
+    serde_json::from_str(&text)
+        .map_err(|error| format!("hooks config {} is not JSON: {error}", path.display()))
+}
+
+/// The outcome a config that could not be read answers in place of its
+/// hooks: a refusal naming the file and the cause.
+pub(crate) fn unreadable_config(reason: String) -> HookOutcome {
+    HookOutcome {
+        exit_code: tama::BLOCK_EXIT,
+        stdout: String::new(),
+        stderr: reason,
+    }
 }
 
 /// Parse the hooks for one event out of a config `Value` (`{version, hooks:{}}`).
@@ -215,7 +235,9 @@ pub fn prompt_context(outcomes: &[HookOutcome]) -> Result<String, String> {
         if outcome.exit_code != 0 {
             return Err(format!(
                 "context hook at index {index} exited {}: stderr: {}; stdout: {}",
-                outcome.exit_code, outcome.stderr.trim(), outcome.stdout.trim()
+                outcome.exit_code,
+                outcome.stderr.trim(),
+                outcome.stdout.trim()
             ));
         }
         let Some(json) = parse_hook_json(&outcome.stdout) else {

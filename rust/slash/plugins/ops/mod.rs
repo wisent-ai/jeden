@@ -197,9 +197,15 @@ pub(crate) fn installed_plugin_command_dirs(cwd: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-/// Parsed `hooks.json` configs from ENABLED installed plugins. User-scope plugin
-/// hooks always apply; project-scope plugin hooks only when `allow_project`.
-pub(crate) fn installed_plugin_hook_configs(cwd: &Path, allow_project: bool) -> Vec<Value> {
+/// Parsed `hooks.json` configs from ENABLED installed plugins, each one or the
+/// reason it could not be read. User-scope plugin hooks always apply;
+/// project-scope plugin hooks only when `allow_project`. A plugin without a
+/// `hooks.json` declares none; one whose file cannot be read or is not JSON
+/// is answered with its path and cause instead of silently declaring none.
+pub(crate) fn installed_plugin_hook_configs(
+    cwd: &Path,
+    allow_project: bool,
+) -> Vec<Result<Value, String>> {
     let mut configs = Vec::new();
     for (dir, include) in [(cwd.to_path_buf(), allow_project), (plugins_home(), true)] {
         if !include {
@@ -211,12 +217,9 @@ pub(crate) fn installed_plugin_hook_configs(cwd: &Path, allow_project: bool) -> 
             }
             if let Some(path) = entry.get("path").and_then(Value::as_str) {
                 let hooks_path = Path::new(path).join("hooks.json");
-                if hooks_path.is_file() {
-                    if let Ok(text) = fs::read_to_string(&hooks_path) {
-                        if let Ok(value) = serde_json::from_str::<Value>(&text) {
-                            configs.push(value);
-                        }
-                    }
+                match crate::hooks::read_config(&hooks_path) {
+                    Ok(Value::Null) => {}
+                    loaded => configs.push(loaded),
                 }
             }
         }

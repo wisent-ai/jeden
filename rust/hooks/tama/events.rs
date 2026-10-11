@@ -20,7 +20,23 @@ pub fn load_event_hooks(
     let Some(path) = registry_path(cwd) else {
         return Vec::new();
     };
-    let registry = read_config(&path);
+    // A registry that cannot be read or is not JSON answers one blocking
+    // registration that cannot start, naming the file and the cause; read as
+    // empty, every Tama guard on this machine stopped without a word.
+    let registry = match read_config(&path) {
+        Ok(registry) => registry,
+        Err(reason) => {
+            return vec![TamaHook {
+                id: path.display().to_string(),
+                hook: Hook {
+                    matcher: String::new(),
+                    command: String::new(),
+                },
+                blocking: true,
+                unrunnable: Some(reason),
+            }]
+        }
+    };
     let catalog = registry.get("catalog").cloned().unwrap_or(Value::Null);
     let Some(events) = registry.get("events").and_then(Value::as_object) else {
         return Vec::new();
@@ -134,7 +150,14 @@ pub fn normalize_outcome(event: &str, blocking: bool, outcome: HookOutcome) -> H
 /// business.
 pub fn describe_source(cwd: &Path) -> Option<String> {
     let path = registry_path(cwd)?;
-    let registry = read_config(&path);
+    let registry = match read_config(&path) {
+        Ok(registry) => registry,
+        Err(reason) => {
+            return Some(format!(
+                "Tama registry unreadable; every event is refused until it is repaired: {reason}"
+            ))
+        }
+    };
     let catalog = registry.get("catalog").cloned().unwrap_or(Value::Null);
     let events = registry.get("events").and_then(Value::as_object)?;
     let mut rows = Vec::new();
