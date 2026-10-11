@@ -237,3 +237,7 @@ fn preferences_picker(cwd: &Path) -> PickerSpec {
         .collect();
     PickerSpec::new("Preferences — language & theme", items).localized(&lang)
 }
+
+#[cfg(test)]
+#[path = "../../../tests/setup/environment.rs"]
+mod environment_journey;
