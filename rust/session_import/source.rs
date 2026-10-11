@@ -26,10 +26,12 @@ impl Format {
 /// Which harness wrote this file, read from its content and never from its
 /// name: an OMP transcript is JSONL with one `{"type":"session"}` header that
 /// carries the session id and its workspace. A file that is none of the
-/// formats answers `None`, which a directory scan skips and an explicit path
-/// refuses.
-pub(crate) fn detect(path: &Path) -> Option<Format> {
-    let file = File::open(path).ok()?;
+/// formats answers `Ok(None)`, which a directory scan skips and an explicit
+/// path refuses; a file that cannot be read is an `Err` naming it and the
+/// cause, never "not a transcript".
+pub(crate) fn detect(path: &Path) -> Result<Option<Format>, String> {
+    let unreadable = |e: std::io::Error| format!("{}: cannot be read: {e}", path.display());
+    let file = File::open(path).map_err(unreadable)?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     // OMP rewrites a fixed-width `title` record at the top of the file and
@@ -37,18 +39,24 @@ pub(crate) fn detect(path: &Path) -> Option<Format> {
     // first few records; a file whose first records are not JSON is not ours.
     for _ in 0..8 {
         line.clear();
-        if reader.read_line(&mut line).ok()? == 0 {
-            return None;
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(None),
+            Ok(_) => {}
+            // Bytes that are not UTF-8 are not a transcript of ours.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => return Ok(None),
+            Err(e) => return Err(unreadable(e)),
         }
         if line.trim().is_empty() {
             continue;
         }
-        let value: Value = serde_json::from_str(&line).ok()?;
+        let Ok(value) = serde_json::from_str::<Value>(&line) else {
+            return Ok(None);
+        };
         if value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string() {
-            return Some(Format::Omp);
+            return Ok(Some(Format::Omp));
         }
     }
-    None
+    Ok(None)
 }
 
 pub(super) struct Source {
@@ -63,7 +71,7 @@ pub(super) struct Source {
 /// Index offsets, not tool-result bodies. Replay only the current branch; keep
 /// the entire original file separately so compaction never destroys provenance.
 pub(super) fn read(path: &Path) -> Result<Source, String> {
-    match detect(path) {
+    match detect(path)? {
         Some(Format::Omp) => read_omp(path),
         None => Err(format!(
             "{}: not a transcript of a supported harness (supported: {})",

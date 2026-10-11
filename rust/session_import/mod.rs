@@ -104,13 +104,20 @@ fn collect(path: &Path, sources: &mut Vec<PathBuf>) -> Result<(), String> {
         for entry in entries {
             if entry.is_dir() {
                 collect(&entry, sources)?;
-            } else if source::detect(&entry).is_some() {
-                sources.push(entry);
+            } else if entry.is_file() {
+                match source::detect(&entry) {
+                    Ok(Some(_)) => sources.push(entry),
+                    Ok(None) => {}
+                    // A file that cannot be read is kept, so the import names
+                    // it under failures with its cause rather than skipping a
+                    // transcript in silence as "not a transcript".
+                    Err(_) => sources.push(entry),
+                }
             }
         }
         return Ok(());
     }
-    if source::detect(path).is_none() {
+    if source::detect(path)?.is_none() {
         return Err(format!(
             "{}: not a transcript of a supported harness (supported: {})",
             path.display(),
