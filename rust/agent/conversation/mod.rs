@@ -5,8 +5,8 @@ pub mod protocol;
 mod compaction;
 mod completion;
 mod history;
-mod lease;
 mod local_exec;
+mod session;
 mod turn;
 
 pub(super) use protocol::action::{
@@ -24,6 +24,9 @@ pub(crate) struct Conversation {
     pub(super) continuation: bool,
     pub(super) reconcile_completion: bool,
     pub(super) session_context_pending: Option<&'static str>,
+    /// The never-ending chat memory, opened at the first turn when the
+    /// configuration turns it on (`chatMemory`).
+    pub(super) memory: Option<crate::chat_memory::session::ChatMemory>,
 }
 
 impl Conversation {
@@ -38,6 +41,7 @@ impl Conversation {
             continuation: false,
             reconcile_completion: false,
             session_context_pending: Some("startup"),
+            memory: None,
         })
     }
 
@@ -55,6 +59,7 @@ impl Conversation {
             continuation: false,
             reconcile_completion: false,
             session_context_pending: None,
+            memory: None,
         })
     }
 
@@ -70,6 +75,7 @@ impl Conversation {
             continuation: false,
             reconcile_completion: true,
             session_context_pending: Some("resume"),
+            memory: None,
         })
     }
 

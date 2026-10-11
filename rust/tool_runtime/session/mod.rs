@@ -119,8 +119,7 @@ pub(crate) fn recall_conversation(
     input: &Value,
 ) -> Result<Value, String> {
     // Explicit session id/path, else the current session (its dir is the parent
-    // of the artifact dir). Text-only transcript: user prompts + final answers,
-    // tool calls/results and images stripped (recall_conversation.sh parity).
+    // of the artifact dir).
     let target = match string_input(input, "session") {
         Some(session) => session,
         None => {
@@ -131,6 +130,23 @@ pub(crate) fn recall_conversation(
             dir.display().to_string()
         }
     };
+    // The chat memory answers a zoom into one node of its summary tree, or
+    // the messages of a time, word for word from its log.
+    let memory = crate::chat_memory::dir(&crate::cli::sessions::session_dir_for(&target));
+    if let Some(node) = string_input(input, "node") {
+        return crate::chat_memory::session::zoom(&memory, &node);
+    }
+    match (string_input(input, "from"), string_input(input, "to")) {
+        (Some(from), Some(to)) => return crate::chat_memory::session::dates(&memory, &from, &to),
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(
+                "recall_conversation by time takes both from and to, in seconds since 1970".into(),
+            )
+        }
+        (None, None) => {}
+    }
+    // Text-only transcript: user prompts + final answers, tool calls/results
+    // and images stripped (recall_conversation.sh parity).
     let transcript = crate::recall_conversation_text(&target)?;
     Ok(
         json!({"ok": true, "session": target, "transcript": transcript, "empty": transcript.is_empty()}),

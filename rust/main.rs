@@ -10,6 +10,7 @@ pub mod agent;
 pub mod autonomy;
 pub mod capability;
 pub mod cas;
+pub mod chat_memory;
 pub mod cli;
 pub mod collab;
 pub mod completion;
@@ -289,6 +290,7 @@ pub fn main() -> ExitCode {
         "worktree" => worktree_command(&args),
         "token" => token_command(&args),
         "lease" => cli::lease::command(&args),
+        "chat-memory" => cli::chat_memory::command(&args),
         "stats" => stats_command(&args),
         "gallery" => gallery_command(&args),
         other => {

@@ -75,3 +75,39 @@ That step runs only when all three of its bounds are stated:
 `JEDEN_TOOL_PRUNE_MIN_TOOL_TOKENS` (the smallest result worth replacing). With
 none stated the step is skipped; with only some, the turn is refused with the
 names of the missing ones.
+
+### Never-ending chat memory
+
+With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
+(user), a session keeps every message and stops compacting:
+
+```json
+{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>", "viewBytes": <bytes a turn's view may take> } }
+```
+
+- Every message the conversation holds — prompts, replies, tool calls and the
+  tool results the model received — is appended word for word to
+  `<session>/chat-memory/log.jsonl` and never rewritten.
+- Over the log grows a tree of summaries in `chat-memory/tree.jsonl`: a leaf
+  per message, a parent per two adjacent nodes of equal span, each at most the
+  operator's summary size (declared in `rust/chat_memory/numeric-provenance.json`).
+  A message or pair that already fits is kept word for word; anything longer is
+  summarized by `summaryModel` through Brama, on the session's lease. Leaves the
+  next fold needs are written on a background thread between steps.
+- Each step sends the conversation's system messages, the view's nodes as one
+  memory message, and the newest messages word for word — never more than
+  `viewBytes`. When the view outgrows it, every tail message but the newest
+  folds into its leaf at the end of the row, then every adjacent pair of the
+  finest span merges at once, so the beginning a provider caches changes only
+  at those moments. The view is kept in `chat-memory/view.json`; a resumed
+  session continues from it.
+- `recall_conversation` with `node=<id>` zooms into a node (its two halves, or
+  a message word for word); with `from` and `to` (seconds since 1970) it
+  answers the messages of that time. `jeden chat-memory show|zoom|dates`
+  answers the same from the command line, and Jeden Desktop shows the memory of
+  the selected session.
+- A `chatMemory` without `summaryModel` or a positive `viewBytes`, a
+  `viewBytes` smaller than one summary, a summary model Brama's catalog
+  refuses, and a view whose newest message alone outgrows `viewBytes` stop the
+  turn with that cause. An unreadable log, tree or view is refused naming the
+  file, never restarted.

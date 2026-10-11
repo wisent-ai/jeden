@@ -1,6 +1,7 @@
 //! CLI subtree: shared helpers and submodule declarations extracted from main.rs.
 
 pub(crate) mod auth;
+pub(crate) mod chat_memory;
 pub(crate) mod clipboard;
 pub(crate) mod commands;
 pub(crate) mod config;

@@ -93,14 +93,17 @@ impl Conversation {
                 return Err(self.cancelled_turn(tracks_completion, hooks)?);
             }
             hooks.note(&format!("thinking (step {}/{})", step, step_max_label));
-            if step > u32::from(true) {
+            // The chat memory replaces compaction: with it on, history is
+            // never cut, and the view a step sends keeps its size by itself.
+            if step > u32::from(true) && self.memory.is_none() {
                 let _ = self.maybe_auto_compact(args, hooks, "threshold", true)?;
             }
             if !args.model_only {
                 self.restore_session_context(args)?;
             }
+            let step_messages = self.step_messages(&prepared.config, args)?;
             let outbound_messages =
-                prepare_outbound_messages(&args.cwd, &self.messages, attachments)?;
+                prepare_outbound_messages(&args.cwd, &step_messages, attachments)?;
             let streaming = match step::call(
                 &prepared.router,
                 outbound_messages,
@@ -124,6 +127,7 @@ impl Conversation {
             };
             current = step_iter.next();
             let content = self.record_step(args, step, streaming, &mut prepared)?;
+            self.build_memory_ahead()?;
             if args.model_only {
                 self.messages
                     .push(json!({ "role": "assistant", "content": content.clone() }));
