@@ -88,14 +88,16 @@ impl Conversation {
         let summary_completion =
             chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[])?;
         if let Some(usage) = &summary_completion.usage {
-            let _ = append_usage_event(
+            if let Err(error) = append_usage_event(
                 &args.cwd,
                 &router,
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
                 None,
                 None,
-            );
+            ) {
+                hooks.note(&format!("compaction summary usage not recorded: {error}"));
+            }
         }
         let summary = summary_completion.content;
         if hooks.cancelled() {
@@ -168,14 +170,16 @@ impl Conversation {
         let brief_completion =
             chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[])?;
         if let Some(usage) = &brief_completion.usage {
-            let _ = append_usage_event(
+            if let Err(error) = append_usage_event(
                 &args.cwd,
                 &router,
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
                 None,
                 None,
-            );
+            ) {
+                hooks.note(&format!("handoff brief usage not recorded: {error}"));
+            }
         }
         let brief = brief_completion.content;
         if hooks.cancelled() {
@@ -260,14 +264,16 @@ impl Conversation {
         match chat_completion(&router, ask, args.max_tokens.map(|t| t as usize), &[]) {
             Ok(review_completion) => {
                 if let Some(usage) = &review_completion.usage {
-                    let _ = append_usage_event(
+                    if let Err(error) = append_usage_event(
                         &args.cwd,
                         &router,
                         usage,
                         usage_cost(&args.cwd, &config, &router.model, usage),
                         None,
                         None,
-                    );
+                    ) {
+                        hooks.note(&format!("advisor review usage not recorded: {error}"));
+                    }
                 }
                 let review = review_completion.content;
                 self.recorder

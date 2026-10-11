@@ -45,10 +45,26 @@ pub(in crate::agent) fn append_usage_event(
     subscription_decision_id: Option<&str>,
 ) -> Result<(), String> {
     let path = usage_path(cwd);
-    let mut document = fs::read_to_string(&path)
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or_else(|| json!({"version": 1, "events": []}));
+    // Only a ledger that is not there starts empty: one that cannot be read
+    // or is not JSON was replaced by this single event, losing every event
+    // recorded before it.
+    let mut document = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text).map_err(|error| {
+            format!(
+                "usage ledger {} is not JSON, so it is not rewritten: {error}",
+                path.display()
+            )
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            json!({"version": 1, "events": []})
+        }
+        Err(error) => {
+            return Err(format!(
+                "cannot read usage ledger {}: {error}",
+                path.display()
+            ))
+        }
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
