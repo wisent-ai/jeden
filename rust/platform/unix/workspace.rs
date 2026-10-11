@@ -42,15 +42,12 @@ impl WorkspacePlatform for UnixPlatform {
         max: u64,
     ) -> Result<Vec<u8>, PlatformError> {
         if workspace.join(".git").exists() {
-            if !quiet(
+            checked(
                 Command::new("git")
                     .args(["add", "-N", "--all"])
                     .current_dir(workspace),
-            ) {
-                return Err(PlatformError::Process(
-                    "git add -N failed while preparing workspace snapshot".into(),
-                ));
-            }
+                "git add -N --all while preparing the workspace snapshot",
+            )?;
             bounded(
                 Command::new("git")
                     .args([
@@ -108,6 +105,21 @@ fn quiet(command: &mut Command) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+/// Run `command`, refusing its failure with what it was doing, its exit
+/// status and what it printed on stderr.
+fn checked(command: &mut Command, what: &str) -> Result<(), PlatformError> {
+    let output = stado_wait::output(command.stdin(Stdio::null()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(PlatformError::Process(format!(
+            "{what} failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
+    }
 }
 
 fn bounded(command: &mut Command, max: u64, allow_one: bool) -> Result<Vec<u8>, PlatformError> {
