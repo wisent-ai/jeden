@@ -121,12 +121,19 @@ impl View {
                 self.log_len = entries.len() as u64;
                 return Ok(size);
             }
-            if let [oldest, _newer, ..] = tail {
-                let leaf = tree.leaf(oldest, summary_bytes, summarize)?;
-                self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
-                self.frontier.push(leaf.id.clone());
-                nodes.push(leaf);
-                continue;
+            // Every tail message but the newest folds at once, so the view
+            // has room again for as many turns as it can hold before it
+            // changes next.
+            if let [older @ .., _newest] = tail {
+                if !older.is_empty() {
+                    for entry in older {
+                        let leaf = tree.leaf(entry, summary_bytes, summarize)?;
+                        self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
+                        self.frontier.push(leaf.id.clone());
+                        nodes.push(leaf);
+                    }
+                    continue;
+                }
             }
             let merged = merge_finest(&nodes, tree, summary_bytes, summarize)?.ok_or_else(|| {
                 format!(
