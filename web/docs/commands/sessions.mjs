@@ -282,6 +282,7 @@ export const sessionCommands = [
       "Required: a session identifier or path.",
       "Optional: a task to run after loading history and explicit write/command grants for that continued turn.",
       "<code>--help</code> or <code>-h</code> prints resume usage before inspecting any session or starting a continuation, including when a session selector precedes the help flag.",
+      "To keep working in the same session instead of a child, name it with <code>jeden run \"task\" --resume-session &lt;id-or-dir&gt;</code>: that run appends to the session's own transcript and chat memory.",
     ],
     effect: "Creates a child session with replayable history and the source's full retained task state. It uses the recorded workspace, independently inspects prior results, and continues unfinished work when no new prompt is supplied. A supplied prompt adds a request without dropping older work. Failure preserves the child and its diagnostics for another continuation.",
     refusals: [
