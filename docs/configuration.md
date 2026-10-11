@@ -87,7 +87,9 @@ With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
 
 - Every message the conversation holds — prompts, replies, tool calls and the
   tool results the model received — is appended word for word to
-  `<session>/chat-memory/log.jsonl` and never rewritten.
+  `<session>/chat-memory/log.jsonl` and never rewritten, with every field it
+  carries (an assistant turn's `tool_calls`, a tool result's `tool_call_id`),
+  so the message a turn is given back is the one the provider accepted.
 - Over the log grows a tree of summaries in `chat-memory/tree.jsonl`: a leaf
   per message, a parent per two adjacent nodes of equal span, each at most the
   operator's summary size (declared in `rust/chat_memory/numeric-provenance.json`).
@@ -96,17 +98,21 @@ With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
   summarized by `summaryModel` through Brama, on the session's lease. Leaves the
   next fold needs are written on a background thread between steps.
 - Each step sends the conversation's system messages, the view's nodes as one
-  memory message, and the newest messages word for word — never more than
-  `viewBytes`. When the view outgrows it, every tail message but the newest
-  folds into its leaf at the end of the row, then every adjacent pair of the
-  finest span merges at once, so the beginning a provider caches changes only
-  at those moments. The view is kept in `chat-memory/view.json`; a resumed
-  session continues from it.
+  memory message (`[first-last] from..to` and the summary, the bytes the view
+  counts), and the newest messages word for word — never more than
+  `viewBytes`. When the view outgrows it, every tail message before the newest
+  turn folds into its leaf at the end of the row — the newest message that is
+  not a tool result stays with the tool results after it, since a provider
+  refuses a tool result whose call is not just before it — then every adjacent
+  pair of the finest span merges at once, so the beginning a provider caches
+  changes only at those moments. The view is kept in `chat-memory/view.json`;
+  a resumed session continues from it.
 - `recall_conversation` with `node=<id>` zooms into a node (its two halves, or
   a message word for word); with `from` and `to` (seconds since 1970) it
   answers the messages of that time. `jeden chat-memory show|zoom|dates`
-  answers the same from the command line, and Jeden Desktop shows the memory of
-  the selected session.
+  answers the same from the command line, and Jeden Desktop's Chat memory
+  screen shows the memory of the selected session, zooms into its nodes and
+  lists the messages of a picked time.
 - A `chatMemory` without `summaryModel` or a positive `viewBytes`, a
   `viewBytes` smaller than one summary, a summary model Brama's catalog
   refuses, and a view whose newest message alone outgrows `viewBytes` stop the
