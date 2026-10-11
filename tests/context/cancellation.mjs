@@ -120,7 +120,7 @@ try {
   report.cases.push({ case: 'cancelled-source-answers-unanswered', verdict: 'passed', detail: status.detail });
 
   await assert.rejects(transport.rpc('context/cancel', { requestId: asked.id }),
-    'cancelling a request that already answered must be refused');
+    /request_not_running:/, 'a finished request must be refused by name, not lose its transport');
   report.cases.push({ case: 'finished-request-cancel-refused', verdict: 'passed' });
 
   const recovered = await transport.rpc('context/recommend', { query, limit, sources: 'files', cwd: workspace });
@@ -145,7 +145,10 @@ try {
   throw error;
 } finally {
   try {
-    await transport.end();
+    const stopped = await transport.end();
+    assert.ok(stopped.status !== null && !stopped.status,
+      `RPC shutdown failed: status=${stopped.status}; ${stopped.stderr}`);
+    assert.equal(stopped.signal, null, `RPC shutdown received ${stopped.signal}`);
   } catch (error) {
     report.verdict = 'failed';
     report.cleanupError = String(error.stack || error);
