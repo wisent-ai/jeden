@@ -23,6 +23,10 @@ const EMBEDDED_BRIDGE: &str = concat!(
     include_str!("bridge-actions.mjs")
 );
 
+mod mode;
+use mode::{browser_profile, browser_visible, embedded_backend_health};
+pub(crate) use mode::{HEADLESS, VISIBLE};
+
 fn default_chromium(config: &Value) -> Option<String> {
     config::string(
         config,
@@ -49,50 +53,6 @@ fn default_chromium(config: &Value) -> Option<String> {
         .find(|candidate| command_exists(candidate))
         .map(str::to_owned)
     })
-}
-
-/// The two modes `/browser` stores; the browser service and the slash command
-/// read these names, so neither keeps a list of its own.
-pub(crate) const VISIBLE: &str = "visible";
-pub(crate) const HEADLESS: &str = "headless";
-
-/// Whether the browser opens a window, as `/browser visible` or `/browser
-/// headless` stored it (browser.mode, or JEDEN_BROWSER_MODE). No stored mode
-/// is a headless browser; a mode that command never stores is refused with
-/// the value read instead of being run headless without a word.
-fn browser_visible(config: &Value) -> Result<bool, String> {
-    let Some(mode) = config::string(config, &["browser", "mode"], "JEDEN_BROWSER_MODE") else {
-        return Ok(false);
-    };
-    if mode == VISIBLE {
-        return Ok(true);
-    }
-    if mode == HEADLESS {
-        return Ok(false);
-    }
-    Err(format!(
-        "browser.mode (or JEDEN_BROWSER_MODE) is {mode:?}, which /browser never stores; set it with /browser {VISIBLE} or /browser {HEADLESS}"
-    ))
-}
-
-fn browser_profile(config: &Value) -> Option<String> {
-    config::string(
-        config,
-        &["browser", "profile", "path"],
-        "JEDEN_BROWSER_PROFILE",
-    )
-}
-
-fn embedded_backend_health(chrome: Option<&str>) -> Result<&str, String> {
-    if !command_exists("node") {
-        return Err("Node.js is required by the embedded Chromium/CDP bridge".into());
-    }
-    chrome
-        .filter(|candidate| command_exists(candidate))
-        .ok_or_else(|| {
-            "no Chromium executable found; set JEDEN_CHROME_EXECUTABLE or browser.launch.executablePath"
-                .into()
-        })
 }
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
