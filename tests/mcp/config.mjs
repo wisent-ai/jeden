@@ -24,7 +24,8 @@ const userFile = join(home, '.jeden/mcp.json');
 const projectFile = join(project, '.jeden/mcp.json');
 const name = `declared-${randomUUID()}`;
 const declaration = { type: 'stdio', command: binary, args: ['mcp'], enabled: false };
-const valid = JSON.stringify({ mcpServers: { [name]: declaration }, disabledServers: [name] });
+const clientMetadata = { declaration: name, sourceRevision: revision };
+const valid = JSON.stringify({ mcpServers: { [name]: declaration }, disabledServers: [name], clientMetadata });
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const report = { revision, binary, binarySha256: hash(binary),
   testSha256: hash(fileURLToPath(import.meta.url)), commands: [], cases: [], verdict: 'failed' };
@@ -109,6 +110,7 @@ try {
   const persisted = JSON.parse(readFileSync(userFile, 'utf8'));
   assert.equal(Object.hasOwn(persisted.mcpServers, name), false);
   assert.equal(persisted.disabledServers.includes(name), false);
+  assert.deepEqual(persisted.clientMetadata, clientMetadata, 'mutation discarded unrelated configuration');
   assert.equal(listed(), absent, 'successful removal must be visible through the reader');
   report.verdict = 'passed';
 } catch (error) {
