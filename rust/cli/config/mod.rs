@@ -6,6 +6,7 @@ use std::path::Path;
 
 pub(crate) mod communication;
 mod document;
+pub(crate) mod env_files;
 #[path = "../../migrations/mod.rs"]
 pub(crate) mod migrations;
 pub(crate) mod schema;

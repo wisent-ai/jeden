@@ -1,6 +1,5 @@
 use serde_json::json;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -71,57 +70,6 @@ fn version_text() -> String {
     format!("jeden {JEDEN_VERSION}")
 }
 
-fn parse_env_value(raw: &str) -> String {
-    let mut value = raw.trim().to_string();
-    if let Some(index) = value.find(" #") {
-        value.truncate(index);
-        value = value.trim().to_string();
-    }
-    let unquoted = value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')));
-    if let Some(inner) = unquoted {
-        value = inner.to_string();
-    }
-    value.replace("\\n", "\n")
-}
-
-fn load_env_path(path: &Path, loaded: &mut Vec<String>) -> Result<(), String> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error.to_string()),
-    };
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let Some((key, raw_value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let key = key.trim();
-        if key.is_empty() || env::var_os(key).is_some() {
-            continue;
-        }
-        env::set_var(key, parse_env_value(raw_value));
-        loaded.push(key.to_string());
-    }
-    Ok(())
-}
-
-fn load_env_files(cwd: &Path) -> Result<Vec<String>, String> {
-    let mut loaded = Vec::new();
-    for name in [".env", ".env.local", ".env.production", ".env.vercel"] {
-        load_env_path(&cwd.join(name), &mut loaded)?;
-    }
-    load_env_path(&dirs_home().join(".jeden/.env"), &mut loaded)?;
-    loaded.sort();
-    loaded.dedup();
-    Ok(loaded)
-}
-
 fn config_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/config.json")
 }
@@ -165,7 +113,7 @@ pub fn main() -> ExitCode {
             }
         }
     }
-    match load_env_files(&args.cwd) {
+    match cli::config::env_files::load_env_files(&args.cwd) {
         Ok(loaded) => agent::credential::record_file_supplied(loaded),
         Err(error) => {
             eprintln!("Error: failed to load environment files: {}", error);
