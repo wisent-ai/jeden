@@ -6,9 +6,20 @@
 
 use super::dates::relative_age;
 use crate::tui::PickerItem;
+use serde::Deserialize;
 use std::fs;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
+
+/// The fields of a `user` event that may carry what the operator asked, in
+/// the order they are read.
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct UserEventData {
+    task: serde_json::Value,
+    content: serde_json::Value,
+    text: serde_json::Value,
+}
 
 /// First user task/message in the session transcript, reading only until the
 /// first `user` event line. Handles both V2 (`payload.type`) and legacy
@@ -25,9 +36,10 @@ fn first_user_task(session_dir: &Path) -> Option<String> {
             continue;
         }
         let data = payload.get("data")?;
-        let text = ["task", "content", "text"]
-            .iter()
-            .find_map(|key| data.get(key).and_then(serde_json::Value::as_str))?;
+        let said = UserEventData::deserialize(data).ok()?;
+        let text = [&said.task, &said.content, &said.text]
+            .into_iter()
+            .find_map(serde_json::Value::as_str)?;
         let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if !collapsed.is_empty() {
             return Some(collapsed);
@@ -36,19 +48,43 @@ fn first_user_task(session_dir: &Path) -> Option<String> {
     None
 }
 
+/// The row for something the listing could not read: disabled, its cause in
+/// the detail, so a broken session is shown instead of vanishing or posing
+/// as an unnamed one.
+fn unreadable_item(label: String, cause: String) -> PickerItem {
+    PickerItem::action(label, "")
+        .detail(cause)
+        .badge("error")
+        .disabled(true)
+}
+
 pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
     let mut entries = Vec::new();
-    if let Ok(read_dir) = fs::read_dir(session_root) {
+    let mut unreadable = Vec::new();
+    let read_dir = match fs::read_dir(session_root) {
+        Ok(read_dir) => read_dir,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(error) => {
+            return vec![unreadable_item(
+                "Sessions cannot be listed".into(),
+                format!("{}: {error}", session_root.display()),
+            )]
+        }
+    };
+    {
         for entry in read_dir.flatten() {
             let path = entry.path();
             if !path.is_dir() {
                 continue;
             }
             let id = entry.file_name().to_string_lossy().to_string();
-            let metadata = fs::read_to_string(path.join("state.json"))
-                .ok()
-                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .unwrap_or_default();
+            let metadata = match crate::slash::common::read_json_value(&path.join("state.json")) {
+                Ok(metadata) => metadata,
+                Err(cause) => {
+                    unreadable.push(unreadable_item(id, cause));
+                    continue;
+                }
+            };
             let name = metadata
                 .get("name")
                 .and_then(serde_json::Value::as_str)
@@ -89,6 +125,7 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
         );
     }
     items.sort_by(|left, right| right.label.cmp(&left.label));
+    items.extend(unreadable);
     items
 }
 
@@ -97,10 +134,20 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
 /// removed; all sessions are listed.
 pub(super) fn list_sessions(session_root: &Path) -> String {
     let mut rows = Vec::new();
-    if let Ok(entries) = fs::read_dir(session_root) {
-        for entry in entries.flatten() {
-            rows.push(entry.file_name().to_string_lossy().to_string());
+    let entries = match fs::read_dir(session_root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return "No sessions found.".into()
         }
+        Err(error) => {
+            return format!(
+                "Sessions cannot be listed: {}: {error}",
+                session_root.display()
+            )
+        }
+    };
+    for entry in entries.flatten() {
+        rows.push(entry.file_name().to_string_lossy().to_string());
     }
     if rows.is_empty() {
         "No sessions found.".into()
