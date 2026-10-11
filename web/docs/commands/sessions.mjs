@@ -39,16 +39,18 @@ export const sessionCommands = [
   {
     path: "run",
     group: "Run and automation",
-    invocation: 'jeden run "task" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]',
+    invocation: 'jeden run "task" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n] [--resume-session id-or-dir]',
     purpose: "Run one concrete agent task through a durable Jeden conversation.",
     inputs: [
       "Required: a non-empty task after <code>run</code>.",
       "<code>--cwd</code>, <code>--model</code>, <code>--max-tokens</code>, and <code>--max-steps</code> select the workspace, route, response budget, and step bound.",
       "<code>--allow-write</code> and <code>--allow-command</code> grant those tool tiers; <code>--yolo</code>/<code>--auto-approve</code> grants both. <code>--model-only</code> suppresses tools and <code>--json</code> wraps local slash-command output where supported.",
+      "<code>--resume-session</code> takes a session id, as <code>jeden sessions</code> lists it, or its directory. The run continues that session — its history, transcript and chat memory — instead of starting one, and a one-shot session command (<code>/checkpoint</code>, <code>/rewind</code>, <code>/compact</code>, <code>/handoff</code>, <code>/context</code>) acts on it; without it a session command acts on the workspace's last recorded session. Interactive <code>jeden --resume-session &lt;id-or-dir&gt;</code> loads the session's turns into a new conversation the same way. While a Jeden process records a session it holds that session's <code>transcript.jsonl</code> open for appending, which is how Oko tells which session a running Jeden is.",
     ],
     effect: "Records the original request durably before model access, then records acceptance requirements in a separate read-only conversation before execution. Every proposed final is independently checked against all retained tasks and original requests; incomplete actionable work continues automatically. The returned JSON includes <code>completion</code> with status, revision, requests, tasks and blockers. Model-only calls and Pursuit's independently owned stage reviews keep their own output contracts.",
     refusals: [
       "A missing task is refused exactly as <code>run requires a task</code>.",
+      "A <code>--resume-session</code> that names no session is refused naming the file it could not read (<code>cannot read &lt;dir&gt;/state.json: …</code>; interactively <code>--resume-session names no session: &lt;dir&gt; does not exist</code>). A session command with neither a named nor a recorded last session is refused as <code>No prior session found. Run a task first, or name one with --resume-session.</code>",
       "A missing value for a valued option is refused (for example <code>--model requires a value</code>); non-integer token or step bounds are refused.",
       "Model work fails closed when required router configuration or credentials are absent, and write or command tools remain approval-gated unless their tier was granted.",
       "On macOS, a missing task sandbox helper is reported as <code>jeden-sandbox-helper is not installed beside the Jeden executable; build and code-sign it or set JEDEN_TASK_SANDBOX_HELPER</code>. Install the complete release, keeping its signed <code>jeden-sandbox-helper</code> beside <code>jeden</code>; the release SBOM and provenance identify both executables.",
