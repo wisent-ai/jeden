@@ -101,11 +101,18 @@ fn adopt() -> Result<AskRegister, String> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(register),
         Err(error) => return Err(format!("cannot read {}: {error}", root.display())),
     };
-    let mut sessions: Vec<PathBuf> = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .filter(|dir| dir.join(STATE_FILE).is_file())
-        .collect();
+    // An entry that cannot be read is refused like the root: the register is
+    // written once from what is adopted here, so a session skipped now would
+    // lose its asks for good.
+    let mut sessions: Vec<PathBuf> = Vec::new();
+    for entry in entries {
+        let dir = entry
+            .map_err(|error| format!("cannot read {}: {error}", root.display()))?
+            .path();
+        if dir.join(STATE_FILE).is_file() {
+            sessions.push(dir);
+        }
+    }
     sessions.sort();
     for session in sessions {
         // The register is written once from what is adopted here, so a state

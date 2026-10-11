@@ -42,10 +42,16 @@ pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) 
             return;
         }
     };
-    let mut paths = entries
-        .flatten()
-        .map(|entry| entry.path())
-        .collect::<Vec<_>>();
+    let mut paths = Vec::new();
+    for entry in entries {
+        match entry {
+            Ok(entry) => paths.push(entry.path()),
+            Err(error) => eprintln!(
+                "jeden: a declarative extension under {} was not loaded: {error}",
+                root.display()
+            ),
+        }
+    }
     paths.sort();
     for path in paths {
         collect(&path, extensions, out);
