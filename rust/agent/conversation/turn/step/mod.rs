@@ -77,6 +77,17 @@ impl Conversation {
                 json!({ "step": step, "result": result }),
             )?;
         }
+        // The route this step was served on, so a reader of the session's
+        // ledger (Oko's `sessions agents` and model policy) knows the model
+        // the session works on now.
+        self.recorder.record(
+            "model_route",
+            json!({
+                "step": step,
+                "model": streaming.route.model.as_str(),
+                "serviceTier": streaming.route.service_tier.as_deref(),
+            }),
+        )?;
         if let Some(lease) = &streaming.lease {
             self.recorder.record(
                 "model_subscription_route",
