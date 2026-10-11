@@ -6,7 +6,7 @@
 // with its caller's cancellation as the cause, a second cancel of the
 // finished id must be refused, and the same connection must answer a later
 // request.
-// Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION.
+// Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_CONTEXT_LIMIT.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -25,6 +25,8 @@ function required(name) {
 }
 const binary = resolve(required('JEDEN_BIN'));
 const revision = required('JEDEN_TEST_SOURCE_REVISION');
+const limit = JSON.parse(required('JEDEN_TEST_CONTEXT_LIMIT'));
+assert.ok(Number.isSafeInteger(limit), 'JEDEN_TEST_CONTEXT_LIMIT must be a whole number');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runs = join(root, '.build/context-cancellation');
 mkdirSync(runs, { recursive: true });
@@ -79,8 +81,16 @@ try {
   assert.equal(git(['rev-parse', 'HEAD']), revision, 'qualify the declared source revision');
   assert.equal(git(['status', '--porcelain']), '', 'commit the candidate and test before qualification');
   const query = `cancellationjourney${randomUUID().replaceAll('-', '')}`;
-  const asked = transport.request('context/recommend', { query, sources: 'ground-truth', cwd: workspace });
-  await firstConnection;
+  const fixture = join(workspace, 'cancellation-recovery.md');
+  const fixtureText = `${query} confirms the advisor can read files after cancellation.`;
+  writeFileSync(fixture, fixtureText);
+  const asked = transport.request('context/recommend', { query, limit, sources: 'ground-truth', cwd: workspace });
+  await Promise.race([
+    firstConnection,
+    asked.response.then(answer => {
+      throw new Error(`context/recommend answered before the source connected: ${JSON.stringify(answer)}`);
+    }),
+  ]);
   report.cases.push({ case: 'ground-truth-request-in-flight', url });
   const acknowledged = await transport.rpc('context/cancel', { requestId: asked.id });
   assert.equal(acknowledged.cancellationRequested, true, JSON.stringify(acknowledged));
@@ -102,9 +112,13 @@ try {
     'cancelling a request that already answered must be refused');
   report.cases.push({ case: 'finished-request-cancel-refused', verdict: 'passed' });
 
-  const inspection = await transport.rpc('context/sources', { cwd: workspace });
-  assert.ok(Array.isArray(inspection.sources), JSON.stringify(inspection));
-  report.cases.push({ case: 'connection-answers-after-cancellation', verdict: 'passed' });
+  const recovered = await transport.rpc('context/recommend', { query, limit, sources: 'files', cwd: workspace });
+  const files = recovered.sources.find(source => source.source === 'files');
+  assert.equal(files?.available, true, JSON.stringify(recovered));
+  const match = recovered.recommendations.find(hit => hit.source === 'files');
+  assert.ok(match?.locator.startsWith(`${fixture}:`), JSON.stringify(recovered));
+  assert.equal(match.snippet, fixtureText);
+  report.cases.push({ case: 'connection-reads-file-after-cancellation', verdict: 'passed', advice: recovered });
 
   // Malformed parameters are refused by name, never replaced.
   await assert.rejects(transport.rpc('context/recommend', { query: { text: query }, cwd: workspace }),
