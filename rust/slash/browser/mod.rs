@@ -5,6 +5,7 @@ use super::common::{
     write_json_value,
 };
 use super::SlashContext;
+use crate::tool_services::browser::{HEADLESS, VISIBLE};
 use crate::tui::{PickerItem, PickerSpec};
 
 mod options;
@@ -17,12 +18,13 @@ fn browser_record_from(config: &Value) -> Value {
         .filter(|value| is_plain_object(value))
         .cloned()
         .unwrap_or_else(|| json!({}));
+    // The mode as it is stored, or none: a value /browser never stores is
+    // shown as it is, and the browser service refuses it by name, rather than
+    // being shown and run as headless.
     let mode = browser
         .get("mode")
         .and_then(Value::as_str)
-        .or_else(|| config.get("browserMode").and_then(Value::as_str))
-        .filter(|mode| matches!(*mode, "headless" | "visible"))
-        .unwrap_or("headless");
+        .or_else(|| config.get("browserMode").and_then(Value::as_str));
     json!({
         "mode": mode,
         "updatedAt": browser.get("updatedAt").and_then(Value::as_str),
@@ -31,6 +33,13 @@ fn browser_record_from(config: &Value) -> Value {
     })
 }
 
+/// The stored mode as a person reads it: no stored mode runs headless.
+fn mode_text(record: &Value) -> String {
+    match record.get("mode").and_then(Value::as_str) {
+        Some(mode) => mode.to_string(),
+        None => format!("{HEADLESS} (no mode stored)"),
+    }
+}
 fn format_browser_settings(label: &str, value: &Value) -> String {
     if value.as_object().map(|map| map.is_empty()).unwrap_or(true) {
         format!("{label}: (none)")
@@ -41,10 +50,11 @@ fn format_browser_settings(label: &str, value: &Value) -> String {
 
 pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
     let current = browser_record_from(&merged_config(context.cwd));
-    let mode = current
-        .get("mode")
-        .and_then(Value::as_str)
-        .unwrap_or("headless");
+    let mode = mode_text(&current);
+    let stored = current.get("mode").and_then(Value::as_str);
+    // No stored mode runs headless, so headless is then the current one.
+    let headless = stored.is_none() || stored == Some(HEADLESS);
+    let visible = stored == Some(VISIBLE);
     let setting_keys = |key: &str| {
         let keys = current
             .get(key)
@@ -71,23 +81,15 @@ pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
                 "Persist preference in {}",
                 project_config_path(context.cwd).display()
             ))
-            .badge(if mode == "headless" {
-                "current"
-            } else {
-                "available"
-            })
-            .disabled(mode == "headless"),
+            .badge(if headless { "current" } else { "available" })
+            .disabled(headless),
         PickerItem::action("Use visible browser mode", "/browser visible")
             .detail(format!(
                 "Persist preference in {}",
                 project_config_path(context.cwd).display()
             ))
-            .badge(if mode == "visible" {
-                "current"
-            } else {
-                "available"
-            })
-            .disabled(mode == "visible"),
+            .badge(if visible { "current" } else { "available" })
+            .disabled(visible),
     ];
     let options = PickerItem::action("Configure launch or profile options", "/browser visible ")
         .detail("Edit mode and launch.<key>=value or profile.<key>=value before submitting")
@@ -105,13 +107,7 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
     let file = project_config_path(context.cwd);
     if verb.is_empty() || verb == "status" {
         return Ok([
-            format!(
-                "Browser runtime preference: {}",
-                current
-                    .get("mode")
-                    .and_then(Value::as_str)
-                    .unwrap_or("headless")
-            ),
+            format!("Browser runtime preference: {}", mode_text(&current)),
             format!(
                 "Updated: {}",
                 current
@@ -133,7 +129,7 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
         ]
         .join("\n"));
     }
-    if !matches!(verb, "headless" | "visible") {
+    if verb != HEADLESS && verb != VISIBLE {
         return Err(
             "Usage: /browser [status|headless|visible] [launch.<key>=value] [profile.<key>=value]"
                 .into(),

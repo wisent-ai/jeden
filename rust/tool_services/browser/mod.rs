@@ -51,8 +51,10 @@ fn default_chromium(config: &Value) -> Option<String> {
     })
 }
 
-const VISIBLE: &str = "visible";
-const HEADLESS: &str = "headless";
+/// The two modes `/browser` stores; the browser service and the slash command
+/// read these names, so neither keeps a list of its own.
+pub(crate) const VISIBLE: &str = "visible";
+pub(crate) const HEADLESS: &str = "headless";
 
 /// Whether the browser opens a window, as `/browser visible` or `/browser
 /// headless` stored it (browser.mode, or JEDEN_BROWSER_MODE). No stored mode
