@@ -39,16 +39,15 @@ impl TaskScheduler {
         let slot = self.reserve_slot(&id)?;
         let isolated = match isolate(&self.cwd, &self.workspace_root(), &id) {
             Ok(v) => v,
-            Err(error) => {
-                let _ = fs::remove_file(&slot);
-                return Err(error);
-            }
+            Err(error) => return Err(released(&slot, error)),
         };
         let stdout = self.store.join("jobs").join(format!("{id}.stdout.log"));
         let stderr = self.store.join("jobs").join(format!("{id}.stderr.log"));
         let capture = self.store.join("jobs").join(format!("{id}.patch"));
         let session_path = self.store.join("sessions").join(&id);
-        fs::create_dir_all(&session_path)?;
+        if let Err(error) = fs::create_dir_all(&session_path) {
+            return Err(released(&slot, error.into()));
+        }
         let mut command = crate::task_runtime::sandbox::command(
             &self.exe,
             &[
@@ -63,7 +62,7 @@ impl TaskScheduler {
                 self.store.clone(),
             ],
         )
-        .map_err(TaskError::Process)?;
+        .map_err(|error| released(&slot, TaskError::Process(error)))?;
         command
             .arg("run")
             .arg(&child_task)
@@ -94,10 +93,7 @@ impl TaskScheduler {
         configure_group(&mut command);
         let mut child = match command.spawn() {
             Ok(child) => child,
-            Err(error) => {
-                let _ = fs::remove_file(&slot);
-                return Err(TaskError::Process(error.to_string()));
-            }
+            Err(error) => return Err(released(&slot, TaskError::Process(error.to_string()))),
         };
         let child_stdout = child
             .stdout
@@ -251,4 +247,19 @@ impl TaskScheduler {
             .map_err(|e| TaskError::Process(e.to_string()))?;
         Ok(job)
     }
+}
+
+/// `error`, after the scheduler slot reserved for a job that never started
+/// is released; a slot that cannot be released is said, since it holds a
+/// place in the running limit until it is removed.
+fn released(slot: &std::path::Path, error: TaskError) -> TaskError {
+    if let Err(left) = fs::remove_file(slot) {
+        if left.kind() != std::io::ErrorKind::NotFound {
+            eprintln!(
+                "jeden: the scheduler slot {} of a job that did not start cannot be released: {left}",
+                slot.display()
+            );
+        }
+    }
+    error
 }
