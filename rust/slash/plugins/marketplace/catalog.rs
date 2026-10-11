@@ -117,10 +117,13 @@ pub(super) fn handle_catalog(
                 any = true;
             }
         }
+        if !errors.is_empty() {
+            lines.extend(errors);
+            return Err(lines.join("\n"));
+        }
         if !any {
             lines.push("- none".into());
         }
-        lines.extend(errors);
         return Ok(lines.join("\n"));
     }
     if verb == "update" {
