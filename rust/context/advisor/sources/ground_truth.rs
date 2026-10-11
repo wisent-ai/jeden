@@ -63,11 +63,20 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
         };
     };
     let considered = results.len();
-    let hits: Vec<Recommendation> = results
+    let hits = results
         .iter()
         .take(request.limit)
-        .map(|result| citation(result, terms))
-        .collect();
+        .enumerate()
+        .map(|(index, result)| {
+            citation(result, terms).map_err(|error| {
+                format!("{url} answered {status} with invalid results[{index}]: {error}")
+            })
+        })
+        .collect::<Result<Vec<_>, _>>();
+    let hits = match hits {
+        Ok(hits) => hits,
+        Err(error) => return unavailable(error),
+    };
     SourceOutcome {
         status: SourceStatus::available(
             "ground-truth",
@@ -80,45 +89,54 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
     }
 }
 
-/// One `/search` result as a recommendation. The locator is the citation the
-/// index returned — repository, path, commit and lines — so it can be read
-/// without trusting this process's working copy.
-fn citation(result: &Value, terms: &[String]) -> Recommendation {
-    let repo = string_at(result, "repo", "unknown-repo");
-    let path = string_at(result, "path", "unknown-path");
-    let reference = result
-        .get("commitSha")
-        .and_then(Value::as_str)
-        .or_else(|| result.get("ref").and_then(Value::as_str))
-        .unwrap_or("unknown-ref");
-    let first = result
-        .get("lineStart")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let last = result
-        .get("lineEnd")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let content = string_at(result, "content", "");
-    let heading = result
-        .get("heading")
-        .and_then(Value::as_str)
-        .unwrap_or(path);
-    Recommendation {
-        source: "ground-truth".to_string(),
-        title: heading.to_string(),
-        locator: format!("{repo}/{path}@{reference}:{first}-{last}"),
-        score: result
-            .get("score")
-            .and_then(Value::as_f64)
-            .unwrap_or_default(),
-        matched: matched_terms(content, terms),
-        snippet: snippet(content, terms),
-    }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct Citation<'a> {
+    repo: &'a str,
+    path: &'a str,
+    commit_sha: &'a str,
+    line_start: std::num::NonZeroU64,
+    line_end: std::num::NonZeroU64,
+    content: &'a str,
+    heading: Option<&'a str>,
+    score: f64,
 }
 
-fn string_at<'a>(value: &'a Value, key: &str, declared: &'a str) -> &'a str {
-    value.get(key).and_then(Value::as_str).unwrap_or(declared)
+/// Keep the index's citation intact; missing citation fields are not locators.
+fn citation(result: &Value, terms: &[String]) -> Result<Recommendation, String> {
+    let row: Citation<'_> = serde::Deserialize::deserialize(result)
+        .map_err(|error: serde_json::Error| error.to_string())?;
+    for (field, value) in [
+        ("repo", row.repo),
+        ("path", row.path),
+        ("commitSha", row.commit_sha),
+    ] {
+        if value.trim().is_empty() {
+            return Err(format!("{field} must not be empty"));
+        }
+    }
+    if row.line_end < row.line_start {
+        return Err(format!(
+            "lineEnd {} precedes lineStart {}",
+            row.line_end, row.line_start
+        ));
+    }
+    let mut title = row.path.to_string();
+    if let Some(heading) = row.heading {
+        title.push_str(": ");
+        title.push_str(heading);
+    }
+    Ok(Recommendation {
+        source: "ground-truth".to_string(),
+        title,
+        locator: format!(
+            "{}/{}@{}:{}-{}",
+            row.repo, row.path, row.commit_sha, row.line_start, row.line_end
+        ),
+        score: row.score,
+        matched: matched_terms(row.content, terms),
+        snippet: snippet(row.content, terms),
+    })
 }
 
 /// Whether the endpoint is configured and whether it answers its own health
