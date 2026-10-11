@@ -143,11 +143,15 @@ impl WelesClient {
         // refuses rather than reading again on a timer.
         loop {
             if cancelled() {
-                let _ = self.request(
+                // A cancel Weles did not take leaves the sign-in running on
+                // the deployment; that is said rather than taken as done.
+                if let Err(error) = self.request(
                     reqwest::Method::POST,
                     &format!("/operations/{operation_id}/cancel"),
                     Some(&json!({})),
-                );
+                ) {
+                    eprintln!("jeden: Weles operation {operation_id} may still be running: its cancel failed: {error}");
+                }
                 return Err(WelesError::Cancelled);
             }
             let query = match cursor.as_ref() {
