@@ -20,13 +20,16 @@ pub fn zoom(dir: &Path, id: &str) -> Result<Value, String> {
     })?;
     if node.children.is_empty() {
         let entries = Log::at(dir).read()?;
-        let entry = entries.get(node.first as usize).ok_or_else(|| {
-            format!(
-                "node {id} covers message {}, which the chat log {} does not hold",
-                node.first,
-                Log::at(dir).path().display()
-            )
-        })?;
+        let entry = entries
+            .iter()
+            .find(|entry| entry.index == node.first)
+            .ok_or_else(|| {
+                format!(
+                    "node {id} covers message {}, which the chat log {} does not hold",
+                    node.first,
+                    Log::at(dir).path().display()
+                )
+            })?;
         return Ok(json!({ "node": node, "message": entry_json(entry) }));
     }
     let children: Vec<Value> = node
@@ -74,7 +77,10 @@ pub fn describe(dir: &Path) -> Result<Value, String> {
     let tree = Tree::open(dir)?;
     let view = View::load(dir)?;
     let frontier = view.nodes(&tree)?;
-    let nodes: Vec<Value> = tree.nodes().map(|node| json!(node)).collect();
+    // In the order of the chat, not of their ids as text ("10-10" before "2-2").
+    let mut ordered: Vec<_> = tree.nodes().collect();
+    ordered.sort_by_key(|node| (node.first, node.last));
+    let nodes: Vec<Value> = ordered.into_iter().map(|node| json!(node)).collect();
     Ok(json!({
         "directory": dir,
         "log": { "path": log.path(), "messages": entries.len() },
