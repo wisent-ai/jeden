@@ -93,15 +93,17 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     // adoption of a running Jeden both name one) seeds a fresh recorder with
     // the prior durable turns while regenerating the system prompt from this
     // executable.
-    let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
+    // A named session that is not there is refused before a new one is
+    // recorded, so a mistyped id leaves no empty session behind.
     let resumed = agent::resumed_session(args);
+    if let Some(session_path) = resumed.as_ref().filter(|path| !path.exists()) {
+        return Err(format!(
+            "--resume-session names no session: {} does not exist",
+            session_path.display()
+        ));
+    }
+    let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
     if let Some(session_path) = &resumed {
-        if !session_path.exists() {
-            return Err(format!(
-                "--resume-session names no session: {} does not exist",
-                session_path.display()
-            ));
-        }
         let mut turns = session_conversation_turns(session_path)?;
         if turns
             .first()
