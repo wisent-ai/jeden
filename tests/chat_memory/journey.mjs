@@ -138,6 +138,21 @@ try {
   assert.match(printed, /^tool_call_id: /m, 'the text answer shows the tool result\'s call id');
   succeeds(jeden(['run', 'Respond exactly: AFTER-TOOLS', '--cwd', chat.directory, '--model', model, '--model-only',
     '--resume-session', session], chat));
+
+  // A rewind keeps the log as it is, and what is said after it is kept too.
+  const resumed = ['--cwd', chat.directory, '--model', model, '--model-only', '--resume-session', session];
+  const checkpointed = succeeds(jeden(['run', '/checkpoint memory-journey', ...resumed], chat));
+  const found = /Checkpoint (\S+) created/.exec(checkpointed);
+  assert.ok(found, `the checkpoint names no id: ${checkpointed}`);
+  const [, checkpoint] = found;
+  succeeds(jeden(['run', 'Respond exactly: BEFORE-REWIND', ...resumed], chat));
+  report.observations.rewound = succeeds(jeden(['run', `/rewind ${checkpoint}`, ...resumed], chat));
+  succeeds(jeden(['run', 'Respond exactly: AFTER-REWIND', ...resumed], chat));
+  const kept = JSON.parse(succeeds(jeden(['chat-memory', 'dates', session, leaf.from,
+    String(Number.MAX_SAFE_INTEGER), '--json'], chat)));
+  const said = (marker) => kept.messages.some((message) => String(message.content).includes(marker));
+  assert.ok(said('BEFORE-REWIND'), 'the log lost what was said before the rewind');
+  assert.ok(said('AFTER-REWIND'), 'the log did not keep what was said after the rewind');
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
