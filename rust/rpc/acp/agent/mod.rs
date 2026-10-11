@@ -120,25 +120,33 @@ impl AcpState {
 }
 
 impl Drop for AcpState {
+    // Every session this client opened is stopped and disposed, even after a
+    // panic poisoned the map: left out, its turns would keep running for a
+    // client that is gone. A step that fails is said with the session's cause.
     fn drop(&mut self) {
-        let sessions = self
-            .sessions
-            .get_mut()
-            .map(|sessions| {
-                sessions
-                    .drain()
-                    .map(|(_, session)| session)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        for session in sessions {
-            let _ = session.set_interaction_handler(None);
-            if let Ok(active) = session.status() {
-                for request_id in active {
-                    let _ = session.abort(&request_id);
-                }
+        let sessions = match self.sessions.get_mut() {
+            Ok(sessions) => sessions,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for (id, session) in sessions.drain() {
+            if let Err(cause) = session.set_interaction_handler(None) {
+                eprintln!("jeden acp: session {id} keeps its interaction handler: {cause}");
             }
-            let _ = session.dispose();
+            match session.status() {
+                Ok(active) => {
+                    for request_id in active {
+                        if let Err(cause) = session.abort(&request_id) {
+                            eprintln!("jeden acp: request {request_id} of session {id} is not aborted: {cause}");
+                        }
+                    }
+                }
+                Err(cause) => eprintln!(
+                    "jeden acp: the running requests of session {id} cannot be read: {cause}"
+                ),
+            }
+            if let Err(cause) = session.dispose() {
+                eprintln!("jeden acp: session {id} is not disposed: {cause}");
+            }
         }
     }
 }
