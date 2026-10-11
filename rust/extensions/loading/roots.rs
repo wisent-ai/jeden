@@ -69,11 +69,12 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     layer.next();
     let project_rank = layer.start;
     let mut roots = vec![cwd.join(".jeden/extensions")];
-    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
-        roots.push(home.join(".jeden/extensions"));
-        declarative.extend(declarative_paths(&home.join(".jeden"), user_rank));
-        roots.push(home.join(".jeden/tools"));
-    }
+    // The user layer under the one home lookup: skipped when HOME was unset,
+    // every user extension and tool vanished from the session.
+    let home_jeden = crate::slash::common::dirs_home().join(".jeden");
+    roots.push(home_jeden.join("extensions"));
+    declarative.extend(declarative_paths(&home_jeden, user_rank));
+    roots.push(home_jeden.join("tools"));
     declarative.extend(declarative_paths(&cwd.join(".jeden"), project_rank));
     roots.push(cwd.join(".jeden/tools"));
     let configured_extensions = config_value(cwd, "extensions");
@@ -118,17 +119,12 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
             .iter()
             .any(|id| text.ends_with(id) || text.contains(&format!("/{id}/")))
     });
-    let home_jeden = env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join(".jeden"));
     let mut module_precedence = BTreeMap::new();
     for module in &modules {
         let plugin = installed_plugins
             .iter()
             .position(|plugin| plugin.enabled && module.starts_with(&plugin.path));
-        let in_user_layer = home_jeden
-            .as_ref()
-            .is_some_and(|root| module.starts_with(root));
+        let in_user_layer = module.starts_with(&home_jeden);
         let precedence = match (plugin, in_user_layer) {
             (Some(index), _) => index,
             (None, true) => user_rank,

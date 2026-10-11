@@ -196,11 +196,11 @@ pub fn command_exists(program: &str) -> bool {
         .any(|directory| directory.join(program).is_file())
 }
 
+/// The user's config under the one home lookup, then the workspace's; with
+/// HOME unset the user config was skipped and its settings silently ignored.
 pub fn config_path(cwd: &Path) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    if let Some(home) = std::env::var_os("HOME") {
-        paths.push(PathBuf::from(home).join(".jeden/config.json"));
-    }
-    paths.push(cwd.join(".jeden/config.json"));
-    paths
+    vec![
+        crate::slash::common::dirs_home().join(".jeden/config.json"),
+        cwd.join(".jeden/config.json"),
+    ]
 }
