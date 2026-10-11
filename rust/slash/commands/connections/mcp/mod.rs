@@ -6,12 +6,14 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 use crate::mcp;
-use crate::slash::common::{dirs_home, read_json_value, split_args, split_head, write_json_value};
+use crate::slash::common::{dirs_home, split_args, split_head, write_json_value};
 use crate::slash::plugins::ops::{normalize_scope, parse_marketplace_flags};
 use crate::slash::SlashContext;
 
+mod list;
 mod picker;
 
+use list::format_mcp_list;
 pub(crate) use picker::mcp_picker;
 
 fn mcp_scope_file(cwd: &Path, scope: &str) -> Result<PathBuf, String> {
@@ -37,63 +39,6 @@ fn mcp_write_file(path: &Path, mut config: Value) -> Result<PathBuf, String> {
     obj.entry("disabledServers").or_insert_with(|| json!([]));
     write_json_value(path, &config)?;
     Ok(path.to_path_buf())
-}
-
-fn format_mcp_list(cwd: &Path) -> Result<String, String> {
-    let user = read_json_value(&dirs_home().join(".jeden/mcp.json"))?;
-    let project = read_json_value(&cwd.join(".jeden/mcp.json"))?;
-    let merged = mcp::load_config(cwd)?;
-    let disabled = merged
-        .get("disabledServers")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect::<std::collections::BTreeSet<_>>();
-    let Some(servers) = merged.get("mcpServers").and_then(Value::as_object) else {
-        return Ok("No MCP servers configured.".into());
-    };
-    if servers.is_empty() {
-        return Ok("No MCP servers configured.".into());
-    }
-    let mut lines = Vec::new();
-    for (name, server) in std::collections::BTreeMap::from_iter(servers.iter()) {
-        let source = if project
-            .get("mcpServers")
-            .and_then(Value::as_object)
-            .map(|m| m.contains_key(name))
-            .unwrap_or(false)
-        {
-            "project"
-        } else if user
-            .get("mcpServers")
-            .and_then(Value::as_object)
-            .map(|m| m.contains_key(name))
-            .unwrap_or(false)
-        {
-            "user"
-        } else {
-            "merged"
-        };
-        let status = if disabled.contains(name.as_str())
-            || server.get("enabled").and_then(Value::as_bool) == Some(false)
-        {
-            "disabled"
-        } else {
-            "enabled"
-        };
-        let transport =
-            server
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or(if server.get("url").is_some() {
-                    "http"
-                } else {
-                    "stdio"
-                });
-        lines.push(format!("{name} [{status}, {source}, {transport}]"));
-    }
-    Ok(lines.join("\n"))
 }
 
 fn head_rest(parts: &[String]) -> (&str, &[String]) {
