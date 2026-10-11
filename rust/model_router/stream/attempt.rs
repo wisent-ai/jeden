@@ -175,15 +175,12 @@ pub(crate) fn streaming_attempt_inner(
         .map_err(AttemptError::permanent)?;
     let body_text =
         serde_json::to_string(&body).map_err(|error| AttemptError::permanent(error.to_string()))?;
-    let (sender, receiver) = mpsc::sync_channel(16);
+    let (sender, receiver) = mpsc::channel();
     spawn_openai_stream_adapter(config, body_text, sender.clone())?;
     // An announced cancellation wakes the blocked receive below; the wake
     // removes itself once this attempt's receiver is gone.
     crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
-        !matches!(
-            sender.try_send(WireMessage::Cancelled),
-            Err(std::sync::mpsc::TrySendError::Disconnected(_))
-        )
+        sender.send(WireMessage::Cancelled).is_ok()
     });
 
     let mut state = OpenAiStreamState::default();

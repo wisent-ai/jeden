@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn spawn_openai_stream_adapter(
     config: &ChatConfig,
     body_text: String,
-    sender: SyncSender<WireMessage>,
+    sender: Sender<WireMessage>,
 ) -> Result<(), AttemptError> {
     use std::io::{BufRead, BufReader};
     let signed = agent_headers(&body_text, &config.agent_id, &config.secret)
@@ -106,7 +106,11 @@ impl SseDecoder {
                 }
                 self.data.push_str(value);
             }
-            "event" | "id" | "retry" => {}
+            // The other fields the SSE standard defines carry nothing a
+            // completion reads.
+            "event" => {}
+            "id" => {}
+            "retry" => {}
             _ => return Err(format!("malformed SSE field: {field}")),
         }
         Ok(None)
