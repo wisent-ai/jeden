@@ -30,11 +30,21 @@ pub fn pretool_block(
     super::block_decision(&outcomes, "PreToolUse hook denied this tool")
 }
 
-/// Fire `PostToolUse` for `tool` (best-effort; outcomes are ignored).
+/// Fire `PostToolUse` for `tool`. Nothing here changes the tool's result, but
+/// a hook that failed, or a hook configuration that could not be read, is
+/// said with its exit status and its own words rather than dropped.
 pub fn posttool(cwd: &Path, tool: &str, result: &Value, allow_project: bool) {
     let payload =
         json!({ "event": event::POST_TOOL_USE, "tool": tool, "result": result, "cwd": cwd });
-    let _ = fire_event(cwd, event::POST_TOOL_USE, tool, &payload, allow_project);
+    for outcome in fire_event(cwd, event::POST_TOOL_USE, tool, &payload, allow_project) {
+        if outcome.exit_code != super::tama::PASS_EXIT {
+            eprintln!(
+                "jeden: a PostToolUse hook for {tool} failed (exit {}): {}",
+                outcome.exit_code,
+                outcome.stderr.trim()
+            );
+        }
+    }
 }
 
 /// Fire `UserPromptSubmit`; returns injected context (joined hook stdout).

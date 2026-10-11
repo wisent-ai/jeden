@@ -29,8 +29,9 @@ pub use events::{describe_source, load_event_hooks, normalize_outcome};
 /// jeden's own block signal: a `PreToolUse` hook that exits with this code
 /// refuses the tool, and `normalize_outcome` maps a Tama failure onto it.
 pub(crate) const BLOCK_EXIT: i32 = 2;
-/// An outcome that carries no verdict of its own.
-const PASS_EXIT: i32 = 0;
+/// An outcome that carries no verdict of its own: a hook that exits with it
+/// passed.
+pub(crate) const PASS_EXIT: i32 = 0;
 
 /// One registry hook resolved for a jeden event: the jeden-shaped `Hook`
 /// (matcher + command) plus the entry's blocking flag.
