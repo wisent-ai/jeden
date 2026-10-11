@@ -95,9 +95,8 @@ pub(crate) fn spawn_turn_classification(
             Ok(Some(decision)) => decision,
             Ok(None) => return,
             Err(reason) => {
-                let _ = crate::cli::sessions::append_ledger_entry(
+                recorded(
                     &session_dir,
-                    crate::agent::now_stamp(),
                     "goal_lifecycle_refused",
                     json!({ "alias": classify::alias(), "reason": reason }),
                 );
@@ -115,9 +114,8 @@ pub(crate) fn spawn_turn_classification(
             LifecycleAction::StartGoal => match resolve_goal_title(&prompt) {
                 Ok(title) => Some(title),
                 Err(reason) => {
-                    let _ = crate::cli::sessions::append_ledger_entry(
+                    recorded(
                         &session_dir,
-                        crate::agent::now_stamp(),
                         "goal_lifecycle_refused",
                         json!({ "alias": classify::alias(), "reason": reason }),
                     );
@@ -129,9 +127,8 @@ pub(crate) fn spawn_turn_classification(
             }
             LifecycleAction::Ignore => None,
         };
-        let _ = crate::cli::sessions::append_ledger_entry(
+        recorded(
             &session_dir,
-            crate::agent::now_stamp(),
             "goal_lifecycle",
             json!({
                 "action": decision.action.as_str(),
@@ -141,17 +138,23 @@ pub(crate) fn spawn_turn_classification(
                 "model": classify::alias(),
             }),
         );
+        // A goal state that could not be saved is said and not announced:
+        // the event would show a goal the session does not hold.
         match decision.action {
             LifecycleAction::StartGoal => {
                 let title = resolved_goal.expect("startGoal always resolves a title");
                 if state.goal.auto {
                     let objective = title.clone();
-                    let _ = crate::slash::mutate_mode_state(&cwd, move |state| {
+                    let saved = crate::slash::mutate_mode_state(&cwd, move |state| {
                         state.goal.objective = objective;
                         state.goal.enabled = true;
                         state.goal.paused = false;
                         Ok(())
                     });
+                    if let Err(cause) = saved {
+                        eprintln!("jeden: the goal \"{title}\" is not started: {cause}");
+                        return;
+                    }
                 }
                 if let Some(emit) = &goal_event {
                     emit(&title, "active");
@@ -160,13 +163,17 @@ pub(crate) fn spawn_turn_classification(
             LifecycleAction::FinishGoal => {
                 if state.goal.auto {
                     // Mirror `/goal drop`.
-                    let _ = crate::slash::mutate_mode_state(&cwd, |state| {
+                    let saved = crate::slash::mutate_mode_state(&cwd, |state| {
                         state.goal.enabled = false;
                         state.goal.paused = false;
                         state.goal.objective.clear();
                         state.goal.budget = None;
                         Ok(())
                     });
+                    if let Err(cause) = saved {
+                        eprintln!("jeden: the finished goal is not dropped: {cause}");
+                        return;
+                    }
                 }
                 if let (Some(emit), Some(objective)) = (&goal_event, &goal_objective) {
                     emit(objective, "done");
@@ -175,6 +182,22 @@ pub(crate) fn spawn_turn_classification(
             LifecycleAction::ContinueCurrent | LifecycleAction::Ignore => {}
         }
     })
+}
+
+/// Append one lifecycle entry to the session ledger; an entry that cannot be
+/// written is said, since the ledger is where the decision is read back.
+fn recorded(session_dir: &Path, kind: &str, data: serde_json::Value) {
+    if let Err(cause) = crate::cli::sessions::append_ledger_entry(
+        session_dir,
+        crate::agent::now_stamp(),
+        kind,
+        data,
+    ) {
+        eprintln!(
+            "jeden: the {kind} entry is not in {}: {cause}",
+            session_dir.display()
+        );
+    }
 }
 
 /// Goal completion follows the native acceptance result, never a post-answer
@@ -186,7 +209,11 @@ pub(crate) fn finish_verified_goal(
     classification: Option<std::thread::JoinHandle<()>>,
 ) -> Result<(), String> {
     if let Some(handle) = classification {
-        let _ = handle.join();
+        if handle.join().is_err() {
+            eprintln!(
+                "jeden: the turn's goal classification panicked; its decision is not recorded"
+            );
+        }
     }
     let completion = crate::completion::read_state(session_dir)?;
     if !completion.complete() {
