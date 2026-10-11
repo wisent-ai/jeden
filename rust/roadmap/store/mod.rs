@@ -261,7 +261,11 @@ fn atomic_write_yaml(path: &Path, roadmap: &RoadmapFile) -> Result<(), RoadmapEr
     fs::create_dir_all(parent)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .map_err(|error| {
+            RoadmapError::Io(format!(
+                "the roadmap cannot be staged: the clock is before the epoch: {error}"
+            ))
+        })?
         .as_nanos();
     let temp = parent.join(format!(".roadmap.yaml.tmp-{}-{nonce}", std::process::id()));
     let yaml =
@@ -279,7 +283,11 @@ fn atomic_write_yaml(path: &Path, roadmap: &RoadmapFile) -> Result<(), RoadmapEr
         Ok(())
     })();
     if result.is_err() {
-        let _ = fs::remove_file(&temp);
+        if let Err(left) = fs::remove_file(&temp) {
+            if left.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("jeden: {} is left behind: {left}", temp.display());
+            }
+        }
     }
     result
 }
