@@ -51,10 +51,26 @@ fn default_chromium(config: &Value) -> Option<String> {
     })
 }
 
-fn browser_mode(config: &Value) -> String {
-    config::string(config, &["browser", "mode"], "JEDEN_BROWSER_MODE")
-        .filter(|mode| matches!(mode.as_str(), "headless" | "visible"))
-        .unwrap_or_else(|| "headless".into())
+const VISIBLE: &str = "visible";
+const HEADLESS: &str = "headless";
+
+/// Whether the browser opens a window, as `/browser visible` or `/browser
+/// headless` stored it (browser.mode, or JEDEN_BROWSER_MODE). No stored mode
+/// is a headless browser; a mode that command never stores is refused with
+/// the value read instead of being run headless without a word.
+fn browser_visible(config: &Value) -> Result<bool, String> {
+    let Some(mode) = config::string(config, &["browser", "mode"], "JEDEN_BROWSER_MODE") else {
+        return Ok(false);
+    };
+    if mode == VISIBLE {
+        return Ok(true);
+    }
+    if mode == HEADLESS {
+        return Ok(false);
+    }
+    Err(format!(
+        "browser.mode (or JEDEN_BROWSER_MODE) is {mode:?}, which /browser never stores; set it with /browser {VISIBLE} or /browser {HEADLESS}"
+    ))
 }
 
 fn browser_profile(config: &Value) -> Option<String> {
@@ -95,7 +111,7 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
 pub(crate) struct BrowserService {
     bridge: Option<String>,
     chrome: Option<String>,
-    mode: String,
+    visible: Result<bool, String>,
     profile: Option<String>,
     cwd: PathBuf,
     sessions: Mutex<BTreeMap<String, String>>,
@@ -112,7 +128,7 @@ impl BrowserService {
                 "JEDEN_BROWSER_BRIDGE",
             ),
             chrome: default_chromium(value),
-            mode: browser_mode(value),
+            visible: browser_visible(value),
             profile: browser_profile(value),
             cwd: cwd.to_path_buf(),
             sessions: Mutex::new(BTreeMap::new()),
@@ -131,10 +147,17 @@ impl BrowserService {
                 )
             };
         }
+        let visible = match &self.visible {
+            Ok(visible) => *visible,
+            Err(error) => return HealthDescriptor::unavailable("browser", error.clone()),
+        };
         match embedded_backend_health(self.chrome.as_deref()) {
             Ok(chrome) => HealthDescriptor::healthy(
                 "browser",
-                format!("embedded-node-cdp ({chrome}, {})", self.mode),
+                format!(
+                    "embedded-node-cdp ({chrome}, {})",
+                    if visible { VISIBLE } else { HEADLESS }
+                ),
             ),
             Err(error) => HealthDescriptor::unavailable("browser", error),
         }
@@ -202,7 +225,7 @@ impl BrowserService {
                     .expect("healthy embedded browser backend")
                     .clone(),
             );
-            if self.mode == "visible" {
+            if self.visible == Ok(true) {
                 args.push("--visible".into());
             }
             if let Some(profile) = &self.profile {
@@ -232,13 +255,18 @@ impl BrowserService {
             }
         }
         if response.get("ok").and_then(Value::as_bool) == Some(false) {
+            let detail = response
+                .get("error")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ServiceError::Protocol {
+                    service: "browser",
+                    detail: format!(
+                        "the bridge answered ok:false with no error string: {response}"
+                    ),
+                })?;
             return Err(ServiceError::Backend {
                 service: "browser",
-                detail: response
-                    .get("error")
-                    .and_then(Value::as_str)
-                    .unwrap_or("bridge rejected request")
-                    .into(),
+                detail: detail.into(),
             });
         }
         if tool == "browser_screenshot" {
