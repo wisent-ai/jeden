@@ -19,27 +19,54 @@ pub(super) fn state_path() -> PathBuf {
     crate::slash::common::dirs_home().join(".jeden/onboarding-state.json")
 }
 
-pub(super) fn subject_hash() -> String {
+/// The device subject onboarding progress is kept for: the user name and the
+/// home it runs under. Without a user name there is no subject to keep it
+/// for; a placeholder made every nameless account share one journey.
+pub(super) fn subject_hash() -> Result<String, String> {
+    let user = env::var("USER").map_err(|error| {
+        format!("USER cannot be read, so onboarding has no subject to keep progress for: {error}")
+    })?;
     let mut digest = Sha256::new();
-    digest.update(env::var("USER").unwrap_or_else(|_| "unknown-user".into()));
+    digest.update(user);
     digest.update(b"\0jeden-first-use\0");
     digest.update(
-        env::var_os("HOME")
-            .map(|value| value.to_string_lossy().into_owned())
-            .unwrap_or_default(),
+        crate::slash::common::dirs_home()
+            .to_string_lossy()
+            .as_bytes(),
     );
-    hex::encode(digest.finalize())
+    Ok(hex::encode(digest.finalize()))
 }
 
-fn transport() -> Box<dyn Transport> {
-    let endpoint = env::var("STADO_INTEGRATION_API_URL").unwrap_or_default();
-    let token = env::var("JEDEN_STADO_INTEGRATION_TOKEN").unwrap_or_default();
-    if !endpoint.trim().is_empty() && !token.trim().is_empty() {
-        if let Ok(transport) = IntegrationTransport::new(endpoint.trim(), token) {
-            return Box::new(transport);
-        }
+/// A variable's declared value: none when it is unset or blank, refused when
+/// it is not text.
+fn declared(name: &str) -> Result<Option<String>, String> {
+    match env::var(name) {
+        Ok(value) if value.trim().is_empty() => Ok(None),
+        Ok(value) => Ok(Some(value.trim().to_string())),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(format!("{name} cannot be read: {error}")),
     }
-    Box::new(wisent_onboarding_client::OfflineTransport)
+}
+
+/// Where onboarding progress is reported: the Stado integration API when both
+/// its address and token are declared, offline when neither is. One without
+/// the other, or an address the transport refuses, is refused by name: read
+/// as offline, a misconfigured integration never reported anything.
+fn transport() -> Result<Box<dyn Transport>, String> {
+    let endpoint = declared("STADO_INTEGRATION_API_URL")?;
+    let token = declared("JEDEN_STADO_INTEGRATION_TOKEN")?;
+    match (endpoint, token) {
+        (Some(endpoint), Some(token)) => IntegrationTransport::new(&endpoint, token)
+            .map(|transport| Box::new(transport) as Box<dyn Transport>)
+            .map_err(|error| format!("STADO_INTEGRATION_API_URL {endpoint}: {error}")),
+        (Some(_), None) => Err(
+            "STADO_INTEGRATION_API_URL is declared without JEDEN_STADO_INTEGRATION_TOKEN".into(),
+        ),
+        (None, Some(_)) => Err(
+            "JEDEN_STADO_INTEGRATION_TOKEN is declared without STADO_INTEGRATION_API_URL".into(),
+        ),
+        (None, None) => Ok(Box::new(wisent_onboarding_client::OfflineTransport)),
+    }
 }
 
 pub(super) async fn start_client() -> Result<Client, String> {
@@ -51,9 +78,9 @@ pub(super) async fn start_client() -> Result<Client, String> {
     let mut client = JourneyClient::new(
         "jeden",
         "first-use",
-        subject_hash(),
+        subject_hash()?,
         ScopeKind::Device,
-        transport(),
+        transport()?,
         FileStorage::new(state_path()),
         fallback,
     )
