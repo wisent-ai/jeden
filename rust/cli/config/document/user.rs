@@ -44,6 +44,11 @@ pub(crate) fn read_user_writable_config_strict() -> Result<Value, String> {
 /// version is deleted.
 pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
     let path = user_config_path();
+    // The legacy layer is read before anything is written: a legacy file that
+    // cannot be read or parsed refuses the whole write, so neither file
+    // changes, rather than publishing the new layer and then failing to
+    // retire the old one.
+    let legacy = read_config_layer(&legacy_user_config_path())?;
     if path.exists() {
         migrate_config_file(&path)?;
     }
@@ -56,11 +61,6 @@ pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
         json!(CONFIG_SCHEMA_VERSION),
     );
     let written = object.clone();
-    // The legacy layer is read before anything is written: a legacy file that
-    // cannot be read or parsed refuses the whole write, so neither file
-    // changes, rather than publishing the new layer and then failing to
-    // retire the old one.
-    let legacy = read_config_layer(&legacy_user_config_path())?;
     migrations::write_json_atomic(&path, &versioned)?;
     retire_legacy_keys(&written, legacy)?;
     Ok(path)
