@@ -8,6 +8,10 @@ pub(in crate::agent) struct SessionRecorder {
     active_leaf: Option<String>,
     lineage: Option<(PathBuf, Option<String>)>,
     pending_tool_results: Option<(usize, Vec<Value>)>,
+    /// The transcript, held open for appending while this process records
+    /// the session: what a fleet supervisor (Oko) reads from the kernel to
+    /// tell which session a running Jeden is, as it does for every harness.
+    _held: Option<fs::File>,
 }
 
 impl SessionRecorder {
@@ -21,6 +25,7 @@ impl SessionRecorder {
             active_leaf: None,
             lineage: None,
             pending_tool_results: None,
+            _held: None,
         }
     }
 
@@ -75,6 +80,7 @@ impl SessionRecorder {
             active_leaf,
             lineage,
             pending_tool_results: None,
+            _held: Some(held(dir)?),
         })
     }
 
@@ -89,12 +95,7 @@ impl SessionRecorder {
         if !state_path.exists() {
             self.write_state(now_stamp())?;
         }
-        let transcript = self.dir.join("transcript.jsonl");
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&transcript)
-            .map_err(|error| format!("cannot open {} for append: {error}", transcript.display()))?;
+        self._held = Some(held(&self.dir)?);
         self.ready = true;
         if let Some((parent_session, parent_entry)) = self.lineage.clone() {
             self.record(
@@ -316,6 +317,17 @@ impl SessionRecorder {
     pub(in crate::agent) fn path(&self) -> PathBuf {
         self.dir.clone()
     }
+}
+
+/// The session's transcript in `dir`, opened for appending (created when the
+/// session is new) and kept so for as long as the recorder records it.
+fn held(dir: &Path) -> Result<fs::File, String> {
+    let transcript = dir.join("transcript.jsonl");
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .map_err(|error| format!("cannot open {} for append: {error}", transcript.display()))
 }
 
 fn stamp() -> String {
