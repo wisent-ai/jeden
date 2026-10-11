@@ -140,7 +140,8 @@ impl ChatMemory {
         Ok(out)
     }
 
-    /// Between turns, write the leaf of every tail message but the newest, so
+    /// Between turns, write the leaf of every tail message the next fold
+    /// takes (`view::foldable`), so
     /// the next fold of the view asks no model while a turn waits. Runs on its
     /// own thread; a failure is said on standard error with its cause, and
     /// the turn that needs the leaf writes it then.
