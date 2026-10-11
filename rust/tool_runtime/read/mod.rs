@@ -99,10 +99,11 @@ fn walk_dir(
     if entries.len() >= limit {
         return Ok(());
     }
+    let unlisted = |error: std::io::Error| format!("cannot list {}: {error}", root.display());
     let mut children = fs::read_dir(root)
-        .map_err(|error| error.to_string())?
-        .filter_map(Result::ok)
-        .collect::<Vec<_>>();
+        .map_err(unlisted)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(unlisted)?;
     children.sort_by_key(|entry| entry.file_name());
     for entry in children {
         if entries.len() >= limit {
