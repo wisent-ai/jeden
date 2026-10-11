@@ -267,31 +267,33 @@ pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), Stri
     ensure_mode_state_dir(parent)?;
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .map_err(|error| {
+            format!("the mode state cannot be staged: the clock is before the epoch: {error}")
+        })?
         .as_nanos();
     let temp = parent.join(format!(
         ".mode-state.json.tmp-{}-{nonce}",
         std::process::id()
     ));
     let text = serde_json::to_string_pretty(state).map_err(|error| error.to_string())? + "\n";
-    let result = (|| -> Result<(), String> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)
-            .map_err(|error| error.to_string())?;
-        file.write_all(text.as_bytes())
-            .map_err(|error| error.to_string())?;
-        file.flush().map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
-        fs::rename(&temp, &path).map_err(|error| error.to_string())?;
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    })();
+    let result = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temp)
+        .and_then(|mut file| {
+            file.write_all(text.as_bytes())?;
+            file.flush()?;
+            file.sync_all()
+        })
+        .and_then(|()| fs::rename(&temp, &path))
+        .and_then(|()| File::open(parent)?.sync_all())
+        .map_err(|error| error.to_string());
     if result.is_err() {
-        let _ = fs::remove_file(&temp);
+        if let Err(left) = fs::remove_file(&temp) {
+            if left.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("jeden: {} is left behind: {left}", temp.display());
+            }
+        }
     }
     result
 }
