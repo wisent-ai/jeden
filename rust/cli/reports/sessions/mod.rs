@@ -60,7 +60,7 @@ struct SessionLedger {
     recovered_truncated_tail: bool,
 }
 
-use crate::{agent, read_json, session_root, Args};
+use crate::{agent, session_root, Args};
 use ledger::export_event;
 
 /// `jeden sessions [limit] [--json]`: the session directories, one per line
@@ -300,7 +300,24 @@ pub(crate) fn read_session_value(id_or_path: &str) -> Result<Value, String> {
     if !dir.exists() {
         return Err(format!("session not found: {}", dir.display()));
     }
-    let state: Value = read_json(&dir.join("state.json"));
+    // A session without a state file has none; one whose state cannot be
+    // read or is not JSON is refused, not exported as a session with no state.
+    let state_path = dir.join("state.json");
+    let state: Value = match fs::read_to_string(&state_path) {
+        Ok(text) => serde_json::from_str(&text).map_err(|error| {
+            format!(
+                "session state {} is not JSON: {error}",
+                state_path.display()
+            )
+        })?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(error) => {
+            return Err(format!(
+                "cannot read session state {}: {error}",
+                state_path.display()
+            ))
+        }
+    };
     let ledger = parse_transcript(&dir)?;
     let id = dir
         .file_name()
