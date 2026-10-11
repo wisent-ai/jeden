@@ -141,12 +141,21 @@ impl Conversation {
             return Err("Usage: /rewind <checkpoint-event-id>".into());
         }
         let (new_leaf, messages) = self.recorder.rewind(checkpoint_id)?;
-        self.messages = messages;
+        let before = std::mem::replace(&mut self.messages, messages);
         // The log keeps every message said before the rewind; the ones it
         // took back are marked so no later turn is given them from the tail,
         // and what is said from the checkpoint on is appended after them.
+        // A process that never opened the memory (a one-shot `/rewind`)
+        // marks them from the history as it stood before.
+        let unopened = self.memory.is_none() && crate::chat_memory::settings(self.cwd())?.is_some();
         if let Some(memory) = &mut self.memory {
             memory.replaced(&self.messages)?;
+        } else if unopened {
+            crate::chat_memory::session::ChatMemory::rewound_unopened(
+                &self.recorder.path(),
+                &before,
+                &self.messages,
+            )?;
         }
         self.session_context_pending = Some("rewind");
         Ok(format!(

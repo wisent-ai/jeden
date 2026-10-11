@@ -157,6 +157,12 @@ try {
   const said = (marker) => kept.messages.some((message) => String(message.content).includes(marker));
   assert.ok(said('BEFORE-REWIND'), 'the log lost what was said before the rewind');
   assert.ok(said('AFTER-REWIND'), 'the log did not keep what was said after the rewind');
+  // A one-shot /rewind marks what it took back as well.
+  const rewoundShown = JSON.parse(succeeds(jeden(['chat-memory', 'show', session, '--json'], chat)));
+  report.observations.rewoundView = rewoundShown.view;
+  assert.ok(rewoundShown.view.rewound.length, 'the one-shot rewind marked no range');
+  assert.ok(!rewoundShown.view.tail.some((message) => String(message.content).includes('BEFORE-REWIND')),
+    'the tail still gives the turn the one-shot rewind took back');
 
   // A rewind inside one running session (an RPC session, as Jeden Desktop
   // and the TUI run one) marks what it took back: the log keeps it, the

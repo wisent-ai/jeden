@@ -91,6 +91,40 @@ impl ChatMemory {
         Ok(())
     }
 
+    /// The same mark for a rewind in a process that never opened the
+    /// session's memory (`jeden run "/rewind <id>"`): the log holds the
+    /// conversation as it stood `before`, in order, but for ranges already
+    /// rewound, so the messages it took back are those after the ones it
+    /// still holds `after`. A session the memory never logged has nothing
+    /// to mark.
+    pub fn rewound_unopened(
+        session_dir: &Path,
+        before: &[Value],
+        after: &[Value],
+    ) -> Result<(), String> {
+        let dir = dir(session_dir);
+        let _guard = busy()?;
+        let entries = Log::at(&dir).read()?;
+        let mut view = View::load(&dir)?;
+        let own = |messages: &[Value]| {
+            messages
+                .iter()
+                .filter(|message| !is_system(message))
+                .count()
+        };
+        let taken: Vec<u64> = entries
+            .iter()
+            .map(|entry| entry.index)
+            .filter(|index| !view.was_rewound(*index))
+            .take(own(before))
+            .collect();
+        let Some(&from) = taken.get(own(after)) else {
+            return Ok(());
+        };
+        view.rewound.push((from, entries.len() as u64));
+        view.save(&dir)
+    }
+
     /// Append the conversation's messages the log does not hold yet, each
     /// as the conversation holds it.
     pub fn sync(&mut self, messages: &[Value]) -> Result<(), String> {
