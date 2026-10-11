@@ -124,8 +124,10 @@ fn color_escape(value: &str) -> Option<String> {
 // ---------------------------------------------------------------------------
 // theme.json loading
 
+/// The user's theme under the one home lookup; with HOME unset it was skipped
+/// and the user's colours silently replaced by the defaults.
 fn home_theme_file() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| Path::new(&home).join(".jeden/theme.json"))
+    Some(crate::slash::common::dirs_home().join(".jeden/theme.json"))
 }
 
 fn parse_theme_json(text: &str) -> Result<Palette, String> {
