@@ -7,17 +7,17 @@
 
 use std::path::{Path, PathBuf};
 
-use super::common::split_head;
 use super::SlashContext;
 use crate::cli::config::{load_config, ui_language};
-use crate::tui::{CommandOutcome, PickerItem, PickerSpec};
+use crate::tui::{PickerItem, PickerSpec};
 
 mod env_file;
 mod report;
+mod steps;
 
 pub(crate) use env_file::brama_router_configured;
-use env_file::{configured_value, example_prefill, save_agent_id, save_brama_url};
-use report::{checklist_text, validate_text};
+use env_file::{configured_value, example_prefill};
+pub(crate) use steps::{handle_text, run_interactive};
 
 const BRAMA_URL_KEY: &str = "BRAMA_URL";
 const AGENT_ID_KEY: &str = "WISENT_APP_AGENT_ID";
@@ -30,6 +30,9 @@ struct SetupState {
     secret_configured: bool,
     workspace: Option<PathBuf>,
     workspace_error: Option<String>,
+    /// Why `~/.jeden/.env` could not be read; the values it would hold are
+    /// then unknown, not unconfigured.
+    env_file_error: Option<String>,
     model: Option<String>,
     language: String,
     theme: String,
@@ -54,18 +57,30 @@ fn setup_state(context: &SlashContext<'_>) -> SetupState {
         Ok(None) => (None, None),
         Err(error) => (None, Some(error)),
     };
+    // A file that cannot be read leaves its values unknown, and says so once.
+    let mut env_file_error = None;
+    let mut from_env_file = |key: &str| match configured_value(key) {
+        Ok(value) => value,
+        Err(error) => {
+            env_file_error = Some(error);
+            None
+        }
+    };
+    // The route this process resolved, or an address /setup wrote to
+    // ~/.jeden/.env after the process resolved it (the next start reads it).
+    let brama_url = crate::agent::credential::brama_url().or_else(|| from_env_file(BRAMA_URL_KEY));
+    let agent_id = from_env_file(AGENT_ID_KEY);
+    let secret_configured = from_env_file(AGENT_SECRET_KEY).is_some();
     SetupState {
-        // The route this process resolved, or an address /setup wrote to
-        // ~/.jeden/.env after the process resolved it (the next start reads it).
-        brama_url: crate::agent::credential::brama_url()
-            .or_else(|| configured_value(BRAMA_URL_KEY)),
-        agent_id: configured_value(AGENT_ID_KEY),
-        secret_configured: configured_value(AGENT_SECRET_KEY).is_some(),
+        brama_url,
+        agent_id,
+        secret_configured,
         model,
         language: ui_language(&config).code().to_string(),
         theme,
         workspace,
         workspace_error,
+        env_file_error,
     }
 }
 
@@ -73,6 +88,13 @@ fn configured_row(label: impl Into<String>, detail: impl Into<String>) -> Picker
     PickerItem::action(label, "")
         .detail(detail)
         .badge("OK")
+        .disabled(true)
+}
+
+fn error_row(label: impl Into<String>, detail: impl Into<String>) -> PickerItem {
+    PickerItem::action(label, "")
+        .detail(detail)
+        .badge("ERROR")
         .disabled(true)
 }
 
@@ -90,12 +112,7 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
                 workspace.display()
             ),
         )),
-        (None, Some(error)) => items.push(
-            PickerItem::action("1. Adopted workspace is unavailable", "")
-                .detail(error)
-                .badge("ERROR")
-                .disabled(true),
-        ),
+        (None, Some(error)) => items.push(error_row("1. Adopted workspace is unavailable", error)),
         (None, None) => items.push(
             PickerItem::action(
                 "1. Adopt this existing workspace",
@@ -106,15 +123,23 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             .prefill(),
         ),
     }
+    if let Some(error) = &state.env_file_error {
+        items.push(error_row("Environment file is unreadable", error));
+    }
     match &state.brama_url {
         Some(url) => items.push(configured_row(
             "2. BRAMA_URL configured",
             format!("{url} · {}", crate::agent::credential::route_origin()),
         )),
         None => {
-            let prefill = example_prefill(context.cwd, BRAMA_URL_KEY)
-                .map(|url| format!(" {url}"))
-                .unwrap_or_else(|| " ".into());
+            let prefill = match example_prefill(context.cwd, BRAMA_URL_KEY) {
+                Ok(Some(url)) => format!(" {url}"),
+                Ok(None) => " ".to_string(),
+                Err(error) => {
+                    items.push(error_row(".env.example is unreadable", error));
+                    " ".to_string()
+                }
+            };
             items.push(
                 PickerItem::action("2. Set BRAMA_URL", format!("/setup brama-url{prefill}"))
                     .detail(format!(
@@ -198,79 +223,4 @@ fn preferences_picker(cwd: &Path) -> PickerSpec {
         })
         .collect();
     PickerSpec::new("Preferences — language & theme", items).localized(&lang)
-}
-
-const USAGE: &str = "Usage: /setup [status|validate|workspace <path>|brama-url <url>|agent-id <id>|model|preferences]";
-
-/// Text-mode handler (non-interactive callers such as `jeden run "/setup …"`
-/// and the slash fallback). Bare `/setup` and `/setup status` print the
-/// checklist without changing anything.
-pub(crate) fn handle_text(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
-    let (verb, rest) = split_head(args);
-    match verb.to_ascii_lowercase().as_str() {
-        "" | "status" => Ok(checklist_text(context)),
-        "validate" => Ok(validate_text(context)),
-        "workspace" => {
-            let path = if rest.trim().is_empty() {
-                context.cwd
-            } else {
-                Path::new(rest.trim())
-            };
-            Ok(crate::cli::workspace::adopt(path, context.cwd)?.text())
-        }
-        "brama-url" => save_brama_url(rest),
-        "agent-id" => save_agent_id(rest),
-        "model" | "preferences" => Ok(format!(
-            "That step needs the interactive TUI; run bare `jeden` and then /setup.\n\n{}",
-            checklist_text(context)
-        )),
-        _ => Err(USAGE.into()),
-    }
-}
-
-/// Interactive handler for the TUI: step submissions keep the wizard sequence
-/// alive by returning the next view instead of plain text.
-pub(crate) fn run_interactive(
-    cwd: &Path,
-    args: &str,
-    current_model: Option<&str>,
-    interactive: bool,
-) -> Result<CommandOutcome, String> {
-    let session_root = crate::session_root();
-    let context = SlashContext {
-        cwd,
-        model: current_model,
-        session_root: &session_root,
-    };
-    let (verb, rest) = split_head(args);
-    match verb.to_ascii_lowercase().as_str() {
-        "" if interactive => setup_picker(&context).map(CommandOutcome::Picker),
-        "" | "status" => Ok(CommandOutcome::Text(checklist_text(&context))),
-        "validate" => Ok(CommandOutcome::Text(validate_text(&context))),
-        "workspace" | "brama-url" | "agent-id" => {
-            let message = match verb.to_ascii_lowercase().as_str() {
-                "workspace" => {
-                    let path = if rest.trim().is_empty() { cwd } else { Path::new(rest.trim()) };
-                    crate::cli::workspace::adopt(path, cwd)?.text()
-                }
-                "brama-url" => save_brama_url(rest)?,
-                _ => save_agent_id(rest)?,
-            };
-            if interactive {
-                // Re-open the wizard so the user lands on the next missing step.
-                setup_picker(&context).map(CommandOutcome::Picker)
-            } else {
-                Ok(CommandOutcome::Text(message))
-            }
-        }
-        "model" => crate::cli::run::slash_ui::model_picker(cwd, current_model, false)
-            .map(CommandOutcome::Picker)
-            .map_err(|error| {
-                format!(
-                    "{error}\nHint: fix the Brama connection (step 1 writes ~/.jeden/.env), then rerun /setup. Completed steps are kept."
-                )
-            }),
-        "preferences" => Ok(CommandOutcome::Picker(preferences_picker(cwd))),
-        _ => Err(USAGE.into()),
-    }
 }

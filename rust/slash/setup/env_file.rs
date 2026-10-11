@@ -30,8 +30,15 @@ fn parse_env_line_value(raw: &str) -> String {
     value.replace("\\n", "\n")
 }
 
-fn env_file_value(path: &Path, key: &str) -> Option<String> {
-    let text = fs::read_to_string(path).ok()?;
+/// The non-empty value of `key` in the env file at `path`. An absent file
+/// holds no value; one that cannot be read names itself and the cause, where
+/// it used to read as unconfigured and offer to set keys it already holds.
+fn env_file_value(path: &Path, key: &str) -> Result<Option<String>, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
+    };
     for line in text.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
@@ -43,20 +50,24 @@ fn env_file_value(path: &Path, key: &str) -> Option<String> {
         if name.trim() == key {
             let value = parse_env_line_value(raw_value);
             if !value.trim().is_empty() {
-                return Some(value);
+                return Ok(Some(value));
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Effective value for a router key: the process environment wins, then the
-/// persisted `~/.jeden/.env` file. Empty values count as unconfigured.
-pub(super) fn configured_value(key: &str) -> Option<String> {
-    std::env::var(key)
+/// persisted `~/.jeden/.env` file. Empty values count as unconfigured; an
+/// env file that cannot be read is an error, not "unconfigured".
+pub(super) fn configured_value(key: &str) -> Result<Option<String>, String> {
+    match std::env::var(key)
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| env_file_value(&env_file_path(), key))
+    {
+        Some(value) => Ok(Some(value)),
+        None => env_file_value(&env_file_path(), key),
+    }
 }
 
 /// True when Brama's address resolves for this process: from the caller's
@@ -69,11 +80,15 @@ pub(crate) fn brama_router_configured(_cwd: &Path) -> bool {
 /// Prefill for an INPUT row, read from the nearest `.env.example` in the
 /// working directory or one of its ancestors, so subdirectories of a
 /// repository work too.
-pub(super) fn example_prefill(cwd: &Path, key: &str) -> Option<String> {
-    cwd.ancestors()
+pub(super) fn example_prefill(cwd: &Path, key: &str) -> Result<Option<String>, String> {
+    match cwd
+        .ancestors()
         .map(|dir| dir.join(".env.example"))
         .find(|candidate| candidate.is_file())
-        .and_then(|candidate| env_file_value(&candidate, key))
+    {
+        Some(candidate) => env_file_value(&candidate, key),
+        None => Ok(None),
+    }
 }
 
 /// Append or update `updates` in `~/.jeden/.env`, preserving every unrelated

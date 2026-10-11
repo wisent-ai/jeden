@@ -49,6 +49,11 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
         ),
         "7. Validate — /setup validate".to_string(),
     ];
+    if let Some(error) = &state.env_file_error {
+        lines.push(format!(
+            "~/.jeden/.env [unreadable] — {error}; the values it holds are unknown, not missing"
+        ));
+    }
     lines.push("Status is read-only: nothing was changed.".to_string());
     lines.join("\n")
 }
