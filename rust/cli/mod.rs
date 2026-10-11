@@ -7,6 +7,7 @@ pub(crate) mod config;
 pub(crate) mod context;
 pub(crate) mod i18n;
 pub(crate) mod invocation;
+pub(crate) mod lease;
 mod reports;
 pub(crate) mod restore;
 pub(crate) mod run;

@@ -41,7 +41,7 @@ pub fn chat_completion_streaming(
         },
         service_tier: nonempty(&config.service_tier),
     };
-    let mut routes = vec![primary.clone()];
+    let mut routes = vec![primary];
     for route in &config.fallbacks {
         if !routes.contains(route) {
             routes.push(route.clone());
@@ -49,56 +49,8 @@ pub fn chat_completion_streaming(
     }
 
     let attempts = config.retry.max_attempts;
-    let (request_id, idempotency_key, sticky_key) = logical_request_keys(&primary, &messages);
-    let cooldown_store = match config.subscription_cooldown_path.as_ref() {
-        Some(path) => Some(
-            crate::routing::CooldownStore::open(path).map_err(|message| {
-                stream_failure(
-                    StreamErrorClass::Permanent,
-                    format!("cannot open subscription cooldown store: {message}"),
-                    Vec::new(),
-                    false,
-                )
-            })?,
-        ),
-        None => None,
-    };
-    let subscription_decision = match config.subscription_pool.as_ref() {
-        Some(pool) if !pool.targets.is_empty() => {
-            let required = ["chat".to_string()].into_iter().collect();
-            let now_ms = epoch_millis();
-            Some(
-                crate::routing::RouteDecisionV2::freeze(
-                    pool,
-                    request_id,
-                    idempotency_key,
-                    &sticky_key,
-                    &required,
-                    now_ms,
-                    |identity| {
-                        cooldown_store.as_ref().is_some_and(|store| {
-                            store.is_cooling_down(identity, now_ms).unwrap_or(true)
-                        })
-                    },
-                )
-                .map_err(|message| {
-                    stream_failure(StreamErrorClass::QuotaExhausted, message, Vec::new(), false)
-                })?,
-            )
-        }
-        _ => None,
-    };
-    let max_target_count = subscription_decision
-        .as_ref()
-        .map_or(1, |decision| decision.targets.len());
-    let mut route_results = Vec::with_capacity(
-        routes
-            .len()
-            .saturating_mul(max_target_count)
-            .saturating_mul(attempts),
-    );
+    let mut route_results = Vec::with_capacity(routes.len().saturating_mul(attempts));
     let mut last_error: Option<AttemptError> = None;
-    let mut exhausted_targets = std::collections::BTreeSet::new();
     for (route_index, route) in routes.iter().enumerate() {
         if let Err(message) = ensure_image_capability(config, &route.model, &messages) {
             if let Some(next) = routes.get(route_index + 1) {
@@ -111,26 +63,30 @@ pub fn chat_completion_streaming(
             last_error = Some(AttemptError::permanent(message));
             continue;
         }
-        let route_targets =
-            subscription_targets_for_route(subscription_decision.as_ref(), &route.model);
-        if route_targets.is_empty() {
-            last_error = Some(AttemptError {
-                class: StreamErrorClass::QuotaExhausted,
-                message: format!(
-                    "no eligible subscription target for model '{}'",
-                    route.model
-                ),
-                retry_after: None,
-                visible_output: false,
-            });
-            continue;
-        }
-        for target_index in 0..route_targets.len() {
-            let target = route_targets[target_index];
-            if target.is_some_and(|target| exhausted_targets.contains(&target.identity())) {
+        // The account this route runs on, leased from Brama's pool for the
+        // session. A lease Brama refuses (a full pool, no usable member) is
+        // this route's error, and the next route is tried.
+        let mut leased = match lease::for_route(config, &route.model) {
+            Ok(leased) => leased,
+            Err(message) => {
+                if let Some(next) = routes.get(route_index + 1) {
+                    route_results.push(RouteResult::RouteChanged {
+                        from: route.clone(),
+                        to: next.clone(),
+                        reason: message.clone(),
+                    });
+                }
+                last_error = Some(AttemptError::permanent(message));
                 continue;
             }
-            for attempt in 1..=attempts {
+        };
+        let mut accounts_tried = BTreeSet::new();
+        'account: loop {
+            if let Some(held) = &leased {
+                accounts_tried.insert(held.subscription_id.clone());
+            }
+            let mut moved = None;
+            for _attempt in 1..=attempts {
                 if cancelled() {
                     return Err(stream_failure(
                         StreamErrorClass::Cancelled,
@@ -145,8 +101,7 @@ pub fn chat_completion_streaming(
                     &messages,
                     max_tokens,
                     tools,
-                    target,
-                    target.and(subscription_decision.as_ref()),
+                    leased.as_ref(),
                     on_delta,
                     on_reasoning,
                     cancelled,
@@ -156,39 +111,41 @@ pub fn chat_completion_streaming(
                             completion,
                             route: route.clone(),
                             route_results,
-                            subscription_target: target.cloned(),
-                            subscription_decision_id: target.and(
-                                subscription_decision
-                                    .as_ref()
-                                    .map(|decision| decision.decision_id.clone()),
-                            ),
+                            lease: leased,
                         });
                     }
                     Err(error) => {
-                        if error.class == StreamErrorClass::QuotaExhausted && !error.visible_output
+                        // A call on a leased account asks Brama for the
+                        // session's account again; Brama passes over an
+                        // account it holds a block against or that is at
+                        // the operator's limit.
+                        if let Some(held) =
+                            leased.as_ref().filter(|_| asks_for_another_account(&error))
                         {
-                            if let Some(target) = target {
-                                exhausted_targets.insert(target.identity());
-                            }
-                            // A cooldown is persisted only for the wait the provider
-                            // stated (Retry-After); without one the subscription is
-                            // skipped for this turn alone and asked again next turn.
-                            if let (Some(store), Some(target), Some(delay)) =
-                                (cooldown_store.as_ref(), target, error.retry_after)
-                            {
-                                let now_ms = epoch_millis();
-                                let until_ms = now_ms.saturating_add(duration_millis(delay).max(1));
-                                if let Err(message) =
-                                    store.record(target.identity(), until_ms, now_ms)
+                            match lease::switch(config, held) {
+                                Ok(Some(next))
+                                    if !accounts_tried.contains(&next.subscription_id) =>
                                 {
-                                    return Err(stream_failure(
-                                        StreamErrorClass::Permanent,
-                                        format!("cannot persist subscription cooldown: {message}"),
-                                        route_results,
-                                        false,
-                                    ));
+                                    moved = Some((next, error.message));
+                                    break;
+                                }
+                                Ok(_) => {}
+                                Err(refused) => {
+                                    let mut message = format!("{}; {refused}", error.message);
+                                    if let Some(delay) = error.retry_after {
+                                        message.push_str(&format!(
+                                            "; the provider asked for a wait of {} s on account {}",
+                                            delay.as_secs(),
+                                            held.member()
+                                        ));
+                                    }
+                                    last_error = Some(AttemptError { message, ..error });
+                                    break 'account;
                                 }
                             }
+                        }
+                        if error.class == StreamErrorClass::QuotaExhausted && !error.visible_output
+                        {
                             last_error = Some(error);
                             break;
                         }
@@ -201,30 +158,29 @@ pub fn chat_completion_streaming(
                                 error.visible_output,
                             ));
                         }
-                        // A transient failure moves to the next subscription or
-                        // route at once; the last one's error is what the turn
+                        // A transient failure moves to the next route at
+                        // once; the last one's error is what the turn
                         // reports when none is left.
                         last_error = Some(error);
                         break;
                     }
                 }
             }
-            if let (Some(from), Some(to)) = (
-                route_targets.get(target_index).copied().flatten(),
-                route_targets.get(target_index + 1).copied().flatten(),
-            ) {
-                route_results.push(RouteResult::SubscriptionChanged {
-                    from: from.clone(),
-                    to: to.clone(),
-                    reason: "subscription quota or transient attempts exhausted".into(),
-                });
-            }
+            let (Some((next, reason)), Some(from)) = (moved, leased.take()) else {
+                break 'account;
+            };
+            route_results.push(RouteResult::SubscriptionChanged {
+                from,
+                to: next.clone(),
+                reason,
+            });
+            leased = Some(next);
         }
         if let Some(next) = routes.get(route_index + 1) {
             route_results.push(RouteResult::RouteChanged {
                 from: route.clone(),
                 to: next.clone(),
-                reason: "subscription targets and transient attempts exhausted".into(),
+                reason: "the route's account and transient attempts are exhausted".into(),
             });
         }
     }
@@ -235,4 +191,13 @@ pub fn chat_completion_streaming(
         route_results,
         error.visible_output,
     ))
+}
+
+/// Whether a failed call on a leased account asks Brama for the session's
+/// account again: nothing was shown yet, and the failure is one an account
+/// at its limit answers (a quota refusal, a rate limit, a transient error).
+/// Brama decides whether the account is spent; the error's words never do.
+fn asks_for_another_account(error: &AttemptError) -> bool {
+    !error.visible_output
+        && (error.class == StreamErrorClass::QuotaExhausted || error.is_transient())
 }

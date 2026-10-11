@@ -4,7 +4,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::path::PathBuf;
 use std::sync::{
     mpsc::{self, Receiver, Sender},
     Arc,
@@ -12,13 +11,16 @@ use std::sync::{
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 mod attachments;
+mod buffered;
 mod completion;
+pub(crate) mod lease;
 mod stream;
 mod transport;
 
 pub(crate) use attachments::{with_attachments, ModelAttachment};
+pub use buffered::chat_completion;
+pub use completion::hmac_headers;
 use completion::*;
-pub use completion::{chat_completion, hmac_headers};
 pub use stream::chat_completion_streaming;
 use stream::*;
 
@@ -70,9 +72,11 @@ pub enum RouteResult {
         to: RouteDescriptor,
         reason: String,
     },
+    /// The session's account moved: the call on `from` failed before any
+    /// output and Brama leased `to`, an account with capacity.
     SubscriptionChanged {
-        from: crate::routing::SubscriptionTarget,
-        to: crate::routing::SubscriptionTarget,
+        from: lease::SessionLease,
+        to: lease::SessionLease,
         reason: String,
     },
 }
@@ -110,8 +114,8 @@ pub struct StreamingCompletion {
     pub completion: Completion,
     pub route: RouteDescriptor,
     pub route_results: Vec<RouteResult>,
-    pub subscription_target: Option<crate::routing::SubscriptionTarget>,
-    pub subscription_decision_id: Option<String>,
+    /// The Brama lease the completion ran on, when its route is leased.
+    pub lease: Option<lease::SessionLease>,
 }
 
 impl StreamingCompletion {
@@ -164,8 +168,12 @@ pub struct ChatConfig {
     pub context_promotions: Vec<RouteDescriptor>,
     /// Models advertised by Brama as accepting image input.
     pub image_capable_models: BTreeSet<String>,
-    pub subscription_pool: Option<crate::routing::SubscriptionPoolSnapshot>,
-    pub subscription_cooldown_path: Option<PathBuf>,
+    /// Whether calls go to Brama, which leases accounts; false for a
+    /// provider named by `JEDEN_MODEL_ENDPOINT`.
+    pub via_brama: bool,
+    /// The Jeden session the calls belong to; a leased route takes its
+    /// account for this session.
+    pub session_id: Option<String>,
     pub config_error: Option<String>,
     /// `config_error` is the catalog read that got no answer about the
     /// request (`BramaError::left_unanswered`), set where the typed error is

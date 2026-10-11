@@ -25,12 +25,6 @@ pub struct WelesClient {
     pub(super) correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 
-pub(crate) fn platform_billing_configured() -> bool {
-    std::env::var(PLATFORM_BILLING_URL_ENV)
-        .ok()
-        .is_some_and(|value| !value.trim().is_empty())
-}
-
 fn platform_billing_endpoint() -> Option<String> {
     std::env::var(PLATFORM_BILLING_URL_ENV).ok()
 }

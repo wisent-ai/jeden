@@ -5,6 +5,7 @@ pub mod protocol;
 mod compaction;
 mod completion;
 mod history;
+mod lease;
 mod local_exec;
 mod turn;
 

@@ -146,47 +146,6 @@ pub(crate) fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     era * 146_097 + day_of_era - 719_468
 }
 
-pub(crate) struct DigestSink<'a>(&'a mut Sha256);
-
-impl std::io::Write for DigestSink<'_> {
-    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.update(bytes);
-        Ok(bytes.len())
-    }
-
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-pub(crate) fn logical_request_keys(
-    route: &RouteDescriptor,
-    messages: &[Value],
-) -> (String, String, String) {
-    let mut hasher = Sha256::new();
-    if serde_json::to_writer(DigestSink(&mut hasher), &(route, messages)).is_err() {
-        hasher = Sha256::new();
-    }
-    let digest = hex::encode(hasher.finalize());
-    (
-        format!("request-{digest}"),
-        format!("completion-{digest}"),
-        format!("session-{digest}"),
-    )
-}
-
-pub(crate) fn epoch_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
-}
-
-pub(crate) fn duration_millis(duration: Duration) -> u64 {
-    duration.as_millis().min(u128::from(u64::MAX)) as u64
-}
-
 pub(crate) fn nonempty(value: &str) -> Option<String> {
     (!value.trim().is_empty()).then(|| value.to_string())
 }
@@ -197,7 +156,10 @@ pub(crate) fn accumulate_tool_call_deltas(
     deltas: &[Value],
 ) -> Result<(), String> {
     for delta in deltas {
-        let raw_index = delta.get("index").and_then(Value::as_u64).unwrap_or(0);
+        let raw_index = delta
+            .get("index")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| format!("tool call delta carries no index: {delta}"))?;
         let index =
             usize::try_from(raw_index).map_err(|_| "tool call index exceeds platform size")?;
         if index > acc.len() {

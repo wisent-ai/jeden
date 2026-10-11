@@ -1,11 +1,9 @@
 use super::*;
 use crate::model_router::RouteDescriptor;
 
-mod pool;
 mod settings;
 mod usage;
 
-use pool::subscription_pool_from_platform_billing;
 use settings::{retry_policy, route_descriptors};
 
 pub(in crate::agent) use usage::{append_usage_event, usage_cost};
@@ -80,7 +78,6 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         }
         (model, _) => model,
     };
-    let subscription_pool = subscription_pool_from_platform_billing();
     let catalog_error = bare_model_error.or(match (&selected_model, &catalog) {
         (None, _) => Some(
             "no model selected; choose a model advertised by Brama; run /setup to configure"
@@ -185,10 +182,6 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     } else {
         promotions
     };
-    let subscription_pool = subscription_pool.unwrap_or(None);
-    let subscription_cooldown_path = subscription_pool
-        .as_ref()
-        .map(|_| args.cwd.join(".jeden/subscription-cooldowns.json"));
     ChatConfig {
         url: endpoint.unwrap_or_default(),
         endpoint_via_stado: direct.is_none()
@@ -225,8 +218,10 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         fallbacks: resolved_fallbacks,
         context_promotions: resolved_promotions,
         image_capable_models,
-        subscription_pool,
-        subscription_cooldown_path,
+        via_brama: direct.is_none(),
+        // The conversation that makes the calls names its session; a call
+        // outside one is not leased.
+        session_id: None,
         config_error,
         catalog_unanswered,
     }

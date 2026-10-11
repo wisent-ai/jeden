@@ -63,7 +63,7 @@ impl Conversation {
         self.restore_session_context(args)?;
         hooks.note("compacting conversation");
         let config = load_config(&args.cwd);
-        let router = model_router_config(&config, args);
+        let router = self.session_router(&config, args)?;
         let transcript = self
             .messages
             .iter()
@@ -145,7 +145,7 @@ impl Conversation {
         self.restore_session_context(args)?;
         hooks.note("generating handoff");
         let config = load_config(&args.cwd);
-        let router = model_router_config(&config, args);
+        let router = self.session_router(&config, args)?;
         let transcript = self
             .messages
             .iter()
@@ -248,7 +248,7 @@ impl Conversation {
         }
         hooks.note("advisor review");
         let config = load_config(&args.cwd);
-        let mut router = model_router_config(&config, args);
+        let mut router = self.session_router(&config, args)?;
         if let Some(model) = state
             .pointer("/advisor/model")
             .and_then(Value::as_str)

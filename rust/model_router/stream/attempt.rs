@@ -91,8 +91,6 @@ pub(crate) fn build_streaming_body(
     messages: &[Value],
     max_tokens: Option<usize>,
     tools: &[Value],
-    target: Option<&crate::routing::SubscriptionTarget>,
-    decision: Option<&crate::routing::RouteDecisionV2>,
 ) -> Result<Value, String> {
     let mut body = json!({
         "model": route.model,
@@ -107,19 +105,11 @@ pub(crate) fn build_streaming_body(
     if !tools.is_empty() {
         body["tools"] = Value::Array(tools.to_vec());
     }
-    if let Some(target) = target {
-        body["billingTarget"] = serde_json::to_value(target).map_err(|error| error.to_string())?;
-    }
-    if let Some(decision) = decision {
-        body["subscriptionDecisionId"] = Value::String(decision.decision_id.clone());
-        body["requestId"] = Value::String(decision.request_id.clone());
-        body["idempotencyKey"] = Value::String(decision.idempotency_key.clone());
-    }
     Ok(body)
 }
 
-// Six of these become the request body and the last three are the caller's
-// live delta sinks and cancel probe, so no one struct owns the set.
+// Five of these become the request and the last three are the caller's live
+// delta sinks and cancel probe, so no one struct owns the set.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn streaming_attempt(
     config: &ChatConfig,
@@ -127,8 +117,7 @@ pub(crate) fn streaming_attempt(
     messages: &[Value],
     max_tokens: Option<usize>,
     tools: &[Value],
-    target: Option<&crate::routing::SubscriptionTarget>,
-    decision: Option<&crate::routing::RouteDecisionV2>,
+    leased: Option<&lease::SessionLease>,
     on_delta: &mut dyn FnMut(&str) -> bool,
     on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
@@ -141,8 +130,7 @@ pub(crate) fn streaming_attempt(
         messages,
         max_tokens,
         tools,
-        target,
-        decision,
+        leased,
         on_delta,
         on_reasoning,
         cancelled,
@@ -165,18 +153,23 @@ pub(crate) fn streaming_attempt_inner(
     messages: &[Value],
     max_tokens: Option<usize>,
     tools: &[Value],
-    target: Option<&crate::routing::SubscriptionTarget>,
-    decision: Option<&crate::routing::RouteDecisionV2>,
+    leased: Option<&lease::SessionLease>,
     on_delta: &mut dyn FnMut(&str) -> bool,
     on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Completion, AttemptError> {
-    let body = build_streaming_body(route, messages, max_tokens, tools, target, decision)
+    let body = build_streaming_body(route, messages, max_tokens, tools)
         .map_err(AttemptError::permanent)?;
     let body_text =
         serde_json::to_string(&body).map_err(|error| AttemptError::permanent(error.to_string()))?;
     let (sender, receiver) = mpsc::channel();
-    spawn_openai_stream_adapter(config, body_text, sender.clone())?;
+    // A leased call names its account in Brama's headers; an unleased one
+    // sends none.
+    let lease_headers: Vec<(&'static str, String)> = leased
+        .into_iter()
+        .flat_map(lease::SessionLease::headers)
+        .collect();
+    spawn_openai_stream_adapter(config, body_text, lease_headers, sender.clone())?;
     // An announced cancellation wakes the blocked receive below; the wake
     // removes itself once this attempt's receiver is gone.
     crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {

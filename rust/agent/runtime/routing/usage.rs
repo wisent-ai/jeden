@@ -4,7 +4,6 @@
 //! line cap.
 
 use super::super::*;
-use crate::routing::SubscriptionTarget;
 
 fn usage_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/usage.json")
@@ -41,8 +40,7 @@ pub(in crate::agent) fn append_usage_event(
     router: &ChatConfig,
     usage: &CompletionUsage,
     cost: Option<Value>,
-    subscription_target: Option<&SubscriptionTarget>,
-    subscription_decision_id: Option<&str>,
+    lease: Option<&crate::model_router::lease::SessionLease>,
 ) -> Result<(), String> {
     let path = usage_path(cwd);
     // Only a ledger that is not there starts empty: one that cannot be read
@@ -89,13 +87,12 @@ pub(in crate::agent) fn append_usage_event(
     if let Some(cost) = cost {
         event["cost"] = cost;
     }
-    if let Some(target) = subscription_target {
+    if let Some(lease) = lease {
         event["billing"] = json!({
-            "providerId": target.provider_id,
-            "accountId": target.account_id,
-            "subscriptionId": target.subscription_id,
-            "quotaBucket": target.quota_bucket,
-            "decisionId": subscription_decision_id,
+            "providerId": lease.provider,
+            "accountId": lease.account,
+            "subscriptionId": lease.subscription_id,
+            "leaseId": lease.id,
         });
     }
     events.push(event);

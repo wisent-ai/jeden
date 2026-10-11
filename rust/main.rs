@@ -288,6 +288,7 @@ pub fn main() -> ExitCode {
         "completions" => completions_command(&args),
         "worktree" => worktree_command(&args),
         "token" => token_command(&args),
+        "lease" => cli::lease::command(&args),
         "stats" => stats_command(&args),
         "gallery" => gallery_command(&args),
         other => {

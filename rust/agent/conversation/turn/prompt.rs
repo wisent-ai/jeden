@@ -34,7 +34,7 @@ impl Conversation {
     ) -> Result<Prepared, String> {
         let started_at = crate::completion::timing::now();
         let config = load_config(&args.cwd);
-        let router = model_router_config(&config, args);
+        let router = self.session_router(&config, args)?;
         // The stage that can change the product owes the delivery report,
         // whoever drove it. Excluding every autonomous stage exempted the
         // Pursuit execution stage — the one that writes code — so it answered

@@ -1,10 +1,6 @@
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 
-mod cooldown;
-
-pub use cooldown::CooldownStore;
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutcomeObservation {
     pub served_route: String,

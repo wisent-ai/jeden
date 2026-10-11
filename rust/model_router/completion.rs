@@ -75,74 +75,6 @@ pub(crate) fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, Strin
     }
 }
 
-pub fn chat_completion(
-    config: &ChatConfig,
-    messages: Vec<Value>,
-    max_tokens: Option<usize>,
-    tools: &[Value],
-) -> Result<Completion, String> {
-    if let Some(message) = &config.config_error {
-        return Err(message.clone());
-    }
-    ensure_image_capability(config, &config.model, &messages)?;
-    let mut body = json!({
-        "model": config.model,
-        "messages": messages,
-    });
-    if let Some(max_tokens) = max_tokens {
-        body["max_tokens"] = json!(max_tokens);
-    }
-    if !config.service_tier.trim().is_empty() {
-        body["service_tier"] = Value::String(config.service_tier.clone());
-    }
-    if !tools.is_empty() {
-        body["tools"] = Value::Array(tools.to_vec());
-        body["tool_choice"] = Value::String("auto".into());
-    }
-    let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
-    let signed = agent_headers(&body_text, &config.agent_id, &config.secret)?;
-    let client = crate::net::blocking_builder().build().map_err(|error| {
-        config.endpoint_failure(
-            "create HTTP client",
-            crate::control_plane::transport::describe_reqwest(error),
-        )
-    })?;
-    let reservation =
-        crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
-    let mut request = client
-        .post(format!(
-            "{}/v1/chat/completions",
-            config.url.trim_end_matches('/')
-        ))
-        .bearer_auth(&config.bearer_token)
-        .header("content-type", "application/json");
-    for (name, value) in signed {
-        request = request.header(name, value);
-    }
-    let response = request.body(body_text).send().map_err(|error| {
-        config.endpoint_failure(
-            "POST model request",
-            crate::control_plane::transport::describe_reqwest(error),
-        )
-    })?;
-    let status = response.status();
-    let text = response.text().map_err(|error| {
-        config.endpoint_failure(
-            "read model response body",
-            crate::control_plane::transport::describe_reqwest(error),
-        )
-    })?;
-    if !status.is_success() {
-        return Err(config.endpoint_failure(
-            "POST model request",
-            format!("HTTP {}: {text}", status.as_u16()),
-        ));
-    }
-    let completion = parse_completion_response(&text)?;
-    crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())?;
-    Ok(completion)
-}
-
 /// Parse a full (non-streamed) completion body into an action string / content.
 pub(crate) fn value_number(value: &Value, paths: &[&str]) -> f64 {
     paths
@@ -225,29 +157,4 @@ pub(crate) fn parse_completion_response(text: &str) -> Result<Completion, String
         content: content.to_string(),
         usage,
     })
-}
-
-pub(crate) fn subscription_provider_for_model(model: &str) -> Option<&'static str> {
-    match model.trim().to_ascii_lowercase().as_str() {
-        "claude-code-subscription" => Some("claude_code"),
-        "codex-subscription" => Some("codex"),
-        "kimi-subscription" => Some("kimi"),
-        "opencode-subscription" => Some("opencode"),
-        _ => None,
-    }
-}
-
-pub(crate) fn subscription_targets_for_route<'a>(
-    decision: Option<&'a crate::routing::RouteDecisionV2>,
-    model: &str,
-) -> Vec<Option<&'a crate::routing::SubscriptionTarget>> {
-    match (decision, subscription_provider_for_model(model)) {
-        (Some(decision), Some(provider)) => decision
-            .targets
-            .iter()
-            .filter(|target| target.provider_id == provider)
-            .map(Some)
-            .collect(),
-        _ => vec![None],
-    }
 }

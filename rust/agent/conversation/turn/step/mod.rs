@@ -77,16 +77,16 @@ impl Conversation {
                 json!({ "step": step, "result": result }),
             )?;
         }
-        if let Some(target) = &streaming.subscription_target {
+        if let Some(lease) = &streaming.lease {
             self.recorder.record(
                 "model_subscription_route",
                 json!({
                     "step": step,
-                    "decisionId": streaming.subscription_decision_id.as_deref(),
-                    "providerId": target.provider_id.as_str(),
-                    "accountId": target.account_id.as_str(),
-                    "subscriptionId": target.subscription_id.as_str(),
-                    "quotaBucket": target.quota_bucket.as_str(),
+                    "leaseId": lease.id.as_str(),
+                    "providerId": lease.provider.as_str(),
+                    "subscriptionId": lease.subscription_id.as_str(),
+                    "accountId": lease.account.as_deref(),
+                    "sessionId": lease.session_id.as_str(),
                 }),
             )?;
         }
@@ -98,8 +98,7 @@ impl Conversation {
                 &prepared.router,
                 usage,
                 usage_cost(&args.cwd, &prepared.config, &prepared.router.model, usage),
-                streaming.subscription_target.as_ref(),
-                streaming.subscription_decision_id.as_deref(),
+                streaming.lease.as_ref(),
             ) {
                 self.recorder
                     .record("usage_error", json!({ "message": error }))

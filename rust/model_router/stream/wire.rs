@@ -3,6 +3,7 @@ use super::*;
 pub(crate) fn spawn_openai_stream_adapter(
     config: &ChatConfig,
     body_text: String,
+    lease_headers: Vec<(&'static str, String)>,
     sender: Sender<WireMessage>,
 ) -> Result<(), AttemptError> {
     use std::io::{BufRead, BufReader};
@@ -27,7 +28,7 @@ pub(crate) fn spawn_openai_stream_adapter(
                 .bearer_auth(bearer_token)
                 .header("content-type", "application/json")
                 .header("accept", "text/event-stream");
-            for (name, value) in signed {
+            for (name, value) in signed.into_iter().chain(lease_headers) {
                 request = request.header(name, value);
             }
             let response = match request.body(body_text).send() {

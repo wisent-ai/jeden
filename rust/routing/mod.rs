@@ -7,7 +7,6 @@
 mod canary;
 mod policy;
 mod store;
-pub(crate) mod subscriptions;
 
 pub use canary::{stable_cohort, CanaryControl, CanaryGuardrail};
 pub use policy::{
@@ -15,10 +14,6 @@ pub use policy::{
     RoutingPolicy, RoutingRequest,
 };
 pub use store::{
-    CooldownStore, OutcomeObservation, QualityMetrics, QualitySnapshot, QualityStore, RouteQuality,
+    OutcomeObservation, QualityMetrics, QualitySnapshot, QualityStore, RouteQuality,
     ServedRouteEvidence,
-};
-pub use subscriptions::{
-    RouteDecisionV2, SubscriptionEligibility, SubscriptionPoolSnapshot, SubscriptionTarget,
-    SubscriptionTargetIdentity,
 };
