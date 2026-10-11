@@ -42,19 +42,25 @@ impl MarketplaceService {
         let parent = path.parent().ok_or("registry path has no parent")?;
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        // Encoded before the staging file exists, so a value that cannot be
+        // encoded leaves no staging file behind.
+        let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&temporary)
-            .map_err(|error| error.to_string())?;
-        let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+            .map_err(|error| format!("{} cannot be staged: {error}", temporary.display()))?;
         let result = (|| {
             file.write_all(&bytes).map_err(|error| error.to_string())?;
             file.sync_all().map_err(|error| error.to_string())?;
             fs::rename(&temporary, path).map_err(|error| error.to_string())
         })();
         if result.is_err() {
-            let _ = fs::remove_file(&temporary);
+            if let Err(left) = fs::remove_file(&temporary) {
+                if left.kind() != std::io::ErrorKind::NotFound {
+                    eprintln!("jeden: {} is left behind: {left}", temporary.display());
+                }
+            }
         }
         result
     }
