@@ -38,8 +38,17 @@ const CLAIM_FILES: [&str; 2] = ["manifest.dsse.json", "channel.json"];
 struct Scratch(PathBuf);
 
 impl Drop for Scratch {
+    // The scratch folder holds downloaded release claims; one that stays is
+    // said with its path rather than left unannounced.
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        if let Err(error) = fs::remove_dir_all(&self.0) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "versioning: the scratch folder {} is left behind: {error}",
+                    self.0.display()
+                );
+            }
+        }
     }
 }
 

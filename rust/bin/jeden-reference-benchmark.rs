@@ -257,8 +257,16 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
         file.sync_all().map_err(|error| error.to_string())?;
         fs::rename(&temporary, path).map_err(|error| error.to_string())
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&temporary);
+    let Err(error) = result else {
+        return Ok(());
+    };
+    // A staging file that stays makes the next run's create_new fail on it,
+    // so it is named with the first cause.
+    match fs::remove_file(&temporary) {
+        Err(left) if left.kind() != std::io::ErrorKind::NotFound => Err(format!(
+            "{error}; {} is left behind: {left}",
+            temporary.display()
+        )),
+        _ => Err(error),
     }
-    result
 }
