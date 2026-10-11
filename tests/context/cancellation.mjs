@@ -144,6 +144,10 @@ try {
   report.error = String(error.stack || error);
   throw error;
 } finally {
+  // Release the owned source before waiting for RPC shutdown: an assertion
+  // may have failed while the advisor still has a request on these sockets.
+  for (const socket of held) socket.destroy();
+  if (server.listening) server.close();
   try {
     if (transport) {
       const stopped = await transport.end();
@@ -156,8 +160,6 @@ try {
     report.cleanupError = String(error.stack || error);
     throw error;
   } finally {
-    for (const socket of held) socket.destroy();
-    if (server.listening) server.close();
     report.finishedAt = new Date().toISOString();
     persist();
     console.log(`${report.verdict}: ${join(output, 'report.json')}`);
