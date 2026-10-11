@@ -207,23 +207,35 @@ impl McpClient {
         }
     }
 
+    /// Ends the server. A stdio server that cannot be killed, or an HTTP
+    /// session the server did not end, outlives this client, so each is said
+    /// with its cause.
     pub(super) fn close(&mut self) {
         match &mut self.transport {
             Transport::Stdio(transport) => {
                 drop(transport.child.stdin.take());
                 if matches!(transport.child.try_wait(), Ok(None)) {
-                    let _ = transport.child.kill();
+                    if let Err(error) = transport.child.kill() {
+                        let pid = transport.child.id();
+                        eprintln!("jeden: MCP server process {pid} cannot be killed: {error}");
+                    }
                 }
                 let _ = transport.child.wait();
-                let _ = transport.stderr.try_recv();
             }
             Transport::Http(transport) => {
                 if let Some(session_id) = transport.session_id.take() {
-                    let _ = transport
+                    let ended = transport
                         .client
                         .delete(&transport.url)
-                        .header(MCP_SESSION_ID, session_id)
-                        .send();
+                        .header(MCP_SESSION_ID, &session_id)
+                        .send()
+                        .and_then(|response| response.error_for_status());
+                    if let Err(error) = ended {
+                        eprintln!(
+                            "jeden: MCP session {session_id} at {} was not ended: {error}",
+                            transport.url
+                        );
+                    }
                 }
             }
         }
