@@ -85,6 +85,13 @@ try {
   expect(declaration.default);
 
   invalidFile(legacy, '{');
+  const keptCurrent = readFileSync(current);
+  const keptLegacy = readFileSync(legacy);
+  refused(legacy, ['config', 'set', key, legacyMode]);
+  assert.deepEqual(readFileSync(current), keptCurrent,
+    'refused legacy retirement must not publish a new canonical layer');
+  assert.deepEqual(readFileSync(legacy), keptLegacy,
+    'refused config set must preserve the broken legacy layer');
   writeFileSync(legacy, legacyBytes);
   expect(declaration.default);
   invalidFile(current, 'communication: [');
