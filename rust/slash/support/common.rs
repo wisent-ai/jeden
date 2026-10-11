@@ -22,7 +22,29 @@ pub(crate) fn read_json_value(path: &Path) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
+/// Writes `value` to `path`. A file already there that cannot be read or is
+/// not JSON is refused with its path and cause, never replaced: every caller
+/// edits what `read_json_value` gave it, which for such a file is an empty
+/// object, so writing would replace every entry the file holds with the one
+/// entry being changed.
 pub(crate) fn write_json_value(path: &Path, value: &Value) -> Result<(), String> {
+    match fs::read_to_string(path) {
+        Ok(text) => {
+            if let Err(error) = serde_json::from_str::<Value>(&text) {
+                return Err(format!(
+                    "{} is not JSON, so it is not replaced: {error}",
+                    path.display()
+                ));
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "cannot read {}, so it is not replaced: {error}",
+                path.display()
+            ))
+        }
+    }
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
