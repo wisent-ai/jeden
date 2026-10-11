@@ -285,17 +285,23 @@ impl BrowserService {
                     service: "browser",
                     detail: e.to_string(),
                 })?;
-            let mut artifact = write_media_artifact(
-                context,
-                "browser-screenshot",
-                response
-                    .get("format")
-                    .and_then(Value::as_str)
-                    .unwrap_or("png"),
-                &bytes,
-            )?;
+            let format = response
+                .get("format")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ServiceError::Protocol {
+                    service: "browser",
+                    detail: format!("screenshot response names no image format: {response}"),
+                })?;
+            let mut artifact = write_media_artifact(context, "browser-screenshot", format, &bytes)?;
             artifact["session"] = json!(session);
-            artifact["tab"] = response.get("tab").cloned().unwrap_or(Value::Null);
+            artifact["tab"] =
+                response
+                    .get("tab")
+                    .cloned()
+                    .ok_or_else(|| ServiceError::Protocol {
+                        service: "browser",
+                        detail: format!("screenshot response names no tab: {response}"),
+                    })?;
             return Ok(artifact);
         }
         bounded_json(context, "browser", &response)
