@@ -19,19 +19,24 @@ pub(super) fn text_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec
         .collect())
 }
 
+/// The matches, and every file that could not be read named with its error:
+/// a search that silently missed a file reads as "no match there".
 pub(super) fn parallel_literal(
     runtime: &ToolRuntime<'_>,
     files: &[PathBuf],
     query: &str,
     case: bool,
     max_matches: usize,
-) -> Result<Vec<(usize, usize, String)>, String> {
+) -> Result<(Vec<(usize, usize, String)>, Vec<String>), String> {
     let output = Mutex::new(Vec::new());
+    let unreadable = Mutex::new(Vec::<String>::new());
     let workers = machine_parallelism("search_files")?;
     let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
             let output = &output;
+            let unreadable = &unreadable;
+            let cwd = runtime.cwd;
             let cancellation = runtime.operation.cancellation().clone();
             let needle = query.to_string();
             scope.spawn(move || {
@@ -43,8 +48,24 @@ pub(super) fn parallel_literal(
                     if cancellation.is_cancelled() {
                         break;
                     }
-                    let Ok(content) = fs::read_to_string(path) else {
-                        continue;
+                    let content = match fs::read_to_string(path) {
+                        Ok(content) => content,
+                        // Gone since listing, or not text: nothing to search.
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
+                            ) =>
+                        {
+                            continue
+                        }
+                        Err(error) => {
+                            if let Ok(mut names) = unreadable.lock() {
+                                names
+                                    .push(format!("{}: {error}", super::walk::rel_path(cwd, path)));
+                            }
+                            continue;
+                        }
                     };
                     if content.contains('\0') {
                         continue;
@@ -75,5 +96,9 @@ pub(super) fn parallel_literal(
         .into_inner()
         .map_err(|_| "search result lock poisoned")?;
     values.sort_by_key(|a| (a.0, a.1));
-    Ok(values)
+    let mut unreadable = unreadable
+        .into_inner()
+        .map_err(|_| "search unreadable-file lock poisoned")?;
+    unreadable.sort();
+    Ok((values, unreadable))
 }

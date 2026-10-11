@@ -58,9 +58,12 @@ pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     } else {
         query.to_lowercase()
     };
-    let found = parallel_literal(runtime, &files, &needle, case, skip.saturating_add(limit))?;
+    let (found, unreadable) =
+        parallel_literal(runtime, &files, &needle, case, skip.saturating_add(limit))?;
     let matches=found.into_iter().skip(skip).take(limit).map(|(file,line,text)|json!({"path":rel_path(runtime.cwd,&files[file]),"line":line,"text":text})).collect::<Vec<_>>();
-    Ok(json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches}))
+    Ok(
+        json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches,"unreadable":unreadable}),
+    )
 }
 
 pub(crate) fn glob_paths(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -112,11 +115,16 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let limit = count_input(input, "limit", "grep_regex")? as usize;
     let max_matches = skip.saturating_add(limit);
     let output = Mutex::new(Vec::<(usize, usize, String)>::new());
+    // A file that cannot be read is named in the answer, not skipped: a
+    // search that silently missed it reads as "no match there".
+    let unreadable = Mutex::new(Vec::<String>::new());
     let workers = machine_parallelism("grep_regex")?;
     let chunk = files.len().max(1).div_ceil(workers);
     std::thread::scope(|scope| {
         for (chunk_index, part) in files.chunks(chunk).enumerate() {
             let output = &output;
+            let unreadable = &unreadable;
+            let cwd = runtime.cwd;
             let matcher = &matcher;
             let cancellation = runtime.operation.cancellation().clone();
             scope.spawn(move || {
@@ -128,8 +136,23 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                     if cancellation.is_cancelled() {
                         break;
                     }
-                    let Ok(content) = fs::read_to_string(path) else {
-                        continue;
+                    let content = match fs::read_to_string(path) {
+                        Ok(content) => content,
+                        // Gone since listing, or not text: nothing to search.
+                        Err(error)
+                            if matches!(
+                                error.kind(),
+                                std::io::ErrorKind::NotFound | std::io::ErrorKind::InvalidData
+                            ) =>
+                        {
+                            continue
+                        }
+                        Err(error) => {
+                            if let Ok(mut names) = unreadable.lock() {
+                                names.push(format!("{}: {error}", rel_path(cwd, path)));
+                            }
+                            continue;
+                        }
                     };
                     if content.contains('\0') {
                         continue;
@@ -142,7 +165,11 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                                 .filter(|byte| *byte == b'\n')
                                 .count()
                                 + 1;
-                            let text = found.as_str().split_whitespace().collect::<Vec<_>>().join(" ");
+                            let text = found
+                                .as_str()
+                                .split_whitespace()
+                                .collect::<Vec<_>>()
+                                .join(" ");
                             if collected >= max_matches {
                                 break;
                             }
@@ -174,5 +201,11 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .map_err(|_| "grep result lock poisoned")?;
     found.sort_by_key(|a| (a.0, a.1));
     let matches=found.into_iter().skip(skip).take(limit).map(|(file,line,text)|json!({"path":rel_path(runtime.cwd,&files[file]),"line":line,"text":text})).collect::<Vec<_>>();
-    Ok(json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches}))
+    let mut unreadable = unreadable
+        .into_inner()
+        .map_err(|_| "grep unreadable-file lock poisoned")?;
+    unreadable.sort();
+    Ok(
+        json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches,"unreadable":unreadable}),
+    )
 }
