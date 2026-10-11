@@ -182,8 +182,17 @@ impl TemporaryEditorFile {
 }
 
 impl Drop for TemporaryEditorFile {
+    // The file holds the prompt the operator was writing; one that cannot be
+    // removed is said with its path rather than left on disk unannounced.
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
+        if let Err(error) = fs::remove_file(&self.path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!(
+                    "jeden: the external editor draft {} is left behind: {error}",
+                    self.path.display()
+                );
+            }
+        }
     }
 }
 
