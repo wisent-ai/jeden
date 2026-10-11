@@ -155,15 +155,42 @@ impl MarketplaceService {
             crate::capability::invalidate();
             Ok(next)
         })();
-        if result.is_err() {
+        // A rollback step that fails is named, and the transaction directory
+        // holding the backups is then kept: removed after a failed restore,
+        // it deleted the only copy of the packages that were active before.
+        if let Err(error) = &result {
+            let mut unrestored = Vec::new();
             for path in promoted.iter().rev() {
-                let _ = fs::remove_dir_all(path);
+                if let Err(cause) = fs::remove_dir_all(path) {
+                    unrestored.push(format!(
+                        "cannot remove promoted {}: {cause}",
+                        path.display()
+                    ));
+                }
             }
             for (backup, original) in backups.iter().rev() {
-                let _ = fs::rename(backup, original);
+                if let Err(cause) = fs::rename(backup, original) {
+                    unrestored.push(format!(
+                        "cannot restore {} from {}: {cause}",
+                        original.display(),
+                        backup.display()
+                    ));
+                }
+            }
+            if !unrestored.is_empty() {
+                return Err(format!(
+                    "{error}; rollback incomplete, backups kept in {}: {}",
+                    transaction.display(),
+                    unrestored.join("; ")
+                ));
             }
         }
-        let _ = fs::remove_dir_all(&transaction);
+        if let Err(cause) = fs::remove_dir_all(&transaction) {
+            eprintln!(
+                "jeden: marketplace transaction {} was not removed: {cause}",
+                transaction.display()
+            );
+        }
         result
     }
 
