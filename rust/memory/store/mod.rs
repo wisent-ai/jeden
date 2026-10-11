@@ -196,24 +196,16 @@ pub(super) async fn load_record(
         .one(db)
         .await
         .map_err(sql)?
-        .map(record)
-        .transpose()?)
+        .map(record))
 }
-/// One stored row as a record. Tags or a source that do not parse are an
-/// error naming the memory: decoded as none, a revision built from the row
-/// was written back without its tags and with an `unknown` origin.
-pub(super) fn record(row: memory::Model) -> Result<MemoryRecord, String> {
-    let tags = serde_json::from_str(&row.tags_json)
-        .map_err(|error| format!("memory {} has tags that do not parse: {error}", row.id))?;
-    let source = serde_json::from_str(&row.source_json).map_err(|error| {
-        format!(
-            "memory {} has a source that does not parse: {error}",
-            row.id
-        )
-    })?;
-    Ok(MemoryRecord {
-        tags,
-        source,
+pub(super) fn record(row: memory::Model) -> MemoryRecord {
+    MemoryRecord {
+        tags: serde_json::from_str(&row.tags_json).unwrap_or_default(),
+        source: serde_json::from_str(&row.source_json).unwrap_or(MemorySource {
+            origin: "unknown".into(),
+            session_id: None,
+            entry_id: None,
+        }),
         scope: MemoryScope {
             kind: row.scope_kind,
             id: row.scope_id,
@@ -231,7 +223,7 @@ pub(super) fn record(row: memory::Model) -> Result<MemoryRecord, String> {
         valid_to: row.valid_to,
         supersedes: row.supersedes,
         tombstone: row.tombstone,
-    })
+    }
 }
 pub(super) fn logical_key(kind: &str, scope: &MemoryScope, text: &str) -> String {
     let mut hash = Sha256::new();
