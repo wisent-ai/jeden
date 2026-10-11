@@ -213,11 +213,15 @@ pub(crate) fn read_marketplace_catalog(cache_dir: &Path) -> Result<Value, String
         ".claude-plugin/marketplace.json",
     ] {
         let path = cache_dir.join(rel);
-        if path.is_file() {
-            let text = fs::read_to_string(&path).map_err(|e| e.to_string())?;
-            return serde_json::from_str(&text)
-                .map_err(|e| format!("{}: invalid JSON: {e}", path.display()));
-        }
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!("{} cannot be read: {error}", path.display()));
+            }
+        };
+        return serde_json::from_str(&text)
+            .map_err(|error| format!("{}: invalid JSON: {error}", path.display()));
     }
     Err(format!(
         "No marketplace.json in {} (.jeden-plugin or .claude-plugin)",
