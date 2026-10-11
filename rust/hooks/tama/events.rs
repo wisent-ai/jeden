@@ -75,8 +75,27 @@ pub fn load_event_hooks(
             .get("blocking")
             .and_then(Value::as_bool)
             .unwrap_or(false);
-        let Some(entries) = spec.get("hooks").and_then(Value::as_array) else {
-            continue;
+        // An event without hooks registers nothing. One whose hooks are not a
+        // list cannot be read, and is reported like any registration that
+        // cannot start rather than dropped with its guards.
+        let entries = match spec.get("hooks") {
+            None | Some(Value::Null) => continue,
+            Some(Value::Array(entries)) => entries,
+            Some(other) => {
+                out.push(TamaHook {
+                    id: format!("{}#{tama_event}", path.display()),
+                    hook: Hook {
+                        matcher: matcher.clone(),
+                        command: String::new(),
+                    },
+                    blocking: true,
+                    unrunnable: Some(format!(
+                        "the Tama registry {} declares {tama_event} hooks that are not a list: {other}",
+                        path.display()
+                    )),
+                });
+                continue;
+            }
         };
         for entry in entries {
             let Some(resolved) = entry_command(entry, &path, &catalog) else {
