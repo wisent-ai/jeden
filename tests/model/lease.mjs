@@ -81,6 +81,17 @@ try {
   report.observations.registerBefore = before;
   assert.ok(Number.isInteger(before.limits[provider]),
     `Brama must state a sessions limit for ${provider}; it answered ${JSON.stringify(before.limits)}`);
+  // What each leased account has left is answered beside the register: null
+  // when Brama's pool document states no accounts.capacity, else keyed by the
+  // subscription of a live lease and never anything else.
+  assert.ok(Object.hasOwn(before, 'capacity'), 'jeden lease list --json answers capacity, null when unstated');
+  report.observations.capacityStated = before.capacity !== null;
+  if (before.capacity !== null) {
+    const leasedMembers = new Set(before.leases.map((entry) => entry.subscription_id));
+    for (const subscription of Object.keys(before.capacity)) {
+      assert.ok(leasedMembers.has(subscription), `capacity names ${subscription}, which holds no live lease`);
+    }
+  }
 
   // A real session on the route takes its lease, runs on it, and gives it back at its end.
   succeeds(invoke(binary, ['run', 'Respond exactly: OK', '--cwd', workspace, '--model', route,
