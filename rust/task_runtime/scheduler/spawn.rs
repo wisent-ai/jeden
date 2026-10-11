@@ -230,8 +230,23 @@ impl TaskScheduler {
                         reaper_job.status = JobStatus::Failed;
                     }
                 }
-                let _ = scheduler.write_job(&reaper_job);
-                let _ = fs::remove_file(slot);
+                // A job whose end cannot be written stays 'running' in its
+                // record for every reader; the failure is said where it
+                // happens, and the slot is freed either way.
+                if let Err(error) = scheduler.write_job(&reaper_job) {
+                    eprintln!(
+                        "jeden: job {} ended but its record cannot be written: {error}",
+                        reaper_job.id
+                    );
+                }
+                if let Err(error) = fs::remove_file(slot) {
+                    if error.kind() != std::io::ErrorKind::NotFound {
+                        eprintln!(
+                            "jeden: the scheduler slot of job {} cannot be released: {error}",
+                            reaper_job.id
+                        );
+                    }
+                }
             })
             .map_err(|e| TaskError::Process(e.to_string()))?;
         Ok(job)
