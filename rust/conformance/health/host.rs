@@ -68,7 +68,16 @@ pub(super) fn storage_probe(cwd: &Path) -> HealthProbe {
         }
         Ok(())
     })();
-    let _ = fs::remove_file(&path);
+    // The probe's own file is removed whatever the write found, and a removal
+    // that fails is the probe's finding: the evidence names the remove step.
+    let result = match (result, fs::remove_file(&path)) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Ok(())) => Ok(()),
+        (Ok(()), Err(error)) => Err(format!(
+            "storage probe {} was written and read back but cannot be removed: {error}",
+            path.display()
+        )),
+    };
     match result {
         Ok(()) => HealthProbe::healthy(
             "storage",
