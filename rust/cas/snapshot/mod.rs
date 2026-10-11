@@ -189,7 +189,11 @@ fn materialize_file(
         super::store::sync_directory(parent)
     })();
     if write_result.is_err() {
-        let _ = fs::remove_file(&temporary);
+        if let Err(left) = fs::remove_file(&temporary) {
+            if left.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("jeden: {} is left behind: {left}", temporary.display());
+            }
+        }
     }
     write_result
 }
