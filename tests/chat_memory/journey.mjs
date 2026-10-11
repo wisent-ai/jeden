@@ -120,6 +120,20 @@ try {
   assert.ok(after.log.messages > shown.log.messages, 'the resumed run appended to the same log');
   assert.ok(after.view.tailStart >= shown.view.tailStart, 'the resumed run continued the kept view');
   assert.ok(after.view.bytes <= viewBytes);
+
+  // A turn that calls a tool keeps the call and its result whole, and the
+  // next turn, given them back from the memory, is accepted by the provider.
+  succeeds(jeden(['run', 'Call list_dir on . once, then respond exactly: LISTED', '--cwd', chat.directory,
+    '--model', model, '--resume-session', session], chat));
+  const everything = JSON.parse(succeeds(jeden(['chat-memory', 'dates', session, leaf.from,
+    String(Number.MAX_SAFE_INTEGER), '--json'], chat)));
+  report.observations.toolTurn = everything.messages.filter((message) => message.tool_call_id || message.tool_calls);
+  assert.ok(everything.messages.some((message) => message.tool_calls),
+    'the assistant turn keeps the tool calls it made');
+  assert.ok(everything.messages.some((message) => message.role === 'tool' && message.tool_call_id),
+    'the tool result keeps the call it answers');
+  succeeds(jeden(['run', 'Respond exactly: AFTER-TOOLS', '--cwd', chat.directory, '--model', model, '--model-only',
+    '--resume-session', session], chat));
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
