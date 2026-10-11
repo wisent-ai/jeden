@@ -130,6 +130,36 @@ pub(crate) fn plugins_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new("Manage plugins", items)
 }
 
+/// One disabled row per extension module under `root`. A root that cannot be
+/// listed, or a package manifest that cannot be read, is one row naming it,
+/// not a root that silently holds nothing.
+fn discovered_rows(
+    items: &mut Vec<PickerItem>,
+    root: &Path,
+    origin: &str,
+    detail: &str,
+    badge: &str,
+) {
+    match scan_modules(root, true) {
+        Ok(paths) => {
+            for path in paths {
+                items.push(
+                    PickerItem::action(format!("{origin} extension {}", path.display()), "")
+                        .detail(detail)
+                        .badge(badge)
+                        .disabled(true),
+                );
+            }
+        }
+        Err(cause) => items.push(
+            PickerItem::action(format!("{origin} extensions cannot be listed"), "")
+                .detail(cause)
+                .badge("error")
+                .disabled(true),
+        ),
+    }
+}
+
 pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
     let mut items = plugin_management_items(context.cwd);
     for (scope, dir) in [
@@ -168,26 +198,22 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
             );
         }
     }
-    for path in native_extension_roots(context.cwd)
-        .into_iter()
-        .flat_map(|root| scan_modules(&root, true))
-    {
-        items.push(
-            PickerItem::action(format!("Native extension {}", path.display()), "")
-                .detail("Discovered extension module · managed on disk")
-                .badge("NATIVE")
-                .disabled(true),
+    for root in native_extension_roots(context.cwd) {
+        discovered_rows(
+            &mut items,
+            &root,
+            "Native",
+            "Discovered extension module · managed on disk",
+            "NATIVE",
         );
     }
-    for path in configured_extension_paths(context.cwd)
-        .into_iter()
-        .flat_map(|path| scan_modules(&path, true))
-    {
-        items.push(
-            PickerItem::action(format!("Configured extension {}", path.display()), "")
-                .detail("Configured extension module · managed in configuration")
-                .badge("CONFIG")
-                .disabled(true),
+    for path in configured_extension_paths(context.cwd) {
+        discovered_rows(
+            &mut items,
+            &path,
+            "Configured",
+            "Configured extension module · managed in configuration",
+            "CONFIG",
         );
     }
     if items.is_empty() {

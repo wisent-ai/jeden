@@ -39,11 +39,19 @@ pub(crate) fn module_file(path: &Path) -> bool {
             })
 }
 
-pub(super) fn package_entries(root: &Path) -> Vec<PathBuf> {
-    let manifest = fs::read_to_string(root.join("package.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .unwrap_or(Value::Null);
+/// The extension modules a root's `package.json` declares (`jeden.extensions`,
+/// else `pi.extensions`). No manifest declares none; one that cannot be read
+/// or parsed, or that declares an entry which is not a module file, is
+/// refused naming it: skipped, the extensions it declared silently did not
+/// load.
+pub(super) fn package_entries(root: &Path) -> Result<Vec<PathBuf>, String> {
+    let path = root.join("package.json");
+    let manifest = match fs::read_to_string(&path) {
+        Ok(text) => serde_json::from_str::<Value>(&text)
+            .map_err(|error| format!("{} is not JSON: {error}", path.display()))?,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
+    };
     let entries = manifest
         .pointer("/jeden/extensions")
         .and_then(Value::as_array)
@@ -52,42 +60,57 @@ pub(super) fn package_entries(root: &Path) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .filter_map(Value::as_str)
-        .map(|path| root.join(path))
-        .filter(|path| module_file(path))
+        .map(|entry| {
+            let module = root.join(entry);
+            if module_file(&module) {
+                Ok(module)
+            } else {
+                Err(format!(
+                    "{} declares the extension {entry}, which is not a module file",
+                    path.display()
+                ))
+            }
+        })
         .collect()
 }
 
-pub(crate) fn scan_modules(root: &Path, recursive_children: bool) -> Vec<PathBuf> {
+/// The extension modules under `root`: a module file itself, a package's
+/// declared entries, an `index` module, or every module file in it (and, with
+/// `recursive_children`, in its child directories). A root that does not
+/// exist holds none; one that cannot be listed is refused naming it.
+pub(crate) fn scan_modules(root: &Path, recursive_children: bool) -> Result<Vec<PathBuf>, String> {
     if module_file(root) {
-        return vec![root.to_path_buf()];
+        return Ok(vec![root.to_path_buf()]);
     }
     if !root.is_dir() {
-        return Vec::new();
+        return Ok(Vec::new());
     }
-    let manifest = package_entries(root);
+    let manifest = package_entries(root)?;
     if !manifest.is_empty() {
-        return manifest;
+        return Ok(manifest);
     }
     for name in ["index.ts", "index.js", "index.mjs"] {
         let path = root.join(name);
         if module_file(&path) {
-            return vec![path];
+            return Ok(vec![path]);
         }
     }
     let mut files = Vec::new();
-    if let Ok(entries) = fs::read_dir(root) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if module_file(&path) {
-                files.push(path);
-            } else if recursive_children && path.is_dir() {
-                files.extend(scan_modules(&path, false));
-            }
+    let unlistable = |error: std::io::Error| {
+        format!("cannot list the extensions in {}: {error}", root.display())
+    };
+    let entries = fs::read_dir(root).map_err(unlistable)?;
+    for entry in entries {
+        let path = entry.map_err(unlistable)?.path();
+        if module_file(&path) {
+            files.push(path);
+        } else if recursive_children && path.is_dir() {
+            files.extend(scan_modules(&path, false)?);
         }
     }
     files.sort();
     files.dedup();
-    files
+    Ok(files)
 }
 
 /// What a root may declare besides modules. Each kind is a directory of

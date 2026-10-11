@@ -96,12 +96,12 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
         }
         roots.push(plugin.path.join("extensions"));
         roots.push(plugin.path.join("tools"));
-        modules.extend(package_entries(&plugin.path));
-        modules.extend(scan_modules(&plugin.path, false));
+        modules.extend(package_entries(&plugin.path)?);
+        modules.extend(scan_modules(&plugin.path, false)?);
         declarative.extend(declarative_paths(&plugin.path, index));
     }
     for root in roots {
-        modules.extend(scan_modules(&root, true));
+        modules.extend(scan_modules(&root, true)?);
     }
     modules.sort();
     modules.dedup();
