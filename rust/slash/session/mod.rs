@@ -39,7 +39,7 @@ pub(super) fn slash_session_dir(
     id_or_path: &str,
 ) -> Result<PathBuf, String> {
     let target = if id_or_path.trim().is_empty() {
-        read_json_value(&mode_state_path(context.cwd))
+        read_json_value(&mode_state_path(context.cwd))?
             .get("lastSessionPath")
             .and_then(Value::as_str)
             .map(str::to_string)

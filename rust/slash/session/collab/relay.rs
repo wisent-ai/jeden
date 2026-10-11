@@ -3,7 +3,8 @@
 //! Split out of `slash/session/collab.rs`, which had grown past the module
 //! line cap.
 
-use crate::slash::common::{now_text, write_json_value};
+use crate::slash::common::{now_text, read_json_value, write_json_value};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs;
 use std::io::Write;
@@ -12,6 +13,46 @@ use url::Url;
 
 pub(super) fn collab_state_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/collab.json")
+}
+
+/// The collaboration state; an empty object when none was saved yet. A state
+/// file that cannot be read, does not parse, or whose root is not an object
+/// is refused naming the file: read as empty, a broken state said no session
+/// was hosted or joined, and the next save replaced the one that was.
+pub(super) fn read_collab_state(cwd: &Path) -> Result<Value, String> {
+    let file = collab_state_path(cwd);
+    let state = read_json_value(&file)?;
+    if !state.is_object() {
+        return Err(format!(
+            "{} does not hold a JSON object, so the collaboration state is unknown",
+            file.display()
+        ));
+    }
+    Ok(state)
+}
+
+/// The relay backend a saved host or guest entry names in `backend`. Only the
+/// HTTP relay is told apart; any other entry is on a durable file relay.
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum CollabBackend {
+    Http,
+}
+
+/// Whether a saved host or guest entry is on the HTTP relay.
+pub(super) fn on_http_relay(entry: &Value) -> bool {
+    entry
+        .get("backend")
+        .cloned()
+        .and_then(|backend| serde_json::from_value::<CollabBackend>(backend).ok())
+        == Some(CollabBackend::Http)
+}
+
+/// Whether a `/collab start` or `/join` target is a network relay URL rather
+/// than a relay file: a URL whose scheme has a known network port. A `file:`
+/// URL or a path names a durable file relay.
+pub(super) fn is_network_relay(target: &str) -> bool {
+    Url::parse(target).is_ok_and(|url| url.port_or_known_default().is_some())
 }
 
 pub(crate) fn collab_default_relay(cwd: &Path) -> PathBuf {
@@ -55,17 +96,24 @@ pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> 
 }
 
 /// The events in the relay file; none when the file does not exist yet. A
-/// file that cannot be read is the error, not an empty log.
+/// file that cannot be read, or an event line that does not parse, is the
+/// error, not a shorter log.
 pub(crate) fn read_collab_events(path: &Path) -> Result<Vec<Value>, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
-    Ok(text
-        .lines()
-        .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .collect())
+    text.lines()
+        .map(|line| {
+            serde_json::from_str::<Value>(line).map_err(|error| {
+                format!(
+                    "{} holds an event that is not valid JSON ({error}): {line}",
+                    path.display()
+                )
+            })
+        })
+        .collect()
 }
 
 pub(super) fn save_collab_state(cwd: &Path, state: &Value) -> Result<PathBuf, String> {

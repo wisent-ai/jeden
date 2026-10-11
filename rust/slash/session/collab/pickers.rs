@@ -1,20 +1,29 @@
 //! The rows shown when a collaboration command is opened without arguments.
 //!
 //! Split out of `slash/session/collab.rs`, which had grown past the module
-//! line cap.
+//! line cap. A collaboration state that cannot be read is one disabled row
+//! naming the file and the cause, never a picker that says no session exists.
+//! A role the saved state does not carry indexes as `null`: not hosting, or
+//! not joined.
 
-use super::relay::collab_state_path;
+use super::relay::{on_http_relay, read_collab_state};
 use super::status::picker_role_detail;
-use crate::slash::common::read_json_value;
+use crate::slash::common::refusal_picker;
 use crate::slash::session::collab::relay::collab_default_relay;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
 
+/// The operation every collaboration picker starts with, named in its refusal.
+const READ_STATE: &str = "Read the collaboration state";
+
 pub(crate) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let state = read_json_value(&collab_state_path(context.cwd));
-    let host = state.get("host").unwrap_or(&Value::Null);
-    let guest = state.get("guest").unwrap_or(&Value::Null);
+    let state = match read_collab_state(context.cwd) {
+        Ok(state) => state,
+        Err(cause) => return refusal_picker("Collaboration", READ_STATE, cause),
+    };
+    let host = &state["host"];
+    let guest = &state["guest"];
     let detail = format!(
         "{}; {}",
         picker_role_detail("host", host),
@@ -45,9 +54,12 @@ pub(crate) fn build_collab_picker(context: &SlashContext<'_>) -> PickerSpec {
 }
 
 pub(crate) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let state = read_json_value(&collab_state_path(context.cwd));
-    let host = state.get("host").unwrap_or(&Value::Null);
-    let guest = state.get("guest").unwrap_or(&Value::Null);
+    let state = match read_collab_state(context.cwd) {
+        Ok(state) => state,
+        Err(cause) => return refusal_picker("Join collaboration", READ_STATE, cause),
+    };
+    let host = &state["host"];
+    let guest = &state["guest"];
     let mut items = Vec::new();
     if let Some(relay_url) = host.get("relayUrl").and_then(Value::as_str) {
         items.push(
@@ -60,7 +72,7 @@ pub(crate) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
             .disabled(!guest.is_null()),
         );
     }
-    let instruction = if host.get("backend").and_then(Value::as_str) == Some("http") {
+    let instruction = if on_http_relay(host) {
         "The HTTP join key is intentionally not persisted; paste the private join URL as `/join <url>#key=<key>`."
     } else {
         "A relay target is required; type `/join <relay-file-or-file-url>` manually."
@@ -83,8 +95,11 @@ pub(crate) fn build_join_picker(context: &SlashContext<'_>) -> PickerSpec {
 }
 
 pub(crate) fn build_leave_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let state = read_json_value(&collab_state_path(context.cwd));
-    let guest = state.get("guest").unwrap_or(&Value::Null);
+    let state = match read_collab_state(context.cwd) {
+        Ok(state) => state,
+        Err(cause) => return refusal_picker("Leave collaboration", READ_STATE, cause),
+    };
+    let guest = &state["guest"];
     PickerSpec::new(
         "Leave collaboration",
         vec![
