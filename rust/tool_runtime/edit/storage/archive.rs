@@ -164,13 +164,21 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         Err("write_archive supports .zip, .tar, .tar.gz, and .tgz".into())
     };
     if let Err(error) = result {
-        let _ = fs::remove_file(&temp);
-        return Err(error);
+        return Err(failed_leaving(error, &temp));
     }
-    fs::rename(&temp, &path).map_err(|error| {
-        let _ = fs::remove_file(&temp);
-        error.to_string()
-    })?;
+    fs::rename(&temp, &path).map_err(|error| failed_leaving(error.to_string(), &temp))?;
     let (sha256, bytes) = file_sha(&path)?;
     Ok(json!({"ok":true,"path":label,"entry":entry,"action":action,"sha256":sha256,"bytes":bytes}))
+}
+
+/// `error`, followed by the sentence of the temporary archive a failed
+/// rewrite could not remove; a temporary that is already gone is not a
+/// failure.
+fn failed_leaving(error: String, temporary: &Path) -> String {
+    match fs::remove_file(temporary) {
+        Err(left) if left.kind() != std::io::ErrorKind::NotFound => {
+            format!("{error}; {} is left behind: {left}", temporary.display())
+        }
+        _ => error,
+    }
 }
