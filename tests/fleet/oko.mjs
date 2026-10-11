@@ -80,7 +80,12 @@ try {
   terminal = started.id;
   assert.ok(started.session && started.transcript && terminal, 'oko sessions start names the session, transcript and terminal');
 
-  const first = await until(started.transcript, (seen) => seen.some((event) => event.type === 'model_route'));
+  // The step's route is recorded when it starts; the screen is read once the
+  // answer itself is recorded.
+  const answered = (seen, text) => seen.some((event) => event.type === 'assistant_message'
+    && JSON.stringify(event.data).includes(text));
+  const first = await until(started.transcript, (seen) => seen.some((event) => event.type === 'model_route')
+    && answered(seen, 'FIRST-ANSWER'));
   const route = first.find((event) => event.type === 'model_route').data.model;
   const lease = first.find((event) => event.type === 'model_subscription_route');
   report.observations.firstRoute = route;
@@ -101,7 +106,7 @@ try {
     'Respond with exactly this text in uppercase and nothing else: second-answer\r']);
   const second = await until(started.transcript, (seen) => {
     const asked = seen.find((event) => event.type === 'user' && JSON.stringify(event.data).includes('second-answer'));
-    return Boolean(asked) && seen.slice(seen.indexOf(asked)).some((event) => event.type === 'model_route');
+    return Boolean(asked) && answered(seen.slice(seen.indexOf(asked)), 'SECOND-ANSWER');
   });
   report.observations.secondEvents = second.length;
   report.verdict = 'passed';
