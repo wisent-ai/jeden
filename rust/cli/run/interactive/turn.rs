@@ -256,7 +256,10 @@ pub(super) fn run_turn(
             _ => {
                 if is_builtin_slash(command) {
                     handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
-                } else if let Some(expanded) = resolve_file_command(&run_args.cwd, command, rest) {
+                } else if let Some(expanded) = {
+                    crate::cli::commands::readable_file_command(&run_args.cwd, command)?;
+                    resolve_file_command(&run_args.cwd, command, rest)
+                } {
                     run_turn_shared(handler_conv, &run_args, &expanded, &attachments, &mut hooks)
                         .map(|text| policy.answer(text))
                 } else {

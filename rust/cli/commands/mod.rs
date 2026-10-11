@@ -111,6 +111,8 @@ pub(crate) fn discover_file_commands(cwd: &Path) -> Vec<DiscoveredCommand> {
 
 /// Resolve a file-based custom command `<name>` to its template body (frontmatter
 /// stripped). Returns None if no provider contributes a matching command.
+/// Callers run [`readable_file_command`] first, so a declared command whose
+/// file cannot be read is refused rather than taken for no command.
 pub(crate) fn find_file_command(cwd: &Path, name: &str) -> Option<String> {
     let safe = name.trim().trim_start_matches('/');
     if !valid_file_command_name(safe) {
@@ -121,4 +123,28 @@ pub(crate) fn find_file_command(cwd: &Path, name: &str) -> Option<String> {
         .find(|command| command.name == safe)
         .and_then(|command| fs::read_to_string(command.path).ok())
         .map(|text| expand::strip_frontmatter(&text))
+}
+
+/// Refuse a custom command a provider declares whose file cannot be read,
+/// naming the file and the cause: taken for no command, `/name` went to the
+/// model as a literal prompt. A name no provider declares is not refused.
+pub(crate) fn readable_file_command(cwd: &Path, name: &str) -> Result<(), String> {
+    let safe = name.trim().trim_start_matches('/');
+    if !valid_file_command_name(safe) {
+        return Ok(());
+    }
+    match discover_file_commands(cwd)
+        .into_iter()
+        .find(|command| command.name == safe)
+    {
+        Some(command) => fs::read_to_string(&command.path)
+            .map(drop)
+            .map_err(|error| {
+                format!(
+                    "custom command /{safe} is declared by {} but cannot be read: {error}",
+                    command.path.display()
+                )
+            }),
+        None => Ok(()),
+    }
 }

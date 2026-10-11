@@ -191,8 +191,11 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
             } else {
                 text + "\n"
             });
-        } else if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest) {
-            task = expanded;
+        } else {
+            crate::cli::commands::readable_file_command(&args.cwd, &command)?;
+            if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest) {
+                task = expanded;
+            }
         }
     }
 
