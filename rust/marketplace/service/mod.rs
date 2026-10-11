@@ -76,10 +76,18 @@ impl MarketplaceService {
             std::process::id(),
             envelope.catalog.sequence
         ));
-        if transaction.exists() {
-            fs::remove_dir_all(&transaction).map_err(|error| error.to_string())?;
-        }
-        fs::create_dir_all(&transaction).map_err(|error| error.to_string())?;
+        fs::create_dir_all(&self.root).map_err(|error| {
+            format!(
+                "cannot create marketplace root {}: {error}",
+                self.root.display()
+            )
+        })?;
+        fs::create_dir(&transaction).map_err(|error| {
+            format!(
+                "cannot create marketplace transaction {}: {error}; any existing transaction and its backups were preserved",
+                transaction.display()
+            )
+        })?;
         let mut promoted = Vec::<PathBuf>::new();
         let mut backups = Vec::<(PathBuf, PathBuf)>::new();
         let result = (|| {
