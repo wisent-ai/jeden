@@ -94,8 +94,19 @@ fn process_alive(_pid: u32) -> bool {
 }
 
 impl Drop for UpdateLock {
+    // A lock that stays is taken back only once its process is gone; until
+    // then, and whenever the release fails, that is said with path and cause.
     fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-        let _ = sync_dir(&self.parent);
+        match fs::remove_file(&self.path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => eprintln!(
+                "jeden update: the update lock {} is left behind: {error}",
+                self.path.display()
+            ),
+        }
+        if let Err(error) = sync_dir(&self.parent) {
+            eprintln!("jeden update: the release of the update lock was not synced: {error}");
+        }
     }
 }
