@@ -142,10 +142,11 @@ impl Conversation {
         }
         let (new_leaf, messages) = self.recorder.rewind(checkpoint_id)?;
         self.messages = messages;
-        // The log keeps every message said before the rewind; what is said
-        // from the checkpoint on is appended after it.
+        // The log keeps every message said before the rewind; the ones it
+        // took back are marked so no later turn is given them from the tail,
+        // and what is said from the checkpoint on is appended after them.
         if let Some(memory) = &mut self.memory {
-            memory.replaced(&self.messages);
+            memory.replaced(&self.messages)?;
         }
         self.session_context_pending = Some("rewind");
         Ok(format!(

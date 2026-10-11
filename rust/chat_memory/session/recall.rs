@@ -90,7 +90,8 @@ pub fn describe(dir: &Path) -> Result<Value, String> {
         "view": {
             "frontier": frontier,
             "tailStart": view.tail_start,
-            "tail": view.tail(&entries)?.iter().map(entry_json).collect::<Vec<_>>(),
+            "tail": view.given(&entries)?.iter().map(entry_json).collect::<Vec<_>>(),
+            "rewound": view.rewound,
             "bytes": view.bytes,
             "logLength": view.log_len,
         },

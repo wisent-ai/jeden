@@ -30,16 +30,18 @@ pub struct ChatMemory {
     dir: PathBuf,
     settings: Settings,
     summarize: Arc<Summarize>,
-    /// How many of the conversation's own messages (all but system ones) the
-    /// log already holds.
-    synced: usize,
+    /// The log index of each of the conversation's own messages (all but
+    /// system ones) the log already holds, in the conversation's order.
+    taken: Vec<u64>,
 }
 
 impl ChatMemory {
     /// The chat memory of the session at `session_dir`, given the history the
     /// conversation brings. A log that already holds the chat keeps it as it
     /// is; a log the session never had takes that history now, so a session
-    /// the memory is turned on for keeps everything said before.
+    /// the memory is turned on for keeps everything said before. The
+    /// history's messages are the log's own, in order, but for those a
+    /// rewind took back.
     pub fn open(
         session_dir: &Path,
         settings: Settings,
@@ -47,28 +49,46 @@ impl ChatMemory {
         history: &[Value],
     ) -> Result<Self, String> {
         let dir = dir(session_dir);
-        let held = Log::at(&dir).read()?.len();
+        let entries = Log::at(&dir).read()?;
+        let view = View::load(&dir)?;
         let own = history.iter().filter(|message| !is_system(message)).count();
+        let taken = entries
+            .iter()
+            .map(|entry| entry.index)
+            .filter(|index| !view.was_rewound(*index))
+            .take(own)
+            .collect();
         let mut memory = Self {
             dir,
             settings,
             summarize,
-            synced: own.min(held),
+            taken,
         };
         memory.sync(history)?;
         Ok(memory)
     }
 
-    /// The conversation's history was replaced (`/rewind` to a checkpoint,
-    /// `/reset`, a resumed source): the messages it holds now are counted as
-    /// taken, and what it says from here on is appended after everything the
-    /// log already keeps. Counted against the length before, every message
-    /// up to that length was skipped and never kept.
-    pub fn replaced(&mut self, messages: &[Value]) {
-        self.synced = messages
+    /// The conversation's history was taken back to a checkpoint
+    /// (`/rewind`): every message the log took from it after the messages it
+    /// still holds stays in the log word for word, recalled by zoom and date,
+    /// but is marked rewound in the view, so no later turn is given it from
+    /// the tail; what the conversation says from here on is appended after
+    /// everything the log keeps.
+    pub fn replaced(&mut self, messages: &[Value]) -> Result<(), String> {
+        let own = messages
             .iter()
             .filter(|message| !is_system(message))
             .count();
+        let Some(&from) = self.taken.get(own) else {
+            return Ok(());
+        };
+        let _guard = busy()?;
+        let to = Log::at(&self.dir).read()?.len() as u64;
+        let mut view = View::load(&self.dir)?;
+        view.rewound.push((from, to));
+        view.save(&self.dir)?;
+        self.taken.truncate(own);
+        Ok(())
     }
 
     /// Append the conversation's messages the log does not hold yet, each
@@ -82,13 +102,13 @@ impl ChatMemory {
             .iter()
             .filter(|message| !is_system(message))
             .count();
-        self.synced = self.synced.min(own);
+        self.taken.truncate(own);
         let next = log.read()?.len() as u64;
         let mut fresh = Vec::new();
         for (message, index) in messages
             .iter()
             .filter(|message| !is_system(message))
-            .skip(self.synced)
+            .skip(self.taken.len())
             .zip(next..)
         {
             let role = message.get("role").and_then(Value::as_str).ok_or_else(|| {
@@ -112,7 +132,7 @@ impl ChatMemory {
             });
         }
         log.append(&fresh)?;
-        self.synced += fresh.len();
+        self.taken.extend(fresh.iter().map(|entry| entry.index));
         Ok(())
     }
 
@@ -150,7 +170,7 @@ impl ChatMemory {
             }
             out.push(json!({ "role": "system", "content": block }));
         }
-        for entry in view.tail(&entries)? {
+        for entry in view.given(&entries)? {
             out.push(entry.message());
         }
         Ok(out)

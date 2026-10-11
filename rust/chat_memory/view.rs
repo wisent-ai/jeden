@@ -29,6 +29,11 @@ pub struct View {
     pub bytes: usize,
     /// How many messages the log held then.
     pub log_len: u64,
+    /// The log ranges (`[from, to)`) a rewind took back: kept in the log
+    /// word for word, and recalled by zoom and date, but never given to a
+    /// turn again from the tail.
+    #[serde(default)]
+    pub rewound: Vec<(u64, u64)>,
 }
 
 pub fn path(dir: &Path) -> PathBuf {
@@ -83,8 +88,10 @@ impl View {
             .collect()
     }
 
-    /// The messages given word for word. A tail that starts past the log is
-    /// a view of another chat, and is refused.
+    /// Every message from the tail's start, the ones a rewind took back
+    /// included: what a fold takes, so the leaves it makes stay adjacent and
+    /// keep merging. A tail that starts past the log is a view of another
+    /// chat, and is refused.
     pub fn tail<'a>(&self, entries: &'a [Entry]) -> Result<&'a [Entry], String> {
         entries.get(self.tail_start as usize..).ok_or_else(|| {
             format!(
@@ -93,6 +100,25 @@ impl View {
                 entries.len()
             )
         })
+    }
+
+    /// The messages a turn is given word for word: the tail but for those a
+    /// rewind took back. Once folded, those stand in the frontier's
+    /// summaries like every earlier message.
+    pub fn given(&self, entries: &[Entry]) -> Result<Vec<Entry>, String> {
+        Ok(self
+            .tail(entries)?
+            .iter()
+            .filter(|entry| !self.was_rewound(entry.index))
+            .cloned()
+            .collect())
+    }
+
+    /// Whether the message at `index` is one a rewind took back.
+    pub fn was_rewound(&self, index: u64) -> bool {
+        self.rewound
+            .iter()
+            .any(|(from, to)| (*from..*to).contains(&index))
     }
 
     /// Fit the view to `view_bytes` over `entries`, making the leaves and
@@ -110,7 +136,8 @@ impl View {
         let mut nodes = self.nodes(tree)?;
         loop {
             let tail = self.tail(entries)?;
-            let tail_bytes = tail.iter().map(Entry::bytes).sum::<usize>();
+            let given = self.given(entries)?;
+            let tail_bytes = given.iter().map(Entry::bytes).sum::<usize>();
             let size = nodes.iter().map(|node| node.line().len()).sum::<usize>() + tail_bytes;
             if size <= view_bytes {
                 self.bytes = size;
