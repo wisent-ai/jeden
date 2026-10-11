@@ -107,6 +107,9 @@ fn detail(corpus: &Corpus) -> String {
             corpus.missing_roots.join(", ")
         ));
     }
+    if !corpus.unreadable.is_empty() {
+        detail.push_str(&format!("; unreadable: {}", corpus.unreadable.join(", ")));
+    }
     detail
 }
 
@@ -143,6 +146,7 @@ pub(crate) fn probe(
             ("existingRoots", json!(corpus.existing_roots)),
             ("missingRoots", json!(corpus.missing_roots)),
             ("files", json!(corpus.files)),
+            ("unreadable", json!(corpus.unreadable)),
         ],
     )
 }

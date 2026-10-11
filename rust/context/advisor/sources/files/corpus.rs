@@ -55,6 +55,9 @@ pub(super) struct Corpus {
     pub(super) files: usize,
     pub(super) existing_roots: Vec<String>,
     pub(super) missing_roots: Vec<String>,
+    /// Files and directories under the roots that could not be read, as
+    /// `path: cause`; their text is in no section.
+    pub(super) unreadable: Vec<String>,
 }
 
 impl Corpus {
@@ -67,6 +70,7 @@ impl Corpus {
             files: usize::default(),
             existing_roots: Vec::new(),
             missing_roots: Vec::new(),
+            unreadable: Vec::new(),
         };
         for root in &settings.roots {
             if cancellation.is_cancelled() {
@@ -112,7 +116,14 @@ impl Corpus {
                 )
             })
             .build();
-        for entry in walk.flatten() {
+        for entry in walk {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    self.unreadable.push(error.to_string());
+                    continue;
+                }
+            };
             if cancellation.is_cancelled() {
                 break;
             }
@@ -123,8 +134,15 @@ impl Corpus {
             if !settings.reads_extension(path) {
                 continue;
             }
-            let Ok(text) = fs::read_to_string(path) else {
-                continue;
+            // Text that is not UTF-8 is binary and skipped like the rest;
+            // any other failure is a file whose text is missing.
+            let text = match fs::read_to_string(path) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::InvalidData => continue,
+                Err(error) => {
+                    self.unreadable.push(format!("{}: {error}", path.display()));
+                    continue;
+                }
             };
             if is_binary(&text) {
                 continue;
