@@ -121,26 +121,32 @@ impl View {
                 self.log_len = entries.len() as u64;
                 return Ok(size);
             }
-            // Every tail message but the newest folds at once, so the view
-            // has room again for as many turns as it can hold before it
-            // changes next.
-            if let [older @ .., _newest] = tail {
-                if !older.is_empty() {
-                    for entry in older {
-                        let leaf = tree.leaf(entry, summary_bytes, summarize)?;
-                        self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
-                        self.frontier.push(leaf.id.clone());
-                        nodes.push(leaf);
-                    }
-                    continue;
+            // Every tail message before the newest turn folds at once, so the
+            // view has room again for as many turns as it can hold before it
+            // changes next. The tail never starts at a tool result: a
+            // provider refuses a tool result whose call is not just before
+            // it, so the newest assistant turn that called tools stays with
+            // its results.
+            let keep_from = tail.iter().rposition(|entry| entry.role != "tool");
+            if let Some(older) = keep_from
+                .map(|start| &tail[..start])
+                .filter(|older| !older.is_empty())
+            {
+                for entry in older {
+                    let leaf = tree.leaf(entry, summary_bytes, summarize)?;
+                    self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
+                    self.frontier.push(leaf.id.clone());
+                    nodes.push(leaf);
                 }
+                continue;
             }
             let merged = merge_finest(&nodes, tree, summary_bytes, summarize)?.ok_or_else(|| {
                 format!(
                     "the chat memory view takes {size} bytes, more than chatMemory.viewBytes {view_bytes}: \
-                     {} node(s) with no two adjacent of equal span left to merge, and the newest message \
-                     alone takes {tail_bytes} bytes",
-                    nodes.len()
+                     {} node(s) with no two adjacent of equal span left to merge, and the newest turn \
+                     ({} message(s): the newest one, or an assistant turn with its tool results) alone takes {tail_bytes} bytes",
+                    nodes.len(),
+                    tail.len()
                 )
             })?;
             self.frontier = merged.iter().map(|node| node.id.clone()).collect();
