@@ -54,12 +54,18 @@ pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> 
     writeln!(file, "{}", line).map_err(|e| e.to_string())
 }
 
-pub(crate) fn read_collab_events(path: &Path) -> Vec<Value> {
-    fs::read_to_string(path)
-        .unwrap_or_default()
+/// The events in the relay file; none when the file does not exist yet. A
+/// file that cannot be read is the error, not an empty log.
+pub(crate) fn read_collab_events(path: &Path) -> Result<Vec<Value>, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    Ok(text
         .lines()
         .filter_map(|line| serde_json::from_str::<Value>(line).ok())
-        .collect()
+        .collect())
 }
 
 pub(super) fn save_collab_state(cwd: &Path, state: &Value) -> Result<PathBuf, String> {

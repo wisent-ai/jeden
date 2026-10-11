@@ -21,7 +21,16 @@ pub(super) fn collab_role_status(role: &str, entry: &Value, view: bool) -> Strin
         return format!("Collab {role}: off.");
     }
     let relay_file = entry.get("relayFile").and_then(Value::as_str).unwrap_or("");
-    let events = read_collab_events(Path::new(relay_file));
+    let events = match read_collab_events(Path::new(relay_file)) {
+        Ok(events) => events,
+        Err(cause) => {
+            return [
+                format!("Collab {role}: {}", collab_descriptor(entry)),
+                format!("Events: unavailable ({cause})"),
+            ]
+            .join("\n")
+        }
+    };
     let latest = events
         .last()
         .and_then(|event| event.get("type"))
