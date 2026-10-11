@@ -26,9 +26,15 @@ impl UpdateLock {
         let mut file = match open() {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                let owner = fs::read_to_string(&paths.lock)
-                    .ok()
-                    .and_then(|value| value.trim().parse::<u32>().ok());
+                let owner = match fs::read_to_string(&paths.lock) {
+                    Ok(value) => value.trim().parse::<u32>().ok(),
+                    Err(error) => {
+                        return Err(format!(
+                            "cannot read the update lock {} to see which updater holds it: {error}",
+                            paths.lock.display()
+                        ))
+                    }
+                };
                 if owner.is_none() || owner.is_some_and(process_alive) {
                     return Err("another updater holds the durable update lock".into());
                 }
