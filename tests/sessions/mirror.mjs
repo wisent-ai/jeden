@@ -14,13 +14,13 @@ export async function exerciseMirror({ rpc, prompt, options, exported, report })
   const mode = statSync(session.sessionPath).mode;
   const probe = join(session.sessionPath, `mirror-probe-${randomUUID()}`);
   let refusal;
+  let probeFd;
   let diagnostic;
   const failures = [];
   try {
     chmodSync(session.sessionPath, mode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
     try {
-      closeSync(openSync(probe, 'wx'));
-      unlinkSync(probe);
+      probeFd = openSync(probe, 'wx');
     } catch (error) { refusal = error; }
     assert.ok(refusal?.errno, 'the host must enforce actual state-file creation refusal');
     closeSync(openSync(transcript, 'a'));
@@ -37,6 +37,10 @@ export async function exerciseMirror({ rpc, prompt, options, exported, report })
     failures.push(error);
   } finally {
     try { chmodSync(session.sessionPath, mode); } catch (error) { failures.push(error); }
+    if (probeFd !== undefined) {
+      try { closeSync(probeFd); } catch (error) { failures.push(error); }
+      try { unlinkSync(probe); } catch (error) { failures.push(error); }
+    }
   }
   if (failures.length) {
     throw new AggregateError(failures, `active-leaf mirror qualification failed: ${failures.map(String).join('; ')}`);

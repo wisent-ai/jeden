@@ -56,11 +56,11 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
   const beforeStaging = readFileSync(statePath);
   const probe = join(session.sessionPath, `create-probe-${randomUUID()}`);
   let refusal;
+  let probeFd;
   await restored(async () => {
     chmodSync(session.sessionPath, mode & ~(constants.S_IWUSR | constants.S_IWGRP | constants.S_IWOTH));
     try {
-      closeSync(openSync(probe, 'wx'));
-      unlinkSync(probe);
+      probeFd = openSync(probe, 'wx');
     } catch (error) {
       refusal = error;
     }
@@ -71,7 +71,11 @@ export async function exerciseMove({ rpc, prompt, options, output, exported, rep
         && error.message.includes(`os error ${Math.abs(refusal.errno)}`));
     assert.deepEqual(readFileSync(statePath), beforeStaging,
       'failed staging must preserve the exact prior state file');
-  }, () => chmodSync(session.sessionPath, mode));
+  }, () => chmodSync(session.sessionPath, mode), () => {
+    if (probeFd !== undefined) closeSync(probeFd);
+  }, () => {
+    if (probeFd !== undefined) unlinkSync(probe);
+  });
   await prompt(session, '/checkpoint after-staging-refusal');
   assert.deepEqual(context(exported(session.sessionPath, 'move-staging-refused')), originalContext);
   await prompt(session, '/move .');
