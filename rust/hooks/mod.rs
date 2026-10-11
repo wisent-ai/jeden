@@ -104,34 +104,40 @@ pub(crate) fn unreadable_config(reason: String) -> HookOutcome {
 }
 
 /// Parse the hooks for one event out of a config `Value` (`{version, hooks:{}}`).
-/// Unknown/missing shapes yield an empty list rather than erroring.
+/// An event with no hooks yields an empty list. A declaration this cannot
+/// read — an event that is not a list, an entry without a command, a matcher
+/// that is not text — is named on stderr: dropped in silence, a gate the
+/// operator declared simply never ran.
 pub fn parse_event_hooks(config: &Value, event: &str) -> Vec<Hook> {
-    config
-        .get("hooks")
-        .and_then(|h| h.get(event))
-        .and_then(Value::as_array)
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|entry| {
-                    let command = entry
-                        .get("command")
-                        .and_then(Value::as_str)?
-                        .trim()
-                        .to_string();
-                    if command.is_empty() {
-                        return None;
-                    }
-                    let matcher = entry
-                        .get("matcher")
-                        .and_then(Value::as_str)
-                        .unwrap_or("")
-                        .trim()
-                        .to_string();
-                    Some(Hook { matcher, command })
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    let Some(declared) = config.get("hooks").and_then(|h| h.get(event)) else {
+        return Vec::new();
+    };
+    let Some(entries) = declared.as_array() else {
+        eprintln!("hooks.{event} is not a list, so none of its hooks run: {declared}");
+        return Vec::new();
+    };
+    let mut hooks = Vec::new();
+    for entry in entries {
+        let command = match entry.get("command").and_then(Value::as_str).map(str::trim) {
+            Some(command) if !command.is_empty() => command.to_string(),
+            _ => {
+                eprintln!("hooks.{event} entry has no command, so it does not run: {entry}");
+                continue;
+            }
+        };
+        let matcher = match entry.get("matcher") {
+            None | Some(Value::Null) => String::new(),
+            Some(Value::String(matcher)) => matcher.trim().to_string(),
+            Some(other) => {
+                eprintln!(
+                    "hooks.{event} entry {command:?} has a matcher that is not text, so it runs for every tool: {other}"
+                );
+                String::new()
+            }
+        };
+        hooks.push(Hook { matcher, command });
+    }
+    hooks
 }
 
 /// Whether `hook`'s matcher applies to `tool`. An empty matcher matches every
