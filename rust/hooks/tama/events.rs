@@ -38,8 +38,22 @@ pub fn load_event_hooks(
         }
     };
     let catalog = registry.get("catalog").cloned().unwrap_or(Value::Null);
+    // A registry with no `events` table registers nothing a guard could run
+    // from; like an unreadable one, it answers a blocking registration that
+    // names the file, not an empty list that stops every guard silently.
     let Some(events) = registry.get("events").and_then(Value::as_object) else {
-        return Vec::new();
+        return vec![TamaHook {
+            id: path.display().to_string(),
+            hook: Hook {
+                matcher: String::new(),
+                command: String::new(),
+            },
+            blocking: true,
+            unrunnable: Some(format!(
+                "the Tama registry {} has no events table, so no Tama hook can run",
+                path.display()
+            )),
+        }];
     };
     let mut out = Vec::new();
     for (tama_event, spec) in events {
