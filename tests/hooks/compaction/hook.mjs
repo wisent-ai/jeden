@@ -31,11 +31,13 @@ if (control.lockTranscript) {
   writeFileSync(`${controlPath}.lock.json`, JSON.stringify({ path, mode }));
   chmodSync(path, mode & ~(files.S_IWUSR | files.S_IWGRP | files.S_IWOTH));
   let cause;
+  let descriptor;
   try {
-    closeSync(openSync(path, 'a'));
+    descriptor = openSync(path, 'a');
   } catch (error) {
     cause = { code: error.code, errno: error.errno, message: error.message };
   }
+  if (descriptor !== undefined) closeSync(descriptor);
   if (!cause) throw new Error(`the isolated transcript still accepts appends: ${path}`);
   writeFileSync(`${controlPath}.cause.json`, JSON.stringify(cause));
 }
