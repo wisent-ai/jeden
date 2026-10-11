@@ -66,18 +66,14 @@ pub(crate) fn brama_router_configured(_cwd: &Path) -> bool {
     crate::agent::credential::brama_url().is_some()
 }
 
-/// Prefill for an INPUT row, read best-effort from the repository's
-/// `.env.example` (cwd and up to two parents, so subdirectories work too).
+/// Prefill for an INPUT row, read from the nearest `.env.example` in the
+/// working directory or one of its ancestors, so subdirectories of a
+/// repository work too.
 pub(super) fn example_prefill(cwd: &Path, key: &str) -> Option<String> {
-    let mut dir = Some(cwd);
-    for _ in 0..3 {
-        let candidate = dir?.join(".env.example");
-        if let Some(value) = env_file_value(&candidate, key) {
-            return Some(value);
-        }
-        dir = dir?.parent();
-    }
-    None
+    cwd.ancestors()
+        .map(|dir| dir.join(".env.example"))
+        .find(|candidate| candidate.is_file())
+        .and_then(|candidate| env_file_value(&candidate, key))
 }
 
 /// Append or update `updates` in `~/.jeden/.env`, preserving every unrelated
