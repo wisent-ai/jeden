@@ -135,14 +135,22 @@ pub fn parse_event_hooks(config: &Value, event: &str) -> Vec<Hook> {
 }
 
 /// Whether `hook`'s matcher applies to `tool`. An empty matcher matches every
-/// tool. An invalid regex never matches (fails closed for tool gating).
+/// tool. A matcher that is not a valid regex applies to every tool and says
+/// so on stderr: skipped, a gate declared for a tool silently never ran, which
+/// is the opposite of failing closed.
 pub fn hook_matches(hook: &Hook, tool: &str) -> bool {
     if hook.matcher.is_empty() {
         return true;
     }
     match Regex::new(&hook.matcher) {
         Ok(re) => re.is_match(tool),
-        Err(_) => false,
+        Err(error) => {
+            eprintln!(
+                "hook {:?}: matcher {:?} is not a valid regex, so the hook runs for {tool}: {error}",
+                hook.command, hook.matcher
+            );
+            true
+        }
     }
 }
 
