@@ -138,8 +138,11 @@ impl<B: SessionBackend> SessionService<B> {
             let event_tenant = tenant.clone();
             let event_session = session_id.clone();
             let event_request = request_id.clone();
+            // An event the replay journal refuses is lost to every client
+            // reading the stream, so the refusal is said with its event.
             let emit = Arc::new(move |kind: String, payload: Value, terminal: bool| {
-                let _ = replay.append(
+                let described = kind.clone();
+                if let Err(error) = replay.append(
                     &event_tenant,
                     SessionEventV1 {
                         session_id: event_session.clone(),
@@ -151,7 +154,11 @@ impl<B: SessionBackend> SessionService<B> {
                         payload,
                         terminal,
                     },
-                );
+                ) {
+                    eprintln!(
+                        "jeden rpc: the {described} event of request {event_request} in session {event_session} could not be recorded for replay: {error:?}"
+                    );
+                }
             });
             let result = service.backend.prompt(
                 &tenant,
@@ -165,9 +172,14 @@ impl<B: SessionBackend> SessionService<B> {
                 Ok(value) => value,
                 Err(message) => json!({"error": {"code": "runtime_error", "message": message}}),
             };
-            let _ = service
+            if let Err(error) = service
                 .idempotency
-                .complete(&tenant, &key, &request_digest, cached);
+                .complete(&tenant, &key, &request_digest, cached)
+            {
+                eprintln!(
+                    "jeden rpc: request {request_id} in session {session_id} finished but its result could not be recorded: {error:?}"
+                );
+            }
         });
         if let Err(error) = submission {
             self.idempotency.abandon(
