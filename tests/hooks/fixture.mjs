@@ -21,12 +21,13 @@ function refuseRecording(receipt, reason, boundary) {
   writeFileSync(`${receipt}.recording.json`, JSON.stringify({ path, mode, reason }));
   chmodSync(path, mode & ~boundary.permission);
   let cause;
+  let descriptor;
   try {
-    const descriptor = openSync(path, boundary.flags);
-    closeSync(descriptor);
+    descriptor = openSync(path, boundary.flags);
   } catch (error) {
     cause = { code: error.code, errno: error.errno, message: error.message };
   }
+  if (descriptor !== undefined) closeSync(descriptor);
   if (!cause) throw new Error(`the isolated file still allows ${boundary.flags}: ${path}`);
   writeFileSync(`${receipt}.cause.json`, JSON.stringify(cause));
 }
