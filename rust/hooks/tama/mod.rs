@@ -105,9 +105,41 @@ pub(crate) fn map_event(tama_event: &str) -> Option<(&'static str, String)> {
     }
 }
 
-/// Claude tool name → anchored jeden tool-name matcher.
+/// The registry events Jeden has no event for, each with the ids of the
+/// hooks that therefore do not run in Jeden, for `jeden doctor`. No
+/// registry installed is none; one that cannot be read, or holds no events
+/// table, is refused with its cause.
+pub fn unmapped_events(cwd: &Path) -> Result<Vec<Value>, String> {
+    let Some(path) = registry_path(cwd)? else {
+        return Ok(Vec::new());
+    };
+    let registry = crate::hooks::read_config(&path)?;
+    let events = registry
+        .get("events")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("the Tama registry {} holds no events table", path.display()))?;
+    Ok(events
+        .iter()
+        .filter(|(name, _)| map_event(name).is_none())
+        .map(|(name, spec)| {
+            let hooks: Vec<&str> = spec
+                .get("hooks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+                .collect();
+            serde_json::json!({ "event": name, "hooks": hooks })
+        })
+        .collect())
+}
+
+/// Claude tool name → anchored jeden tool-name matcher. `any` is the
+/// registry's word for every tool (`post_tool_use:any`), not a tool's name:
+/// matched literally it named no Jeden tool and its hooks never ran.
 fn tool_matcher(tool: &str) -> String {
     let matcher = match tool {
+        "any" => "^.+$",
         "bash" => "^(run_command|run_process)$",
         "read" => "^(read|read_file|read_binary_file|read_archive|read_document)$",
         "edit" => "^(edit|edit_file|apply_patch)$",

@@ -122,11 +122,12 @@ pub fn doctor(cwd: &Path) -> DoctorReport {
         d.id.contains("collab") || d.operations.iter().any(|op| op.contains("collab"))
     });
     let keymap = registry::keymap_probe(cwd);
+    let hooks = registry::hooks_probe(cwd);
     let task = runtime::task_probe(cwd);
     let memory = runtime::memory_probe();
     let probes = vec![
         brama, weles, storage, process, sandbox, mcp, extensions, lsp, browser, task, memory,
-        collab, keymap,
+        collab, keymap, hooks,
     ];
     let healthy = probes.iter().all(HealthProbe::available);
     DoctorReport {

@@ -95,3 +95,26 @@ pub(super) fn keymap_probe(cwd: &Path) -> HealthProbe {
         ),
     }
 }
+
+/// Tama's shared hook registry as Jeden runs it: degraded when it registers
+/// hooks on an event Jeden has no event for, naming each event and the hooks
+/// that therefore do not run here; unavailable when the registry cannot be
+/// read, because then every registered guard refuses.
+pub(super) fn hooks_probe(cwd: &Path) -> HealthProbe {
+    let started = Instant::now();
+    match crate::hooks::tama::unmapped_events(cwd) {
+        Err(cause) => HealthProbe::unavailable("hooks", started, cause),
+        Ok(unmapped) if unmapped.is_empty() => HealthProbe::healthy(
+            "hooks",
+            started,
+            "every Tama registry event runs on a Jeden hook event",
+            None,
+        ),
+        Ok(unmapped) => HealthProbe::degraded(
+            "hooks",
+            started,
+            "Tama registers hooks on events Jeden has no event for; those hooks do not run in Jeden",
+            Some(json!({ "unmapped": unmapped })),
+        ),
+    }
+}

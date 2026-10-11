@@ -216,8 +216,19 @@ pub fn describe_source(cwd: &Path) -> Option<String> {
     let events = registry.get("events").and_then(Value::as_object)?;
     let mut rows = Vec::new();
     let mut broken = Vec::new();
+    // A registry event Jeden has no counterpart for runs none of its hooks
+    // here; it is named, never left out of the summary without a word.
+    let mut unmapped = Vec::new();
     for (tama_event, spec) in events {
         let Some((event, matcher)) = map_event(tama_event) else {
+            let ids: Vec<&str> = spec
+                .get("hooks")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|entry| entry.get("id").and_then(Value::as_str))
+                .collect();
+            unmapped.push(format!("  {tama_event}: {}", ids.join(", ")));
             continue;
         };
         let entries = spec
@@ -254,7 +265,7 @@ pub fn describe_source(cwd: &Path) -> Option<String> {
             if blocking { ", blocking" } else { "" }
         ));
     }
-    if rows.is_empty() {
+    if rows.is_empty() && unmapped.is_empty() {
         return None;
     }
     let managed_by = registry
@@ -270,6 +281,12 @@ pub fn describe_source(cwd: &Path) -> Option<String> {
     if !broken.is_empty() {
         text.push_str("\nRegistrations with no executable here:\n");
         text.push_str(&broken.join("\n"));
+    }
+    if !unmapped.is_empty() {
+        text.push_str(
+            "\nRegistry events Jeden has no event for; these hooks do not run in Jeden:\n",
+        );
+        text.push_str(&unmapped.join("\n"));
     }
     Some(text)
 }
