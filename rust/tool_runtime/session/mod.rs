@@ -136,7 +136,12 @@ pub(crate) fn recall_conversation(
     if let Some(node) = string_input(input, "node") {
         return crate::chat_memory::session::zoom(&memory, &node);
     }
-    match (string_input(input, "from"), string_input(input, "to")) {
+    // A time is seconds since 1970, given as a number or as its digits.
+    let time = |key: &str| match input.get(key) {
+        Some(Value::Number(seconds)) => Some(seconds.to_string()),
+        _ => string_input(input, key),
+    };
+    match (time("from"), time("to")) {
         (Some(from), Some(to)) => return crate::chat_memory::session::dates(&memory, &from, &to),
         (Some(_), None) | (None, Some(_)) => {
             return Err(
