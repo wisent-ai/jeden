@@ -1,6 +1,14 @@
 use super::*;
 
 impl<B: SessionBackend> HeadlessDaemon<B> {
+    /// Serve one connection; a connection that ends on an error is said
+    /// with its cause, since the client sees only a dropped socket.
+    pub(super) async fn serve_said(&self, stream: TcpStream) {
+        if let Err(cause) = self.serve_connection(stream).await {
+            eprintln!("jeden daemon: a connection ended on an error: {cause}");
+        }
+    }
+
     pub(super) async fn serve_connection(&self, mut stream: TcpStream) -> Result<(), String> {
         let mut record_prefix = [0_u8; 3];
         loop {

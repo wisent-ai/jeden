@@ -280,9 +280,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                             Ok(permit) => permit,
                             Err(_) => { reject_overloaded(stream).await; return; }
                         };
-                        if let Err(cause) = daemon.serve_connection(stream).await {
-                            eprintln!("jeden daemon: a connection ended on an error: {cause}");
-                        }
+                        daemon.serve_said(stream).await;
                     });
                 }
             }
