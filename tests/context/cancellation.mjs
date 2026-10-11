@@ -80,6 +80,17 @@ const transport = startRpc({ binary, cwd: workspace, env: process.env, report })
 try {
   assert.equal(git(['rev-parse', 'HEAD']), revision, 'qualify the declared source revision');
   assert.equal(git(['status', '--porcelain']), '', 'commit the candidate and test before qualification');
+  const version = spawnSync(binary, ['--version'], { cwd: root, encoding: 'utf8' });
+  report.commands.push({
+    program: binary, args: ['--version'], status: version.status, signal: version.signal,
+    stdout: version.stdout, stderr: version.stderr, error: version.error?.message,
+  });
+  assert.ok(version.status !== null && !version.status,
+    `candidate version failed: ${version.error?.message || version.stderr}`);
+  report.binaryVersion = version.stdout.trim();
+  const shortRevision = git(['rev-parse', '--short', revision]);
+  assert.ok(report.binaryVersion.endsWith(`.${shortRevision}`),
+    `the binary must embed the clean candidate revision: ${report.binaryVersion}`);
   const query = `cancellationjourney${randomUUID().replaceAll('-', '')}`;
   const fixture = join(workspace, 'cancellation-recovery.md');
   const fixtureText = `${query} confirms the advisor can read files after cancellation.`;
@@ -133,10 +144,17 @@ try {
   report.error = String(error.stack || error);
   throw error;
 } finally {
-  await transport.end();
-  for (const socket of held) socket.destroy();
-  server.close();
-  report.finishedAt = new Date().toISOString();
-  persist();
-  console.log(`${report.verdict}: ${join(output, 'report.json')}`);
+  try {
+    await transport.end();
+  } catch (error) {
+    report.verdict = 'failed';
+    report.cleanupError = String(error.stack || error);
+    throw error;
+  } finally {
+    for (const socket of held) socket.destroy();
+    server.close();
+    report.finishedAt = new Date().toISOString();
+    persist();
+    console.log(`${report.verdict}: ${join(output, 'report.json')}`);
+  }
 }
