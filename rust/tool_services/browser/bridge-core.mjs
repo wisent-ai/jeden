@@ -70,6 +70,7 @@ const browserReady = async () => {
 const ensureBrowser = async () => {
   if (await browserReady()) return;
   if (!chrome) throw new Error("Chromium executable is not configured");
+  const state = await readState();
   await mkdir(profile, { recursive: true });
   const browserTmp = join(root, "tmp");
   await mkdir(browserTmp, { recursive: true });
@@ -106,19 +107,34 @@ const ensureBrowser = async () => {
       if (stderr.includes("DevTools listening on ")) resolve();
     });
   });
-  const exited = new Promise((_, reject) => {
-    child.once("error", error => reject(new Error(`Chromium could not start: ${error.message}`)));
-    child.once("exit", (code, signal) => reject(new Error(
-      `Chromium exited (code ${code ?? "none"}, signal ${signal ?? "none"}) before exposing CDP on ${endpoint}`,
+  const exited = new Promise(resolve => {
+    child.once("error", error => resolve(new Error(`Chromium could not start: ${error.message}`, { cause: error })));
+    child.once("exit", (code, signal) => resolve(new Error(
+      `Chromium exited (code ${code}, signal ${signal}) before exposing CDP on ${endpoint}`,
     )));
   });
-  const state = await readState();
-  state.browserPid = child.pid;
-  await saveState(state);
+  const readiness = Promise.race([listening, exited]);
   try {
-    await Promise.race([listening, exited]);
+    state.browserPid = child.pid;
+    await saveState(state);
+    const failure = await readiness;
+    if (failure) throw failure;
+    const version = await requestJson("/json/version");
+    if (typeof version.webSocketDebuggerUrl !== "string") {
+      throw new Error(`CDP readiness at ${endpoint}/json/version returned no string webSocketDebuggerUrl`);
+    }
   } catch (error) {
-    throw new Error(`${error.message}; stderr: ${stderr}`);
+    if (child.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch (cleanup) {
+        if (cleanup.code !== "ESRCH") {
+          throw new Error(`${error.message}; stopping Chromium process group ${child.pid} failed: ${inspect(cleanup)}; stderr: ${stderr}`, { cause: error });
+        }
+      }
+      await exited;
+    }
+    throw new Error(`${error.message}; stderr: ${stderr}`, { cause: error });
   } finally {
     child.removeAllListeners("exit");
     child.removeAllListeners("error");
@@ -129,10 +145,6 @@ const ensureBrowser = async () => {
     child.stdout.unref();
     child.stderr.unref();
     child.unref();
-  }
-  const version = await requestJson("/json/version");
-  if (typeof version.webSocketDebuggerUrl !== "string") {
-    throw new Error(`CDP readiness at ${endpoint}/json/version returned no string webSocketDebuggerUrl`);
   }
 };
 const listTabs = async () => (await requestJson("/json/list"))
