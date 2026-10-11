@@ -68,6 +68,7 @@ function until(transcript, holds) {
 }
 
 let terminal;
+let resumedTerminal;
 try {
   assert.equal(invoke('git', ['-C', root, 'rev-parse', 'HEAD']).trim(), revision);
   // Each prompt asks for its answer in a spelling the prompt itself does not
@@ -109,14 +110,26 @@ try {
     return Boolean(asked) && answered(seen.slice(seen.indexOf(asked)), 'SECOND-ANSWER');
   });
   report.observations.secondEvents = second.length;
+
+  // `oko sessions resume` continues the same Jeden session in place: the
+  // message and its answer land in the session's own ledger, which already
+  // holds both earlier answers, not in a new session that knows nothing.
+  const resumed = JSON.parse(invoke(oko, ['sessions', 'resume', started.session, '--model', model, '--text',
+    'Respond with exactly this text in uppercase and nothing else: third-answer', '--json']));
+  report.observations.resumed = resumed;
+  resumedTerminal = resumed.brokerSession;
+  assert.equal(resumed.transcript, started.transcript, 'the resumed message landed in the session\'s own ledger');
+  const third = await until(started.transcript, (seen) => answered(seen, 'THIRD-ANSWER'));
+  assert.ok(answered(third, 'FIRST-ANSWER') && answered(third, 'SECOND-ANSWER'),
+    'the continued ledger still holds the earlier answers');
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);
   throw error;
 } finally {
-  if (terminal) {
-    const ended = spawnSync(oko, ['sessions', 'end', terminal, '--json'], { encoding: 'utf8' });
-    report.commands.push({ program: oko, args: ['sessions', 'end', terminal, '--json'], status: ended.status,
+  for (const held of [terminal, resumedTerminal].filter(Boolean)) {
+    const ended = spawnSync(oko, ['sessions', 'end', held, '--json'], { encoding: 'utf8' });
+    report.commands.push({ program: oko, args: ['sessions', 'end', held, '--json'], status: ended.status,
       stdout: ended.stdout, stderr: ended.stderr, error: ended.error?.message });
   }
   writeFileSync(join(output, 'report.json'), JSON.stringify(report));
