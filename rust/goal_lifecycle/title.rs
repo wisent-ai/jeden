@@ -5,61 +5,68 @@
 
 use serde_json::Value;
 use std::env;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Resolve a title for a freshly started goal: `transcript-lake goal title
-/// --stdin --json` when the executable is available, otherwise the prompt's
-/// whole first line.
-pub fn resolve_goal_title(prompt: &str) -> String {
-    if let Some(title) = transcript_lake_title(prompt) {
-        return title;
+/// --stdin --json` when `transcript-lake` is on `PATH`, otherwise the
+/// prompt's first line that holds text. An installed transcript-lake that
+/// cannot be started, exits unsuccessfully or answers no goal is refused with
+/// its cause, and a prompt with no text has no title: either one, replaced by
+/// a placeholder, started a goal nobody named.
+pub fn resolve_goal_title(prompt: &str) -> Result<String, String> {
+    match find_transcript_lake() {
+        Some(executable) => transcript_lake_title(&executable, prompt),
+        None => prompt
+            .lines()
+            .map(str::trim)
+            .find(|line| !line.is_empty())
+            .map(str::to_string)
+            .ok_or_else(|| "the prompt holds no text to title the goal with".to_string()),
     }
-    let first_line = prompt.lines().next().unwrap_or("").trim();
-    let mut title = first_line.to_string();
-    if title.is_empty() {
-        title = "New goal".to_string();
-    }
-    title
 }
 
-fn transcript_lake_title(prompt: &str) -> Option<String> {
+fn transcript_lake_title(executable: &Path, prompt: &str) -> Result<String, String> {
     use std::io::Write;
     use std::process::{Command, Stdio};
 
-    let executable = find_transcript_lake()?;
+    let command_line = format!("{} goal title --stdin --json", executable.display());
+    let failed = |operation: &str, cause: String| format!("{command_line}: {operation}: {cause}");
     let mut child = Command::new(executable)
         .args(["goal", "title", "--stdin", "--json"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()
-        .ok()?;
-    child.stdin.take()?.write_all(prompt.as_bytes()).ok()?;
-    let output = child.wait_with_output().ok()?;
+        .map_err(|error| failed("cannot start", error.to_string()))?;
+    let written = match child.stdin.take() {
+        Some(mut stdin) => stdin.write_all(prompt.as_bytes()),
+        None => Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
+    };
+    written.map_err(|error| failed("cannot write the prompt", error.to_string()))?;
+    let output = stado_wait::child_output(child, &command_line)
+        .map_err(|error| failed("cannot collect the answer", error.to_string()))?;
     if !output.status.success() {
-        return None;
+        return Err(failed(
+            &output.status.to_string(),
+            String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        ));
     }
-    let value: Value = serde_json::from_slice(&output.stdout).ok()?;
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| failed("answer is not JSON", error.to_string()))?;
     value
         .get("goal")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|goal| !goal.is_empty())
         .map(str::to_string)
+        .ok_or_else(|| failed("answer names no goal", value.to_string()))
 }
 
+/// `transcript-lake` on this process's `PATH`, the one place executables
+/// are declared for it.
 fn find_transcript_lake() -> Option<PathBuf> {
-    let mut directories: Vec<PathBuf> = env::var_os("PATH")
-        .map(|path| env::split_paths(&path).collect())
-        .unwrap_or_default();
-    if let Some(home) = env::var_os("HOME") {
-        directories.push(Path::new(&home).join(".local/bin"));
-    }
-    directories.push(PathBuf::from("/opt/homebrew/bin"));
-    directories.push(PathBuf::from("/usr/local/bin"));
-    directories
-        .into_iter()
+    let path = env::var_os("PATH")?;
+    env::split_paths(&path)
         .map(|directory| directory.join("transcript-lake"))
         .find(|candidate| candidate.is_file())
 }

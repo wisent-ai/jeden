@@ -112,7 +112,18 @@ pub(crate) fn spawn_turn_classification(
             decision.action = LifecycleAction::ContinueCurrent;
         }
         let resolved_goal = match decision.action {
-            LifecycleAction::StartGoal => Some(resolve_goal_title(&prompt)),
+            LifecycleAction::StartGoal => match resolve_goal_title(&prompt) {
+                Ok(title) => Some(title),
+                Err(reason) => {
+                    let _ = crate::cli::sessions::append_ledger_entry(
+                        &session_dir,
+                        crate::agent::now_stamp(),
+                        "goal_lifecycle_refused",
+                        json!({ "alias": classify::alias(), "reason": reason }),
+                    );
+                    return;
+                }
+            },
             LifecycleAction::ContinueCurrent | LifecycleAction::FinishGoal => {
                 goal_objective.clone()
             }
