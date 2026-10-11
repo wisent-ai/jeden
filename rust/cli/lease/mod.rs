@@ -65,8 +65,12 @@ fn line(lease: &SessionLease) -> String {
 
 fn list(config: &ChatConfig, json: bool) -> Result<String, String> {
     let register = lease::register(config)?;
+    let capacity = lease::capacity(config, &register.leases)?;
     if json {
-        return serde_json::to_string_pretty(&register)
+        let mut document = serde_json::to_value(&register)
+            .map_err(|error| format!("the lease register cannot be printed as JSON: {error}"))?;
+        document["capacity"] = serde_json::json!(capacity);
+        return serde_json::to_string_pretty(&document)
             .map(|text| text + "\n")
             .map_err(|error| format!("the lease register cannot be printed as JSON: {error}"));
     }
@@ -90,6 +94,31 @@ fn list(config: &ChatConfig, json: bool) -> Result<String, String> {
     }
     for (subscription, sessions) in &register.counts {
         out.push_str(&format!("{subscription}: carries {sessions} sessions\n"));
+    }
+    match &capacity {
+        None => out.push_str(
+            "what each account has left: not stated; Brama's pool document carries no accounts.capacity\n",
+        ),
+        Some(accounts) => {
+            for (subscription, account) in accounts {
+                out.push_str(&format!(
+                    "{subscription}: available={} tightest remaining={} live sessions={}\n",
+                    account["available"],
+                    account["tightest_remaining_fraction"],
+                    account["live_sessions"]
+                ));
+                for window in account["windows"].as_array().into_iter().flatten() {
+                    out.push_str(&format!(
+                        "    {}: used={} remaining={} resets_at_ms={} current={}\n",
+                        window["label"],
+                        window["used_fraction"],
+                        window["remaining_fraction"],
+                        window["resets_at_ms"],
+                        window["current"]
+                    ));
+                }
+            }
+        }
     }
     Ok(out)
 }

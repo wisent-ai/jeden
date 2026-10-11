@@ -1,5 +1,6 @@
 mod context;
 mod hosting;
+mod lease;
 mod operations;
 mod parking;
 mod prompt;
@@ -285,10 +286,12 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
             state.shutting_down.store(true, Ordering::Release);
             Ok(json!({"shuttingDown": true}))
         }
-        _ => Err((
-            "method_not_found",
-            format!("unknown method: {}", request.method),
-        )),
+        _ => match request.method.as_str() {
+            "lease/list" => lease::list(&request.params),
+            "lease/release" => lease::release(&request.params),
+            "lease/end" => lease::end(&request.params),
+            other => Err(("method_not_found", format!("unknown method: {other}"))),
+        },
     };
     match result {
         Ok(value) => state

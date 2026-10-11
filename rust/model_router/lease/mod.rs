@@ -19,6 +19,8 @@ mod session;
 pub(crate) use session::{for_route, release_held, switch};
 
 const LEASES: &str = "/v1/subscription-pool/leases";
+/// The pool document, whose `accounts.capacity` states what each account has left.
+const POOL: &str = "/v1/subscription-pool";
 /// Who takes the lease, as Brama records it.
 pub(crate) const HOLDER: &str = "jeden";
 /// The request header naming the leased member, as Brama reads it.
@@ -218,4 +220,38 @@ pub fn release_session(config: &ChatConfig, session_id: &str) -> Result<Vec<Sess
         "release",
     )?;
     Ok(released.released)
+}
+
+/// What each leased account has left, keyed by the member's subscription id:
+/// Brama's pool document (`GET /v1/subscription-pool`, as this agent sees
+/// it) states `accounts.capacity` per account, and each member of an account
+/// is keyed to its account's row. Only the members of live leases are kept,
+/// because that is what `jeden lease list` and Jeden Desktop ask about. A
+/// document without the object is answered as none, said by the caller.
+pub fn capacity(
+    config: &ChatConfig,
+    leases: &[SessionLease],
+) -> Result<Option<BTreeMap<String, Value>>, String> {
+    let document = call(config, reqwest::Method::GET, POOL, None)?;
+    let Some(accounts) = document
+        .pointer("/accounts/capacity")
+        .and_then(Value::as_array)
+    else {
+        return Ok(None);
+    };
+    let mut keyed = BTreeMap::new();
+    for account in accounts {
+        let members = account
+            .get("members")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str);
+        for member in members {
+            if leases.iter().any(|lease| lease.subscription_id == member) {
+                keyed.insert(member.to_owned(), account.clone());
+            }
+        }
+    }
+    Ok(Some(keyed))
 }
