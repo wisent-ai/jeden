@@ -47,27 +47,42 @@ pub(crate) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, St
 /// request error; a path that cannot be imported is a failure row in the
 /// result, so one bad file never hides the rest.
 pub(crate) fn import_sessions(params: &Value) -> Result<Value, (&'static str, String)> {
-    let paths: Vec<PathBuf> = params
-        .get("paths")
-        .and_then(Value::as_array)
-        .map(|paths| {
-            paths
-                .iter()
-                .filter_map(Value::as_str)
-                .map(PathBuf::from)
-                .collect()
+    let Some(listed) = params.get("paths").and_then(Value::as_array) else {
+        return Err((
+            "invalid_params",
+            "paths must be a non-empty array of strings".into(),
+        ));
+    };
+    // An entry that is not a path is refused by its place, not left out:
+    // a dropped entry would be an import nobody asked to skip.
+    let paths = listed
+        .iter()
+        .enumerate()
+        .map(|(at, path)| {
+            path.as_str().map(PathBuf::from).ok_or_else(|| {
+                (
+                    "invalid_params",
+                    format!("paths[{at}] is {path}, not a path string"),
+                )
+            })
         })
-        .unwrap_or_default();
+        .collect::<Result<Vec<PathBuf>, _>>()?;
     if paths.is_empty() {
         return Err((
             "invalid_params",
             "paths must be a non-empty array of strings".into(),
         ));
     }
-    let refresh = params
-        .get("refresh")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+    let refresh = match params.get("refresh") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(refresh)) => *refresh,
+        Some(other) => {
+            return Err((
+                "invalid_params",
+                format!("refresh must be true or false, not {other}"),
+            ))
+        }
+    };
     crate::session_import::import_paths(&paths, refresh).map_err(|error| ("import_error", error))
 }
 
