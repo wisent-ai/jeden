@@ -43,10 +43,16 @@ fn md_files(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                 continue;
             }
         };
-        let mut paths = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
+        let mut paths = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry) => paths.push(entry.path()),
+                Err(error) => eprintln!(
+                    "jeden: a slash command under {} was not loaded: {error}",
+                    current.display()
+                ),
+            }
+        }
         paths.sort();
         for path in paths {
             let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
