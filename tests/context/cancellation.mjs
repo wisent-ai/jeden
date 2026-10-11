@@ -67,17 +67,17 @@ const server = createServer(socket => {
   socket.on('error', error => report.cases.push({ case: 'held-socket-error', error: error.message }));
   connected();
 });
-await new Promise((resolveListen, reject) => {
-  server.once('error', reject);
-  server.listen({ host: loopback }, resolveListen);
-});
-const url = `http://${loopback}:${server.address().port}`;
-writeFileSync(join(workspace, '.jeden/config.json'), JSON.stringify({
-  context: { advisor: { roots: workspace, groundTruthUrl: url } },
-}));
-
-const transport = startRpc({ binary, cwd: workspace, env: process.env, report });
+let transport;
 try {
+  await new Promise((resolveListen, reject) => {
+    server.once('error', reject);
+    server.listen({ host: loopback }, resolveListen);
+  });
+  const url = `http://${loopback}:${server.address().port}`;
+  writeFileSync(join(workspace, '.jeden/config.json'), JSON.stringify({
+    context: { advisor: { roots: workspace, groundTruthUrl: url } },
+  }));
+  transport = startRpc({ binary, cwd: workspace, env: process.env, report });
   assert.equal(git(['rev-parse', 'HEAD']), revision, 'qualify the declared source revision');
   assert.equal(git(['status', '--porcelain']), '', 'commit the candidate and test before qualification');
   const version = spawnSync(binary, ['--version'], { cwd: root, encoding: 'utf8' });
@@ -145,17 +145,19 @@ try {
   throw error;
 } finally {
   try {
-    const stopped = await transport.end();
-    assert.ok(stopped.status !== null && !stopped.status,
-      `RPC shutdown failed: status=${stopped.status}; ${stopped.stderr}`);
-    assert.equal(stopped.signal, null, `RPC shutdown received ${stopped.signal}`);
+    if (transport) {
+      const stopped = await transport.end();
+      assert.ok(stopped.status !== null && !stopped.status,
+        `RPC shutdown failed: status=${stopped.status}; ${stopped.stderr}`);
+      assert.equal(stopped.signal, null, `RPC shutdown received ${stopped.signal}`);
+    }
   } catch (error) {
     report.verdict = 'failed';
     report.cleanupError = String(error.stack || error);
     throw error;
   } finally {
     for (const socket of held) socket.destroy();
-    server.close();
+    if (server.listening) server.close();
     report.finishedAt = new Date().toISOString();
     persist();
     console.log(`${report.verdict}: ${join(output, 'report.json')}`);
