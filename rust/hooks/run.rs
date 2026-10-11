@@ -24,10 +24,7 @@ fn trusted_configs(cwd: &Path, allow_project: bool) -> (Value, Value, Vec<String
         }
     };
     let project = loaded(read_config(&project_hooks_path(cwd)), allow_project);
-    let user = match user_hooks_path() {
-        Some(path) => loaded(read_config(&path), true),
-        None => Value::Null,
-    };
+    let user = loaded(read_config(&user_hooks_path()), true);
     (user, project, failures)
 }
 

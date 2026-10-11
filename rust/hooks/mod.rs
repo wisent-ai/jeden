@@ -70,8 +70,10 @@ pub(crate) fn project_hooks_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/hooks.json")
 }
 
-pub(crate) fn user_hooks_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".jeden/hooks.json"))
+/// The user's hooks config under the one home lookup. With HOME unset it was
+/// skipped, and every user-scope guard stopped without a word.
+pub(crate) fn user_hooks_path() -> PathBuf {
+    crate::slash::common::dirs_home().join(".jeden/hooks.json")
 }
 
 /// Read a hooks config file into a JSON `Value`. A file that does not exist

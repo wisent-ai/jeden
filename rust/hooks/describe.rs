@@ -7,10 +7,7 @@ use super::*;
 /// every event until it is repaired.
 pub fn describe_hooks(cwd: &Path) -> String {
     let project = read_config(&project_hooks_path(cwd));
-    let user = match user_hooks_path() {
-        Some(path) => read_config(&path),
-        None => Ok(Value::Null),
-    };
+    let user = read_config(&user_hooks_path());
     let events = event::ALL;
     let mut lines = Vec::new();
     for (label, config) in [
