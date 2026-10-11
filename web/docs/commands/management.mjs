@@ -41,8 +41,8 @@ export const managementCommands = [
     invocation: "jeden config get <key> [--json] [--cwd path]",
     purpose: "Read one effective schema-backed setting.",
     inputs: ["Required: an exact key from the setting schema, including <code>contracts.communication</code>, <code>contracts.functionality</code>, <code>communication.mode</code>, or one of the four <code>communication.*</code> overrides. Optional: <code>--json</code> for metadata and <code>--cwd</code> for the project layer."],
-    effect: "Prints the effective string or JSON value; JSON mode also returns type, description, default, and enum metadata. It does not write configuration.",
-    refusals: ["Missing input is refused as <code>config get requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>."],
+    effect: "Prints the effective string or JSON value; JSON mode also returns type, description, default, and enum metadata. It does not write configuration. Layers apply in order: legacy user config.json, canonical user config.yml, then project config.json; an absent layer contributes nothing, but a broken earlier layer is not hidden by a later override. The real CLI journey <code>JEDEN_BIN=target/debug/jeden JEDEN_TEST_SOURCE_REVISION=&lt;candidate-commit&gt; node tests/config/layers.mjs</code> uses an isolated home and project beneath <code>.build/config-layers</code>, checks precedence, invalid syntax and root shape, non-text and directory read refusals, byte preservation and recovery. Its report retains declared candidate revision, executable/test digests, actual commands, statuses, output and final file observations; source authorship alone is not a passing run.",
+    refusals: ["Missing input is refused as <code>config get requires a key</code>; an unregistered key is refused as <code>unknown config key: &lt;key&gt;</code>. A present layer that cannot be read, parsed or interpreted as an object refuses with its path and actual cause instead of silently supplying empty settings; inspect the named file before retrying."],
   },
   {
     path: "config/set",
