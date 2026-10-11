@@ -41,7 +41,7 @@ pub(super) fn built_in_tools() -> Vec<ToolInfo> {
         ToolInfo::new("git_show", "Read one git object or commit summary; optional path scopes the output"),
         ToolInfo::new("fetch_url", "Fetch one HTTP(S) URL and return text capped at maxBytes with byte count, truncation state, SHA-256, and optional line range"),
         ToolInfo::new("fetch_readable_url", "Fetch one HTTP(S) URL and return simplified readable text capped at maxBytes with byte count, truncation state, SHA-256, and optional line range; supports HTML, JSON, CSV/TSV, RSS/Atom/XML, notebooks, and basic PDF text streams"),
-        ToolInfo::new("save_artifact", "Save UTF-8 content into the current session artifacts directory"),
+        ToolInfo::new("save_artifact", "Save UTF-8 content under a name in the current session artifacts directory"),
         ToolInfo::new("list_artifacts", "List files in the current session artifact directory"),
         ToolInfo::new("read_artifact", "Read one UTF-8 artifact from the current session artifact directory; maxBytes (required) is how many bytes to answer"),
         ToolInfo::new("recall_conversation", "Return the text-only transcript of a recorded session (user prompts and final answers; tool calls, results, and images stripped); defaults to the current session, or pass session=<id-or-path>"),

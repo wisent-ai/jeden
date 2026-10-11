@@ -14,38 +14,33 @@ pub(crate) use context::context_tool;
 pub(crate) use memory::memory_tool;
 pub(crate) use todo::todo_tool;
 
-fn active_roadmap_item(cwd: &std::path::Path) -> Option<String> {
-    fs::read_to_string(cwd.join(".jeden/mode-state.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|state| {
-            state
-                .get("activeRoadmapItem")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
+/// The `field` a JSON state file declares as a string. No file declares
+/// nothing; one that cannot be read or parsed is refused naming it, so an
+/// artifact is never filed under no roadmap item because its state was
+/// unreadable.
+fn declared_string(path: &Path, field: &str) -> Result<Option<String>, String> {
+    let state = crate::slash::common::read_json_value(path)?;
+    Ok(state.get(field).and_then(Value::as_str).map(str::to_string))
 }
 
-fn session_roadmap_item(dir: &std::path::Path) -> Option<String> {
-    fs::read_to_string(dir.parent()?.join("roadmap-item.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
-        .and_then(|metadata| {
-            metadata
-                .get("itemId")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-        })
-}
-
-fn artifact_roadmap_item(runtime: &ToolRuntime<'_>, dir: &std::path::Path) -> Option<String> {
-    session_roadmap_item(dir).or_else(|| active_roadmap_item(runtime.cwd))
+/// The roadmap item an artifact belongs to: the session's own
+/// `roadmap-item.json`, else the workspace's active roadmap item.
+fn artifact_roadmap_item(runtime: &ToolRuntime<'_>, dir: &Path) -> Result<Option<String>, String> {
+    if let Some(session) = dir.parent() {
+        if let Some(item) = declared_string(&session.join("roadmap-item.json"), "itemId")? {
+            return Ok(Some(item));
+        }
+    }
+    declared_string(
+        &runtime.cwd.join(".jeden/mode-state.json"),
+        "activeRoadmapItem",
+    )
 }
 pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let Some(dir) = runtime.artifact_dir else {
         return Err("save_artifact requires an active session artifact directory".into());
     };
-    let name = string_input(input, "name").unwrap_or_else(|| "artifact.txt".into());
+    let name = string_input(input, "name").ok_or("save_artifact requires name")?;
     let content = string_input(input, "content").ok_or("save_artifact requires content")?;
     if name.contains('/') || name.contains("..") {
         return Err(format!("invalid artifact name: {name}"));
@@ -58,7 +53,7 @@ pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         "name": name,
         "path": path.display().to_string(),
         "bytes": content.len(),
-        "roadmapItem": artifact_roadmap_item(runtime, dir)
+        "roadmapItem": artifact_roadmap_item(runtime, dir)?
     }))
 }
 
