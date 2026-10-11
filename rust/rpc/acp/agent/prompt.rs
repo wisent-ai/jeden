@@ -95,7 +95,9 @@ impl AcpState {
                 let cancelled = Box::pin(watch_cancellation.cancelled());
                 if let Either::Left(_) = block_on(future::select(cancelled, finished_rx)) {
                     watch_operation_token.cancel();
-                    let _ = watch_session.abort(&watch_request_id);
+                    if let Err(cause) = watch_session.abort(&watch_request_id) {
+                        eprintln!("jeden acp: the cancelled request {watch_request_id} is not aborted: {cause}");
+                    }
                 }
             });
 
@@ -126,14 +128,29 @@ impl AcpState {
                 prompt,
                 goal: None,
             });
-            let _ = finished_tx.send(());
-            let _ = session.end_subscription(subscription_id);
-            let _ = watcher.join();
-            let _ = forwarder.join();
-            let _ = session.set_interaction_handler(None);
-            if let Ok(mut active) = state.active.lock() {
-                active.remove(&session_id);
+            // Each cleanup step that fails is said: a subscription not ended or
+            // a handler not reset outlives the prompt unnoticed. The active
+            // prompt is cleared through a poisoned lock, so a panic elsewhere
+            // does not leave the session refusing every later prompt.
+            let _ = finished_tx.send(()); // the watcher may already be gone
+            if let Err(cause) = session.end_subscription(subscription_id) {
+                eprintln!(
+                    "jeden acp: the event subscription of {request_id} is not ended: {cause}"
+                );
             }
+            if watcher.join().is_err() {
+                eprintln!("jeden acp: the cancellation watcher of {request_id} panicked");
+            }
+            if forwarder.join().is_err() {
+                eprintln!("jeden acp: the event forwarder of {request_id} panicked");
+            }
+            if let Err(cause) = session.set_interaction_handler(None) {
+                eprintln!("jeden acp: session {session_id} keeps its interaction handler: {cause}");
+            }
+            match state.active.lock() {
+                Ok(mut active) => active.remove(&session_id),
+                Err(poisoned) => poisoned.into_inner().remove(&session_id),
+            };
 
             let aborted = state
                 .aborted
