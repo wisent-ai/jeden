@@ -56,15 +56,16 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
                 ))
                 .badge("DISCOVER"),
             );
-            let mut plugins = read_marketplace_catalog(&marketplace_cache_dir(name))
-                .map(|catalog| catalog_plugins(&catalog))
-                .unwrap_or_else(|_| {
-                    source
-                        .get("plugins")
-                        .and_then(Value::as_array)
-                        .cloned()
-                        .unwrap_or_default()
-                });
+            let mut plugins = match read_marketplace_catalog(&marketplace_cache_dir(name)) {
+                Ok(catalog) => catalog_plugins(&catalog),
+                Err(cause) => {
+                    return refusal_picker(
+                        "Marketplace",
+                        &format!("Catalogue for {name} cannot be read"),
+                        cause,
+                    );
+                }
+            };
             plugins.sort_by(|a, b| {
                 a.get("name")
                     .and_then(Value::as_str)
