@@ -75,14 +75,21 @@ impl ChatMemory {
             let role = message.get("role").and_then(Value::as_str).ok_or_else(|| {
                 format!("message {index} of the conversation names no role, so the chat log cannot keep it")
             })?;
-            let content = message.get("content").cloned().ok_or_else(|| {
-                format!("message {index} of the conversation has no content, so the chat log cannot keep it")
+            let mut fields = message.as_object().cloned().ok_or_else(|| {
+                format!("message {index} of the conversation is not an object, so the chat log cannot keep it")
             })?;
+            fields.remove("role");
+            // An assistant turn that only called tools carries no content.
+            let content = fields.remove("content");
             fresh.push(Entry {
                 index,
                 at: crate::agent::now_stamp(),
                 role: role.to_string(),
-                content,
+                content: match content {
+                    Some(content) => content,
+                    None => Value::Null,
+                },
+                fields,
             });
         }
         log.append(&fresh)?;
@@ -128,7 +135,7 @@ impl ChatMemory {
             out.push(json!({ "role": "system", "content": block }));
         }
         for entry in view.tail(&entries)? {
-            out.push(json!({ "role": entry.role, "content": entry.content }));
+            out.push(entry.message());
         }
         Ok(out)
     }

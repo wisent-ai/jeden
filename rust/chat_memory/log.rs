@@ -20,22 +20,41 @@ pub struct Entry {
     /// When it entered the log, RFC 3339.
     pub at: String,
     pub role: String,
-    /// The message's content exactly as the model saw it.
+    /// The message's content exactly as the model saw it (`null` for an
+    /// assistant turn that only called tools).
     pub content: Value,
+    /// Every other field the message carried — an assistant turn's
+    /// `tool_calls`, a tool result's `tool_call_id` and `name` — so the
+    /// message a turn is given back is the one the provider accepted.
+    #[serde(default, skip_serializing_if = "serde_json::Map::is_empty")]
+    pub fields: serde_json::Map<String, Value>,
 }
 
 impl Entry {
-    /// The content as text: a string as it is, anything else as its JSON.
+    /// The content as text: a string as it is, anything else as its JSON,
+    /// followed by the message's other fields as JSON when it has any.
     pub fn text(&self) -> String {
-        match &self.content {
+        let content = match &self.content {
             Value::String(text) => text.clone(),
             other => other.to_string(),
+        };
+        if self.fields.is_empty() {
+            return content;
         }
+        format!("{content}\n{}", Value::Object(self.fields.clone()))
     }
 
     /// How many bytes the entry takes in a view: its role and its text.
     pub fn bytes(&self) -> usize {
         self.role.len() + self.text().len()
+    }
+
+    /// The message as the conversation holds it: its fields, role and content.
+    pub fn message(&self) -> Value {
+        let mut message = self.fields.clone();
+        message.insert("role".into(), Value::String(self.role.clone()));
+        message.insert("content".into(), self.content.clone());
+        Value::Object(message)
     }
 }
 

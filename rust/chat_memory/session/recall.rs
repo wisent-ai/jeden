@@ -8,7 +8,10 @@ use std::path::Path;
 use super::super::{summary_bytes, Entry, Log, Tree, View};
 
 fn entry_json(entry: &Entry) -> Value {
-    json!({ "index": entry.index, "at": entry.at, "role": entry.role, "content": entry.content })
+    let mut shown = entry.message();
+    shown["index"] = json!(entry.index);
+    shown["at"] = json!(entry.at);
+    shown
 }
 
 /// A node's two halves as nodes, or, for a leaf, its message word for word.
