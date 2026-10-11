@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, constants, mkdirSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { constants as system } from 'node:os';
@@ -122,6 +122,9 @@ try {
   const originalMode = statSync(fixture).mode;
   const originalBytes = readFileSync(fixture);
   let denial;
+  const companion = join(workspace, 'readable.rs');
+  const companionText = `pub fn ${query}_readable() {}`;
+  let companionCreated = false;
   try {
     chmodSync(fixture, originalMode & ~(constants.S_IRUSR | constants.S_IRGRP | constants.S_IROTH));
     try { readFileSync(fixture); } catch (error) { denial = error; }
@@ -135,8 +138,30 @@ try {
     assert.ok(source.detail.includes(fixture) && source.detail.includes(`os error ${-denial.errno}`), source.detail);
     assert.ok(advice.unanswered.some(source => source.source === 'files'), JSON.stringify(advice));
     report.cases.push({ case: 'unreadable-files-source', verdict: 'passed', refusal: source });
+    writeFileSync(companion, `${companionText}\n`);
+    companionCreated = true;
+    const partialRead = await invoke(binary, ['context', 'recommend', query,
+      '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);
+    const partial = JSON.parse(succeeds(partialRead));
+    const partialSource = partial.sources.find(source => source.source === 'files');
+    assert.equal(partialSource?.available, false, JSON.stringify(partial));
+    assert.ok(partialSource.detail.includes(fixture)
+      && partialSource.detail.includes(`os error ${-denial.errno}`), partialSource.detail);
+    assert.ok(partial.recommendations.some(hit => hit.source === 'files'
+      && hit.locator.startsWith(`${companion}:`) && hit.snippet === companionText),
+    'a failed file must not discard the readable source recommendation');
+    assert.ok(partialRead.stderr.includes('blad czekania: context advisor source files;'), partialRead.stderr);
+    const partialProbe = await invoke(binary, ['context', 'sources', '--json', '--cwd', workspace]);
+    const partialInspection = JSON.parse(succeeds(partialProbe));
+    const inspectedFiles = partialInspection.sources.find(source => source.source === 'files');
+    assert.equal(inspectedFiles?.available, false, JSON.stringify(partialInspection));
+    assert.ok(inspectedFiles.detail.includes(fixture)
+      && inspectedFiles.detail.includes(`os error ${-denial.errno}`), inspectedFiles.detail);
+    assert.ok(partialProbe.stderr.includes('blad czekania: context advisor probe files;'), partialProbe.stderr);
+    report.cases.push({ case: 'partial-files-source-refusal', verdict: 'passed', refusal: partialSource, probe: inspectedFiles });
   } finally {
     chmodSync(fixture, originalMode);
+    if (companionCreated) unlinkSync(companion);
   }
   const restoredRead = await invoke(binary, ['context', 'recommend', query,
     '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);

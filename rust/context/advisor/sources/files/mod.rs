@@ -82,15 +82,31 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| left.1.locator.cmp(&right.1.locator))
     });
-    let considered = corpus.sections.len();
     let hits: Vec<Recommendation> = scored
         .into_iter()
         .map(|(_, hit)| hit)
         .take(request.limit)
         .collect();
     SourceOutcome {
-        status: SourceStatus::available("files", detail(&corpus), considered, hits.len(), started),
+        status: corpus_status(&corpus, hits.len(), started),
         hits,
+    }
+}
+
+fn corpus_status(corpus: &Corpus, returned: usize, started: Instant) -> SourceStatus {
+    if corpus.unreadable.is_empty() {
+        SourceStatus::available(
+            "files",
+            detail(corpus),
+            corpus.sections.len(),
+            returned,
+            started,
+        )
+    } else {
+        let mut status = SourceStatus::unavailable("files", detail(corpus), started);
+        status.considered = corpus.sections.len();
+        status.returned = returned;
+        status
     }
 }
 
@@ -130,13 +146,7 @@ pub(crate) fn probe(
     } else if corpus.sections.is_empty() {
         SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {
-        SourceStatus::available(
-            "files",
-            detail(&corpus),
-            corpus.sections.len(),
-            usize::default(),
-            started,
-        )
+        corpus_status(&corpus, usize::default(), started)
     };
     probe_value(
         &status,
