@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::mpsc::{self, Receiver, TrySendError};
+use std::sync::mpsc::{self, Receiver};
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -27,6 +27,44 @@ struct DapSession {
     stdin: ChildStdin,
     responses: Receiver<ServiceResult<Value>>,
     sequence: u64,
+    adapter: String,
+    stderr_log: PathBuf,
+}
+impl DapSession {
+    /// Why the adapter stopped answering: the transport `cause`, its exit
+    /// status when it has ended, and where what it printed on stderr is kept.
+    fn stopped(&mut self, cause: &str) -> ServiceError {
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => status.to_string(),
+            Ok(None) => "still running".to_string(),
+            Err(error) => format!("exit status unreadable: {error}"),
+        };
+        ServiceError::Backend {
+            service: "debugger",
+            detail: format!(
+                "DAP adapter {} stopped answering: {cause} ({status}); its stderr is kept in {}",
+                self.adapter,
+                self.stderr_log.display()
+            ),
+        }
+    }
+}
+
+/// The `debug_session` commands that end a session.
+#[derive(Clone, Copy)]
+enum SessionEnd {
+    Disconnect,
+    Terminate,
+}
+
+impl SessionEnd {
+    fn named(command: &str) -> Option<Self> {
+        match command {
+            "disconnect" => Some(Self::Disconnect),
+            "terminate" => Some(Self::Terminate),
+            _ => None,
+        }
+    }
 }
 impl Drop for DapSession {
     fn drop(&mut self) {
@@ -77,16 +115,34 @@ impl DebuggerService {
                 service: "debugger",
                 detail: self.health().detail,
             })?;
+        let stderr_log = self.cwd.join(".jeden/dap").join(format!(
+            "{}.stderr.log",
+            Path::new(command)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .ok_or_else(|| ServiceError::Backend {
+                    service: "debugger",
+                    detail: format!("DAP adapter {command} names no file"),
+                })?
+        ));
+        let log_failed = |error: std::io::Error| ServiceError::Backend {
+            service: "debugger",
+            detail: format!("cannot create {}: {error}", stderr_log.display()),
+        };
+        if let Some(directory) = stderr_log.parent() {
+            std::fs::create_dir_all(directory).map_err(log_failed)?;
+        }
+        let stderr = std::fs::File::create(&stderr_log).map_err(log_failed)?;
         let mut child = Command::new(command)
             .args(&self.args)
             .current_dir(&self.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(stderr))
             .spawn()
             .map_err(|e| ServiceError::Backend {
                 service: "debugger",
-                detail: e.to_string(),
+                detail: format!("cannot start DAP adapter {command}: {e}"),
             })?;
         let stdin = child.stdin.take().ok_or_else(|| ServiceError::Protocol {
             service: "debugger",
@@ -96,16 +152,13 @@ impl DebuggerService {
             service: "debugger",
             detail: "adapter stdout unavailable".into(),
         })?;
-        let (tx, rx) = mpsc::sync_channel(64);
+        let (tx, rx) = mpsc::channel();
         // One wake per adapter session: an announced cancellation sends a null
         // frame that `wait_response` reads as an event before re-checking its
         // own flag; the wake ends with the session's receiver.
         let wake = tx.clone();
         crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
-            !matches!(
-                wake.try_send(Ok(Value::Null)),
-                Err(TrySendError::Disconnected(_))
-            )
+            wake.send(Ok(Value::Null)).is_ok()
         });
         std::thread::spawn(move || {
             let mut reader = BufReader::new(stdout);
@@ -122,6 +175,8 @@ impl DebuggerService {
             stdin,
             responses: rx,
             sequence: 1,
+            adapter: command.to_string(),
+            stderr_log,
         })
     }
     pub(crate) fn execute(
@@ -149,7 +204,7 @@ impl DebuggerService {
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .ok_or_else(|| ServiceError::InvalidInput("command is required".into()))?;
-        if tool == "debug_session" && matches!(command, "disconnect" | "terminate") {
+        if tool == "debug_session" && SessionEnd::named(command).is_some() {
             let mut sessions = self.sessions.lock();
             let Some(mut session) = sessions.remove(&session_key) else {
                 return Err(ServiceError::InvalidInput(format!(
@@ -162,7 +217,8 @@ impl DebuggerService {
                 input.get("arguments").cloned().unwrap_or_else(|| json!({})),
             );
             write_frame(&mut session.stdin, &request)?;
-            let response = wait_response(&session.responses, context, session.sequence)?;
+            let sequence = session.sequence;
+            let response = wait_response(&mut session, context, sequence)?;
             drop(session);
             return bounded_json(context, "debugger", &response);
         }
@@ -182,10 +238,7 @@ impl DebuggerService {
             })?
             .is_some()
         {
-            return Err(ServiceError::Backend {
-                service: "debugger",
-                detail: "adapter exited".into(),
-            });
+            return Err(session.stopped("the adapter exited before this request"));
         }
         let seq = session.sequence;
         session.sequence = session.sequence.saturating_add(1);
@@ -195,7 +248,7 @@ impl DebuggerService {
             input.get("arguments").cloned().unwrap_or_else(|| json!({})),
         );
         write_frame(&mut session.stdin, &request)?;
-        let response = wait_response(&session.responses, context, seq)?;
+        let response = wait_response(session, context, seq)?;
         bounded_json(context, "debugger", &response)
     }
 }
@@ -243,7 +296,7 @@ fn read_frame(reader: &mut BufReader<impl Read>) -> ServiceResult<Value> {
     })
 }
 fn wait_response(
-    rx: &Receiver<ServiceResult<Value>>,
+    session: &mut DapSession,
     context: &OperationContext<'_>,
     request_seq: u64,
 ) -> ServiceResult<Value> {
@@ -251,7 +304,7 @@ fn wait_response(
     // turn wakes the receive through the session's cancellation wake.
     loop {
         check_operation(context)?;
-        match rx.recv() {
+        match session.responses.recv() {
             Ok(Ok(value))
                 if value.get("type").and_then(Value::as_str) == Some("response")
                     && value.get("request_seq").and_then(Value::as_u64) == Some(request_seq) =>
@@ -269,13 +322,8 @@ fn wait_response(
                 return Ok(value);
             }
             Ok(Ok(_event)) => continue,
-            Ok(Err(error)) => return Err(error),
-            Err(_) => {
-                return Err(ServiceError::Protocol {
-                    service: "debugger",
-                    detail: "adapter response channel closed".into(),
-                })
-            }
+            Ok(Err(error)) => return Err(session.stopped(&error.to_string())),
+            Err(_) => return Err(session.stopped("its response channel closed")),
         }
     }
 }
