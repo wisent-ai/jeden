@@ -123,8 +123,15 @@ impl RawModeGuard {
 }
 
 impl Drop for RawModeGuard {
+    // A terminal left in raw mode echoes nothing and ignores line editing
+    // after Jeden exits; when it cannot be restored the operator is told why
+    // and how to recover it.
     fn drop(&mut self) {
-        let _ = disable_raw_mode();
+        if let Err(error) = disable_raw_mode() {
+            eprintln!(
+                "jeden: the terminal is still in raw mode ({error}); run `stty sane` to restore it"
+            );
+        }
     }
 }
 
