@@ -1,14 +1,18 @@
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-use super::event;
-
 use super::{
-    hook_matches, parse_event_hooks, project_hooks_path, prompt_context, read_config,
-    resolve_trusted_hooks, unreadable_config, user_hooks_path, Hook, HookOutcome,
+    hook_matches, parse_event_hooks, project_hooks_path, read_config, resolve_trusted_hooks,
+    unreadable_config, user_hooks_path, Hook, HookOutcome,
 };
+
+/// The exit code of an outcome whose hook gave none of its own: it could
+/// not start, could not be waited on, was not handed its payload, or was an
+/// extension dispatch that failed. Every reader takes a negative code for
+/// exactly that.
+const NO_EXIT_CODE: i32 = -1;
 
 /// The user and project configs, and why any config that applies could not
 /// be read. The project config applies only when `allow_project`.
@@ -54,7 +58,7 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
         Ok(c) => c,
         Err(e) => {
             return HookOutcome {
-                exit_code: -1,
+                exit_code: NO_EXIT_CODE,
                 stdout: String::new(),
                 stderr: format!(
                     "hook spawn failed for `{}` in {}: {e}",
@@ -64,14 +68,18 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
             };
         }
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(payload.to_string().as_bytes());
-    }
+    // A hook that is not handed its payload judges an empty event; that is
+    // the hook's failure with its cause, not an answer. A hook that closed its
+    // input without reading it answered without the payload and stands.
+    let handed = match child.stdin.take() {
+        Some(mut stdin) => stdin.write_all(payload.to_string().as_bytes()),
+        None => Ok(()),
+    };
     let output = match child.wait_with_output() {
         Ok(o) => o,
         Err(e) => {
             return HookOutcome {
-                exit_code: -1,
+                exit_code: NO_EXIT_CODE,
                 stdout: String::new(),
                 stderr: format!(
                     "hook output failed for `{}` in {}: {e}",
@@ -81,6 +89,19 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
             }
         }
     };
+    if let Err(error) = handed {
+        if error.kind() != std::io::ErrorKind::BrokenPipe {
+            return HookOutcome {
+                exit_code: NO_EXIT_CODE,
+                stdout: String::new(),
+                stderr: format!(
+                    "hook `{}` in {} was not handed its payload: {error}",
+                    hook.command,
+                    cwd.display()
+                ),
+            };
+        }
+    }
     let mut outcome = HookOutcome {
         exit_code: output.status.code().unwrap_or(-1),
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -166,7 +187,7 @@ pub fn fire_event(
             stderr: String::new(),
         })),
         Err(error) => outcomes.push(HookOutcome {
-            exit_code: -1,
+            exit_code: NO_EXIT_CODE,
             stdout: String::new(),
             stderr: format!("extension hook dispatch failed: {error}"),
         }),
@@ -190,103 +211,4 @@ pub fn has_event_hooks(cwd: &Path, event: &str, allow_project: bool) -> bool {
             })
         || !super::tama::load_event_hooks(cwd, event, "", None).is_empty()
         || super::extensions::has_hooks(cwd, event)
-}
-
-/// Fire `PreToolUse` for `tool`; returns `Some(reason)` if a hook blocks it.
-pub fn pretool_block(
-    cwd: &Path,
-    tool: &str,
-    input: &Value,
-    allow_project: bool,
-    transcript_path: &Path,
-) -> Option<String> {
-    let payload = json!({
-        "event": event::PRE_TOOL_USE,
-        "hook_event_name": event::PRE_TOOL_USE,
-        "tool": tool,
-        "tool_name": tool,
-        "input": input,
-        "tool_input": input,
-        "cwd": cwd,
-        "transcript_path": transcript_path,
-    });
-    let outcomes = fire_event(cwd, event::PRE_TOOL_USE, tool, &payload, allow_project);
-    super::block_decision(&outcomes, "PreToolUse hook denied this tool")
-}
-
-/// Fire `PostToolUse` for `tool` (best-effort; outcomes are ignored).
-pub fn posttool(cwd: &Path, tool: &str, result: &Value, allow_project: bool) {
-    let payload =
-        json!({ "event": event::POST_TOOL_USE, "tool": tool, "result": result, "cwd": cwd });
-    let _ = fire_event(cwd, event::POST_TOOL_USE, tool, &payload, allow_project);
-}
-
-/// Fire `UserPromptSubmit`; returns injected context (joined hook stdout).
-///
-/// `automation` says Jeden itself wrote the prompt — a Pursuit stage or an
-/// automatic continuation — so a hook that learns from the operator's words
-/// (Tama's frustration drafter, the adaptive bridge) does not take a stage
-/// instruction such as "do not execute commands" for his correction.
-pub fn user_prompt_submit(
-    cwd: &Path,
-    prompt: &str,
-    automation: bool,
-    allow_project: bool,
-) -> Result<String, String> {
-    let author = if automation { "automation" } else { "operator" };
-    let payload = json!({
-        "event": event::USER_PROMPT_SUBMIT,
-        "prompt": prompt,
-        "prompt_author": author,
-        "cwd": cwd,
-    });
-    let outcomes = fire_event(cwd, event::USER_PROMPT_SUBMIT, "", &payload, allow_project);
-    prompt_context(&outcomes)
-}
-
-/// Fire SessionStart and return context for the model, not a terminal banner.
-pub fn session_start(
-    cwd: &Path,
-    allow_project: bool,
-    source: &str,
-    session_id: &str,
-    transcript_path: &Path,
-) -> Result<String, String> {
-    let payload = json!({
-        "event": event::SESSION_START,
-        "hook_event_name": event::SESSION_START,
-        "cwd": cwd,
-        "source": source,
-        "session_id": session_id,
-        "transcript_path": transcript_path,
-    });
-    let outcomes = fire_event(cwd, event::SESSION_START, "", &payload, allow_project);
-    prompt_context(&outcomes)
-}
-
-/// Fire `Stop` for the answer the agent is about to give; `Some(reason)` means
-/// a hook refused it, and the turn must continue with that reason instead of
-/// ending. The payload is the shape every Stop hook reads (Claude's, which the
-/// Tama catalog is written against): the session, its transcript, the pending
-/// answer as `last_assistant_message`, and `stop_hook_active` once an earlier
-/// answer of the same turn was already refused.
-pub fn answer_stop_block(
-    cwd: &Path,
-    session_id: &str,
-    transcript_path: &Path,
-    answer: &str,
-    stop_hook_active: bool,
-    allow_project: bool,
-) -> Option<String> {
-    let payload = json!({
-        "event": event::STOP,
-        "hook_event_name": event::STOP,
-        "cwd": cwd,
-        "session_id": session_id,
-        "transcript_path": transcript_path,
-        "last_assistant_message": answer,
-        "stop_hook_active": stop_hook_active,
-    });
-    let outcomes = fire_event(cwd, event::STOP, "", &payload, allow_project);
-    super::block_decision(&outcomes, "Stop hook refused this answer")
 }

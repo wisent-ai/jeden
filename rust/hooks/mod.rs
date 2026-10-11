@@ -31,6 +31,7 @@ use std::path::{Path, PathBuf};
 mod describe;
 #[path = "../extensions/mod.rs"]
 pub(crate) mod extensions;
+mod firing;
 mod run;
 pub mod tama;
 
@@ -45,10 +46,8 @@ pub use extensions::{
     provider_entries as extension_provider_entries, reload as reload_extensions,
     status as extension_status, ReloadReport,
 };
-pub use run::{
-    answer_stop_block, fire_event, has_event_hooks, posttool, pretool_block, session_start,
-    user_prompt_submit,
-};
+pub use firing::{answer_stop_block, posttool, pretool_block, session_start, user_prompt_submit};
+pub use run::{fire_event, has_event_hooks};
 
 /// One configured hook: an optional matcher (regex over the tool name; empty =
 /// match everything) and the shell command to run.
