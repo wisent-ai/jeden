@@ -34,21 +34,29 @@ pub(super) fn configured_extension_paths(cwd: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-pub(super) fn discover_custom_tool_files(cwd: &Path) -> Vec<String> {
+/// Every custom tool module under the user's and the project's
+/// `.jeden/tools`. A missing directory holds none; one that exists but
+/// cannot be listed is refused naming it, never counted as holding none.
+pub(super) fn discover_custom_tool_files(cwd: &Path) -> Result<Vec<String>, String> {
     let mut out = Vec::new();
     let mut dirs = vec![dirs_home().join(".jeden/tools"), cwd.join(".jeden/tools")];
     dirs.sort();
     dirs.dedup();
     for dir in dirs {
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if module_file(&path) {
-                    out.push(path.display().to_string());
-                }
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!("cannot list {}: {error}", dir.display())),
+        };
+        for entry in entries {
+            let path = entry
+                .map_err(|error| format!("cannot list {}: {error}", dir.display()))?
+                .path();
+            if module_file(&path) {
+                out.push(path.display().to_string());
             }
         }
     }
     out.sort();
-    out
+    Ok(out)
 }

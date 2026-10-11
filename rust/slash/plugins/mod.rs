@@ -223,17 +223,23 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
 }
 
 pub(crate) fn reload_plugins_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let custom_tools = discover_custom_tool_files(context.cwd);
     let visible_tools = tools::list_tools(context.cwd);
+    let detail = match discover_custom_tool_files(context.cwd) {
+        Ok(custom_tools) => format!(
+            "{} custom tool file(s) · {} visible tool definition(s)",
+            custom_tools.len(),
+            visible_tools.len()
+        ),
+        Err(error) => format!(
+            "custom tool files unknown: {error} · {} visible tool definition(s)",
+            visible_tools.len()
+        ),
+    };
     PickerSpec::new(
         "Reload plugins",
         vec![
             PickerItem::action("Reload plugin and tool registry", "/reload-plugins run")
-                .detail(format!(
-                    "{} custom tool file(s) · {} visible tool definition(s)",
-                    custom_tools.len(),
-                    visible_tools.len()
-                ))
+                .detail(detail)
                 .badge("RELOAD"),
         ],
     )
