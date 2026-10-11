@@ -6,7 +6,7 @@ import { createInterface } from 'node:readline';
 export function startRpc({ binary, cwd, env, report }) {
   const pending = new Map();
   let processFailure;
-  const command = { program: binary, args: ['rpc'], cwd, stderr: '' };
+  const command = { program: binary, args: ['rpc'], cwd, stderr: '', protocolErrors: [] };
   report.commands.push(command);
   const child = spawn(binary, command.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
   function fail(error) {
@@ -35,24 +35,33 @@ export function startRpc({ binary, cwd, env, report }) {
       pending.delete(frame.id);
       if (frame.error) request.reject(new Error(`${frame.error.code}: ${frame.error.message}`));
       else request.resolve(frame.result);
-    } catch (error) { fail(error); }
+    } catch (error) {
+      command.protocolErrors.push({ line, cause: String(error) });
+      fail(error);
+    }
   });
-  function rpc(method, params) {
-    if (processFailure) return Promise.reject(processFailure);
+  // One request, with the id it was sent under, so a journey can name it in a
+  // later request (context/cancel takes the id of the request it cancels).
+  function request(method, params) {
+    if (processFailure) return { id: undefined, response: Promise.reject(processFailure) };
     const id = randomUUID();
     const frame = { id, method, params };
     report.frames.push({ direction: 'request', frame });
-    return new Promise((resolveRequest, reject) => {
+    const response = new Promise((resolveRequest, reject) => {
       pending.set(id, { resolve: resolveRequest, reject });
       child.stdin.write(`${JSON.stringify(frame)}\n`, (error) => {
         if (error) fail(error);
       });
     });
+    return { id, response };
+  }
+  function rpc(method, params) {
+    return request(method, params).response;
   }
   async function end() {
     if (child.exitCode === null && child.signalCode === null) child.stdin.end();
     await exited;
     return command;
   }
-  return { rpc, end, command };
+  return { rpc, request, end, command };
 }
