@@ -80,6 +80,8 @@ try {
     ['syntax', '{'],
     ['root', JSON.stringify([])],
     ['servers', JSON.stringify({ mcpServers: [] })],
+    ['server', JSON.stringify({ mcpServers: { [name]: false } })],
+    ['enabled', JSON.stringify({ mcpServers: { [name]: { ...declaration, enabled: 'false' } } })],
     ['disabled', JSON.stringify({ mcpServers: { [name]: declaration }, disabledServers: {} })],
     ['disabled-member', JSON.stringify({ mcpServers: { [name]: declaration }, disabledServers: [false] })],
   ];
