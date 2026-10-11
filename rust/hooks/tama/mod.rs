@@ -11,8 +11,10 @@
 //!
 //! Source precedence: env `JEDEN_TAMA_REGISTRY` (path; empty string disables)
 //! > config key `hooks.tamaRegistry` (path; empty disables) > the registry
-//! > Tama installed at `~/.shared-hooks/registry.json`. No registry found =
-//! > no hooks, quietly. No source checkout is looked at.
+//! > Tama installed at `~/.shared-hooks/registry.json`. No installed registry
+//! > = no hooks, quietly; a registry named explicitly that does not exist is
+//! > refused naming it, never read as "no hooks". No source checkout is
+//! > looked at.
 
 mod command;
 mod events;
@@ -45,31 +47,41 @@ pub struct TamaHook {
     pub unrunnable: Option<String>,
 }
 
-/// Resolve the registry path by precedence; `None` disables the feature.
-/// An explicitly configured path that does not exist also yields `None`
-/// (quiet — no behavior change when no registry is found).
-pub fn registry_path(cwd: &Path) -> Option<PathBuf> {
+/// Resolve the registry path by precedence; `Ok(None)` disables the feature
+/// (an empty explicit path, or no Tama installed under the home). A path
+/// named explicitly that does not exist is refused naming it and where it
+/// was named: answered as `None`, a typo in it turned off every Tama guard
+/// without a word.
+pub fn registry_path(cwd: &Path) -> Result<Option<PathBuf>, String> {
     if let Some(raw) = std::env::var_os("JEDEN_TAMA_REGISTRY") {
-        return explicit_path(&raw.to_string_lossy());
+        return explicit_path(&raw.to_string_lossy(), "JEDEN_TAMA_REGISTRY");
     }
     let config = crate::cli::config::merged_config_value(cwd);
     if let Some(raw) =
         crate::cli::config::config_value_at(&config, "hooks.tamaRegistry").and_then(Value::as_str)
     {
-        return explicit_path(raw);
+        return explicit_path(raw, "the configuration key hooks.tamaRegistry");
     }
-    let home = std::env::var_os("HOME").map(PathBuf::from)?;
-    let installed = home.join(".shared-hooks/registry.json");
-    installed.is_file().then_some(installed)
+    // The one home lookup: read from HOME alone, an unset HOME skipped the
+    // installed registry and every Tama guard with it.
+    let installed = crate::slash::common::dirs_home().join(".shared-hooks/registry.json");
+    Ok(installed.is_file().then_some(installed))
 }
 
-fn explicit_path(raw: &str) -> Option<PathBuf> {
+fn explicit_path(raw: &str, named_by: &str) -> Result<Option<PathBuf>, String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
-        return None; // empty string disables the registry entirely
+        return Ok(None); // empty string disables the registry entirely
     }
     let path = PathBuf::from(trimmed);
-    path.is_file().then_some(path)
+    if path.is_file() {
+        Ok(Some(path))
+    } else {
+        Err(format!(
+            "the Tama registry {} named by {named_by} is not a file, so no Tama hook can run",
+            path.display()
+        ))
+    }
 }
 
 /// Map a Tama registry event name to jeden's `(event, tool matcher)` pair.
@@ -110,7 +122,8 @@ fn tool_matcher(tool: &str) -> String {
         "lookup" => "^(search_files|search_text|grep_regex|glob_paths|ast_search)$",
         // jeden has no wait/goal tools; park both on the todo tool so these
         // guardrail hooks still fire against the closest equivalent surface.
-        "wait" | "goal" => "^todo$",
+        "wait" => "^todo$",
+        "goal" => "^todo$",
         other => return format!("^{}$", regex::escape(other)),
     };
     matcher.to_string()

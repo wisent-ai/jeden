@@ -17,8 +17,22 @@ pub fn load_event_hooks(
     tool: &str,
     source: Option<&str>,
 ) -> Vec<TamaHook> {
-    let Some(path) = registry_path(cwd) else {
-        return Vec::new();
+    let path = match registry_path(cwd) {
+        Ok(Some(path)) => path,
+        Ok(None) => return Vec::new(),
+        // A registry named explicitly that does not exist answers one
+        // blocking registration that cannot start, like an unreadable one.
+        Err(reason) => {
+            return vec![TamaHook {
+                id: "tama-registry".to_string(),
+                hook: Hook {
+                    matcher: String::new(),
+                    command: String::new(),
+                },
+                blocking: true,
+                unrunnable: Some(reason),
+            }]
+        }
     };
     // A registry that cannot be read or is not JSON answers one blocking
     // registration that cannot start, naming the file and the cause; read as
@@ -182,7 +196,14 @@ pub fn normalize_outcome(event: &str, blocking: bool, outcome: HookOutcome) -> H
 /// whose file is absent, because a guard that cannot start is the operator's
 /// business.
 pub fn describe_source(cwd: &Path) -> Option<String> {
-    let path = registry_path(cwd)?;
+    let path = match registry_path(cwd) {
+        Ok(path) => path?,
+        Err(reason) => {
+            return Some(format!(
+                "Tama registry unusable; every event is refused until it is repaired: {reason}"
+            ))
+        }
+    };
     let registry = match read_config(&path) {
         Ok(registry) => registry,
         Err(reason) => {

@@ -223,7 +223,7 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "hooks.tamaRegistry",
         typ: "string",
-        description: "Path to the Tama hook registry (shared-hooks registry.json). Empty disables Tama hooks; unset auto-discovers known locations.",
+        description: "Path to the Tama hook registry (shared-hooks registry.json). Empty disables Tama hooks; unset reads the registry Tama installed under ~/.shared-hooks. A path set here that is not a file refuses every Tama-guarded event, naming the path, instead of running without the guards.",
         default_json: "\"\"",
         enum_values: &[],
     },
