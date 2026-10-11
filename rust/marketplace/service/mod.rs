@@ -185,11 +185,13 @@ impl MarketplaceService {
                 ));
             }
         }
-        if let Err(cause) = fs::remove_dir_all(&transaction) {
-            eprintln!(
+        match fs::remove_dir_all(&transaction) {
+            Ok(()) => {}
+            Err(cause) if cause.kind() == std::io::ErrorKind::NotFound => {}
+            Err(cause) => eprintln!(
                 "jeden: marketplace transaction {} was not removed: {cause}",
                 transaction.display()
-            );
+            ),
         }
         result
     }
