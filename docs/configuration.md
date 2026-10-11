@@ -115,6 +115,7 @@ With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
   lists the messages of a picked time.
 - A `chatMemory` without `summaryModel` or a positive `viewBytes`, a
   `viewBytes` smaller than one summary, a summary model Brama's catalog
-  refuses, and a view whose newest message alone outgrows `viewBytes` stop the
+  refuses, and a view whose newest turn alone (the newest message, or an
+  assistant turn with its tool results) outgrows `viewBytes` stop the
   turn with that cause. An unreadable log, tree or view is refused naming the
   file, never restarted.
