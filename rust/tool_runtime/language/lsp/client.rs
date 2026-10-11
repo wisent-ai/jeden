@@ -22,6 +22,26 @@ pub(super) struct LspClient {
     pub(super) stdin: ChildStdin,
     messages: Receiver<Result<Value, String>>,
     opened: BTreeMap<PathBuf, i64>,
+    program: String,
+    stderr_log: PathBuf,
+}
+
+impl LspClient {
+    /// Why the server stopped answering: the transport `cause`, the server's
+    /// exit status when it has ended, and where what it printed on stderr is
+    /// kept.
+    fn stopped(&mut self, cause: &str) -> String {
+        let status = match self.child.try_wait() {
+            Ok(Some(status)) => status.to_string(),
+            Ok(None) => "still running".to_string(),
+            Err(error) => format!("exit status unreadable: {error}"),
+        };
+        format!(
+            "LSP server {} stopped answering: {cause} ({status}); its stderr is kept in {}",
+            self.program,
+            self.stderr_log.display()
+        )
+    }
 }
 
 impl Drop for LspClient {
@@ -49,7 +69,7 @@ fn reader_thread(stdout: impl Read + Send + 'static, sender: mpsc::Sender<Result
                         return;
                     }
                 }
-                if header == "\r\n" || header == "\n" {
+                if header.trim().is_empty() {
                     break;
                 }
                 if let Some(value) = header.trim().strip_prefix("Content-Length:") {
@@ -114,8 +134,8 @@ pub(super) fn await_response(
                 return Ok(message.get("result").cloned().unwrap_or(Value::Null));
             }
             Ok(Ok(_notification_or_wake)) => {}
-            Ok(Err(error)) => return Err(error),
-            Err(_) => return Err("LSP reader stopped".into()),
+            Ok(Err(error)) => return Err(client.stopped(&error)),
+            Err(_) => return Err(client.stopped("its reader ended")),
         }
     }
 }
@@ -128,14 +148,28 @@ pub(super) fn start(
     if !executable_exists(program) {
         return Err(format!("LSP server executable not found: {program}"));
     }
+    let stderr_log = runtime.cwd.join(".jeden/lsp").join(format!(
+        "{}.stderr.log",
+        Path::new(program)
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .ok_or_else(|| format!("LSP server program {program} names no file"))?
+    ));
+    let log_directory = stderr_log
+        .parent()
+        .ok_or_else(|| format!("{} has no directory", stderr_log.display()))?;
+    fs::create_dir_all(log_directory)
+        .map_err(|error| format!("cannot create {}: {error}", log_directory.display()))?;
+    let stderr = fs::File::create(&stderr_log)
+        .map_err(|error| format!("cannot create {}: {error}", stderr_log.display()))?;
     let mut child = Command::new(program)
         .args(args)
         .current_dir(runtime.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::from(stderr))
         .spawn()
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("cannot start LSP server {program}: {error}"))?;
     let stdin = child.stdin.take().ok_or("LSP server stdin unavailable")?;
     let stdout = child.stdout.take().ok_or("LSP server stdout unavailable")?;
     let (sender, messages) = mpsc::channel();
@@ -151,6 +185,8 @@ pub(super) fn start(
         stdin,
         messages,
         opened: BTreeMap::new(),
+        program: program.to_string(),
+        stderr_log,
     };
     let id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
     send(
