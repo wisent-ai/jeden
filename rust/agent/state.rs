@@ -14,13 +14,18 @@ pub(super) fn read_mode_state(cwd: &Path) -> Result<Value, String> {
 pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
     let path = mode_state_path(cwd);
     if let Some(parent) = path.parent() {
-        crate::slash::state::ensure_mode_state_dir(parent)?;
+        crate::slash::state::ensure_mode_state_dir(parent).map_err(|error| {
+            format!("cannot create the directory of {}: {error}", path.display())
+        })?;
     }
-    fs::write(
-        path,
-        serde_json::to_string_pretty(state).map_err(|e| e.to_string())? + "\n",
-    )
-    .map_err(|e| e.to_string())
+    let text = serde_json::to_string_pretty(state).map_err(|error| {
+        format!(
+            "cannot encode the mode state for {}: {error}",
+            path.display()
+        )
+    })?;
+    fs::write(&path, text + "\n")
+        .map_err(|error| format!("cannot write the mode state {}: {error}", path.display()))
 }
 
 pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
@@ -149,7 +154,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
     // Duration guard: stop once the deadline has passed.
     if let Some(until) = state.pointer("/loop_mode/until").and_then(Value::as_u64) {
         if now_millis_u64() >= until {
-            disable_loop(cwd, &mut state);
+            disable_loop(cwd, &mut state)?;
             return Ok(None);
         }
     }
@@ -158,7 +163,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
         .pointer("/loop_mode/remaining")
         .and_then(Value::as_u64);
     if remaining == Some(0) {
-        disable_loop(cwd, &mut state);
+        disable_loop(cwd, &mut state)?;
         return Ok(None);
     }
     let prompt = state
@@ -168,7 +173,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
         .trim()
         .to_string();
     if prompt.trim().is_empty() {
-        disable_loop(cwd, &mut state);
+        disable_loop(cwd, &mut state)?;
         return Ok(None);
     }
     // Consume one iteration.
@@ -179,16 +184,22 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
                 lm.insert("remaining".into(), json!(next));
             }
         }
-        let _ = write_mode_state(cwd, &state);
+        // An iteration that cannot be counted is not run: unrecorded, the
+        // same iteration would be resubmitted for ever.
+        write_mode_state(cwd, &state)
+            .map_err(|error| format!("loop mode could not count this iteration: {error}"))?;
     }
     Ok(Some(prompt))
 }
 
-fn disable_loop(cwd: &Path, state: &mut Value) {
+/// Turn loop mode off in the saved mode state; a state that cannot be written
+/// is the error, since a loop still enabled there would run again.
+fn disable_loop(cwd: &Path, state: &mut Value) -> Result<(), String> {
     if let Some(obj) = state.as_object_mut() {
         obj.insert("loop_mode".into(), json!({ "enabled": false }));
     }
-    let _ = write_mode_state(cwd, state);
+    write_mode_state(cwd, state)
+        .map_err(|error| format!("loop mode could not be turned off: {error}"))
 }
 
 pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {

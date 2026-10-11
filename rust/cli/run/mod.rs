@@ -12,7 +12,9 @@ pub(crate) mod slash_ui;
 pub(crate) use crate::update;
 
 /// Run one agent turn against the shared conversation and persist retry/session
-/// bookkeeping, mirroring the CLI `run` path.
+/// bookkeeping, mirroring the CLI `run` path: a record that cannot be written
+/// is the turn's error, naming the workspace and the cause, because `/retry`
+/// and every session command read it; it was dropped without a word.
 pub(crate) fn run_turn_shared(
     conversation: &Arc<Mutex<agent::Conversation>>,
     args: &Args,
@@ -22,16 +24,22 @@ pub(crate) fn run_turn_shared(
 ) -> Result<String, String> {
     let mut conv = conversation.lock();
     let result = conv.run_turn(args, task, attachments, hooks);
-    match &result {
-        Ok(_) => {
-            let _ = agent::update_task_outcome(&args.cwd, task, true);
-            let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
+    let workspace = args.cwd.display();
+    let mut text = match result {
+        Err(error) => {
+            return Err(match agent::update_task_outcome(&args.cwd, task, false) {
+                Ok(()) => error,
+                Err(recording) => format!(
+                    "{error}; cannot persist failed task outcome for workspace {workspace}: {recording}"
+                ),
+            });
         }
-        Err(_) => {
-            let _ = agent::update_task_outcome(&args.cwd, task, false);
-        }
-    }
-    let mut text = result.map(|text| text.trim().to_string())?;
+        Ok(text) => text.trim().to_string(),
+    };
+    agent::update_task_outcome(&args.cwd, task, true).map_err(|error| {
+        format!("cannot persist successful task outcome for workspace {workspace}: {error}")
+    })?;
+    record_session(args, &conv)?;
     // Loop mode: auto-resubmit until the count or deadline `/loop` was given
     // runs out, `/loop off`, a failed turn or cancellation, as the CLI path does.
     while let Some(loop_prompt) = agent::loop_next_prompt(&args.cwd, task)? {
@@ -40,7 +48,7 @@ pub(crate) fn run_turn_shared(
         }
         match conv.run_turn(args, &loop_prompt, &[], hooks) {
             Ok(more) => {
-                let _ = agent::update_last_session_path(&args.cwd, &conv.session_path());
+                record_session(args, &conv)?;
                 text = format!("{}\n\n— loop resubmit —\n{}", text, more.trim());
             }
             Err(error) => {
@@ -50,4 +58,17 @@ pub(crate) fn run_turn_shared(
         }
     }
     Ok(text)
+}
+
+/// Record the conversation's session as the workspace's last one, or say why
+/// it could not be recorded.
+fn record_session(args: &Args, conv: &agent::Conversation) -> Result<(), String> {
+    let session = conv.session_path();
+    agent::update_last_session_path(&args.cwd, &session).map_err(|error| {
+        format!(
+            "cannot persist last session {} for workspace {}: {error}",
+            session.display(),
+            args.cwd.display()
+        )
+    })
 }
