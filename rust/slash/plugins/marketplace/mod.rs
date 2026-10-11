@@ -115,9 +115,23 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
             if cn != provisional {
                 let to = marketplace_cache_dir(&cn);
                 if let Some(parent) = to.parent() {
-                    let _ = fs::create_dir_all(parent);
+                    fs::create_dir_all(parent).map_err(|e| {
+                        format!(
+                            "failed to make the marketplace cache folder {}: {e}",
+                            parent.display()
+                        )
+                    })?;
                 }
-                let _ = fs::remove_dir_all(&to);
+                match fs::remove_dir_all(&to) {
+                    Ok(()) => {}
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => {
+                        return Err(format!(
+                            "failed to clear the earlier cache of marketplace '{cn}' at {}: {e}",
+                            to.display()
+                        ))
+                    }
+                }
                 fs::rename(&cache, &to)
                     .map_err(|e| format!("failed to key marketplace cache to '{cn}': {e}"))?;
             }
