@@ -121,17 +121,8 @@ impl View {
                 self.log_len = entries.len() as u64;
                 return Ok(size);
             }
-            // Every tail message before the newest turn folds at once, so the
-            // view has room again for as many turns as it can hold before it
-            // changes next. The tail never starts at a tool result: a
-            // provider refuses a tool result whose call is not just before
-            // it, so the newest assistant turn that called tools stays with
-            // its results.
-            let keep_from = tail.iter().rposition(|entry| entry.role != "tool");
-            if let Some(older) = keep_from
-                .map(|start| &tail[..start])
-                .filter(|older| !older.is_empty())
-            {
+            let older = foldable(tail);
+            if !older.is_empty() {
                 for entry in older {
                     let leaf = tree.leaf(entry, summary_bytes, summarize)?;
                     self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
@@ -152,6 +143,19 @@ impl View {
             self.frontier = merged.iter().map(|node| node.id.clone()).collect();
             nodes = merged;
         }
+    }
+}
+
+/// The tail messages a fold takes: every one before the newest turn, all at
+/// once, so the view has room again for as many turns as it can hold before
+/// it changes next. The tail never starts at a tool result — a provider
+/// refuses a tool result whose call is not just before it — so the newest
+/// message that is not a tool result stays with the results after it. The
+/// background builder writes the leaves of exactly these ahead of the turn.
+pub fn foldable(tail: &[Entry]) -> &[Entry] {
+    match tail.iter().rposition(|entry| entry.role != "tool") {
+        Some(start) => &tail[..start],
+        None => &[],
     }
 }
 

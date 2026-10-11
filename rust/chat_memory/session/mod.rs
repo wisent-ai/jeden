@@ -165,10 +165,8 @@ fn build_leaves(dir: &Path, summarize: &Summarize) -> Result<(), String> {
     let entries = Log::at(dir).read()?;
     let mut tree = Tree::open(dir)?;
     let view = View::load(dir)?;
-    if let [older @ .., _newest] = view.tail(&entries)? {
-        for entry in older {
-            tree.leaf(entry, summary_bytes(), summarize)?;
-        }
+    for entry in super::super::view::foldable(view.tail(&entries)?) {
+        tree.leaf(entry, summary_bytes(), summarize)?;
     }
     Ok(())
 }
