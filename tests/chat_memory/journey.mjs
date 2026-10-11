@@ -127,11 +127,15 @@ try {
     '--model', model, '--resume-session', session], chat));
   const everything = JSON.parse(succeeds(jeden(['chat-memory', 'dates', session, leaf.from,
     String(Number.MAX_SAFE_INTEGER), '--json'], chat)));
-  report.observations.toolTurn = everything.messages.filter((message) => message.tool_call_id || message.tool_calls);
-  assert.ok(everything.messages.some((message) => message.tool_calls),
+  // A message's other fields are kept under `fields`, as in the log itself.
+  report.observations.toolTurn = everything.messages.filter((message) => message.fields);
+  assert.ok(everything.messages.some((message) => message.fields?.tool_calls),
     'the assistant turn keeps the tool calls it made');
-  assert.ok(everything.messages.some((message) => message.role === 'tool' && message.tool_call_id),
+  assert.ok(everything.messages.some((message) => message.role === 'tool' && message.fields?.tool_call_id),
     'the tool result keeps the call it answers');
+  // The text a person reads shows them too.
+  const printed = succeeds(jeden(['chat-memory', 'dates', session, leaf.from, String(Number.MAX_SAFE_INTEGER)], chat));
+  assert.match(printed, /^tool_call_id: /m, 'the text answer shows the tool result\'s call id');
   succeeds(jeden(['run', 'Respond exactly: AFTER-TOOLS', '--cwd', chat.directory, '--model', model, '--model-only',
     '--resume-session', session], chat));
   report.verdict = 'passed';

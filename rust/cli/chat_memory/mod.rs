@@ -30,14 +30,25 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     Ok(text(&answer))
 }
 
+/// A value as a person reads it: a string as it is, anything else as JSON.
+fn plain(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
 /// The answer for a person: each node as `[id] from..to` and its summary,
-/// each message as `#index role at` and its text.
+/// each message as `#index role at` and its text, followed by the other
+/// fields it carries (`fields`: an assistant turn's `tool_calls`, a tool
+/// result's `tool_call_id`), one per line.
 fn text(answer: &serde_json::Value) -> String {
     let mut out = String::new();
     if let Some(log) = answer.get("log") {
         out.push_str(&format!(
             "log {} holds {} message(s)\n",
-            log["path"], log["messages"]
+            plain(&log["path"]),
+            log["messages"]
         ));
         out.push_str(&format!(
             "view: {} bytes over the first {} message(s); messages from #{} word for word\n",
@@ -54,7 +65,10 @@ fn text(answer: &serde_json::Value) -> String {
     for node in nodes {
         out.push_str(&format!(
             "[{}] {}..{}\n{}\n",
-            node["id"], node["from"], node["to"], node["summary"]
+            plain(&node["id"]),
+            plain(&node["from"]),
+            plain(&node["to"]),
+            plain(&node["summary"])
         ));
     }
     let messages = answer
@@ -67,8 +81,14 @@ fn text(answer: &serde_json::Value) -> String {
     for message in messages {
         out.push_str(&format!(
             "#{} {} {}\n{}\n",
-            message["index"], message["role"], message["at"], message["content"]
+            message["index"],
+            plain(&message["role"]),
+            plain(&message["at"]),
+            plain(&message["content"])
         ));
+        for (field, value) in message["fields"].as_object().into_iter().flatten() {
+            out.push_str(&format!("{field}: {value}\n"));
+        }
     }
     out
 }

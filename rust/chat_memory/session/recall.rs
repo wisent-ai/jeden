@@ -7,11 +7,10 @@ use std::path::Path;
 
 use super::super::{summary_bytes, Entry, Log, Tree, View};
 
+/// A message as the log keeps it: index, time, role, content and, when it
+/// carried any, its other fields under `fields` (tool calls, a tool call's id).
 fn entry_json(entry: &Entry) -> Value {
-    let mut shown = entry.message();
-    shown["index"] = json!(entry.index);
-    shown["at"] = json!(entry.at);
-    shown
+    json!(entry)
 }
 
 /// A node's two halves as nodes, or, for a leaf, its message word for word.
