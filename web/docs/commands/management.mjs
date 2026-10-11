@@ -83,15 +83,9 @@ export const managementCommands = [
   },
 
   // Completion leaves.
-  ...["bash", "zsh", "fish"].map((shell) => ({
-    path: `completions/${shell}`,
-    group: "Shell completions",
-    invocation: `jeden completions ${shell}`,
-    purpose: `Generate Jeden completions for ${shell}.`,
-    inputs: [`Required shell selector: <code>${shell}</code>; no output path is accepted because the script is written to stdout.`],
-    effect: `Prints a ${shell} completion program derived from the current usage and slash-command tables; redirect it into the shell's normal completion-loading location.`,
-    refusals: ["Any selector outside <code>bash</code>, <code>zsh</code>, and <code>fish</code> is refused by the parent command's exact unknown-shell error."],
-  })),
+  completionPage("bash"),
+  completionPage("zsh"),
+  completionPage("fish"),
 
   // Worktree leaves.
   {
@@ -100,7 +94,7 @@ export const managementCommands = [
     invocation: "jeden worktree list [--json] [--cwd path]",
     purpose: "List Git worktrees correlated with Jeden task records.",
     inputs: ["Optional: <code>--cwd</code> for the repository and <code>--json</code> for structured rows."],
-    effect: "Reads Git worktree metadata and task stores, classifies managed entries as live or stale, and prints them without creating scheduler state or mutating a worktree.",
+    effect: "Reads Git worktree metadata and task stores, classifies managed entries as live or stale, and prints them without creating scheduler state or mutating a worktree. Only a store, jobs directory, session root or workspace root that does not exist is empty: one that cannot be listed (<code>the job records in PATH cannot be listed: CAUSE</code>, <code>the session root …</code>, <code>the workspace root …</code>), a job record that cannot be read (<code>the job record PATH cannot be read: CAUSE</code>) or does not parse (<code>the job record PATH is not a job record: CAUSE</code>) fails the command, because the workspace that record claims would otherwise be listed as an orphan.",
     refusals: ["An unexpected argument is refused as <code>unexpected argument 'ARG': usage: jeden worktree [list|clear] [--dry-run] [--yes] [--json]</code> and exits 2; repositories without managed worktrees return an explanatory empty-state result."],
   },
   {
@@ -116,6 +110,7 @@ export const managementCommands = [
       "Live or unknown task ownership is kept. When <code>git worktree remove</code> refuses (modified or untracked files), the worktree is kept and reported as skipped with git's own message; it is never deleted another way.",
       "A checkout no repository claims is kept when it has uncommitted changes or when <code>git status</code> does not answer in it. The refusal includes every returned status row, in text and JSON alike, rather than hiding changes after a fixed preview count.",
       "Filesystem removal failures retain the affected path and operating-system cause. If a clean unclaimed checkout was removed but its administrative directory could not be removed, the row explicitly reports that partial outcome and the remaining directory rather than claiming complete cleanup.",
+      "The same job-record, store and root failures as <code>jeden worktree list</code> fail the command before anything is removed, in <code>--dry-run</code> and <code>--yes</code> alike: a workspace whose record could not be read is never taken for an orphan and removed from under its job.",
     ],
   },
 
@@ -285,3 +280,16 @@ export const managementCommands = [
     ],
   },
 ];
+
+/** The page of `jeden completions <shell>` for one supported shell. */
+function completionPage(shell) {
+  return {
+    path: `completions/${shell}`,
+    group: "Shell completions",
+    invocation: `jeden completions ${shell}`,
+    purpose: `Generate Jeden completions for ${shell}.`,
+    inputs: [`Required shell selector: <code>${shell}</code>; no output path is accepted because the script is written to stdout.`],
+    effect: `Prints a ${shell} completion program derived from the current usage and slash-command tables; redirect it into the shell's normal completion-loading location.`,
+    refusals: ["Any selector outside <code>bash</code>, <code>zsh</code>, and <code>fish</code> is refused by the parent command's exact unknown-shell error."],
+  };
+}

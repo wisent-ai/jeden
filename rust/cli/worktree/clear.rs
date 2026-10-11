@@ -8,7 +8,7 @@
 //! directory, and not a repository top level. Every refusal is reported with
 //! its reason rather than passed over in silence.
 
-use super::discovery::{candidate_stores, collect_managed};
+use super::discovery::{candidate_stores, collect_managed, resolved};
 use super::*;
 
 /// Canonicalized safety roots: a worktree may only be removed when it lives
@@ -18,13 +18,13 @@ fn removal_allowed(path: &Path, roots: &[PathBuf], cwd: &Path, repo_top: Option<
     if !is_worktree_checkout(path) {
         return false;
     }
-    let canonical = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let cwd_canonical = fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
+    let canonical = resolved(path);
+    let cwd_canonical = resolved(cwd);
     if canonical == cwd_canonical {
         return false;
     }
     if let Some(top) = repo_top {
-        let top = fs::canonicalize(top).unwrap_or_else(|_| top.to_path_buf());
+        let top = resolved(top);
         if canonical == top {
             return false;
         }
@@ -32,19 +32,22 @@ fn removal_allowed(path: &Path, roots: &[PathBuf], cwd: &Path, repo_top: Option<
     roots.iter().any(|root| canonical.starts_with(root))
 }
 
-pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
+/// Remove the stale worktrees. A job record, store or workspace root that
+/// cannot be read refuses the whole clear before anything is removed: its
+/// workspace would look orphaned and be removed from under its job.
+pub(super) fn render_clear(args: &Args, dry_run: bool) -> Result<String, String> {
     let cwd = &args.cwd;
     let now = now_ms();
-    let (managed, _) = collect_managed(cwd);
+    let (managed, _) = collect_managed(cwd)?;
     let repo_top = git(cwd, &["rev-parse", "--show-toplevel"]).map(PathBuf::from);
     let roots: Vec<PathBuf> = {
         let mut set = BTreeSet::new();
-        for store in candidate_stores(cwd) {
+        for store in candidate_stores(cwd)? {
             set.insert(workspace_root_for(&store, cwd));
         }
         for worktree in &managed {
             if let Some(parent) = worktree.path.parent() {
-                set.insert(fs::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf()));
+                set.insert(resolved(parent));
             }
         }
         set.into_iter().collect()
@@ -55,16 +58,14 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
     if managed.is_empty() {
         let message = "no git worktrees found here; nothing to clear".to_string();
         if args.json {
-            return serde_json::to_string_pretty(&serde_json::json!({
+            return printed(&serde_json::json!({
                 "dryRun": dry_run,
                 "removed": [],
                 "skipped": [],
                 "note": message,
-            }))
-            .unwrap_or_default()
-                + "\n";
+            }));
         }
-        return format!("{message}\n");
+        return Ok(format!("{message}\n"));
     }
     for worktree in &managed {
         let row = to_row(worktree, now);
@@ -162,13 +163,11 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
         }
     }
     if args.json {
-        return serde_json::to_string_pretty(&serde_json::json!({
+        return printed(&serde_json::json!({
             "dryRun": dry_run,
             "removed": removed,
             "skipped": skipped,
-        }))
-        .unwrap_or_default()
-            + "\n";
+        }));
     }
     let header = if dry_run {
         format!(
@@ -188,5 +187,5 @@ pub(super) fn render_clear(args: &Args, dry_run: bool) -> String {
         out.push_str(&line);
         out.push('\n');
     }
-    out
+    Ok(out)
 }

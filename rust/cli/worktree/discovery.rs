@@ -9,25 +9,57 @@
 
 use super::*;
 
-pub(super) fn read_jobs(store: &Path) -> Vec<JobRecord> {
-    let mut jobs = Vec::new();
-    let Ok(entries) = fs::read_dir(store.join("jobs")) else {
-        return jobs;
+/// The entries of `directory`; none only when it does not exist. A directory
+/// that cannot be listed is refused: its job records would be missing, and
+/// the workspaces they claim would look orphaned to `clear`.
+fn listed(directory: &Path, what: &str) -> Result<Vec<PathBuf>, String> {
+    let unreadable =
+        |error: std::io::Error| format!("{what} {} cannot be listed: {error}", directory.display());
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(unreadable(error)),
     };
-    for entry in entries.flatten() {
-        let path = entry.path();
+    entries
+        .map(|entry| entry.map(|entry| entry.path()).map_err(unreadable))
+        .collect()
+}
+
+/// Every job record in `store`. A record that cannot be read or does not
+/// parse is refused with its path, never skipped: skipped, its workspace had
+/// no job and `clear` removed it from under the running job. A record that
+/// vanished between listing and reading was retired and is passed over.
+pub(super) fn read_jobs(store: &Path) -> Result<Vec<JobRecord>, String> {
+    let mut jobs = Vec::new();
+    for path in listed(&store.join("jobs"), "the job records in")? {
         if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
             continue;
         }
-        if let Ok(job) = serde_json::from_slice::<JobRecord>(&fs::read(&path).unwrap_or_default()) {
-            jobs.push(job);
-        }
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(format!(
+                    "the job record {} cannot be read: {error}",
+                    path.display()
+                ))
+            }
+        };
+        let job = serde_json::from_slice::<JobRecord>(&bytes).map_err(|error| {
+            format!(
+                "the job record {} is not a job record: {error}",
+                path.display()
+            )
+        })?;
+        jobs.push(job);
     }
-    jobs
+    Ok(jobs)
 }
 
-/// Scheduler stores that may hold job records relevant to `cwd`.
-pub(super) fn candidate_stores(cwd: &Path) -> Vec<PathBuf> {
+/// Scheduler stores that may hold job records relevant to `cwd`. A session
+/// root that cannot be listed is refused, since its stores' jobs would be
+/// missed.
+pub(super) fn candidate_stores(cwd: &Path) -> Result<Vec<PathBuf>, String> {
     let mut stores = Vec::new();
     let mut seen = BTreeSet::new();
     let push = |store: PathBuf, seen: &mut BTreeSet<PathBuf>, stores: &mut Vec<PathBuf>| {
@@ -43,18 +75,32 @@ pub(super) fn candidate_stores(cwd: &Path) -> Vec<PathBuf> {
     // Store probed by `jeden doctor`.
     push(cwd.join(".jeden/tasks"), &mut seen, &mut stores);
     // Per-session stores used by `/tan` background jobs.
-    if let Ok(entries) = fs::read_dir(session_root()) {
-        for entry in entries.flatten() {
-            let store = entry.path().join("task-runtime");
-            push(store, &mut seen, &mut stores);
-        }
+    for session in listed(&session_root(), "the session root")? {
+        push(session.join("task-runtime"), &mut seen, &mut stores);
     }
-    stores
+    Ok(stores)
+}
+
+/// `path` resolved, or as written when it does not resolve (a workspace
+/// already gone still has a key).
+pub(super) fn resolved(path: &Path) -> PathBuf {
+    match fs::canonicalize(path) {
+        Ok(canonical) => canonical,
+        Err(_) => path.to_path_buf(),
+    }
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
-    let canon = |p: &Path| fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    canon(a) == canon(b)
+    resolved(a) == resolved(b)
+}
+
+/// The parent repository and administrative directory a worktree's gitfile
+/// names, when it names them.
+fn gitfile(path: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
+    match parse_gitfile(path) {
+        Some((repo, admin)) => (Some(repo), Some(admin)),
+        None => (None, None),
+    }
 }
 
 /// Collect every git worktree found for this cwd, from job records and from
@@ -67,14 +113,13 @@ fn same_dir(a: &Path, b: &Path) -> bool {
 /// orphan scan sees the canonical form (`/private/tmp`) — without canonical
 /// keys the same checkout would be listed twice and a stale-looking duplicate
 /// could be removed out from under a running job.
-pub(super) fn collect_managed(cwd: &Path) -> (Vec<ManagedWorktree>, usize) {
+pub(super) fn collect_managed(cwd: &Path) -> Result<(Vec<ManagedWorktree>, Vec<PathBuf>), String> {
     let mut worktrees: BTreeMap<PathBuf, ManagedWorktree> = BTreeMap::new();
     let mut roots: BTreeSet<PathBuf> = BTreeSet::new();
-    let mut clone_workspaces = 0usize;
-    let canonical_key = |path: &Path| fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    for store in candidate_stores(cwd) {
+    let mut clone_workspaces = Vec::new();
+    for store in candidate_stores(cwd)? {
         roots.insert(workspace_root_for(&store, cwd));
-        for job in read_jobs(&store) {
+        for job in read_jobs(&store)? {
             // Stores are per-project by construction, but session stores and a
             // shared JEDEN_TASK_STORE may hold jobs for other repositories;
             // only claim worktrees whose parent repo is this cwd.
@@ -88,15 +133,13 @@ pub(super) fn collect_managed(cwd: &Path) -> (Vec<ManagedWorktree>, usize) {
             }
             if !is_worktree_checkout(&path) {
                 if path.join(".git").is_dir() {
-                    clone_workspaces += 1;
+                    clone_workspaces.push(path);
                 }
                 continue;
             }
-            let (parent_repo, admin_dir) = parse_gitfile(&path)
-                .map(|(repo, admin)| (Some(repo), Some(admin)))
-                .unwrap_or((None, None));
+            let (parent_repo, admin_dir) = gitfile(&path);
             worktrees
-                .entry(canonical_key(&path))
+                .entry(resolved(&path))
                 .or_insert_with(|| ManagedWorktree {
                     branch: branch_of(&path),
                     created_ms: job.created_at,
@@ -113,22 +156,16 @@ pub(super) fn collect_managed(cwd: &Path) -> (Vec<ManagedWorktree>, usize) {
     // Orphaned workspaces: managed-root directories with a worktree gitfile
     // but no surviving job record.
     for root in roots {
-        let Ok(entries) = fs::read_dir(&root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
+        for path in listed(&root, "the workspace root")? {
             if !path.is_dir() || !is_worktree_checkout(&path) {
                 continue;
             }
-            if worktrees.contains_key(&canonical_key(&path)) {
+            if worktrees.contains_key(&resolved(&path)) {
                 continue;
             }
-            let (parent_repo, admin_dir) = parse_gitfile(&path)
-                .map(|(repo, admin)| (Some(repo), Some(admin)))
-                .unwrap_or((None, None));
+            let (parent_repo, admin_dir) = gitfile(&path);
             worktrees
-                .entry(canonical_key(&path))
+                .entry(resolved(&path))
                 .or_insert_with(|| ManagedWorktree {
                     branch: branch_of(&path),
                     created_ms: modified_ms(&path),
@@ -147,7 +184,7 @@ pub(super) fn collect_managed(cwd: &Path) -> (Vec<ManagedWorktree>, usize) {
             .cmp(&b.created_ms)
             .then_with(|| a.path.cmp(&b.path))
     });
-    (ordered, clone_workspaces)
+    Ok((ordered, clone_workspaces))
 }
 
 /// Used when no job record names a worktree here: the current repository's own

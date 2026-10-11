@@ -197,24 +197,28 @@ fn to_row(worktree: &ManagedWorktree, now: u64) -> WorktreeRow {
     }
 }
 
-fn render_list(args: &Args) -> String {
+fn printed(value: &serde_json::Value) -> Result<String, String> {
+    serde_json::to_string_pretty(value)
+        .map(|text| text + "\n")
+        .map_err(|error| format!("the answer does not serialise: {error}"))
+}
+
+fn render_list(args: &Args) -> Result<String, String> {
     let cwd = &args.cwd;
     let now = now_ms();
-    let (managed, clone_workspaces) = collect_managed(cwd);
+    let (managed, clone_workspaces) = collect_managed(cwd)?;
     if managed.is_empty() {
         let note = "no git worktrees found under this project's workspace roots (job workspaces are isolated by copying, so they are not worktrees and are not listed)";
-        match repo_worktrees(cwd) {
+        return match repo_worktrees(cwd) {
             Some(repo) => {
                 let rows: Vec<WorktreeRow> = repo.iter().map(|w| to_row(w, now)).collect();
                 if args.json {
-                    return serde_json::to_string_pretty(&serde_json::json!({
+                    return printed(&serde_json::json!({
                         "managed": false,
                         "note": note,
                         "source": "git worktree list",
                         "worktrees": rows,
-                    }))
-                    .unwrap_or_default()
-                        + "\n";
+                    }));
                 }
                 let mut out = format!(
                     "{note}\nrepository worktrees from `git worktree list` ({}):\n",
@@ -223,48 +227,53 @@ fn render_list(args: &Args) -> String {
                 for row in &rows {
                     out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
                 }
-                out
+                Ok(out)
             }
             None => {
                 if args.json {
-                    return serde_json::to_string_pretty(&serde_json::json!({
+                    return printed(&serde_json::json!({
                         "managed": false,
                         "note": format!("{note}; {} is not inside a git repository", cwd.display()),
                         "worktrees": [],
-                    }))
-                    .unwrap_or_default()
-                        + "\n";
+                    }));
                 }
-                format!("{note}; {} is not inside a git repository\n", cwd.display())
+                Ok(format!(
+                    "{note}; {} is not inside a git repository\n",
+                    cwd.display()
+                ))
             }
-        }
-    } else {
-        let rows: Vec<WorktreeRow> = managed.iter().map(|w| to_row(w, now)).collect();
-        if args.json {
-            return serde_json::to_string_pretty(&serde_json::json!({
-                "managed": true,
-                "cloneIsolatedWorkspaces": clone_workspaces,
-                "worktrees": rows,
-            }))
-            .unwrap_or_default()
-                + "\n";
-        }
-        let mut out = format!("git worktrees under {} ({}):\n", cwd.display(), rows.len());
-        for row in &rows {
-            out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
-        }
-        if clone_workspaces > 0 {
-            out.push_str(&format!(
-                "({clone_workspaces} clone-isolated workspace(s) are not git worktrees and are not listed)\n"
-            ));
-        }
-        out
+        };
     }
+    let rows: Vec<WorktreeRow> = managed.iter().map(|w| to_row(w, now)).collect();
+    if args.json {
+        return printed(&serde_json::json!({
+            "managed": true,
+            "cloneIsolatedWorkspaces": clone_workspaces.len(),
+            "worktrees": rows,
+        }));
+    }
+    let mut out = format!("git worktrees under {} ({}):\n", cwd.display(), rows.len());
+    for row in &rows {
+        out.push_str(&format!("  {} · {} · {}\n", row.path, row.branch, row.age));
+    }
+    if !clone_workspaces.is_empty() {
+        out.push_str(&format!(
+            "({} clone-isolated workspace(s) are not git worktrees and are not listed)\n",
+            clone_workspaces.len()
+        ));
+    }
+    Ok(out)
+}
+
+/// What `jeden worktree` was asked to do; listing when no verb is given.
+enum Action {
+    List,
+    Clear,
 }
 
 pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
     const USAGE: &str = "usage: jeden worktree [list|clear] [--dry-run] [--yes] [--json]";
-    let mut action: Option<&str> = None;
+    let mut action: Option<Action> = None;
     let mut dry_run = false;
     let mut confirmed = false;
     for token in &args.positionals {
@@ -272,12 +281,8 @@ pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
             "--dry-run" => dry_run = true,
             "--yes" => confirmed = true,
             "--json" => {} // handled globally by parse_args
-            "list" | "clear" if action.is_none() => {
-                action = Some(match token.as_str() {
-                    "clear" => "clear",
-                    _ => "list",
-                })
-            }
+            "list" if action.is_none() => action = Some(Action::List),
+            "clear" if action.is_none() => action = Some(Action::Clear),
             other => {
                 return Err(crate::cli::invocation::refusal::usage(format!(
                     "unexpected argument '{other}': {USAGE}"
@@ -285,13 +290,13 @@ pub(crate) fn worktree_command(args: &Args) -> Result<String, String> {
             }
         }
     }
-    match action.unwrap_or("list") {
+    match action {
         // Removing a worktree deletes its checkout; what it held is gone.
         // The list `clear --dry-run` prints is what `clear --yes` removes.
-        "clear" if !dry_run && !confirmed => Err(crate::cli::invocation::refusal::usage(format!(
+        Some(Action::Clear) if !dry_run && !confirmed => Err(crate::cli::invocation::refusal::usage(format!(
             "worktree clear deletes stale worktree checkouts permanently; run `jeden worktree clear --dry-run` to see them, then `jeden worktree clear --yes`: {USAGE}"
         ))),
-        "clear" => Ok(render_clear(args, dry_run)),
-        _ => Ok(render_list(args)),
+        Some(Action::Clear) => render_clear(args, dry_run),
+        Some(Action::List) | None => render_list(args),
     }
 }
