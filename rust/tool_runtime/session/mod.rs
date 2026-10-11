@@ -66,15 +66,26 @@ pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String>
     let Some(dir) = runtime.artifact_dir else {
         return Err("list_artifacts requires an active session artifact directory".into());
     };
+    // No directory yet is no artifacts; one that cannot be listed, or an
+    // entry that cannot be read, is refused rather than answered as empty.
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => Some(entries),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "cannot list artifacts in {}: {error}",
+                dir.display()
+            ))
+        }
+    };
     let mut artifacts = Vec::new();
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let meta = entry.metadata().map_err(|e| e.to_string())?;
-            if meta.is_file() {
-                artifacts.push(
-                    json!({"name": entry.file_name().to_string_lossy(), "bytes": meta.len()}),
-                );
-            }
+    for entry in entries.into_iter().flatten() {
+        let entry = entry
+            .map_err(|error| format!("cannot list artifacts in {}: {error}", dir.display()))?;
+        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        if meta.is_file() {
+            artifacts
+                .push(json!({"name": entry.file_name().to_string_lossy(), "bytes": meta.len()}));
         }
     }
     Ok(json!({
