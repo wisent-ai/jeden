@@ -185,24 +185,48 @@ fn extract_release_executable(archive: &[u8], target_triple: &str) -> Result<Vec
     executable.ok_or_else(|| format!("release archive is missing {expected_name}"))
 }
 
+/// Run the candidate's `capabilities` probe. A probe that fails says why: its
+/// exit status and what it printed on stderr, which the rollback that follows
+/// would otherwise leave unexplained.
 pub fn run_health(binary: &Path, cwd: &Path) -> Result<(), String> {
-    let status = Command::new(binary)
-        .args(["capabilities", "--cwd"])
-        .arg(cwd)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map_err(|error| format!("health probe failed to run {}: {error}", binary.display()))?;
-    if status.success() {
+    let output = stado_wait::output(
+        Command::new(binary)
+            .args(["capabilities", "--cwd"])
+            .arg(cwd)
+            .stdin(Stdio::null()),
+    )
+    .map_err(|error| format!("health probe failed to run {}: {error}", binary.display()))?;
+    if output.status.success() {
         Ok(())
     } else {
-        Err(format!("health probe failed with {status}"))
+        Err(format!(
+            "health probe {} capabilities failed with {}: {}",
+            binary.display(),
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+/// The release channels an update follows.
+#[derive(Clone, Copy)]
+enum Channel {
+    Canary,
+    Stable,
+}
+
+impl Channel {
+    fn named(name: &str) -> Option<Self> {
+        match name {
+            "canary" => Some(Self::Canary),
+            "stable" => Some(Self::Stable),
+            _ => None,
+        }
     }
 }
 
 pub fn execute(request: UpdateRequest) -> Result<ReleaseManifestV2, String> {
-    if !matches!(request.channel.as_str(), "canary" | "stable") {
+    if Channel::named(&request.channel).is_none() {
         return Err("update channel must be canary or stable".into());
     }
     let paths = InstallPaths::new(request.target)?;
