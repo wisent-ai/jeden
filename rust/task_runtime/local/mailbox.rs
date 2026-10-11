@@ -73,6 +73,21 @@ impl Mailbox {
             }
         }
         paths.sort();
+        // The wake goes before any message leaves the inbox: a wake that
+        // cannot be cleared refuses the delivery with every message still
+        // waiting, instead of waking the agent again on an emptied inbox, and
+        // a message sent while this one is read writes its own wake after it.
+        if deliver && !paths.is_empty() {
+            let wake = self.root.join(format!("{agent}.wake.json"));
+            if let Err(error) = fs::remove_file(&wake) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    return Err(TaskError::Io(format!(
+                        "the mail of {agent} was not delivered: its wake {} cannot be cleared: {error}",
+                        wake.display()
+                    )));
+                }
+            }
+        }
         for path in paths {
             let mut message: MailMessage = serde_json::from_slice(&fs::read(&path)?)?;
             if deliver {
@@ -82,9 +97,6 @@ impl Mailbox {
                 fs::remove_file(&path)?;
             }
             messages.push(message);
-        }
-        if deliver && !messages.is_empty() {
-            let _ = fs::remove_file(self.root.join(format!("{agent}.wake.json")));
         }
         Ok(messages)
     }
