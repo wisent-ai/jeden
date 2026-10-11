@@ -23,11 +23,22 @@ struct UserEventData {
 
 /// First user task/message in the session transcript, reading only until the
 /// first `user` event line. Handles both V2 (`payload.type`) and legacy
-/// (`type`) transcript lines.
-fn first_user_task(session_dir: &Path) -> Option<String> {
-    let file = fs::File::open(session_dir.join("transcript.jsonl")).ok()?;
-    for line in std::io::BufReader::new(file).lines() {
-        let Ok(line) = line else { break };
+/// (`type`) transcript lines. A session with no transcript has no task; a
+/// transcript that cannot be read is an `Err` with the file and cause, shown
+/// in the preview rather than taken for a session that asked nothing.
+fn first_user_task(session_dir: &Path) -> Result<Option<String>, String> {
+    let transcript = session_dir.join("transcript.jsonl");
+    let file = match fs::File::open(&transcript) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{}: {error}", transcript.display())),
+    };
+    first_task_in(std::io::BufReader::new(file), &transcript)
+}
+
+fn first_task_in(reader: impl BufRead, transcript: &Path) -> Result<Option<String>, String> {
+    for line in reader.lines() {
+        let line = line.map_err(|error| format!("{}: {error}", transcript.display()))?;
         let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
             continue;
         };
@@ -35,17 +46,25 @@ fn first_user_task(session_dir: &Path) -> Option<String> {
         if payload.get("type").and_then(serde_json::Value::as_str) != Some("user") {
             continue;
         }
-        let data = payload.get("data")?;
-        let said = UserEventData::deserialize(data).ok()?;
-        let text = [&said.task, &said.content, &said.text]
-            .into_iter()
-            .find_map(serde_json::Value::as_str)?;
+        let Some(text) = user_text(payload) else {
+            return Ok(None);
+        };
         let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
         if !collapsed.is_empty() {
-            return Some(collapsed);
+            return Ok(Some(collapsed));
         }
     }
-    None
+    Ok(None)
+}
+
+/// The text a `user` event's data carries, read in the order its fields are
+/// declared.
+fn user_text(payload: &serde_json::Value) -> Option<String> {
+    let said = UserEventData::deserialize(payload.get("data")?).ok()?;
+    [&said.task, &said.content, &said.text]
+        .into_iter()
+        .find_map(serde_json::Value::as_str)
+        .map(str::to_string)
 }
 
 /// The row for something the listing could not read: disabled, its cause in
@@ -72,7 +91,17 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
         }
     };
     {
-        for entry in read_dir.flatten() {
+        for entry in read_dir {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    unreadable.push(unreadable_item(
+                        "A session cannot be listed".into(),
+                        format!("{}: {error}", session_root.display()),
+                    ));
+                    continue;
+                }
+            };
             let path = entry.path();
             if !path.is_dir() {
                 continue;
@@ -110,8 +139,10 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
         if let Some(age) = relative_age(started) {
             parts.push(age);
         }
-        if let Some(task) = first_user_task(path) {
-            parts.push(task);
+        match first_user_task(path) {
+            Ok(Some(task)) => parts.push(task),
+            Ok(None) => {}
+            Err(cause) => parts.push(format!("transcript unreadable: {cause}")),
         }
         let detail = parts
             .into_iter()
