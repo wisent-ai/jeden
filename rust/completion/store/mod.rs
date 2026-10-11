@@ -131,10 +131,17 @@ pub(crate) fn write_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Resul
             .map_err(|error| error.to_string())?;
         Ok(())
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&staging);
+    let Err(error) = result else {
+        return Ok(());
+    };
+    let refused = format!("cannot persist {}: {error}", path.display());
+    match fs::remove_file(&staging) {
+        Err(left) if left.kind() != std::io::ErrorKind::NotFound => Err(format!(
+            "{refused}; {} is left behind: {left}",
+            staging.display()
+        )),
+        _ => Err(refused),
     }
-    result.map_err(|error: String| format!("cannot persist {}: {error}", path.display()))
 }
 
 /// Old todo claims are imported as unverified work, never as completed work.
