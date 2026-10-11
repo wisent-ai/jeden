@@ -47,23 +47,30 @@ pub(super) fn read_disk_cache(key: &str) -> Option<(ModelCatalog, Option<String>
     Some((catalog, etag, fetched_ms))
 }
 
+/// Keep `catalog` for the next process. The cache only spares a request to
+/// Brama, so a failure is said on stderr and the answer stands; left silent,
+/// every start paid for the catalogue again with nobody knowing why.
 pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&str>) {
     let path = disk_cache_path(key);
-    let Some(parent) = path.parent() else {
-        return;
-    };
-    if std::fs::create_dir_all(parent).is_err() {
-        return;
-    }
-    let payload = serde_json::json!({
-        "fetchedAtMs": now_ms(),
-        "etag": etag,
-        "catalog": catalog,
-    });
-    // tmp + rename keeps the entry atomic for concurrent jeden processes.
-    let tmp = path.with_extension("json.tmp");
-    if std::fs::write(&tmp, payload.to_string()).is_ok() {
-        let _ = std::fs::rename(&tmp, &path);
+    let written = (|| -> std::io::Result<()> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let payload = serde_json::json!({
+            "fetchedAtMs": now_ms(),
+            "etag": etag,
+            "catalog": catalog,
+        });
+        // tmp + rename keeps the entry atomic for concurrent jeden processes.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, payload.to_string())?;
+        std::fs::rename(&tmp, &path)
+    })();
+    if let Err(error) = written {
+        eprintln!(
+            "jeden: the model catalogue is not kept at {}: {error}",
+            path.display()
+        );
     }
 }
 
