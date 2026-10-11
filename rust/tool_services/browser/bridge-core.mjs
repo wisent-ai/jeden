@@ -30,8 +30,11 @@ const readStdin = async () => {
 const readState = async () => {
   try {
     return JSON.parse(await readFile(statePath, "utf8"));
-  } catch {
-    return {};
+  } catch (error) {
+    if (error.code === "ENOENT") return {};
+    throw new Error(`Browser state ${statePath} could not be read: ${inspect(error, {
+      depth: null, maxArrayLength: null, maxStringLength: null,
+    })}`, { cause: error });
   }
 };
 const saveState = async state => {
