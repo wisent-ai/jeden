@@ -31,7 +31,7 @@ impl<B: SessionBackend> SessionService<B> {
         let path = match self.backend.create(&caller.tenant, &id) {
             Ok(path) => path,
             Err(error) => {
-                let _ = self.tenants.release_session(&caller.tenant);
+                self.tenants.release_session(&caller.tenant);
                 return Err(ServiceError::Runtime(error));
             }
         };
@@ -139,14 +139,14 @@ impl<B: SessionBackend> SessionService<B> {
         let path = match self.backend.open(&caller.tenant, session_id, &dir) {
             Ok(path) => path,
             Err(error) => {
-                let _ = self.tenants.release_session(&caller.tenant);
+                self.tenants.release_session(&caller.tenant);
                 return Err(ServiceError::Runtime(error));
             }
         };
         let summary = match self.summarize(session_id, &path, true) {
             Ok(summary) => summary,
             Err(()) => {
-                let _ = self.tenants.release_session(&caller.tenant);
+                self.tenants.release_session(&caller.tenant);
                 return Err(unreadable_session(session_id));
             }
         };

@@ -100,14 +100,16 @@ impl TenantGuard {
         Ok(())
     }
 
-    pub fn release_session(&self, tenant: &TenantId) -> Result<(), TenantError> {
-        let mut usage = self
-            .usage
-            .lock()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+    /// Gives back the session unit `register_session` took. A panic elsewhere
+    /// cannot break a counter, so a poisoned lock is recovered rather than
+    /// leaving the unit held and the tenant over its quota for good.
+    pub fn release_session(&self, tenant: &TenantId) {
+        let mut usage = match self.usage.lock() {
+            Ok(usage) => usage,
+            Err(poisoned) => poisoned.into_inner(),
+        };
         let entry = usage.entry(tenant.clone()).or_default();
         entry.sessions = entry.sessions.saturating_sub(1);
-        Ok(())
     }
 
     pub fn account_bytes(&self, tenant: &TenantId, delta: u64) -> Result<(), TenantError> {
