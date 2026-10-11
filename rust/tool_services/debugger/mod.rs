@@ -6,10 +6,13 @@ use crate::tool_runtime::runtime_ops::OperationContext;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+
+mod frames;
+use frames::{dap_request, read_frame, write_frame};
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -253,48 +256,6 @@ impl DebuggerService {
     }
 }
 
-fn dap_request(seq: u64, command: &str, arguments: Value) -> Value {
-    json!({"seq":seq,"type":"request","command":command,"arguments":arguments})
-}
-fn write_frame(stdin: &mut ChildStdin, value: &Value) -> ServiceResult<()> {
-    let bytes = serde_json::to_vec(value).map_err(|e| ServiceError::Protocol {
-        service: "debugger",
-        detail: e.to_string(),
-    })?;
-    write!(stdin, "Content-Length: {}\r\n\r\n", bytes.len())?;
-    stdin.write_all(&bytes)?;
-    stdin.flush()?;
-    Ok(())
-}
-fn read_frame(reader: &mut BufReader<impl Read>) -> ServiceResult<Value> {
-    let mut length = None;
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            return Err(ServiceError::Protocol {
-                service: "debugger",
-                detail: "adapter closed transport".into(),
-            });
-        }
-        let line = line.trim_end_matches(['\r', '\n']);
-        if line.is_empty() {
-            break;
-        }
-        if let Some(raw) = line.strip_prefix("Content-Length:") {
-            length = raw.trim().parse::<usize>().ok();
-        }
-    }
-    let length = length.ok_or_else(|| ServiceError::Protocol {
-        service: "debugger",
-        detail: "the adapter's frame header carried no Content-Length".into(),
-    })?;
-    let mut bytes = vec![0; length];
-    reader.read_exact(&mut bytes)?;
-    serde_json::from_slice(&bytes).map_err(|e| ServiceError::Protocol {
-        service: "debugger",
-        detail: e.to_string(),
-    })
-}
 fn wait_response(
     session: &mut DapSession,
     context: &OperationContext<'_>,
@@ -312,11 +273,10 @@ fn wait_response(
                 if value.get("success").and_then(Value::as_bool) == Some(false) {
                     return Err(ServiceError::Backend {
                         service: "debugger",
-                        detail: value
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .unwrap_or("request failed")
-                            .into(),
+                        detail: match value.get("message").and_then(Value::as_str) {
+                            Some(message) => message.to_string(),
+                            None => format!("the adapter refused the request: {value}"),
+                        },
                     });
                 }
                 return Ok(value);
