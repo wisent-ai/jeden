@@ -13,8 +13,8 @@ mod shapes;
 
 pub(crate) use document::{
     config_layer_paths, config_remove_value, config_set_value, config_value_at,
-    merged_config_value, parse_config_literal, read_config_typed, read_user_writable_config,
-    read_user_writable_config_strict, write_user_config,
+    merged_config_value, parse_config_literal, read_config_typed, read_user_writable_config_strict,
+    write_user_config,
 };
 pub(crate) use shapes::*;
 

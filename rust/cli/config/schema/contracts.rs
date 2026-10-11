@@ -4,7 +4,7 @@
 //! Split out of `cli/config/schema.rs`, which had grown past the module line
 //! cap.
 
-use super::super::{read_user_writable_config, write_user_config};
+use super::super::{read_user_writable_config_strict, write_user_config};
 use super::values::{effective_setting_value, parse_setting_value, setting_spec};
 use super::{
     COMMUNICATION_CODE_KEY, COMMUNICATION_CONTRACT_KEY, COMMUNICATION_MODE_KEY,
@@ -20,16 +20,34 @@ use std::path::Path;
 /// The two operator contracts plus what Jeden actually uses for
 /// communication: `communicationSource` says whether the text in force is
 /// Jeden's default, the operator's own, or nothing, and
-/// `communicationDefault` is the default text for the current language.
+/// `communicationDefault` is the default text for the current language. A
+/// user configuration that exists and cannot be read answers `refusal` with
+/// its path and cause, never the defaults.
 pub(crate) fn contract_settings() -> Value {
-    let config = read_user_writable_config();
+    match read_contract_settings() {
+        Ok(settings) => settings,
+        Err(cause) => refused(cause),
+    }
+}
+
+/// What a getter answers when the user configuration cannot be read.
+fn refused(cause: String) -> Value {
+    json!({ "refusal": cause, "path": user_config_path().display().to_string() })
+}
+
+fn read_contract_settings() -> Result<Value, String> {
+    let config = read_user_writable_config_strict()?;
     let communication = setting_spec(COMMUNICATION_CONTRACT_KEY)
         .map(|spec| effective_setting_value(&config, spec))
         .unwrap_or_else(|| json!(""));
     let functionality = setting_spec(FUNCTIONALITY_CONTRACT_KEY)
         .map(|spec| effective_setting_value(&config, spec))
         .unwrap_or_else(|| json!(""));
-    contract_settings_json(communication, functionality, &user_config_path())
+    Ok(contract_settings_json(
+        communication,
+        functionality,
+        &user_config_path(),
+    ))
 }
 
 fn contract_settings_json(communication: Value, functionality: Value, path: &Path) -> Value {
@@ -58,7 +76,7 @@ pub(crate) fn set_contract_settings(
         setting_spec(FUNCTIONALITY_CONTRACT_KEY).expect("functionality contract setting");
     let communication = parse_setting_value(communication_spec, communication)?;
     let functionality = parse_setting_value(functionality_spec, functionality)?;
-    let mut config = read_user_writable_config();
+    let mut config = read_user_writable_config_strict()?;
     config_set_value(
         &mut config,
         COMMUNICATION_CONTRACT_KEY,
@@ -97,15 +115,19 @@ fn communication_settings_json(config: &Value, path: &Path) -> Value {
 }
 
 /// The user-default communication settings plus the policy in force here,
-/// which also folds in the project layer of the current directory.
+/// which also folds in the project layer of the current directory; refused
+/// with the path and cause when the user configuration cannot be read.
 pub(crate) fn communication_settings() -> Value {
-    communication_settings_json(&read_user_writable_config(), &user_config_path())
+    match read_user_writable_config_strict() {
+        Ok(config) => communication_settings_json(&config, &user_config_path()),
+        Err(cause) => refused(cause),
+    }
 }
 
 /// Write all five user-default communication settings atomically. Each value
 /// is validated against the setting schema before anything is written.
 pub(crate) fn set_communication_settings(values: &[(&str, &str); 5]) -> Result<Value, String> {
-    let mut config = read_user_writable_config();
+    let mut config = read_user_writable_config_strict()?;
     for (key, raw) in values {
         let spec = setting_spec(key).ok_or_else(|| format!("unknown config key: {key}"))?;
         config_set_value(&mut config, key, parse_setting_value(spec, raw)?)?;

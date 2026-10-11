@@ -3,7 +3,7 @@
 use serde_json::json;
 
 use super::{
-    config_remove_value, config_set_value, merged_config_value, read_user_writable_config,
+    config_remove_value, config_set_value, merged_config_value, read_user_writable_config_strict,
     write_user_config,
 };
 
@@ -103,7 +103,7 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
             }
             let raw = value_tokens.join(" ");
             let parsed = parse_setting_value(spec, &raw).map_err(usage)?;
-            let mut config = read_user_writable_config();
+            let mut config = read_user_writable_config_strict()?;
             config_set_value(&mut config, key, parsed.clone())?;
             let path = write_user_config(&config)?;
             Ok(if args.json {
@@ -116,7 +116,7 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
             let key = rest.first().ok_or_else(|| usage("config reset requires a key"))?;
             let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
             let default_value = setting_default(spec);
-            let mut config = read_user_writable_config();
+            let mut config = read_user_writable_config_strict()?;
             config_set_value(&mut config, key, default_value.clone())?;
             let path = write_user_config(&config)?;
             Ok(if args.json {
@@ -128,7 +128,7 @@ pub(crate) fn config_command(args: &Args) -> Result<String, String> {
         "unset" => {
             let key = rest.first().ok_or_else(|| usage("config unset requires a key"))?;
             let spec = setting_spec(key).ok_or_else(|| unknown_key(key))?;
-            let mut config = read_user_writable_config();
+            let mut config = read_user_writable_config_strict()?;
             let removed = config_remove_value(&mut config, key)?;
             let path = write_user_config(&config)?;
             let default_value = setting_default(spec);
