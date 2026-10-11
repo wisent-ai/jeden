@@ -70,8 +70,12 @@ function until(transcript, holds) {
 let terminal;
 try {
   assert.equal(invoke('git', ['-C', root, 'rev-parse', 'HEAD']).trim(), revision);
+  // Each prompt asks for its answer in a spelling the prompt itself does not
+  // contain, so finding the answer on the screen is the answer, not the
+  // terminal echoing what was typed.
   const started = JSON.parse(invoke(oko, ['sessions', 'start', '--harness', 'jeden', '--model', model,
-    '--text', 'Respond exactly: FIRST', '--cwd', workspace, '--json']));
+    '--text', 'Respond with exactly this text in uppercase and nothing else: first-answer', '--cwd', workspace,
+    '--json']));
   report.observations.started = started;
   terminal = started.id;
   assert.ok(started.session && started.transcript && terminal, 'oko sessions start names the session, transcript and terminal');
@@ -91,11 +95,12 @@ try {
 
   const screen = JSON.parse(invoke(oko, ['sessions', 'screen', terminal, '--json'])).screen;
   report.observations.screen = screen;
-  assert.ok(screen.includes('FIRST'), 'the terminal screen shows the first answer');
+  assert.ok(screen.includes('FIRST-ANSWER'), 'the terminal screen shows the first answer');
 
-  invoke(oko, ['sessions', 'send', terminal, '--text', 'Respond exactly: SECOND\r']);
+  invoke(oko, ['sessions', 'send', terminal, '--text',
+    'Respond with exactly this text in uppercase and nothing else: second-answer\r']);
   const second = await until(started.transcript, (seen) => {
-    const asked = seen.find((event) => event.type === 'user' && JSON.stringify(event.data).includes('SECOND'));
+    const asked = seen.find((event) => event.type === 'user' && JSON.stringify(event.data).includes('second-answer'));
     return Boolean(asked) && seen.slice(seen.indexOf(asked)).some((event) => event.type === 'model_route');
   });
   report.observations.secondEvents = second.length;
