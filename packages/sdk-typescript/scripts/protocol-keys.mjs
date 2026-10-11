@@ -74,11 +74,14 @@ function render(schema) {
 const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
 const rendered = render(schema);
 const check = process.argv.includes("--check");
+// Only a missing output is "missing": one that cannot be read is thrown with
+// its cause, not reported as absent and regenerated over.
 const current = (() => {
   try {
     return readFileSync(outputPath, "utf8");
-  } catch {
-    return null;
+  } catch (error) {
+    if (error.code === "ENOENT") return null;
+    throw new Error(`${outputLabel} cannot be read: ${error.message}`);
   }
 })();
 
