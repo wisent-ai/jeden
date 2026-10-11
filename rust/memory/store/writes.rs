@@ -29,7 +29,8 @@ async fn live_revision(
         .one(tx)
         .await
         .map_err(sql)?
-        .map(record))
+        .map(record)
+        .transpose()?)
 }
 
 /// Close `prior` at `at`; the next revision supersedes it.
@@ -160,7 +161,7 @@ impl MemoryStore {
             .await
             .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
-            Ok(record(written))
+            record(written)
         })
     }
 
@@ -205,7 +206,7 @@ impl MemoryStore {
                 .await
                 .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
-            Ok(record(written))
+            record(written)
         })
     }
 

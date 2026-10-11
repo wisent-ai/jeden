@@ -16,7 +16,7 @@ impl MemoryStore {
     pub fn list(&self, limit: usize) -> Result<Vec<MemoryRecord>, String> {
         let limit = limit as u64;
         run_db(move |db| async move {
-            Ok(memory::Entity::find()
+            memory::Entity::find()
                 .order_by_desc(memory::Column::UpdatedAt)
                 .order_by_asc(memory::Column::Id)
                 .limit(limit)
@@ -25,7 +25,7 @@ impl MemoryStore {
                 .map_err(sql)?
                 .into_iter()
                 .map(record)
-                .collect())
+                .collect()
         })
     }
 
