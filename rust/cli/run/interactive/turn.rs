@@ -12,10 +12,9 @@ use crate::cli::reports::sessions::replay::session_conversation_turns;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
 use crate::cli::run::slash_ui::interactive_view;
 use crate::cli::sessions::session_dir_for;
-use crate::read_json;
 use crate::{agent, tui, Args};
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::json;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -170,19 +169,18 @@ pub(super) fn run_turn(
                 }
                 let dir = handler_conv.lock().session_path();
                 let state_path = dir.join("state.json");
-                let mut state = read_json::<Value>(&state_path);
-                if !state.is_object() {
-                    state = json!({});
-                }
-                state
-                    .as_object_mut()
-                    .expect("state object")
-                    .insert("name".into(), json!(name));
-                fs::write(
-                    &state_path,
-                    serde_json::to_string_pretty(&state).map_err(|e| e.to_string())? + "\n",
-                )
-                .map_err(|e| e.to_string())?;
+                // A state file that cannot be read or is not JSON is refused
+                // naming it; read as {}, the rename wrote one field over the
+                // whole session state.
+                let mut state = crate::slash::common::read_json_value(&state_path)?;
+                let Some(fields) = state.as_object_mut() else {
+                    return Err(format!(
+                        "session state {} is not a JSON object, so it is not renamed",
+                        state_path.display()
+                    ));
+                };
+                fields.insert("name".into(), json!(name));
+                crate::slash::common::write_json_value(&state_path, &state)?;
                 Ok(format!("Session renamed to \"{}\".", name))
             }
             "/drop" => {
