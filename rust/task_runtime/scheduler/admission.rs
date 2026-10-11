@@ -124,9 +124,23 @@ impl TaskScheduler {
     pub(super) fn clean_slots(&self) -> Result<(), TaskError> {
         for entry in fs::read_dir(self.store.join("slots"))?.flatten() {
             let path = entry.path();
-            let pid = fs::read_to_string(&path)
-                .ok()
-                .and_then(|v| v.lines().next()?.parse::<u32>().ok());
+            // A slot that cannot be read names a holder nobody can check;
+            // freed as dead, it admitted one task more than maxParallel.
+            let text = match fs::read_to_string(&path) {
+                Ok(text) => text,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(error) => {
+                    return Err(std::io::Error::new(
+                        error.kind(),
+                        format!("cannot read admission slot {}: {error}", path.display()),
+                    )
+                    .into())
+                }
+            };
+            let pid = text
+                .lines()
+                .next()
+                .and_then(|line| line.parse::<u32>().ok());
             if !pid.map(process_alive).unwrap_or(false) {
                 let _ = fs::remove_file(path);
             }
