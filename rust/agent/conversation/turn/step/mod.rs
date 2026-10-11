@@ -113,7 +113,11 @@ impl Conversation {
             ) {
                 self.recorder
                     .record("usage_error", json!({ "message": error }))
-                    .ok();
+                    .map_err(|recording| {
+                        format!(
+                            "the usage of step {step} was not written to the usage ledger ({error}), and recording that in the session failed too: {recording}"
+                        )
+                    })?;
             }
         }
         let content = streaming.completion.content;
