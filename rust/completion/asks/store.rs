@@ -108,12 +108,13 @@ fn adopt() -> Result<AskRegister, String> {
         .collect();
     sessions.sort();
     for session in sessions {
-        let Ok(bytes) = fs::read(session.join(STATE_FILE)) else {
-            continue;
-        };
-        let Ok(state) = serde_json::from_slice::<CompletionState>(&bytes) else {
-            continue;
-        };
+        // The register is written once from what is adopted here, so a state
+        // skipped now would lose its asks for good.
+        let path = session.join(STATE_FILE);
+        let bytes =
+            fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let state = serde_json::from_slice::<CompletionState>(&bytes)
+            .map_err(|error| format!("{} is not a completion state: {error}", path.display()))?;
         let key = super::session_key(&session);
         for task in &state.tasks {
             let Some(request) = &task.operator_request else {
