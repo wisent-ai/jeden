@@ -24,40 +24,42 @@ pub fn load_config(cwd: &Path) -> Result<Value, String> {
         dirs_home().join(".jeden/mcp.json"),
         cwd.join(".jeden/mcp.json"),
     ] {
-        let (declared, listed) = declarations(&path)?;
-        servers.extend(declared);
-        lists.push(listed);
+        let mut source = read_config_file(&path)?;
+        let root = source.as_object_mut().expect("validated MCP object");
+        if let Some(Value::Object(declared)) = root.remove("mcpServers") {
+            servers.extend(declared);
+        }
+        if let Some(Value::Array(listed)) = root.remove("disabledServers") {
+            lists.extend(listed);
+        }
     }
     for (name, server) in &servers {
         if server.get("enabled").and_then(Value::as_bool) == Some(false) {
-            disabled.push(name.clone());
+            disabled.push(Value::String(name.clone()));
         }
     }
-    disabled.extend(lists.into_iter().flatten());
+    disabled.extend(lists);
     Ok(json!({"mcpServers": servers, "disabledServers": disabled}))
 }
 
-/// One `mcp.json`: its servers and the names it disables. A missing file
-/// declares nothing; a root that is not an object, `mcpServers` that is not
-/// an object of objects, an `enabled` that is not a boolean, or a
-/// `disabledServers` that is not a list of names is refused with the file,
-/// the field and what it held.
-fn declarations(path: &Path) -> Result<(serde_json::Map<String, Value>, Vec<String>), String> {
+/// Read and validate one `mcp.json`, preserving fields a mutation does not own.
+/// A missing file declares nothing; malformed declarations name their file.
+pub(crate) fn read_config_file(path: &Path) -> Result<Value, String> {
     let source = read_json_value(path)?;
     let file = path.display();
     let root = source
         .as_object()
         .ok_or_else(|| format!("{file} does not hold a JSON object"))?;
     let servers = match root.get("mcpServers") {
-        None => serde_json::Map::new(),
-        Some(Value::Object(servers)) => servers.clone(),
+        None => None,
+        Some(Value::Object(servers)) => Some(servers),
         Some(other) => {
             return Err(format!(
                 "{file}: mcpServers must be an object of servers, not {other}"
             ))
         }
     };
-    for (name, server) in &servers {
+    for (name, server) in servers.into_iter().flatten() {
         if !server.is_object() {
             return Err(format!(
                 "{file}: mcpServers.{name} must be an object, not {server}"
@@ -72,23 +74,24 @@ fn declarations(path: &Path) -> Result<(serde_json::Map<String, Value>, Vec<Stri
             }
         }
     }
-    let disabled = match root.get("disabledServers") {
-        None => Vec::new(),
-        Some(Value::Array(values)) => values
-            .iter()
-            .map(|value| {
-                value.as_str().map(ToOwned::to_owned).ok_or_else(|| {
-                    format!("{file}: disabledServers holds {value}, which is not a server name")
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?,
+    match root.get("disabledServers") {
+        None => {}
+        Some(Value::Array(values)) => {
+            for value in values {
+                if !value.is_string() {
+                    return Err(format!(
+                        "{file}: disabledServers holds {value}, which is not a server name"
+                    ));
+                }
+            }
+        }
         Some(other) => {
             return Err(format!(
                 "{file}: disabledServers must be a list of server names, not {other}"
             ))
         }
-    };
-    Ok((servers, disabled))
+    }
+    Ok(source)
 }
 
 pub(crate) fn configured_servers(cwd: &Path) -> Result<BTreeMap<String, Value>, String> {

@@ -30,10 +30,9 @@ fn valid_mcp_server_name(name: &str) -> bool {
 }
 
 fn mcp_write_file(path: &Path, mut config: Value) -> Result<PathBuf, String> {
-    if !config.is_object() {
-        config = json!({});
-    }
-    let obj = config.as_object_mut().expect("object");
+    let obj = config
+        .as_object_mut()
+        .ok_or_else(|| format!("{} must hold an MCP object", path.display()))?;
     obj.entry("mcpServers").or_insert_with(|| json!({}));
     obj.entry("disabledServers").or_insert_with(|| json!([]));
     write_json_value(path, &config)?;
@@ -124,19 +123,9 @@ enum McpVerb {
     Reconnect,
 }
 
-/// The file `scope` names, as it stands: absent is an empty object; one that
-/// cannot be read or does not parse is refused naming it, so an edit never
-/// replaces it with the one server being changed.
+/// Validate the selected scope before any mutation, preserving unrelated fields.
 fn mcp_scope_config(path: &Path) -> Result<Value, String> {
-    let config = read_json_value(path)?;
-    if config.is_object() {
-        Ok(config)
-    } else {
-        Err(format!(
-            "{} is not valid: its root must be an object",
-            path.display()
-        ))
-    }
+    mcp::read_config_file(path)
 }
 
 const MCP_USAGE: &str = "Usage: /mcp list | status | add [--scope user|project] <name> [stdio <command> [args...] | http <url>] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | notifications <server> | test <server> | reload | reconnect <server>";

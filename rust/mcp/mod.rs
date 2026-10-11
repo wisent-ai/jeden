@@ -16,6 +16,7 @@ use connection::ServerConnection;
 pub(crate) use servers::capability_descriptors;
 use servers::configured_servers;
 pub use servers::load_config;
+pub(crate) use servers::read_config_file;
 pub use sweep::{live_tools, reconnect, refresh_all};
 use validate::{validate_prompts, validate_resources, validate_tools};
 
