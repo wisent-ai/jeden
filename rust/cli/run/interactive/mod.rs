@@ -88,14 +88,17 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let initial_picker = crate::onboarding::initial_picker(&args.cwd)?.or(initial_model_picker);
     let session_model = Arc::new(Mutex::new(model));
     // One persistent conversation provides native cross-turn memory for the
-    // entire interactive session. A self-rebuild seeds a fresh recorder with
-    // the prior durable turns while regenerating the system prompt from the
-    // rebuilt executable.
+    // entire interactive session. `--resume-session` (a session id, as
+    // `jeden sessions` lists it, or its directory; a self-rebuild and Oko's
+    // adoption of a running Jeden both name one) seeds a fresh recorder with
+    // the prior durable turns while regenerating the system prompt from this
+    // executable.
     let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
-    if let Some(session_path) = &args.resume_session {
+    let resumed = agent::resumed_session(args);
+    if let Some(session_path) = &resumed {
         if !session_path.exists() {
             return Err(format!(
-                "resume session not found after rebuild: {}",
+                "--resume-session names no session: {} does not exist",
                 session_path.display()
             ));
         }
@@ -111,7 +114,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
         let count = turns.len();
         initial_conversation.load_history(&args.cwd, turns, session_path)?;
         println!(
-            "Resumed {} prior turn(s) from {} after rebuilding Jeden.",
+            "Resumed {} prior turn(s) from {}.",
             count,
             session_path.display()
         );

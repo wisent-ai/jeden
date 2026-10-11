@@ -28,6 +28,31 @@ pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> 
         .map_err(|error| format!("cannot write the mode state {}: {error}", path.display()))
 }
 
+/// The session `--resume-session` names: a session id, as `jeden sessions`
+/// lists it, or its directory.
+pub(crate) fn resumed_session(args: &Args) -> Option<PathBuf> {
+    args.resume_session
+        .as_ref()
+        .map(|named| crate::cli::sessions::session_dir_for(&named.to_string_lossy()))
+}
+
+/// The session a one-shot session command (`jeden run "/rewind <id>"`) acts
+/// on: the one `--resume-session` names, or else the workspace's last
+/// durable session.
+pub(super) fn command_session(args: &Args) -> Result<PathBuf, String> {
+    if let Some(named) = resumed_session(args) {
+        return Ok(named);
+    }
+    read_mode_state(&args.cwd)?
+        .pointer("/lastSessionPath")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .filter(|path| path.exists())
+        .ok_or_else(|| {
+            "No prior session found. Run a task first, or name one with --resume-session.".into()
+        })
+}
+
 pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
     let state = read_mode_state(cwd)?;
     let mut parts = Vec::new();

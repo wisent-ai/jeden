@@ -85,12 +85,7 @@ fn run_session_command(
     rest: &str,
     hooks: &mut RunHooks,
 ) -> Result<String, String> {
-    let last = read_mode_state(&args.cwd)?
-        .pointer("/lastSessionPath")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .filter(|p| p.exists())
-        .ok_or("No prior session found. Run a task first, then use a session command.")?;
+    let last = state::command_session(args)?;
     let mut conversation = Conversation::open(&args.cwd, &last)?;
     match command {
         "/compact" => conversation.compact(args, rest, hooks),
@@ -199,10 +194,11 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
         }
     }
 
-    let mut conversation = if args.model_only {
-        Conversation::new_model_only(&args.cwd)?
-    } else {
-        Conversation::new(&args.cwd)?
+    // A run continues the session `--resume-session` names, else starts one.
+    let mut conversation = match state::resumed_session(args) {
+        Some(session) => Conversation::open(&args.cwd, &session)?,
+        None if args.model_only => Conversation::new_model_only(&args.cwd)?,
+        None => Conversation::new(&args.cwd)?,
     };
     let result = conversation.run_turn(args, &task, &[], hooks);
     if !args.model_only {
