@@ -9,6 +9,8 @@ export function startRpc({ binary, cwd, env, report }) {
   const command = { program: binary, args: ['rpc'], cwd, stderr: '', protocolErrors: [] };
   report.commands.push(command);
   const child = spawn(binary, command.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
+  // The process a journey reads from the kernel (its open files) while it runs.
+  command.pid = child.pid;
   function fail(error) {
     processFailure = error;
     for (const request of pending.values()) request.reject(error);
