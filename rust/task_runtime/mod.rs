@@ -125,7 +125,11 @@ fn dynamic_descriptors() -> Vec<crate::tool_runtime::DynamicToolDescriptor> {
                 .map_err(|error| error.to_string())
         })
         .map(|scheduler| scheduler.health());
-    let _ = fs::remove_dir_all(&health_store);
+    if let Err(left) = fs::remove_dir_all(&health_store) {
+        if left.kind() != std::io::ErrorKind::NotFound {
+            eprintln!("jeden: {} is left behind: {left}", health_store.display());
+        }
+    }
     let (healthy, detail) = match health {
         Ok(health) if health.healthy => (
             true,
@@ -154,7 +158,12 @@ fn dynamic_execute(
     tool: &str,
     input: &Value,
 ) -> Option<Result<Value, String>> {
-    if !matches!(tool, "task" | "job" | "irc") {
+    // The registry is the one list of task tools; dispatch reads it rather
+    // than repeating its names.
+    if !registered_task_tools()
+        .iter()
+        .any(|descriptor| descriptor.name == tool)
+    {
         return None;
     }
     if runtime.operation.cancellation().is_cancelled() {
