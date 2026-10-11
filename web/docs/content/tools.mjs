@@ -53,6 +53,7 @@ export const toolPages = [
         title: "Approvals and grants",
         paragraphs: [
           "Every file write or shell command pauses for interactive approval unless explicitly enabled, and destructive confirmations default to <strong>Cancel</strong>. In one-shot mode, grants are explicit per invocation. Project hooks in <code>.jeden/hooks.json</code> run only with <code>--allow-command</code>, so a cloned repository cannot silently execute shell.",
+          "Only a hooks file that does not exist declares no hooks. A <code>~/.jeden/hooks.json</code>, a trusted <code>.jeden/hooks.json</code>, an enabled plugin's <code>hooks.json</code> or the Tama registry that cannot be read or is not JSON refuses every event it would have guarded, with the file and the filesystem or JSON-decoding cause, instead of being read as an empty config that turns its guards off; <code>/hooks</code> lists it as unreadable with the same cause.",
         ],
         commands: [
           {
