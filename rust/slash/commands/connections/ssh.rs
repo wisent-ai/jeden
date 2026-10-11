@@ -1,5 +1,6 @@
+use crate::cli::config::{merged_config_value, read_config_value, user_config_value};
 use crate::slash::common::{
-    dirs_home, merged_config, project_config_path, read_json_value, split_args, write_json_value,
+    project_config_for_edit, project_config_path, split_args, write_json_value,
 };
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
@@ -35,9 +36,9 @@ fn ssh_host_value(target: &str, options: &[String]) -> Option<Value> {
 }
 
 pub(crate) fn ssh_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let user = read_json_value(&dirs_home().join(".jeden/config.json"));
-    let project = read_json_value(&project_config_path(context.cwd));
-    let effective = merged_config(context.cwd);
+    let user = user_config_value();
+    let project = read_config_value(&project_config_path(context.cwd));
+    let effective = merged_config_value(context.cwd);
     let user_hosts = ssh_hosts_from(&user);
     let project_hosts = ssh_hosts_from(&project);
     let mut items = vec![PickerItem::action("Show configured SSH hosts", "/ssh list")
@@ -106,7 +107,7 @@ pub(crate) fn handle_ssh(args: &str, context: &SlashContext<'_>) -> Result<Strin
         .unwrap_or(("", empty));
     let project_file = project_config_path(context.cwd);
     if verb == "list" {
-        let config = merged_config(context.cwd);
+        let config = merged_config_value(context.cwd);
         let Some(hosts) = ssh_hosts_from(&config) else {
             return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into());
         };
@@ -135,10 +136,7 @@ pub(crate) fn handle_ssh(args: &str, context: &SlashContext<'_>) -> Result<Strin
         }
         let value = ssh_host_value(target, options)
             .ok_or_else(|| "Usage: /ssh add <name> <target> [key=value ...]".to_string())?;
-        let mut project = read_json_value(&project_file);
-        if !project.is_object() {
-            project = Value::Object(Map::new());
-        }
+        let mut project = project_config_for_edit(context.cwd)?;
         let object = project.as_object_mut().expect("project config object");
         let hosts = object
             .entry("sshHosts")
@@ -161,8 +159,8 @@ pub(crate) fn handle_ssh(args: &str, context: &SlashContext<'_>) -> Result<Strin
         if name.is_empty() {
             return Err("Usage: /ssh remove <name>".into());
         }
-        let effective = merged_config(context.cwd);
-        let mut project = read_json_value(&project_file);
+        let effective = merged_config_value(context.cwd);
+        let mut project = project_config_for_edit(context.cwd)?;
         let in_project = project
             .get("sshHosts")
             .and_then(Value::as_object)

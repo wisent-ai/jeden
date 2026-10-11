@@ -1,6 +1,7 @@
 //! Installed plugins and extensions: what is there, what is enabled, and the
 //! rows an operator manages them from.
 
+use serde::Deserialize;
 use serde_json::{json, Value};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -17,15 +18,21 @@ pub(crate) mod ops;
 pub(crate) mod registry;
 pub(crate) use crate::marketplace as production;
 
-use discovery::{
-    configured_extension_paths, discover_custom_tool_files, discover_extension_module_files,
-    native_extension_roots,
-};
+use crate::hooks::extensions::loading::scan_modules;
+use discovery::{configured_extension_paths, discover_custom_tool_files, native_extension_roots};
 use ops::{
     installed_entries_for_scope, merged_installed_values, normalize_scope, parse_marketplace_flags,
     registry_scope_dir,
 };
 use registry::{format_plugin, plugin_registry, save_plugin_registry, sorted_object_values};
+
+/// The `/plugins` verbs that switch an installed plugin on or off.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Toggle {
+    Enable,
+    Disable,
+}
 
 /// Plugin cache home. Honors `JEDEN_PLUGINS_HOME` (used to keep tests hermetic);
 /// defaults to `~`.
@@ -154,7 +161,7 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
     }
     for path in native_extension_roots(context.cwd)
         .into_iter()
-        .flat_map(|root| discover_extension_module_files(&root))
+        .flat_map(|root| scan_modules(&root, true))
     {
         items.push(
             PickerItem::action(format!("Native extension {}", path.display()), "")
@@ -165,7 +172,7 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
     }
     for path in configured_extension_paths(context.cwd)
         .into_iter()
-        .flat_map(|path| discover_extension_module_files(&path))
+        .flat_map(|path| scan_modules(&path, true))
     {
         items.push(
             PickerItem::action(format!("Configured extension {}", path.display()), "")
@@ -236,7 +243,7 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
                 .join("\n")
         });
     }
-    if verb == "enable" || verb == "disable" {
+    if let Ok(toggle) = serde_json::from_value::<Toggle>(Value::from(verb)) {
         let rest = argv.split_first().map(|(_, r)| r).unwrap_or(&[]);
         let (_force, scope, targets) = parse_marketplace_flags(rest);
         let scope = normalize_scope(scope)?;
@@ -259,7 +266,7 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
             *plugin = json!({});
         }
         let plugin_obj = plugin.as_object_mut().expect("plugin object");
-        plugin_obj.insert("enabled".into(), json!(verb == "enable"));
+        plugin_obj.insert("enabled".into(), json!(matches!(toggle, Toggle::Enable)));
         plugin_obj.insert("scope".into(), json!(scope.clone()));
         plugin_obj.insert("updatedAt".into(), json!(now_text()));
         let file = save_plugin_registry(&reg_dir, &registry)?;

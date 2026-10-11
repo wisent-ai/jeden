@@ -1,10 +1,11 @@
 use serde_json::{json, Map, Value};
 
 use super::common::{
-    is_plain_object, merged_config, now_text, project_config_path, read_json_value, split_args,
+    is_plain_object, now_text, project_config_for_edit, project_config_path, split_args,
     write_json_value,
 };
 use super::SlashContext;
+use crate::cli::config::merged_config_value;
 use crate::tool_services::browser::{HEADLESS, VISIBLE};
 use crate::tui::{PickerItem, PickerSpec};
 
@@ -49,7 +50,7 @@ fn format_browser_settings(label: &str, value: &Value) -> String {
 }
 
 pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let current = browser_record_from(&merged_config(context.cwd));
+    let current = browser_record_from(&merged_config_value(context.cwd));
     let mode = mode_text(&current);
     let stored = current.get("mode").and_then(Value::as_str);
     // No stored mode runs headless, so headless is then the current one.
@@ -102,7 +103,7 @@ pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
 pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
     let verb = argv.first().map(String::as_str).unwrap_or("");
-    let config = merged_config(context.cwd);
+    let config = merged_config_value(context.cwd);
     let current = browser_record_from(&config);
     let file = project_config_path(context.cwd);
     if verb.is_empty() || verb == "status" {
@@ -150,10 +151,7 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
             target.insert(key.clone(), value.clone());
         }
     }
-    let mut project = read_json_value(&file);
-    if !project.is_object() {
-        project = json!({});
-    }
+    let mut project = project_config_for_edit(context.cwd)?;
     let object = project.as_object_mut().expect("project object");
     let mut browser = Map::new();
     browser.insert("mode".into(), json!(verb));

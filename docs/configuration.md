@@ -7,6 +7,8 @@ instruction.
 
 User config loads from `~/.jeden/config.json` and `~/.jeden/config.yml`. Project config loads from `<cwd>/.jeden/config.json` and overrides user config. Environment variables still win over file config.
 
+A configuration layer that exists and cannot be read, is not JSON (`.json`) or YAML (`config.yml`), has no object at its root, or holds a value its setting cannot take is never read as empty: every `jeden` command refuses to start with `Error: configuration <path> cannot be read: <cause>`, `… is not valid: <cause>` or `… does not hold valid settings: <cause>` and a failure status. A layer that breaks while a run is under way stops that run with the same sentence. A file that does not exist is simply no layer.
+
 Before each run, Jeden loads user context from `~/.jeden/instructions.md` and `~/.jeden/context.md`. Project context walks from the project ancestor to `--cwd` and reads:
 
 - `JEDEN.md`

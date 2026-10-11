@@ -179,6 +179,10 @@ pub fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     }
+    if let Err(error) = cli::config::check_config(&args.cwd) {
+        eprintln!("Error: {error}");
+        return ExitCode::FAILURE;
+    }
     tui::theme::init(&args.cwd);
     if args.command == "doctor" {
         let report = conformance::health::doctor(&args.cwd);

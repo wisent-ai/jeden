@@ -15,7 +15,7 @@ use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
 use std::time::SystemTime;
 
-pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
+pub(super) fn installed_plugin_roots(cwd: &Path) -> Result<Vec<InstalledPluginRoot>, String> {
     // The user scope is JEDEN_PLUGINS_HOME when declared, else the one home
     // lookup; read as the working directory, the project registry was loaded
     // twice and the user's installed plugins not at all.
@@ -25,7 +25,7 @@ pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
     };
     let mut roots = Vec::new();
     for scope in [cwd.to_path_buf(), home] {
-        let registry = read_json(&scope.join(".jeden/plugins.json"));
+        let registry = read_json(&scope.join(".jeden/plugins.json"))?;
         let Some(installed) = registry.get("installed").and_then(Value::as_object) else {
             continue;
         };
@@ -54,13 +54,13 @@ pub(super) fn installed_plugin_roots(cwd: &Path) -> Vec<InstalledPluginRoot> {
             .cmp(&right.id)
             .then_with(|| left.path.cmp(&right.path))
     });
-    roots
+    Ok(roots)
 }
 
 pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, String> {
     let mut modules = Vec::new();
     let mut declarative = Vec::new();
-    let installed_plugins = installed_plugin_roots(cwd);
+    let installed_plugins = installed_plugin_roots(cwd)?;
     // Precedence rises layer by layer, a later layer overriding an earlier
     // one: installed plugins in their listed order, then the user's
     // ~/.jeden, then the workspace with the extensions its config names.
@@ -77,7 +77,7 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     roots.push(home_jeden.join("tools"));
     declarative.extend(declarative_paths(&cwd.join(".jeden"), project_rank));
     roots.push(cwd.join(".jeden/tools"));
-    let configured_extensions = config_value(cwd, "extensions");
+    let configured_extensions = config_value(cwd, "extensions")?;
     if let Some(configured) = configured_extensions.as_array() {
         for value in configured {
             if let Some(path) = value.as_str() {
@@ -105,7 +105,7 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     }
     modules.sort();
     modules.dedup();
-    let disabled_extensions = config_value(cwd, "disabledExtensions");
+    let disabled_extensions = config_value(cwd, "disabledExtensions")?;
     let disabled: BTreeSet<String> = disabled_extensions
         .as_array()
         .into_iter()

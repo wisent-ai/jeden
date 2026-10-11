@@ -13,13 +13,35 @@ mod shapes;
 
 pub(crate) use document::{
     config_layer_paths, config_remove_value, config_set_value, config_value_at,
-    merged_config_value, parse_config_literal, read_config_typed, read_user_writable_config_strict,
-    write_user_config,
+    merged_config_value, parse_config_literal, read_config_layer, read_config_typed,
+    read_config_value, read_user_writable_config_strict, user_config_value, write_user_config,
 };
 pub(crate) use shapes::*;
 
+/// Every configuration layer that applies here, read the way a run reads it.
+/// `jeden` refuses to start while one cannot be read, does not parse, or holds
+/// values the settings cannot take, naming the file and the cause; read as
+/// empty, such a layer dropped every setting in it without a word.
+pub(crate) fn check_config(cwd: &Path) -> Result<(), String> {
+    for path in config_layer_paths(cwd) {
+        let Some(layer) = read_config_layer(&path)? else {
+            continue;
+        };
+        serde_json::from_value::<Config>(layer).map_err(|error| {
+            format!(
+                "configuration {} does not hold valid settings: {error}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(())
+}
+
 pub(crate) fn load_config(cwd: &Path) -> Config {
-    let merged: Config = serde_json::from_value(merged_config_value(cwd)).unwrap_or_default();
+    let merged: Config = match serde_json::from_value(merged_config_value(cwd)) {
+        Ok(merged) => merged,
+        Err(error) => panic!("the merged configuration does not hold valid settings: {error}"),
+    };
     let mut model_catalog = BTreeMap::new();
     let mut model_overrides = BTreeMap::new();
     for path in config_layer_paths(cwd) {

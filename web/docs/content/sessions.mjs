@@ -119,6 +119,7 @@ export const sessionPages = [
         title: "Configuration and context",
         paragraphs: [
           "Process environment wins over every file. User config loads from <code>~/.jeden/config.json</code> and <code>~/.jeden/config.yml</code>; project config loads from <code><cwd>/.jeden/config.json</code> and overrides user config.",
+          "A configuration layer that exists and cannot be read, is not JSON or YAML, has no object at its root, or holds a value its setting cannot take is never read as empty: every <code>jeden</code> command refuses to start with <code>Error: configuration &lt;path&gt; cannot be read: &lt;cause&gt;</code>, <code>… is not valid: &lt;cause&gt;</code> or <code>… does not hold valid settings: &lt;cause&gt;</code>. A layer that breaks during a run stops that run with the same sentence; a file that does not exist is no layer.",
           "Before each run, Jeden loads user context from <code>~/.jeden/instructions.md</code> and <code>~/.jeden/context.md</code>. Project context walks from the project ancestor to <code>--cwd</code> and reads:",
         ],
         bullets: [

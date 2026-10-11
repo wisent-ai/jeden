@@ -7,27 +7,70 @@ use crate::{config_path, legacy_user_config_path, user_config_path};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::fs;
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-pub(crate) fn read_config_value(path: &Path) -> Value {
-    let Some(text) = fs::read_to_string(path).ok() else {
-        return json!({});
+/// The extension of a layer written as JSON; every other layer is YAML.
+const JSON_EXTENSION: &str = "json";
+
+/// One configuration layer as the file holds it. A file that does not exist
+/// is no layer (`None`). One that cannot be read, does not parse, or whose
+/// root is not an object is refused naming the file and the cause: read as
+/// `{}`, a typo or a permission problem dropped every setting in it (the
+/// model route, task limits, the Tama registry, disabled extensions) without
+/// a word.
+pub(crate) fn read_config_layer(path: &Path) -> Result<Option<Value>, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(format!(
+                "configuration {} cannot be read: {error}",
+                path.display()
+            ))
+        }
     };
-    let parsed = match path
+    let written_as_json = path
         .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "yml" | "yaml" => serde_yaml::from_str::<Value>(&text).ok(),
-        _ => serde_json::from_str::<Value>(&text).ok(),
+        .is_some_and(|extension| extension == JSON_EXTENSION);
+    let parsed = if written_as_json {
+        serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())
+    } else {
+        serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())
     };
-    parsed.filter(Value::is_object).unwrap_or_else(|| json!({}))
+    let value = parsed
+        .map_err(|error| format!("configuration {} is not valid: {error}", path.display()))?;
+    if !value.is_object() {
+        return Err(format!(
+            "configuration {} is not valid: its root must be an object",
+            path.display()
+        ));
+    }
+    Ok(Some(value))
 }
 
-pub(crate) fn read_config_typed<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> T {
-    serde_json::from_value(read_config_value(path)).unwrap_or_default()
+/// One layer for merging: an absent file is an empty layer. `jeden` refuses
+/// to start while any layer is unreadable or invalid (`check_config`), so a
+/// failure here means the file broke during the run; the run stops with the
+/// cause instead of continuing without the file's settings.
+pub(crate) fn read_config_value(path: &Path) -> Value {
+    match read_config_layer(path) {
+        Ok(Some(value)) => value,
+        Ok(None) => json!({}),
+        Err(error) => panic!("{error}"),
+    }
+}
+
+/// One layer as `T`; a layer whose values do not fit `T` stops the run naming
+/// the file, as `read_config_value` does.
+pub(crate) fn read_config_typed<T: for<'a> Deserialize<'a>>(path: &Path) -> T {
+    match serde_json::from_value(read_config_value(path)) {
+        Ok(typed) => typed,
+        Err(error) => panic!(
+            "configuration {} does not hold valid settings: {error}",
+            path.display()
+        ),
+    }
 }
 
 pub(super) fn global_config_layer_paths() -> Vec<PathBuf> {
@@ -75,6 +118,16 @@ fn deep_merge_value(base: &mut Value, overlay: Value) {
 pub(crate) fn merged_config_value(cwd: &Path) -> Value {
     let mut merged = json!({});
     for path in config_layer_paths(cwd) {
+        deep_merge_value(&mut merged, read_config_value(&path));
+    }
+    merged
+}
+
+/// The user's own layers merged, without the project's: what a screen shows
+/// as inherited from user configuration.
+pub(crate) fn user_config_value() -> Value {
+    let mut merged = json!({});
+    for path in global_config_layer_paths() {
         deep_merge_value(&mut merged, read_config_value(&path));
     }
     merged

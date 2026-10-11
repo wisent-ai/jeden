@@ -34,7 +34,10 @@ struct ServiceHub {
 }
 impl ServiceHub {
     fn discover(cwd: &Path) -> Self {
-        let value = config::discover(cwd);
+        // The layers every run reads, merged; a layer that cannot be read or
+        // does not parse stops the run naming the file instead of every
+        // browser, debugger or search setting in it falling back to default.
+        let value = crate::cli::config::merged_config_value(cwd);
         Self {
             browser: browser::BrowserService::discover(cwd, &value),
             debugger: debugger::DebuggerService::discover(cwd, &value),

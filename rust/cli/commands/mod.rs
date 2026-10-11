@@ -4,7 +4,7 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{dirs_home, read_json, slash};
+use crate::{dirs_home, slash};
 
 pub(crate) mod expand;
 
@@ -26,75 +26,20 @@ pub(crate) fn valid_file_command_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | ':'))
 }
 
-fn raw_config_bool(value: &Value, path: &[&str]) -> Option<bool> {
-    let mut current = value;
-    for key in path {
-        current = current.get(*key)?;
-    }
-    current.as_bool()
-}
-
-fn parse_bool_text(value: &str) -> Option<bool> {
-    match value
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "true" | "yes" | "on" | "1" => Some(true),
-        "false" | "no" | "off" | "0" => Some(false),
-        _ => None,
-    }
-}
-
-fn read_command_bool(path: &Path, key: &str) -> Option<bool> {
-    match path.extension().and_then(|ext| ext.to_str()).unwrap_or("") {
-        "json" => raw_config_bool(&read_json::<Value>(path), &["commands", key]),
-        "yml" | "yaml" => {
-            let text = fs::read_to_string(path).ok()?;
-            let dotted = format!("commands.{key}");
-            let mut in_commands = false;
-            for line in text.lines() {
-                let no_comment = line.split_once('#').map(|(head, _)| head).unwrap_or(line);
-                if no_comment.trim().is_empty() {
-                    continue;
-                }
-                let top_level = !no_comment.starts_with(|ch: char| ch.is_whitespace());
-                let trimmed = no_comment.trim();
-                if let Some((field, value)) = trimmed.split_once(':') {
-                    if field.trim() == dotted {
-                        return parse_bool_text(value);
-                    }
-                    if top_level && field.trim() == "commands" {
-                        in_commands = true;
-                        continue;
-                    }
-                    if in_commands && top_level {
-                        in_commands = false;
-                    }
-                    if in_commands && field.trim() == key {
-                        return parse_bool_text(value);
-                    }
-                }
-            }
-            None
-        }
-        _ => None,
-    }
-}
-
+/// Whether the command provider `commands.<key>` names is on, as the
+/// configuration layers every run reads declare it (user files, then the
+/// project's); `default` while no layer declares it. A hand-rolled reader
+/// here took only `config.json`, read a file that did not parse as empty,
+/// and parsed YAML line by line.
 fn command_provider_enabled(cwd: &Path, key: &str, default: bool) -> bool {
-    let mut enabled = default;
-    for path in [
-        dirs_home().join(".jeden/config.json"),
-        cwd.join(".jeden/config.json"),
-    ] {
-        if let Some(next) = read_command_bool(&path, key) {
-            enabled = next;
-        }
+    match crate::cli::config::merged_config_value(cwd)
+        .get("commands")
+        .and_then(|commands| commands.get(key))
+        .and_then(Value::as_bool)
+    {
+        Some(enabled) => enabled,
+        None => default,
     }
-    enabled
 }
 
 /// Discover file-based custom slash commands in provider precedence order.

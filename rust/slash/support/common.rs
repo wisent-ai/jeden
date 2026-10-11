@@ -65,17 +65,17 @@ pub(crate) fn write_json_value(path: &Path, value: &Value) -> Result<(), String>
     fs::write(path, text).map_err(|e| e.to_string())
 }
 
-pub(crate) fn merged_config(cwd: &Path) -> Value {
-    let mut merged = match read_json_value(&dirs_home().join(".jeden/config.json")) {
-        Value::Object(map) => map,
-        _ => Map::new(),
-    };
-    if let Value::Object(project) = read_json_value(&project_config_path(cwd)) {
-        for (key, value) in project {
-            merged.insert(key, value);
-        }
+/// The project configuration a slash command edits: absent is an empty
+/// object; one that cannot be read, does not parse, or has no object at its
+/// root is refused naming the file, so an edit never replaces every setting
+/// it holds with the one being changed. What a command reads as effective
+/// configuration comes from `crate::cli::config::merged_config_value`, the
+/// same layers every run reads.
+pub(crate) fn project_config_for_edit(cwd: &Path) -> Result<Value, String> {
+    match crate::cli::config::read_config_layer(&project_config_path(cwd))? {
+        Some(layer) => Ok(layer),
+        None => Ok(Value::Object(Map::new())),
     }
-    Value::Object(merged)
 }
 
 pub(crate) fn is_plain_object(value: &Value) -> bool {

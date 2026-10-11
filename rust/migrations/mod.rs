@@ -24,8 +24,11 @@ pub(crate) enum MigrationOutcome {
     },
 }
 
+/// The key every migrated document carries its schema version under.
+pub(crate) const SCHEMA_VERSION_KEY: &str = "schemaVersion";
+
 fn version(value: &Value) -> Result<u32, String> {
-    match value.get("schemaVersion") {
+    match value.get(SCHEMA_VERSION_KEY) {
         None => Ok(0),
         Some(value) => value
             .as_u64()

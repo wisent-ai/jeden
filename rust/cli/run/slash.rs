@@ -1,14 +1,13 @@
 //! Slash help, builtin routing, model/settings slash, and self-update.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::env;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::cli::auth::{format_auth_status, logout, refresh, start_login};
 use crate::cli::config::load_config;
 use crate::cli::config::schema::config_command;
-use crate::{config_path, read_json, session_root, slash, Args};
+use crate::{config_path, session_root, slash, Args};
 
 fn format_slash_help(cwd: &Path) -> String {
     let mut out = String::from("Jeden slash commands:\n");
@@ -90,22 +89,12 @@ pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<String, Str
 pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String> {
     let resolved = resolve_model_route(cwd, model)?;
     let path = config_path(cwd);
-    let mut config = read_json::<Value>(&path);
-    if !config.is_object() {
-        config = json!({});
-    }
+    let mut config = crate::slash::common::project_config_for_edit(cwd)?;
     config
         .as_object_mut()
-        .expect("object")
+        .expect("a configuration layer is an object")
         .insert("model".into(), Value::String(resolved.clone()));
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    fs::write(
-        &path,
-        serde_json::to_string_pretty(&config).map_err(|error| error.to_string())? + "\n",
-    )
-    .map_err(|error| error.to_string())?;
+    crate::slash::common::write_json_value(&path, &config)?;
     Ok(format!("Model route set to {}.", resolved))
 }
 
@@ -148,14 +137,10 @@ fn handle_settings_slash(cwd: &Path, args: &str) -> Result<String, String> {
             }
         })
         .collect::<Vec<_>>();
-    let Some(verb) = positionals.first().map(String::as_str) else {
+    // The verb is `jeden config`'s: it refuses an unknown one with its usage,
+    // so `/settings` and the CLI accept and refuse the same verbs.
+    if positionals.is_empty() {
         return Ok(format_auth_status(cwd));
-    };
-    if !matches!(verb, "list" | "path" | "get" | "set" | "reset") {
-        return Err(
-            "Usage: /settings [status|list|path|get <key>|set <key> <value>|reset <key>] [--json]"
-                .into(),
-        );
     }
     // max_tokens/max_steps are irrelevant to config_command; Default fills them
     // number-free.

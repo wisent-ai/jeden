@@ -2,13 +2,14 @@
 //! declarative capabilities a root declares, and the fingerprint that says
 //! whether anything under those roots has changed since the last generation.
 
+use serde::Deserialize;
 use serde_json::Value;
 use std::fs;
 use std::hash::{DefaultHasher, Hash};
+use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use super::DeclarativeCapability;
-use std::env;
 use std::time::SystemTime;
 
 pub(crate) mod host;
@@ -19,12 +20,23 @@ pub(super) fn canonical_key(cwd: &Path) -> PathBuf {
     fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf())
 }
 
-pub(super) fn module_file(path: &Path) -> bool {
+/// The module formats the extension host loads, named by file extension.
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ModuleExtension {
+    Js,
+    Mjs,
+    Ts,
+}
+
+pub(crate) fn module_file(path: &Path) -> bool {
     path.is_file()
-        && matches!(
-            path.extension().and_then(|value| value.to_str()),
-            Some("js" | "mjs" | "ts")
-        )
+        && path
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| {
+                serde_json::from_value::<ModuleExtension>(Value::from(extension)).is_ok()
+            })
 }
 
 pub(super) fn package_entries(root: &Path) -> Vec<PathBuf> {
@@ -45,7 +57,7 @@ pub(super) fn package_entries(root: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-pub(super) fn scan_modules(root: &Path, recursive_children: bool) -> Vec<PathBuf> {
+pub(crate) fn scan_modules(root: &Path, recursive_children: bool) -> Vec<PathBuf> {
     if module_file(root) {
         return vec![root.to_path_buf()];
     }
@@ -78,36 +90,70 @@ pub(super) fn scan_modules(root: &Path, recursive_children: bool) -> Vec<PathBuf
     files
 }
 
+/// What a root may declare besides modules. Each kind is a directory of
+/// files under the root, except hooks, which is one manifest.
+#[derive(Clone, Copy)]
+enum DeclarativeKind {
+    Commands,
+    Hooks,
+    Skills,
+    Agents,
+    Rules,
+}
+
+impl DeclarativeKind {
+    const EVERY: &'static [DeclarativeKind] = &[
+        DeclarativeKind::Commands,
+        DeclarativeKind::Hooks,
+        DeclarativeKind::Skills,
+        DeclarativeKind::Agents,
+        DeclarativeKind::Rules,
+    ];
+
+    fn name(self) -> &'static str {
+        match self {
+            DeclarativeKind::Commands => "commands",
+            DeclarativeKind::Hooks => "hooks",
+            DeclarativeKind::Skills => "skills",
+            DeclarativeKind::Agents => "agents",
+            DeclarativeKind::Rules => "rules",
+        }
+    }
+
+    fn path(self, root: &Path) -> PathBuf {
+        match self {
+            DeclarativeKind::Hooks => root.join("hooks.json"),
+            _ => root.join(self.name()),
+        }
+    }
+
+    fn health(self, path: &Path) -> Result<(), String> {
+        match self {
+            DeclarativeKind::Hooks => {
+                let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
+                let value =
+                    serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?;
+                if value.is_object() {
+                    Ok(())
+                } else {
+                    Err("hooks manifest must be an object".into())
+                }
+            }
+            _ => fs::read_dir(path)
+                .map(|_| ())
+                .map_err(|error| error.to_string()),
+        }
+    }
+}
+
 pub(super) fn declarative_paths(root: &Path, precedence: usize) -> Vec<DeclarativeCapability> {
     let mut values = Vec::new();
-    for kind in ["commands", "hooks", "skills", "agents", "rules"] {
-        let path = if kind == "hooks" {
-            root.join("hooks.json")
-        } else {
-            root.join(kind)
-        };
+    for kind in DeclarativeKind::EVERY.iter().copied() {
+        let path = kind.path(root);
         if path.exists() {
-            let health = if kind == "hooks" {
-                fs::read_to_string(&path)
-                    .map_err(|error| error.to_string())
-                    .and_then(|text| {
-                        serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())
-                    })
-                    .map(|value| value.is_object())
-                    .and_then(|valid| {
-                        if valid {
-                            Ok(())
-                        } else {
-                            Err("hooks manifest must be an object".into())
-                        }
-                    })
-            } else {
-                fs::read_dir(&path)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            };
+            let health = kind.health(&path);
             values.push(DeclarativeCapability {
-                kind,
+                kind: kind.name(),
                 path,
                 healthy: health.is_ok(),
                 error: health.err(),
@@ -142,21 +188,33 @@ pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher) {
     }
 }
 
-pub(crate) fn read_json(path: &Path) -> Value {
-    fs::read_to_string(path)
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or(Value::Null)
+/// A JSON file the loader reads, such as a plugin registry: a file that does
+/// not exist is `Value::Null`; one that cannot be read or does not parse is
+/// refused naming the file, never read as empty.
+pub(super) fn read_json(path: &Path) -> Result<Value, String> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Value::Null),
+        Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
+    };
+    serde_json::from_str(&text)
+        .map_err(|error| format!("{} is not valid JSON: {error}", path.display()))
 }
 
-pub(super) fn config_value(cwd: &Path, key: &str) -> Value {
-    let project = read_json(&cwd.join(".jeden/config.json"));
-    if let Some(value) = project.get(key) {
-        return value.clone();
+/// `key` as the configuration layers that apply here declare it, a later
+/// layer (the project) overriding an earlier one (the user's files). A layer
+/// that cannot be read or does not parse is refused naming the file: read as
+/// empty, an invalid project configuration dropped `disabledExtensions` and
+/// loaded every extension it switched off.
+pub(super) fn config_value(cwd: &Path, key: &str) -> Result<Value, String> {
+    let mut declared = Value::Null;
+    for path in crate::cli::config::config_layer_paths(cwd) {
+        let Some(layer) = crate::cli::config::read_config_layer(&path)? else {
+            continue;
+        };
+        if let Some(value) = layer.get(key) {
+            declared = value.clone();
+        }
     }
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| read_json(&home.join(".jeden/config.json")))
-        .and_then(|config| config.get(key).cloned())
-        .unwrap_or(Value::Null)
+    Ok(declared)
 }

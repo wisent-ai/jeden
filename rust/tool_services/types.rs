@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static ARTIFACT_ID: AtomicU64 = AtomicU64::new(1);
@@ -194,13 +194,4 @@ pub fn command_exists(program: &str) -> bool {
         .into_iter()
         .flat_map(|paths| std::env::split_paths(&paths).collect::<Vec<_>>())
         .any(|directory| directory.join(program).is_file())
-}
-
-/// The user's config under the one home lookup, then the workspace's; with
-/// HOME unset the user config was skipped and its settings silently ignored.
-pub fn config_path(cwd: &Path) -> Vec<PathBuf> {
-    vec![
-        crate::slash::common::dirs_home().join(".jeden/config.json"),
-        cwd.join(".jeden/config.json"),
-    ]
 }

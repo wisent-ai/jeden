@@ -1,5 +1,5 @@
-use super::types::config_path;
-use serde_json::{Map, Value};
+use crate::cli::config::config_layer_paths;
+use serde_json::Value;
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
@@ -18,34 +18,9 @@ const SERVICE_ENVS: &[&str] = &[
     "JEDEN_TTS_MODEL",
 ];
 
-fn merge(base: &mut Value, overlay: Value) {
-    match (base, overlay) {
-        (Value::Object(base), Value::Object(overlay)) => {
-            for (key, value) in overlay {
-                merge(base.entry(key).or_insert(Value::Null), value);
-            }
-        }
-        (base, overlay) => *base = overlay,
-    }
-}
-
-pub(crate) fn discover(cwd: &Path) -> Value {
-    let mut value = Value::Object(Map::new());
-    for path in config_path(cwd) {
-        if let Ok(bytes) = fs::read(path) {
-            if bytes.len() <= 2 * 1024 * 1024 {
-                if let Ok(layer) = serde_json::from_slice(&bytes) {
-                    merge(&mut value, layer);
-                }
-            }
-        }
-    }
-    value
-}
-
 pub(crate) fn fingerprint(cwd: &Path) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
-    for path in config_path(cwd) {
+    for path in config_layer_paths(cwd) {
         path.hash(&mut hash);
         if let Ok(metadata) = fs::metadata(&path) {
             metadata.len().hash(&mut hash);
