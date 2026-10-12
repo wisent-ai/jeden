@@ -15,6 +15,7 @@ mod session;
 pub(crate) mod setup;
 mod support;
 
+pub(crate) use commands::usage::totals as usage_ledger;
 pub(crate) use support::{common, state, validate};
 
 pub(crate) use plugins::ops::{installed_plugin_command_dirs, installed_plugin_hook_configs};

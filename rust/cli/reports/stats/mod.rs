@@ -7,7 +7,6 @@
 mod dashboard;
 
 use dashboard::serve;
-use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -18,70 +17,35 @@ use crate::control_plane::quota::{
 };
 use crate::Args;
 
-/// One usage event as `append_usage_event` writes it: the model, the
-/// provider's own token total, and the priced cost when one was computed.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UsageEvent {
-    model: String,
-    total_tokens: f64,
-    cost: Option<EventCost>,
-}
+use crate::slash::usage_ledger::{read_ledger, Agg};
 
-#[derive(Deserialize)]
-struct EventCost {
-    total: f64,
-}
-
-/// A usage ledger (`.jeden/usage.json`); a ledger without `events` holds none.
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct UsageLedger {
-    #[serde(default)]
-    events: Vec<UsageEvent>,
-    updated_at: Option<Value>,
-}
-
-fn event_totals(events: &[&UsageEvent]) -> Value {
+fn event_totals(agg: &Agg) -> Value {
     json!({
-        "calls": events.len(),
-        "tokens": events.iter().map(|event| event.total_tokens).sum::<f64>(),
-        "cost": events
-            .iter()
-            .filter_map(|event| event.cost.as_ref())
-            .map(|cost| cost.total)
-            .sum::<f64>(),
+        "calls": agg.calls,
+        "tokens": agg.total,
+        "cost": agg.cost.total,
     })
 }
 
-/// Totals of one usage ledger. A missing ledger is no usage; one that cannot
-/// be read, is not JSON, or holds an event of another shape is reported with
-/// its path and the decoder's reason instead of being counted as zero.
+/// Totals of one usage ledger, read by the reader `/usage` and the status line
+/// use. A missing ledger is no usage; one that cannot be read, is not JSON, or
+/// holds an event of another shape is reported with its path and the
+/// decoder's reason instead of being counted as zero.
 fn usage_file_totals(path: &Path) -> Value {
     let shown = path.display().to_string();
-    let document = match crate::slash::common::read_json_value(path) {
-        Ok(document) => document,
+    let ledger = match read_ledger(path) {
+        Ok(ledger) => ledger,
         Err(error) => return json!({"path": shown, "error": error}),
     };
-    let ledger: UsageLedger = match serde_json::from_value(document) {
-        Ok(ledger) => ledger,
-        Err(error) => {
-            return json!({"path": shown, "error": format!("{shown} is not a usage ledger: {error}")})
-        }
-    };
-    let mut by_model: BTreeMap<&str, Vec<&UsageEvent>> = BTreeMap::new();
+    let mut by_model: BTreeMap<&str, Agg> = BTreeMap::new();
     for event in &ledger.events {
-        by_model
-            .entry(event.model.as_str())
-            .or_default()
-            .push(event);
+        by_model.entry(event.model.as_str()).or_default().add(event);
     }
     let by_model: serde_json::Map<String, Value> = by_model
         .into_iter()
-        .map(|(model, events)| (model.to_string(), event_totals(&events)))
+        .map(|(model, agg)| (model.to_string(), event_totals(&agg)))
         .collect();
-    let all: Vec<&UsageEvent> = ledger.events.iter().collect();
-    let totals = event_totals(&all);
+    let totals = event_totals(&Agg::of(&ledger.events));
     json!({
         "path": shown,
         "events": totals["calls"],

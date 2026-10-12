@@ -14,8 +14,8 @@ use std::time::{Duration, Instant};
 /// so per-keystroke renders stay cheap.
 #[derive(Clone)]
 pub(super) struct StatusExtras {
-    tokens: f64,
-    cost: f64,
+    /// Total tokens and recorded cost, or why the ledger cannot be read.
+    usage: Result<(f64, f64), String>,
     plan: bool,
     goal: bool,
     loop_mode: bool,
@@ -31,54 +31,12 @@ struct ExtrasCache {
 static EXTRAS_CACHE: Mutex<Option<ExtrasCache>> = Mutex::new(None);
 const EXTRAS_TTL: Duration = Duration::from_secs(3);
 
-/// Total tokens and recorded cost across all events, summed exactly like the
-/// `/usage` report does over the same `.jeden/usage.json` file.
-fn usage_totals(cwd: &Path) -> (f64, f64) {
-    let usage: serde_json::Value = std::fs::read_to_string(cwd.join(".jeden/usage.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or(serde_json::Value::Null);
-    let events = usage
-        .get("events")
-        .and_then(serde_json::Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-    let mut tokens = 0.0;
-    let mut cost = 0.0;
-    for event in events {
-        let number = |key: &str| event.get(key).and_then(serde_json::Value::as_f64);
-        tokens += event
-            .get("totalTokens")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or_else(|| {
-                let direct = ["inputTokens", "outputTokens"]
-                    .iter()
-                    .filter_map(|key| number(key))
-                    .sum::<f64>();
-                let cache_read = number("cacheReadTokens")
-                    .or_else(|| number("cacheRead"))
-                    .unwrap_or_default();
-                let cache_write = number("cacheWriteTokens")
-                    .or_else(|| number("cacheWrite"))
-                    .unwrap_or_default();
-                direct + cache_read + cache_write
-            });
-        cost += event
-            .pointer("/cost/total")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or_else(|| {
-                ["input", "output", "cacheRead", "cacheWrite"]
-                    .iter()
-                    .map(|key| {
-                        event
-                            .pointer(&format!("/cost/{key}"))
-                            .and_then(serde_json::Value::as_f64)
-                            .unwrap_or_default()
-                    })
-                    .sum::<f64>()
-            });
-    }
-    (tokens, cost)
+/// Total tokens and recorded cost across all events, added up by the reader
+/// `/usage` uses over the same `.jeden/usage.json` file.
+fn usage_totals(cwd: &Path) -> Result<(f64, f64), String> {
+    let ledger = crate::slash::usage_ledger::read_ledger(&cwd.join(".jeden/usage.json"))?;
+    let totals = crate::slash::usage_ledger::Agg::of(&ledger.events);
+    Ok((totals.total, totals.cost.total))
 }
 
 /// A status cache is only ever replaced whole, so a panic while one was held
@@ -97,14 +55,13 @@ pub(super) fn status_extras(cwd: &Path) -> Option<StatusExtras> {
         .as_ref()
         .is_some_and(|cache| cache.cwd == cwd && cache.fetched_at.elapsed() < EXTRAS_TTL);
     if !fresh {
-        let (tokens, cost) = usage_totals(cwd);
+        let usage = usage_totals(cwd);
         let state = crate::slash::read_mode_state(cwd);
         *guard = Some(ExtrasCache {
             cwd: cwd.to_path_buf(),
             fetched_at: Instant::now(),
             extras: StatusExtras {
-                tokens,
-                cost,
+                usage,
                 plan: state.plan.enabled,
                 goal: state.goal.enabled || state.guided_goal.active,
                 loop_mode: state.loop_mode.enabled,
@@ -116,15 +73,19 @@ pub(super) fn status_extras(cwd: &Path) -> Option<StatusExtras> {
 }
 
 /// Live session spend: recorded cost when nonzero, otherwise the token form
-/// (`~N tok`); nothing when no usage has been recorded yet.
+/// (`~N tok`); nothing when no usage has been recorded yet, and `usage
+/// unreadable` when the ledger cannot be read (`/usage` names its cause).
 pub(super) fn cost_segment(status: &PromptStatus, extras: &StatusExtras) -> Option<String> {
     if let Some(cost) = &status.cost {
         return Some(format!("cost {}", sanitize_terminal_text(cost)));
     }
-    if extras.cost > 0.0 {
-        Some(format!("${:.2}", extras.cost))
-    } else if extras.tokens > 0.0 {
-        Some(format!("~{} tok", extras.tokens.round() as u64))
+    let Ok((tokens, cost)) = extras.usage else {
+        return Some("usage unreadable".into());
+    };
+    if cost > 0.0 {
+        Some(format!("${cost:.2}"))
+    } else if tokens > 0.0 {
+        Some(format!("~{} tok", tokens.round() as u64))
     } else {
         None
     }
