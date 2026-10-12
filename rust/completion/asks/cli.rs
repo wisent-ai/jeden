@@ -219,6 +219,14 @@ fn render_answer(value: &Value) -> String {
     lines.join("\n")
 }
 
+/// What `jeden asks` does, by the word that names it.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum AskAction {
+    List,
+    Show,
+    Answer,
+}
 pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
     let json = args.json;
     let mut text = None;
@@ -240,18 +248,26 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
             _ => words.push(argument.as_str()),
         }
     }
-    let (value, text_output) = match words.as_slice() {
-        [] | ["list"] => {
+    let (action, rest) = match words.split_first() {
+        None => (AskAction::List, &[][..]),
+        Some((word, rest)) => (
+            crate::agent::approval_named::<AskAction>(word)
+                .ok_or_else(|| usage(format!("unknown asks action: {word}\n{USAGE}")))?,
+            rest,
+        ),
+    };
+    let (value, text_output) = match (action, rest) {
+        (AskAction::List, []) => {
             let value = list_value()?;
             let rendered = render_list(&value);
             (value, rendered)
         }
-        ["show", id] => {
+        (AskAction::Show, [id]) => {
             let value = show_value(id)?;
             let rendered = render_show(&value);
             (value, rendered)
         }
-        ["answer", id] => {
+        (AskAction::Answer, [id]) => {
             let answer = text.ok_or_else(|| {
                 usage(format!(
                     "answer requires --text with what the ask asked for\n{USAGE}"
@@ -261,11 +277,11 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
             let rendered = render_answer(&value);
             (value, rendered)
         }
-        ["show"] | ["answer"] => {
-            return Err(usage(format!("{} requires an ask id\n{USAGE}", words[0])))
-        }
-        [action, ..] if !matches!(*action, "list" | "show" | "answer") => {
-            return Err(usage(format!("unknown asks action: {action}\n{USAGE}")))
+        (_, []) => {
+            return Err(usage(format!(
+                "{} requires an ask id\n{USAGE}",
+                crate::agent::approval_spelling(action)
+            )))
         }
         _ => {
             return Err(usage(format!(
