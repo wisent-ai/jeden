@@ -33,13 +33,13 @@ fn fixture_lines(color: bool) -> Vec<String> {
     lines.extend(tui::compact_prompt(WIDTH, &status, "", false, color));
     lines.push(String::new());
     for (role, text) in [
-        ("user", "Refactor the picker to support tabs"),
+        (tui::Role::User, "Refactor the picker to support tabs"),
         (
-            "assistant",
+            tui::Role::Assistant,
             "Done — Tab switches categories, search spans all of them.",
         ),
-        ("system", "tools: read_file, edit_file"),
-        ("error", "relay POST returned no seq"),
+        (tui::Role::System, "tools: read_file, edit_file"),
+        (tui::Role::Error, "relay POST returned no seq"),
     ] {
         lines.extend(tui::message_block(&Message::new(role, text), WIDTH, color));
     }

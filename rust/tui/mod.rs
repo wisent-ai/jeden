@@ -57,9 +57,29 @@ const APP: &str = "Agent";
 const VERSION: &str = crate::JEDEN_VERSION;
 const ASSISTANT_TITLE: &str = "wisent";
 
+/// Who a terminal message speaks for; the title of its block is the
+/// role's name, the assistant's titled with the product.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Assistant,
+    System,
+    Error,
+    Tool,
+    Reasoning,
+    Status,
+}
+
+impl Role {
+    pub fn name(self) -> String {
+        crate::agent::approval_spelling(self)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Message {
-    pub role: String,
+    pub role: Role,
     pub text: String,
     /// Output of a slash command rather than conversation. Views REPLACE
     /// each other in the live region instead of being committed to the
@@ -69,15 +89,15 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn new(role: impl Into<String>, text: impl Into<String>) -> Self {
+    pub fn new(role: Role, text: impl Into<String>) -> Self {
         Self {
-            role: role.into(),
+            role,
             text: text.into(),
             view: false,
         }
     }
 
-    pub fn view(role: impl Into<String>, text: impl Into<String>) -> Self {
+    pub fn view(role: Role, text: impl Into<String>) -> Self {
         Self {
             view: true,
             ..Self::new(role, text)

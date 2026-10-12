@@ -8,7 +8,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 use crate::tui::{
     stdout_supports_color, terminal_dimensions, AttachmentTray, CommandOutcome, ConfirmEvent,
     ConfirmState, EditorState, FollowUpQueue, Message, PickerEvent, PickerSpec, PickerState,
-    PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind,
+    PromptStatus, RegistryUiRuntime, Role, TurnCtx, TurnKind,
 };
 
 use super::input::TerminalInput;
@@ -200,10 +200,10 @@ where
                     submission_from_view = false;
                     slash_selection = 0;
                     editor.push_history(submitted.clone());
-                    messages.push(Message::new("user", submitted));
+                    messages.push(Message::new(Role::User, submitted));
                     match result {
-                        Ok(text) => messages.push(Message::new("system", text)),
-                        Err(error) => messages.push(Message::new("error", error)),
+                        Ok(text) => messages.push(Message::new(Role::System, text)),
+                        Err(error) => messages.push(Message::new(Role::Error, error)),
                     }
                     needs_render = true;
                     continue;
@@ -223,7 +223,7 @@ where
                 let is_command = active_prompt.trim_start().starts_with('/');
                 view = None;
                 if !is_command {
-                    messages.push(Message::new("user", active_prompt.clone()));
+                    messages.push(Message::new(Role::User, active_prompt.clone()));
                 }
 
                 {

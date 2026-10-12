@@ -4,7 +4,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use super::super::view_render::picker_panel;
 use super::super::{
-    terminal_dimensions, Message, PickerEvent, PickerItem, PickerSpec, PickerState,
+    terminal_dimensions, Message, PickerEvent, PickerItem, PickerSpec, PickerState, Role,
 };
 use super::input::TerminalInput;
 use super::{message_block, ReplRenderer};
@@ -28,7 +28,7 @@ pub(super) fn prompt_user_question(
             let mut lines = Vec::new();
             if !streamed.trim().is_empty() {
                 lines.extend(message_block(
-                    &Message::new("assistant", streamed.to_string()),
+                    &Message::new(Role::Assistant, streamed.to_string()),
                     columns,
                     color,
                 ));
@@ -58,14 +58,14 @@ pub(super) fn prompt_user_question(
         let mut lines = Vec::new();
         if !streamed.trim().is_empty() {
             lines.extend(message_block(
-                &Message::new("assistant", streamed.to_string()),
+                &Message::new(Role::Assistant, streamed.to_string()),
                 columns,
                 color,
             ));
         }
         lines.extend(message_block(
             &Message::new(
-                "system",
+                Role::System,
                 format!("{question}\n\nAnswer: {answer}\n\nEnter submit · Esc cancel"),
             ),
             columns,

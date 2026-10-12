@@ -4,7 +4,7 @@
 //! cap.
 
 use super::super::{message_block, skeleton_bar};
-use crate::tui::Message;
+use crate::tui::{Message, Role};
 
 /// Reasoning is committed the moment the model moves on, so the scrollback
 /// keeps the order things happened in: reasoning, tool call, result, answer.
@@ -19,7 +19,7 @@ pub(super) fn commit_reasoning(
         return;
     }
     blocks.extend(message_block(
-        &Message::new("reasoning", std::mem::take(reasoning)),
+        &Message::new(Role::Reasoning, std::mem::take(reasoning)),
         columns,
         color,
     ));
@@ -39,14 +39,14 @@ pub(super) fn build_live(
     let mut lines = Vec::new();
     if !reasoning.trim().is_empty() {
         lines.extend(message_block(
-            &Message::new("reasoning", reasoning.to_string()),
+            &Message::new(Role::Reasoning, reasoning.to_string()),
             columns,
             color,
         ));
     }
     if !streamed.trim().is_empty() {
         lines.extend(message_block(
-            &Message::new("assistant", streamed.to_string()),
+            &Message::new(Role::Assistant, streamed.to_string()),
             columns,
             color,
         ));
@@ -57,7 +57,7 @@ pub(super) fn build_live(
         format!("{} {} · esc to cancel", skeleton_bar(frame), note)
     };
     lines.extend(message_block(
-        &Message::new("system", label),
+        &Message::new(Role::System, label),
         columns,
         color,
     ));

@@ -12,7 +12,7 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use crate::tui::{
     stdout_supports_color, terminal_dimensions, Attachment, CommandOutcome, EditorState,
-    FollowUpQueue, Message, PickerState, PromptStatus, RegistryUiRuntime, TurnCtx, TurnKind,
+    FollowUpQueue, Message, PickerState, PromptStatus, RegistryUiRuntime, Role, TurnCtx, TurnKind,
     UiFeature, UiRuntimeAdapter,
 };
 
@@ -86,7 +86,7 @@ where
                 )?;
                 if !tools_used.is_empty() {
                     messages.push(Message::new(
-                        "system",
+                        Role::System,
                         format!("tools: {}", tools_used.join(", ")),
                     ));
                 }
@@ -103,7 +103,7 @@ where
         active_attachments = Vec::new();
         active_from_view = false;
         editor.push_history(active_prompt.clone());
-        messages.push(Message::new("user", active_prompt.clone()));
+        messages.push(Message::new(Role::User, active_prompt.clone()));
         let (columns, _) = terminal_dimensions()?;
         let color = stdout_supports_color();
         let mut blocks = Vec::new();

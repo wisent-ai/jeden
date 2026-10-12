@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 
 use super::render::format_message;
-use super::{CommandOutcome, Message, PickerState};
+use super::{CommandOutcome, Message, PickerState, Role};
 
 pub(super) mod background;
 pub(crate) mod external_editor;
@@ -171,11 +171,11 @@ pub(super) fn apply_turn_result(
             let role = if trimmed.starts_with('!') || trimmed.starts_with('$') {
                 // Local `!`/`$` escapes render as tool-style result blocks;
                 // they never produce a model turn.
-                "tool"
+                Role::Tool
             } else if is_command {
-                "system"
+                Role::System
             } else {
-                "assistant"
+                Role::Assistant
             };
             if is_command {
                 *view = Some(Message::view(role, text.trim().to_string()));
@@ -185,7 +185,7 @@ pub(super) fn apply_turn_result(
             false
         }
         Ok(CommandOutcome::Exit(text)) => {
-            messages.push(Message::new("system", text.trim().to_string()));
+            messages.push(Message::new(Role::System, text.trim().to_string()));
             true
         }
         Ok(CommandOutcome::Picker(spec)) => {
@@ -195,9 +195,9 @@ pub(super) fn apply_turn_result(
         }
         Err(error) => {
             if is_command {
-                *view = Some(Message::view("error", error));
+                *view = Some(Message::view(Role::Error, error));
             } else {
-                messages.push(Message::new("error", error));
+                messages.push(Message::new(Role::Error, error));
             }
             false
         }

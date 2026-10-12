@@ -12,7 +12,7 @@ use crossterm::event::{Event, KeyCode, KeyEventKind};
 use super::super::input::TerminalInput;
 use super::super::{message_block, ReplRenderer};
 use crate::agent::TraceEvent;
-use crate::tui::Message;
+use crate::tui::{Message, Role};
 
 /// Worker→render-loop message during a background turn.
 pub(super) enum TurnMsg {
@@ -52,15 +52,16 @@ fn compact(value: &serde_json::Value) -> String {
 /// accumulated instead.
 pub(super) fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
     match *event {
-        TraceEvent::ToolCall { tool, input } => {
-            Some(Message::new("tool", format!("→ {tool} {}", compact(input))))
-        }
+        TraceEvent::ToolCall { tool, input } => Some(Message::new(
+            Role::Tool,
+            format!("→ {tool} {}", compact(input)),
+        )),
         TraceEvent::ToolResult { tool, result } => Some(Message::new(
-            "tool",
+            Role::Tool,
             format!("← {tool} {}", compact(result)),
         )),
         TraceEvent::CompletionState { state } => Some(Message::new(
-            "status",
+            Role::Status,
             format!(
                 "Tasks: {} — {} verified, {} open",
                 state["status"].as_str().unwrap_or("unknown"),
@@ -68,7 +69,7 @@ pub(super) fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
                 state["open"]
             ),
         )),
-        TraceEvent::Message { text } => Some(Message::new("assistant", text)),
+        TraceEvent::Message { text } => Some(Message::new(Role::Assistant, text)),
         TraceEvent::Reasoning { .. } => None,
     }
 }
@@ -87,7 +88,7 @@ pub(super) fn prompt_tool_approval(
     let mut lines = Vec::new();
     if !streamed.trim().is_empty() {
         lines.extend(message_block(
-            &Message::new("assistant", streamed.to_string()),
+            &Message::new(Role::Assistant, streamed.to_string()),
             columns,
             color,
         ));
@@ -101,7 +102,11 @@ pub(super) fn prompt_tool_approval(
             detail.trim()
         )
     };
-    lines.extend(message_block(&Message::new("system", ask), columns, color));
+    lines.extend(message_block(
+        &Message::new(Role::System, ask),
+        columns,
+        color,
+    ));
     renderer.flush(&[], &lines)?;
     loop {
         if let Event::Key(key) = input.read()? {

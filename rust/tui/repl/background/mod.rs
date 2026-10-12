@@ -162,7 +162,7 @@ where
                                 scrollback_columns,
                                 color,
                             );
-                            if message.role == "tool" {
+                            if message.role == crate::tui::Role::Tool {
                                 blocks.extend(message_row(&message, scrollback_columns, color));
                             } else {
                                 blocks.extend(message_block(&message, scrollback_columns, color));

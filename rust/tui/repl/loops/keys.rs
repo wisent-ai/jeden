@@ -14,7 +14,7 @@ use crate::tool_runtime::runtime_ops::{ArtifactSink, CancellationToken, Operatio
 use crate::tui::render::{complete_slash_input, slash_matches};
 use crate::tui::{
     AttachmentTray, ClipboardContent, EditorAction, EditorState, Message, PromptStatus,
-    RegistryUiRuntime, UiRuntimeAdapter,
+    RegistryUiRuntime, Role, UiRuntimeAdapter,
 };
 
 use super::super::external_editor::{external_editor, external_editor_health};
@@ -56,7 +56,7 @@ where
             crossterm::execute!(io::stdout(), EnableBracketedPaste)?;
             renderer.reset();
             if let Err(error) = result {
-                messages.push(Message::new("error", error));
+                messages.push(Message::new(Role::Error, error));
             }
             *slash_selection = 0;
         }
@@ -70,11 +70,11 @@ where
                 Ok(Some(ClipboardContent::Text(text))) => editor.paste(&text),
                 Ok(Some(content @ ClipboardContent::Bytes { .. })) => {
                     if let Err(error) = attachments.add_clipboard(content) {
-                        messages.push(Message::new("error", error.to_string()));
+                        messages.push(Message::new(Role::Error, error.to_string()));
                     }
                 }
-                Ok(None) => messages.push(Message::new("system", "Clipboard is empty")),
-                Err(error) => messages.push(Message::new("error", error)),
+                Ok(None) => messages.push(Message::new(Role::System, "Clipboard is empty")),
+                Err(error) => messages.push(Message::new(Role::Error, error)),
             }
         }
         KeyCode::Backspace if key.modifiers.contains(KeyModifiers::ALT) => {

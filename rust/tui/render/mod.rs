@@ -1,7 +1,9 @@
 //! Turning the terminal state into the lines a frame is made of.
 
 use super::text::{paint, sanitize_terminal_text, wrap_line};
-use super::{AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, ASSISTANT_TITLE};
+use super::{
+    AttachmentTray, EditorState, FollowUpQueue, FrameOptions, Message, Role, ASSISTANT_TITLE,
+};
 
 mod panels;
 mod prompt;
@@ -16,29 +18,31 @@ pub(crate) use panels::{boxed, boxed_split, welcome_panel};
 pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
 pub(crate) use prompt::compact_prompt;
 
-fn role_color(role: &str) -> &'static str {
+fn role_color(role: Role) -> &'static str {
     match role {
-        "assistant" => "magenta",
-        "error" => "red",
-        "system" => "yellow",
+        Role::Assistant => "magenta",
+        Role::Error => "red",
+        Role::System => "yellow",
         // Machinery the communication mode chose to show sits below the
         // conversation it explains.
-        "tool" | "reasoning" => "dim",
-        _ => "cyan",
+        Role::Tool => "dim",
+        Role::Reasoning => "dim",
+        Role::User => "cyan",
+        Role::Status => "cyan",
     }
 }
 
 pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Vec<String> {
-    let title = sanitize_terminal_text(if message.role == "assistant" {
-        ASSISTANT_TITLE
-    } else {
-        message.role.as_str()
+    let name = message.role.name();
+    let title = sanitize_terminal_text(match message.role {
+        Role::Assistant => ASSISTANT_TITLE,
+        _ => name.as_str(),
     });
     let safe = sanitize_terminal_text(&message.text);
     let rows = safe.split('\n').map(str::to_string).collect::<Vec<_>>();
     boxed(&title, &rows, width.max(1), color)
         .into_iter()
-        .map(|line| paint(&line, role_color(&message.role), color))
+        .map(|line| paint(&line, role_color(message.role), color))
         .collect()
 }
 
