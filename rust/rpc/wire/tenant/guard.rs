@@ -23,10 +23,14 @@ pub struct ActiveRequestPermit {
 
 impl Drop for ActiveRequestPermit {
     fn drop(&mut self) {
-        if let Ok(mut usage) = self.usage.lock() {
-            let entry = usage.entry(self.tenant.clone()).or_default();
-            entry.active_requests = entry.active_requests.saturating_sub(1);
-        }
+        // Admission recovers a poisoned usage map, so the release must too:
+        // a permit that is never given back holds the tenant's slot forever.
+        let mut usage = match self.usage.lock() {
+            Ok(usage) => usage,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let entry = usage.entry(self.tenant.clone()).or_default();
+        entry.active_requests = entry.active_requests.saturating_sub(1);
     }
 }
 
