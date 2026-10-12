@@ -74,7 +74,7 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             }
             Ok(json!({"removed":store.forget_scope(&scope)?}))
         }
-        "health" | "stats" => store.health(),
+        "stats" => store.health(),
         other => Err(format!("unknown memory op: {other}")),
     }
 }
