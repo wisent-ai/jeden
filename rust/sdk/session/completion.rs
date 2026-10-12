@@ -38,6 +38,7 @@ impl AgentSession {
         revision: u64,
     ) -> Result<serde_json::Value, String> {
         let path = self.session_path()?;
+        let action = crate::completion::ControlAction::named(action)?;
         let state = crate::completion::operator_control(&path, task_id, action, reason, revision)?;
         // Active work stops when the task the operator controlled is left
         // paused or cancelled, read from the state the control produced

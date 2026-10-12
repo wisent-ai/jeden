@@ -147,30 +147,50 @@ pub(crate) fn clear_runtime_blocker(session: &Path) -> Result<CompletionState, S
     .map(|(_, state)| state)
 }
 
+/// What the operator does to a task or request, spelled by its serde name on
+/// the CLI (`jeden todo <action>`) and in RPC `session/completion/control`.
+/// There is deliberately no operator or model action named `done` or `pass`.
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ControlAction {
+    Pause,
+    Resume,
+    Cancel,
+    Defect,
+    Answer,
+}
+
+impl ControlAction {
+    /// The action `word` names, refused naming the word otherwise.
+    pub fn named(word: &str) -> Result<Self, String> {
+        crate::agent::approval_named(word)
+            .ok_or_else(|| format!("unsupported operator task action: {word}"))
+    }
+
+    pub fn name(self) -> String {
+        crate::agent::approval_spelling(self)
+    }
+}
+
 /// This operation is exposed to operator CLI/RPC clients, never as an agent tool.
-/// There is deliberately no operator or model operation named `done` or `pass`.
 pub(crate) fn operator_control(
     session: &Path,
     task_id: &str,
-    action: &str,
+    action: ControlAction,
     reason: &str,
     revision: u64,
 ) -> Result<CompletionState, String> {
     if reason.trim().is_empty() {
         return Err("task control requires a nonempty operator reason".into());
     }
-    if action == "defect" {
-        return defects::report(session, task_id, reason, revision);
-    }
-    if action == "answer" {
-        return answers::record(session, task_id, reason, revision);
-    }
     let status = match action {
-        "cancel" => TaskStatus::Cancelled,
-        "pause" => TaskStatus::Paused,
-        "resume" => TaskStatus::Pending,
-        _ => return Err(format!("unsupported operator task action: {action}")),
+        ControlAction::Defect => return defects::report(session, task_id, reason, revision),
+        ControlAction::Answer => return answers::record(session, task_id, reason, revision),
+        ControlAction::Cancel => TaskStatus::Cancelled,
+        ControlAction::Pause => TaskStatus::Paused,
+        ControlAction::Resume => TaskStatus::Pending,
     };
+    let action_name = action.name();
     let (_, state) = store::update(session, Some(revision), |state| {
         if let Some(request_index) = state
             .requests
@@ -181,11 +201,11 @@ pub(crate) fn operator_control(
             if request.coverage_verified {
                 return Err(format!("request is already terminal: {task_id}"));
             }
-            request.paused = action == "pause";
-            if action == "cancel" {
+            request.paused = action == ControlAction::Pause;
+            if action == ControlAction::Cancel {
                 request.coverage_verified = true;
             }
-            if action == "cancel" && !request.planned {
+            if action == ControlAction::Cancel && !request.planned {
                 state.tasks.push(WorkTask {
                     id: uuid::Uuid::new_v4().to_string(),
                     request_id: request.id.clone(),
@@ -213,7 +233,7 @@ pub(crate) fn operator_control(
                 .filter(|task| task.request_id == task_id && !task.status.terminal())
             {
                 task.status = status;
-                task.reason = Some(format!("Operator {action}: {reason}"));
+                task.reason = Some(format!("Operator {action_name}: {reason}"));
                 task.verification = None;
             }
         } else {
@@ -225,7 +245,7 @@ pub(crate) fn operator_control(
             if task.status.terminal() {
                 return Err(format!("task is already terminal: {task_id}"));
             }
-            if action == "resume"
+            if action == ControlAction::Resume
                 && state
                     .requests
                     .iter()
@@ -234,7 +254,7 @@ pub(crate) fn operator_control(
                 return Err("the owning request is paused; resume that request first".into());
             }
             task.status = status;
-            task.reason = Some(format!("Operator {action}: {reason}"));
+            task.reason = Some(format!("Operator {action_name}: {reason}"));
             task.verification = None;
         }
         state.blocker = None;

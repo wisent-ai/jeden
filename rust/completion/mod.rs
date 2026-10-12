@@ -30,7 +30,7 @@ pub use model::{
     CompletionBlocker, CompletionEstimate, CompletionState, CriterionReview, EvidenceReference,
     TaskKind, TaskOrigin, TaskStatus, TaskVerification, WorkRequest, WorkTask,
 };
-pub use operations::snapshot;
+pub use operations::{snapshot, ControlAction};
 
 pub(crate) use model::{unreadable, CompletionReview, IntakePlan};
 pub(crate) use operations::{

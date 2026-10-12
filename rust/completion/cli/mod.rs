@@ -1,9 +1,39 @@
 use super::{model::*, operations, store};
 use crate::Args;
+use operations::ControlAction;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 pub(crate) const USAGE: &str = "jeden todo [list|add <request>|pause <id>|resume <id>|cancel <id>|defect <id>|answer <id> --text <answer>|continue] [--session <id-or-path>] [--revision <n> --reason <text>] [--json]";
+
+/// What `jeden todo` does, by the word that names it: read, capture, resume
+/// work, or one of the operator's control actions.
+#[derive(Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum TodoVerb {
+    List,
+    Add,
+    Continue,
+    Pause,
+    Resume,
+    Cancel,
+    Defect,
+    Answer,
+}
+
+impl TodoVerb {
+    /// The operator control action this verb is, if it is one.
+    fn control(self) -> Option<ControlAction> {
+        match self {
+            TodoVerb::List | TodoVerb::Add | TodoVerb::Continue => None,
+            TodoVerb::Pause => Some(ControlAction::Pause),
+            TodoVerb::Resume => Some(ControlAction::Resume),
+            TodoVerb::Cancel => Some(ControlAction::Cancel),
+            TodoVerb::Defect => Some(ControlAction::Defect),
+            TodoVerb::Answer => Some(ControlAction::Answer),
+        }
+    }
+}
 
 pub(crate) fn workspace(session: &Path) -> Result<PathBuf, String> {
     let bytes = std::fs::read(session.join("state.json"))
@@ -170,20 +200,17 @@ pub(crate) fn execute(
             _ => words.push(argument.as_str()),
         }
     }
-    let (action, remaining) = words
-        .split_first()
-        .map(|(action, rest)| (*action, rest))
-        .unwrap_or(("list", &[]));
-    if !matches!(
-        action,
-        "list" | "add" | "pause" | "resume" | "cancel" | "defect" | "answer" | "continue"
-    ) {
-        return Err(usage(format!("unknown todo action: {action}\n{USAGE}\nTask completion requires independent verification; there is no operator done command.")));
-    }
+    let (verb, remaining) = match words.split_first() {
+        None => (TodoVerb::List, &[][..]),
+        Some((word, rest)) => (
+            crate::agent::approval_named::<TodoVerb>(word).ok_or_else(|| usage(format!("unknown todo action: {word}\n{USAGE}\nTask completion requires independent verification; there is no operator done command.")))?,
+            rest,
+        ),
+    };
     if selected.is_none() {
         super::migrate_workspace(cwd, None)?;
     }
-    let session = if action == "add"
+    let session = if verb == TodoVerb::Add
         && selected.is_none()
         && crate::slash::read_mode_state(cwd)
             .last_session_path
@@ -196,37 +223,27 @@ pub(crate) fn execute(
     } else {
         active_session(cwd, selected)?
     };
-    let state = match action {
-        "list" if remaining.is_empty() => store::read(&session)?,
-        "add" if !remaining.is_empty() => {
+    let state = match (verb.control(), verb, remaining) {
+        (None, TodoVerb::List, []) => store::read(&session)?,
+        (None, TodoVerb::Add, [_, ..]) => {
             let request = remaining.join(" ");
             operations::capture_request(&session, &workspace(&session)?, &request)?.1
         }
-        "pause" | "resume" | "cancel" | "defect" => {
-            let [task_id] = remaining else {
-                return Err(USAGE.into());
-            };
-            operations::operator_control(
-                &session,
-                task_id,
-                action,
-                reason.ok_or("task control requires --reason")?,
-                revision.ok_or("task control requires --revision")?,
-            )?
-        }
-        "answer" => {
-            let [task_id] = remaining else {
-                return Err(USAGE.into());
-            };
-            operations::operator_control(
-                &session,
-                task_id,
-                action,
-                text.ok_or("answer requires --text with what the task asked for")?,
-                revision.ok_or("answer requires --revision")?,
-            )?
-        }
-        "continue" if remaining.is_empty() => {
+        (Some(ControlAction::Answer), _, [task_id]) => operations::operator_control(
+            &session,
+            task_id,
+            ControlAction::Answer,
+            text.ok_or("answer requires --text with what the task asked for")?,
+            revision.ok_or("answer requires --revision")?,
+        )?,
+        (Some(action), _, [task_id]) => operations::operator_control(
+            &session,
+            task_id,
+            action,
+            reason.ok_or("task control requires --reason")?,
+            revision.ok_or("task control requires --revision")?,
+        )?,
+        (None, TodoVerb::Continue, []) => {
             let mut args = run_args
                 .cloned()
                 .ok_or("Use jeden todo continue with the current execution grants.")?;
@@ -244,7 +261,7 @@ pub(crate) fn execute(
         _ => return Err(USAGE.into()),
     };
     let value = operations::snapshot_value(&state);
-    if action != "list" {
+    if verb != TodoVerb::List {
         crate::cli::sessions::append_ledger_entry(
             &session,
             crate::agent::now_stamp(),
