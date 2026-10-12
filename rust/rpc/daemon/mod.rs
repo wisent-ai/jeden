@@ -183,16 +183,22 @@ impl BoundedExecutor {
 impl Drop for BoundedExecutor {
     fn drop(&mut self) {
         self.inner.state.store(DRAINING, Ordering::Release);
-        if let Ok(mut sender) = self.inner.sender.lock() {
-            sender.take();
+        // The sender is only ever taken whole, so a poisoned lock is recovered:
+        // a sender left in place would keep every worker waiting and the
+        // joins below would never return.
+        match self.inner.sender.lock() {
+            Ok(mut sender) => drop(sender.take()),
+            Err(poisoned) => drop(poisoned.into_inner().take()),
         }
-        if let Ok(workers) = self.workers.get_mut() {
-            for worker in workers.drain(..) {
-                // drain() refuses a panicked worker; a drop has no caller to
-                // refuse to, so the panic is said instead of lost.
-                if worker.join().is_err() {
-                    eprintln!("jeden daemon: an executor worker panicked before shutdown");
-                }
+        let workers = match self.workers.get_mut() {
+            Ok(workers) => workers,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for worker in workers.drain(..) {
+            // drain() refuses a panicked worker; a drop has no caller to
+            // refuse to, so the panic is said instead of lost.
+            if worker.join().is_err() {
+                eprintln!("jeden daemon: an executor worker panicked before shutdown");
             }
         }
         self.inner.state.store(STOPPED, Ordering::Release);
