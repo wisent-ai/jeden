@@ -113,10 +113,18 @@ pub(crate) fn handle_loop(args: &str, state: &mut ModeState) -> Result<String, S
         return Ok(format_loop_status(&state.loop_mode));
     }
     let mut prompt = args.trim();
+    // A count too large to hold is refused before anything changes, never
+    // read as no count, which would loop without end.
+    let count = if !head.is_empty() && head.chars().all(|ch| ch.is_ascii_digit()) {
+        let parsed = head.parse::<u64>();
+        Some(parsed.map_err(|error| format!("/loop {head}: not a resubmission count: {error}"))?)
+    } else {
+        None
+    };
     state.loop_mode.remaining = None;
     state.loop_mode.until = None;
     if !head.is_empty() && head.chars().all(|ch| ch.is_ascii_digit()) {
-        state.loop_mode.remaining = head.parse::<u64>().ok();
+        state.loop_mode.remaining = count;
         prompt = rest;
     } else if let Some(duration) = parse_duration_ms(head) {
         state.loop_mode.until = Some(now_millis() + duration);
