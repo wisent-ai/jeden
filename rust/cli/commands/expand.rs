@@ -106,7 +106,9 @@ fn render_prompt_variables(
         };
         let expr = after[..end].trim();
         let value = match expr {
-            "ARGUMENTS" | "arguments" => Some(raw_args.to_string()),
+            // The command-file convention's own name (Claude Code commands:
+            // `$ARGUMENTS`); the lowercase second spelling is gone.
+            "ARGUMENTS" => Some(raw_args.to_string()),
             "args" => Some(positionals.join(" ")),
             _ => {
                 if let Some(index) = expr

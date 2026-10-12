@@ -39,7 +39,18 @@ impl AgentSession {
     ) -> Result<serde_json::Value, String> {
         let path = self.session_path()?;
         let state = crate::completion::operator_control(&path, task_id, action, reason, revision)?;
-        if matches!(action, "pause" | "cancel") {
+        // Active work stops when the task the operator controlled is left
+        // paused or cancelled, read from the state the control produced
+        // rather than from the action's spelling.
+        let stopped = state.tasks.iter().any(|task| {
+            task.id == task_id
+                && matches!(
+                    task.status,
+                    crate::completion::TaskStatus::Paused
+                        | crate::completion::TaskStatus::Cancelled
+                )
+        });
+        if stopped {
             for cancel in self
                 .inner
                 .active
