@@ -15,13 +15,15 @@
         "WISENT_CODESIGN_PRIVATE_KEY_PEM": "macos-development-signing#private_key"
       },
       "quality": [
-        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"]},
+        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"], "kind": "format"},
         {
           "name": "release-compile",
-          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"],
+          "kind": "lint"
         },
         {
           "name": "native-stage",
+          "kind": "test",
           "argv": ["env", "JEDEN_TEST_SUCCESS_EXIT=0", "node", "tests/release/stage.mjs"]
         }
       ],
@@ -37,13 +39,15 @@
     "linux-amd64": {
       "runner_platform": "linux-amd64",
       "quality": [
-        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"]},
+        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"], "kind": "format"},
         {
           "name": "release-compile",
-          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"]
+          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"],
+          "kind": "lint"
         },
         {
           "name": "native-stage",
+          "kind": "test",
           "argv": ["env", "JEDEN_TEST_SUCCESS_EXIT=0", "node", "tests/release/stage.mjs"]
         }
       ],
@@ -67,7 +71,8 @@
             "quality",
             "--root",
             "web"
-          ]
+          ],
+          "kind": "format"
         }
       ],
       "build": {
