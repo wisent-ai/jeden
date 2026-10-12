@@ -7,7 +7,7 @@ use std::path::Path;
 use super::super::RegistryDescriptor;
 use super::super::{CapabilityHealth, CapabilityKind, CapabilityPolicy, FunctionTarget};
 use super::current;
-use serde_json::json;
+use serde_json::{json, Value};
 
 pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescriptor>, String> {
     let registry = current(cwd)?;
@@ -97,15 +97,24 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
             );
         }
         for declared in &extension.capabilities {
-            let kind = match declared.kind.as_str() {
-                "skill" | "skills" => CapabilityKind::Skill,
-                "agent" | "agents" => CapabilityKind::Agent,
-                "rule" | "rules" => CapabilityKind::Rule,
-                "service" | "services" => CapabilityKind::Service,
+            // A declared kind is read as CapabilityKind spells it (kebab-case,
+            // singular); singular and plural spellings were both accepted and
+            // the plural cut back by its last `s`. An extension may declare a
+            // skill, an agent, a rule or a service; anything else it declares
+            // is its own contribution.
+            let named =
+                serde_json::from_value::<CapabilityKind>(Value::from(declared.kind.as_str()));
+            let kind = match named {
+                Ok(
+                    kind @ (CapabilityKind::Skill
+                    | CapabilityKind::Agent
+                    | CapabilityKind::Rule
+                    | CapabilityKind::Service),
+                ) => kind,
                 _ => CapabilityKind::PluginContribution,
             };
             let mut descriptor = RegistryDescriptor::new(
-                format!("{}/{}", declared.kind.trim_end_matches('s'), declared.id),
+                format!("{}/{}", declared.kind, declared.id),
                 kind,
                 extension.source.display().to_string(),
                 declared.id.clone(),
@@ -132,7 +141,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
                 .any(|capability| capability.active && capability.path.starts_with(&plugin.path))
             || registry.declarative.iter().any(|capability| {
                 capability.healthy
-                    && matches!(capability.kind, "commands" | "hooks")
+                    && capability.carried
                     && capability.path.starts_with(&plugin.path)
             });
         let health = if !plugin.enabled {
@@ -163,7 +172,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
     for capability in registry
         .declarative
         .iter()
-        .filter(|capability| matches!(capability.kind, "commands" | "hooks"))
+        .filter(|capability| capability.carried)
     {
         let health = if capability.healthy {
             CapabilityHealth::healthy()

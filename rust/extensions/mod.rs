@@ -81,6 +81,9 @@ struct HostExtension {
 #[derive(Clone, Debug)]
 struct DeclarativeCapability {
     kind: &'static str,
+    /// The registry itself carries it (commands, hooks), not the declarative
+    /// runtime.
+    carried: bool,
     path: PathBuf,
     healthy: bool,
     error: Option<String>,
@@ -196,7 +199,7 @@ pub fn status(cwd: &Path) -> Result<String, String> {
                 .any(|capability| capability.active && capability.path.starts_with(&plugin.path))
             || registry.declarative.iter().any(|capability| {
                 capability.healthy
-                    && matches!(capability.kind, "commands" | "hooks")
+                    && capability.carried
                     && capability.path.starts_with(&plugin.path)
             });
         lines.push(format!(
@@ -207,7 +210,7 @@ pub fn status(cwd: &Path) -> Result<String, String> {
     for capability in registry
         .declarative
         .iter()
-        .filter(|capability| matches!(capability.kind, "commands" | "hooks"))
+        .filter(|capability| capability.carried)
     {
         lines.push(format!(
             "- {} {} [{}]{}",

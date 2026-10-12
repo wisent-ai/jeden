@@ -106,9 +106,7 @@ pub fn reload(cwd: &Path) -> Result<ReloadReport, String> {
         + built
             .declarative
             .iter()
-            .filter(|capability| {
-                capability.healthy && matches!(capability.kind, "commands" | "hooks")
-            })
+            .filter(|capability| capability.healthy && capability.carried)
             .count()
         + built
             .declarative_runtime

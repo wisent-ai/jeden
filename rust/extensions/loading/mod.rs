@@ -143,6 +143,13 @@ impl DeclarativeKind {
         }
     }
 
+    /// Whether the registry itself carries this kind's capability — the
+    /// commands it expands and the hooks it runs — rather than handing it to
+    /// the declarative runtime.
+    fn registry_carries(self) -> bool {
+        matches!(self, DeclarativeKind::Commands | DeclarativeKind::Hooks)
+    }
+
     fn path(self, root: &Path) -> PathBuf {
         match self {
             DeclarativeKind::Hooks => root.join("hooks.json"),
@@ -177,6 +184,7 @@ pub(super) fn declarative_paths(root: &Path, precedence: usize) -> Vec<Declarati
             let health = kind.health(&path);
             values.push(DeclarativeCapability {
                 kind: kind.name(),
+                carried: kind.registry_carries(),
                 path,
                 healthy: health.is_ok(),
                 error: health.err(),
