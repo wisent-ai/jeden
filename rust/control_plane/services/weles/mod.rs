@@ -15,7 +15,9 @@ mod login;
 mod requests;
 mod types;
 
-pub use types::{Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesError};
+pub use types::{
+    Account, InteractionBridge, OperationEvent, OperationState, OperationV1, Provider, WelesError,
+};
 
 #[derive(Clone)]
 pub struct WelesClient {

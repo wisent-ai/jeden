@@ -73,11 +73,38 @@ pub enum OperationEvent {
     },
 }
 
+/// Where a Weles operation is, as the Weles API spells it.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum OperationState {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl OperationState {
+    /// Whether the operation has stopped moving.
+    pub fn is_terminal(self) -> bool {
+        !matches!(self, OperationState::Pending | OperationState::Running)
+    }
+}
+
+impl std::fmt::Display for OperationState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => formatter.write_str(&name),
+            other => unreachable!("a unit state serializes as its name, not {other:?}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationV1 {
     pub id: String,
-    pub state: String,
+    pub state: OperationState,
     #[serde(default)]
     pub cursor: Option<String>,
     #[serde(default)]

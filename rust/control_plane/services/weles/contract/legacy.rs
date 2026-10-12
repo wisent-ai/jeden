@@ -4,7 +4,7 @@
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
-use super::super::{Account, OperationV1, Provider, WelesClient, WelesError};
+use super::super::{Account, OperationState, OperationV1, Provider, WelesClient, WelesError};
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::contract::{self, RequestMeta};
 use crate::control_plane::{now_ms, ServiceHealth};
@@ -82,10 +82,10 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
         {
             return Err(WelesError::ExpiredOperation);
         }
-        if operation.state == "completed" {
+        if operation.state == OperationState::Completed {
             BramaClient::invalidate_all();
         }
-        if operation.state == "cancelled" {
+        if operation.state == OperationState::Cancelled {
             return Err(WelesError::Cancelled);
         }
         Ok(operation)
@@ -149,7 +149,7 @@ pub(super) fn operation_from_start(value: Value) -> Result<OperationV1, WelesErr
             .ok_or_else(|| WelesError::InvalidResponse("operation id is missing".into()))?;
         return Ok(OperationV1 {
             id: id.into(),
-            state: "pending".into(),
+            state: OperationState::Pending,
             cursor: None,
             events: Vec::new(),
             expires_at_ms: value.get("expiresAtMs").and_then(Value::as_u64),

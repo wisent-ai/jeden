@@ -4,8 +4,8 @@
 //! module line cap.
 
 use super::{
-    Account, InteractionBridge, OperationEvent, OperationV1, Provider, WelesClient, WelesError,
-    HOLD_QUERY,
+    Account, InteractionBridge, OperationEvent, OperationState, OperationV1, Provider, WelesClient,
+    WelesError, HOLD_QUERY,
 };
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::now_ms;
@@ -201,18 +201,18 @@ impl WelesClient {
                     _ => {}
                 }
             }
-            match page.state.as_str() {
-                "completed" => {
+            match page.state {
+                OperationState::Completed => {
                     BramaClient::invalidate_all();
                     return Ok(None);
                 }
-                "failed" => {
+                OperationState::Failed => {
                     return Err(WelesError::Operation {
-                        code: "failed".into(),
+                        code: page.state.to_string(),
                         message: "operation failed without an error event".into(),
                     })
                 }
-                "cancelled" => return Err(WelesError::Cancelled),
+                OperationState::Cancelled => return Err(WelesError::Cancelled),
                 _ if moved => {}
                 _ => return Err(WelesError::NoHoldingRead),
             }

@@ -23,7 +23,7 @@ fn poll_to_terminal(
     schema_max: u32,
 ) -> Result<super::weles::OperationV1, String> {
     for _ in 0..256 {
-        if !matches!(operation.state.as_str(), "pending" | "running") {
+        if operation.state.is_terminal() {
             return Ok(operation);
         }
         operation = WelesApiV1::poll_operation(
@@ -132,7 +132,7 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
             "staging disposable login unexpectedly requires interactive secret input".into(),
         );
     }
-    if operation.state != "completed" {
+    if operation.state != super::weles::OperationState::Completed {
         return Err(format!("disposable login ended in {}", operation.state));
     }
     let account_id = operation
@@ -168,7 +168,9 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
     });
     let refresh = refresh_result?;
     let logout = logout_result?;
-    if refresh.state != "completed" || logout.state != "completed" {
+    if refresh.state != super::weles::OperationState::Completed
+        || logout.state != super::weles::OperationState::Completed
+    {
         return Err(format!(
             "refresh/logout terminal states were {}/{}",
             refresh.state, logout.state
