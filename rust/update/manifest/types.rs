@@ -72,7 +72,7 @@ impl TrustRootDocument {
         self.roots
             .into_iter()
             .map(|entry| {
-                if !matches!(entry.channel.as_str(), "canary" | "stable") {
+                if super::super::Channel::named(&entry.channel).is_none() {
                     return Err(format!("unsupported trust-root channel {}", entry.channel));
                 }
                 let bytes = base64::engine::general_purpose::STANDARD

@@ -30,7 +30,7 @@ pub(super) fn validate_manifest(
             manifest.schema_version
         ));
     }
-    if !matches!(manifest.channel.as_str(), "canary" | "stable")
+    if super::super::Channel::named(&manifest.channel).is_none()
         || manifest.channel != expected_channel
     {
         return Err(format!(
