@@ -58,6 +58,20 @@ fn valid_option_key_part(part: &str) -> bool {
     }
 }
 
+/// Which settings an option key writes into, named by the key's first part.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Scope {
+    Launch,
+    Profile,
+}
+
+/// Object keys a JavaScript reader of these settings would take for its
+/// object machinery rather than an option.
+const PROTOTYPE_KEYS: &[&str] = &["__proto__", "constructor", "prototype"];
+
+/// `launch.<key>=value` and `profile.<key>=value`, the forms `/browser`
+/// documents; any other key is refused naming those forms.
 pub(super) fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value), String> {
     let mut launch = json!({});
     let mut profile = json!({});
@@ -69,63 +83,27 @@ pub(super) fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value),
             .split('.')
             .filter(|part| !part.is_empty())
             .collect::<Vec<_>>();
-        let Some((scope, rest)) = key_parts.split_first() else {
+        if key_parts
+            .iter()
+            .any(|part| PROTOTYPE_KEYS.contains(part) || !valid_option_key_part(part))
+        {
             return Err(format!("Invalid browser option key \"{raw_key}\"."));
+        }
+        let scoped = key_parts.split_first().and_then(|(scope, rest)| {
+            let scope: Scope = crate::agent::approval_named(scope)?;
+            let key = rest.last()?;
+            Some((scope, rest, *key))
+        });
+        let Some((scope, rest, key)) = scoped else {
+            return Err(format!(
+                "Unknown browser option \"{raw_key}\". Use launch.<key>=value or profile.<key>=value."
+            ));
         };
-        let scope = *scope;
-        if key_parts.iter().any(|part| {
-            matches!(*part, "__proto__" | "constructor" | "prototype")
-                || !valid_option_key_part(part)
-        }) {
-            return Err(format!("Invalid browser option key \"{raw_key}\"."));
-        }
-        if scope == "launch" && !rest.is_empty() {
-            insert_nested_object(
-                &mut launch,
-                rest,
-                browser_option_value(rest.last().copied().unwrap_or(""), raw_value),
-            );
-        } else if scope == "profile" && !rest.is_empty() {
-            insert_nested_object(
-                &mut profile,
-                rest,
-                browser_option_value(rest.last().copied().unwrap_or(""), raw_value),
-            );
-        } else if raw_key == "launch" {
-            insert_nested_object(
-                &mut launch,
-                &["executablePath"],
-                browser_option_value("executablePath", raw_value),
-            );
-        } else if raw_key == "profile" {
-            insert_nested_object(
-                &mut profile,
-                &["name"],
-                browser_option_value("name", raw_value),
-            );
-        } else if matches!(
-            raw_key,
-            "args" | "channel" | "devtools" | "executablePath" | "slowMo"
-        ) {
-            insert_nested_object(
-                &mut launch,
-                &[raw_key],
-                browser_option_value(raw_key, raw_value),
-            );
-        } else if matches!(raw_key, "name" | "profileDir" | "profile" | "userDataDir") {
-            let normalized = if raw_key == "profileDir" {
-                "userDataDir"
-            } else {
-                raw_key
-            };
-            insert_nested_object(
-                &mut profile,
-                &[normalized],
-                browser_option_value(normalized, raw_value),
-            );
-        } else {
-            return Err(format!("Unknown browser option \"{raw_key}\". Use launch.<key>=value or profile.<key>=value."));
-        }
+        let target = match scope {
+            Scope::Launch => &mut launch,
+            Scope::Profile => &mut profile,
+        };
+        insert_nested_object(target, rest, browser_option_value(key, raw_value));
     }
     Ok((launch, profile))
 }
