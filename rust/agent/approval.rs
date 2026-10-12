@@ -1,24 +1,71 @@
 use super::*;
+pub(crate) use crate::tools::ToolTier;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ToolTier {
-    Read,
-    Write,
-    Exec,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ApprovalMode {
+/// How much a session runs before it asks; spelled in config and on the
+/// command line by its serde name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ApprovalMode {
     AlwaysAsk,
     Write,
     Yolo,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ToolPolicy {
+/// What a per-tool policy says about one tool, spelled by its serde name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum ToolPolicy {
     Allow,
     Deny,
     Prompt,
+}
+
+impl ApprovalMode {
+    pub(crate) const ALL: &'static [ApprovalMode] = &[
+        ApprovalMode::AlwaysAsk,
+        ApprovalMode::Write,
+        ApprovalMode::Yolo,
+    ];
+    pub(crate) fn name(self) -> String {
+        spelling(self)
+    }
+    /// Every mode's spelling, joined with `|` for a usage line.
+    pub(crate) fn choices() -> String {
+        Self::ALL
+            .iter()
+            .map(|mode| mode.name())
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+}
+
+impl ToolPolicy {
+    pub(crate) const ALL: &'static [ToolPolicy] =
+        &[ToolPolicy::Allow, ToolPolicy::Deny, ToolPolicy::Prompt];
+    pub(crate) fn name(self) -> String {
+        spelling(self)
+    }
+    /// Every policy's spelling, joined with `|` for a usage line.
+    pub(crate) fn choices() -> String {
+        Self::ALL
+            .iter()
+            .map(|policy| policy.name())
+            .collect::<Vec<_>>()
+            .join("|")
+    }
+}
+
+/// The value of a declared vocabulary spelled `name`, or nothing.
+pub(crate) fn named<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
+    serde_json::from_value(Value::String(name.trim().to_owned())).ok()
+}
+
+/// How a declared vocabulary value is spelled.
+pub(crate) fn spelling<T: serde::Serialize>(value: T) -> String {
+    match serde_json::to_value(value) {
+        Ok(Value::String(name)) => name,
+        other => unreachable!("a unit variant serializes as its name, not {other:?}"),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -30,62 +77,22 @@ pub(super) enum ToolDecision {
     Deny(String),
 }
 
-pub(super) fn is_builtin_read_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "list_dir"
-            | "read_file"
-            | "read_binary_file"
-            | "read_document"
-            | "read_archive"
-            | "read_image"
-            | "read_sqlite"
-            | "search_text"
-            | "search_files"
-            | "glob_paths"
-            | "grep_regex"
-            | "list_package_scripts"
-            | "git_status"
-            | "git_diff"
-            | "git_log"
-            | "git_show"
-            | "fetch_url"
-            | "fetch_readable_url"
-            | "list_artifacts"
-            | "read_artifact"
-            | "task_evidence"
-            // Reads documentation, recalls memory, and asks a search index;
-            // the same work the turn prologue already does unapproved.
-            | "context_recommend"
-            | "ask_user"
-    )
-}
-
+/// The tier a tool acts at: what the builtin catalog declares for it; an
+/// MCP server's tool, which the catalog cannot know, changes what its server
+/// holds; and anything else, a custom or future tool, is treated as running
+/// code until it is declared.
 pub(super) fn tool_tier(tool: &str) -> ToolTier {
-    if is_write_tool(tool)
-        || matches!(tool, "save_artifact" | "todo" | "memory")
-        || tool.starts_with("mcp_")
-        || tool.starts_with("mcp__")
-    {
-        ToolTier::Write
-    } else if is_command_tool(tool) {
-        ToolTier::Exec
-    } else if is_builtin_read_tool(tool) {
-        ToolTier::Read
-    } else {
-        // Tools without an approval declaration use the exec tier as a safe
-        // default for custom or future tools the model may emit.
-        ToolTier::Exec
+    if let Some(tier) = crate::tools::builtin_tier(tool) {
+        return tier;
     }
+    if tool.starts_with("mcp_") {
+        return ToolTier::Write;
+    }
+    ToolTier::Exec
 }
 
 pub(super) fn parse_approval_mode(value: &str) -> Option<ApprovalMode> {
-    match value.trim() {
-        "always-ask" => Some(ApprovalMode::AlwaysAsk),
-        "write" => Some(ApprovalMode::Write),
-        "yolo" => Some(ApprovalMode::Yolo),
-        _ => None,
-    }
+    named(value)
 }
 
 pub(super) fn approval_mode(args: &Args, state: &Value) -> ApprovalMode {
@@ -108,12 +115,7 @@ pub(super) fn approval_mode(args: &Args, state: &Value) -> ApprovalMode {
 }
 
 pub(super) fn parse_tool_policy(value: &str) -> Option<ToolPolicy> {
-    match value.trim() {
-        "allow" => Some(ToolPolicy::Allow),
-        "deny" => Some(ToolPolicy::Deny),
-        "prompt" => Some(ToolPolicy::Prompt),
-        _ => None,
-    }
+    named(value)
 }
 
 pub(super) fn tool_policy(state: &Value, tool: &str) -> Option<ToolPolicy> {

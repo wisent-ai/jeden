@@ -101,37 +101,3 @@ impl RunHooks<'_> {
         }))
     }
 }
-
-/// Tools that mutate the filesystem (require write authorization).
-///
-/// Every tool that can change a file belongs here: the list decides which
-/// calls are offered for approval, and a mutating tool left out of it can
-/// only ever be refused, never approved.
-pub(crate) fn is_write_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "write_file"
-            | "write"
-            | "write_archive"
-            | "write_sqlite"
-            | "apply_patch"
-            | "edit_file"
-            | "edit"
-            | "ast_rewrite"
-            | "delete_file"
-            | "move_file"
-    )
-}
-
-/// Tools that execute commands/code (require command authorization).
-pub(crate) fn is_command_tool(tool: &str) -> bool {
-    matches!(
-        tool,
-        "run_command"
-            | "run_process"
-            | "node_eval"
-            | "python_eval"
-            | "run_package_script"
-            | "delegate_task"
-    )
-}

@@ -7,11 +7,11 @@ use crate::slash::state::ModeState;
 use crate::slash::support::state::ToolsState;
 
 fn valid_approval_mode(value: &str) -> bool {
-    matches!(value, "always-ask" | "write" | "yolo")
+    crate::agent::approval_named::<crate::agent::ApprovalMode>(value).is_some()
 }
 
 fn valid_approval_policy(value: &str) -> bool {
-    matches!(value, "allow" | "deny" | "prompt")
+    crate::agent::approval_named::<crate::agent::ToolPolicy>(value).is_some()
 }
 
 pub(crate) fn handle_approval(args: &str, state: &mut ModeState) -> Result<String, String> {
@@ -40,7 +40,10 @@ pub(crate) fn handle_approval(args: &str, state: &mut ModeState) -> Result<Strin
         "mode" => {
             let mode = rest.first().map(String::as_str).unwrap_or("");
             if !valid_approval_mode(mode) {
-                return Err("Usage: /approval mode <always-ask|write|yolo>".into());
+                return Err(format!(
+                    "Usage: /approval mode <{}>",
+                    crate::agent::ApprovalMode::choices()
+                ));
             }
             state.tools.approval_mode = mode.to_string();
             Ok(format!("Approval mode set to {}.", mode))
@@ -52,7 +55,11 @@ pub(crate) fn handle_approval(args: &str, state: &mut ModeState) -> Result<Strin
         tool => {
             let policy = rest.first().map(String::as_str).unwrap_or("");
             if tool.is_empty() || !valid_approval_policy(policy) {
-                return Err("Usage: /approval [status] | mode <always-ask|write|yolo> | <tool> <allow|deny|prompt> | reset".into());
+                return Err(format!(
+                    "Usage: /approval [status] | mode <{}> | <tool> <{}> | reset",
+                    crate::agent::ApprovalMode::choices(),
+                    crate::agent::ToolPolicy::choices()
+                ));
             }
             state
                 .tools

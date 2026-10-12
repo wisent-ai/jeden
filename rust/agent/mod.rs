@@ -22,9 +22,10 @@ mod hooks;
 mod runtime;
 mod state;
 
+pub(crate) use approval::{named as approval_named, ApprovalMode, ToolPolicy};
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;
-pub(crate) use hooks::{is_command_tool, is_write_tool, RunHooks, RunResult, TraceEvent};
+pub(crate) use hooks::{RunHooks, RunResult, TraceEvent};
 pub(crate) use runtime::communication_contract;
 
 /// The router configuration, with Jeden's own credential accounted for.
@@ -123,6 +124,8 @@ pub(crate) fn record_roadmap_event(
     Ok(path)
 }
 
+/// A tool whose call counts as reading for verification: one the catalog
+/// declares read-only, other than asking the user, which reads no evidence.
 pub(crate) fn is_verification_read_tool(tool: &str) -> bool {
-    approval::is_builtin_read_tool(tool) && tool != "ask_user"
+    crate::tools::builtin_tier(tool) == Some(crate::tools::ToolTier::Read) && tool != "ask_user"
 }

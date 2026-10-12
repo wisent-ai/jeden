@@ -26,66 +26,105 @@ impl ToolInfo {
     }
 }
 
-pub(crate) fn builtin_capability_descriptors() -> Vec<CapabilityDescriptor> {
-    const PROBE_BACKED: &[&str] = &[
-        "eval_session",
-        "pty_session",
-        "pty_resize",
-        "ast_search",
-        "ast_rewrite",
-        "lsp",
-    ];
-    let mut descriptors = builtin::built_in_tools()
+/// What a tool may do: read only, change files or durable state, or run
+/// commands and code. Approval prompts, plan mode and the capability policy
+/// are decided from it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolTier {
+    Read,
+    Write,
+    Exec,
+}
+
+/// One builtin tool as the catalog declares it: what it is, the tier it acts
+/// at, and whether its availability is probed at runtime (its descriptor then
+/// comes from the probe, not from this catalog).
+pub(crate) struct BuiltinTool {
+    pub info: ToolInfo,
+    pub tier: ToolTier,
+    pub probe_backed: bool,
+}
+
+impl BuiltinTool {
+    fn at(tier: ToolTier, name: &str, description: &str) -> Self {
+        Self {
+            info: ToolInfo::new(name, description),
+            tier,
+            probe_backed: false,
+        }
+    }
+    pub(crate) fn reads(name: &str, description: &str) -> Self {
+        Self::at(ToolTier::Read, name, description)
+    }
+    pub(crate) fn writes(name: &str, description: &str) -> Self {
+        Self::at(ToolTier::Write, name, description)
+    }
+    pub(crate) fn runs(name: &str, description: &str) -> Self {
+        Self::at(ToolTier::Exec, name, description)
+    }
+    pub(crate) fn probe_backed(mut self) -> Self {
+        self.probe_backed = true;
+        self
+    }
+}
+
+/// The declared tier of the builtin tool named `name`, or nothing when no
+/// builtin tool has that name.
+pub(crate) fn builtin_tier(name: &str) -> Option<ToolTier> {
+    builtin::built_in_tools()
         .into_iter()
-        .filter(|tool| !PROBE_BACKED.contains(&tool.name.as_str()))
-        .map(|tool| {
-            let policy = if matches!(
-                tool.name.as_str(),
-                "write"
-                    | "write_file"
-                    | "write_archive"
-                    | "write_sqlite"
-                    | "apply_patch"
-                    | "edit_file"
-                    | "edit"
-                    | "delete_file"
-                    | "move_file"
-                    | "run_command"
-                    | "run_process"
-                    | "node_eval"
-                    | "python_eval"
-                    | "run_package_script"
-            ) {
-                CapabilityPolicy::ApprovalRequired
-            } else {
-                CapabilityPolicy::ReadOnly
-            };
-            CapabilityDescriptor::new(
-                format!("tool/{}", tool.name),
-                CapabilityKind::Tool,
-                "jeden-core",
-                tool.name.clone(),
-                tool.description.clone(),
-                FunctionTarget::BuiltinTool {
-                    name: tool.name.clone(),
-                },
-            )
-            .operation("execute")
-            .policy(policy)
-            .executable(tool.name)
-            .metadata(json!({"input": tool.input}))
-        })
+        .find(|tool| tool.info.name == name)
+        .map(|tool| tool.tier)
+}
+
+fn tier_policy(tier: ToolTier) -> CapabilityPolicy {
+    match tier {
+        ToolTier::Read => CapabilityPolicy::ReadOnly,
+        ToolTier::Write | ToolTier::Exec => CapabilityPolicy::ApprovalRequired,
+    }
+}
+
+pub(crate) fn builtin_capability_descriptors() -> Vec<CapabilityDescriptor> {
+    let catalog = builtin::built_in_tools();
+    let probed: Vec<(String, ToolTier)> = catalog
+        .iter()
+        .filter(|tool| tool.probe_backed)
+        .map(|tool| (tool.info.name.clone(), tool.tier))
+        .collect();
+    let mut descriptors = catalog
+        .into_iter()
+        .filter(|tool| !tool.probe_backed)
+        .map(
+            |BuiltinTool {
+                 info: tool, tier, ..
+             }| {
+                CapabilityDescriptor::new(
+                    format!("tool/{}", tool.name),
+                    CapabilityKind::Tool,
+                    "jeden-core",
+                    tool.name.clone(),
+                    tool.description.clone(),
+                    FunctionTarget::BuiltinTool {
+                        name: tool.name.clone(),
+                    },
+                )
+                .operation("execute")
+                .policy(tier_policy(tier))
+                .executable(tool.name)
+                .metadata(json!({"input": tool.input}))
+            },
+        )
         .collect::<Vec<_>>();
+    // A probe-backed tool is offered only while its probe reports it healthy,
+    // under the tier the catalog declares for it.
     descriptors.extend(
         crate::tool_runtime::dynamic_tool_descriptors()
             .into_iter()
-            .filter(|tool| matches!(tool.name.as_str(), "ast_search" | "ast_rewrite" | "lsp"))
-            .map(|tool| {
-                let policy = if tool.name == "ast_rewrite" {
-                    CapabilityPolicy::ApprovalRequired
-                } else {
-                    CapabilityPolicy::ReadOnly
-                };
+            .filter_map(|tool| {
+                let (_, tier) = probed.iter().find(|(name, _)| *name == tool.name)?;
+                Some((tool, *tier))
+            })
+            .map(|(tool, tier)| {
                 CapabilityDescriptor::new(
                     format!("tool/{}", tool.name),
                     CapabilityKind::Tool,
@@ -97,7 +136,7 @@ pub(crate) fn builtin_capability_descriptors() -> Vec<CapabilityDescriptor> {
                     },
                 )
                 .operation("execute")
-                .policy(policy)
+                .policy(tier_policy(tier))
                 .executable(tool.name)
                 .metadata(json!({"input": tool.input, "health": tool.health}))
             }),

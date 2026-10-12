@@ -114,7 +114,11 @@ pub(crate) fn approval_picker(state: &ModeState, lang: &str) -> PickerSpec {
             .detail("Show the global mode and per-tool policies")
             .badge(current),
     ];
-    for mode in ["always-ask", "write", "yolo"] {
+    for mode in crate::agent::ApprovalMode::ALL
+        .iter()
+        .map(|mode| mode.name())
+    {
+        let mode = mode.as_str();
         items.push(
             PickerItem::action(
                 format!("Use {} approval mode", mode),
@@ -130,7 +134,11 @@ pub(crate) fn approval_picker(state: &ModeState, lang: &str) -> PickerSpec {
         );
     }
     for (tool, active) in &state.tools.approval {
-        for policy in ["allow", "deny", "prompt"] {
+        for policy in crate::agent::ToolPolicy::ALL
+            .iter()
+            .map(|policy| policy.name())
+        {
+            let policy = policy.as_str();
             items.push(
                 PickerItem::action(
                     format!("Set {} to {}", tool, policy),
