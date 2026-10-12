@@ -163,7 +163,7 @@ where
         };
         if matches!(
             request.method.as_str(),
-            "prompt" | "session/prompt" | "session/completion/continue"
+            "session/prompt" | "session/completion/continue"
         ) {
             let worker_state = state.clone();
             let in_flight = activity.begin();
@@ -236,12 +236,12 @@ where
 fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), Value> {
     let id = request.id.clone();
     let result = match request.method.as_str() {
-        "initialize" | "capabilities" => Ok(json!({
+        "initialize" => Ok(json!({
             "protocol": "jeden-rpc",
             "capabilities": AgentSession::capabilities(),
             "quickReplies": quick_replies()
         })),
-        "session/new" | "new" => create_session(state, request.params, false),
+        "session/new" => create_session(state, request.params, false),
         "config/contracts/get" => Ok(crate::cli::config::schema::contract_settings()),
         "config/contracts/set" => set_contract_settings(&request.params),
         "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
@@ -267,21 +267,17 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "workspace/adopt" => workspace_adopt(&request.params),
         "session/import" => import_sessions(&request.params),
         "session/restore" => restore_sessions(&request.params),
-        "session/open" | "session/load" | "resume" => create_session(state, request.params, true),
-        "abort" | "session/cancel" => abort_session(state, &request.params),
-        "status" | "session/status" => session_status(state, &request.params),
+        "session/open" | "session/load" => create_session(state, request.params, true),
+        "session/cancel" => abort_session(state, &request.params),
+        "session/status" => session_status(state, &request.params),
         "session/completion/get" | "session/completion/control" | "session/completion/add" => {
             completion_request(state, &request.params, &request.method)
         }
         "asks/list" | "asks/get" | "asks/answer" => asks_request(&request.params, &request.method),
-        "dispose" | "session/dispose" => dispose_session(state, &request.params, false),
+        "session/dispose" => dispose_session(state, &request.params, false),
         "session/retire" => dispose_session(state, &request.params, true),
-        "elicitation/resolve" | "session/input_response" => {
-            resolve_elicitation(state, &request.params)
-        }
-        "approval/resolve" | "session/permission_response" => {
-            resolve_approval(state, &request.params)
-        }
+        "session/input_response" => resolve_elicitation(state, &request.params),
+        "session/permission_response" => resolve_approval(state, &request.params),
         "shutdown" => {
             state.shutting_down.store(true, Ordering::Release);
             Ok(json!({"shuttingDown": true}))
