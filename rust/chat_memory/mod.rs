@@ -1,16 +1,18 @@
-//! A chat's memory that never ends: every message kept word for word in an
-//! append-only log, a tree of summaries over it built in the background by a
-//! cheap model through Brama, and a view of constant size that each turn is
-//! given instead of the whole history, with the tree reachable by zoom and
-//! by date. The view is kept beside the log, so a resumed session continues
-//! from it. Compaction, which replaced the history and lost what the operator
-//! said, is not used while the chat memory is on.
+//! A chat's memory that never ends, as the operator's OptChat design lays it
+//! out: every message logged word for word in `main/YYYY-MM-DD.jsonl`, a
+//! binary tree of one-line summaries of at most 512 bytes built from it by a
+//! cheap model through Brama in `tree/YYYY-MM-DD.jsonl`, and a view of those
+//! lines, 64 to 128 KB, that each turn is given before its new message,
+//! saved in `view.json` and never rebuilt. The model opens a line with
+//! zoom(id, n), down to the message itself, and asks date(id) for when a
+//! message was said. Compaction, which replaced the history and lost what
+//! the operator said, is not used while the chat memory is on.
 //!
 //! The operator turns it on per workspace or user with `chatMemory` in
-//! Jeden's configuration: `summaryModel` (the Brama route or alias of the
-//! cheap model) and `viewBytes` (how many bytes the view may take). A
-//! summary's size is the operator's own number, declared beside this file.
-//! Everything lives under the session directory in `chat-memory/`.
+//! Jeden's configuration, naming `summaryModel`: the Brama route or alias of
+//! the cheap model. Every size is the operator's own number, declared
+//! beside this file. Everything lives under the session directory in
+//! `chat-memory/`.
 
 mod log;
 pub mod session;
@@ -22,28 +24,58 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-pub use log::{Entry, Log};
+pub use log::{Entry, Kind, Log};
 pub use tree::{Node, Summarize, Tree};
 pub use view::View;
 
 #[derive(Deserialize)]
-struct Declared {
-    value: usize,
+struct Declared<T> {
+    value: T,
 }
 
 #[derive(Deserialize)]
 struct Limits {
-    summary_bytes_max: Declared,
+    summary_bytes_max: Declared<usize>,
+    view_bytes_high: Declared<usize>,
+    view_bytes_low: Declared<usize>,
+    echo_chars_max: Declared<usize>,
+    summary_attempts_max: Declared<usize>,
+    message_level: Declared<u32>,
 }
 
 static LIMITS: LazyLock<Limits> = LazyLock::new(|| {
     serde_json::from_str(include_str!("numeric-provenance.json"))
-        .expect("numeric-provenance.json declares the operator's summary size")
+        .expect("numeric-provenance.json declares the operator's chat memory numbers")
 });
 
-/// The most bytes one summary of the tree may take: the operator's number.
+/// The most bytes one line of the tree may take.
 pub fn summary_bytes() -> usize {
     LIMITS.summary_bytes_max.value
+}
+
+/// The size past which the view is merged down.
+pub fn view_high() -> usize {
+    LIMITS.view_bytes_high.value
+}
+
+/// The size a batch merges the view down to.
+pub fn view_low() -> usize {
+    LIMITS.view_bytes_low.value
+}
+
+/// How many characters of a tool's output the log keeps, head and tail.
+pub fn echo_chars() -> usize {
+    LIMITS.echo_chars_max.value
+}
+
+/// How many times a compaction is asked for a line that fits.
+pub fn summary_attempts() -> usize {
+    LIMITS.summary_attempts_max.value
+}
+
+/// The level of a message's own node.
+pub fn message_level() -> u32 {
+    LIMITS.message_level.value
 }
 
 /// What the operator set the chat memory to.
@@ -51,20 +83,25 @@ pub fn summary_bytes() -> usize {
 pub struct Settings {
     /// The Brama route or alias the summaries are written with.
     pub summary_model: String,
-    /// How many bytes the view a turn is given may take.
-    pub view_bytes: usize,
 }
 
 /// The chat memory's settings in `cwd`'s configuration: none when the
 /// configuration names no `chatMemory`, which leaves it off. A section that
-/// leaves out a setting, or states one that is not usable, is refused naming
-/// it, never filled in.
+/// leaves out the summary model, or still states a view size the design
+/// fixes, is refused naming it, never filled in or ignored.
 pub fn settings(cwd: &Path) -> Result<Option<Settings>, String> {
     let merged = crate::cli::config::merged_config_value(cwd);
     let section = match merged.get("chatMemory") {
         None | Some(Value::Null) => return Ok(None),
         Some(section) => section,
     };
+    if section.get("viewBytes").is_some() {
+        return Err(format!(
+            "chatMemory.viewBytes is no longer read: the view grows to {} bytes and is merged down to {} at once, as the design states; remove it",
+            view_high(),
+            view_low()
+        ));
+    }
     let summary_model = section
         .get("summaryModel")
         .and_then(Value::as_str)
@@ -72,23 +109,7 @@ pub fn settings(cwd: &Path) -> Result<Option<Settings>, String> {
         .filter(|model| !model.is_empty())
         .ok_or("chatMemory.summaryModel is required: the Brama route or alias of the cheap model the summary tree is written with")?
         .to_string();
-    let view_bytes = section
-        .get("viewBytes")
-        .and_then(Value::as_u64)
-        .and_then(|bytes| usize::try_from(bytes).ok())
-        .and_then(std::num::NonZeroUsize::new)
-        .ok_or("chatMemory.viewBytes is required: a positive whole number of bytes the view a turn is given may take")?
-        .get();
-    if view_bytes < summary_bytes() {
-        return Err(format!(
-            "chatMemory.viewBytes {view_bytes} is smaller than one summary of the tree ({} bytes), so no view could hold a node",
-            summary_bytes()
-        ));
-    }
-    Ok(Some(Settings {
-        summary_model,
-        view_bytes,
-    }))
+    Ok(Some(Settings { summary_model }))
 }
 
 /// Where a session keeps its chat memory.

@@ -130,22 +130,22 @@ pub(crate) fn recall_conversation(
             dir.display().to_string()
         }
     };
-    // The chat memory answers a zoom into one node of its summary tree, or
-    // the messages of a time, word for word from its log.
+    // The chat memory answers zoom(id, n) into a line of its view, down to a
+    // message whole, and date(id) of a message.
     let memory = crate::chat_memory::dir(&crate::cli::sessions::session_dir_for(&target));
-    if let Some(node) = string_input(input, "node") {
-        return crate::chat_memory::session::zoom(&memory, &node);
-    }
-    // A time is seconds since 1970, given as a number or as its digits.
-    let time = |key: &str| match input.get(key) {
-        Some(Value::Number(seconds)) => Some(seconds.to_string()),
+    // A message id or a count, given as a number or as its digits.
+    let number = |key: &str| match input.get(key) {
+        Some(Value::Number(value)) => Some(value.to_string()),
         _ => string_input(input, key),
     };
-    match (time("from"), time("to")) {
-        (Some(from), Some(to)) => return crate::chat_memory::session::dates(&memory, &from, &to),
+    if let Some(id) = number("date") {
+        return crate::chat_memory::session::date(&memory, &id);
+    }
+    match (number("id"), number("n")) {
+        (Some(id), Some(n)) => return crate::chat_memory::session::zoom(&memory, &id, &n),
         (Some(_), None) | (None, Some(_)) => {
             return Err(
-                "recall_conversation by time takes both from and to, in seconds since 1970".into(),
+                "recall_conversation opens a line of the chat memory with both id and n, as the view names it `id+n|`".into(),
             )
         }
         (None, None) => {}

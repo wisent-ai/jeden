@@ -98,23 +98,12 @@ impl Conversation {
                 settings.summary_model
             ));
         }
-        Ok(Arc::new(move |text: &str, bytes: usize| {
-            let instruction = format!(
-                "Summarize the conversation text the user sends in at most {bytes} bytes of UTF-8. Keep every \
-                 order, decision, consent, refusal, question and its answer, name, number and path the text \
-                 states, in its own words where they fit; leave out nothing the operator asked for or decided. \
-                 Answer with the summary alone."
-            );
-            chat_completion(
-                &router,
-                vec![
-                    json!({ "role": "system", "content": instruction }),
-                    json!({ "role": "user", "content": text }),
-                ],
-                None,
-                &[],
-            )
-            .map(|completion| completion.content)
+        // The chat memory writes the compaction's whole conversation (its
+        // instructions, the task with its ruler, and any "too long" retry);
+        // the cheap model answers the line.
+        Ok(Arc::new(move |messages: &[Value]| {
+            chat_completion(&router, messages.to_vec(), None, &[])
+                .map(|completion| completion.content)
         }))
     }
 }

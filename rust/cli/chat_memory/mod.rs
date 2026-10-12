@@ -1,21 +1,23 @@
 //! `jeden chat-memory`: a session's never-ending chat memory as it stands —
 //! the log, the view a turn is given, the summary tree — and the same zoom
-//! and date recall the model has. Nothing here writes.
+//! and date the model has. Nothing here writes.
+
+use serde_json::Value;
 
 use crate::chat_memory::{dir, session};
 use crate::Args;
 
-const USAGE: &str = "jeden chat-memory show <session-id-or-path> [--json] — the log length, the view a turn is given now (its nodes and the messages word for word) and every node of the summary tree
-jeden chat-memory zoom <session-id-or-path> <node> [--json] — a node's two halves, or a single message word for word
-jeden chat-memory dates <session-id-or-path> <from> <to> [--json] — every message that entered the log between two times, in seconds since 1970";
+const USAGE: &str = "jeden chat-memory show <session-id-or-path> [--json] — how many messages the log holds, the view a turn is given now (its lines and its size between the design's bounds) and every line of the summary tree
+jeden chat-memory zoom <session-id-or-path> <id> <n> [--json] — line id+n opened into the two lines it was made from, or for n = 1 the message whole
+jeden chat-memory date <session-id-or-path> <id> [--json] — the date and time of message id";
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
     let words: Vec<&str> = args.positionals.iter().map(String::as_str).collect();
     let memory = |session: &str| dir(&crate::cli::sessions::session_dir_for(session));
     let answer = match words.as_slice() {
         ["show", session] => session::describe(&memory(session))?,
-        ["zoom", session, node] => session::zoom(&memory(session), node)?,
-        ["dates", session, from, to] => session::dates(&memory(session), from, to)?,
+        ["zoom", session, id, n] => session::zoom(&memory(session), id, n)?,
+        ["date", session, id] => session::date(&memory(session), id)?,
         _ => {
             return Err(crate::cli::invocation::refusal::usage(format!(
                 "jeden chat-memory takes one of:\n{USAGE}"
@@ -31,64 +33,44 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
 }
 
 /// A value as a person reads it: a string as it is, anything else as JSON.
-fn plain(value: &serde_json::Value) -> String {
+fn plain(value: &Value) -> String {
     match value {
-        serde_json::Value::String(text) => text.clone(),
+        Value::String(text) => text.clone(),
         other => other.to_string(),
     }
 }
 
-/// The answer for a person: each node as `[id] from..to` and its summary,
-/// each message as `#index role at` and its text, followed by the other
-/// fields it carries (`fields`: an assistant turn's `tool_calls`, a tool
-/// result's `tool_call_id`), one per line.
-fn text(answer: &serde_json::Value) -> String {
+/// The answer for a person: the log and view sizes and the view's lines;
+/// a zoom's lines or its message as `#i kind date` and its text; a date.
+fn text(answer: &Value) -> String {
     let mut out = String::new();
     if let Some(log) = answer.get("log") {
+        let view = &answer["view"];
         out.push_str(&format!(
-            "log {} holds {} message(s)\n",
-            plain(&log["path"]),
-            log["messages"]
-        ));
-        out.push_str(&format!(
-            "view: {} bytes over the first {} message(s); messages from #{} word for word\n",
-            answer["view"]["bytes"], answer["view"]["logLength"], answer["view"]["tailStart"]
-        ));
-    }
-    let nodes = answer
-        .pointer("/view/frontier")
-        .or_else(|| answer.get("children"))
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .chain(answer.get("node"));
-    for node in nodes {
-        out.push_str(&format!(
-            "[{}] {}..{}\n{}\n",
-            plain(&node["id"]),
-            plain(&node["from"]),
-            plain(&node["to"]),
-            plain(&node["summary"])
+            "log {} holds {} message(s)\nview: {} bytes over the first {} message(s), merged down to {} once past {}\n{}",
+            plain(&log["directory"]),
+            log["messages"],
+            view["bytes"],
+            view["covers"],
+            view["low"],
+            view["high"],
+            plain(&view["text"])
         ));
     }
-    let messages = answer
-        .pointer("/view/tail")
-        .or_else(|| answer.get("messages"))
-        .and_then(serde_json::Value::as_array)
-        .into_iter()
-        .flatten()
-        .chain(answer.get("message"));
-    for message in messages {
+    for line in answer["lines"].as_array().into_iter().flatten() {
+        out.push_str(&plain(line));
+    }
+    if let Some(message) = answer.get("message") {
         out.push_str(&format!(
             "#{} {} {}\n{}\n",
-            message["index"],
-            plain(&message["role"]),
-            plain(&message["at"]),
-            plain(&message["content"])
+            message["i"],
+            plain(&message["kind"]),
+            plain(&message["date"]),
+            plain(&message["text"])
         ));
-        for (field, value) in message["fields"].as_object().into_iter().flatten() {
-            out.push_str(&format!("{field}: {value}\n"));
-        }
+    }
+    if let (Some(id), Some(date)) = (answer.get("id"), answer.get("date")) {
+        out.push_str(&format!("#{id} {}\n", plain(date)));
     }
     out
 }

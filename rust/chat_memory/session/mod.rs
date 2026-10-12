@@ -1,19 +1,34 @@
 //! The chat memory of one live conversation: what it appends to the log,
-//! the view it hands each turn, and the summaries it builds in the
-//! background between turns.
+//! the view it hands each turn, and the lines it builds in the background
+//! between turns.
+//!
+//! A turn is given the conversation's system messages, the view of every
+//! message before the turn as summary lines, and then the turn itself from
+//! the user's message on, whole. Nothing else carries over between turns:
+//! the view is the only continuity, so every message before the turn is
+//! summarized before the turn is sent.
 
+mod entries;
 mod recall;
+mod store;
 
-pub use recall::{dates, describe, zoom};
+pub use recall::{date, describe, zoom};
 
 use serde_json::{json, Value};
+use std::fs::File;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use super::{dir, summary_bytes, Entry, Log, Settings, Summarize, Tree, View};
+use super::log::now;
+use super::view::{render, Fitting};
+use super::{
+    dir, summary_attempts, summary_bytes, view_high, view_low, Log, Settings, Summarize, Tree, View,
+};
+use entries::{entries_of, is_system, is_user, own};
+use store::{load_taken, note_rewind, own_chat, refuse_earlier_layout, save_taken};
 
-/// One process works on a chat memory at a time: the background builder and
-/// the turn share its tree and its view.
+/// The background builder and the turn share one chat's tree and view.
 static BUSY: Mutex<()> = Mutex::new(());
 
 fn busy() -> Result<MutexGuard<'static, ()>, String> {
@@ -22,169 +37,139 @@ fn busy() -> Result<MutexGuard<'static, ()>, String> {
     })
 }
 
-fn is_system(message: &Value) -> bool {
-    message.get("role").and_then(Value::as_str) == Some("system")
-}
+/// What a turn is told about the view, before it.
+const VIEW_HEADER: &str = "Jeden's memory: the whole chat between Jeden and the user before this turn, oldest first, \
+inside <chat> tags, as one-line summaries:\n\n  id+n|text   the n messages from id on, summarized (newlines as spaces)\n\n\
+Each message has a kind: user (the user's words), jeden (Jeden's replies), tool (Jeden's tool calls), echo (tool \
+results), work (an agent's report), note (what the chat itself recorded, such as a rewind).\n\n\
+The summaries form a binary tree: each message is compressed into a line (a short message is its own line), then \
+adjacent lines are merged in pairs, again and again, so recent lines cover few messages and older lines more. \
+recall_conversation with id and n opens line id+n into the two lines it was made from, and for a line of a single \
+message gives message id whole; with date = id it gives the date and time of message id.\n\n\
+The view is your memory, and its latest word on a thing is the truth. Whenever you need any information, first find \
+its latest mention in the view and zoom until you have it whole, before any other source, and before you act, guess \
+or ask. Summaries keep little of tool output, so say in your reply what you learned that will matter later.\n\n";
 
 pub struct ChatMemory {
     dir: PathBuf,
-    settings: Settings,
     summarize: Arc<Summarize>,
-    /// The log index of each of the conversation's own messages (all but
-    /// system ones) the log already holds, in the conversation's order.
+    /// The first log index of each of the conversation's own messages the
+    /// log holds, in the conversation's order.
     taken: Vec<u64>,
+    /// The lock that makes this process the chat's one writer.
+    _owner: File,
 }
 
 impl ChatMemory {
     /// The chat memory of the session at `session_dir`, given the history the
-    /// conversation brings. A log that already holds the chat keeps it as it
-    /// is; a log the session never had takes that history now, so a session
-    /// the memory is turned on for keeps everything said before. The
-    /// history's messages are the log's own, in order, but for those a
-    /// rewind took back.
+    /// conversation brings: a log that already holds the chat keeps it, and
+    /// what the history says that the log does not hold is appended now.
     pub fn open(
         session_dir: &Path,
-        settings: Settings,
+        _settings: Settings,
         summarize: Arc<Summarize>,
         history: &[Value],
     ) -> Result<Self, String> {
         let dir = dir(session_dir);
-        let entries = Log::at(&dir).read()?;
-        let view = View::load(&dir)?;
-        let own = history.iter().filter(|message| !is_system(message)).count();
-        let taken = entries
-            .iter()
-            .map(|entry| entry.index)
-            .filter(|index| !view.was_rewound(*index))
-            .take(own)
-            .collect();
+        refuse_earlier_layout(&dir)?;
+        let owner = own_chat(&dir)?;
+        let taken = load_taken(&dir)?;
         let mut memory = Self {
             dir,
-            settings,
             summarize,
             taken,
+            _owner: owner,
         };
         memory.sync(history)?;
         Ok(memory)
     }
 
     /// The conversation's history was taken back to a checkpoint
-    /// (`/rewind`): every message the log took from it after the messages it
-    /// still holds stays in the log word for word, recalled by zoom and date,
-    /// but is marked rewound in the view, so no later turn is given it from
-    /// the tail; what the conversation says from here on is appended after
-    /// everything the log keeps.
+    /// (`/rewind`): the log keeps everything said, a note names what was
+    /// taken back, and what is said from here on follows the note.
     pub fn replaced(&mut self, messages: &[Value]) -> Result<(), String> {
-        let own = messages
-            .iter()
-            .filter(|message| !is_system(message))
-            .count();
-        let Some(&from) = self.taken.get(own) else {
-            return Ok(());
-        };
         let _guard = busy()?;
-        let to = Log::at(&self.dir).read()?.len() as u64;
-        let mut view = View::load(&self.dir)?;
-        view.rewound.push((from, to));
-        view.save(&self.dir)?;
-        self.taken.truncate(own);
-        Ok(())
+        let kept = own(messages).count();
+        note_rewind(&self.dir, &mut self.taken, kept)
     }
 
-    /// The same mark for a rewind in a process that never opened the
-    /// session's memory (`jeden run "/rewind <id>"`): the log holds the
-    /// conversation as it stood `before`, in order, but for ranges already
-    /// rewound, so the messages it took back are those after the ones it
-    /// still holds `after`. A session the memory never logged has nothing
-    /// to mark.
-    pub fn rewound_unopened(
-        session_dir: &Path,
-        before: &[Value],
-        after: &[Value],
-    ) -> Result<(), String> {
+    /// The same note for a rewind in a process that never opened the
+    /// session's memory (`jeden run "/rewind <id>"`), from the history as it
+    /// stands after the rewind. A session the memory never logged has
+    /// nothing to note.
+    pub fn rewound_unopened(session_dir: &Path, after: &[Value]) -> Result<(), String> {
         let dir = dir(session_dir);
-        let _guard = busy()?;
-        let entries = Log::at(&dir).read()?;
-        let mut view = View::load(&dir)?;
-        let own = |messages: &[Value]| {
-            messages
-                .iter()
-                .filter(|message| !is_system(message))
-                .count()
-        };
-        let taken: Vec<u64> = entries
-            .iter()
-            .map(|entry| entry.index)
-            .filter(|index| !view.was_rewound(*index))
-            .take(own(before))
-            .collect();
-        let Some(&from) = taken.get(own(after)) else {
+        if !Log::at(&dir).dir().exists() {
             return Ok(());
-        };
-        view.rewound.push((from, entries.len() as u64));
-        view.save(&dir)
+        }
+        let _owner = own_chat(&dir)?;
+        let _guard = busy()?;
+        let mut taken = load_taken(&dir)?;
+        note_rewind(&dir, &mut taken, own(after).count())
     }
 
-    /// Append the conversation's messages the log does not hold yet, each
-    /// as the conversation holds it.
+    /// Append the conversation's messages the log does not hold yet, word
+    /// for word, flushed before the call answers.
     pub fn sync(&mut self, messages: &[Value]) -> Result<(), String> {
-        let log = Log::at(&self.dir);
         let _guard = busy()?;
-        // A history cut back by a path that did not say so (`replaced`)
-        // still has its next messages kept from its own length on.
-        let own = messages
-            .iter()
-            .filter(|message| !is_system(message))
-            .count();
-        self.taken.truncate(own);
-        let next = log.read()?.len() as u64;
+        let log = Log::at(&self.dir);
+        let mine: Vec<&Value> = own(messages).collect();
+        // A history cut back by a path that did not say so still has its next
+        // messages kept from its own length on.
+        self.taken.truncate(mine.len());
+        let mut next = log.read()?.len() as u64;
         let mut fresh = Vec::new();
-        for (message, index) in messages
-            .iter()
-            .filter(|message| !is_system(message))
-            .skip(self.taken.len())
-            .zip(next..)
-        {
-            let role = message.get("role").and_then(Value::as_str).ok_or_else(|| {
-                format!("message {index} of the conversation names no role, so the chat log cannot keep it")
-            })?;
-            let mut fields = message.as_object().cloned().ok_or_else(|| {
-                format!("message {index} of the conversation is not an object, so the chat log cannot keep it")
-            })?;
-            fields.remove("role");
-            // An assistant turn that only called tools carries no content.
-            let content = fields.remove("content");
-            fresh.push(Entry {
-                index,
-                at: crate::agent::now_stamp(),
-                role: role.to_string(),
-                content: match content {
-                    Some(content) => content,
-                    None => Value::Null,
-                },
-                fields,
-            });
+        for message in mine.iter().skip(self.taken.len()) {
+            let made = entries_of(message, next, &now()?)?;
+            self.taken.push(next);
+            next += made.len() as u64;
+            fresh.extend(made);
+        }
+        if fresh.is_empty() {
+            return Ok(());
         }
         log.append(&fresh)?;
-        self.taken.extend(fresh.iter().map(|entry| entry.index));
-        Ok(())
+        save_taken(&self.dir, &self.taken)
     }
 
     /// The messages a turn sends: the conversation's system messages, the
-    /// frontier of the view as one memory message, then the tail word for
-    /// word. The view is fitted to its size first and kept.
+    /// view of every message before the turn, then the turn itself from the
+    /// user's last message on. The view is grown, merged when it passed its
+    /// size, and saved first.
     pub fn outbound(&self, messages: &[Value]) -> Result<Vec<Value>, String> {
         let _guard = busy()?;
-        let entries = Log::at(&self.dir).read()?;
+        let mine: Vec<&Value> = own(messages).collect();
+        let logged = Log::at(&self.dir).read()?;
+        // The turn starts at the user's last message; a conversation with
+        // none is all turn, and every message the log holds comes before it.
+        let (turn, start) = match mine.iter().rposition(|message| is_user(message)) {
+            Some(turn) => {
+                let start = self.taken.get(turn).ok_or_else(|| {
+                    format!("the chat log does not hold the turn's message {turn} yet")
+                })?;
+                let start = usize::try_from(*start).map_err(|error| {
+                    format!("the turn starts at a log index this machine cannot count: {error}")
+                })?;
+                (turn, start)
+            }
+            None => (mine.len(), logged.len()),
+        };
+        let before = logged.get(..start).ok_or_else(|| {
+            format!(
+                "the turn starts at message {start}, but the chat log holds {}",
+                logged.len()
+            )
+        })?;
         let mut tree = Tree::open(&self.dir)?;
         let mut view = View::load(&self.dir)?;
-        view.fit(
-            &entries,
-            &mut tree,
-            self.settings.view_bytes,
-            summary_bytes(),
-            self.summarize.as_ref(),
-        )?;
+        let fitting = Fitting {
+            summary_bytes: summary_bytes(),
+            attempts: summary_attempts(),
+            high: view_high(),
+            low: view_low(),
+            summarize: self.summarize.as_ref(),
+        };
+        view.grow(before, &mut tree, &fitting)?;
         view.save(&self.dir)?;
         let mut out: Vec<Value> = messages
             .iter()
@@ -193,36 +178,28 @@ impl ChatMemory {
             .collect();
         let nodes = view.nodes(&tree)?;
         if !nodes.is_empty() {
-            let mut block = String::from(
-                "Conversation memory: every message of this chat before the ones that follow, oldest first, \
-                 as summaries. Each line names a node (`first-last` message, entered between two times in \
-                 seconds since 1970). recall_conversation with node=<id> answers a node's two halves, or a \
-                 message word for word; with from and to (seconds since 1970) it answers the messages of that time.\n",
-            );
-            for node in &nodes {
-                block.push_str(&node.line());
-            }
-            out.push(json!({ "role": "system", "content": block }));
+            out.push(json!({
+                "role": "system",
+                "content": format!("{VIEW_HEADER}{}", render(&nodes)),
+            }));
         }
-        for entry in view.given(&entries)? {
-            out.push(entry.message());
-        }
+        out.extend(mine.into_iter().skip(turn).cloned());
         Ok(out)
     }
 
-    /// Between turns, write the leaf of every tail message the next fold
-    /// takes (`view::foldable`), so
-    /// the next fold of the view asks no model while a turn waits. Runs on its
-    /// own thread; a failure is said on standard error with its cause, and
-    /// the turn that needs the leaf writes it then.
+    /// Between turns, build ahead the line of every message the view does
+    /// not cover yet and the parent of every sibling pair in the view, so
+    /// the next turn and the next batch ask no model while they wait. Runs
+    /// on its own thread; a failure is said on standard error with its
+    /// cause, and the turn that needs the line builds it then.
     pub fn build_in_background(&self) {
         let dir = self.dir.clone();
         let summarize = Arc::clone(&self.summarize);
         let spawned = std::thread::Builder::new()
             .name("chat-memory-builder".into())
             .spawn(move || {
-                if let Err(error) = build_leaves(&dir, summarize.as_ref()) {
-                    eprintln!("jeden: the chat memory's summaries were not built ahead: {error}");
+                if let Err(error) = build_ahead(&dir, summarize.as_ref()) {
+                    eprintln!("jeden: the chat memory's lines were not built ahead: {error}");
                 }
             });
         if let Err(error) = spawned {
@@ -231,13 +208,38 @@ impl ChatMemory {
     }
 }
 
-fn build_leaves(dir: &Path, summarize: &Summarize) -> Result<(), String> {
+fn build_ahead(dir: &Path, summarize: &Summarize) -> Result<(), String> {
     let _guard = busy()?;
-    let entries = Log::at(dir).read()?;
+    let logged = Log::at(dir).read()?;
     let mut tree = Tree::open(dir)?;
     let view = View::load(dir)?;
-    for entry in super::super::view::foldable(view.tail(&entries)?) {
-        tree.leaf(entry, summary_bytes(), summarize)?;
+    let nodes = view.nodes(&tree)?;
+    let context = render(&nodes);
+    let covered = usize::try_from(view.covered()).map_err(|error| {
+        format!("the view covers more messages than this machine counts: {error}")
+    })?;
+    for entry in logged.iter().skip(covered) {
+        tree.leaf(
+            entry,
+            &context,
+            summary_bytes(),
+            summary_attempts(),
+            summarize,
+        )?;
+    }
+    let pairs = nodes.windows(NonZeroUsize::MIN.get() + NonZeroUsize::MIN.get());
+    for (at, window) in pairs.enumerate() {
+        let [left, right] = window else {
+            continue;
+        };
+        let (l, i) = (
+            left.l + NonZeroU32::MIN.get(),
+            left.i >> NonZeroU32::MIN.get(),
+        );
+        if super::tree::halves(l, i) == Some(((left.l, left.i), (right.l, right.i))) {
+            let upto = render(&nodes[..=at + NonZeroUsize::MIN.get()]);
+            tree.parent(l, i, &upto, summary_bytes(), summary_attempts(), summarize)?;
+        }
     }
     Ok(())
 }

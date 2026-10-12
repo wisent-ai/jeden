@@ -79,43 +79,53 @@ names of the missing ones.
 ### Never-ending chat memory
 
 With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
-(user), a session keeps every message and stops compacting:
+(user), a session keeps every message and stops compacting, as the operator's
+OptChat design lays it out:
 
 ```json
-{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>", "viewBytes": <bytes a turn's view may take> } }
+{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>" } }
 ```
 
-- Every message the conversation holds — prompts, replies, tool calls and the
-  tool results the model received — is appended word for word to
-  `<session>/chat-memory/log.jsonl` and never rewritten, with every field it
-  carries (an assistant turn's `tool_calls`, a tool result's `tool_call_id`),
-  so the message a turn is given back is the one the provider accepted.
-- Over the log grows a tree of summaries in `chat-memory/tree.jsonl`: a leaf
-  per message, a parent per two adjacent nodes of equal span, each at most the
-  operator's summary size (declared in `rust/chat_memory/numeric-provenance.json`).
-  A message or pair that already fits is kept word for word (`by: verbatim`;
-  a pair whose halves include a model's summary is `joined`); anything longer is
-  summarized by `summaryModel` through Brama, on the session's lease. Leaves the
-  next fold needs are written on a background thread between steps.
-- Each step sends the conversation's system messages, the view's nodes as one
-  memory message (`[first-last] from..to` and the summary, the bytes the view
-  counts), and the newest messages word for word — never more than
-  `viewBytes`. When the view outgrows it, every tail message before the newest
-  turn folds into its leaf at the end of the row — the newest message that is
-  not a tool result stays with the tool results after it, since a provider
-  refuses a tool result whose call is not just before it — then every adjacent
-  pair of the finest span merges at once, so the beginning a provider caches
-  changes only at those moments. The view is kept in `chat-memory/view.json`;
-  a resumed session continues from it.
-- `recall_conversation` with `node=<id>` zooms into a node (its two halves, or
-  a message word for word); with `from` and `to` (seconds since 1970) it
-  answers the messages of that time. `jeden chat-memory show|zoom|dates`
-  answers the same from the command line, and Jeden Desktop's Chat memory
-  screen shows the memory of the selected session, zooms into its nodes and
-  lists the messages of a picked time.
-- A `chatMemory` without `summaryModel` or a positive `viewBytes`, a
-  `viewBytes` smaller than one summary, a summary model Brama's catalog
-  refuses, and a view whose newest turn alone (the newest message, or an
-  assistant turn with its tool results) outgrows `viewBytes` stop the
-  turn with that cause. An unreadable log, tree or view is refused naming the
-  file, never restarted.
+- Every message is appended word for word to
+  `<session>/chat-memory/main/YYYY-MM-DD.jsonl`, one line
+  `{i, kind, text, size, date}` each, flushed, never edited: `user` (the
+  user's words), `jeden` (a reply), `tool` (a tool call: its name and JSON
+  input), `echo` (a tool's output, clipped to its head and tail), `note` (what
+  the chat records itself, such as a rewind). One process writes a chat; a
+  second is refused naming `chat-memory/owner.lock`.
+- Over the log grows a binary tree in `chat-memory/tree/YYYY-MM-DD.jsonl`, one
+  line `{l, i, text, size}` per node: node(0, i) is message i in one line,
+  node(l, i) merges node(l-1, 2i) and node(l-1, 2i+1), and it is named
+  `id+n`, its first message and how many it covers. A source that fits the
+  summary size is its own line with no model call (a short message word for
+  word, two short lines joined by a newline); anything longer is compressed by
+  `summaryModel` through Brama, shown the size as a ruler and asked again when
+  the line is too long, keeping the shortest. Each node is built once.
+- Each turn sends the conversation's system messages, then the view — one
+  `id+n|text` line per node covering every message before the turn, inside
+  `<chat>` tags, never a whole message — and then the turn itself from the
+  user's message on. Each new message appends its line. Once the view passes
+  the high size, one batch merges the most due sibling pairs, due =
+  (T - last) / 2^l with T the messages in the chat and last the pair's last
+  message, oldest first among equals, until it is at most the low size; so
+  the view is a sawtooth between the two and its beginning stays put between
+  batches. The view is saved in `chat-memory/view.json` as its `[l, i]` pairs,
+  loaded at start and never rebuilt from the log. The sizes, the tool output
+  clip and the retry count are the operator's numbers, declared with his
+  words in `rust/chat_memory/numeric-provenance.json`.
+- Between turns a background thread builds the line of every message the
+  view does not cover yet and the parent of every sibling pair in the view.
+- `recall_conversation` with `id` and `n` opens line `id+n` into the two lines
+  it was made from, down to the message whole for a line of one message, and
+  with `date=<id>` answers when message id was said. `jeden chat-memory
+  show|zoom|date` answers the same from the command line.
+- A `/rewind` keeps the log as it is and appends a `note` naming the messages
+  taken back; what is said after it follows the note.
+- A `chatMemory` without `summaryModel`, one still naming `viewBytes`, a
+  summary model Brama's catalog refuses, and a chat memory in the earlier
+  `log.jsonl` layout stop the turn with that cause. An unreadable log, tree or
+  view is refused naming the file, never restarted.
+- The real journey is `node tests/chat_memory/journey.mjs` with `JEDEN_BIN`,
+  `JEDEN_TEST_SOURCE_REVISION`, `JEDEN_TEST_MODEL`, `JEDEN_TEST_SUMMARY_MODEL`,
+  `JEDEN_TEST_MAX_STEPS` and `JEDEN_TEST_BATCHES`; it writes its report under
+  `.build/chat-memory/`.

@@ -1,54 +1,69 @@
-//! The view a turn is given: the chat's oldest messages as a row of tree
-//! nodes (the frontier), covering every message before the tail, and the
-//! newest messages word for word (the tail). Together they never take more
-//! bytes than the operator's view size, however long the chat grows.
+//! The view a turn is given: a list of tree nodes that covers the whole chat
+//! before the turn, oldest first, one `id+n|text` line each inside `<chat>`
+//! tags. It holds only summaries, never a whole message.
 //!
-//! A view changes only when it outgrows its size, and then in one batch, so
-//! the beginning a model provider has cached stays the same for as many
-//! turns as possible: first every tail message but the newest folds into the
-//! frontier as its leaf (appended at the frontier's end, the beginning
-//! untouched); then, while still too large, every adjacent pair of nodes of
-//! the finest span merges into its parent at once. The view is kept in
-//! `view.json`, so a resumed session continues from it.
+//! Each new message appends its line and nothing else changes. Once the view
+//! passes the high size, one batch merges the most due sibling pairs until
+//! it is at most the low size, so the view is a sawtooth between the two and
+//! its beginning, which the provider caches, stays put between batches. For
+//! siblings (l, i) and (l, i+1), with T messages in the chat,
+//!
+//!   due = (T - last) / 2^l      last: the pair's last message
+//!
+//! and among equally due pairs the oldest merges first. The view is saved to
+//! `view.json` as its `[l, i]` pairs and loaded at start; it is never
+//! rebuilt from the log, since a rebuilt view differs from the live one.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 
 use super::log::Entry;
-use super::tree::{Node, Summarize, Tree};
+use super::tree::{count, halves, last, Node, Summarize, Tree};
+
+/// How a view's lines are built and merged: the operator's numbers and the
+/// cheap model.
+pub struct Fitting<'a> {
+    pub summary_bytes: usize,
+    pub attempts: usize,
+    pub high: usize,
+    pub low: usize,
+    pub summarize: &'a Summarize,
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
-pub struct View {
-    /// The nodes covering every message before the tail, oldest first.
-    pub frontier: Vec<String>,
-    /// The first message given word for word.
-    pub tail_start: u64,
-    /// How many bytes the view took when it was last fitted.
-    pub bytes: usize,
-    /// How many messages the log held then.
-    pub log_len: u64,
-    /// The log ranges (`[from, to)`) a rewind took back: kept in the log
-    /// word for word, and recalled by zoom and date, but never given to a
-    /// turn again from the tail.
-    #[serde(default)]
-    pub rewound: Vec<(u64, u64)>,
-}
+#[serde(transparent)]
+pub struct View(pub Vec<(u32, u64)>);
 
 pub fn path(dir: &Path) -> PathBuf {
     dir.join("view.json")
 }
 
+/// The lines `nodes` give inside `<chat>` tags.
+pub fn render(nodes: &[Node]) -> String {
+    let mut text = String::from("<chat>\n");
+    for node in nodes {
+        text.push_str(&node.line());
+    }
+    text.push_str("</chat>\n");
+    text
+}
+
+/// How many bytes `nodes` take as lines.
+pub fn bytes(nodes: &[Node]) -> usize {
+    nodes.iter().map(|node| node.line().len()).sum()
+}
+
 impl View {
-    /// The kept view, or the empty one a new chat starts from. A view that
-    /// cannot be read is refused naming the file, never restarted.
+    /// The saved view, or the empty one a new chat starts from. A view that
+    /// cannot be read is refused naming the file, never rebuilt.
     pub fn load(dir: &Path) -> Result<Self, String> {
         let path = path(dir);
         match fs::read_to_string(&path) {
             Ok(text) => serde_json::from_str(&text).map_err(|error| {
                 format!(
-                    "the chat memory view {} is not a view ({error})",
+                    "the chat memory view {} is not a list of [l, i] pairs ({error})",
                     path.display()
                 )
             }),
@@ -60,11 +75,11 @@ impl View {
         }
     }
 
-    /// Keep the view, replaced whole through a file beside it.
+    /// Save the view, replaced whole through a file beside it.
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         let path = path(dir);
         let staged = dir.join("view.json.staged");
-        let text = serde_json::to_string_pretty(self)
+        let text = serde_json::to_string(self)
             .map_err(|error| format!("the chat memory view cannot be encoded: {error}"))?;
         fs::write(&staged, text)
             .and_then(|()| fs::rename(&staged, &path))
@@ -76,143 +91,109 @@ impl View {
             })
     }
 
-    /// The frontier's nodes, read from the tree.
+    /// How many messages the view covers: its nodes cover the chat from its
+    /// first message on, without a gap.
+    pub fn covered(&self) -> u64 {
+        self.0.iter().map(|(l, _)| count(*l)).sum()
+    }
+
+    /// The view's nodes, read from the tree.
     pub fn nodes(&self, tree: &Tree) -> Result<Vec<Node>, String> {
-        self.frontier
+        self.0
             .iter()
-            .map(|id| {
-                tree.get(id).cloned().ok_or_else(|| {
-                    format!("the chat memory view names node {id}, which its summary tree does not hold")
+            .map(|(l, i)| {
+                tree.get(*l, *i).cloned().ok_or_else(|| {
+                    format!(
+                        "the chat memory view names node {}, which its summary tree does not hold",
+                        super::tree::name(*l, *i)
+                    )
                 })
             })
             .collect()
     }
 
-    /// Every message from the tail's start, the ones a rewind took back
-    /// included: what a fold takes, so the leaves it makes stay adjacent and
-    /// keep merging. A tail that starts past the log is a view of another
-    /// chat, and is refused.
-    pub fn tail<'a>(&self, entries: &'a [Entry]) -> Result<&'a [Entry], String> {
-        entries.get(self.tail_start as usize..).ok_or_else(|| {
-            format!(
-                "the chat memory view starts its tail at message {}, but the chat log holds {} message(s)",
-                self.tail_start,
-                entries.len()
-            )
-        })
-    }
-
-    /// The messages a turn is given word for word: the tail but for those a
-    /// rewind took back. Once folded, those stand in the frontier's
-    /// summaries like every earlier message.
-    pub fn given(&self, entries: &[Entry]) -> Result<Vec<Entry>, String> {
-        Ok(self
-            .tail(entries)?
-            .iter()
-            .filter(|entry| !self.was_rewound(entry.index))
-            .cloned()
-            .collect())
-    }
-
-    /// Whether the message at `index` is one a rewind took back.
-    pub fn was_rewound(&self, index: u64) -> bool {
-        self.rewound
-            .iter()
-            .any(|(from, to)| (*from..*to).contains(&index))
-    }
-
-    /// Fit the view to `view_bytes` over `entries`, making the leaves and
-    /// parents it needs. Answers its size. A view whose newest message alone,
-    /// or whose frontier with no two adjacent nodes of equal span left to
-    /// merge, still outgrows the size is refused with what it holds.
-    pub fn fit(
+    /// Append the line of every message in `entries` the view does not
+    /// cover yet, building each from the lines before it, then, once the
+    /// view passes the high size, merge it down to the low size in one
+    /// batch. Answers whether a batch merged.
+    pub fn grow(
         &mut self,
         entries: &[Entry],
         tree: &mut Tree,
-        view_bytes: usize,
-        summary_bytes: usize,
-        summarize: &Summarize,
-    ) -> Result<usize, String> {
+        fitting: &Fitting,
+    ) -> Result<bool, String> {
         let mut nodes = self.nodes(tree)?;
-        loop {
-            let tail = self.tail(entries)?;
-            let given = self.given(entries)?;
-            let tail_bytes = given.iter().map(Entry::bytes).sum::<usize>();
-            let size = nodes.iter().map(|node| node.line().len()).sum::<usize>() + tail_bytes;
-            if size <= view_bytes {
-                self.bytes = size;
-                self.log_len = entries.len() as u64;
-                return Ok(size);
-            }
-            let older = foldable(tail);
-            if !older.is_empty() {
-                for entry in older {
-                    let leaf = tree.leaf(entry, summary_bytes, summarize)?;
-                    self.tail_start = leaf.last + std::num::NonZeroU64::MIN.get();
-                    self.frontier.push(leaf.id.clone());
-                    nodes.push(leaf);
-                }
-                continue;
-            }
-            let merged = merge_finest(&nodes, tree, summary_bytes, summarize)?.ok_or_else(|| {
-                format!(
-                    "the chat memory view takes {size} bytes, more than chatMemory.viewBytes {view_bytes}: \
-                     {} node(s) with no two adjacent of equal span left to merge, and the newest turn \
-                     ({} message(s): the newest one, or an assistant turn with its tool results) alone takes {tail_bytes} bytes",
-                    nodes.len(),
-                    tail.len()
-                )
-            })?;
-            self.frontier = merged.iter().map(|node| node.id.clone()).collect();
-            nodes = merged;
+        let covered = usize::try_from(self.covered()).map_err(|error| {
+            format!("the view covers more messages than this machine counts: {error}")
+        })?;
+        let fresh = entries.get(covered..).ok_or_else(|| {
+            format!(
+                "the chat memory view covers {covered} message(s), but the chat log holds {}",
+                entries.len()
+            )
+        })?;
+        for entry in fresh {
+            let leaf = tree.leaf(
+                entry,
+                &render(&nodes),
+                fitting.summary_bytes,
+                fitting.attempts,
+                fitting.summarize,
+            )?;
+            self.0.push((leaf.l, leaf.i));
+            nodes.push(leaf);
         }
+        if bytes(&nodes) <= fitting.high {
+            return Ok(false);
+        }
+        let total = self.covered();
+        while bytes(&nodes) > fitting.low {
+            let Some(at) = most_due(&nodes, total) else {
+                break;
+            };
+            let (l, i) = parent_of(&nodes[at]);
+            let parent = tree.parent(
+                l,
+                i,
+                &render(&nodes[..=at + NonZeroUsize::MIN.get()]),
+                fitting.summary_bytes,
+                fitting.attempts,
+                fitting.summarize,
+            )?;
+            nodes.splice(at..=at + NonZeroUsize::MIN.get(), [parent]);
+        }
+        self.0 = nodes.iter().map(|node| (node.l, node.i)).collect();
+        Ok(true)
     }
 }
 
-/// The tail messages a fold takes: every one before the newest turn, all at
-/// once, so the view has room again for as many turns as it can hold before
-/// it changes next. The tail never starts at a tool result — a provider
-/// refuses a tool result whose call is not just before it — so the newest
-/// message that is not a tool result stays with the results after it. The
-/// background builder writes the leaves of exactly these ahead of the turn.
-pub fn foldable(tail: &[Entry]) -> &[Entry] {
-    match tail.iter().rposition(|entry| entry.role != "tool") {
-        Some(start) => &tail[..start],
-        None => &[],
-    }
+/// The parent of the left node of a sibling pair.
+fn parent_of(left: &Node) -> (u32, u64) {
+    (
+        left.l + NonZeroU32::MIN.get(),
+        left.i >> NonZeroU32::MIN.get(),
+    )
 }
 
-/// The frontier with every adjacent pair of nodes of the finest span that
-/// has one merged into its parent, left to right, in one batch; `None` when
-/// no two adjacent nodes have equal span.
-fn merge_finest(
-    nodes: &[Node],
-    tree: &mut Tree,
-    summary_bytes: usize,
-    summarize: &Summarize,
-) -> Result<Option<Vec<Node>>, String> {
-    let mut finest: Option<u64> = None;
-    let mut walk = nodes.iter().peekable();
-    while let Some(node) = walk.next() {
-        if let Some(next) = walk.peek() {
-            if next.span() == node.span() && finest.is_none_or(|span| node.span() < span) {
-                finest = Some(node.span());
-            }
+/// Where the most due sibling pair of `nodes` starts, the oldest of equally
+/// due pairs; none when no two adjacent nodes are siblings.
+pub fn most_due(nodes: &[Node], total: u64) -> Option<usize> {
+    let mut best: Option<(usize, u128, u32)> = None;
+    let pairs = nodes.windows(NonZeroUsize::MIN.get() + NonZeroUsize::MIN.get());
+    for (at, window) in pairs.enumerate() {
+        let [a, b] = window else {
+            continue;
+        };
+        let (l, i) = parent_of(a);
+        if halves(l, i) != Some(((a.l, a.i), (b.l, b.i))) {
+            continue;
+        }
+        let since = u128::from(total.saturating_sub(last(l, i)));
+        let more_due =
+            best.is_none_or(|(_, kept_since, kept_level)| since << kept_level > kept_since << a.l);
+        if more_due {
+            best = Some((at, since, a.l));
         }
     }
-    let Some(span) = finest else {
-        return Ok(None);
-    };
-    let mut merged = Vec::with_capacity(nodes.len());
-    let mut walk = nodes.iter().peekable();
-    while let Some(node) = walk.next() {
-        match walk.peek() {
-            Some(next) if node.span() == span && next.span() == span => {
-                merged.push(tree.parent(node, next, summary_bytes, summarize)?);
-                walk.next();
-            }
-            _ => merged.push(node.clone()),
-        }
-    }
-    Ok(Some(merged))
+    best.map(|(at, _, _)| at)
 }

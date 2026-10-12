@@ -1,100 +1,87 @@
-//! Reading a chat memory back: zoom into a node, the messages of a time, and
-//! the whole memory as the CLI and Jeden Desktop show it. Nothing here
-//! writes.
+//! Reading a chat memory back: zoom(id, n) into a line, date(id) of a
+//! message, and the whole memory as the CLI and Jeden Desktop show it.
+//! Nothing here writes.
 
 use serde_json::{json, Value};
+use std::num::NonZeroU64;
 use std::path::Path;
 
-use super::super::{summary_bytes, Entry, Log, Tree, View};
+use super::super::tree::{halves, name};
+use super::super::view::{bytes, render};
+use super::super::{message_level, summary_bytes, view_high, view_low, Entry, Log, Tree, View};
 
-/// A message as the log keeps it: index, time, role, content and, when it
-/// carried any, its other fields under `fields` (tool calls, a tool call's id).
-fn entry_json(entry: &Entry) -> Value {
-    json!(entry)
+fn number(text: &str, what: &str) -> Result<u64, String> {
+    text.trim()
+        .parse()
+        .map_err(|error| format!("{what} is a whole number of messages; `{text}` is not ({error})"))
 }
 
-/// A node's two halves as nodes, or, for a leaf, its message word for word.
-/// A node the tree does not hold is refused naming it.
-pub fn zoom(dir: &Path, id: &str) -> Result<Value, String> {
-    let tree = Tree::open(dir)?;
-    let node = tree.get(id).ok_or_else(|| {
-        format!("the chat memory holds no node {id}; its view names the nodes it has")
-    })?;
-    if node.children.is_empty() {
-        let entries = Log::at(dir).read()?;
-        let entry = entries
-            .iter()
-            .find(|entry| entry.index == node.first)
-            .ok_or_else(|| {
-                format!(
-                    "node {id} covers message {}, which the chat log {} does not hold",
-                    node.first,
-                    Log::at(dir).path().display()
-                )
-            })?;
-        return Ok(json!({ "node": node, "message": entry_json(entry) }));
-    }
-    let children: Vec<Value> = node
-        .children
-        .iter()
-        .map(|child| {
-            tree.get(child).map(|child| json!(child)).ok_or_else(|| {
-                format!("node {id} names its half {child}, which the summary tree does not hold")
-            })
-        })
-        .collect::<Result<_, String>>()?;
-    Ok(json!({ "node": node, "children": children }))
+fn message(dir: &Path, id: u64) -> Result<Entry, String> {
+    let log = Log::at(dir);
+    let index = usize::try_from(id)
+        .map_err(|error| format!("message {id} is beyond what this machine counts: {error}"))?;
+    log.read()?
+        .get(index)
+        .cloned()
+        .ok_or_else(|| format!("the chat log {} holds no message {id}", log.dir().display()))
 }
 
-fn seconds(text: &str, what: &str) -> Result<u64, String> {
-    text.trim().parse().map_err(|error| {
-        format!("{what} is a time in seconds since 1970; `{text}` is not ({error})")
-    })
-}
-
-/// Every message that entered the log between `from` and `to`, inclusive,
-/// in seconds since 1970, word for word.
-pub fn dates(dir: &Path, from: &str, to: &str) -> Result<Value, String> {
-    let (from, to) = (seconds(from, "from")?, seconds(to, "to")?);
-    if from > to {
+/// Line `id+n` opened: for a line of one message, the message whole; else
+/// the two lines of n/2 it was made from, a line not built yet shown as
+/// such. `n` is a power of two and `id` a multiple of it, as the view names
+/// its lines; anything else is refused naming what a line looks like.
+pub fn zoom(dir: &Path, id: &str, n: &str) -> Result<Value, String> {
+    let (id, n) = (number(id, "id")?, number(n, "n")?);
+    if !n.is_power_of_two() || id / n * n != id {
         return Err(format!(
-            "from {from} is after to {to}; no message entered the log in that time"
+            "{id}+{n} is no line of the view: a line covers a power of two messages from a multiple of that count, as `id+n|` names it"
         ));
     }
-    let mut messages = Vec::new();
-    for entry in Log::at(dir).read()? {
-        let at = seconds(&entry.at, &format!("message {}'s time", entry.index))?;
-        if (from..=to).contains(&at) {
-            messages.push(entry_json(&entry));
-        }
+    if n == NonZeroU64::MIN.get() {
+        let entry = message(dir, id)?;
+        return Ok(json!({ "line": name(message_level(), id), "message": entry }));
     }
-    Ok(json!({ "from": from, "to": to, "messages": messages }))
+    let level = n.trailing_zeros();
+    let (left, right) = halves(level, id >> level)
+        .ok_or_else(|| format!("{id}+{n} is a message's own line, made of no halves"))?;
+    let tree = Tree::open(dir)?;
+    let line = |(l, i): (u32, u64)| match tree.get(l, i) {
+        Some(node) => node.line(),
+        None => format!("{}|(not summarized yet: zoom it)\n", name(l, i)),
+    };
+    Ok(json!({
+        "line": name(level, id >> level),
+        "lines": [line(left), line(right)],
+    }))
 }
 
-/// The memory of a session as a whole: how long the log is, the view a turn
-/// is given now, and every node of the tree.
+/// When message `id` entered the log.
+pub fn date(dir: &Path, id: &str) -> Result<Value, String> {
+    let id = number(id, "id")?;
+    let entry = message(dir, id)?;
+    Ok(json!({ "id": id, "date": entry.date }))
+}
+
+/// The memory of a session as a whole: the log, the view a turn is given
+/// now and its size between the design's bounds, and every node built.
 pub fn describe(dir: &Path) -> Result<Value, String> {
     let log = Log::at(dir);
     let entries = log.read()?;
     let tree = Tree::open(dir)?;
     let view = View::load(dir)?;
-    let frontier = view.nodes(&tree)?;
-    // In the order of the chat, not of their ids as text ("10-10" before "2-2").
-    let mut ordered: Vec<_> = tree.nodes().collect();
-    ordered.sort_by_key(|node| (node.first, node.last));
-    let nodes: Vec<Value> = ordered.into_iter().map(|node| json!(node)).collect();
+    let nodes = view.nodes(&tree)?;
     Ok(json!({
         "directory": dir,
-        "log": { "path": log.path(), "messages": entries.len() },
+        "log": { "directory": log.dir(), "messages": entries.len() },
         "summaryBytes": summary_bytes(),
         "view": {
-            "frontier": frontier,
-            "tailStart": view.tail_start,
-            "tail": view.given(&entries)?.iter().map(entry_json).collect::<Vec<_>>(),
-            "rewound": view.rewound,
-            "bytes": view.bytes,
-            "logLength": view.log_len,
+            "pairs": view.0,
+            "covers": view.covered(),
+            "bytes": bytes(&nodes),
+            "high": view_high(),
+            "low": view_low(),
+            "text": render(&nodes),
         },
-        "nodes": nodes,
+        "nodes": tree.nodes().collect::<Vec<_>>(),
     }))
 }

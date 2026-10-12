@@ -2,5 +2,25 @@
   "summary_bytes_max": {
     "value": 512,
     "user_said": "drzewo 512-bajtowych streszczen budowane w tle tanim modelem przez Brame"
+      },
+      "view_bytes_high": {
+        "value": 128000,
+        "user_said": "Once the view passes 128,000 bytes, one batch merges the most due pairs until it is at most 64,000 bytes."
+      },
+      "view_bytes_low": {
+        "value": 64000,
+        "user_said": "Once the view passes 128,000 bytes, one batch merges the most due pairs until it is at most 64,000 bytes."
+      },
+      "echo_chars_max": {
+        "value": 30000,
+        "user_said": "A tool's output is clipped to its head and tail, 30,000 characters in all."
+      },
+      "summary_attempts_max": {
+        "value": 5,
+        "user_said": "Try at most 5 times, and keep the shortest line."
+          },
+          "message_level": {
+            "value": 0,
+            "user_said": "node(0, i) = message i, in at most 512 bytes"
   }
 }
