@@ -20,24 +20,52 @@ use std::path::{Component, Path, PathBuf};
 
 /// Longest extension still read as a file name rather than prose.
 const MAX_EXTENSION: usize = 8;
-/// Last labels that make a dotted word a host instead of a file.
-const HOSTS: &[&str] = &["com", "org", "net", "io", "ai", "gov", "edu", "pl", "eu"];
+/// What separates a URL's scheme from its host (RFC 3986).
+const AUTHORITY: &str = "://";
 /// Trimmed from both ends of a word before it is read as a path.
 const WRAPPERS: &[char] = &[
     '`', '\'', '"', '(', ')', '[', ']', '{', '}', '<', '>', ',', ';', ':', '!', '?', '*', '=',
     '\u{201c}', '\u{201d}', '\u{2018}', '\u{2019}',
 ];
 
-/// Every path this text names, in the spelling the text used.
-pub(super) fn named(text: &str) -> BTreeSet<String> {
-    text.split_whitespace().filter_map(token).collect()
+/// Every path this text names, in the spelling the text used. A dotted
+/// head before a slash is a host, not a directory, when the run reached that
+/// host by URL (`hosts`) or the text itself spells it with a scheme.
+pub(super) fn named(text: &str, hosts: &BTreeSet<String>) -> BTreeSet<String> {
+    let mut known = hosts.clone();
+    known.extend(hosts_in(text));
+    text.split_whitespace()
+        .filter_map(|word| token(word, &known))
+        .collect()
 }
 
 /// Every path a receipt mentions, wherever the string sits inside it.
 pub(super) fn touched(receipt: &Value) -> BTreeSet<String> {
+    let hosts = reached_hosts(receipt);
     let mut found = BTreeSet::new();
-    collect(receipt, &mut found);
+    collect(receipt, &mut found, &hosts);
     found
+}
+
+/// Every host a receipt names in a URL, wherever the string sits inside it:
+/// what the URL grammar itself says is a machine.
+pub(super) fn reached_hosts(value: &Value) -> BTreeSet<String> {
+    match value {
+        Value::String(text) => hosts_in(text).collect(),
+        Value::Array(items) => items.iter().flat_map(reached_hosts).collect(),
+        Value::Object(fields) => fields.values().flat_map(reached_hosts).collect(),
+        _ => BTreeSet::new(),
+    }
+}
+
+/// The host of every `scheme://host…` word in `text`, without its port.
+fn hosts_in(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.split_whitespace().filter_map(|word| {
+        let (_, rest) = word.split_once(AUTHORITY)?;
+        let authority = rest.split('/').next()?;
+        let host = authority.rsplit('@').next()?.split(':').next()?;
+        (!host.is_empty()).then(|| host.to_owned())
+    })
 }
 
 /// The place a verdict is missing, when no observation happened at any place
@@ -67,11 +95,13 @@ pub(super) fn unmatched(
     wanted.iter().next().cloned()
 }
 
-fn collect(value: &Value, found: &mut BTreeSet<String>) {
+fn collect(value: &Value, found: &mut BTreeSet<String>, hosts: &BTreeSet<String>) {
     match value {
-        Value::String(text) => found.extend(named(text)),
-        Value::Array(items) => items.iter().for_each(|item| collect(item, found)),
-        Value::Object(fields) => fields.values().for_each(|field| collect(field, found)),
+        Value::String(text) => found.extend(named(text, hosts)),
+        Value::Array(items) => items.iter().for_each(|item| collect(item, found, hosts)),
+        Value::Object(fields) => fields
+            .values()
+            .for_each(|field| collect(field, found, hosts)),
         _ => {}
     }
 }
@@ -82,18 +112,18 @@ fn collect(value: &Value, found: &mut BTreeSet<String>) {
 /// arrive interleaved: a criterion writing ``scratch/`.`` at the end of a
 /// sentence once produced the place `scratch/\``, which no observation could
 /// ever match. A leading dot is kept: `.jeden/probe.txt` is a real path.
-fn token(word: &str) -> Option<String> {
+fn token(word: &str, hosts: &BTreeSet<String>) -> Option<String> {
     let word = word
         .trim_start_matches(|character| WRAPPERS.contains(&character))
         .trim_end_matches(|character: char| WRAPPERS.contains(&character) || character == '.');
-    let word = match word.split_once("://") {
+    let word = match word.split_once(AUTHORITY) {
         Some((_, rest)) => rest.find('/').map(|cut| &rest[cut..])?,
         None => word,
     };
     if word.is_empty() || word.contains('*') || word == "/" || word.trim_matches('.').is_empty() {
         return None;
     }
-    let word = strip_host(word);
+    let word = strip_host(word, hosts);
     let directory = word.ends_with('/');
     let trimmed = word.trim_end_matches('/');
     if trimmed.is_empty() {
@@ -125,12 +155,12 @@ fn recognisable(word: &str, directory: bool) -> bool {
 
 /// `jeden.wisent.com/docs/cli` is a page under `/docs/cli`, not a directory
 /// called after the host, and a bare host names no path at all.
-fn strip_host(word: &str) -> &str {
+fn strip_host<'a>(word: &'a str, hosts: &BTreeSet<String>) -> &'a str {
     let (head, rest) = match word.split_once('/') {
         Some((head, rest)) => (head, rest),
         None => (word, ""),
     };
-    if !is_host(head) {
+    if !is_host(head, hosts) {
         return word;
     }
     if rest.is_empty() {
@@ -139,29 +169,35 @@ fn strip_host(word: &str) -> &str {
     &word[head.len()..]
 }
 
-/// A head is a machine, not a directory: `jeden.wisent.com`, `127.0.0.1:17601`
-/// and `localhost:8080` all address a service whose path follows the slash.
-fn is_host(head: &str) -> bool {
-    let head = match head.split_once(':') {
-        Some((host, port)) if !port.is_empty() && port.chars().all(char::is_numeric) => host,
-        _ => head,
+/// A head is a machine, not a directory, when the run reached it by URL or
+/// the text spells it with a scheme (`hosts`), when it is an IPv4 literal
+/// (`127.0.0.1`), or when it carries a port (`localhost:8080`,
+/// `jeden.wisent.com:443`): no file is spelled `name:port`. A dotted word
+/// alone says nothing — `notes.md` and `wisent.com` have the same shape, and
+/// the nine domain endings that used to decide it read `wisent.app` as a
+/// directory and would read `main.rs` as a host had Serbia's been listed.
+fn is_host(head: &str, hosts: &BTreeSet<String>) -> bool {
+    let (name, port) = match head.split_once(':') {
+        Some((host, port)) if !port.is_empty() && port.chars().all(char::is_numeric) => {
+            (host, true)
+        }
+        _ => (head, false),
     };
-    if head == "localhost" {
+    if hosts.contains(name) {
         return true;
     }
-    let labels: Vec<_> = head.split('.').collect();
-    let named_labels = labels.len() > 1
-        && labels.iter().all(|label| {
-            !label.is_empty()
-                && label
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || character == '-')
-        });
+    let labels: Vec<_> = name.split('.').collect();
+    let named_labels = labels.iter().all(|label| {
+        !label.is_empty()
+            && label
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || character == '-')
+    });
     let literal = labels.len() == "0.0.0.0".split('.').count()
         && labels
             .iter()
             .all(|label| label.chars().all(char::is_numeric) && !label.is_empty());
-    named_labels && (literal || labels.last().is_some_and(|last| HOSTS.contains(last)))
+    literal || (port && named_labels)
 }
 
 /// True for `alpha.txt` and `package.json`, false for `0.1.1` or `127.0.0.1`.

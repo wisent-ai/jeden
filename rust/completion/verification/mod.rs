@@ -106,10 +106,12 @@ pub(crate) fn apply_review(
                 }
                 let mut observed = false;
                 let mut places = BTreeSet::new();
+                let mut hosts = BTreeSet::new();
                 for reference in &criterion.evidence {
                     if index.observation(reference)? {
                         observed = true;
                         places.extend(index.places(reference)?);
+                        hosts.extend(index.hosts(reference)?);
                     }
                 }
                 if verdict.status == ReviewStatus::Done
@@ -124,7 +126,7 @@ pub(crate) fn apply_review(
                 // The place it names is not a judgement, so a verdict that
                 // rests on work done somewhere else is refused here.
                 if verdict.status == ReviewStatus::Done && task.kind != TaskKind::Answer {
-                    let wanted = paths::named(&task.criteria[criterion.index]);
+                    let wanted = paths::named(&task.criteria[criterion.index], &hosts);
                     let workspace = state
                         .requests
                         .iter()

@@ -69,6 +69,12 @@ impl EvidenceIndex {
             .map(|(receipt, _)| paths::touched(receipt))
     }
 
+    /// The hosts an accepted observation reached by URL.
+    pub(super) fn hosts(&self, reference: &EvidenceReference) -> Result<BTreeSet<String>, String> {
+        self.get(reference)
+            .map(|(receipt, _)| paths::reached_hosts(receipt))
+    }
+
     /// A failed operation of the execution itself. The reviewer's own
     /// failed lookups do not count: a review can cite its own
     /// `task_evidence` miss on a made-up id as the failed operation behind a
