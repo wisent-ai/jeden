@@ -7,7 +7,6 @@
 use super::super::contract::RequestMeta;
 use super::super::transport::{SecretRef, TransportRequest};
 use super::{WelesClient, WelesError, API_VERSION};
-use crate::control_plane::services::weles::contract::guards::reject_forbidden_payment_fields;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -114,9 +113,6 @@ impl WelesClient {
             return Err(WelesError::InvalidRequest(
                 "financial mutation requires caller idempotency key",
             ));
-        }
-        if let Some(value) = body {
-            reject_forbidden_payment_fields(value)?;
         }
         let mut headers = BTreeMap::new();
         headers.insert("x-jeden-schema-min".into(), meta.schema_min.to_string());

@@ -1,6 +1,14 @@
 //! What is checked before a billing request is sent, and after its answer
 //! arrives.
 //!
+//! No request field is refused by its name. Every billing request body is the
+//! serialization of a closed request type (`control_plane::billing`:
+//! `deny_unknown_fields`, no open map or `Value` field) or a literal with the
+//! one field the operation takes, so a raw payment detail has no field to
+//! travel in; the hosted setup keeps card data at Weles. A name list
+//! (`pan`, `cvv`, `cardholder`, …) refused a spelling and let every other
+//! one through.
+//!
 //! Split out of `control_plane/services/weles.rs`, which had grown past the
 //! module line cap.
 
@@ -8,47 +16,6 @@ use super::super::{WelesClient, WelesError};
 use crate::control_plane::contract::RequestMeta;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
-
-pub(crate) fn reject_forbidden_payment_fields(value: &Value) -> Result<(), WelesError> {
-    match value {
-        Value::Object(fields) => {
-            for (key, child) in fields {
-                let normalized = key
-                    .chars()
-                    .filter(|character| character.is_ascii_alphanumeric())
-                    .flat_map(char::to_lowercase)
-                    .collect::<String>();
-                if matches!(
-                    normalized.as_str(),
-                    "pan"
-                        | "cardnumber"
-                        | "cvv"
-                        | "cvc"
-                        | "processortoken"
-                        | "rawpaymentdetails"
-                        | "billingaddress"
-                        | "shippingaddress"
-                        | "fulladdress"
-                        | "cardholder"
-                        | "expiry"
-                        | "expiration"
-                ) {
-                    return Err(WelesError::InvalidRequest(
-                        "raw payment fields are forbidden",
-                    ));
-                }
-                reject_forbidden_payment_fields(child)?;
-            }
-        }
-        Value::Array(items) => {
-            for item in items {
-                reject_forbidden_payment_fields(item)?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
-}
 
 pub(super) fn decode_v2<T: DeserializeOwned>(value: Value) -> Result<T, WelesError> {
     serde_json::from_value(value).map_err(|_| {
