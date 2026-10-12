@@ -265,7 +265,7 @@ impl MemoryStore {
                     self.remember("session", &scope, text, &["automatic".into()], &source, 0.6)
                         .map(|_| ())
                 }
-                "reindex" | "rebuild" => self.rebuild_fts().map(|_| ()),
+                kind if kind == super::REINDEX_JOB => self.rebuild_fts().map(|_| ()),
                 other => Err(format!("unsupported memory job kind: {other}")),
             }
         })();

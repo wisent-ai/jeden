@@ -208,6 +208,10 @@ pub(super) fn now_ms() -> i64 {
         .as_millis()
         .min(i64::MAX as u128) as i64
 }
+
+/// The durable job that rebuilds the full-text index: what `/memory enqueue`
+/// writes and the worker runs.
+pub(crate) const REINDEX_JOB: &str = "reindex";
 /// `value` with credentials redacted and whitespace runs joined, whole.
 ///
 /// A credential is recognised by the format its issuer documents, never by

@@ -2,7 +2,7 @@ use std::num::{NonZeroI64, NonZeroUsize};
 
 use serde_json::{json, Value};
 
-use crate::memory::{scope_from_value, FtsBackend, MemoryStore};
+use crate::memory::{scope_from_value, FtsBackend, MemoryStore, REINDEX_JOB};
 use crate::slash::common::split_args;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
@@ -58,16 +58,19 @@ pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<St
         .unwrap_or(("view", &[][..]));
     let store = MemoryStore::open()?;
     let scope = scope_from_value(None, context.cwd);
+    // Each subcommand answers to the one name MEMORY_USAGE declares; the
+    // undocumented second spellings (diagnose, health, reset, list, jobs and
+    // an immediate reindex) are gone, so the usage line is the whole grammar.
     match verb {
-        "stats" | "diagnose" | "health" if rest.is_empty() => {
+        "stats" if rest.is_empty() => {
             serde_json::to_string_pretty(&store.health()?).map_err(|e| e.to_string())
         }
-        "clear" | "reset" if rest.is_empty() => Ok(format!(
+        "clear" if rest.is_empty() => Ok(format!(
             "Deleted {} stored memory revision row(s) from {}. The durable job queue was not changed.",
             store.clear()?,
             store.location()
         )),
-        "view" | "list" | "" => {
+        "view" => {
             let query = rest.join(" ");
             let hits = store.recall(&FtsBackend, &scope, &query, 200)?;
             if hits.is_empty() {
@@ -89,8 +92,8 @@ pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<St
                 .join("\n"))
         }
         "enqueue" => enqueue_maintenance(&store, rest, &scope),
-        "queue" | "jobs" => handle_queue(&store, rest),
-        "rebuild" | "reindex" if rest.is_empty() => {
+        "queue" => handle_queue(&store, rest),
+        "rebuild" if rest.is_empty() => {
             serde_json::to_string_pretty(&store.rebuild_fts()?).map_err(|e| e.to_string())
         }
         _ => Err(MEMORY_USAGE.into()),
@@ -102,12 +105,14 @@ fn enqueue_maintenance(
     args: &[String],
     scope: &crate::memory::MemoryScope,
 ) -> Result<String, String> {
-    let operation = args.first().map(String::as_str).unwrap_or("reindex");
-    if args.len() > 1 || !matches!(operation, "reindex" | "rebuild") {
-        return Err("Usage: /memory enqueue [reindex]".into());
+    // The only job `enqueue` takes is the reindex, named or implied.
+    match args {
+        [] => {}
+        [operation] if operation == REINDEX_JOB => {}
+        _ => return Err("Usage: /memory enqueue [reindex]".into()),
     }
     let id = store.enqueue(
-        "reindex",
+        REINDEX_JOB,
         &json!({"requestedBy":"slash","scope":scope,"operation":"reindex"}),
     )?;
     Ok(format!(
