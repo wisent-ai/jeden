@@ -35,16 +35,39 @@ fn disk_cache_path(key: &str) -> std::path::PathBuf {
     ))
 }
 
+/// The catalogue another process kept, when there is one. An entry that is
+/// there but cannot be read or does not parse is said on stderr, as a write
+/// that failed is, and the catalogue is then fetched again.
 pub(super) fn read_disk_cache(key: &str) -> Option<(ModelCatalog, Option<String>, u64)> {
-    let text = std::fs::read_to_string(disk_cache_path(key)).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    let fetched_ms = value.get("fetchedAtMs")?.as_u64()?;
-    let etag = value
-        .get("etag")
-        .and_then(serde_json::Value::as_str)
-        .map(str::to_string);
-    let catalog: ModelCatalog = serde_json::from_value(value.get("catalog")?.clone()).ok()?;
-    Some((catalog, etag, fetched_ms))
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Kept {
+        fetched_at_ms: u64,
+        etag: Option<String>,
+        catalog: ModelCatalog,
+    }
+    let path = disk_cache_path(key);
+    let text = match std::fs::read_to_string(&path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(error) => {
+            eprintln!(
+                "jeden: the kept model catalogue at {} cannot be read: {error}",
+                path.display()
+            );
+            return None;
+        }
+    };
+    match serde_json::from_str::<Kept>(&text) {
+        Ok(kept) => Some((kept.catalog, kept.etag, kept.fetched_at_ms)),
+        Err(error) => {
+            eprintln!(
+                "jeden: the kept model catalogue at {} does not parse: {error}",
+                path.display()
+            );
+            None
+        }
+    }
 }
 
 /// Keep `catalog` for the next process. The cache only spares a request to
