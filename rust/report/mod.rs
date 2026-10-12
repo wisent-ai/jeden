@@ -2,8 +2,9 @@ mod aggregate;
 mod sign;
 
 pub use aggregate::{
-    canonical_envelope_json, digest_bytes, scan_private_data, verify_report, Aggregator, Evidence,
-    EvidenceSummary, Metric, QualityReport, Status, EVIDENCE_PAYLOAD_TYPE, REPORT_PAYLOAD_TYPE,
+    canonical_envelope_json, digest_bytes, scan_machine_report, scan_private_data, verify_report,
+    Aggregator, Evidence, EvidenceSummary, Metric, QualityReport, Status, EVIDENCE_PAYLOAD_TYPE,
+    REPORT_PAYLOAD_TYPE,
 };
 pub use sign::{envelope_digest, key_id, sign, verify, DsseEnvelope, DsseSignature, TrustedRoot};
 
@@ -84,7 +85,6 @@ pub fn markdown_from_machine_report(
             writeln!(markdown, "- `{}`: `{}`", markdown_text(name), digest).unwrap();
         }
     }
-    scan_private_data(markdown.as_bytes())?;
     Ok(markdown)
 }
 

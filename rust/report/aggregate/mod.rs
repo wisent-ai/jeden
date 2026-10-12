@@ -5,8 +5,10 @@ use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod checks;
+mod privacy;
 
 use checks::validate_evidence;
+pub use privacy::scan_private_data;
 
 pub const EVIDENCE_PAYLOAD_TYPE: &str = "application/vnd.jeden.quality-evidence.v1+json";
 pub const REPORT_PAYLOAD_TYPE: &str = "application/vnd.jeden.quality-report.v1+json";
@@ -164,8 +166,8 @@ impl Aggregator {
             evidence: summaries,
             artifact_digests,
         };
+        scan_private_data(&report)?;
         let payload = canonical_json(&report)?;
-        scan_private_data(&payload)?;
         Ok(sign(REPORT_PAYLOAD_TYPE, &payload, report_key))
     }
 }
@@ -175,66 +177,35 @@ pub fn verify_report(envelope: &DsseEnvelope, root: &TrustedRoot) -> Result<Qual
         return Err("unexpected quality report payload type".into());
     }
     let payload = verify(envelope, root)?;
-    scan_private_data(&payload)?;
     let report: QualityReport = serde_json::from_slice(&payload)
         .map_err(|error| format!("invalid quality report JSON: {error}"))?;
     if canonical_json(&report)? != payload {
         return Err("quality report is not canonical JSON".into());
     }
+    scan_private_data(&report)?;
     Ok(report)
+}
+
+/// The privacy check of a machine report file, read without its trust root:
+/// the envelope's payload decoded and every value checked by its structure.
+/// What the signature proves is `verify_report`'s question, not this one.
+pub fn scan_machine_report(bytes: &[u8]) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let envelope: DsseEnvelope = serde_json::from_slice(bytes)
+        .map_err(|error| format!("invalid machine report envelope: {error}"))?;
+    if envelope.payload_type != REPORT_PAYLOAD_TYPE {
+        return Err("unexpected quality report payload type".into());
+    }
+    let payload = STANDARD
+        .decode(&envelope.payload)
+        .map_err(|error| format!("machine report payload is not base64: {error}"))?;
+    let report: QualityReport = serde_json::from_slice(&payload)
+        .map_err(|error| format!("invalid quality report JSON: {error}"))?;
+    scan_private_data(&report)
 }
 
 pub fn canonical_envelope_json(envelope: &DsseEnvelope) -> Result<Vec<u8>, String> {
     canonical_json(envelope)
-}
-
-pub fn scan_private_data(bytes: &[u8]) -> Result<(), String> {
-    let text = std::str::from_utf8(bytes).map_err(|_| "report is not UTF-8".to_string())?;
-    let lower = text.to_ascii_lowercase();
-    let forbidden = [
-        "-----begin ",
-        "authorization:",
-        "bearer ",
-        "api_key",
-        "api-key",
-        "client_secret",
-        "access_token",
-        "private_key",
-        "password=",
-        "token=",
-        "secret=",
-        "file://",
-        "http://",
-        "https://",
-        "localhost",
-        "127.0.0.1",
-        "\\users\\",
-        "/users/",
-        "/home/",
-        "/tmp/",
-    ];
-    if let Some(marker) = forbidden.iter().find(|marker| lower.contains(**marker)) {
-        return Err(format!("privacy scan rejected marker {marker}"));
-    }
-    let structural_markers = [
-        (
-            r"(?i)\b(?:[a-z0-9-]+\.)+(?:app|cloud|com|dev|internal|io|local|net|org)\b",
-            "hostname",
-        ),
-        (r"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", "IP address"),
-        (
-            r#"(?:^|[\s\"'])/(?:etc|opt|private|srv|var|volumes)/"#,
-            "absolute path",
-        ),
-        (r"(?i)\b[a-z]:\\", "absolute Windows path"),
-    ];
-    for (pattern, name) in structural_markers {
-        let regex = regex::Regex::new(pattern).map_err(|error| error.to_string())?;
-        if regex.is_match(text) {
-            return Err(format!("privacy scan rejected {name}"));
-        }
-    }
-    Ok(())
 }
 
 pub fn digest_bytes(bytes: &[u8]) -> String {

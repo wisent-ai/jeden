@@ -1,6 +1,6 @@
 use ed25519_dalek::SigningKey;
 use jeden::report::{
-    canonical_envelope_json, markdown_from_machine_report, scan_private_data, verify_report,
+    canonical_envelope_json, markdown_from_machine_report, scan_machine_report, verify_report,
     Aggregator, DsseEnvelope, TrustedRoot, EVIDENCE_PAYLOAD_TYPE,
 };
 use std::env;
@@ -25,7 +25,7 @@ fn run() -> Result<(), String> {
 }
 
 fn usage() -> String {
-    "usage: jeden-quality-report build <evidence-dir> <evidence-root.json> <signing-seed-hex> <revision> <environment> <now-epoch-seconds> <max-age-seconds> <machine.json> <human.md>\n       jeden-quality-report verify <machine.json> <report-root.json>\n       jeden-quality-report privacy-scan <file>...".into()
+    "usage: jeden-quality-report build <evidence-dir> <evidence-root.json> <signing-seed-hex> <revision> <environment> <now-epoch-seconds> <max-age-seconds> <machine.json> <human.md>\n       jeden-quality-report verify <machine.json> <report-root.json>\n       jeden-quality-report privacy-scan <machine.json>...".into()
 }
 
 fn build(args: &[String]) -> Result<(), String> {
@@ -75,8 +75,6 @@ fn build(args: &[String]) -> Result<(), String> {
         )]),
     };
     let markdown = markdown_from_machine_report(&machine, &report_root)?;
-    scan_private_data(&machine)?;
-    scan_private_data(markdown.as_bytes())?;
     fs::write(&args[7], machine).map_err(|error| error.to_string())?;
     fs::write(&args[8], markdown).map_err(|error| error.to_string())?;
     Ok(())
@@ -96,7 +94,7 @@ fn verify_file(machine_path: &str, root_path: &str) -> Result<(), String> {
 
 fn privacy_scan(paths: &[String]) -> Result<(), String> {
     for path in paths {
-        scan_private_data(&fs::read(path).map_err(|error| error.to_string())?)?;
+        scan_machine_report(&fs::read(path).map_err(|error| error.to_string())?)?;
     }
     Ok(())
 }
