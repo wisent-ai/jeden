@@ -12,19 +12,36 @@ use crate::tool_runtime::shared::{
 };
 use crate::tool_runtime::ToolRuntime;
 
+/// The grammars the AST tools parse, named by language or file extension.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum Grammar {
+    #[serde(alias = "rs")]
+    Rust,
+    #[serde(alias = "js", alias = "jsx")]
+    Javascript,
+    #[serde(alias = "ts")]
+    Typescript,
+    Tsx,
+    #[serde(alias = "py")]
+    Python,
+}
+
 fn language(name: &str, path: &Path) -> Result<Language, String> {
     let inferred = path
         .extension()
         .and_then(|value| value.to_str())
         .unwrap_or("");
-    match if name.is_empty() { inferred } else { name } {
-        "rs" | "rust" => Ok(tree_sitter_rust::LANGUAGE.into()),
-        "js" | "jsx" | "javascript" => Ok(tree_sitter_javascript::LANGUAGE.into()),
-        "ts" | "typescript" => Ok(tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into()),
-        "tsx" => Ok(tree_sitter_typescript::LANGUAGE_TSX.into()),
-        "py" | "python" => Ok(tree_sitter_python::LANGUAGE.into()),
-        other => Err(format!("unsupported AST language: {other}")),
-    }
+    let named = if name.is_empty() { inferred } else { name };
+    let grammar = serde_json::from_value::<Grammar>(Value::String(named.into()))
+        .map_err(|_| format!("unsupported AST language: {named}"))?;
+    Ok(match grammar {
+        Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
+        Grammar::Javascript => tree_sitter_javascript::LANGUAGE.into(),
+        Grammar::Typescript => tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into(),
+        Grammar::Tsx => tree_sitter_typescript::LANGUAGE_TSX.into(),
+        Grammar::Python => tree_sitter_python::LANGUAGE.into(),
+    })
 }
 
 fn parse(source: &[u8], language: &Language) -> Result<tree_sitter::Tree, String> {
@@ -163,8 +180,13 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
     let temp = parent.join(format!(".jeden-{}.tmp", claim.id));
     fs::write(&temp, &claim.payload).map_err(|error| error.to_string())?;
     fs::rename(&temp, &path).map_err(|error| {
-        let _ = fs::remove_file(&temp);
-        error.to_string()
+        let refused = error.to_string();
+        match fs::remove_file(&temp) {
+            Err(left) if left.kind() != std::io::ErrorKind::NotFound => {
+                format!("{refused}; {} is left behind: {left}", temp.display())
+            }
+            _ => refused,
+        }
     })?;
     complete_pending_action(artifact_dir, &claim.id)?;
     Ok(
