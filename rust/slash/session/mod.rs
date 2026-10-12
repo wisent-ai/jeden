@@ -91,7 +91,7 @@ pub(crate) fn handle_export(args: &str, context: &SlashContext<'_>) -> Result<St
     for arg in argv {
         if arg == "--html" {
             format = "html".into();
-        } else if arg == "--markdown" || arg == "--md" {
+        } else if arg == "--markdown" {
             format = "markdown".into();
         } else if id.is_empty()
             && !arg.starts_with("--")

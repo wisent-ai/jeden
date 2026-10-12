@@ -36,7 +36,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
     let result = match command.as_str() {
         "/plan" => { changed = args.trim() != "status"; Some(modes::handle_plan(args, &mut state)) },
         "/plan-review" => Some(modes::handle_plan_review(&state)),
-        "/goal" => { changed = !matches!(split_head(args).0, "" | "show" | "status"); Some(modes::handle_goal(args, &mut state)) },
+        "/goal" => { let head = split_head(args).0; changed = !(head.is_empty() || head == "status"); Some(modes::handle_goal(args, &mut state)) },
         "/guided-goal" => { changed = true; Some(modes::handle_guided_goal(args, &mut state)) },
         "/loop" => { changed = split_head(args).0 != "status"; Some(modes::handle_loop(args, &mut state)) },
         "/fast" => { changed = split_head(args).0 != "status"; Some(modes::handle_fast(args, &mut state)) },

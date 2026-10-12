@@ -41,7 +41,7 @@ pub(crate) fn format_goal_status(goal: &GoalState) -> String {
 pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, String> {
     let (head, rest) = split_head(args);
     let verb = head.to_ascii_lowercase();
-    if args.trim().is_empty() || verb == "show" || verb == "status" {
+    if args.trim().is_empty() || verb == "status" {
         return Ok(format_goal_status(&state.goal));
     }
     match verb.as_str() {
@@ -69,7 +69,7 @@ pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, S
             state.goal.paused = false;
             Ok("Goal mode resumed.".into())
         }
-        "drop" | "off" => {
+        "drop" => {
             state.goal.enabled = false;
             state.goal.paused = false;
             state.goal.objective.clear();

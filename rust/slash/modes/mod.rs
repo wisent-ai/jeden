@@ -105,7 +105,7 @@ pub(crate) fn handle_plan_review(state: &ModeState) -> Result<String, String> {
 pub(crate) fn handle_loop(args: &str, state: &mut ModeState) -> Result<String, String> {
     let (head, rest) = split_head(args);
     let verb = head.to_ascii_lowercase();
-    if verb == "off" || verb == "stop" {
+    if verb == "off" {
         state.loop_mode = LoopState::default();
         return Ok("Loop mode disabled.".into());
     }

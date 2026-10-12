@@ -56,7 +56,7 @@ pub(crate) fn slash_session_export(session: &Value, format: &str) -> Result<Stri
     if format == "json" {
         return Ok(serde_json::to_string_pretty(session).map_err(|e| e.to_string())? + "\n");
     }
-    if format == "markdown" || format == "md" {
+    if format == "markdown" {
         let mut out = format!(
             "# Jeden session {}\n\n{}\n\n",
             session

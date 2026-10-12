@@ -31,7 +31,7 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    if format == "markdown" || format == "md" {
+    if format == "markdown" {
         let mut out = format!("# Jeden session {}\n\n{}\n\n", id, path);
         for event in events {
             let label = format!(

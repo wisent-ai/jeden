@@ -23,12 +23,14 @@ pub enum KernelLanguage {
 }
 
 impl KernelLanguage {
+    /// The language `value` names, by the one label each language has — the
+    /// names eval_session's input schema lists. The extra spellings `py`,
+    /// `js` and `node` were outside that schema.
     pub fn parse(value: &str) -> Result<Self, String> {
-        match value {
-            "python" | "py" => Ok(Self::Python),
-            "javascript" | "js" | "node" => Ok(Self::JavaScript),
-            _ => Err(format!("unsupported kernel language: {value}")),
-        }
+        [Self::Python, Self::JavaScript]
+            .into_iter()
+            .find(|language| language.label() == value)
+            .ok_or_else(|| format!("unsupported kernel language: {value}"))
     }
     fn label(self) -> &'static str {
         match self {
