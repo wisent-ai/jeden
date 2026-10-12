@@ -32,7 +32,7 @@ pub(super) fn run_turn(
     local_escape_enabled: bool,
 ) -> Result<tui::CommandOutcome, String> {
     let mut run_args = args.clone();
-    run_args.command = "run".into();
+    run_args.command = crate::Command::Run;
     run_args.model = handler_model.lock().clone();
     run_args.json = false;
     run_args.cwd = handler_cwd.lock().clone();

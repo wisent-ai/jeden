@@ -33,7 +33,7 @@ fn gateway(params: &Value) -> Result<ChatConfig, (&'static str, String)> {
         })?,
     };
     let args = Args {
-        command: "lease".into(),
+        command: crate::Command::Lease,
         cwd: cwd.clone(),
         cwd_explicit: true,
         ..Args::default()

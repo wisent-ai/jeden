@@ -1,10 +1,12 @@
+mod command;
 pub(crate) mod refusal;
 
+pub(crate) use command::Command;
 use std::env;
 use std::path::PathBuf;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Args {
-    pub(crate) command: String,
+    pub(crate) command: Command,
     pub(crate) cwd: PathBuf,
     pub(crate) cwd_explicit: bool,
     pub(crate) model: Option<String>,
@@ -25,10 +27,10 @@ pub(crate) struct Args {
 pub(crate) fn usage() -> String {
     concat!(
         "Usage:\n",
-        "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo] [--max-steps n]\n",
         "  jeden --version | -V\n",
-        "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
-        "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo|--auto-approve] [--max-steps n]\n",
+        "  jeden run \"task\" [--json] [--model-only] [--cwd path] [--model name] [--max-tokens n] [--allow-write] [--allow-command] [--yolo] [--max-steps n]\n",
+        "  jeden pursue \"rough objective\" [--json] [--cwd path] [--model name] [--allow-write] [--allow-command] [--yolo] [--max-steps n]\n",
         "  jeden pursue --request-file JSON [--allow-write] [--allow-command] [--json]\n",
         "  jeden pursue --status REQUEST_ID [--json]\n",
         "  jeden pursue --state REQUEST_ID [--json]\n",
@@ -126,51 +128,79 @@ pub(crate) fn command_usage(command: Option<&str>) -> String {
     }
 }
 
+/// The command a whole-line flag stands for: `--version`/`-V` and
+/// `--help`/`-h`, as the usage spells them.
+fn standalone_flag(word: &str) -> Option<Command> {
+    match word {
+        "--version" => Some(Command::Version),
+        "-V" => Some(Command::Version),
+        "--help" => Some(Command::Help),
+        "-h" => Some(Command::Help),
+        _ => None,
+    }
+}
+
+/// How a pursuit mode is built from its option's value.
+type PursuitMode = fn(String) -> crate::autonomy::requests::Mode;
+
+/// The pursuit mode a `jeden pursue` option selects, built from its value.
+fn pursuit_mode(flag: &str) -> Option<PursuitMode> {
+    use crate::autonomy::requests::Mode;
+    let mode: PursuitMode = match flag {
+        "--request-file" => |value| Mode::Submit(PathBuf::from(value)),
+        "--status" => Mode::Status,
+        "--state" => Mode::State,
+        "--resume-run" => Mode::Resume,
+        _ => return None,
+    };
+    Some(mode)
+}
+
+/// The directory the command runs in until `--cwd` names another.
+fn current_dir() -> Result<PathBuf, String> {
+    env::current_dir().map_err(|error| format!("the current directory cannot be read: {error}"))
+}
+
 pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
-    let mut rest = argv.into_iter();
-    let first = rest.next();
-    let mut command = first.unwrap_or_else(|| "interactive".to_string());
-    if command == "--version" || command == "-V" {
-        return Ok(Args {
-            command: "version".into(),
-            cwd: env::current_dir().unwrap_or_default(),
-            ..Default::default()
-        });
-    }
-    if command == "--help" || command == "-h" {
-        return Ok(Args {
-            command: "help".into(),
-            cwd: env::current_dir().unwrap_or_default(),
-            ..Default::default()
-        });
-    }
-    if command.starts_with("--") {
-        rest = std::iter::once(command)
-            .chain(rest)
-            .collect::<Vec<_>>()
-            .into_iter();
-        command = "interactive".into();
-    }
+    let mut rest = argv.into_iter().peekable();
+    let first = rest.peek().cloned();
+    let command = match first.as_deref() {
+        None => Command::Interactive,
+        Some(word) => match standalone_flag(word) {
+            Some(command) => {
+                return Ok(Args {
+                    command,
+                    cwd: current_dir()?,
+                    ..Default::default()
+                })
+            }
+            None if word.starts_with("--") => Command::Interactive,
+            None => {
+                rest.next();
+                Command::named(word)?
+            }
+        },
+    };
     // `--help` or `-h` after a subcommand answers with that subcommand's
     // usage lines and never runs it: `jeden roadmap drop --help` used to read
     // `--help` as the value of an option, and `jeden config --help` refused it.
     let rest_words: Vec<String> = rest.collect();
-    if command != "interactive"
+    if command != Command::Interactive
         && rest_words
             .iter()
-            .any(|word| word == "--help" || word == "-h")
+            .any(|word| standalone_flag(word) == Some(Command::Help))
     {
         return Ok(Args {
-            command: "help".into(),
-            cwd: env::current_dir().unwrap_or_default(),
-            positionals: vec![command],
+            command: Command::Help,
+            cwd: current_dir()?,
+            positionals: vec![command.name()],
             ..Default::default()
         });
     }
-    if command == "resume" {
+    if command == Command::Resume {
         return Ok(Args {
             command,
-            cwd: env::current_dir().map_err(|e| e.to_string())?,
+            cwd: current_dir()?,
             positionals: rest_words,
             ..Default::default()
         });
@@ -178,32 +208,24 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     let mut rest = rest_words.into_iter();
     let mut args = Args {
         command,
-        cwd: env::current_dir().map_err(|e| e.to_string())?,
+        cwd: current_dir()?,
         ..Default::default()
     };
     while let Some(arg) = rest.next() {
-        match arg.as_str() {
-            "--request-file" | "--status" | "--state" | "--resume-run"
-                if args.command == "pursue" =>
-            {
-                if args.pursuit_request.is_some() {
-                    return Err(
-                        "pursue request, status, state and resume modes are mutually exclusive"
-                            .into(),
-                    );
-                }
-                let value = rest
-                    .next()
-                    .ok_or_else(|| format!("{arg} requires a value"))?;
-                args.pursuit_request = Some(match arg.as_str() {
-                    "--request-file" => {
-                        crate::autonomy::requests::Mode::Submit(PathBuf::from(value))
-                    }
-                    "--status" => crate::autonomy::requests::Mode::Status(value),
-                    "--state" => crate::autonomy::requests::Mode::State(value),
-                    _ => crate::autonomy::requests::Mode::Resume(value),
-                });
+        let pursuit = pursuit_mode(&arg).filter(|_| args.command == Command::Pursue);
+        if let Some(mode) = pursuit {
+            if args.pursuit_request.is_some() {
+                return Err(
+                    "pursue request, status, state and resume modes are mutually exclusive".into(),
+                );
             }
+            let value = rest
+                .next()
+                .ok_or_else(|| format!("{arg} requires a value"))?;
+            args.pursuit_request = Some(mode(value));
+            continue;
+        }
+        match arg.as_str() {
             "--cwd" => {
                 args.cwd = PathBuf::from(rest.next().ok_or("--cwd requires a value")?);
                 args.cwd_explicit = true;
@@ -232,7 +254,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                     rest.next().ok_or("--resume-session requires a path")?,
                 ))
             }
-            "--yolo" | "--auto-approve" => {
+            "--yolo" => {
                 args.yolo = true;
                 args.allow_write = true;
                 args.allow_command = true;
@@ -241,23 +263,8 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
             "--json" => args.json = true,
             other
                 if other.starts_with("--")
-                    && (matches!(
-                        args.command.as_str(),
-                        "export"
-                            | "roadmap"
-                            | "worktree"
-                            | "token"
-                            | "stats"
-                            | "gallery"
-                            | "contracts"
-                            | "context"
-                            | "workspace"
-                            | "import"
-                            | "restore"
-                            | "todo"
-                            | "asks"
-                            | "copy"
-                    ) || (args.command == "run" && !args.positionals.is_empty())) =>
+                    && (args.command.reads_own_options()
+                        || (args.command == Command::Run && !args.positionals.is_empty())) =>
             {
                 args.positionals.push(other.to_string())
             }
@@ -268,20 +275,13 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
     if args.pursuit_request.is_some() && !args.positionals.is_empty() {
         return Err("a machine pursuit request cannot also contain a positional objective".into());
     }
-    if matches!(args.command.as_str(), "run" | "pursue")
-        && args.positionals.is_empty()
-        && args.pursuit_request.is_none()
-    {
-        return Err(format!("{} requires a task", args.command));
+    if args.command.takes_task() && args.positionals.is_empty() && args.pursuit_request.is_none() {
+        return Err(format!("{} requires a task", args.command.name()));
     }
-    if args.command == "interactive" && !args.positionals.is_empty() {
-        return Err(format!(
-            "unknown command: {}",
-            args.positionals
-                .first()
-                .map(String::as_str)
-                .unwrap_or_default()
-        ));
+    if args.command == Command::Interactive {
+        if let Some(first) = args.positionals.first() {
+            return Err(format!("unknown command: {first}"));
+        }
     }
     Ok(args)
 }

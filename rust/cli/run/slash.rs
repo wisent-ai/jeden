@@ -145,7 +145,7 @@ fn handle_settings_slash(cwd: &Path, args: &str) -> Result<String, String> {
     // max_tokens/max_steps are irrelevant to config_command; Default fills them
     // number-free.
     config_command(&Args {
-        command: "config".into(),
+        command: crate::Command::Config,
         cwd: cwd.to_path_buf(),
         json,
         positionals,

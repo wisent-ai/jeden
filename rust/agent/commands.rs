@@ -50,7 +50,7 @@ pub(crate) fn retry_command_with(args: &Args, hooks: &mut RunHooks) -> Result<St
         return Err("Refusing to retry a slash command; retry only replays agent prompts.".into());
     }
     let mut retry_args = args.clone();
-    retry_args.command = "run".into();
+    retry_args.command = crate::Command::Run;
     retry_args.positionals = vec![task.to_string()];
     run_command_with(&retry_args, hooks)
 }
@@ -65,7 +65,7 @@ pub(crate) fn btw_command_with(
         return Err("Usage: /btw <side question>".into());
     }
     let mut side_args = args.clone();
-    side_args.command = "run".into();
+    side_args.command = crate::Command::Run;
     side_args.positionals = vec![format!(
         "Answer this side question using the current session context.\nKeep it separate from the main task: do not change files unless the side question explicitly asks for file changes.\nQuestion: {}",
         question

@@ -49,7 +49,7 @@ pub(crate) use cli::commands::expand::resolve_file_command;
 pub(crate) use cli::completions::completions_command;
 pub(crate) use cli::config::schema::config_command;
 pub(crate) use cli::config::{load_config, Config};
-pub(crate) use cli::invocation::{parse_args, usage, Args};
+pub(crate) use cli::invocation::{parse_args, usage, Args, Command};
 
 pub(crate) use cli::gallery::gallery_command;
 pub(crate) use cli::run::interactive::interactive;
@@ -97,14 +97,11 @@ pub fn main() -> ExitCode {
             return ExitCode::from(USAGE_STATUS);
         }
     };
-    if args.command == "version" {
+    if args.command == Command::Version {
         println!("{}", version_text());
         return ExitCode::SUCCESS;
     }
-    if matches!(
-        args.command.as_str(),
-        "interactive" | "run" | "pursue" | "rpc" | "acp"
-    ) {
+    if args.command.workspace_bound() {
         match cli::workspace::effective_cwd(&args.cwd, args.cwd_explicit) {
             Ok(cwd) => args.cwd = cwd,
             Err(error) => {
@@ -127,7 +124,7 @@ pub fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     tui::theme::init(&args.cwd);
-    if args.command == "doctor" {
+    if args.command == Command::Doctor {
         let report = conformance::health::doctor(&args.cwd);
         match serde_json::to_string(&report) {
             Ok(text) => println!("{text}"),
@@ -142,7 +139,7 @@ pub fn main() -> ExitCode {
             ExitCode::FAILURE
         };
     }
-    if args.command == "conformance" {
+    if args.command == Command::Conformance {
         return match conformance::run(&args.cwd)
             .and_then(|report| conformance::canonical_json(&report).map(|text| (report, text)))
         {
@@ -160,28 +157,33 @@ pub fn main() -> ExitCode {
             }
         };
     }
-    let result = match args.command.as_str() {
-        "help" => Ok(cli::invocation::command_usage(
+    let result = match args.command {
+        Command::Version | Command::Doctor | Command::Conformance => {
+            unreachable!("{} answers before the workspace is read", args.command.name())
+        }
+        Command::Help => Ok(cli::invocation::command_usage(
             args.positionals.first().map(String::as_str),
         )),
-        "interactive" => interactive(&args),
-        "run" => agent::run_command(&args),
-        "pursue" => autonomy::command(&args),
-        "todo" => completion::command(&args),
-        "asks" => completion::asks_command(&args),
-        "rpc" => rpc::serve_stdio().map(|_| String::new()),
-        "headless" => rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
-            .map(|_| String::new()),
-        "acp" => rpc::serve_acp_stdio().map(|_| String::new()),
-        "relay" => match args.positionals.as_slice() {
+        Command::Interactive => interactive(&args),
+        Command::Run => agent::run_command(&args),
+        Command::Pursue => autonomy::command(&args),
+        Command::Todo => completion::command(&args),
+        Command::Asks => completion::asks_command(&args),
+        Command::Rpc => rpc::serve_stdio().map(|_| String::new()),
+        Command::Headless => {
+            rpc::serve_headless_cli(&args.positionals, &args.cwd.join(".jeden/headless"))
+                .map(|_| String::new())
+        }
+        Command::Acp => rpc::serve_acp_stdio().map(|_| String::new()),
+        Command::Relay => match args.positionals.as_slice() {
             [verb, addr] if verb == "serve" => collab::serve(addr).map(|_| String::new()),
             _ => Err(cli::invocation::refusal::usage(
                 "relay serve takes the address to listen on: jeden relay serve <host:port>",
             )),
         },
-        "import" => session_import::command(&args),
-        "restore" => cli::restore::command(&args),
-        "sessions" => match args.positionals.split_first() {
+        Command::Import => session_import::command(&args),
+        Command::Restore => cli::restore::command(&args),
+        Command::Sessions => match args.positionals.split_first() {
             None => list_sessions(None, args.json),
             Some((verb, query)) if verb == "search" => search_sessions_command(query, args.json),
             Some((raw, _)) => raw
@@ -193,11 +195,11 @@ pub fn main() -> ExitCode {
                 })
                 .and_then(|limit| list_sessions(Some(limit), args.json)),
         },
-        "copy" => cli::clipboard::copy_command(&args),
+        Command::Copy => cli::clipboard::copy_command(&args),
         // A session that cannot be read or rendered is a failure with its
         // cause, never an exit 0 carrying an error object or nothing. Text is
         // the session's events one heading each; --json is the whole record.
-        "show" => match args.positionals.first() {
+        Command::Show => match args.positionals.first() {
             Some(id) => read_session_value(id)
                 .map_err(|error| format!("session {id} cannot be read: {error}"))
                 .and_then(|session| {
@@ -207,45 +209,37 @@ pub fn main() -> ExitCode {
                 "show requires a session id",
             )),
         },
-        "export" => export_session_command(&args),
-        "artifacts" => args
-            .positionals
-            .first()
-            .map(|id| list_artifacts_command(id, args.json))
-            .unwrap_or_else(|| {
-                Err(cli::invocation::refusal::usage(
-                    "artifacts requires a session id",
-                ))
-            }),
-        "artifact" => artifact_command(&args),
-        "tools" => Ok(tools::tools_output(&args.cwd, args.json)),
-        "resume" => resume_command(&args),
-        "update" => update_command(),
-        "config" => config_command(&args),
-        "workspace" => workspace_command(&args),
-        "contracts" => cli::contracts::command(&args),
-        "context" => cli::context::command(&args),
-        "roadmap" => roadmap::execute(&args.cwd, &args.positionals, args.json)
+        Command::Export => export_session_command(&args),
+        Command::Artifacts => match args.positionals.first() {
+            Some(id) => list_artifacts_command(id, args.json),
+            None => Err(cli::invocation::refusal::usage(
+                "artifacts requires a session id",
+            )),
+        },
+        Command::Artifact => artifact_command(&args),
+        Command::Tools => Ok(tools::tools_output(&args.cwd, args.json)),
+        Command::Resume => resume_command(&args),
+        Command::Update => update_command(),
+        Command::Config => config_command(&args),
+        Command::Workspace => workspace_command(&args),
+        Command::Contracts => cli::contracts::command(&args),
+        Command::Context => cli::context::command(&args),
+        Command::Roadmap => roadmap::execute(&args.cwd, &args.positionals, args.json)
             .map_err(|error| error.to_string()),
-        "capabilities" => {
+        Command::Capabilities => {
             if args.json {
                 capability::status_json(&args.cwd).map(|json| json + "\n")
             } else {
                 Ok(capability::status_text(&args.cwd) + "\n")
             }
         }
-        "completions" => completions_command(&args),
-        "worktree" => worktree_command(&args),
-        "token" => token_command(&args),
-        "lease" => cli::lease::command(&args),
-        "chat-memory" => cli::chat_memory::command(&args),
-        "stats" => stats_command(&args),
-        "gallery" => gallery_command(&args),
-        other => {
-            const USAGE_STATUS: u8 = 2;
-            eprintln!("Error: unknown command: {}\n{}", other, usage());
-            return ExitCode::from(USAGE_STATUS);
-        }
+        Command::Completions => completions_command(&args),
+        Command::Worktree => worktree_command(&args),
+        Command::Token => token_command(&args),
+        Command::Lease => cli::lease::command(&args),
+        Command::ChatMemory => cli::chat_memory::command(&args),
+        Command::Stats => stats_command(&args),
+        Command::Gallery => gallery_command(&args),
     };
     match result {
         Ok(text) => {

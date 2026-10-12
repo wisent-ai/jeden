@@ -77,7 +77,7 @@ pub(crate) fn session_dir_for(id_or_path: &str) -> PathBuf {
 /// `jeden resume <id-or-path> ["<task>"]`: load a recorded session's turns into
 /// a fresh conversation and, when a task is given, continue it with a real turn
 /// (a genuine in-process resume, not just inspection). Accepts `--allow-write`,
-/// `--allow-command`, and `--yolo`/`--auto-approve` among the trailing args
+/// `--allow-command`, and `--yolo` among the trailing args
 /// because the resume parser deliberately skips normal flag handling.
 pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     let (id, rest) = args
@@ -98,7 +98,7 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
         match part.as_str() {
             "--allow-write" => allow_write = true,
             "--allow-command" => allow_command = true,
-            "--yolo" | "--auto-approve" => {
+            "--yolo" => {
                 yolo = true;
                 allow_write = true;
                 allow_command = true;

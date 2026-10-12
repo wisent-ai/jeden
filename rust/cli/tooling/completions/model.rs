@@ -36,7 +36,7 @@ fn is_value_token(token: &str) -> bool {
 }
 
 /// Collect `--long` flags from one usage line. Handles compact alternations
-/// such as `[--yolo|--auto-approve]` and value placeholders after a flag.
+/// such as `[--json|--summary|--serve]` and value placeholders after a flag.
 fn collect_flags(line: &str, flags: &mut Vec<FlagSpec>) {
     let tokens: Vec<&str> = line.split_whitespace().collect();
     for (index, token) in tokens.iter().enumerate() {

@@ -14,7 +14,7 @@ pub(super) fn args_from_options(
     goal: Option<String>,
 ) -> Args {
     Args {
-        command: "run".into(),
+        command: crate::Command::Run,
         cwd: cwd.to_path_buf(),
         cwd_explicit: true,
         model: options.model.clone(),

@@ -19,7 +19,7 @@ struct JedenStageRunner {
 impl JedenStageRunner {
     fn new(args: &Args) -> Result<Self, String> {
         let mut read_only_args = args.clone();
-        read_only_args.command = "run".into();
+        read_only_args.command = crate::Command::Run;
         read_only_args.positionals.clear();
         read_only_args.allow_write = false;
         read_only_args.allow_command = false;
@@ -28,7 +28,7 @@ impl JedenStageRunner {
         read_only_args.autonomous = true;
 
         let mut execution_args = args.clone();
-        execution_args.command = "run".into();
+        execution_args.command = crate::Command::Run;
         execution_args.positionals.clear();
         execution_args.goal = None;
         execution_args.autonomous = true;
