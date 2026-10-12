@@ -95,6 +95,33 @@ pub(super) fn definition_output_is_unconstrained(schema: &serde_json::Value) -> 
             .unwrap_or(false)
 }
 
+/// A JSON Schema `type`, spelled as the schema spells it.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum JsonType {
+    Null,
+    Boolean,
+    Number,
+    Integer,
+    String,
+    Array,
+    Object,
+}
+
+impl JsonType {
+    fn holds(self, value: &serde_json::Value) -> bool {
+        match self {
+            JsonType::Null => value.is_null(),
+            JsonType::Boolean => value.is_boolean(),
+            JsonType::Number => value.is_number(),
+            JsonType::Integer => value.is_i64() || value.is_u64(),
+            JsonType::String => value.is_string(),
+            JsonType::Array => value.is_array(),
+            JsonType::Object => value.is_object(),
+        }
+    }
+}
+
 pub(super) fn validate_output(
     value: &serde_json::Value,
     schema: &serde_json::Value,
@@ -110,17 +137,9 @@ pub(super) fn validate_output(
         .and_then(serde_json::Value::as_str)
         .or_else(|| schema.as_str());
     if let Some(expected) = expected {
-        let matches = match expected {
-            "null" => value.is_null(),
-            "boolean" => value.is_boolean(),
-            "number" => value.is_number(),
-            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-            "string" => value.is_string(),
-            "array" => value.is_array(),
-            "object" | "json" => value.is_object(),
-            _ => return Err(format!("{path} uses unsupported schema type {expected}")),
-        };
-        if !matches {
+        let kind: JsonType = crate::agent::approval_named(expected)
+            .ok_or_else(|| format!("{path} uses unsupported schema type {expected}"))?;
+        if !kind.holds(value) {
             return Err(format!("{path} must be {expected}"));
         }
     }
