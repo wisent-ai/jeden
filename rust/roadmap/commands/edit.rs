@@ -121,15 +121,25 @@ pub(super) fn unblock_command(
     }
 }
 
+/// Which way a dependency edge changes, spelled as the command that asks for
+/// it; the payload's `operation` carries the same name.
+#[derive(Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub(super) enum DependencyChange {
+    Depends,
+    Undepends,
+}
+
 /// `roadmap depends|undepends <id> <dependency-id>`: attach or detach one
 /// dependency edge. Both are the same item mutation; the payload's
 /// `operation` is what tells a reader which way it went.
 pub(super) fn dependency_command(
     store: &RoadmapStore,
     options: &ParsedOptions,
-    command: &str,
+    change: DependencyChange,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
+    let command = crate::agent::approval_spelling(change);
     let id = options.positionals.first().ok_or_else(|| {
         RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
     })?;
@@ -137,7 +147,6 @@ pub(super) fn dependency_command(
         RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
     })?;
     let revision = expected_revision(store, options)?;
-    let add = command == "depends";
     let roadmap = store.mutate(
         revision,
         "roadmap_item_updated",
@@ -147,7 +156,7 @@ pub(super) fn dependency_command(
                 return Err(RoadmapError::NotFound(dependency.clone()));
             }
             let item = find_item_mut(roadmap, id)?;
-            if add {
+            if change == DependencyChange::Depends {
                 item.depends_on.push(dependency.to_ascii_uppercase());
             } else {
                 let before = item.depends_on.len();

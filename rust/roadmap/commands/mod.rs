@@ -14,7 +14,7 @@ mod options;
 mod status;
 
 use acceptance::{acceptance_command, work_command};
-use edit::{dependency_command, edit_command, unblock_command};
+use edit::{dependency_command, edit_command, unblock_command, DependencyChange};
 use options::{expected_revision, format_json, ParsedOptions};
 use status::{mutate_status, mutate_status_explicit};
 
@@ -235,7 +235,10 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 .parse()?;
             mutate_status_explicit(&store, &options, id, status, false, 2, json_output)
         }
-        "depends" | "undepends" => dependency_command(&store, &options, command, json_output),
+        "depends" => dependency_command(&store, &options, DependencyChange::Depends, json_output),
+        "undepends" => {
+            dependency_command(&store, &options, DependencyChange::Undepends, json_output)
+        }
         "acceptance" => acceptance_command(&store, &options, json_output),
         "check" => {
             let report = store.check();
