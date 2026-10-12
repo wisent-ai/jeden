@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { startRpc } from './rpc.mjs';
+import { startRpc } from '../rpc.mjs';
 
 export async function rpcRefusal({ binary, cwd, env, report, model, maxSteps, prompt }) {
   const steps = Number(maxSteps);

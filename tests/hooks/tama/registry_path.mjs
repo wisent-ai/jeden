@@ -8,7 +8,7 @@
 // report.json.
 //
 // Run: JEDEN_BIN=target/debug/jeden JEDEN_TEST_SOURCE_REVISION=$(git rev-parse HEAD) \
-//   node tests/hooks/tama_registry_path.mjs
+//   node tests/hooks/tama/registry_path.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -21,7 +21,7 @@ function required(name) {
   assert.ok(value?.trim(), `${name} is required`);
   return value;
 }
-const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const binary = resolve(required('JEDEN_BIN'));
 const revision = required('JEDEN_TEST_SOURCE_REVISION');
 const runs = join(root, '.build/hooks-tama-registry-path');
