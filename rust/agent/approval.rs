@@ -26,6 +26,10 @@ impl ApprovalMode {
         ApprovalMode::Write,
         ApprovalMode::Yolo,
     ];
+    /// The mode a session runs in when neither config nor flags name one:
+    /// older Jeden sessions only auto-ran write or command tools with
+    /// explicit flags, and a missing setting keeps that gate.
+    pub(crate) const DEFAULT: ApprovalMode = ApprovalMode::AlwaysAsk;
     pub(crate) fn name(self) -> String {
         spelling(self)
     }
@@ -36,6 +40,21 @@ impl ApprovalMode {
             .map(|mode| mode.name())
             .collect::<Vec<_>>()
             .join("|")
+    }
+    /// Every mode's spelling, kept for the process, for the settings schema
+    /// that names its choices as static strings.
+    pub(crate) fn spellings() -> &'static [&'static str] {
+        static NAMES: std::sync::LazyLock<Vec<String>> =
+            std::sync::LazyLock::new(|| ApprovalMode::ALL.iter().map(|mode| mode.name()).collect());
+        static SPELLINGS: std::sync::LazyLock<Vec<&'static str>> =
+            std::sync::LazyLock::new(|| NAMES.iter().map(String::as_str).collect());
+        &SPELLINGS
+    }
+    /// [`Self::DEFAULT`] as the settings schema's JSON default.
+    pub(crate) fn default_json() -> &'static str {
+        static DEFAULT_JSON: std::sync::LazyLock<String> =
+            std::sync::LazyLock::new(|| Value::String(ApprovalMode::DEFAULT.name()).to_string());
+        &DEFAULT_JSON
     }
 }
 
@@ -109,9 +128,7 @@ pub(super) fn approval_mode(args: &Args, state: &Value) -> ApprovalMode {
     if args.allow_write && args.allow_command {
         return ApprovalMode::Yolo;
     }
-    // Intentional safe default: older Jeden sessions only auto-ran write or
-    // command tools with explicit flags. Missing config keeps that gate.
-    ApprovalMode::AlwaysAsk
+    ApprovalMode::DEFAULT
 }
 
 pub(super) fn parse_tool_policy(value: &str) -> Option<ToolPolicy> {

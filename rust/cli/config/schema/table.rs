@@ -49,8 +49,8 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
         key: "tools.approvalMode",
         typ: "enum",
         description: "Default approval policy for tool execution.",
-        default_json: "\"always-ask\"",
-        enum_values: &["always-ask", "write", "yolo"],
+        default_json: crate::agent::ApprovalMode::default_json(),
+        enum_values: crate::agent::ApprovalMode::spellings(),
     },
     SettingSpec {
         key: "commands.enableClaudeUser",
