@@ -46,7 +46,13 @@ impl LspClient {
 
 impl Drop for LspClient {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // A server that cannot be killed outlives jeden, so that is said.
+        if let Err(error) = self.child.kill() {
+            eprintln!(
+                "jeden: LSP server {} cannot be killed: {error}",
+                self.program
+            );
+        }
         let _ = self.child.wait();
     }
 }

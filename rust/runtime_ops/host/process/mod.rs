@@ -139,7 +139,14 @@ impl ProcessManager {
         let mut process_tree = match native().attach_process_tree(&child) {
             Ok(tree) => tree,
             Err(error) => {
-                let _ = child.kill();
+                // A child left running outside its process tree is not
+                // contained, so a kill that failed is part of the refusal.
+                if let Err(kill) = child.kill() {
+                    return Err(format!(
+                        "{error}; the uncontained process {} could not be killed: {kill}",
+                        child.id()
+                    ));
+                }
                 let _ = child.wait();
                 return Err(error.to_string());
             }

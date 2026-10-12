@@ -205,7 +205,12 @@ pub(crate) fn run_host(
     // is then awaited. A cancelled turn kills it instead.
     loop {
         if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
-            let _ = child.kill();
+            if let Err(error) = child.kill() {
+                return Err(format!(
+                    "extension operation cancelled; its host process {} could not be killed: {error}",
+                    child.id()
+                ));
+            }
             let _ = child.wait();
             let _ = stdout_reader.join();
             let _ = stderr_reader.join();
