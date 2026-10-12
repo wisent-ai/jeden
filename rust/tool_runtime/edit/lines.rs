@@ -29,9 +29,27 @@ fn inserted_lines(value: Option<&Value>) -> Result<Vec<String>, String> {
     }
 }
 
+/// What one line edit does, spelled as the `edit_file` op names it.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum LineEditKind {
+    Replace,
+    Delete,
+    InsertBefore,
+    InsertAfter,
+}
+
+impl LineEditKind {
+    /// Whether this edit spans existing lines (and so must not overlap
+    /// another), rather than adding lines at one position.
+    fn spans_lines(self) -> bool {
+        matches!(self, LineEditKind::Replace | LineEditKind::Delete)
+    }
+}
+
 #[derive(Clone)]
 struct LineEditOp {
-    kind: String,
+    kind: LineEditKind,
     start: usize,
     end: usize,
     content: Vec<String>,
@@ -51,39 +69,39 @@ fn normalize_line_edit_ops(content: &str, ops: &Value) -> Result<Vec<LineEditOp>
         let Some(obj) = op.as_object() else {
             return Err("op must be an object".into());
         };
-        let kind = obj
+        let named = obj
             .get("op")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        if !matches!(
-            kind.as_str(),
-            "replace" | "delete" | "insert_before" | "insert_after"
-        ) {
-            return Err(format!("unknown edit op: {kind}"));
-        }
+            .ok_or_else(|| format!("edit op {index} names no op"))?;
+        let kind: LineEditKind = serde_json::from_value(named.clone())
+            .map_err(|_| format!("unknown edit op: {named}"))?;
         let start = obj
             .get("start")
             .or_else(|| obj.get("startLine"))
             .or_else(|| obj.get("line"))
             .and_then(Value::as_u64)
             .ok_or("start must be a 1-based line number")? as usize;
-        let end = obj
-            .get("end")
-            .or_else(|| obj.get("endLine"))
-            .and_then(Value::as_u64)
-            .map(|n| n as usize)
-            .unwrap_or(start);
+        // A range edit states the last line it covers; an insert has one
+        // position, its start.
+        let end = if kind.spans_lines() {
+            obj.get("end")
+                .or_else(|| obj.get("endLine"))
+                .and_then(Value::as_u64)
+                .ok_or_else(|| {
+                    format!("edit op {named} needs end (or endLine): the last line it covers")
+                })? as usize
+        } else {
+            start
+        };
         if start < 1 {
             return Err("start must be a 1-based line number".into());
         }
         if end < start {
             return Err("end must be >= start".into());
         }
-        if matches!(kind.as_str(), "replace" | "delete") && end > lines.len() {
+        if kind.spans_lines() && end > lines.len() {
             return Err("edit range is past end of file".into());
         }
-        if matches!(kind.as_str(), "insert_before" | "insert_after") && start > lines.len() + 1 {
+        if !kind.spans_lines() && start > lines.len() + 1 {
             return Err("insert line is past end of file".into());
         }
         normalized.push(LineEditOp {
@@ -96,7 +114,7 @@ fn normalize_line_edit_ops(content: &str, ops: &Value) -> Result<Vec<LineEditOp>
     }
     let mut ranges: Vec<_> = normalized
         .iter()
-        .filter(|op| matches!(op.kind.as_str(), "replace" | "delete"))
+        .filter(|op| op.kind.spans_lines())
         .collect();
     ranges.sort_by_key(|op| op.start);
     for pair in ranges.windows(2) {
@@ -112,24 +130,23 @@ pub(super) fn apply_line_edit_ops(content: &str, ops: &Value) -> Result<String, 
     let mut normalized = normalize_line_edit_ops(content, ops)?;
     normalized.sort_by(|a, b| b.start.cmp(&a.start).then_with(|| b.index.cmp(&a.index)));
     for op in normalized {
-        match op.kind.as_str() {
-            "replace" => {
+        match op.kind {
+            LineEditKind::Replace => {
                 lines.splice(op.start - 1..op.end, op.content);
             }
-            "delete" => {
+            LineEditKind::Delete => {
                 lines.drain(op.start - 1..op.end);
             }
-            "insert_before" => {
+            LineEditKind::InsertBefore => {
                 lines.splice(
                     op.start.saturating_sub(1)..op.start.saturating_sub(1),
                     op.content,
                 );
             }
-            "insert_after" => {
+            LineEditKind::InsertAfter => {
                 let at = op.start.min(lines.len());
                 lines.splice(at..at, op.content);
             }
-            _ => unreachable!(),
         }
     }
     let next = lines.join("\n");
