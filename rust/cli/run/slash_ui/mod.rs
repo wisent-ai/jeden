@@ -47,8 +47,7 @@ pub(crate) fn interactive_view(
     if command == "/onboarding" {
         return Some(crate::onboarding::interactive(args.trim(), cwd));
     }
-    if matches!(command, "/model" | "/models" | "/switch") && matches!(args.trim(), "--all" | "-a")
-    {
+    if command == "/model" && matches!(args.trim(), "--all" | "-a") {
         return Some(model_picker(cwd, model, true).map(CommandOutcome::Picker));
     }
     if !args.trim().is_empty() {
@@ -88,9 +87,7 @@ pub(crate) fn interactive_view(
             return Some(provider_picker(cwd).map(CommandOutcome::Picker));
         }
         "/logout" => return Some(logout_picker().map(CommandOutcome::Picker)),
-        "/model" | "/models" | "/switch" => {
-            return Some(model_picker(cwd, model, false).map(CommandOutcome::Picker))
-        }
+        "/model" => return Some(model_picker(cwd, model, false).map(CommandOutcome::Picker)),
         "/settings" => return Some(Ok(CommandOutcome::Picker(settings_picker(cwd)))),
         _ => {}
     }

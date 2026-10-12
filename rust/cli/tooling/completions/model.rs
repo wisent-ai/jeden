@@ -158,12 +158,6 @@ pub(super) fn collect_model() -> CompletionModel {
             word: format!("/{}", spec.name),
             description: spec.description.to_string(),
         });
-        for alias in &spec.aliases {
-            slash.push(SlashEntry {
-                word: format!("/{alias}"),
-                description: format!("{} (alias for /{})", spec.description, spec.name),
-            });
-        }
     }
     CompletionModel {
         global_flags,

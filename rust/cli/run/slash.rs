@@ -197,7 +197,7 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         return crate::cli::billing::handle_billing_slash(trimmed, false);
     }
     match command {
-        "/help" | "/commands" => {
+        "/help" => {
             let help = format_slash_help(cwd);
             Ok(help)
         }
@@ -207,10 +207,8 @@ pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Resu
         "/token" => crate::cli::token::token_slash(),
         "/logout" => logout(cwd, parts.collect::<Vec<_>>().join(" ").as_str()),
         "/refresh" => refresh(parts.collect::<Vec<_>>().join(" ").as_str()),
-        "/model" | "/models" | "/switch" => {
-            handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str())
-        }
-        "/exit" | "/quit" => Ok("Exit is handled by the interactive input loop.".into()),
+        "/model" => handle_model_slash(cwd, model, parts.collect::<Vec<_>>().join(" ").as_str()),
+        "/exit" => Ok("Exit is handled by the interactive input loop.".into()),
         "/billing" | "/subscriptions" | "/payment-method" => Ok(billing_slash_usage(command)),
         _ => Err(format!("Unknown Rust slash command: {}", command)),
     }

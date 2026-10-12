@@ -36,7 +36,7 @@ where
         if prompt.trim().is_empty() {
             continue;
         }
-        if matches!(prompt.trim(), "/exit" | "/quit") {
+        if prompt.trim() == "/exit" {
             break;
         }
         let ctx = TurnCtx {

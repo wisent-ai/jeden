@@ -213,7 +213,7 @@ where
                 let active_from_view = submission_from_view;
                 submission_from_view = false;
                 slash_selection = 0;
-                if matches!(active_prompt.trim(), "/exit" | "/quit") {
+                if active_prompt.trim() == "/exit" {
                     break;
                 }
                 editor.push_history(active_prompt.clone());

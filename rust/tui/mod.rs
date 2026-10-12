@@ -177,8 +177,9 @@ pub fn default_turn_kind(input: &str) -> TurnKind {
     }
     let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
     match command {
-        "/retry" | "/btw" | "/login" | "/logout" | "/model" | "/models" | "/switch" | "/usage"
-        | "/providers" => TurnKind::Background,
+        "/retry" | "/btw" | "/login" | "/logout" | "/model" | "/usage" | "/providers" => {
+            TurnKind::Background
+        }
         _ => TurnKind::Foreground,
     }
 }

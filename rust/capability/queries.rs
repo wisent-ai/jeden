@@ -42,9 +42,7 @@ pub fn view_descriptor(cwd: &Path, command: &str) -> Option<CapabilityDescriptor
 
 pub fn is_builtin_slash(name: &str) -> bool {
     let name = name.trim().trim_start_matches('/');
-    builtin_slash_specs()
-        .iter()
-        .any(|spec| spec.name == name || spec.aliases.iter().any(|alias| alias == name))
+    builtin_slash_specs().iter().any(|spec| spec.name == name)
 }
 
 pub fn status_text(cwd: &Path) -> String {

@@ -41,7 +41,7 @@ pub(super) fn session_command(
                 Some(run_args),
             )
         }
-        "/model" | "/models" | "/switch" => {
+        "/model" => {
             let next = rest.trim();
             if matches!(next, "--all" | "-a") {
                 return model_picker(&run_args.cwd, handler_model.lock().as_deref(), true)
@@ -91,7 +91,7 @@ pub(super) fn session_command(
             }
             return Ok(Some(outcome));
         }
-        "/roles" | "/role" => {
+        "/roles" => {
             // Roles hub rows dispatch `/roles <role>`; the hub has no
             // backend of its own, so forward to the role's existing
             // view even when a picker submitted the command.
@@ -116,7 +116,7 @@ pub(super) fn session_command(
                 )),
             };
         }
-        "/rebuild" | "/self-rebuild" => {
+        "/rebuild" => {
             if !rest.trim().is_empty() {
                 return Err("Usage: /rebuild".into());
             }

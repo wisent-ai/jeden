@@ -102,7 +102,7 @@ pub(crate) fn usage() -> String {
         "  /btw <question>\n",
         "  /compact [focus]\n",
         "  /handoff [focus]\n",
-        "  /clear|/new|/fresh\n",
+        "  /new | /fresh\n",
         "  /fork | /branch <title> | /tree | /resume <session>\n",
         "  /rename <name> | /drop | /context | /move <dir>\n",
     )

@@ -1,9 +1,11 @@
-//! The commands this build ships with, read from the catalogues beside it.
+//! The commands this build ships with, read from the catalogue beside it.
 //!
 //! They were four hundred lines of Rust literals, which meant adding a slash
 //! command or a native view was a code change and a release. They are
-//! `builtin-slash-commands.json` and `native-view-commands.json` now: one row
-//! per command, with the aliases each answers to.
+//! `builtin-slash-commands.json` now: one row per command, its one name, and
+//! whether it renders a native view. A command answers to its name only; the
+//! catalogue used to declare second spellings that the dispatchers then
+//! repeated, and that some of them read as different commands.
 
 use std::sync::LazyLock;
 
@@ -12,11 +14,12 @@ use serde::Deserialize;
 use super::{CapabilityDescriptor, CapabilityKind, FunctionTarget};
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct SlashSpec {
     pub(crate) name: String,
     pub(crate) description: String,
-    #[serde(default)]
-    pub(crate) aliases: Vec<String>,
+    /// Whether the command renders a native interactive view.
+    pub(crate) view: bool,
 }
 
 static SLASH_COMMANDS: LazyLock<Vec<SlashSpec>> = LazyLock::new(|| {
@@ -24,17 +27,8 @@ static SLASH_COMMANDS: LazyLock<Vec<SlashSpec>> = LazyLock::new(|| {
         .expect("builtin-slash-commands.json is this build s own catalogue of slash commands")
 });
 
-static VIEW_COMMANDS: LazyLock<Vec<String>> = LazyLock::new(|| {
-    serde_json::from_str(include_str!("native-view-commands.json"))
-        .expect("native-view-commands.json is this build s own list of native views")
-});
-
 pub(crate) fn builtin_slash_specs() -> &'static [SlashSpec] {
     &SLASH_COMMANDS
-}
-
-pub(super) fn native_view_commands() -> &'static [String] {
-    &VIEW_COMMANDS
 }
 
 pub(super) fn builtin_slash_descriptors() -> Vec<CapabilityDescriptor> {
@@ -58,31 +52,23 @@ pub(super) fn builtin_slash_descriptors() -> Vec<CapabilityDescriptor> {
 }
 
 pub(super) fn native_view_descriptors() -> Vec<CapabilityDescriptor> {
-    native_view_commands()
+    builtin_slash_specs()
         .iter()
-        .map(|command| {
-            let named = builtin_slash_specs()
-                .iter()
-                .find(|spec| &spec.name == command || spec.aliases.contains(command));
-            let description = named
-                .map(|spec| spec.description.clone())
-                .unwrap_or_else(|| "Native interactive command view".to_string());
-            let dependency = named
-                .map(|spec| spec.name.clone())
-                .unwrap_or_else(|| command.clone());
+        .filter(|spec| spec.view)
+        .map(|spec| {
             CapabilityDescriptor::new(
-                format!("view/{command}"),
+                format!("view/{}", spec.name),
                 CapabilityKind::View,
                 "jeden-core",
-                command.clone(),
-                description,
+                spec.name.clone(),
+                spec.description.clone(),
                 FunctionTarget::NativeView {
-                    command: command.clone(),
+                    command: spec.name.clone(),
                 },
             )
-            .dependency(format!("slash/{dependency}"))
+            .dependency(format!("slash/{}", spec.name))
             .operation("render")
-            .executable(format!("/{command}"))
+            .executable(format!("/{}", spec.name))
         })
         .collect()
 }

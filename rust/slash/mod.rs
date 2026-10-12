@@ -44,13 +44,13 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/advisor" => { changed = !matches!(split_head(args).0, "" | "status" | "dump"); Some(modes::handle_advisor(args, &mut state, context)) },
         "/approval" => { changed = !matches!(split_head(args).0, "" | "status"); Some(modes::handle_approval(args, &mut state)) },
         "/tools" => Some(Ok(if split_args(args).iter().any(|arg| arg == "--json") { tools::tools_json(context.cwd) } else { tools::tools_slash_text(context.cwd) })),
-        "/stats" | "/debug" => Some(commands::handle_doctor(context)),
+        "/stats" => Some(commands::handle_doctor(context)),
         "/setup" => Some(setup::handle_text(args, context)),
         "/onboarding" => Some(crate::onboarding::text(args, context.cwd)),
         "/usage" => Some(commands::usage::handle_usage(args, context)),
 
-        "/session" | "/sessions" => Some(modes::session::handle_session(args, context)),
-        "/roles" | "/role" => Some(modes::session::handle_roles(context)),
+        "/session" => Some(modes::session::handle_session(args, context)),
+        "/roles" => Some(modes::session::handle_roles(context)),
         "/prompt" => Some(crate::agent::system_prompt_checked(context.cwd)),
         "/todo" => Some(modes::todo::handle_todo(args, context)),
         "/roadmap" => Some(
@@ -85,7 +85,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
             "{} must be executed through the agent runner so it can mutate the live durable conversation.",
             command
         ))),
-        "/rebuild" | "/self-rebuild" => Some(Err(
+        "/rebuild" => Some(Err(
             "/rebuild is available only in an interactive session so it can preserve the live conversation."
                 .into(),
         )),
@@ -227,8 +227,8 @@ pub(crate) fn interactive_picker(
         "/approval" => Ok(modes::session::approval_picker(&state, &lang)),
         "/todo" => Ok(modes::todo::todo_picker()),
         "/roadmap" => crate::roadmap::picker(context.cwd).map_err(|error| error.to_string()),
-        "/session" | "/sessions" => Ok(modes::session::session_picker(context)),
-        "/roles" | "/role" => Ok(modes::session::roles_picker(&state, context)),
+        "/session" => Ok(modes::session::session_picker(context)),
+        "/roles" => Ok(modes::session::roles_picker(&state, context)),
         "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state, &lang)),
         "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             Ok(modes::session::lifecycle_picker(&state, context))
@@ -239,7 +239,6 @@ pub(crate) fn interactive_picker(
         "/usage" => Ok(commands::usage::usage_picker(context)),
         "/browser" => Ok(browser::browser_picker(context)),
         "/stats" => Ok(commands::stats_picker(context)),
-        "/debug" => Ok(commands::debug_picker(context)),
         "/setup" => setup::setup_picker(context),
         "/tools" => Ok(tools_picker(context)),
         "/extensions" => Ok(plugins::extensions_picker(context)),

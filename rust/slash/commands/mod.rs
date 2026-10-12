@@ -90,10 +90,6 @@ pub(crate) fn stats_picker(context: &SlashContext<'_>) -> PickerSpec {
     diagnostics_picker("Runtime statistics", context)
 }
 
-pub(crate) fn debug_picker(context: &SlashContext<'_>) -> PickerSpec {
-    diagnostics_picker("Debug tools", context)
-}
-
 /// Render recent release notes from the source repo's git history — the real
 /// changelog for this package (no bundled CHANGELOG file exists).
 pub(crate) fn handle_changelog() -> Result<String, String> {
