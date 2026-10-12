@@ -104,7 +104,7 @@
     {
       "name": "darwin-jeden",
       "platform": "darwin-arm64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden", "--name", "jeden"],
       "required": true,
       "secret_env": {},
       "target": { "product": "jeden" }
@@ -112,7 +112,7 @@
     {
       "name": "darwin-sandbox-helper",
       "platform": "darwin-arm64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
       "required": true,
       "secret_env": {},
       "target": { "product": "jeden" }
@@ -120,7 +120,7 @@
     {
       "name": "linux-jeden",
       "platform": "linux-amd64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden", "--name", "jeden"],
+      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden", "--name", "jeden"],
       "required": true,
       "secret_env": {},
       "target": { "product": "jeden" }
@@ -128,7 +128,7 @@
     {
       "name": "linux-sandbox-helper",
       "platform": "linux-amd64",
-      "argv": ["stado", "release", "install-local", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
       "required": true,
       "secret_env": {},
       "target": { "product": "jeden" }
