@@ -209,13 +209,20 @@ pub(super) fn now_ms() -> i64 {
         .min(i64::MAX as u128) as i64
 }
 /// `value` with credentials redacted and whitespace runs joined, whole.
+///
+/// A credential is recognised by the format its issuer documents, never by
+/// the word in front of it: a PEM private key block (RFC 7468 labels end in
+/// `PRIVATE KEY`), a GitHub token (`gh` + token-kind letter + `_`, GitHub's
+/// token format), a Stripe key (`sk_`/`pk_`/`rk_` + mode + `_` + body,
+/// Stripe's API key format). The rule that redacted whatever followed
+/// `password=`, `token:`, `api_key=` and three more spellings is gone: it
+/// missed every other spelling and hid values that were no secret.
 pub(crate) fn redacted(value: &str) -> String {
     let mut text = value.to_string();
     for pattern in [
-        r"\b(?:sk|pk|rk)_[A-Za-z0-9_\-]{12,}\b",
-        r"\bgh[pousr]_[A-Za-z0-9_]{16,}\b",
-        r"(?i)\b(?:password|passwd|token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+",
         r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----",
+        r"\bgh[pousr]_[A-Za-z0-9_]+\b",
+        r"\b[spr]k_[a-z]+_[A-Za-z0-9]+\b",
     ] {
         if let Ok(re) = regex::Regex::new(pattern) {
             text = re.replace_all(&text, "[REDACTED]").into_owned()
