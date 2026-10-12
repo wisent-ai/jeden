@@ -235,7 +235,12 @@ mod holders {
         let mut pid = None;
         for line in stdout.lines() {
             if let Some(number) = line.strip_prefix('p') {
-                pid = number.parse::<u32>().ok();
+                // A process id that does not read is refused: dropping it would
+                // take the locks it holds as held by no one.
+                let parsed = number.parse::<u32>().map_err(|error| {
+                    format!("lsof answered an unreadable process id {number:?}: {error}")
+                })?;
+                pid = Some(parsed);
             } else if let (Some(name), Some(pid)) = (line.strip_prefix('n'), pid) {
                 let holders = held.entry(PathBuf::from(name)).or_default();
                 if !holders.contains(&pid) {
