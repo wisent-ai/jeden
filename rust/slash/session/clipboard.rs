@@ -96,8 +96,10 @@ pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
             Ok(mut child) => {
                 if let Some(stdin) = child.stdin.as_mut() {
                     if let Err(error) = stdin.write_all(payload.as_bytes()) {
-                        last_error = error.to_string();
-                        let _ = child.kill();
+                        last_error = match child.kill() {
+                            Ok(()) => error.to_string(),
+                            Err(kill) => format!("{error}; {command} could not be stopped: {kill}"),
+                        };
                         continue;
                     }
                 }
