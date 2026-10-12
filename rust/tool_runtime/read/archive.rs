@@ -7,7 +7,7 @@ use std::path::Path;
 use super::document::readable_text_for_document;
 use super::files::image_dimensions;
 use crate::tool_runtime::shared::{
-    count_input, jail_path, line_window, mime_type_for_path, sha256_hex, string_input,
+    count_input, jail_path, line_window, mime_type_of, sha256_hex, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -178,14 +178,14 @@ pub(crate) fn read_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     let sliced = &entry.content[..entry.content.len().min(max_bytes)];
     if mode == "binary" {
         return Ok(
-            json!({"path": path, "entry": entry.name, "mode": mode, "bytes": entry.content.len(), "truncated": entry.content.len() > sliced.len(), "mimeType": mime_type_for_path(Path::new(&entry.name)), "base64": general_purpose::STANDARD.encode(sliced), "sha256": sha256_hex(&entry.content)}),
+            json!({"path": path, "entry": entry.name, "mode": mode, "bytes": entry.content.len(), "truncated": entry.content.len() > sliced.len(), "mimeType": mime_type_of(&entry.content), "base64": general_purpose::STANDARD.encode(sliced), "sha256": sha256_hex(&entry.content)}),
         );
     }
     if mode == "image" {
         let Some((width, height, mime_type)) = image_dimensions(&entry.content) else {
             return Err(format!(
                 "unsupported image type: {}",
-                mime_type_for_path(Path::new(&entry.name))
+                mime_type_of(&entry.content)
             ));
         };
         return Ok(
@@ -193,7 +193,7 @@ pub(crate) fn read_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
         );
     }
     let text = if mode == "document" {
-        readable_text_for_document(&entry.content, Path::new(&entry.name), None)?
+        readable_text_for_document(&entry.content)?
     } else if mode == "text" {
         String::from_utf8_lossy(&entry.content).to_string()
     } else {
@@ -214,7 +214,7 @@ pub(crate) fn read_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     let mut out = json!({"path": path, "entry": entry.name, "mode": mode, "bytes": if mode == "document" { text.len() } else { entry.content.len() }, "truncated": output_bytes.len() > slice.len(), "sha256": sha256_hex(&entry.content), "startLine": if selected.3.is_empty() { Value::Null } else { json!(selected.1) }, "endLine": if selected.3.is_empty() { Value::Null } else { json!(selected.2) }, "ranges": if selected.3.is_empty() { Value::Null } else { json!(selected.3) }});
     out[key] = json!(String::from_utf8_lossy(slice));
     if mode == "document" {
-        out["mimeType"] = json!(mime_type_for_path(Path::new(&entry.name)));
+        out["mimeType"] = json!(mime_type_of(&entry.content));
     }
     Ok(out)
 }

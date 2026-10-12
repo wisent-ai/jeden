@@ -116,22 +116,22 @@ pub(crate) fn object_input(input: &Value, key: &str) -> Value {
         .unwrap_or_else(|| json!({}))
 }
 
-pub(crate) fn mime_type_for_path(path: &Path) -> &'static str {
-    match path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "txt" | "md" | "rs" | "js" | "ts" | "tsx" | "json" | "toml" | "yaml" | "yml" | "html"
-        | "css" | "csv" => "text/plain",
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "pdf" => "application/pdf",
-        _ => "application/octet-stream",
+/// The media type `bytes` carry, read from the bytes themselves: an image
+/// format's own signature, a PDF's file header, UTF-8 text (a character cut
+/// by a read limit at the end still counts), or `application/octet-stream`.
+/// A file's name is not asked: an extension table missed every format it did
+/// not list (`.py`, `.go`, `.sh`, …) and trusted a name over the content.
+pub(crate) fn mime_type_of(bytes: &[u8]) -> &'static str {
+    if let Some(image) = super::read::image_signature(bytes) {
+        return image;
+    }
+    if bytes.starts_with(super::read::PDF_SIGNATURE) {
+        return super::read::PDF_TYPE;
+    }
+    match std::str::from_utf8(bytes) {
+        Ok(_) => super::read::TEXT_TYPE,
+        Err(error) if error.error_len().is_none() => super::read::TEXT_TYPE,
+        Err(_) => super::read::BINARY_TYPE,
     }
 }
 

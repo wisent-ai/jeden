@@ -6,7 +6,7 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::tool_runtime::shared::{
-    count_input, jail_path, mime_type_for_path, sha256_hex, snapshot_name, string_input,
+    count_input, jail_path, mime_type_of, sha256_hex, snapshot_name, string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -203,7 +203,7 @@ pub(crate) fn read_binary_file(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
         .read_to_end(&mut bytes)
         .map_err(|error| error.to_string())?;
     Ok(
-        json!({"ok":true,"path":path,"bytes":meta.len(),"truncated":meta.len()>max_bytes as u64,"mimeType":mime_type_for_path(&file),"sha256":hash_file(&file)?,"base64":general_purpose::STANDARD.encode(bytes)}),
+        json!({"ok":true,"path":path,"bytes":meta.len(),"truncated":meta.len()>max_bytes as u64,"mimeType":mime_type_of(&bytes),"sha256":hash_file(&file)?,"base64":general_purpose::STANDARD.encode(bytes)}),
     )
 }
 
@@ -257,10 +257,7 @@ pub(crate) fn read_image(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let file = jail_path(runtime.cwd, &path)?;
     let bytes = fs::read(&file).map_err(|e| e.to_string())?;
     let Some((width, height, mime_type)) = image_dimensions(&bytes) else {
-        return Err(format!(
-            "unsupported image type: {}",
-            mime_type_for_path(&file)
-        ));
+        return Err(format!("unsupported image type: {}", mime_type_of(&bytes)));
     };
     let slice = &bytes[..bytes.len().min(max_bytes)];
     Ok(

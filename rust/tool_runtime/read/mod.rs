@@ -145,3 +145,16 @@ pub(crate) fn list_dir(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         json!({"ok":true,"path":path,"depth":depth,"limit":limit,"truncated":entries.len()==limit,"entries":entries}),
     )
 }
+
+/// A PDF file's own first bytes: the file header the PDF specification
+/// requires every PDF to begin with.
+pub(crate) const PDF_SIGNATURE: &[u8] = b"%PDF-";
+pub(crate) const PDF_TYPE: &str = "application/pdf";
+pub(crate) const TEXT_TYPE: &str = "text/plain";
+pub(crate) const BINARY_TYPE: &str = "application/octet-stream";
+
+/// The media type an image format's own signature names, when `bytes` start
+/// with one (see `files::image_dimensions`); `shared::mime_type_of` asks it.
+pub(crate) fn image_signature(bytes: &[u8]) -> Option<&'static str> {
+    files::image_dimensions(bytes).map(|(_, _, mime_type)| mime_type)
+}
