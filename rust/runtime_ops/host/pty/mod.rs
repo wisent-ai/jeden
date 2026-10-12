@@ -233,11 +233,16 @@ pub fn probe(cwd: &Path) -> Result<(), String> {
 }
 
 pub fn teardown_scope(scope: &Path) {
-    if let Ok(mut registry) = SESSIONS.lock() {
-        if let Some(mut session) = registry.sessions.remove(scope) {
-            let id = session.metadata.session_id.clone();
-            session.terminate();
-            registry.terminal.insert(id, PtySessionState::Cancelled);
-        }
+    // Teardown must end the scope's terminal even after a panic poisoned
+    // the registry, or its process outlives the scope; the guard is
+    // recovered.
+    let mut registry = match SESSIONS.lock() {
+        Ok(registry) => registry,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(mut session) = registry.sessions.remove(scope) {
+        let id = session.metadata.session_id.clone();
+        session.terminate();
+        registry.terminal.insert(id, PtySessionState::Cancelled);
     }
 }

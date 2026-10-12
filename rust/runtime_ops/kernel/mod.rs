@@ -159,16 +159,20 @@ pub fn probe(language: KernelLanguage, cwd: &Path) -> Result<(), String> {
 }
 
 pub fn teardown_scope(scope: &Path) {
-    if let Ok(mut kernels) = KERNELS.lock() {
-        let keys: Vec<_> = kernels
-            .keys()
-            .filter(|key| key.scope == scope)
-            .cloned()
-            .collect();
-        for key in keys {
-            if let Some(mut kernel) = kernels.remove(&key) {
-                kernel.terminate();
-            }
+    // Teardown must end the scope's kernels even after a panic poisoned
+    // the registry, or they outlive the scope; the guard is recovered.
+    let mut kernels = match KERNELS.lock() {
+        Ok(kernels) => kernels,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let keys: Vec<_> = kernels
+        .keys()
+        .filter(|key| key.scope == scope)
+        .cloned()
+        .collect();
+    for key in keys {
+        if let Some(mut kernel) = kernels.remove(&key) {
+            kernel.terminate();
         }
     }
 }
