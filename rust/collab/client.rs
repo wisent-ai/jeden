@@ -19,7 +19,7 @@ pub fn relay_post_authorized(
     blob: &str,
     write_token: Option<&str>,
 ) -> Result<usize, String> {
-    relay_post_role(base, room, blob, write_token, "full")
+    relay_post_role(base, room, blob, write_token, super::CollabRole::Full)
 }
 
 pub fn relay_post_role(
@@ -27,13 +27,13 @@ pub fn relay_post_role(
     room: &str,
     blob: &str,
     write_token: Option<&str>,
-    role: &str,
+    role: super::CollabRole,
 ) -> Result<usize, String> {
     let url = format!("{}/room/{}", base.trim_end_matches('/'), room);
     let mut request = client()?
         .post(&url)
         .header("content-type", "text/plain")
-        .header("x-jeden-role", role)
+        .header("x-jeden-role", role.name())
         .body(blob.to_string());
     if let Some(token) = write_token {
         request = request.header("x-jeden-write-token", token);
@@ -87,7 +87,7 @@ fn relay_get_role(
     room: &str,
     since: usize,
     token: Option<&str>,
-    role: Option<&str>,
+    role: Option<super::CollabRole>,
 ) -> Result<(Vec<String>, usize), String> {
     let url = format!(
         "{}/room/{}?since={}",
@@ -100,7 +100,7 @@ fn relay_get_role(
         request = request.header("x-jeden-write-token", token);
     }
     if let Some(role) = role {
-        request = request.header("x-jeden-role", role);
+        request = request.header("x-jeden-role", role.name());
     }
     let response = request.send().map_err(|e| e.to_string())?;
     let status = response.status();
@@ -169,13 +169,12 @@ impl LiveClient {
             .ok_or("this collaboration client has no write token")?;
         let frame = super::ProtocolFrame::new(self.client_id.clone(), self.role, kind)?;
         let blob = super::seal_frame(&self.key, &frame)?;
-        let role = role_name(self.role);
-        let seq = relay_post_role(&self.base, &self.room, &blob, Some(token), role)?;
+        let seq = relay_post_role(&self.base, &self.room, &blob, Some(token), self.role)?;
         self.cursor = self.cursor.max(seq);
         Ok(seq)
     }
     pub fn replay(&mut self) -> Result<Vec<super::ProtocolFrame>, String> {
-        let role = role_name(self.role);
+        let role = self.role;
         let (blobs, next) = relay_get_role(
             &self.base,
             &self.room,
@@ -202,14 +201,5 @@ impl LiveClient {
         relay_rotate_write_token(&self.base, &self.room, old, &next)?;
         self.write_token = Some(next.clone());
         Ok(next)
-    }
-}
-
-fn role_name(role: super::CollabRole) -> &'static str {
-    match role {
-        super::CollabRole::View => "view",
-        super::CollabRole::Prompt => "prompt",
-        super::CollabRole::Abort => "abort",
-        super::CollabRole::Full => "full",
     }
 }

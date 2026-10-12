@@ -129,12 +129,16 @@ fn collab_start(
         // host's own start event included.
         let (_, cursor) = crate::collab::relay_get(&parsed.base, &room, 0)?;
         let key_text = crate::collab::encode_key(&key);
-        let entry = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": key_text, "writeToken": write_token, "cursor": cursor, "role": "full", "startedAt": now_text(), "cwd": context.cwd });
+        let (full, view) = (
+            crate::collab::CollabRole::Full.name(),
+            crate::collab::CollabRole::View.name(),
+        );
+        let entry = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": key_text, "writeToken": write_token, "cursor": cursor, "role": full, "startedAt": now_text(), "cwd": context.cwd });
         state["host"] = entry;
         save_collab_state(context.cwd, state)?;
-        let view_url = format!("{}/room/{}#key={}&role=view", parsed.base, room, key_text);
+        let view_url = format!("{}/room/{}#key={}&role={view}", parsed.base, room, key_text);
         let full_url = format!(
-            "{}/room/{}#key={}&write={}&role=full",
+            "{}/room/{}#key={}&write={}&role={full}",
             parsed.base, room, key_text, write_token
         );
         let qr_block = |url: &str| {
@@ -195,12 +199,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
                 context.cwd,
             )?;
         }
-        let role = match parsed.role {
-            crate::collab::CollabRole::View => "view",
-            crate::collab::CollabRole::Prompt => "prompt",
-            crate::collab::CollabRole::Abort => "abort",
-            crate::collab::CollabRole::Full => "full",
-        };
+        let role = parsed.role.name();
         state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": parsed.room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": now_text(), "cwd": context.cwd });
         save_collab_state(context.cwd, &state)?;
         return Ok(format!(

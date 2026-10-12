@@ -38,6 +38,20 @@ impl CollabRole {
             Self::Full => true,
         }
     }
+
+    /// How this role is spelled in write tokens, URL fragments, relay
+    /// headers and the relay's rows: its serde name, declared once above.
+    pub fn name(self) -> String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            other => unreachable!("a unit role serializes as its name, not {other:?}"),
+        }
+    }
+
+    /// The role spelled `name`, or nothing when no role is spelled that way.
+    pub fn named(name: &str) -> Option<Self> {
+        serde_json::from_value(serde_json::Value::String(name.to_owned())).ok()
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -125,13 +139,7 @@ pub fn open_frame(key: &[u8; 32], blob: &str) -> Result<ProtocolFrame, String> {
 pub fn new_role_write_token(role: CollabRole) -> String {
     let mut token = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut token);
-    let role = match role {
-        CollabRole::View => "view",
-        CollabRole::Prompt => "prompt",
-        CollabRole::Abort => "abort",
-        CollabRole::Full => "full",
-    };
-    format!("{role}.{}", URL_SAFE_NO_PAD.encode(token))
+    format!("{}.{}", role.name(), URL_SAFE_NO_PAD.encode(token))
 }
 
 pub fn new_write_token() -> String {
@@ -234,13 +242,8 @@ pub fn parse_relay_url(text: &str) -> Result<RelayUrl, String> {
                     "key" => key = Some(decode_key(value)?),
                     "write" => write_token = Some(value.to_string()),
                     "role" => {
-                        role = match value {
-                            "view" => CollabRole::View,
-                            "prompt" => CollabRole::Prompt,
-                            "abort" => CollabRole::Abort,
-                            "full" => CollabRole::Full,
-                            _ => return Err("unknown collaboration role".into()),
-                        }
+                        role = CollabRole::named(value)
+                            .ok_or_else(|| format!("unknown collaboration role: {value}"))?
                     }
                     _ => return Err(format!("unknown relay fragment field: {name}")),
                 }

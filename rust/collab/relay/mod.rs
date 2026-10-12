@@ -1,3 +1,4 @@
+use crate::collab::CollabRole;
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{
@@ -43,10 +44,8 @@ impl RelayStore {
         token: Option<&str>,
     ) -> Result<usize, String> {
         let token = token.ok_or("write token required")?;
-        let role = token_role(token)
-            .ok_or("invalid role-bound token")?
-            .to_owned();
-        if role == "view" {
+        let role = token_role(token).ok_or("invalid role-bound token")?;
+        if role == CollabRole::View {
             return Err("view role is read-only".into());
         }
         let (room, hash) = (room.to_owned(), token_hash(token));
@@ -60,7 +59,7 @@ impl RelayStore {
                 .map_err(sql)?
                 .is_some();
             if !exists {
-                if role != "full" {
+                if role != CollabRole::Full {
                     return Err("full token required to create room".into());
                 }
                 room::Entity::insert(room::ActiveModel {
@@ -72,7 +71,7 @@ impl RelayStore {
                 .map_err(sql)?;
                 token::Entity::insert(token::ActiveModel {
                     room_id: Set(room.clone()),
-                    role: Set("full".into()),
+                    role: Set(CollabRole::Full.name()),
                     token_hash: Set(hash.clone()),
                     generation: Set(1),
                 })
@@ -82,7 +81,7 @@ impl RelayStore {
             }
             let authorized = token::Entity::find()
                 .filter(token::Column::RoomId.eq(room.clone()))
-                .filter(token::Column::Role.eq(role))
+                .filter(token::Column::Role.eq(role.name()))
                 .filter(token::Column::TokenHash.eq(hash))
                 .one(&tx)
                 .await
@@ -143,9 +142,9 @@ impl RelayStore {
         })
     }
     pub fn rotate_token(&self, room: &str, old: &str, new: &str) -> Result<bool, String> {
-        let old_role = token_role(old).ok_or("invalid old role token")?.to_owned();
-        let new_role = token_role(new).ok_or("invalid new role token")?.to_owned();
-        if old_role == "view" || new_role == "view" {
+        let old_role = token_role(old).ok_or("invalid old role token")?;
+        let new_role = token_role(new).ok_or("invalid new role token")?;
+        if old_role == CollabRole::View || new_role == CollabRole::View {
             return Ok(false);
         }
         let (room, old_hash, new_hash) = (room.to_owned(), token_hash(old), token_hash(new));
@@ -153,7 +152,7 @@ impl RelayStore {
             let tx = db.begin().await.map_err(sql)?;
             let authorized = token::Entity::find()
                 .filter(token::Column::RoomId.eq(room.clone()))
-                .filter(token::Column::Role.eq(old_role.clone()))
+                .filter(token::Column::Role.eq(old_role.name()))
                 .filter(token::Column::TokenHash.eq(old_hash))
                 .one(&tx)
                 .await
@@ -162,10 +161,10 @@ impl RelayStore {
             if !authorized {
                 return Ok(false);
             }
-            if old_role == "full" && new_role != "full" {
+            if old_role == CollabRole::Full && new_role != CollabRole::Full {
                 token::Entity::insert(token::ActiveModel {
                     room_id: Set(room),
-                    role: Set(new_role),
+                    role: Set(new_role.name()),
                     token_hash: Set(new_hash),
                     generation: Set(1),
                 })
@@ -189,7 +188,7 @@ impl RelayStore {
                         Expr::col(token::Column::Generation).add(1),
                     )
                     .filter(token::Column::RoomId.eq(room))
-                    .filter(token::Column::Role.eq(old_role))
+                    .filter(token::Column::Role.eq(old_role.name()))
                     .exec(&tx)
                     .await
                     .map_err(sql)?;

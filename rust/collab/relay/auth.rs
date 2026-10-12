@@ -79,9 +79,10 @@ pub(super) fn parse_since(query: &str) -> usize {
         .unwrap_or_default()
 }
 
-pub(crate) fn token_role(token: &str) -> Option<&str> {
+/// The role a write token is bound to: the declared role its prefix names.
+pub(crate) fn token_role(token: &str) -> Option<crate::collab::CollabRole> {
     let (role, _) = token.split_once('.')?;
-    matches!(role, "view" | "prompt" | "abort" | "full").then_some(role)
+    crate::collab::CollabRole::named(role)
 }
 pub(super) fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))

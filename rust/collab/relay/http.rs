@@ -91,10 +91,16 @@ pub(super) fn handle_conn(mut stream: TcpStream, store: &RelayStore) -> std::io:
     let token = header_value(&header, "x-jeden-write-token");
     let requested_role = header_value(&header, "x-jeden-role");
     let (status, response) = match (token.as_deref(), requested_role.as_deref()) {
-        (Some(token), Some(role)) if token_role(token) != Some(role) => (
-            403,
-            json!({"ok":false,"error":"write token is not valid for requested role"}).to_string(),
-        ),
+        (Some(token), Some(role))
+            if token_role(token).is_none()
+                || token_role(token) != crate::collab::CollabRole::named(role) =>
+        {
+            (
+                403,
+                json!({"ok":false,"error":"write token is not valid for requested role"})
+                    .to_string(),
+            )
+        }
         _ => relay_response_authorized(store, &method, &path, &query, &body, token.as_deref()),
     };
     write_response(&mut stream, status, &response)
