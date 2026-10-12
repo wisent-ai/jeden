@@ -188,7 +188,11 @@ impl Drop for BoundedExecutor {
         }
         if let Ok(workers) = self.workers.get_mut() {
             for worker in workers.drain(..) {
-                let _ = worker.join();
+                // drain() refuses a panicked worker; a drop has no caller to
+                // refuse to, so the panic is said instead of lost.
+                if worker.join().is_err() {
+                    eprintln!("jeden daemon: an executor worker panicked before shutdown");
+                }
             }
         }
         self.inner.state.store(STOPPED, Ordering::Release);
