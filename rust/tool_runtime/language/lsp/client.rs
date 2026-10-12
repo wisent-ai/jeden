@@ -226,9 +226,10 @@ pub(super) fn ensure_open(client: &mut LspClient, path: &Path) -> Result<(), Str
             &json!({"jsonrpc":"2.0","method":"textDocument/didChange","params":{"textDocument":{"uri":uri,"version":version},"contentChanges":[{"text":text}]}}),
         )?;
     } else {
+        let language_id = language_id(path)?;
         send(
             &mut client.stdin,
-            &json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":language_id(path),"version":version,"text":text}}}),
+            &json!({"jsonrpc":"2.0","method":"textDocument/didOpen","params":{"textDocument":{"uri":uri,"languageId":language_id,"version":version,"text":text}}}),
         )?;
     }
     client.opened.insert(path.to_path_buf(), version);
