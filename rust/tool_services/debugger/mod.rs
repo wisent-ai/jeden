@@ -71,7 +71,13 @@ impl SessionEnd {
 }
 impl Drop for DapSession {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        // An adapter that cannot be killed outlives jeden, so that is said.
+        if let Err(error) = self.child.kill() {
+            eprintln!(
+                "jeden: debug adapter process {} cannot be killed: {error}",
+                self.child.id()
+            );
+        }
         let _ = self.child.wait();
     }
 }
