@@ -22,7 +22,9 @@ mod hooks;
 mod runtime;
 mod state;
 
-pub(crate) use approval::{named as approval_named, ApprovalMode, ToolPolicy};
+pub(crate) use approval::{
+    named as approval_named, spelling as approval_spelling, ApprovalMode, ToolPolicy,
+};
 pub(crate) use commands::{arm_force_tool, btw_task, retry_task, run_command};
 pub(crate) use conversation::Conversation;
 pub(crate) use hooks::{RunHooks, RunResult, TraceEvent};

@@ -38,5 +38,5 @@ pub(crate) use operations::{
     plan_request, snapshot_value,
 };
 pub(crate) use store::{inherit, migrate_workspace, read as read_state, session_from_artifacts};
-pub(crate) use todo::execute as execute_todo;
+pub(crate) use todo::{execute as execute_todo, TodoOp};
 pub(crate) use verification::{apply_review, inspect_evidence, review_evidence};
