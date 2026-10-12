@@ -3,26 +3,40 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The formats an agent definition file is written in, by extension.
-#[derive(Clone, Copy)]
-enum DefinitionFormat {
+/// The formats an agent definition file is written in, named by its
+/// extension: the variant's own name, `yml` being YAML too. Delegation and
+/// the extension loader read definitions through this one declaration.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum DefinitionFormat {
     Json,
+    #[serde(alias = "yml")]
     Yaml,
 }
 
 impl DefinitionFormat {
-    fn of(path: &Path) -> Option<Self> {
-        match path.extension().and_then(|extension| extension.to_str())? {
-            "json" => Some(Self::Json),
-            "yaml" => Some(Self::Yaml),
-            "yml" => Some(Self::Yaml),
-            _ => None,
+    pub(crate) fn of(path: &Path) -> Option<Self> {
+        let extension = path.extension()?.to_str()?;
+        serde_json::from_value(serde_json::Value::String(extension.to_owned())).ok()
+    }
+
+    /// `text` read in this format as `T`, refused with the parser's cause.
+    pub(crate) fn parse<T: serde::de::DeserializeOwned>(self, text: &str) -> Result<T, String> {
+        match self {
+            Self::Json => serde_json::from_str(text).map_err(|error| error.to_string()),
+            Self::Yaml => serde_yaml::from_str(text).map_err(|error| error.to_string()),
         }
     }
 }
 
 /// The characters an agent id may hold besides ASCII letters and digits.
 const ID_PUNCTUATION: &[char] = &['-', '_'];
+
+/// Whether `id` names an agent delegation can address.
+pub(crate) fn valid_agent_id(id: &str) -> bool {
+    !id.trim().is_empty()
+        && !id.contains(|c: char| !c.is_ascii_alphanumeric() && !ID_PUNCTUATION.contains(&c))
+}
 
 /// Where agent definitions are read: the bundled agents, the user's, the
 /// project's, and every directory an active extension declares. Extensions
@@ -80,17 +94,16 @@ pub fn discover_agents(cwd: &Path) -> Result<Vec<AgentDefinition>, TaskError> {
         let text = fs::read_to_string(&path).map_err(|error| {
             TaskError::Io(format!("{} cannot be read: {error}", path.display()))
         })?;
-        let parsed = match DefinitionFormat::of(&path) {
-            Some(DefinitionFormat::Yaml) => serde_yaml::from_str::<AgentDefinition>(&text)
-                .map_err(|e| TaskError::Invalid(format!("{}: {e}", path.display())))?,
-            _ => serde_json::from_str::<AgentDefinition>(&text)
-                .map_err(|e| TaskError::Invalid(format!("{}: {e}", path.display())))?,
-        };
-        if parsed.id.trim().is_empty()
-            || parsed
-                .id
-                .contains(|c: char| !c.is_ascii_alphanumeric() && !ID_PUNCTUATION.contains(&c))
-        {
+        let format = DefinitionFormat::of(&path).ok_or_else(|| {
+            TaskError::Invalid(format!(
+                "{} names no agent definition format by its extension",
+                path.display()
+            ))
+        })?;
+        let parsed = format
+            .parse::<AgentDefinition>(&text)
+            .map_err(|e| TaskError::Invalid(format!("{}: {e}", path.display())))?;
+        if !valid_agent_id(&parsed.id) {
             return Err(TaskError::Invalid(format!(
                 "invalid agent id in {}",
                 path.display()

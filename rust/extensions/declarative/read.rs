@@ -6,8 +6,11 @@
 
 use super::parse::{
     parse_frontmatter, safe_assets, skill_file_id, string_list, valid_id, validate_matchers,
+    Notation,
 };
 use super::shapes::{Agent, LoadedCapability, Rule, Skill};
+use crate::task_runtime::discovery::valid_agent_id;
+use crate::task_runtime::AgentDefinition;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
@@ -65,15 +68,8 @@ pub(super) fn load_skill(path: &Path, precedence: usize) -> Result<Skill, String
 
 pub(super) fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let (value, fallback_body) = match path.extension().and_then(|value| value.to_str()) {
-        Some("json") => (
-            serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?,
-            String::new(),
-        ),
-        Some("yaml" | "yml") => (
-            serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?,
-            String::new(),
-        ),
+    let (value, fallback_body) = match Notation::of(path) {
+        Some(Notation::Structured(format)) => (format.parse::<Value>(&text)?, String::new()),
         _ => {
             let (frontmatter, body) = parse_frontmatter(&text)?;
             (Value::Object(frontmatter), body)
@@ -129,57 +125,28 @@ pub(super) fn load_rule(path: &Path, precedence: usize) -> Result<Rule, String> 
     })
 }
 
+/// An agent definition read as delegation reads it
+/// ([`crate::task_runtime::discover_agents`]): one typed shape and one id
+/// rule, so a definition the loader calls healthy is one delegation takes.
 pub(super) fn load_agent(path: &Path, precedence: usize) -> Result<Agent, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
-    let value = match path.extension().and_then(|value| value.to_str()) {
-        Some("yaml" | "yml") => {
-            serde_yaml::from_str::<Value>(&text).map_err(|error| error.to_string())?
-        }
-        _ => serde_json::from_str::<Value>(&text).map_err(|error| error.to_string())?,
+    let Some(Notation::Structured(format)) = Notation::of(path) else {
+        return Err(format!(
+            "{} is not written in an agent definition format",
+            path.display()
+        ));
     };
-    let object = value
-        .as_object()
-        .ok_or("agent definition must be an object")?;
-    let id = object
-        .get("id")
-        .and_then(Value::as_str)
-        .ok_or("agent id is missing")?
-        .to_string();
-    if !valid_id(&id) {
-        return Err(format!("invalid agent id: {id}"));
+    let value: Value = format.parse(&text)?;
+    let definition: AgentDefinition = serde_json::from_value(value.clone())
+        .map_err(|error| format!("agent definition: {error}"))?;
+    if !valid_agent_id(&definition.id) {
+        return Err(format!("invalid agent id: {}", definition.id));
     }
-    for key in ["description", "prompt", "model"] {
-        if object
-            .get(key)
-            .is_some_and(|value| !value.is_null() && !value.is_string())
-        {
-            return Err(format!("agent.{key} must be a string"));
-        }
-    }
-    for key in ["tools", "skills"] {
-        string_list(object.get(key)).map_err(|error| format!("agent.{key}: {error}"))?;
-    }
-    if let Some(spawn) = object.get("spawn") {
-        let spawn = spawn.as_object().ok_or("agent.spawn must be an object")?;
-        string_list(spawn.get("allowAgents"))
-            .map_err(|error| format!("agent.spawn.allowAgents: {error}"))?;
-        string_list(spawn.get("denyAgents"))
-            .map_err(|error| format!("agent.spawn.denyAgents: {error}"))?;
-        if spawn
-            .get("allowRecursive")
-            .is_some_and(|value| !value.is_boolean())
-        {
-            return Err("agent.spawn.allowRecursive must be boolean".into());
-        }
-    }
-    if object
-        .get("output")
-        .is_some_and(|value| !value.is_null() && !value.is_object())
-    {
+    if !definition.output.is_null() && !definition.output.is_object() {
         return Err("agent.output must be a JSON schema object".into());
     }
     Ok(Agent {
-        id,
+        id: definition.id,
         source: path.to_path_buf(),
         precedence,
         value,

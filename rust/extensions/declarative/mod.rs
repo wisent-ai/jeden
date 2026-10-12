@@ -8,7 +8,7 @@ mod read;
 mod shapes;
 
 use crate::hooks::extensions::declarative::parse::skill_file_id;
-use parse::{collect, matches};
+use parse::{collect, matches, Notation};
 use read::{capability_from_result, load_agent, load_rule, load_skill};
 use serde_json::json;
 pub(crate) use shapes::PromptContribution;
@@ -21,14 +21,16 @@ pub(super) fn load(inputs: &[Input]) -> Loaded {
     ordered.sort_by_key(|input| (input.precedence, input.path.clone()));
     let mut seen_files = BTreeSet::new();
     for input in ordered {
-        let extensions: &[&str] = match input.kind {
-            "skills" => &["md"],
-            "rules" => &["md", "json", "yaml", "yml"],
-            "agents" => &["json", "yaml", "yml"],
+        // Skills are Markdown, agents structured definitions, and rules
+        // either.
+        let accepts: fn(Notation) -> bool = match input.kind {
+            "skills" => Notation::markdown,
+            "rules" => |_| true,
+            "agents" => Notation::structured,
             _ => continue,
         };
         let mut files = Vec::new();
-        collect(&input.path, extensions, &mut files);
+        collect(&input.path, accepts, &mut files);
         for path in files {
             if !seen_files.insert((input.kind, path.clone())) {
                 continue;

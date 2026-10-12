@@ -8,6 +8,8 @@ use serde_json::{Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::task_runtime::discovery::DefinitionFormat;
+
 pub(super) fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id
@@ -15,16 +17,41 @@ pub(super) fn valid_id(id: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
 }
 
-pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) {
+/// How a declarative file is written: Markdown with a frontmatter block, or
+/// a structured definition in one of the formats delegation reads agents in.
+#[derive(Clone, Copy)]
+pub(super) enum Notation {
+    Markdown,
+    Structured(DefinitionFormat),
+}
+
+/// The extension a Markdown definition carries.
+const MARKDOWN_EXTENSION: &str = "md";
+
+impl Notation {
+    pub(super) fn of(path: &Path) -> Option<Self> {
+        if let Some(format) = DefinitionFormat::of(path) {
+            return Some(Self::Structured(format));
+        }
+        (path.extension()? == MARKDOWN_EXTENSION).then_some(Self::Markdown)
+    }
+
+    pub(super) fn markdown(self) -> bool {
+        matches!(self, Self::Markdown)
+    }
+
+    pub(super) fn structured(self) -> bool {
+        matches!(self, Self::Structured(_))
+    }
+}
+
+/// Every file under `root` written in a notation `accepts` takes.
+pub(super) fn collect(root: &Path, accepts: fn(Notation) -> bool, out: &mut Vec<PathBuf>) {
     if !root.exists() {
         return;
     }
     if root.is_file() {
-        if root
-            .extension()
-            .and_then(|value| value.to_str())
-            .is_some_and(|extension| extensions.contains(&extension))
-        {
+        if Notation::of(root).is_some_and(accepts) {
             out.push(root.to_path_buf());
         }
         return;
@@ -54,7 +81,7 @@ pub(super) fn collect(root: &Path, extensions: &[&str], out: &mut Vec<PathBuf>) 
     }
     paths.sort();
     for path in paths {
-        collect(&path, extensions, out);
+        collect(&path, accepts, out);
     }
 }
 
