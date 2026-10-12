@@ -195,8 +195,13 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
     }
 
     // A run continues the session `--resume-session` names, else starts one.
+    // An imported session it continues is adopted, so no refresh of the
+    // import replaces the turns written to it from here on.
     let mut conversation = match state::resumed_session(args) {
-        Some(session) => Conversation::open(&args.cwd, &session)?,
+        Some(session) => {
+            crate::session_import::mark_adopted(&session)?;
+            Conversation::open(&args.cwd, &session)?
+        }
         None if args.model_only => Conversation::new_model_only(&args.cwd)?,
         None => Conversation::new(&args.cwd)?,
     };
