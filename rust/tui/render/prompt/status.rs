@@ -81,8 +81,18 @@ fn usage_totals(cwd: &Path) -> (f64, f64) {
     (tokens, cost)
 }
 
+/// A status cache is only ever replaced whole, so a panic while one was held
+/// leaves nothing half-written: its lock is recovered instead of hiding the
+/// segment for the rest of the session.
+fn recovered<T>(cache: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    match cache.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
 pub(super) fn status_extras(cwd: &Path) -> Option<StatusExtras> {
-    let mut guard = EXTRAS_CACHE.lock().ok()?;
+    let mut guard = recovered(&EXTRAS_CACHE);
     let fresh = guard
         .as_ref()
         .is_some_and(|cache| cache.cwd == cwd && cache.fetched_at.elapsed() < EXTRAS_TTL);
@@ -152,7 +162,7 @@ const QUOTA_TTL: Duration = Duration::from_secs(60);
 /// first refresh lands and whenever Weles is unconfigured or unreachable, so
 /// the status line just skips the segment.
 pub(super) fn quota_percent_free_cached() -> Option<u64> {
-    let mut guard = QUOTA_CACHE.lock().ok()?;
+    let mut guard = recovered(&QUOTA_CACHE);
     let refresh = match guard.as_ref() {
         Some(cache) => cache.fetched_at.elapsed() >= QUOTA_TTL && !cache.refreshing,
         None => true,
@@ -170,13 +180,12 @@ pub(super) fn quota_percent_free_cached() -> Option<u64> {
         std::thread::spawn(|| {
             let percent_free =
                 crate::control_plane::quota::fetch_subscription_quotas().min_percent_free();
-            if let Ok(mut guard) = QUOTA_CACHE.lock() {
-                *guard = Some(QuotaCache {
-                    fetched_at: Instant::now(),
-                    percent_free,
-                    refreshing: false,
-                });
-            }
+            let mut guard = recovered(&QUOTA_CACHE);
+            *guard = Some(QuotaCache {
+                fetched_at: Instant::now(),
+                percent_free,
+                refreshing: false,
+            });
         });
     }
     guard.as_ref().and_then(|cache| cache.percent_free)
