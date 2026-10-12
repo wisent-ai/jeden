@@ -89,7 +89,9 @@ pub(super) async fn start_client() -> Result<Client, String> {
         .start(EVIDENCE_REVISION)
         .await
         .map_err(|error| error.to_string())?;
-    let _ = client.flush().await;
+    // Undelivered events stay queued in the client; only a storage failure
+    // is an error here, and it is refused rather than dropped.
+    client.flush().await.map_err(|error| error.to_string())?;
     Ok(client)
 }
 
