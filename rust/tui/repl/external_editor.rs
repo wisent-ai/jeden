@@ -117,13 +117,11 @@ fn external_editor_with(
         });
     }
     if !result.status.success() {
-        return Err(format!(
-            "external editor exited with status {}",
-            result
-                .status
-                .code()
-                .map_or_else(|| "unknown".into(), |code| code.to_string())
-        ));
+        // An exit status without a code is a process a signal ended.
+        return Err(match result.status.code() {
+            Some(code) => format!("external editor exited with status {code}"),
+            None => format!("external editor was ended by a signal ({})", result.status),
+        });
     }
 
     let bytes = fs::read(temporary.path())
