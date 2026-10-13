@@ -141,15 +141,21 @@ pub(crate) fn search_sessions_command(
             .map(|text| text + "\n")
             .map_err(|error| error.to_string());
     }
+    // Each field of a hit, or the field named as missing: a dash read as a
+    // session or time called "-".
+    let field = |hit: &Value, name: &str| match hit[name].as_str() {
+        Some(text) => text.to_string(),
+        None => format!("(no {name})"),
+    };
     Ok(hits
         .iter()
         .map(|hit| {
             format!(
                 "{}\t{}\t{}\t{}\n",
-                hit["session"].as_str().map_or("-", |text| text),
-                hit["ts"].as_str().map_or("-", |text| text),
-                hit["type"].as_str().map_or("-", |text| text),
-                hit["snippet"].as_str().map_or("-", |text| text),
+                field(hit, "session"),
+                field(hit, "ts"),
+                field(hit, "type"),
+                field(hit, "snippet"),
             )
         })
         .collect())
