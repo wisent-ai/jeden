@@ -108,12 +108,16 @@ pub(super) fn handle_catalog(
                     .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
             });
             for plugin in plugins {
-                let pname = plugin.get("name").and_then(Value::as_str).unwrap_or("-");
-                let desc = plugin
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                lines.push(format!("{pname}@{name}\t{desc}"));
+                let desc = match plugin.get("description").and_then(Value::as_str) {
+                    Some(desc) => desc,
+                    None => "(no description)",
+                };
+                // A catalog entry without a name cannot be installed; listing it
+                // as "-@market" offered an install spec that names nothing.
+                match plugin.get("name").and_then(Value::as_str) {
+                    Some(pname) => lines.push(format!("{pname}@{name}\t{desc}")),
+                    None => lines.push(format!("(an entry of {name} declares no name)\t{desc}")),
+                }
                 any = true;
             }
         }

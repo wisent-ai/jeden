@@ -54,12 +54,21 @@ pub(crate) fn save_plugin_registry(cwd: &Path, registry: &Value) -> Result<PathB
     Ok(file)
 }
 
+/// A field of a registry entry, or the field named as missing: a dash read
+/// as a plugin, type or source called "-".
+fn named(value: &Value, field: &str) -> String {
+    match value.get(field).and_then(Value::as_str) {
+        Some(text) => text.to_string(),
+        None => format!("({field} not recorded)"),
+    }
+}
+
 pub(crate) fn format_plugin_source(value: &Value) -> String {
     format!(
         "{}\t{}\t{}\t{}",
-        value.get("name").and_then(Value::as_str).unwrap_or("-"),
-        value.get("type").and_then(Value::as_str).unwrap_or("-"),
-        value.get("source").and_then(Value::as_str).unwrap_or("-"),
+        named(value, "name"),
+        named(value, "type"),
+        named(value, "source"),
         if value.get("enabled").and_then(Value::as_bool) == Some(false) {
             "disabled"
         } else {
@@ -71,14 +80,14 @@ pub(crate) fn format_plugin_source(value: &Value) -> String {
 pub(crate) fn format_plugin(value: &Value) -> String {
     format!(
         "{}\t{}\t{}\t{}",
-        value.get("id").and_then(Value::as_str).unwrap_or("-"),
-        value.get("version").and_then(Value::as_str).unwrap_or("-"),
+        named(value, "id"),
+        named(value, "version"),
         if value.get("enabled").and_then(Value::as_bool) == Some(false) {
             "disabled"
         } else {
             "enabled"
         },
-        value.get("source").and_then(Value::as_str).unwrap_or("-")
+        named(value, "source")
     )
 }
 
