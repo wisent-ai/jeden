@@ -192,10 +192,10 @@ fn stats_text(cwd: &Path) -> String {
             }
         }
     } else {
-        lines.push(format!(
-            "quota unavailable: {}",
-            stats["quota"]["reason"].as_str().unwrap_or("unknown")
-        ));
+        lines.push(match stats["quota"]["reason"].as_str() {
+            Some(reason) => format!("quota unavailable: {reason}"),
+            None => "quota unavailable; no reason was reported".to_string(),
+        });
     }
     match stats["sessions"].get("error").and_then(Value::as_str) {
         Some(error) => lines.push(format!("sessions unreadable: {error}")),

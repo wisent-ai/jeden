@@ -78,10 +78,26 @@ pub(crate) fn spawn_turn_classification(
         let goal_objective = Some(state.goal.objective.trim())
             .filter(|objective| state.goal.enabled && !objective.is_empty())
             .map(str::to_string);
-        let session_id = session_dir
+        // A session directory without a final name identifies no session;
+        // the classification is refused and recorded rather than filed
+        // under an invented session id.
+        let Some(session_id) = session_dir
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown".to_string());
+        else {
+            recorded(
+                &session_dir,
+                "goal_lifecycle_refused",
+                json!({
+                    "alias": classify::alias(),
+                    "reason": format!(
+                        "session directory {} has no final name to identify the session",
+                        session_dir.display()
+                    ),
+                }),
+            );
+            return;
+        };
         let classified = classify(
             &router,
             &LifecycleRequest {

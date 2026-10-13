@@ -198,22 +198,22 @@ fn sources(
     out.push_str(&format!("Selected for every run: {selected}\n\n"));
     if let Some(rows) = report.get("sources").and_then(|value| value.as_array()) {
         for row in rows {
-            let name = row
-                .get("source")
-                .and_then(|value| value.as_str())
-                .unwrap_or("unknown");
-            let available = row
-                .get("available")
-                .and_then(|value| value.as_bool())
-                .unwrap_or_default();
-            let detail = row
-                .get("detail")
-                .and_then(|value| value.as_str())
-                .unwrap_or_default();
-            out.push_str(&format!(
-                "- {name}: {} — {detail}\n",
-                advisor::availability_word(available)
-            ));
+            // A row field the advisor left out is named as such; an absent
+            // availability was read as unavailable and an absent name as
+            // "unknown".
+            let name = match row.get("source").and_then(|value| value.as_str()) {
+                Some(name) => name,
+                None => "unnamed source",
+            };
+            let availability = match row.get("available").and_then(|value| value.as_bool()) {
+                Some(available) => advisor::availability_word(available),
+                None => "availability not reported",
+            };
+            let detail = match row.get("detail").and_then(|value| value.as_str()) {
+                Some(detail) => detail,
+                None => "no detail reported",
+            };
+            out.push_str(&format!("- {name}: {availability} — {detail}\n"));
         }
     }
     Ok(out)

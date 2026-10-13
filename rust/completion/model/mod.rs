@@ -5,28 +5,12 @@ use super::constants::{INITIAL_REVISION, SCHEMA_VERSION};
 mod criterion;
 mod operator;
 mod review;
+mod status;
 pub use criterion::CriterionReview;
+pub use status::TaskStatus;
 
 pub use operator::{OperatorAnswer, OperatorRequest};
 pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus, TaskReview};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TaskStatus {
-    Pending,
-    InProgress,
-    VerificationRequested,
-    Done,
-    Blocked,
-    Paused,
-    Cancelled,
-}
-
-impl TaskStatus {
-    pub fn terminal(self) -> bool {
-        matches!(self, Self::Done | Self::Cancelled)
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

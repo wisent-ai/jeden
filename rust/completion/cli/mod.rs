@@ -96,15 +96,7 @@ pub(crate) fn render(state: &CompletionState, session: &Path) -> Result<String, 
                     "  Defect of {original}; repair requires fresh independent verification"
                 ));
             }
-            lines.push(format!(
-                "  {} [{}] {}",
-                task.id,
-                serde_json::to_value(task.status)
-                    .unwrap_or_default()
-                    .as_str()
-                    .unwrap_or("unknown"),
-                task.text
-            ));
+            lines.push(format!("  {} [{}] {}", task.id, task.status, task.text));
             for criterion in &task.criteria {
                 lines.push(format!("    Acceptance: {criterion}"));
             }

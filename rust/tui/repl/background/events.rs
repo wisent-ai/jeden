@@ -62,12 +62,16 @@ pub(super) fn trace_message(event: &TraceEvent<'_>) -> Option<Message> {
         )),
         TraceEvent::CompletionState { state } => Some(Message::new(
             Role::Status,
-            format!(
-                "Tasks: {} — {} verified, {} open",
-                state["status"].as_str().unwrap_or("unknown"),
-                state["completed"],
-                state["open"]
-            ),
+            match state["status"].as_str() {
+                Some(status) => format!(
+                    "Tasks: {status} — {} verified, {} open",
+                    state["completed"], state["open"]
+                ),
+                None => format!(
+                    "Tasks: status not reported — {} verified, {} open",
+                    state["completed"], state["open"]
+                ),
+            },
         )),
         TraceEvent::Message { text } => Some(Message::new(Role::Assistant, text)),
         TraceEvent::Reasoning { .. } => None,

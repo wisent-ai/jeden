@@ -268,10 +268,10 @@ pub fn describe_source(cwd: &Path) -> Option<String> {
     if rows.is_empty() && unmapped.is_empty() {
         return None;
     }
-    let managed_by = registry
-        .get("managedBy")
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
+    let managed_by = match registry.get("managedBy").and_then(Value::as_str) {
+        Some(owner) => owner,
+        None => "not declared",
+    };
     let mut text = format!(
         "Tama registry ({}, managedBy {}):\n{}",
         path.display(),

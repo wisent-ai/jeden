@@ -68,17 +68,17 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             continue;
         }
         let body = row.get("text").and_then(Value::as_str).unwrap_or_default();
-        let runtime = row
-            .get("runtime")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown");
+        let runtime = row.get("runtime").and_then(Value::as_str);
         let stamp = row.get("ts").and_then(Value::as_str).unwrap_or("undated");
         // The archive answers newest first, so position is recency, not
         // relevance. Naming it a rank keeps that visible in the output.
         let rank = considered.saturating_sub(index) as f64;
         hits.push(Recommendation {
             source: "transcripts".to_string(),
-            title: format!("{runtime} session on {stamp}"),
+            title: match runtime {
+                Some(runtime) => format!("{runtime} session on {stamp}"),
+                None => format!("session of an unreported runtime on {stamp}"),
+            },
             locator: format!("session:{session}"),
             score: rank,
             matched: matched_terms(body, terms),

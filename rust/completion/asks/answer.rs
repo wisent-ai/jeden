@@ -124,7 +124,7 @@ fn record(id: &str, text: &str, expected: Option<(&Path, u64)>) -> Result<Answer
                     .map(|task| {
                         format!(
                             "the task no longer waits on this ask (status {})",
-                            status(task)
+                            task.status
                         )
                     })
                     .unwrap_or_else(|| "the session no longer holds this task".into()),
@@ -238,11 +238,4 @@ fn deliver(state: &mut CompletionState, task_id: &str, ask: &OperatorAsk) -> boo
     task.verification = None;
     state.blocker = None;
     true
-}
-
-fn status(task: &WorkTask) -> String {
-    serde_json::to_value(task.status)
-        .ok()
-        .and_then(|value| value.as_str().map(str::to_string))
-        .unwrap_or_else(|| "unknown".into())
 }
