@@ -66,17 +66,7 @@ impl Conversation {
         hooks.note("compacting conversation");
         let config = load_config(&args.cwd);
         let router = self.session_router(&config, args)?;
-        let transcript = self
-            .messages
-            .iter()
-            .skip(1)
-            .map(|m| {
-                let role = m.get("role").and_then(Value::as_str).unwrap_or("?");
-                let content = m.get("content").and_then(Value::as_str).unwrap_or("");
-                format!("{}: {}", role, content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let transcript = transcript_text(&self.messages);
         let extra = if instructions.trim().is_empty() {
             String::new()
         } else {
@@ -148,17 +138,7 @@ impl Conversation {
         hooks.note("generating handoff");
         let config = load_config(&args.cwd);
         let router = self.session_router(&config, args)?;
-        let transcript = self
-            .messages
-            .iter()
-            .skip(1)
-            .map(|m| {
-                let role = m.get("role").and_then(Value::as_str).unwrap_or("?");
-                let content = m.get("content").and_then(Value::as_str).unwrap_or("");
-                format!("{}: {}", role, content)
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+        let transcript = transcript_text(&self.messages);
         let extra = if focus.trim().is_empty() {
             String::new()
         } else {
@@ -228,4 +208,31 @@ impl Conversation {
             brief
         ))
     }
+}
+
+/// The conversation after its system prompt, one line per message, as the
+/// compaction and handoff prompts read it. A message whose content is not
+/// plain text (tool calls, multi-part content) is given as its JSON rather
+/// than dropped, and a message without a role or content says so; they were
+/// rendered as "?" and an empty line, so a summary lost what they held.
+fn transcript_text(messages: &[Value]) -> String {
+    let Some((_, conversation)) = messages.split_first() else {
+        return String::new();
+    };
+    conversation
+        .iter()
+        .map(|message| {
+            let role = match message.get("role").and_then(Value::as_str) {
+                Some(role) => role,
+                None => "unattributed",
+            };
+            let content = match message.get("content") {
+                Some(Value::String(text)) => text.clone(),
+                Some(other) => other.to_string(),
+                None => "(no content)".to_string(),
+            };
+            format!("{role}: {content}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
