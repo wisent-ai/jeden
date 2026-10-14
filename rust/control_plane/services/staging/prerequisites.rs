@@ -57,10 +57,15 @@ pub(super) fn identity(endpoint: &str) -> String {
 }
 
 pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), ContractError> {
+    // A value that is not text is named as such: read as empty it was listed
+    // as missing, and the operator was sent to set a variable already set.
     let prerequisites = REQUIRED_ENV
         .iter()
-        .filter(|&(name, _detail)| required(name).is_empty())
-        .map(|(name, detail)| format!("{name}: {detail}"))
+        .filter_map(|(name, detail)| match std::env::var(name) {
+            Ok(value) if !value.trim().is_empty() => None,
+            Ok(_) | Err(std::env::VarError::NotPresent) => Some(format!("{name}: {detail}")),
+            Err(error) => Some(format!("{name}: {detail} (set, but {error})")),
+        })
         .collect::<Vec<_>>();
     if !prerequisites.is_empty() {
         return Err(ContractError::ExternalBlocked { prerequisites });
