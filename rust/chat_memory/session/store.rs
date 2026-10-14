@@ -71,7 +71,7 @@ pub(super) fn own_chat(dir: &Path) -> Result<File, String> {
 /// mixed with this one.
 pub(super) fn refuse_earlier_layout(dir: &Path) -> Result<(), String> {
     let earlier = dir.join("log.jsonl");
-    if earlier.exists() {
+    if crate::tool_runtime::runtime_ops::platform::presence::present(&earlier)? {
         return Err(format!(
             "{} is a chat log in the layout of an earlier Jeden; move {} aside to start this chat's memory in main/, tree/ and view.json",
             earlier.display(),

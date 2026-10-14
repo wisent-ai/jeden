@@ -49,7 +49,7 @@ pub(crate) fn write_user_config(value: &Value) -> Result<PathBuf, String> {
     // changes, rather than publishing the new layer and then failing to
     // retire the old one.
     let legacy = read_config_layer(&legacy_user_config_path())?;
-    if path.exists() {
+    if crate::tool_runtime::runtime_ops::platform::presence::present(&path)? {
         migrate_config_file(&path)?;
     }
     let mut versioned = value.clone();

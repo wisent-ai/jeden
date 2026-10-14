@@ -180,17 +180,21 @@ pub(super) fn declarative_paths(root: &Path, precedence: usize) -> Vec<Declarati
     let mut values = Vec::new();
     for kind in DeclarativeKind::EVERY.iter().copied() {
         let path = kind.path(root);
-        if path.exists() {
-            let health = kind.health(&path);
-            values.push(DeclarativeCapability {
-                kind: kind.name(),
-                carried: kind.registry_carries(),
-                path,
-                healthy: health.is_ok(),
-                error: health.err(),
-                precedence,
-            });
-        }
+        // A path that cannot be examined is listed unhealthy with its cause:
+        // read as absent, the capability vanished from the listing.
+        let health = match crate::tool_runtime::runtime_ops::platform::presence::present(&path) {
+            Ok(false) => continue,
+            Ok(true) => kind.health(&path),
+            Err(cause) => Err(cause),
+        };
+        values.push(DeclarativeCapability {
+            kind: kind.name(),
+            carried: kind.registry_carries(),
+            path,
+            healthy: health.is_ok(),
+            error: health.err(),
+            precedence,
+        });
     }
     values
 }
