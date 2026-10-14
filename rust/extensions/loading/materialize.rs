@@ -39,8 +39,7 @@ pub(super) fn materialize_commands(
         } else {
             format!(
                 "---\ndescription: {}\n---\n{}",
-                serde_json::to_string(&command.description.replace('\n', " "))
-                    .unwrap_or_else(|_| "\"extension command\"".into()),
+                serde_json::Value::String(command.description.replace('\n', " ")),
                 command.prompt
             )
         };
