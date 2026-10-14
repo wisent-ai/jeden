@@ -136,18 +136,28 @@ fn tool_specs() -> impl Iterator<Item = (&'static str, &'static str)> {
         .chain(media::TOOLS)
         .copied()
 }
+/// Every service tool with its health in the current working directory. A
+/// directory that cannot be read leaves every tool unhealthy with that cause,
+/// never judged against "." as if it were the directory the session works in.
 fn dynamic_descriptors() -> Vec<DynamicToolDescriptor> {
-    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let services = hub(&cwd);
+    let services = std::env::current_dir()
+        .map(|cwd| hub(&cwd))
+        .map_err(|error| format!("the working directory cannot be read: {error}"));
     tool_specs()
         .map(|(name, description)| {
-            let health = services.health(name);
+            let (healthy, health) = match &services {
+                Ok(services) => {
+                    let health = services.health(name);
+                    (health.available(), health.detail)
+                }
+                Err(cause) => (false, cause.clone()),
+            };
             DynamicToolDescriptor {
                 name: name.into(),
                 description: description.into(),
                 input: json!({"type":"object","additionalProperties":true}),
-                healthy: health.available(),
-                health: health.detail,
+                healthy,
+                health,
             }
         })
         .collect()
