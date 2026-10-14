@@ -186,7 +186,16 @@ where
         &previous_state,
     )?;
     hit(failpoint, "after-stage-fsync")?;
-    if paths.target.exists() {
+    // The current binary is examined once: one that cannot be examined is
+    // rejected with its cause, where it was read as absent, skipped its
+    // health check and its backup, and the update replaced it with nothing
+    // to roll back to.
+    let installed =
+        match crate::tool_runtime::runtime_ops::platform::presence::present(&paths.target) {
+            Ok(installed) => installed,
+            Err(cause) => return reject_staged(format!("pre-update check failed: {cause}")),
+        };
+    if installed {
         if let Err(error) = health(&paths.target, paths.parent()) {
             return reject_staged(format!("pre-update health failed: {error}"));
         }
@@ -202,7 +211,7 @@ where
         artifact_sha256,
         &previous_state,
     )?;
-    if paths.target.exists() {
+    if installed {
         fs::rename(&paths.target, &paths.backup)
             .map_err(|error| format!("backup current binary: {error}"))?;
         sync_dir(paths.parent())?;

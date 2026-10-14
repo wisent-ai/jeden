@@ -43,7 +43,11 @@ pub const TASK_STORE_SCHEMA_VERSION: u32 = 2;
 
 pub(crate) fn ensure_store_schema(store: &Path) -> Result<(), TaskError> {
     let manifest = store.join("store-schema.json");
-    if manifest.exists() {
+    // A manifest that cannot be examined is refused: read as absent, a fresh
+    // manifest was written over the store's recorded schema version.
+    if crate::tool_runtime::runtime_ops::platform::presence::present(&manifest)
+        .map_err(TaskError::Invalid)?
+    {
         let plan = crate::cli::config::migrations::builtin_document_plan("task-store")
             .map_err(TaskError::Invalid)?;
         crate::cli::config::migrations::migrate_json(&manifest, &plan)

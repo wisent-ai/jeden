@@ -106,7 +106,9 @@ impl TaskScheduler {
     }
     pub fn get(&self, id: &str) -> Result<JobRecord, TaskError> {
         let path = self.job_path(id);
-        if !path.exists() {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(&path)
+            .map_err(TaskError::Invalid)?
+        {
             return Err(TaskError::NotFound(format!("job not found: {id}")));
         }
         Ok(serde_json::from_slice(&fs::read(path)?)?)
