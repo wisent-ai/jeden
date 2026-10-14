@@ -6,7 +6,6 @@
 
 use crate::control_plane::billing::QuotaBucket;
 use crate::control_plane::billing::QuotaState;
-use crate::control_plane::now_ms;
 use crate::control_plane::quota::{
     fetch_subscription_quotas, percent_free, QuotaEntry, SubscriptionQuotas,
 };
@@ -98,7 +97,16 @@ pub(super) fn quota_rows() -> Vec<PickerItem> {
         }
         SubscriptionQuotas::Accounts(accounts) => accounts,
     };
-    let now = now_ms();
+    // Reset times are counted from now; a clock that cannot be read says so
+    // in the one row, as an unavailable quota does.
+    let now = match crate::clock::unix_millis() {
+        Ok(now) => now,
+        Err(error) => {
+            return vec![display_row(format!(
+                "quota reset times cannot be counted: {error}"
+            ))];
+        }
+    };
     let mut groups: BTreeMap<String, Vec<QuotaRow>> = BTreeMap::new();
     for account in accounts {
         for entry in account.entries {

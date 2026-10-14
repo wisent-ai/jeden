@@ -7,7 +7,7 @@
 use super::super::{Account, OperationState, OperationV1, Provider, WelesClient, WelesError};
 use crate::control_plane::brama::BramaClient;
 use crate::control_plane::contract::{self, RequestMeta};
-use crate::control_plane::{now_ms, ServiceHealth};
+use crate::control_plane::ServiceHealth;
 use serde_json::json;
 use serde_json::Value;
 
@@ -76,12 +76,7 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
         if operation.id != operation_id {
             return Err(WelesError::InvalidResponse("operation id mismatch".into()));
         }
-        if operation
-            .expires_at_ms
-            .is_some_and(|expiry| now_ms() >= expiry)
-        {
-            return Err(WelesError::ExpiredOperation);
-        }
+        operation.refuse_expired()?;
         if operation.state == OperationState::Completed {
             BramaClient::invalidate_all();
         }
@@ -162,11 +157,6 @@ pub(super) fn operation_from_start(value: Value) -> Result<OperationV1, WelesErr
             "operation id is missing".into(),
         ));
     }
-    if operation
-        .expires_at_ms
-        .is_some_and(|expiry| now_ms() >= expiry)
-    {
-        return Err(WelesError::ExpiredOperation);
-    }
+    operation.refuse_expired()?;
     Ok(operation)
 }

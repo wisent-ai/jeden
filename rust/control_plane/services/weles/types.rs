@@ -113,6 +113,23 @@ pub struct OperationV1 {
     pub expires_at_ms: Option<u64>,
 }
 
+impl OperationV1 {
+    /// Refuses an operation whose stated expiry has passed. The expiry is
+    /// read on the clock; a clock that cannot be read is refused by name,
+    /// never read as time zero, which put every expiry still ahead.
+    pub(crate) fn refuse_expired(&self) -> Result<(), WelesError> {
+        let Some(expiry) = self.expires_at_ms else {
+            return Ok(());
+        };
+        let now =
+            crate::clock::unix_millis().map_err(|error| WelesError::Clock(error.to_string()))?;
+        if now >= expiry {
+            return Err(WelesError::ExpiredOperation);
+        }
+        Ok(())
+    }
+}
+
 pub trait InteractionBridge {
     fn elicit(&self, prompt: &str, options: &[String], secret: bool) -> Result<String, String>;
     fn event(&self, event: &OperationEvent);
@@ -146,6 +163,8 @@ pub enum WelesError {
         message: String,
     },
     Interaction(String),
+    /// The host clock gave no time to judge an operation's expiry against.
+    Clock(String),
 }
 impl std::fmt::Display for WelesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -173,6 +192,7 @@ impl std::fmt::Display for WelesError {
                 write!(f, "Weles operation failed ({code}): {message}")
             }
             Self::Interaction(e) => write!(f, "Weles interaction failed: {e}"),
+            Self::Clock(e) => write!(f, "the expiry of a Weles operation cannot be judged: {e}"),
         }
     }
 }

@@ -1,5 +1,5 @@
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
-use super::{now_ms, ServiceHealth};
+use super::ServiceHealth;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -88,7 +88,6 @@ impl WelesClient {
             } else {
                 "WISENT_PLATFORM_BILLING_URL is not configured".into()
             },
-            checked_at_ms: now_ms(),
         }
     }
 

@@ -22,7 +22,9 @@ async function refresh() {
       throw new Error(`/api/stats returned HTTP ${response.status}: ${detail}`);
     }
     const stats = await response.json();
-    const generatedAt = new Date(stats.generatedAtMs).toISOString();
+    const generatedAt = stats.generatedAtMs.error != null
+      ? 'an undated moment (' + stats.generatedAtMs.error + ')'
+      : new Date(stats.generatedAtMs).toISOString();
     const quotaHtml = stats.quota.available
       ? stats.quota.providers.map(provider => '<div class="card"><b>' + escapeText(provider.provider) + '</b>' + provider.entries.map(entry => {
           if (entry.error != null) {

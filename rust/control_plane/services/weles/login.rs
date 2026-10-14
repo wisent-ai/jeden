@@ -8,7 +8,6 @@ use super::{
     WelesError, HOLD_QUERY,
 };
 use crate::control_plane::brama::BramaClient;
-use crate::control_plane::now_ms;
 use serde_json::{json, Value};
 
 impl WelesClient {
@@ -168,9 +167,7 @@ impl WelesClient {
             )?;
             let page: OperationV1 = serde_json::from_value(value)
                 .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
-            if page.expires_at_ms.is_some_and(|expiry| now_ms() >= expiry) {
-                return Err(WelesError::ExpiredOperation);
-            }
+            page.refuse_expired()?;
             cursor = page.cursor;
             let moved = !page.events.is_empty();
             for event in page.events {

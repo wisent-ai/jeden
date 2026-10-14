@@ -9,7 +9,6 @@ use super::super::transport::{SecretRef, TransportRequest, TransportResponse};
 use super::cache::{catalog_cache_key, read_disk_cache, write_disk_cache, CachedCatalog, CACHE};
 use super::catalog::validate_catalog;
 use super::{BramaClient, BramaError, BramaReadiness, ModelCatalog};
-use crate::control_plane::now_ms;
 use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
 use crate::control_plane::services::brama::API_VERSION;
 use reqwest::StatusCode;
@@ -97,10 +96,21 @@ impl BramaClient {
             // inside the TTL, so a fresh `jeden` start skips the network
             // entirely (the in-memory cache above only covers one process).
             if let Some((catalog, etag, fetched_ms)) = read_disk_cache(&key) {
-                if self
-                    .ttl
-                    .is_some_and(|ttl| now_ms().saturating_sub(fetched_ms) < ttl.as_millis() as u64)
-                {
+                // The kept catalogue's age is measured on the clock; a clock
+                // that cannot be read cannot call it fresh, so the catalogue
+                // is fetched again and the reason is said.
+                let fresh = match crate::clock::unix_millis() {
+                    Ok(now) => self
+                        .ttl
+                        .is_some_and(|ttl| now.saturating_sub(fetched_ms) < ttl.as_millis() as u64),
+                    Err(error) => {
+                        eprintln!(
+                            "jeden: the kept model catalogue's age cannot be measured: {error}"
+                        );
+                        false
+                    }
+                };
+                if fresh {
                     CACHE
                         .lock()
                         .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?

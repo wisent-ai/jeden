@@ -6,7 +6,6 @@
 
 use super::super::transport::SecretRef;
 use super::ModelCatalog;
-use crate::control_plane::now_ms;
 use crate::control_plane::services::brama::auth::caller_credentials;
 use std::collections::HashMap;
 use std::sync::{LazyLock, Mutex};
@@ -80,7 +79,7 @@ pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&
             std::fs::create_dir_all(parent)?;
         }
         let payload = serde_json::json!({
-            "fetchedAtMs": now_ms(),
+            "fetchedAtMs": crate::clock::unix_millis()?,
             "etag": etag,
             "catalog": catalog,
         });

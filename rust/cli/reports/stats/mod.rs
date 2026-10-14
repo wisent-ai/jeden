@@ -11,7 +11,6 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::control_plane::now_ms;
 use crate::control_plane::quota::{
     fetch_subscription_quotas, percent_free, QuotaEntry, SubscriptionQuotas,
 };
@@ -144,7 +143,11 @@ fn sessions_json() -> Value {
 pub(crate) fn stats_json(cwd: &Path) -> Value {
     json!({
         "version": crate::JEDEN_VERSION,
-        "generatedAtMs": now_ms(),
+        // An undatable snapshot says why in place, as every other part does.
+        "generatedAtMs": match crate::clock::unix_millis() {
+            Ok(now) => json!(now),
+            Err(error) => json!({"error": format!("the snapshot cannot be dated: {error}")}),
+        },
         "cwd": cwd.display().to_string(),
         "usage": {
             "project": usage_file_totals(&cwd.join(".jeden/usage.json")),

@@ -1,6 +1,6 @@
 use super::contract::{ModelRequest, ModelStreamResultV1, RequestMeta, RouteRequest};
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
-use super::{now_ms, ServiceHealth};
+use super::ServiceHealth;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -107,7 +107,6 @@ impl BramaClient {
             } else {
                 "BRAMA_URL is required; configure the Brama model-router service URL".into()
             },
-            checked_at_ms: now_ms(),
         }
     }
 

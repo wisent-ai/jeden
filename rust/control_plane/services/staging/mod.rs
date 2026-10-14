@@ -62,8 +62,9 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
 
     let catalog = BramaApiV1::catalog(&brama, true).map_err(|error| error.to_string())?;
     let model = required("JEDEN_STAGING_MODEL")?;
+    let now = crate::clock::unix_millis().map_err(|error| error.to_string())?;
     let request_ids = (0..8)
-        .map(|index| format!("staging-{}-{index}", super::now_ms()))
+        .map(|index| format!("staging-{now}-{index}"))
         .collect::<Vec<_>>();
     let read_meta = RequestMeta {
         correlation_id: request_ids[0].clone(),

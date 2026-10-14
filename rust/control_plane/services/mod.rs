@@ -14,4 +14,4 @@ pub mod weles;
 // The shared vocabulary each service is written against, under the names they
 // have always used: a request's shape, how it is carried, what billing calls
 // things, and the health a service reports.
-use super::{billing, contract, now_ms, transport, ServiceHealth};
+use super::{billing, contract, transport, ServiceHealth};

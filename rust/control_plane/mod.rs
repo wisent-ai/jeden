@@ -17,7 +17,6 @@ pub struct ServiceHealth {
     pub available: bool,
     pub endpoint: Option<String>,
     pub detail: String,
-    pub checked_at_ms: u64,
 }
 
 pub fn model_catalog(
@@ -51,12 +50,4 @@ pub fn providers(
         entries.insert(entry.id.clone(), entry);
     }
     Ok(entries.into_values().collect())
-}
-
-pub fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u128::from(u64::MAX)) as u64
 }
