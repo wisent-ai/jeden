@@ -72,9 +72,16 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
     Err(format!("unsupported session export format: {}", format))
 }
 
+/// `jeden export <session> <output> [--html|--markdown]`: write the session
+/// to a file. Printing a session is `jeden show`; an export without an
+/// output printed the same session a second way, so one is required.
 pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
+    const USAGE: &str =
+        "usage: jeden export <session-id-or-path> <output> [--html|--markdown]; `jeden show` prints a session";
     let (id, rest) = args.positionals.split_first().ok_or_else(|| {
-        crate::cli::invocation::refusal::usage("export requires a session id or path")
+        crate::cli::invocation::refusal::usage(format!(
+            "export requires a session id or path: {USAGE}"
+        ))
     })?;
     let mut format = "json".to_string();
     let mut output = None;
@@ -87,19 +94,21 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
             // An unknown flag is not a file name, and a second path is not
             // silently preferred over the first.
             return Err(crate::cli::invocation::refusal::usage(format!(
-                "export: unexpected argument {arg:?}; usage: jeden export <session-id-or-path> [output] [--html|--markdown]"
+                "export: unexpected argument {arg:?}; {USAGE}"
             )));
         } else {
             output = Some(arg.clone());
         }
     }
+    let Some(path) = output else {
+        return Err(crate::cli::invocation::refusal::usage(format!(
+            "export requires the file to write: {USAGE}"
+        )));
+    };
     let payload = render_session_export(&read_session_value(id)?, &format)?;
-    if let Some(path) = output {
-        fs::write(&path, &payload).map_err(|e| e.to_string())?;
-        Ok(format!("{}\n", path))
-    } else {
-        Ok(payload)
-    }
+    fs::write(&path, &payload)
+        .map_err(|error| format!("cannot write the export to {path}: {error}"))?;
+    Ok(format!("{}\n", path))
 }
 
 /// `jeden artifacts <session> [--json]`: each artifact's name and size in

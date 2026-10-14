@@ -199,17 +199,18 @@ export const sessionCommands = [
   {
     path: "export",
     group: "Sessions and artifacts",
-    invocation: "jeden export <session-id-or-path> [output] [--html|--markdown]",
-    purpose: "Export a recorded session as JSON, HTML, or Markdown.",
+    invocation: "jeden export <session-id-or-path> <output> [--html|--markdown]",
+    purpose: "Write a recorded session to a file as JSON, HTML, or Markdown. Printing a session is <code>jeden show</code>.",
     inputs: [
-      "Required: a session identifier or path.",
-      "Optional: <code>--html</code> or <code>--markdown</code>; JSON is the default. One non-flag trailing value is the output file.",
+      "Required: a session identifier or path, and the output file.",
+      "Optional: <code>--html</code> or <code>--markdown</code>; JSON is the default.",
     ],
-    effect: "Prints the serialized session when no output path is supplied; otherwise writes the payload to that path and prints the path.",
+    effect: "Writes the payload to the output path and prints the path.",
     refusals: [
-      "A missing selector is refused as <code>export requires a session id or path</code>.",
-      "Any other flag, or a second output path, is refused as <code>export: unexpected argument \"ARG\"; usage: jeden export &lt;session-id-or-path&gt; [output] [--html|--markdown]</code>.",
-      "Missing sessions, invalid ledgers, unsupported renderer formats, and output write errors are returned without a partial successful result.",
+      "A missing selector is refused as <code>export requires a session id or path: usage: …</code> and exits 2.",
+      "A missing output file is refused as <code>export requires the file to write: usage: jeden export &lt;session-id-or-path&gt; &lt;output&gt; [--html|--markdown]; `jeden show` prints a session</code> and exits 2; nothing is printed or written.",
+      "Any other flag, or a second output path, is refused as <code>export: unexpected argument \"ARG\"; usage: …</code> and exits 2.",
+      "Missing sessions, invalid ledgers, unsupported renderer formats, and output write errors (<code>cannot write the export to PATH: CAUSE</code>) are returned without a partial successful result.",
     ],
   },
   {

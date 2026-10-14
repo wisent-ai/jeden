@@ -47,7 +47,7 @@ pub(crate) fn usage() -> String {
         "  jeden restore --since <today|YYYY-MM-DD|YYYY-MM-DDTHH:MM:SSZ> [--dry-run] [--sessions <dir>] [--json] — reopen every OMP session the operator wrote in since then and report each as already running, reopened, refused or stopped\n",
         "  jeden restore open <transcript> [--run <dir>] — resume one OMP session in this terminal, in its own workspace\n",
         "  jeden show <session-id-or-path> [--json]\n",
-        "  jeden export <session-id-or-path> [output.json]\n",
+        "  jeden export <session-id-or-path> <output> [--html|--markdown] — write a session to a file\n",
         "  jeden artifacts <session-id-or-path> [--json]\n",
         "  jeden artifact <session-id-or-path> <name> [output]\n",
         "  jeden copy <text> | jeden copy - [--check] [--json] — hand an exact payload to the operator's clipboard, read back to confirm; --check asks later whether it is still there\n",
