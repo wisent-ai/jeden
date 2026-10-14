@@ -56,16 +56,25 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
     } else {
         let previous = std::env::current_exe()
             .map_err(|error| format!("cannot identify the running Jeden executable: {error}"))?;
-        let report = Command::new("stado")
-            .args(["product", "signing", "inspect", "--json"])
-            .arg(previous)
-            .output()
-            .map_err(|error| {
-                format!(
-                    "cannot inspect the running code identity through Stado: {error}; \
-                     without Stado set JEDEN_CODESIGN_IDENTITY to a codesign identity, or - for ad-hoc"
-                )
-            })?;
+        let report = stado_wait::output(
+            Command::new("stado")
+                .args(["product", "signing", "inspect", "--json"])
+                .arg(previous),
+        )
+        .map_err(|error| {
+            format!(
+                "cannot inspect the running code identity through Stado: {error}; \
+                 without Stado set JEDEN_CODESIGN_IDENTITY to a codesign identity, or - for ad-hoc"
+            )
+        })?;
+        // A refused inspection is said with Stado's own sentence: parsed as
+        // a report, it read as invalid JSON and the cause was lost.
+        if !report.status.success() {
+            return Err(command_failure(
+                "stado product signing inspect",
+                &report.stderr,
+            ));
+        }
         let reports: Vec<Value> = serde_json::from_slice(&report.stdout)
             .map_err(|error| format!("cannot read the running code identity: {error}"))?;
         let observed = reports
@@ -128,9 +137,7 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
             } else {
                 signer.args(["--product", "jeden"]);
             }
-            let output = signer
-                .arg(&executable)
-                .output()
+            let output = stado_wait::output(signer.arg(&executable))
                 .map_err(|error| format!("cannot start stable macOS signing: {error}"))?;
             if !output.status.success() {
                 return Err(command_failure("stable macOS signing", &output.stderr));

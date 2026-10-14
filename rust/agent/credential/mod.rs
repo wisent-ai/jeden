@@ -107,16 +107,19 @@ const CREDENTIALS_GROUP: &str = "credentials";
 /// role no item plays are three different problems, and Stado already words
 /// them apart.
 fn field_from_stado(role: &str, field: &str) -> Result<String, String> {
-    let output = Command::new("stado")
-        .arg(CREDENTIALS_GROUP)
-        .args(["get", "--role", role, "--field", field])
-        .output()
-        .map_err(|error| {
-            format!(
-                "the Stado CLI could not be started to read role {role} field {field}: {error}. \
-                 Install Stado, or carry {SECRET} and BRAMA_URL in this process's environment"
-            )
-        })?;
+    // Through the announced wait: a vault that stands held every agent turn
+    // here with nothing saying what it waited on.
+    let output = stado_wait::output(
+        Command::new("stado")
+            .arg(CREDENTIALS_GROUP)
+            .args(["get", "--role", role, "--field", field]),
+    )
+    .map_err(|error| {
+        format!(
+            "the Stado CLI could not be started to read role {role} field {field}: {error}. \
+             Install Stado, or carry {SECRET} and BRAMA_URL in this process's environment"
+        )
+    })?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
         let said = if stderr.is_empty() {
@@ -124,9 +127,11 @@ fn field_from_stado(role: &str, field: &str) -> Result<String, String> {
         } else {
             stderr
         };
+        // The status as the system reports it: a signal-ended read has no
+        // exit code, and -1 in its place was a code nobody returned.
         return Err(format!(
-            "stado credentials get --role {role} --field {field} exited {}: {said}",
-            output.status.code().unwrap_or(-1)
+            "stado credentials get --role {role} --field {field} ended with {}: {said}",
+            output.status
         ));
     }
     let value = String::from_utf8_lossy(&output.stdout).trim().to_string();
