@@ -30,3 +30,14 @@ pub fn unix_millis() -> io::Result<u64> {
         ))
     })
 }
+
+/// Milliseconds since the Unix epoch as the signed count database columns
+/// hold; a count an i64 cannot hold is refused, never clamped.
+pub fn unix_millis_i64() -> io::Result<i64> {
+    let millis = unix_millis()?;
+    i64::try_from(millis).map_err(|error| {
+        io::Error::other(format!(
+            "the system clock reads {millis} ms since the Unix epoch, more than an i64 holds: {error}"
+        ))
+    })
+}

@@ -101,11 +101,8 @@ impl ProtocolFrame {
         }
         let mut id = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut id);
-        let created_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis()
-            .min(u64::MAX as u128) as u64;
+        let created_at = crate::clock::unix_millis()
+            .map_err(|error| format!("the collaboration frame cannot be stamped: {error}"))?;
         Ok(Self {
             version: 1,
             id: hex::encode(id),

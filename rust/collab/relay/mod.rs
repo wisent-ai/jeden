@@ -49,6 +49,7 @@ impl RelayStore {
             return Err("view role is read-only".into());
         }
         let (room, hash) = (room.to_owned(), token_hash(token));
+        let now = now_ms()?;
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
             // Writers of one room serialize on its row.
@@ -64,7 +65,7 @@ impl RelayStore {
                 }
                 room::Entity::insert(room::ActiveModel {
                     id: Set(room.clone()),
-                    created_at: Set(now_ms()),
+                    created_at: Set(now),
                 })
                 .exec_without_returning(&tx)
                 .await
@@ -107,7 +108,7 @@ impl RelayStore {
                 room_id: Set(room),
                 seq: Set(seq),
                 blob: Set(blob),
-                created_at: Set(now_ms()),
+                created_at: Set(now),
             })
             .exec_without_returning(&tx)
             .await

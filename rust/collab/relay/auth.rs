@@ -87,10 +87,8 @@ pub(crate) fn token_role(token: &str) -> Option<crate::collab::CollabRole> {
 pub(super) fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
-pub(super) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(i64::MAX as u128) as i64
+/// Milliseconds since the Unix epoch for room and frame rows, or why the
+/// clock has none to give.
+pub(super) fn now_ms() -> Result<i64, String> {
+    crate::clock::unix_millis_i64().map_err(|error| error.to_string())
 }

@@ -201,14 +201,10 @@ pub(super) fn stable_id(prefix: &str) -> String {
     rand::thread_rng().fill_bytes(&mut bytes);
     format!("{prefix}_{}", hex::encode(bytes))
 }
-/// Milliseconds since the Unix epoch as the store's column type; a clock
-/// before the epoch, or a count past an i64, is refused, never stored as zero
-/// or clamped.
+/// Milliseconds since the Unix epoch as the store's column type, or why the
+/// clock has none to give.
 pub(super) fn now_ms() -> Result<i64, String> {
-    let millis = crate::clock::unix_millis().map_err(|error| error.to_string())?;
-    i64::try_from(millis).map_err(|error| {
-        format!("the system clock reads {millis} ms since the Unix epoch, more than the memory store's i64 holds: {error}")
-    })
+    crate::clock::unix_millis_i64().map_err(|error| error.to_string())
 }
 
 /// The durable job that rebuilds the full-text index: what `/memory enqueue`
