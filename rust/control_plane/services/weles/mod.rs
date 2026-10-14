@@ -107,7 +107,18 @@ impl WelesClient {
         let endpoint = url::Url::parse(self.endpoint()?)
             .map_err(|_| WelesError::InvalidResponse("Weles endpoint URL is invalid".into()))?;
         let endpoint_origin = endpoint.origin().ascii_serialization();
-        let configured = std::env::var("WELES_HOSTED_ORIGINS").unwrap_or_default();
+        // An allowlist that is not text is refused by name: read as empty it
+        // refused every other origin as "not allowlisted" without saying the
+        // list could not be read.
+        let configured = match std::env::var("WELES_HOSTED_ORIGINS") {
+            Ok(configured) => configured,
+            Err(std::env::VarError::NotPresent) => String::new(),
+            Err(error) => {
+                return Err(WelesError::InvalidResponse(format!(
+                    "WELES_HOSTED_ORIGINS cannot be read: {error}"
+                )))
+            }
+        };
         if hosted_origin != endpoint_origin
             && !configured
                 .split(',')
@@ -115,9 +126,10 @@ impl WelesClient {
                 .filter(|origin| !origin.is_empty())
                 .any(|origin| origin == hosted_origin)
         {
-            return Err(WelesError::InvalidResponse(
-                "hosted setup URL origin is not allowlisted".into(),
-            ));
+            return Err(WelesError::InvalidResponse(format!(
+                "hosted setup URL origin {hosted_origin} is neither the Weles endpoint's origin \
+                 {endpoint_origin} nor listed in WELES_HOSTED_ORIGINS"
+            )));
         }
         Ok(())
     }
