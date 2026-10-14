@@ -8,9 +8,11 @@ pub fn hmac_headers(
     if secret.is_empty() {
         return Err("WISENT_APP_AGENT_AUTH_SECRET is required".into());
     }
+    // A clock before the epoch is refused: read as 0, it signed a timestamp
+    // Brama refuses as stale, and the refusal named the signature.
     let ts = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
+        .map_err(|error| format!("the system clock is before the Unix epoch: {error}"))?
         .as_secs()
         .to_string();
     let body_hash = if body.is_empty() {
