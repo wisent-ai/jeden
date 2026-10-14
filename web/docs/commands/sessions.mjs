@@ -268,7 +268,7 @@ export const sessionCommands = [
     effect: "Creates a child session with replayable history and the source's full retained task state. It uses the recorded workspace, independently inspects prior results, and continues unfinished work when no new prompt is supplied. A supplied prompt adds a request without dropping older work. Failure preserves the child and its diagnostics for another continuation.",
     refusals: [
       "Missing input is refused with <code>Usage: jeden resume &lt;session-id-or-path&gt; [\"&lt;task&gt;\"]</code>.",
-      "A nonexistent source is refused as <code>session not found: ...</code>; invalid session ledgers or model/tool errors also stop continuation.",
+      "A nonexistent source is refused as <code>session not found: ...</code>; a source whose directory cannot be examined (a permission or I/O fault) is refused as <code>&lt;path&gt; cannot be examined: &lt;cause&gt;</code>, never as not found; invalid session ledgers or model/tool errors also stop continuation.",
     ],
   },
 ];
