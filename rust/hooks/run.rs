@@ -102,12 +102,16 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
             };
         }
     }
+    let ended_without_code = output.status.code().is_none();
     let mut outcome = HookOutcome {
-        exit_code: output.status.code().unwrap_or(-1),
+        exit_code: match output.status.code() {
+            Some(code) => code,
+            None => NO_EXIT_CODE,
+        },
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
     };
-    if outcome.exit_code.is_negative() {
+    if ended_without_code {
         outcome.stderr = format!(
             "hook process `{}` in {} ended without an exit code ({}): {}",
             hook.command,
