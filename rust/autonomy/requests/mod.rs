@@ -226,12 +226,19 @@ fn execute(
     let preferences = match store.get::<PreferenceEvidence>("preferences")? {
         Some(preferences) => preferences,
         None => {
-            let lake = args.allow_command.then(|| {
-                PathBuf::from(
-                    std::env::var("TRANSCRIPT_LAKE_BIN")
-                        .unwrap_or_else(|_| "transcript-lake".into()),
-                )
-            });
+            // Unset means the program on PATH; set to something that is not
+            // text is the operator's override unread, refused rather than
+            // silently replaced, exactly as the interactive pursue reads it.
+            let lake = match (args.allow_command, std::env::var("TRANSCRIPT_LAKE_BIN")) {
+                (false, _) => None,
+                (true, Ok(path)) => Some(PathBuf::from(path)),
+                (true, Err(std::env::VarError::NotPresent)) => {
+                    Some(PathBuf::from("transcript-lake"))
+                }
+                (true, Err(error)) => {
+                    return Err(format!("TRANSCRIPT_LAKE_BIN cannot be read: {error}"))
+                }
+            };
             let preferences =
                 collect_preference_evidence(&request.cwd, &request.objective, lake.as_deref());
             store.set("preferences", &preferences)?;
