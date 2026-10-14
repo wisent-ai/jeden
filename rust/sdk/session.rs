@@ -161,7 +161,9 @@ impl AgentSession {
         id_or_path: impl AsRef<Path>,
     ) -> Result<Self, String> {
         let source = resolve_session_path(id_or_path.as_ref());
-        if !source.join("state.json").is_file() {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(
+            &source.join("state.json"),
+        )? {
             return Err(format!("session not found: {}", source.display()));
         }
         crate::session_import::mark_adopted(&source)?;

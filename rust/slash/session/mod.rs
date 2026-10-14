@@ -57,7 +57,7 @@ pub(super) fn slash_session_dir(
     } else {
         context.session_root.join(target)
     };
-    if !path.exists() {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&path)? {
         return Err(format!("session not found: {}", path.display()));
     }
     Ok(path)

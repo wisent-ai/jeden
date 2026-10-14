@@ -272,8 +272,11 @@ pub(crate) fn handle_lifecycle(
             if id.is_empty() { Some(Ok(list_sessions(context.session_root))) }
             else {
                 let path = session_path(context.session_root, id);
-                if path.exists() { Some(Ok(format!("Session {} exists at {}. Full in-place interactive resume is available through CLI: jeden resume {} \"<task>\"", path.file_name().map(|v| v.to_string_lossy()).unwrap_or_default(), path.display(), path.display()))) }
-                else { Some(Err(format!("session not found: {}", path.display()))) }
+                match crate::tool_runtime::runtime_ops::platform::presence::present(&path) {
+                    Ok(true) => Some(Ok(format!("Session {id} exists at {}. Full in-place interactive resume is available through CLI: jeden resume {} \"<task>\"", path.display(), path.display()))),
+                    Ok(false) => Some(Err(format!("session not found: {}", path.display()))),
+                    Err(cause) => Some(Err(cause)),
+                }
             }
         },
         "/rename" => Some(Ok(format!("Session title set to: {}", if args.trim().is_empty() { "rust one-shot slash invocation" } else { args.trim() }))),
