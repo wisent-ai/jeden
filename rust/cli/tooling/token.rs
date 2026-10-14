@@ -51,17 +51,20 @@ fn configured() -> Result<(String, Option<String>, String, &'static str), String
     // followed; it now carries what Stado itself said.
     let (secret_source, _) = crate::agent::credential::ensure();
     let url = brama_url()?;
-    let secret = env::var(SECRET_KEY).unwrap_or_default();
-    if secret.is_empty() {
-        let (role, field) = crate::agent::credential::SECRET_ROLE;
-        return Err(match secret_source.refusal() {
-            Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
-            None => format!(
-                "{SECRET_KEY} is not configured; the vault item playing role `{role}` holds it and \
-                 `stado credentials get --role {role} --field {field}` is how this process reads it"
-            ),
-        });
-    }
+    let secret = match env::var(SECRET_KEY) {
+        Ok(secret) if !secret.is_empty() => secret,
+        Ok(_) | Err(env::VarError::NotPresent) => {
+            let (role, field) = crate::agent::credential::SECRET_ROLE;
+            return Err(match secret_source.refusal() {
+                Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
+                None => format!(
+                    "{SECRET_KEY} is not configured; the vault item playing role `{role}` holds it and \
+                     `stado credentials get --role {role} --field {field}` is how this process reads it"
+                ),
+            });
+        }
+        Err(error) => return Err(format!("{SECRET_KEY} cannot be read: {error}")),
+    };
     let agent_id = match env::var(AGENT_ID_KEY) {
         Ok(agent) if !agent.trim().is_empty() => Some(agent),
         Ok(_) | Err(env::VarError::NotPresent) => None,
