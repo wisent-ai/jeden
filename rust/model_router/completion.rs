@@ -46,17 +46,22 @@ pub(crate) fn agent_headers(
 pub(crate) fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, String> {
     let mut actions = Vec::new();
     for call in tool_calls {
-        let name = call
+        let Some(name) = call
             .pointer("/function/name")
             .and_then(Value::as_str)
-            .unwrap_or("");
-        if name.trim().is_empty() {
-            return Err("model router returned tool call without function name".into());
-        }
-        let raw_args = call
-            .pointer("/function/arguments")
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
+            .filter(|name| !name.trim().is_empty())
+        else {
+            return Err(format!(
+                "model router returned tool call without function name: {call}"
+            ));
+        };
+        // Arguments the router did not state are refused, not read as `{}`:
+        // a call run with no input was not the call the model made.
+        let Some(raw_args) = call.pointer("/function/arguments").and_then(Value::as_str) else {
+            return Err(format!(
+                "model router returned tool call {name} without function arguments text: {call}"
+            ));
+        };
         let input: Value = if raw_args.trim().is_empty() {
             json!({})
         } else {
