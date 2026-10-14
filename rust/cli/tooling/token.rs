@@ -38,7 +38,10 @@ fn brama_url() -> Result<String, String> {
         })
 }
 
-fn configured() -> Result<(String, String, String, &'static str), String> {
+/// The router, the agent id (none when the launcher declared none), the
+/// secret and where it came from. An agent id that is not text is refused;
+/// read as empty it printed an agent with no name.
+fn configured() -> Result<(String, Option<String>, String, &'static str), String> {
     // Where the value came from is part of the answer: an operator reading
     // this needs to know whether the launcher carried it or the vault did.
     // The same resolution every request path uses: the secret comes from
@@ -59,12 +62,20 @@ fn configured() -> Result<(String, String, String, &'static str), String> {
             ),
         });
     }
-    Ok((
-        url,
-        env::var(AGENT_ID_KEY).unwrap_or_default(),
-        secret,
-        secret_source.as_str(),
-    ))
+    let agent_id = match env::var(AGENT_ID_KEY) {
+        Ok(agent) if !agent.trim().is_empty() => Some(agent),
+        Ok(_) | Err(env::VarError::NotPresent) => None,
+        Err(error) => return Err(format!("{AGENT_ID_KEY} cannot be read: {error}")),
+    };
+    Ok((url, agent_id, secret, secret_source.as_str()))
+}
+
+/// The agent line a person reads.
+fn agent_line(agent_id: &Option<String>) -> String {
+    match agent_id {
+        Some(agent) => agent.clone(),
+        None => format!("none declared ({AGENT_ID_KEY} is not set)"),
+    }
 }
 
 /// CLI `jeden token [--list] [--json]`.
@@ -93,7 +104,7 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
     }
     let mut lines = vec![
         format!("Brama:   {brama}"),
-        format!("Agent:   {agent_id}"),
+        format!("Agent:   {}", agent_line(&agent_id)),
         match source {
             "stado" => format!(
                 "Token:   {} — read through Stado from the vault item playing role {role}",
@@ -139,7 +150,8 @@ pub(crate) fn token_slash() -> Result<String, String> {
     let (brama, agent_id, secret, source) = configured()?;
     let (role, _) = crate::agent::credential::SECRET_ROLE;
     Ok(format!(
-        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {agent_id}\nToken: {} (redacted, source: {source}).\nThe value stays in the vault item playing role {role}.\n",
+        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {}\nToken: {} (redacted, source: {source}).\nThe value stays in the vault item playing role {role}.\n",
+        agent_line(&agent_id),
         redacted(&secret)
     ))
 }
