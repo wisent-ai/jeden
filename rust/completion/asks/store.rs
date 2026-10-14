@@ -165,9 +165,25 @@ fn adopt() -> Result<AskRegister, String> {
             }
         }
     }
+    // Occurrences are ordered by when they were asked; one whose time is not
+    // milliseconds since the epoch is refused with where it was read, never
+    // ordered as the earliest and made the ask's own time.
     for ask in &mut register.asks {
-        ask.occurrences
-            .sort_by_key(|occurrence| occurrence.asked_at.parse::<u64>().unwrap_or_default());
+        let mut stamped = Vec::new();
+        for occurrence in ask.occurrences.drain(..) {
+            let stamp = occurrence.asked_at.parse::<u64>().map_err(|error| {
+                format!(
+                    "{:?} records the ask {:?} as asked at {:?}, which is not milliseconds since the epoch: {error}",
+                    occurrence.session_path, ask.ask, occurrence.asked_at
+                )
+            })?;
+            stamped.push((stamp, occurrence));
+        }
+        stamped.sort_by_key(|(stamp, _)| *stamp);
+        ask.occurrences = stamped
+            .into_iter()
+            .map(|(_, occurrence)| occurrence)
+            .collect();
         if let Some(first) = ask.occurrences.first() {
             ask.asked_at.clone_from(&first.asked_at);
         }
