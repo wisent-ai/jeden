@@ -45,8 +45,14 @@ const REQUIRED_ENV: &[(&str, &str)] = &[
     ),
 ];
 
-pub(super) fn required(name: &str) -> String {
-    std::env::var(name).unwrap_or_default().trim().to_string()
+/// A configured prerequisite's value. One that is unset, empty or not text
+/// is refused with its name, never read as an empty value.
+pub(super) fn required(name: &str) -> Result<String, String> {
+    match std::env::var(name) {
+        Ok(value) if !value.trim().is_empty() => Ok(value.trim().to_string()),
+        Ok(_) => Err(format!("{name} is set but empty")),
+        Err(error) => Err(format!("{name} cannot be read: {error}")),
+    }
 }
 
 pub(super) fn identity(endpoint: &str) -> String {
@@ -70,14 +76,19 @@ pub fn staging_preflight_from_env() -> Result<(BramaClient, WelesClient), Contra
     if !prerequisites.is_empty() {
         return Err(ContractError::ExternalBlocked { prerequisites });
     }
+    let endpoint = |name: &str| {
+        required(name).map_err(|cause| ContractError::ExternalBlocked {
+            prerequisites: vec![cause],
+        })
+    };
     let brama = BramaClient::with_secret_ref(
-        Some(required("BRAMA_STAGING_URL")),
+        Some(endpoint("BRAMA_STAGING_URL")?),
         Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
         None,
         ReqwestTransport::production(),
     );
     let weles = WelesClient::with_secret_ref(
-        Some(required("WELES_STAGING_URL")),
+        Some(endpoint("WELES_STAGING_URL")?),
         Some(SecretRef::environment("JEDEN_STAGING_OIDC_TOKEN")),
         ReqwestTransport::production(),
     );

@@ -44,10 +44,10 @@ fn poll_to_terminal(
 
 pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
     let (brama, weles) = staging_preflight_from_env().map_err(|error| format!("{error:?}"))?;
-    let schema_min = required("JEDEN_STAGING_SCHEMA_MIN")
+    let schema_min = required("JEDEN_STAGING_SCHEMA_MIN")?
         .parse::<u32>()
         .map_err(|_| "JEDEN_STAGING_SCHEMA_MIN must be u32".to_string())?;
-    let schema_max = required("JEDEN_STAGING_SCHEMA_MAX")
+    let schema_max = required("JEDEN_STAGING_SCHEMA_MAX")?
         .parse::<u32>()
         .map_err(|_| "JEDEN_STAGING_SCHEMA_MAX must be u32".to_string())?;
     super::contract::negotiate(schema_min, schema_max).map_err(|error| format!("{error:?}"))?;
@@ -61,7 +61,7 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
     }
 
     let catalog = BramaApiV1::catalog(&brama, true).map_err(|error| error.to_string())?;
-    let model = required("JEDEN_STAGING_MODEL");
+    let model = required("JEDEN_STAGING_MODEL")?;
     let request_ids = (0..8)
         .map(|index| format!("staging-{}-{index}", super::now_ms()))
         .collect::<Vec<_>>();
@@ -105,8 +105,8 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
     )
     .map_err(|error| error.to_string())?;
 
-    let provider = required("JEDEN_STAGING_PROVIDER");
-    let tenant = required("JEDEN_STAGING_TENANT");
+    let provider = required("JEDEN_STAGING_PROVIDER")?;
+    let tenant = required("JEDEN_STAGING_TENANT")?;
     let mutation = |index: usize| RequestMeta {
         correlation_id: request_ids[index].clone(),
         idempotency_key: Some(format!("{}:{}", tenant, request_ids[index])),
@@ -196,8 +196,8 @@ pub fn run_staging_readiness() -> Result<StagingEvidence, String> {
         .iter()
         .map(|id| identity(id))
         .collect::<Vec<_>>();
-    let release_digest = required("JEDEN_RELEASE_DIGEST");
-    let seed = hex::decode(required("JEDEN_STAGING_REPORT_SIGNING_KEY_HEX"))
+    let release_digest = required("JEDEN_RELEASE_DIGEST")?;
+    let seed = hex::decode(required("JEDEN_STAGING_REPORT_SIGNING_KEY_HEX")?)
         .map_err(|_| "report signing seed must be hex".to_string())?;
     let seed: [u8; 32] = seed
         .try_into()
