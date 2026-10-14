@@ -77,40 +77,36 @@ try {
   const shortRevision = succeeds(await invoke('git', ['rev-parse', '--short', revision], root)).trim();
   assert.ok(version.endsWith(`.${shortRevision}`), `binary does not embed the candidate: ${version}`);
   const result = await invoke(binary, ['context', 'recommend', query, '--limit', limit,
-    '--source', 'files,memory', '--json', '--cwd', workspace]);
+    '--source', 'files,memory,transcripts', '--json', '--cwd', workspace]);
   const advice = JSON.parse(succeeds(result));
   const statuses = Object.fromEntries(advice.sources.map(source => [source.source, source]));
   assert.equal(statuses.files.available, true, JSON.stringify(advice));
+  assert.equal(statuses.transcripts.available, true, JSON.stringify(advice));
   const file = advice.recommendations.find(hit => hit.source === 'files');
   assert.ok(file?.locator.startsWith(`${fixture}:`), JSON.stringify(advice));
   assert.equal(file.snippet, fixtureText);
   assert.match(result.stderr, /context advisor source files/);
   assert.match(result.stderr, /context advisor source memory/);
-  assert.equal(typeof statuses.memory.available, 'boolean');
-  if (statuses.memory.available) {
-    assert.equal(advice.unanswered.some(source => source.source === 'memory'), false);
-    assert.match(statuses.memory.detail, /repo:/);
-    report.registryOutcome = 'answered';
-  } else {
-    assert.ok(statuses.memory.detail.includes('stado database resolve jeden'), statuses.memory.detail);
-    assert.ok(statuses.memory.detail.includes('Stado resolver state')
-      || statuses.memory.detail.includes('resolver-declared'), statuses.memory.detail);
-    assert.ok(advice.unanswered.some(source => source.source === 'memory'
-      && source.detail === statuses.memory.detail), JSON.stringify(advice));
-    assert.match(result.stderr, /blad czekania: context advisor source memory/);
-    report.registryOutcome = 'unavailable';
-  }
+  assert.match(result.stderr, /context advisor source transcripts/);
+  assert.equal(statuses.memory.available, false,
+    `the registry answered; run this journey during a real unanswering registry operation: ${JSON.stringify(advice)}`);
+  assert.ok(statuses.memory.detail.includes('stado database resolve jeden'), statuses.memory.detail);
+  assert.ok(statuses.memory.detail.includes('Stado resolver state')
+    || statuses.memory.detail.includes('resolver-declared'), statuses.memory.detail);
+  assert.ok(advice.unanswered.some(source => source.source === 'memory'
+    && source.detail === statuses.memory.detail), JSON.stringify(advice));
+  assert.match(result.stderr, /blad czekania: context advisor source memory/);
+  report.registryOutcome = 'unavailable';
   report.sources = advice.sources;
   const probe = await invoke(binary, ['context', 'sources', '--json', '--cwd', workspace]);
   const inspection = JSON.parse(succeeds(probe));
   const probedFiles = inspection.sources.find(source => source.source === 'files');
   const probedMemory = inspection.sources.find(source => source.source === 'memory');
   assert.equal(probedFiles?.available, true, JSON.stringify(inspection));
-  assert.equal(typeof probedMemory?.available, 'boolean');
-  if (!probedMemory.available) {
-    assert.ok(probedMemory.detail.includes('stado database resolve jeden'), probedMemory.detail);
-    assert.match(probe.stderr, /blad czekania: context advisor probe memory/);
-  }
+  assert.equal(probedMemory?.available, false,
+    `the real registry answered during the source probe: ${JSON.stringify(inspection)}`);
+  assert.ok(probedMemory.detail.includes('stado database resolve jeden'), probedMemory.detail);
+  assert.match(probe.stderr, /blad czekania: context advisor probe memory/);
   report.probe = inspection.sources;
   report.verdict = 'passed';
 } catch (error) {
