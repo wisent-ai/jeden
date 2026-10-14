@@ -63,7 +63,7 @@ pub(crate) fn rebuild(provider: &dyn EmbeddingProvider) -> Result<usize, String>
     {
         return Err("embedding provider returned invalid or inconsistent vectors".into());
     }
-    let now = crate::memory::now_ms();
+    let now = crate::memory::now_ms()?;
     let model = provider.name().to_owned();
     let rows = records
         .into_iter()

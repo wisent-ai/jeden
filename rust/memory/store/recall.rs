@@ -115,7 +115,7 @@ impl MemoryStore {
         if loser_ids.iter().any(|id| id == winner_id) {
             return Err("conflict winner cannot also be a loser".into());
         }
-        let now = now_ms();
+        let now = now_ms()?;
         let winner_id = winner_id.to_owned();
         let loser_ids = loser_ids.to_vec();
         let payload =

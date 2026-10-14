@@ -27,6 +27,7 @@ pub(super) async fn add_edge(
         return Err("memory edge endpoint does not exist".into());
     }
     let provenance = serde_json::to_string(source).map_err(|e| e.to_string())?;
+    let created = super::now_ms()?;
     let mut pairs = vec![(from_id, to_id)];
     if relation != MemoryRelation::Supports {
         pairs.push((to_id, from_id));
@@ -36,7 +37,7 @@ pub(super) async fn add_edge(
             from_id: Set(from.to_owned()),
             to_id: Set(to.to_owned()),
             relation: Set(relation.as_str().to_owned()),
-            created_at: Set(super::now_ms()),
+            created_at: Set(created),
             provenance_json: Set(provenance.clone()),
         })
         .on_conflict(

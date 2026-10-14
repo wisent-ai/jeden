@@ -41,7 +41,7 @@ async fn update_leased(
 impl MemoryStore {
     pub fn enqueue(&self, kind: &str, payload: &Value) -> Result<String, String> {
         let id = super::stable_id("job");
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let row = job::ActiveModel {
             id: Set(id.clone()),
             kind: Set(kind.to_owned()),
@@ -125,7 +125,7 @@ impl MemoryStore {
     }
 
     pub fn claim(&self, worker: &str, lease_ms: i64) -> Result<Option<LeasedJob>, String> {
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let until = lease_until(now, lease_ms)?;
         let worker = worker.to_owned();
         run_db(move |db| async move {
@@ -186,7 +186,7 @@ impl MemoryStore {
     }
 
     pub fn heartbeat(&self, id: &str, worker: &str, lease_ms: i64) -> Result<bool, String> {
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let until = lease_until(now, lease_ms)?;
         let (id, worker) = (id.to_owned(), worker.to_owned());
         run_db(move |db| async move {
@@ -200,7 +200,7 @@ impl MemoryStore {
     }
     pub fn complete(&self, id: &str, worker: &str) -> Result<bool, String> {
         let (id, worker) = (id.to_owned(), worker.to_owned());
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         run_db(move |db| async move {
             let changes = vec![
                 (job::Column::State, Expr::value("done")),
@@ -212,7 +212,7 @@ impl MemoryStore {
         })
     }
     pub fn retry(&self, id: &str, worker: &str, error: &str) -> Result<bool, String> {
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let (id, worker, error) = (id.to_owned(), worker.to_owned(), redacted(error));
         run_db(move |db| async move {
             let changes = vec![

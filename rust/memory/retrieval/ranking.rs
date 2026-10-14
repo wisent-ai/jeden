@@ -61,7 +61,7 @@ impl SemanticBackend for FtsBackend {
             scope,
             query,
             limit,
-            crate::memory::now_ms(),
+            crate::memory::now_ms()?,
             DEFAULT_HALF_LIFE_MS,
             None,
         )
@@ -108,11 +108,16 @@ impl SemanticBackend for HybridBackend<'_> {
             }
             _ => None,
         };
+        // A recall dated by the caller ranks as of then; otherwise as of now.
+        let as_of = match self.as_of {
+            Some(stated) => stated,
+            None => crate::memory::now_ms()?,
+        };
         rank(
             scope,
             query,
             limit,
-            self.as_of.unwrap_or_else(crate::memory::now_ms),
+            as_of,
             self.half_life_ms,
             semantic.as_deref(),
         )

@@ -93,7 +93,7 @@ impl MemoryStore {
         if logical_key.is_empty() {
             return Err("memory logical key is empty".into());
         }
-        let now = now_ms();
+        let now = now_ms()?;
         let valid_from = valid_from.unwrap_or(now);
         let (kind, scope) = (kind.to_owned(), scope.clone());
         let tags = serde_json::to_string(tags).map_err(|e| e.to_string())?;
@@ -172,7 +172,7 @@ impl MemoryStore {
         source: &MemorySource,
         valid_from: Option<i64>,
     ) -> Result<MemoryRecord, String> {
-        let now = now_ms();
+        let now = now_ms()?;
         let at = valid_from.unwrap_or(now);
         let (scope, logical_key) = (scope.clone(), logical_key.to_owned());
         let source = serde_json::to_string(source).map_err(|e| e.to_string())?;
@@ -212,7 +212,7 @@ impl MemoryStore {
 
     pub fn forget_scope(&self, scope: &MemoryScope) -> Result<usize, String> {
         let scope = scope.clone();
-        let now = now_ms();
+        let now = now_ms()?;
         run_db(move |db| async move {
             let result = memory::Entity::update_many()
                 .col_expr(memory::Column::Status, Expr::value("forgotten"))

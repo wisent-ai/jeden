@@ -201,12 +201,14 @@ pub(super) fn stable_id(prefix: &str) -> String {
     rand::thread_rng().fill_bytes(&mut bytes);
     format!("{prefix}_{}", hex::encode(bytes))
 }
-pub(super) fn now_ms() -> i64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(i64::MAX as u128) as i64
+/// Milliseconds since the Unix epoch as the store's column type; a clock
+/// before the epoch, or a count past an i64, is refused, never stored as zero
+/// or clamped.
+pub(super) fn now_ms() -> Result<i64, String> {
+    let millis = crate::clock::unix_millis().map_err(|error| error.to_string())?;
+    i64::try_from(millis).map_err(|error| {
+        format!("the system clock reads {millis} ms since the Unix epoch, more than the memory store's i64 holds: {error}")
+    })
 }
 
 /// The durable job that rebuilds the full-text index: what `/memory enqueue`

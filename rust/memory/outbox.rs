@@ -32,7 +32,7 @@ impl MemoryStore {
         kind: &str,
         payload: &Value,
     ) -> Result<String, String> {
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let dedupe_key = dedupe_key.to_owned();
         let row = outbox::ActiveModel {
             id: Set(super::stable_id("evt")),
@@ -73,7 +73,7 @@ impl MemoryStore {
         consumer: &dyn OutboxConsumer,
         lease_ms: i64,
     ) -> Result<bool, String> {
-        let now = super::now_ms();
+        let now = super::now_ms()?;
         let until = lease_until(now, lease_ms)?;
         let name = consumer.name().to_owned();
         let owner = name.clone();
@@ -144,8 +144,9 @@ impl MemoryStore {
                     )
                     .col_expr(outbox::Column::LeaseUntil, Expr::value(Option::<i64>::None))
                     .col_expr(outbox::Column::LastError, Expr::value(detail))
-                    // Available to the next pass: no wait was ever measured.
-                    .col_expr(outbox::Column::AvailableAt, Expr::value(super::now_ms()))
+                    // Available to the next pass from the moment it was
+                    // claimed: no wait was ever measured.
+                    .col_expr(outbox::Column::AvailableAt, Expr::value(now))
                     .filter(outbox::Column::Id.eq(id))
                     .exec(&db)
                     .await
@@ -156,7 +157,7 @@ impl MemoryStore {
         }
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
-            let at = super::now_ms();
+            let at = super::now_ms()?;
             processed_event::Entity::insert(processed_event::ActiveModel {
                 consumer: Set(name),
                 event_id: Set(id.clone()),

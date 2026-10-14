@@ -120,6 +120,7 @@ impl MemoryStore {
         let fingerprint = fingerprint.to_owned();
         let description = redacted(description);
         let session_id = session_id.to_owned();
+        let now = now_ms()?;
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
             let prior = workflow::Entity::find_by_id(fingerprint.clone())
@@ -144,7 +145,7 @@ impl MemoryStore {
                 sessions_json: Set(serde_json::to_string(&sessions).map_err(|e| e.to_string())?),
                 occurrences: Set(occurrences),
                 verified: Set(verified),
-                updated_at: Set(now_ms()),
+                updated_at: Set(now),
             })
             .on_conflict(
                 OnConflict::column(workflow::Column::Fingerprint)
@@ -169,7 +170,7 @@ impl MemoryStore {
                     id: Set(id.clone()),
                     workflow_fingerprint: Set(fingerprint),
                     body: Set(format!("# Managed workflow\n\n{description}")),
-                    created_at: Set(now_ms()),
+                    created_at: Set(now),
                 })
                 .on_conflict(
                     OnConflict::column(managed_skill::Column::Id)
