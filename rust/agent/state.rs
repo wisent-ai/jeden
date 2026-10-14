@@ -155,13 +155,6 @@ pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) -> Result<(), Stri
     Ok(())
 }
 
-fn now_millis_u64() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
 /// If loop mode is active and not exhausted, return the stored prompt to
 /// resubmit and consume one iteration (decrement `remaining`; disable when the
 /// remaining count is exhausted or the `until` deadline passes). Returns `None`
@@ -178,7 +171,9 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
     }
     // Duration guard: stop once the deadline has passed.
     if let Some(until) = state.pointer("/loop_mode/until").and_then(Value::as_u64) {
-        if now_millis_u64() >= until {
+        let now = crate::clock::unix_millis()
+            .map_err(|error| format!("the /loop deadline cannot be checked: {error}"))?;
+        if now >= until {
             disable_loop(cwd, &mut state)?;
             return Ok(None);
         }

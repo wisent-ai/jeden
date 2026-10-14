@@ -76,7 +76,7 @@ pub(crate) fn handle_usage(args: &str, context: &SlashContext<'_>) -> Result<Str
         return Err("Usage: /usage [show|reset]".into());
     };
     if let UsageVerb::Reset = verb {
-        write_json_value(&path, &json!({"updatedAt": now_text(), "events": []}))?;
+        write_json_value(&path, &json!({"updatedAt": now_text()?, "events": []}))?;
         return Ok(format!("Reset usage accounting: {}", path.display()));
     }
     let ledger = read_ledger(&path)?;

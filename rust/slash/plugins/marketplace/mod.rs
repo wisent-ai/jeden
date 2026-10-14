@@ -147,17 +147,19 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
             .and_then(|sources| sources.get(&name))
             .cloned()
             .unwrap_or_else(|| json!({}));
-        let added_at = existing
-            .get("addedAt")
-            .cloned()
-            .unwrap_or_else(|| json!(now_text()));
+        let now = now_text()?;
+        // A source added before keeps the time it was first added.
+        let added_at = match existing.get("addedAt") {
+            Some(first) => first.clone(),
+            None => json!(now),
+        };
         registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(name.clone(), json!({
         "name": name,
         "source": source.clone(),
         "type": marketplace_source_type(&source),
         "enabled": true,
         "addedAt": added_at,
-        "updatedAt": now_text(),
+        "updatedAt": now,
         "plugins": existing.get("plugins").filter(|value| value.is_array()).cloned().unwrap_or_else(|| json!([])),
     }));
         let file = save_plugin_registry(context.cwd, &registry)?;

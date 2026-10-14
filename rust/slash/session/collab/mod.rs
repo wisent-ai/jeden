@@ -100,6 +100,9 @@ fn collab_start(
     rest: &str,
     context: &SlashContext<'_>,
 ) -> Result<String, String> {
+    // Read before any relay is touched, so a clock that cannot be read
+    // starts nothing.
+    let started = now_text()?;
     let target = rest.trim();
     if is_network_relay(target) {
         let parsed = crate::collab::parse_relay_url(target)?;
@@ -133,7 +136,7 @@ fn collab_start(
             crate::collab::CollabRole::Full.name(),
             crate::collab::CollabRole::View.name(),
         );
-        let entry = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": key_text, "writeToken": write_token, "cursor": cursor, "role": full, "startedAt": now_text(), "cwd": context.cwd });
+        let entry = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": key_text, "writeToken": write_token, "cursor": cursor, "role": full, "startedAt": started, "cwd": context.cwd });
         state["host"] = entry;
         save_collab_state(context.cwd, state)?;
         let view_url = format!("{}/room/{}#key={}&role={view}", parsed.base, room, key_text);
@@ -158,7 +161,7 @@ fn collab_start(
     }
     let relay = collab_path(context.cwd, rest)?;
     append_collab_event(&relay, "host-start", context.cwd)?;
-    let entry = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "startedAt": now_text(), "cwd": context.cwd });
+    let entry = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "startedAt": started, "cwd": context.cwd });
     state["host"] = entry;
     let file = save_collab_state(context.cwd, state)?;
     Ok(format!("Collab started with durable file relay: {}.\nJoin with: /join {}\nBackend: durable local file relay.\nState: {}", relay.display(), file_url(&relay), file.display()))
@@ -170,6 +173,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
         return Err("Usage: /join <http-relay-url | relay-file>".into());
     }
     let mut state = read_collab_state(context.cwd)?;
+    let joined = now_text()?;
     if is_network_relay(target) {
         let parsed = crate::collab::parse_relay_url(target)?;
         if parsed.room.is_empty() {
@@ -200,7 +204,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
             )?;
         }
         let role = parsed.role.name();
-        state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": parsed.room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": now_text(), "cwd": context.cwd });
+        state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": parsed.room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": joined, "cwd": context.cwd });
         save_collab_state(context.cwd, &state)?;
         return Ok(format!(
             "Joined HTTP collab relay {} room {} as {}. Replayed {} encrypted frame(s); cursor {}.",
@@ -213,7 +217,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
     }
     let relay = collab_path(context.cwd, target)?;
     append_collab_event(&relay, "guest-join", context.cwd)?;
-    state["guest"] = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "joinedAt": now_text(), "cwd": context.cwd });
+    state["guest"] = json!({ "backend": "file", "relayFile": relay, "relayUrl": file_url(&relay), "joinedAt": joined, "cwd": context.cwd });
     let file = save_collab_state(context.cwd, &state)?;
     Ok(format!(
         "Joined collab via durable file relay: {}.\nRelay URL: {}\nState: {}",

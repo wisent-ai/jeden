@@ -155,7 +155,7 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
     let object = project.as_object_mut().expect("project object");
     let mut browser = Map::new();
     browser.insert("mode".into(), json!(verb));
-    browser.insert("updatedAt".into(), json!(now_text()));
+    browser.insert("updatedAt".into(), json!(now_text()?));
     if merged_launch
         .as_object()
         .map(|map| !map.is_empty())

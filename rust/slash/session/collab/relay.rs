@@ -85,7 +85,7 @@ pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> 
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let line = serde_json::to_string(&json!({ "ts": now_text(), "type": event_type, "cwd": cwd }))
+    let line = serde_json::to_string(&json!({ "ts": now_text()?, "type": event_type, "cwd": cwd }))
         .map_err(|e| e.to_string())?;
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -122,7 +122,7 @@ pub(super) fn save_collab_state(cwd: &Path, state: &Value) -> Result<PathBuf, St
     let guest = state.get("guest").cloned().unwrap_or(Value::Null);
     write_json_value(
         &file,
-        &json!({ "updatedAt": now_text(), "host": host, "guest": guest }),
+        &json!({ "updatedAt": now_text()?, "host": host, "guest": guest }),
     )?;
     Ok(file)
 }
@@ -146,7 +146,7 @@ pub(super) fn post_collab_http(
         "jeden-slash",
         crate::collab::CollabRole::Full,
         crate::collab::FrameKind::State {
-            value: json!({ "event": event_type, "ts": now_text(), "cwd": cwd }),
+            value: json!({ "event": event_type, "ts": now_text()?, "cwd": cwd }),
         },
     )?;
     let blob = crate::collab::seal_frame(key_array, &frame)?;

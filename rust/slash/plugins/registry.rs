@@ -49,7 +49,7 @@ pub(crate) fn save_plugin_registry(cwd: &Path, registry: &Value) -> Result<PathB
             normalized["reload"] = reload.clone();
         }
     }
-    normalized["updatedAt"] = json!(now_text());
+    normalized["updatedAt"] = json!(now_text()?);
     write_json_value(&file, &normalized)?;
     Ok(file)
 }

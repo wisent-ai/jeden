@@ -2,7 +2,7 @@ use serde_json::{json, Map, Value};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use url::Url;
 
 use crate::tui::{PickerItem, PickerSpec};
@@ -120,15 +120,11 @@ pub(crate) fn split_head(args: &str) -> (&str, &str) {
     }
 }
 
-pub(crate) fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
-
-pub(crate) fn now_text() -> String {
-    now_millis().to_string()
+/// Milliseconds since the Unix epoch as text, or why the clock has none.
+pub(crate) fn now_text() -> Result<String, String> {
+    crate::clock::unix_millis()
+        .map(|millis| millis.to_string())
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn split_args(value: &str) -> Vec<String> {

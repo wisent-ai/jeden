@@ -91,7 +91,7 @@ pub(crate) fn update_source_plugins(
             .and_then(Value::as_object_mut)
         {
             src.insert("plugins".into(), json!(summary));
-            src.insert("updatedAt".into(), json!(now_text()));
+            src.insert("updatedAt".into(), json!(now_text()?));
         }
         save_plugin_registry(&dir, &registry)?;
     }

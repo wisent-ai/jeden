@@ -24,7 +24,7 @@ pub(crate) fn handle_share(args: &str, context: &SlashContext<'_>) -> Result<Str
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or("session");
-    let created_at = now_text();
+    let created_at = now_text()?;
     let plain = serde_json::to_vec_pretty(
         &json!({ "kind": "jeden-session", "createdAt": created_at, "session": session }),
     )
@@ -88,11 +88,12 @@ pub(crate) fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<Stri
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let id = format!("rule-{}", now_text());
+    let created_at = now_text()?;
+    let id = format!("rule-{created_at}");
     let record = json!({
         "id": id,
         "kind": "omfg-rule",
-        "createdAt": now_text(),
+        "createdAt": created_at,
         "cwd": context.cwd,
         "complaint": complaint,
         "rule": format!("When this situation recurs, avoid the behavior described here: {}", complaint),

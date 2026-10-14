@@ -3,7 +3,7 @@
 
 use std::env;
 
-use crate::slash::common::{now_millis, parse_duration_ms, split_head};
+use crate::slash::common::{parse_duration_ms, split_head};
 use crate::slash::state::{ForceState, LoopState, ModeState};
 use crate::slash::SlashContext;
 use crate::tools;
@@ -121,13 +121,25 @@ pub(crate) fn handle_loop(args: &str, state: &mut ModeState) -> Result<String, S
     } else {
         None
     };
-    state.loop_mode.remaining = None;
-    state.loop_mode.until = None;
-    if !head.is_empty() && head.chars().all(|ch| ch.is_ascii_digit()) {
-        state.loop_mode.remaining = count;
-        prompt = rest;
-    } else if let Some(duration) = parse_duration_ms(head) {
-        state.loop_mode.until = Some(now_millis() + duration);
+    // A duration's end is read from the clock before anything changes too;
+    // a clock that cannot be read, or an end past what the clock counts, is
+    // refused rather than read as time zero or wrapped.
+    let until = match count {
+        Some(_) => None,
+        None => match parse_duration_ms(head) {
+            Some(duration) => {
+                let now = crate::clock::unix_millis()
+                    .map_err(|error| format!("/loop {head}: {error}"))?;
+                Some(now.checked_add(duration).ok_or_else(|| {
+                    format!("/loop {head}: the duration ends past what the clock counts")
+                })?)
+            }
+            None => None,
+        },
+    };
+    state.loop_mode.remaining = count;
+    state.loop_mode.until = until;
+    if count.is_some() || until.is_some() {
         prompt = rest;
     }
     state.loop_mode.enabled = true;

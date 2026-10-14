@@ -177,7 +177,7 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
         let plugin_obj = plugin.as_object_mut().expect("plugin object");
         plugin_obj.insert("enabled".into(), json!(matches!(toggle, Toggle::Enable)));
         plugin_obj.insert("scope".into(), json!(scope.clone()));
-        plugin_obj.insert("updatedAt".into(), json!(now_text()));
+        plugin_obj.insert("updatedAt".into(), json!(now_text()?));
         let file = save_plugin_registry(&reg_dir, &registry)?;
         return Ok(format!(
             "{} plugin {} in {} scope ({}).",
