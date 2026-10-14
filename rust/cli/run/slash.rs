@@ -34,9 +34,24 @@ pub(crate) fn update_command() -> Result<String, String> {
     let manifest_location = env::var("JEDEN_UPDATE_MANIFEST").map_err(|_| {
         "JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest".to_string()
     })?;
-    let channel = env::var("JEDEN_UPDATE_CHANNEL").unwrap_or_else(|_| "stable".into());
-    let target_triple =
-        env::var("JEDEN_UPDATE_TARGET_TRIPLE").unwrap_or(super::update::native_target_triple()?);
+    // The documented default channel applies only when none is declared; a
+    // declaration that is not text is refused, not read as the default.
+    let channel = match env::var("JEDEN_UPDATE_CHANNEL") {
+        Ok(channel) => channel,
+        Err(env::VarError::NotPresent) => "stable".to_string(),
+        Err(error) => return Err(format!("JEDEN_UPDATE_CHANNEL cannot be read: {error}")),
+    };
+    // The native triple is asked only when none is declared: asked first, a
+    // host whose own triple is unknown refused even a declared target.
+    let target_triple = match env::var("JEDEN_UPDATE_TARGET_TRIPLE") {
+        Ok(triple) => triple,
+        Err(env::VarError::NotPresent) => super::update::native_target_triple()?,
+        Err(error) => {
+            return Err(format!(
+                "JEDEN_UPDATE_TARGET_TRIPLE cannot be read: {error}"
+            ))
+        }
+    };
     let target = match env::var_os("JEDEN_UPDATE_TARGET") {
         Some(path) => PathBuf::from(path),
         None => std::env::current_exe().map_err(|error| error.to_string())?,
