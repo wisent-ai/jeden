@@ -36,7 +36,6 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 static ATOMIC_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 pub const TASK_STORE_SCHEMA_VERSION: u32 = 2;
@@ -226,12 +225,6 @@ pub fn execute_registered_tool(
     }
 }
 
-pub(crate) fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
-}
 pub(crate) fn next_sequence() -> u64 {
     ATOMIC_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }

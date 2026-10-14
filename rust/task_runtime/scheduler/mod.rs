@@ -1,7 +1,8 @@
 use super::discovery::discover_agents;
 use super::mailbox::Mailbox;
 use super::types::{AgentDefinition, JobRecord, JobStatus, TaskError, TaskLimits};
-use super::{atomic_json, ensure_store_schema, now_millis};
+use super::{atomic_json, ensure_store_schema};
+use crate::clock::unix_millis;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -145,11 +146,12 @@ impl TaskScheduler {
             .collect())
     }
     fn recover(&self) -> Result<(), TaskError> {
+        let now = unix_millis()?;
         for mut job in self.list()? {
             if job.status == JobStatus::Running && !job.pid.map(process_alive).unwrap_or(false) {
                 job.status = JobStatus::Interrupted;
                 job.pid = None;
-                job.updated_at = now_millis();
+                job.updated_at = now;
                 job.error = Some(
                     "scheduler recovered job after its process exited without a terminal record"
                         .into(),

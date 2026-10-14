@@ -1,5 +1,6 @@
+use crate::clock::unix_millis;
 use crate::task_runtime::types::{MailMessage, TaskError};
-use crate::task_runtime::{atomic_json, next_sequence, now_millis};
+use crate::task_runtime::{atomic_json, next_sequence};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -37,7 +38,7 @@ impl Mailbox {
         }
         let dir = self.agent_dir(to)?;
         fs::create_dir_all(&dir)?;
-        let at = now_millis();
+        let at = unix_millis()?;
         let id = format!("msg-{at}-{}-{}", std::process::id(), next_sequence());
         let message = MailMessage {
             id: id.clone(),
@@ -73,6 +74,9 @@ impl Mailbox {
             }
         }
         paths.sort();
+        // The delivery time is read before anything changes, so a clock that
+        // cannot be read refuses with the wake and every message in place.
+        let delivered = if deliver { Some(unix_millis()?) } else { None };
         // The wake goes before any message leaves the inbox: a wake that
         // cannot be cleared refuses the delivery with every message still
         // waiting, instead of waking the agent again on an emptied inbox, and
@@ -92,7 +96,7 @@ impl Mailbox {
             let mut message: MailMessage = serde_json::from_slice(&fs::read(&path)?)?;
             if deliver {
                 if message.delivered_at.is_none() {
-                    message.delivered_at = Some(now_millis());
+                    message.delivered_at = delivered;
                 }
                 fs::remove_file(&path)?;
             }
@@ -125,9 +129,10 @@ impl Mailbox {
                 })
                 .collect::<Vec<_>>();
             if !found.is_empty() {
+                let delivered = unix_millis()?;
                 for message in &mut found {
                     if message.delivered_at.is_none() {
-                        message.delivered_at = Some(now_millis());
+                        message.delivered_at = Some(delivered);
                     }
                     fs::remove_file(dir.join(format!("{}.json", message.id)))?;
                 }

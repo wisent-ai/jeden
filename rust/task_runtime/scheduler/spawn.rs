@@ -11,7 +11,7 @@ use super::support::{
     validate_output,
 };
 use super::{SpawnRequest, TaskScheduler, JOB_SEQUENCE};
-use crate::task_runtime::now_millis;
+use crate::clock::unix_millis;
 use crate::task_runtime::types::{JobRecord, JobStatus, TaskError};
 use crate::task_runtime::workspace::{isolate, IsolatedWorkspace};
 use serde_json::json;
@@ -33,7 +33,7 @@ impl TaskScheduler {
         let (depth, parent) = self.depth_and_parent(&request)?;
         self.validate_policy(&request, definition, depth, parent.as_ref())?;
         let child_task = agent_task_context(&self.cwd, definition, &request.task)?;
-        let created = now_millis();
+        let created = unix_millis()?;
         let sequence = JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let id = format!("job-{created}-{}-{sequence}", std::process::id());
         let slot = self.reserve_slot(&id)?;
@@ -154,7 +154,12 @@ impl TaskScheduler {
                     });
                     (status, stdout_result, stderr_result)
                 });
-                reaper_job.updated_at = now_millis();
+                // A clock that cannot be read leaves the record at its start
+                // time and says so beside whatever else the job reports.
+                let ended = unix_millis();
+                if let Ok(ended) = ended {
+                    reaper_job.updated_at = ended;
+                }
                 reaper_job.pid = None;
                 if let Err(error) = stdout_result.and(stderr_result) {
                     reaper_job.error = Some(error.to_string());
@@ -225,6 +230,13 @@ impl TaskScheduler {
                     if reaper_job.status == JobStatus::Succeeded {
                         reaper_job.status = JobStatus::Failed;
                     }
+                }
+                // Said last, so no later failure of the job writes over it.
+                if let Err(error) = ended {
+                    reaper_job.error = Some(match reaper_job.error.take() {
+                        Some(earlier) => format!("{earlier}; the end time was not read: {error}"),
+                        None => format!("the end time was not read: {error}"),
+                    });
                 }
                 // A job whose end cannot be written stays 'running' in its
                 // record for every reader; the failure is said where it

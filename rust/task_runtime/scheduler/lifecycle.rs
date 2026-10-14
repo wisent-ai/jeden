@@ -8,8 +8,8 @@
 
 use super::support::terminate_group;
 use super::{BatchTask, SpawnRequest, TaskScheduler};
+use crate::clock::unix_millis;
 use crate::task_runtime::discovery::discover_agents;
-use crate::task_runtime::now_millis;
 use crate::task_runtime::types::{CapabilityHealth, JobRecord, JobStatus, TaskError};
 use crate::task_runtime::workspace::IsolatedWorkspace;
 use serde_json::json;
@@ -37,7 +37,7 @@ impl TaskScheduler {
             return Err(TaskError::Conflict(format!("job {id} is not terminal")));
         }
         job.delivered = true;
-        job.updated_at = now_millis();
+        job.updated_at = unix_millis()?;
         self.write_job(&job)?;
         Ok(job)
     }
@@ -60,6 +60,9 @@ impl TaskScheduler {
                 break;
             }
         }
+        // The time is read before any job is stopped, so a clock that cannot
+        // be read stops nothing rather than leave a stopped job unrecorded.
+        let now = unix_millis()?;
         let mut cancelled = Vec::new();
         for target in targets.iter().rev() {
             let mut job = self.get(target)?;
@@ -69,7 +72,7 @@ impl TaskScheduler {
                 }
                 job.status = JobStatus::Cancelled;
                 job.pid = None;
-                job.updated_at = now_millis();
+                job.updated_at = now;
                 self.write_job(&job)?;
                 cancelled.push(target.clone());
             }
@@ -81,14 +84,15 @@ impl TaskScheduler {
         if !job.status.terminal() {
             return Err(TaskError::Conflict("cannot merge a running job".into()));
         }
+        let now = unix_millis()?;
         IsolatedWorkspace {
             path: job.workspace.clone(),
             strategy: job.isolation.clone(),
             parent: job.cwd.clone(),
         }
         .merge(&job.capture, self.limits.max_output_bytes)?;
-        job.metadata.insert("mergedAt".into(), json!(now_millis()));
-        job.updated_at = now_millis();
+        job.metadata.insert("mergedAt".into(), json!(now));
+        job.updated_at = now;
         self.write_job(&job)?;
         Ok(job)
     }

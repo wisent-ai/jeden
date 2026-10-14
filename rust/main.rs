@@ -11,6 +11,7 @@ pub mod capability;
 pub mod cas;
 pub mod chat_memory;
 pub mod cli;
+pub mod clock;
 pub mod collab;
 pub mod completion;
 pub mod conformance;
