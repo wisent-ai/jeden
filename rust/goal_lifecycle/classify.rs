@@ -8,7 +8,6 @@ use super::{LifecycleAction, LifecycleDecision, LifecycleRequest};
 use crate::model_router::{chat_completion, ChatConfig};
 use serde_json::{json, Value};
 use std::env;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The Brama alias the lifecycle model is declared under on this machine. No
 /// alias is built in: a machine that declares none has no classifier, and the
@@ -31,11 +30,8 @@ const SYSTEM_PROMPT: &str = include_str!("prompt.txt");
 /// UTC RFC3339 timestamp and calendar day via Howard Hinnant's
 /// civil-from-days; no date crate is available here. The envelope's
 /// `local_day` therefore uses the UTC day.
-fn utc_now_strings() -> (String, String) {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs() as i64;
+fn utc_now_strings() -> Result<(String, String), String> {
+    let secs = crate::clock::unix_seconds().map_err(|error| error.to_string())? as i64;
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);
     let z = days + 719_468;
@@ -55,7 +51,7 @@ fn utc_now_strings() -> (String, String) {
         (rem / 60) % 60,
         rem % 60
     );
-    (timestamp, local_day)
+    Ok((timestamp, local_day))
 }
 
 /// The member whose prompt this is: `USER`, else `LOGNAME`. Neither set is
@@ -76,7 +72,7 @@ fn member_id() -> Result<String, String> {
 }
 
 fn build_envelope(request: &LifecycleRequest) -> Result<Value, String> {
-    let (timestamp, local_day) = utc_now_strings();
+    let (timestamp, local_day) = utc_now_strings()?;
     let member_id = member_id()?;
     let candidates = match request.goal_objective.as_deref() {
         Some(objective) => json!([

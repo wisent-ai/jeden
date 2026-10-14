@@ -5,7 +5,6 @@
 use super::instant::parse_rfc3339;
 use super::types::ReleaseManifestV2;
 use semver::Version;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) fn validate_hash(label: &str, value: &str) -> Result<(), String> {
     if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
@@ -68,12 +67,12 @@ pub(super) fn validate_manifest(
             "current version {current_version} is below release minimum {minimum}"
         ));
     }
-    let now = now.unwrap_or_else(|| {
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs()
-    });
+    // A clock before the epoch refuses: read as zero, every manifest's
+    // expiry stood in the future and an expired release was accepted.
+    let now = match now {
+        Some(now) => now,
+        None => crate::clock::unix_seconds().map_err(|error| error.to_string())?,
+    };
     let published_at = parse_rfc3339(&manifest.published_at)?;
     let expires_at = parse_rfc3339(&manifest.expires_at)?;
     if published_at > now.saturating_add(300) {

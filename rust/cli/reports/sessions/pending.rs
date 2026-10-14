@@ -52,7 +52,7 @@ pub(crate) fn create_pending_action(
 ) -> Result<String, String> {
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
-    let now = now_epoch_seconds();
+    let now = now_epoch_seconds()?;
     let id = format!(
         "pending-{}-{:016x}",
         now,
@@ -143,7 +143,7 @@ pub(crate) fn claim_pending_action(
     };
     // A preview holds until it is applied or discarded; the file revision it
     // was made against is what keeps a stale preview from landing.
-    let now = now_epoch_seconds();
+    let now = now_epoch_seconds()?;
     let payload_path = artifact_dir
         .join("pending-actions")
         .join(format!("{id}.payload"));
@@ -199,7 +199,7 @@ pub(crate) fn complete_pending_action(artifact_dir: &Path, id: &str) -> Result<(
     }
     append_ledger_entry_unlocked(
         session_dir,
-        now_epoch_seconds().to_string(),
+        now_epoch_seconds()?.to_string(),
         "pending_apply",
         json!({ "pendingId": id }),
     )?;
@@ -236,7 +236,7 @@ pub(crate) fn discard_pending_action(
     }
     append_ledger_entry_unlocked(
         session_dir,
-        now_epoch_seconds().to_string(),
+        now_epoch_seconds()?.to_string(),
         "pending_discard",
         json!({ "pendingId": id }),
     )?;
@@ -255,9 +255,8 @@ fn remove_pending_payload(artifact_dir: &Path, id: &str) -> Result<(), String> {
     }
 }
 
-fn now_epoch_seconds() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+/// Seconds since the epoch; a clock set before it refuses rather than stamping
+/// a pending action or its ledger entry with zero.
+fn now_epoch_seconds() -> Result<u64, String> {
+    crate::clock::unix_seconds().map_err(|error| error.to_string())
 }
