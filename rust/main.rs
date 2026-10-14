@@ -181,7 +181,6 @@ pub fn main() -> ExitCode {
             )),
         },
         Command::Import => session_import::command(&args),
-        Command::Restore => cli::restore::command(&args),
         Command::Sessions => match args.positionals.split_first() {
             None => list_sessions(None, args.json),
             Some((verb, query)) if verb == "search" => search_sessions_command(query, args.json),

@@ -22,7 +22,6 @@ pub(crate) enum Command {
     Acp,
     Relay,
     Import,
-    Restore,
     Sessions,
     Copy,
     Show,
@@ -85,7 +84,6 @@ impl Command {
                 | Command::Context
                 | Command::Workspace
                 | Command::Import
-                | Command::Restore
                 | Command::Todo
                 | Command::Asks
                 | Command::Copy

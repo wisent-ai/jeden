@@ -22,10 +22,10 @@ use std::path::{Path, PathBuf};
 use super::interaction::RpcInteractionBridge;
 use crate::rpc::server::operations::wire::error_response;
 use crate::rpc::server::operations::wire::success_response;
+use crate::rpc::server::operations::workspace::import_sessions;
 use crate::rpc::server::operations::workspace::workspace_adopt;
 use crate::rpc::server::operations::workspace::workspace_discover;
 use crate::rpc::server::operations::workspace::workspace_status;
-use crate::rpc::server::operations::workspace::{import_sessions, restore_sessions};
 use crate::sdk::{AgentSession, SessionOptions};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -266,7 +266,6 @@ fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), 
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),
         "session/import" => import_sessions(&request.params),
-        "session/restore" => restore_sessions(&request.params),
         "session/open" | "session/load" => create_session(state, request.params, true),
         "session/cancel" => abort_session(state, &request.params),
         "session/status" => session_status(state, &request.params),

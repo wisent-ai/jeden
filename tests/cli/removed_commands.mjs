@@ -1,8 +1,10 @@
 // Real test that a command folded into a general primitive is gone, not kept
 // as a second spelling: `jeden worktree` (cleaning up Git worktrees jeden
-// cannot create is git's own `worktree list|remove|prune`) is refused as an
-// unknown command with the same usage status any unknown word gets, with or
-// without its former actions, and prints nothing.
+// cannot create is git's own `worktree list|remove|prune`) and `jeden
+// restore` (resuming every agent session stopped since a time is `oko
+// sessions resume --since`) are refused as unknown commands with the same
+// usage status any unknown word gets, with or without their former actions
+// and options, and print nothing.
 // Every command, its exit status and output go to the run's report.json.
 //
 // Usage: JEDEN_BIN=<built jeden> node tests/cli/removed_commands.mjs
@@ -17,7 +19,8 @@ const binary = process.env.JEDEN_BIN;
 if (!binary) {
   throw new Error('JEDEN_BIN must name the built jeden this test runs; the test proves that binary, not whichever is on PATH');
 }
-const removed = 'worktree';
+const worktree = 'worktree';
+const restore = 'restore';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runs = join(root, 'build/real-tests/removed-commands');
 mkdirSync(runs, { recursive: true });
@@ -31,11 +34,12 @@ function jeden(args) {
   return result;
 }
 
-function refusedAsUnknown(args, usage) {
-  const result = jeden(args);
-  assert.equal(result.status, usage, `jeden ${args.join(' ')} exited ${result.status}, not as an unknown command`);
+function refusedAsUnknown(removed, args, usage) {
+  const line = [removed, ...args];
+  const result = jeden(line);
+  assert.equal(result.status, usage, `jeden ${line.join(' ')} exited ${result.status}, not as an unknown command`);
   assert.match(result.stderr, new RegExp(`unknown command: ${removed}`));
-  assert.equal(result.stdout, '', `jeden ${args.join(' ')} printed output`);
+  assert.equal(result.stdout, '', `jeden ${line.join(' ')} printed output`);
 }
 
 try {
@@ -45,8 +49,11 @@ try {
 
   const unknown = jeden(['no-such-command']);
   assert.ok(unknown.status, `an unknown command was accepted: ${unknown.stdout}`);
-  refusedAsUnknown([removed], unknown.status);
-  refusedAsUnknown([removed, 'clear'], unknown.status);
+  refusedAsUnknown(worktree, [], unknown.status);
+  refusedAsUnknown(worktree, ['clear'], unknown.status);
+  refusedAsUnknown(restore, [], unknown.status);
+  refusedAsUnknown(restore, ['--since', 'today'], unknown.status);
+  refusedAsUnknown(restore, ['open', join(output, 'session.jsonl')], unknown.status);
   report.verdict = 'passed';
 } catch (error) {
   report.error = error.stack || String(error);

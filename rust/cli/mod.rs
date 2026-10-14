@@ -10,7 +10,6 @@ pub(crate) mod i18n;
 pub(crate) mod invocation;
 pub(crate) mod lease;
 mod reports;
-pub(crate) mod restore;
 pub(crate) mod run;
 pub(crate) mod tooling;
 pub(crate) mod workspace;
