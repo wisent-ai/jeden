@@ -43,6 +43,25 @@ fn parse(file: &Path, bytes: &[u8]) -> Result<AskRegister, String> {
             file.display()
         ));
     }
+    // Every reader orders asks and occurrences by these times; one that is not
+    // milliseconds since the epoch is refused here, where the file is named,
+    // never ordered as the earliest by whichever reader meets it.
+    for ask in &register.asks {
+        let times = std::iter::once(&ask.asked_at).chain(
+            ask.occurrences
+                .iter()
+                .map(|occurrence| &occurrence.asked_at),
+        );
+        for time in times {
+            time.parse::<u64>().map_err(|error| {
+                format!(
+                    "{} records ask {} as asked at {time:?}, which is not milliseconds since the epoch: {error}",
+                    file.display(),
+                    ask.id
+                )
+            })?;
+        }
+    }
     Ok(register)
 }
 
