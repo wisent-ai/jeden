@@ -115,7 +115,7 @@ pub(super) fn acceptance_command(
                         uri: uri.clone(),
                         acceptance_id: Some(criterion_id.clone()),
                         added_at: now(),
-                        added_by: actor(),
+                        added_by: actor()?,
                     });
                     Ok(())
                 },

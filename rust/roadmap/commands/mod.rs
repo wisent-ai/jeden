@@ -134,7 +134,7 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 .transpose()?
                 .unwrap_or(RoadmapStatus::Backlog);
             let created_at = now();
-            let created_by = actor();
+            let created_by = actor()?;
             let mut created_id = String::new();
             let roadmap = store.mutate(
                 revision,

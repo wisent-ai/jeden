@@ -91,10 +91,18 @@ pub(super) fn next_item_id(roadmap: &RoadmapFile) -> String {
     format!("JED-{next:03}")
 }
 
-pub(super) fn actor() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .unwrap_or_else(|_| "unknown".into())
+/// Who records a roadmap change: USER, or USERNAME where USER is unset. A
+/// change nobody is named for is refused, never attributed to "unknown".
+pub(super) fn actor() -> Result<String, RoadmapError> {
+    let named = match std::env::var("USER") {
+        Err(std::env::VarError::NotPresent) => std::env::var("USERNAME"),
+        read => read,
+    };
+    named.map_err(|error| {
+        RoadmapError::Invalid(format!(
+            "USER or USERNAME must name who records this roadmap change: {error}"
+        ))
+    })
 }
 
 pub(super) fn now() -> String {

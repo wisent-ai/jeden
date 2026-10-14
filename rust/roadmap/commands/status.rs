@@ -64,7 +64,7 @@ pub(super) fn mutate_status_explicit(
     }
     let evidence_uris = options.many("evidence");
     let evidence_added_at = now();
-    let evidence_added_by = actor();
+    let evidence_added_by = actor()?;
     let event_type = if status == RoadmapStatus::Passed {
         "roadmap_item_passed"
     } else if status == RoadmapStatus::ExternalBlocked {
