@@ -67,18 +67,19 @@ impl Linker {
                     "task {task_id} names ask {id}, which is not in the operator ask register; name an askId from operatorAsks or leave it out to record a new ask"
                 )
             })?),
-            None => self
-                .register
-                .asks
-                .iter()
-                .filter(|ask| {
+            None => {
+                let mut matching = Vec::new();
+                for ask in self.register.asks.iter().filter(|ask| {
                     same_words(&ask.ask, wording)
-                        || ask
-                            .occurrences
-                            .iter()
-                            .any(|occurrence| same_words(&occurrence.wording, wording))
-                })
-                .max_by_key(|ask| (ask.answer.is_none(), ask.asked_at.parse::<u64>().unwrap_or_default())),
+                        || ask.occurrences.iter().any(|occurrence| same_words(&occurrence.wording, wording))
+                }) {
+                    let stamp = ask.asked_at.parse::<u64>().map_err(|error| {
+                        format!("ask {} records its time as {:?}, which is not milliseconds since the epoch: {error}", ask.id, ask.asked_at)
+                    })?;
+                    matching.push(((ask.answer.is_none(), stamp), ask));
+                }
+                matching.into_iter().max_by_key(|(key, _)| *key).map(|(_, ask)| ask)
+            }
         };
         let link = match existing {
             Some(ask) => match &ask.answer {

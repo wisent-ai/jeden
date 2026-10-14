@@ -79,8 +79,15 @@ fn summary(register: &AskRegister, ask: &OperatorAsk) -> Value {
 
 pub(crate) fn list_value() -> Result<Value, String> {
     let register = super::read()?;
-    let mut asks: Vec<&OperatorAsk> = register.asks.iter().collect();
-    asks.sort_by_key(|ask| std::cmp::Reverse(ask.asked_at.parse::<u64>().unwrap_or_default()));
+    let mut asks = Vec::new();
+    for ask in &register.asks {
+        let stamp = ask.asked_at.parse::<u64>().map_err(|error| {
+            format!("ask {} records its time as {:?}, which is not milliseconds since the epoch: {error}", ask.id, ask.asked_at)
+        })?;
+        asks.push((stamp, ask));
+    }
+    asks.sort_by_key(|(stamp, _)| std::cmp::Reverse(*stamp));
+    let asks: Vec<&OperatorAsk> = asks.into_iter().map(|(_, ask)| ask).collect();
     Ok(json!({
         "register": super::register_path(),
         "revision": register.revision,
