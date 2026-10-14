@@ -87,33 +87,6 @@ export const managementCommands = [
   completionPage("zsh"),
   completionPage("fish"),
 
-  // Worktree leaves.
-  {
-    path: "worktree/list",
-    group: "Managed worktrees",
-    invocation: "jeden worktree list [--json] [--cwd path]",
-    purpose: "List Git worktrees correlated with Jeden task records.",
-    inputs: ["Optional: <code>--cwd</code> for the repository and <code>--json</code> for structured rows."],
-    effect: "Reads Git worktree metadata and task stores, classifies managed entries as live or stale, and prints them without creating scheduler state or mutating a worktree. Only a store, jobs directory, session root or workspace root that does not exist is empty: one that cannot be listed (<code>the job records in PATH cannot be listed: CAUSE</code>, <code>the session root …</code>, <code>the workspace root …</code>), a job record that cannot be read (<code>the job record PATH cannot be read: CAUSE</code>) or does not parse (<code>the job record PATH is not a job record: CAUSE</code>) fails the command, because the workspace that record claims would otherwise be listed as an orphan.",
-    refusals: ["An unexpected argument is refused as <code>unexpected argument 'ARG': usage: jeden worktree [list|clear] [--dry-run] [--yes] [--json]</code> and exits 2; repositories without managed worktrees return an explanatory empty-state result."],
-  },
-  {
-    path: "worktree/clear",
-    group: "Managed worktrees",
-    invocation: "jeden worktree clear (--dry-run | --yes) [--json] [--cwd path]",
-    purpose: "Remove stale, safely bounded Git worktrees owned by Jeden.",
-    inputs: ["Required: <code>--dry-run</code> to see the removal plan, or <code>--yes</code> to confirm the removal it lists. Optional: <code>--json</code> and repository <code>--cwd</code>."],
-    effect: "Evaluates stale managed worktrees and either reports the removal plan or removes each with <code>git worktree remove</code>, returning removed and skipped rows with reasons. A checkout no repository claims is deleted only when <code>git status --porcelain</code> in it answers and is empty.",
-    refusals: [
-      "Without <code>--dry-run</code> or <code>--yes</code> the command removes nothing and exits 2: <code>worktree clear deletes stale worktree checkouts permanently; run `jeden worktree clear --dry-run` to see them, then `jeden worktree clear --yes`</code>.",
-      "The command refuses removal outside canonical Jeden-managed roots and never removes the current checkout or repository top level.",
-      "Live or unknown task ownership is kept. When <code>git worktree remove</code> refuses (modified or untracked files), the worktree is kept and reported as skipped with git's own message; it is never deleted another way.",
-      "A checkout no repository claims is kept when it has uncommitted changes or when <code>git status</code> does not answer in it. The refusal includes every returned status row, in text and JSON alike, rather than hiding changes after a fixed preview count.",
-      "Filesystem removal failures retain the affected path and operating-system cause. If a clean unclaimed checkout was removed but its administrative directory could not be removed, the row explicitly reports that partial outcome and the remaining directory rather than claiming complete cleanup.",
-      "The same job-record, store and root failures as <code>jeden worktree list</code> fail the command before anything is removed, in <code>--dry-run</code> and <code>--yes</code> alike: a workspace whose record could not be read is never taken for an orphan and removed from under its job.",
-    ],
-  },
-
   // Roadmap direct leaves.
   {
     path: "roadmap/list",

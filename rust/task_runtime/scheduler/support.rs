@@ -18,9 +18,7 @@ use std::process::Command;
 use super::kill;
 
 /// Root directory that holds the isolated workspaces for jobs of a scheduler
-/// with the given store and cwd. Mirrors `TaskScheduler::workspace_root` so
-/// read-only tooling (e.g. `jeden worktree`) can locate managed workspaces
-/// without opening (and thereby mutating) a scheduler store.
+/// with the given store and cwd (`TaskScheduler::workspace_root`).
 pub(crate) fn workspace_root_for(store: &Path, cwd: &Path) -> PathBuf {
     let store = fs::canonicalize(store).unwrap_or_else(|_| store.to_path_buf());
     let cwd = fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());

@@ -39,7 +39,6 @@ pub(crate) enum Command {
     Roadmap,
     Capabilities,
     Completions,
-    Worktree,
     Token,
     Lease,
     ChatMemory,
@@ -79,7 +78,6 @@ impl Command {
             self,
             Command::Export
                 | Command::Roadmap
-                | Command::Worktree
                 | Command::Token
                 | Command::Stats
                 | Command::Gallery

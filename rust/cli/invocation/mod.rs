@@ -60,7 +60,6 @@ pub(crate) fn usage() -> String {
         "  jeden conformance [--json] [--cwd path]\n",
         "  jeden capabilities [--json] [--cwd path]\n",
         "  jeden completions <bash|zsh|fish>\n",
-        "  jeden worktree [list|clear] [--dry-run] [--yes] [--json] [--cwd path]\n",
         "  jeden token [--list] [--json] — which Brama credential this agent uses, redacted, and its Skarbiec item\n",
         "  jeden stats [--json|--summary|--serve [--port N]] — usage/quota snapshot or local web dashboard\n",
         "  jeden gallery [--theme NAME|--all] [--color] — render TUI components across themes (dev tool)\n\n",

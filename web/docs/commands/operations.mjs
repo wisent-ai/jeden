@@ -152,21 +152,6 @@ export const operationCommands = [
     refusals: ["A missing or unknown shell is refused as <code>unknown shell '&lt;missing-or-value&gt;': usage: jeden completions &lt;bash|zsh|fish&gt;</code>."],
   },
   {
-    path: "worktree",
-    group: "Managed worktrees",
-    invocation: "jeden worktree [list|clear] [--dry-run] [--json] [--cwd path]",
-    purpose: "Inspect or safely clear stale Git worktrees owned by Jeden's task runtime.",
-    inputs: [
-      "No action defaults to <code>list</code>.",
-      "<code>--dry-run</code> previews <code>clear</code>; <code>--json</code> selects structured rows and <code>--cwd</code> selects the repository.",
-    ],
-    effect: "Lists task-record-correlated managed worktrees, or removes only stale worktrees that pass canonical managed-root, checkout, and repository-top safety checks.",
-    refusals: [
-      "Unexpected arguments are refused with <code>usage: jeden worktree [list|clear] [--dry-run] [--json]</code>.",
-      "Clear skips the current checkout, repository root, live/unknown work, and any path outside Jeden-managed workspace roots; it reports the reason instead of removing it.",
-    ],
-  },
-  {
     path: "token",
     group: "Runtime and operations",
     invocation: "jeden token [--list] [--json]",

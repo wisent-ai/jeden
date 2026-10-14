@@ -23,7 +23,6 @@ pub use protocol::{
     Worker, WorkerDescriptor, WorkerEvent, WorkerHello, WORKER_PROTOCOL_MAJOR,
     WORKER_PROTOCOL_MINOR,
 };
-pub(crate) use scheduler::workspace_root_for;
 pub use scheduler::{BatchTask, SpawnRequest, TaskScheduler};
 pub use store::{CoordinatorStore, JobState};
 pub use types::{

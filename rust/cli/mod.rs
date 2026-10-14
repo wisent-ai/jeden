@@ -14,7 +14,6 @@ pub(crate) mod restore;
 pub(crate) mod run;
 pub(crate) mod tooling;
 pub(crate) mod workspace;
-pub(crate) mod worktree;
 
 pub(crate) use reports::{billing, contracts, sessions, stats};
 pub(crate) use tooling::{completions, gallery, token};
