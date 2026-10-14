@@ -98,7 +98,7 @@ impl AcpState {
             request.mcp_servers.len(),
         )?;
         let session_id = request.session_id.0.to_string();
-        if !AgentSession::exists(&session_id) {
+        if !AgentSession::exists(&session_id).map_err(super::internal)? {
             return Err(agent_client_protocol::Error::resource_not_found(Some(
                 session_id,
             )));

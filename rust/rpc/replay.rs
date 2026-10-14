@@ -216,10 +216,15 @@ impl ReplayStore {
 }
 
 fn load_stream(path: &Path) -> Result<StreamState, ReplayError> {
-    if !path.exists() {
-        return Ok(StreamState::default());
-    }
-    let file = OpenOptions::new().read(true).open(path).map_err(storage)?;
+    // Only a stream that does not exist is empty; one that cannot be opened
+    // for any other cause is the storage error, not a stream with no events.
+    let file = match OpenOptions::new().read(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(StreamState::default())
+        }
+        Err(error) => return Err(storage(error)),
+    };
     let mut state = StreamState::default();
     for (index, line) in BufReader::new(file).lines().enumerate() {
         let line = line.map_err(storage)?;

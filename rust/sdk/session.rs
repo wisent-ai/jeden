@@ -119,14 +119,17 @@ impl AgentSession {
 
     /// Whether `id_or_path` names a stored session `resume` can open, resolved
     /// the way `resume` resolves it, so a caller can answer "not found" from
-    /// the store instead of from the words of resume's error.
-    pub fn exists(id_or_path: impl AsRef<Path>) -> bool {
-        resolve_session_path(id_or_path.as_ref()).exists()
+    /// the store instead of from the words of resume's error. A session that
+    /// cannot be examined is the error, not "not found".
+    pub fn exists(id_or_path: impl AsRef<Path>) -> Result<bool, String> {
+        crate::tool_runtime::runtime_ops::platform::presence::present(&resolve_session_path(
+            id_or_path.as_ref(),
+        ))
     }
 
     pub fn resume(options: SessionOptions, id_or_path: impl AsRef<Path>) -> Result<Self, String> {
         let source = resolve_session_path(id_or_path.as_ref());
-        if !source.exists() {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(&source)? {
             return Err(format!("session not found: {}", source.display()));
         }
         crate::session_import::mark_adopted(&source)?;

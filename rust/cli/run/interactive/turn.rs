@@ -11,7 +11,7 @@ use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::cli::reports::sessions::replay::session_conversation_turns;
 use crate::cli::run::slash::{handle_slash, is_builtin_slash};
 use crate::cli::run::slash_ui::interactive_view;
-use crate::cli::sessions::session_dir_for;
+use crate::cli::sessions::recorded_session_dir;
 use crate::{agent, tui, Args};
 use parking_lot::Mutex;
 use serde_json::json;
@@ -200,10 +200,7 @@ pub(super) fn run_turn(
                 if target.is_empty() {
                     return Err("Usage: /resume <session-id-or-path>".into());
                 }
-                let dir = session_dir_for(target);
-                if !dir.exists() {
-                    return Err(format!("session not found: {}", dir.display()));
-                }
+                let dir = recorded_session_dir(target)?;
                 let turns = session_conversation_turns(&dir)?;
                 let count = turns.len();
                 handler_conv

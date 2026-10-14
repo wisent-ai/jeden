@@ -10,6 +10,7 @@ pub mod guarded;
 mod linux;
 #[cfg(target_os = "macos")]
 mod macos;
+pub mod presence;
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 mod unix;
 pub mod update;

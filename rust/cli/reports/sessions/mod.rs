@@ -74,6 +74,17 @@ pub(crate) fn session_dir_for(id_or_path: &str) -> PathBuf {
     }
 }
 
+/// The recorded session `id_or_path` names. One that does not exist is
+/// refused as not found; one that cannot be examined is refused with the
+/// cause, where it was reported as not found too.
+pub(crate) fn recorded_session_dir(id_or_path: &str) -> Result<PathBuf, String> {
+    let dir = session_dir_for(id_or_path);
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&dir)? {
+        return Err(format!("session not found: {}", dir.display()));
+    }
+    Ok(dir)
+}
+
 /// `jeden resume <id-or-path> ["<task>"]`: load a recorded session's turns into
 /// a fresh conversation and, when a task is given, continue it with a real turn
 /// (a genuine in-process resume, not just inspection). Accepts `--allow-write`,
@@ -84,10 +95,7 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
         .positionals
         .split_first()
         .ok_or("Usage: jeden resume <session-id-or-path> [\"<task>\"]")?;
-    let dir = session_dir_for(id);
-    if !dir.exists() {
-        return Err(format!("session not found: {}", dir.display()));
-    }
+    let dir = recorded_session_dir(id)?;
     let turns = session_conversation_turns(&dir)?;
     let count = turns.len();
     let mut allow_write = false;
@@ -136,10 +144,7 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
 /// `recall_conversation.sh` extraction, exposed so the agent `recall_conversation`
 /// tool can reload a session's readable history into context.
 pub(crate) fn recall_conversation_text(id_or_path: &str) -> Result<String, String> {
-    let dir = session_dir_for(id_or_path);
-    if !dir.exists() {
-        return Err(format!("session not found: {}", dir.display()));
-    }
+    let dir = recorded_session_dir(id_or_path)?;
     let turns = session_conversation_turns(&dir)?;
     if turns.is_empty() {
         return Ok(String::new());
@@ -161,10 +166,7 @@ pub(crate) fn recall_conversation_text(id_or_path: &str) -> Result<String, Strin
 }
 
 pub(crate) fn read_session_value(id_or_path: &str) -> Result<Value, String> {
-    let dir = session_dir_for(id_or_path);
-    if !dir.exists() {
-        return Err(format!("session not found: {}", dir.display()));
-    }
+    let dir = recorded_session_dir(id_or_path)?;
     // A session without a state file has none; one whose state cannot be
     // read or is not JSON is refused, not exported as a session with no state.
     let state_path = dir.join("state.json");

@@ -94,7 +94,9 @@ impl SessionRecorder {
         fs::create_dir_all(&artifacts)
             .map_err(|error| format!("cannot create {}: {error}", artifacts.display()))?;
         let state_path = self.dir.join("state.json");
-        if !state_path.exists() {
+        // A state that cannot be examined refuses: read as absent, a fresh
+        // state was written over the session's own.
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(&state_path)? {
             self.write_state(now_stamp())?;
         }
         self._held = Some(held(&self.dir)?);
