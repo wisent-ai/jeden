@@ -64,14 +64,20 @@ export class ExtensionModel extends EventEmitter {
       case "worker_job_update": {
         const id = text(payload.id) ?? text(payload.jobId) ?? event.eventId;
         const detail = text(payload.detail);
-        this.jobs.set(id, { id, label: text(payload.label) ?? id, state: text(payload.state) ?? text(payload.status) ?? "updated", ...(detail === undefined ? {} : { detail }) });
+        const state = text(payload.state) ?? text(payload.status);
+        if (state === undefined) { this.incomplete(kind, id, payload); break; }
+        this.jobs.set(id, { id, label: text(payload.label) ?? id, state, ...(detail === undefined ? {} : { detail }) });
         break;
       }
       case "diagnostic_update": {
         const id = text(payload.id) ?? event.eventId;
         const uri = text(payload.uri);
         const message = text(payload.message);
-        if (uri && message) this.diagnostics.set(id, { id, uri, message, severity: text(payload.severity) ?? "warning", line: numberValue(payload.line) ?? 0, character: numberValue(payload.character) ?? 0 });
+        const severity = text(payload.severity);
+        const line = numberValue(payload.line);
+        const character = numberValue(payload.character);
+        if (uri === undefined || message === undefined || severity === undefined || line === undefined || character === undefined) { this.incomplete(kind, id, payload); break; }
+        this.diagnostics.set(id, { id, uri, message, severity, line, character });
         break;
       }
       case "pending_diff": {
@@ -80,7 +86,9 @@ export class ExtensionModel extends EventEmitter {
         const before = text(payload.before);
         const after = text(payload.after);
         const detail = text(payload.detail);
-        if (uri && before !== undefined && after !== undefined) this.pending.set(id, { id, kind: "diff", title: text(payload.title) ?? "Pending diff", uri, before, after, ...(detail === undefined ? {} : { detail }) });
+        const title = text(payload.title);
+        if (uri === undefined || before === undefined || after === undefined || title === undefined) { this.incomplete(kind, id, payload); break; }
+        this.pending.set(id, { id, kind: "diff", title, uri, before, after, ...(detail === undefined ? {} : { detail }) });
         break;
       }
       case "model_status":
@@ -96,4 +104,8 @@ export class ExtensionModel extends EventEmitter {
     this.emit("change", event);
   }
   clearSession(): void { this.transcript.length = 0; this.artifacts.clear(); this.jobs.clear(); this.diagnostics.clear(); this.pending.clear(); this.emit("change"); }
+  /** An event the agent sent without a field its record needs is shown as such, with what it carried, never filled in. */
+  private incomplete(kind: string, id: string, payload: JsonObject): void {
+    this.transcript.push({ role: "status", text: `${kind} ${id} arrived incomplete and was not shown: ${JSON.stringify(payload)}` });
+  }
 }
