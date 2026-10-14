@@ -9,7 +9,6 @@ use areas::{completion_areas, production_scopes};
 use probes::AREA_PROBES;
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::capability;
 pub(crate) use report::audit_ui_honesty_paths;
@@ -23,14 +22,6 @@ use std::path::PathBuf;
 const REPORT_SCHEMA_VERSION: u32 = 2;
 const CHECK_VERSION: u32 = 2;
 const CHECK_PROTOCOL_VERSION: &str = "jeden.behavior-check.v2";
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis()
-        .min(u64::MAX as u128) as u64
-}
 
 fn run_at(cwd: &Path, evidence_now_ms: u64) -> Result<ConformanceReport, String> {
     let areas = completion_areas();
@@ -135,7 +126,9 @@ fn run_at(cwd: &Path, evidence_now_ms: u64) -> Result<ConformanceReport, String>
 }
 
 pub fn run(cwd: &Path) -> Result<ConformanceReport, String> {
-    run_at(cwd, now_ms())
+    let now = crate::clock::unix_millis()
+        .map_err(|error| format!("the conformance report cannot be dated: {error}"))?;
+    run_at(cwd, now)
 }
 
 pub fn canonical_json(report: &ConformanceReport) -> Result<String, String> {

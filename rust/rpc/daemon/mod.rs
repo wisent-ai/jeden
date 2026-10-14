@@ -11,7 +11,6 @@ use super::tls::{ReloadableTlsAcceptor, TlsPeer};
 use super::transport::{AuthenticatedConnection, ErrorV1, ReconnectTokens, RequestEnvelopeV1};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Semaphore};

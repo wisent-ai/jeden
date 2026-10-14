@@ -7,7 +7,6 @@ use rustls::ServerConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::net::TcpStream;
 use tokio_rustls::server::TlsStream;
 use tokio_rustls::TlsAcceptor;
@@ -68,6 +67,9 @@ pub enum TlsError {
     Revoked,
     MissingIdentitySan,
     TrustStateUnavailable,
+    /// The host clock gave no time to check the certificate's validity
+    /// against; read as zero, every certificate read as not yet valid.
+    ClockUnreadable(String),
 }
 
 pub trait ClientCertificateVerifier: Send + Sync {
@@ -113,10 +115,8 @@ impl ReloadableTrustStore {
     }
 
     pub fn verify_now(&self, handshake: &TlsHandshake) -> Result<VerifiedPeer, TlsError> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs();
+        let now = crate::clock::unix_seconds()
+            .map_err(|error| TlsError::ClockUnreadable(error.to_string()))?;
         self.verify(handshake, now)
     }
 }

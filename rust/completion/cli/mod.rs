@@ -69,7 +69,7 @@ pub(crate) fn render(state: &CompletionState, session: &Path) -> Result<String, 
     if let Some(blocker) = &state.blocker {
         lines.push(format!("{}: {}", blocker.operation, blocker.message));
     }
-    let now = super::timing::now();
+    let now = super::timing::now()?;
     for request in &state.requests {
         lines.push(format!(
             "Request {} [{}]: {}",

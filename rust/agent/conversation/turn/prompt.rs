@@ -32,7 +32,7 @@ impl Conversation {
         completion_request: Option<String>,
         hooks: &RunHooks<'_>,
     ) -> Result<Prepared, String> {
-        let started_at = crate::completion::timing::now();
+        let started_at = crate::completion::timing::now()?;
         let config = load_config(&args.cwd);
         let router = self.session_router(&config, args)?;
         // The stage that can change the product owes the delivery report,

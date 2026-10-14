@@ -25,7 +25,7 @@ pub(crate) fn snapshot_value(state: &CompletionState) -> Value {
 }
 
 pub(crate) fn model_context(state: &CompletionState) -> Result<String, String> {
-    let now = super::super::timing::now();
+    let now = super::super::timing::now()?;
     let asks = super::super::asks::read()?.context();
     let requests: Vec<_> = state.requests.iter()
         .filter(|request| !request.coverage_verified)

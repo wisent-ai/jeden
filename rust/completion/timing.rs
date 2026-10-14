@@ -12,18 +12,15 @@
 use super::model::{CompletionState, WorkRequest};
 use serde_json::{json, Value};
 use std::cmp::Ordering;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 const MINUTE: u64 = 60;
 const HOUR: u64 = 60 * MINUTE;
 const DAY: u64 = 24 * HOUR;
 
-/// Seconds since the Unix epoch, the unit of every `*At` stamp in the state.
-pub(crate) fn now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+/// Seconds since the Unix epoch, the unit of every `*At` stamp in the state;
+/// a clock before the epoch is refused, never read as time zero.
+pub(crate) fn now() -> Result<u64, String> {
+    crate::clock::unix_seconds().map_err(|error| error.to_string())
 }
 
 fn epoch(stamp: &str) -> Option<u64> {

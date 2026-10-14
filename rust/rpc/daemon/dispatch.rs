@@ -21,11 +21,14 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 Ok(json!({"state": format!("{:?}", self.service.readiness()).to_lowercase()}))
             }
             "session/create" => {
+                // Read before the session exists, so a clock that cannot be
+                // read creates nothing.
+                let now = now_unix()?;
                 let session_id = self
                     .service
                     .create_session(&connection.identity)
                     .map_err(service_error)?;
-                let expires = now_unix().saturating_add(self.config.reconnect_ttl.as_secs());
+                let expires = now.saturating_add(self.config.reconnect_ttl.as_secs());
                 let reconnect_token = self
                     .reconnect
                     .issue(connection, &session_id, expires)
@@ -38,7 +41,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 let token = string_field(&request.params, "reconnectToken")?;
                 let session_id = self
                     .reconnect
-                    .verify(connection, token, now_unix())
+                    .verify(connection, token, now_unix()?)
                     .map_err(|_| {
                         protocol_error("access_denied", "invalid or expired reconnect token")
                     })?;
@@ -271,9 +274,9 @@ fn service_error(error: ServiceError) -> ErrorV1 {
     }
 }
 
-fn now_unix() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
+/// Seconds since the epoch for reconnect tokens, or the refusal of a clock
+/// that has none: read as zero, every token issued would be expired and every
+/// expired token would verify.
+fn now_unix() -> Result<u64, ErrorV1> {
+    crate::clock::unix_seconds().map_err(|error| protocol_error("internal", &error.to_string()))
 }
