@@ -33,8 +33,8 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     // A provider named in JEDEN_MODEL_ENDPOINT replaces Brama outright: its
     // own key is the bearer and its requests carry no Brama signature.
     let direct = crate::agent::credential::direct_provider();
-    let (endpoint, bearer_token, secret) = match &direct {
-        Some((url, key)) => (Some(url.clone()), key.clone(), String::new()),
+    let (endpoint, bearer_token, secret_read) = match &direct {
+        Some((url, key)) => (Some(url.clone()), key.clone(), Ok(String::new())),
         None => (
             crate::agent::credential::brama_url().or_else(|| {
                 env::var("STADO_MODEL_ROUTER_URL")
@@ -42,7 +42,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
                     .filter(|value| !value.trim().is_empty())
             }),
             brama_variable("BRAMA_TOKEN", "STADO_MODEL_ROUTER_TOKEN"),
-            env::var("WISENT_APP_AGENT_AUTH_SECRET").unwrap_or_default(),
+            env::var("WISENT_APP_AGENT_AUTH_SECRET"),
         ),
     };
     let selected_model = args
@@ -130,8 +130,21 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     let token_error = (direct.is_none() && bearer_token.is_none()).then(|| {
         "BRAMA_TOKEN is required; obtain the scoped Jeden model-router credential".to_string()
     });
-    let secret_error = (direct.is_none() && secret.is_empty())
-        .then(|| "WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama".to_string());
+    // A secret that is not text is named as such: read as empty, it was
+    // reported as missing while the launcher had set it.
+    let (secret, secret_error) = match secret_read {
+        Ok(secret) if !secret.is_empty() || direct.is_some() => (secret, None),
+        Ok(_) | Err(env::VarError::NotPresent) => (
+            String::new(),
+            Some("WISENT_APP_AGENT_AUTH_SECRET is required to sign requests to Brama".to_string()),
+        ),
+        Err(error) => (
+            String::new(),
+            Some(format!(
+                "WISENT_APP_AGENT_AUTH_SECRET cannot be read: {error}"
+            )),
+        ),
+    };
     let inherited_lease = crate::model_router::lease::inherited();
     let precondition_error = endpoint_error
         .or(token_error)
