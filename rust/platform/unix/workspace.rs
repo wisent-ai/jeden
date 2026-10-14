@@ -12,27 +12,43 @@ use std::process::{Command, Stdio};
 
 impl WorkspacePlatform for UnixPlatform {
     fn isolate(&self, parent: &Path, target: &Path) -> Result<&'static str, PlatformError> {
+        // A refused clone's cause is kept for the native copy's own refusal,
+        // and the partial tree it left is removed first (see `cloned`): the
+        // copy used to fail on that existing directory with neither cause said.
+        let mut refused: Vec<String> = Vec::new();
         #[cfg(target_os = "macos")]
-        if quiet(
+        match cloned(
             Command::new("cp")
                 .arg("-cR")
                 .arg(parent)
                 .arg(target)
                 .current_dir(parent),
-        ) {
-            return Ok("apfs-clone");
+            target,
+        )? {
+            None => return Ok("apfs-clone"),
+            Some(cause) => refused.push(format!("cp -cR refused: {cause}")),
         }
         #[cfg(target_os = "linux")]
-        if quiet(
+        match cloned(
             Command::new("cp")
                 .args(["--reflink=auto", "-a"])
                 .arg(parent)
                 .arg(target)
                 .current_dir(parent),
-        ) {
-            return Ok("reflink-copy");
+            target,
+        )? {
+            None => return Ok("reflink-copy"),
+            Some(cause) => refused.push(format!("cp --reflink=auto refused: {cause}")),
         }
-        copy_tree(parent, target)?;
+        copy_tree(parent, target).map_err(|error| match refused.is_empty() {
+            true => error,
+            false => PlatformError::Process(format!(
+                "copying {} into {} failed: {error}; the clone before it: {}",
+                parent.display(),
+                target.display(),
+                refused.join("; ")
+            )),
+        })?;
         Ok("native-copy")
     }
     fn snapshot(
@@ -98,13 +114,21 @@ impl WorkspacePlatform for UnixPlatform {
     }
 }
 
-fn quiet(command: &mut Command) -> bool {
-    command
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+/// A workspace clone: `None` when it succeeded, else its exit and stderr, any partial tree at `target` removed.
+fn cloned(command: &mut Command, target: &Path) -> Result<Option<String>, PlatformError> {
+    let output = stado_wait::output(command.stdin(Stdio::null()))?;
+    if output.status.success() {
+        return Ok(None);
+    }
+    let cause = format!(
+        "{} {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    if target.exists() {
+        fs::remove_dir_all(target)?;
+    }
+    Ok(Some(cause))
 }
 
 /// Run `command`, refusing its failure with what it was doing, its exit
