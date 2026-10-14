@@ -20,7 +20,15 @@ pub(in crate::agent) fn usage_cost(
         endpoint,
         env::var("BRAMA_TOKEN").ok(),
     );
-    let catalog = crate::control_plane::model_catalog(cwd, &client, false).ok()?;
+    // An unpriced model and an unreadable catalogue both leave the call
+    // without a cost; only the second is a failure, so it is said with its cause.
+    let catalog = match crate::control_plane::model_catalog(cwd, &client, false) {
+        Ok(catalog) => catalog,
+        Err(error) => {
+            eprintln!("jeden: the model catalog could not be read to price {model}; the call is recorded without a cost: {error}");
+            return None;
+        }
+    };
     let cost = catalog.price(model)?;
     let input = usage.input_tokens * cost.input / 1_000_000.0;
     let output = usage.output_tokens * cost.output / 1_000_000.0;
