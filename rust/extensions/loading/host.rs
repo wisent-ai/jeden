@@ -83,7 +83,13 @@ pub(crate) fn run_host(
     if operation.is_some_and(|context| context.cancellation().is_cancelled()) {
         return Err("extension operation cancelled".into());
     }
-    let node = env::var("JEDEN_NODE").unwrap_or_else(|_| "node".into());
+    // Unset means `node` on PATH; an override that is not text is refused
+    // rather than silently replaced by it.
+    let node = match env::var("JEDEN_NODE") {
+        Ok(node) => node,
+        Err(env::VarError::NotPresent) => "node".to_string(),
+        Err(error) => return Err(format!("JEDEN_NODE cannot be read: {error}")),
+    };
     if !grant.permits_program(std::ffi::OsStr::new(&node)) {
         return Err(
             crate::tool_runtime::runtime_ops::GrantError::ProgramDenied(node.clone()).to_string(),

@@ -114,10 +114,14 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         return Err("pursue requires a rough objective".into());
     }
 
+    // Unset means the program on PATH; set to something that is not text is
+    // the operator's override unread, refused rather than silently replaced.
     let transcript_lake = if args.allow_command || args.yolo {
-        Some(PathBuf::from(
-            env::var("TRANSCRIPT_LAKE_BIN").unwrap_or_else(|_| "transcript-lake".into()),
-        ))
+        Some(match env::var("TRANSCRIPT_LAKE_BIN") {
+            Ok(path) => PathBuf::from(path),
+            Err(env::VarError::NotPresent) => PathBuf::from("transcript-lake"),
+            Err(error) => return Err(format!("TRANSCRIPT_LAKE_BIN cannot be read: {error}")),
+        })
     } else {
         None
     };
