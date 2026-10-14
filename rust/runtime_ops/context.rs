@@ -40,15 +40,25 @@ pub fn wake_on_cancellation(wake: impl Fn() -> bool + Send + 'static) {
 #[derive(Clone, Debug, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
+    parent: Option<Arc<CancellationToken>>,
 }
 
 impl CancellationToken {
     pub fn new() -> Self {
         Self::default()
     }
-
     pub fn from_flag(cancelled: Arc<AtomicBool>) -> Self {
-        Self { cancelled }
+        Self {
+            cancelled,
+            parent: None,
+        }
+    }
+
+    pub(crate) fn child(&self) -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+            parent: Some(Arc::new(self.clone())),
+        }
     }
 
     pub fn cancel(&self) {
@@ -58,6 +68,10 @@ impl CancellationToken {
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
+            || self
+                .parent
+                .as_ref()
+                .is_some_and(|parent| parent.is_cancelled())
     }
 
     /// Keep Stado's owned waits linked to this caller for the returned scope.

@@ -28,17 +28,16 @@ use crate::tool_runtime::runtime_ops::CancellationToken;
 
 pub(crate) use render::{availability_word, probe_value, prompt_section, render_text};
 pub(crate) use settings::{parse_sources, settings, unknown_sources, Settings};
-use sources::{files, ground_truth, memory, transcripts};
+use sources::{files, ground_truth, transcripts};
 
 /// Source order is the presentation order: local and cited sources first,
 /// scans last. Interleaving walks this list, so it decides which source wins
 /// a tie for the first recommendation.
 pub(crate) const SOURCES: &[&str] = &["files", "ground-truth", "memory", "transcripts"];
 
-/// What every run consults. The archive and the network index are not in it
-/// because nothing cuts a source short any more: one Transcript Lake search
-/// measured 30 s on this archive against 1 s for the two local sources, and a
-/// turn pays whatever it asks for. `--source all` asks for the rest.
+/// The network index and archive are selected explicitly. The memory source
+/// uses Stado's published refresh interval to bound a silent registry read,
+/// without limiting independent local or cited sources.
 pub(crate) const DEFAULT_SOURCES: &str = "files,memory";
 /// Which file types the walk reads. Empty means every readable text file —
 /// code, configuration and prose alike; a list narrows it.
@@ -246,7 +245,7 @@ pub(crate) fn sources_report(
             let answer = match *source {
                 "files" => files::probe(&settings, cancellation),
                 "ground-truth" => ground_truth::probe(&settings, cancellation),
-                "memory" => crate::fleet::with_cancellation(cancellation, memory::probe),
+                "memory" => execution::probe_memory(cancellation),
                 "transcripts" => transcripts::probe(&settings, cancellation),
                 other => probe_value(
                     &SourceStatus::unavailable(other, "no such source", started),
