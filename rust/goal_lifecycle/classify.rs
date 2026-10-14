@@ -58,9 +58,26 @@ fn utc_now_strings() -> (String, String) {
     (timestamp, local_day)
 }
 
-fn build_envelope(request: &LifecycleRequest) -> Value {
+/// The member whose prompt this is: `USER`, else `LOGNAME`. Neither set is
+/// an error naming both: read as a placeholder, every account without a login
+/// environment was one member, and its goals were judged against each other.
+fn member_id() -> Result<String, String> {
+    for variable in ["USER", "LOGNAME"] {
+        match env::var(variable) {
+            Ok(name) if !name.trim().is_empty() => return Ok(name),
+            Ok(_) | Err(env::VarError::NotPresent) => {}
+            Err(error) => return Err(format!("{variable} cannot be read: {error}")),
+        }
+    }
+    Err(
+        "neither USER nor LOGNAME is set, so the member whose goal this is cannot be named"
+            .to_string(),
+    )
+}
+
+fn build_envelope(request: &LifecycleRequest) -> Result<Value, String> {
     let (timestamp, local_day) = utc_now_strings();
-    let member_id = env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+    let member_id = member_id()?;
     let candidates = match request.goal_objective.as_deref() {
         Some(objective) => json!([
             {
@@ -76,7 +93,7 @@ fn build_envelope(request: &LifecycleRequest) -> Value {
             { "ref": "NEW_GOAL", "title": "Create a new goal", "score": 0 },
         ]),
     };
-    json!({
+    Ok(json!({
         "prompt_id": format!("{}-{}", request.session_id, request.turn_index),
         "member_id": member_id,
         "provider": "jeden",
@@ -88,7 +105,7 @@ fn build_envelope(request: &LifecycleRequest) -> Value {
         "recent_session_prompts": [],
         "recent_member_prompts": [],
         "candidates": candidates,
-    })
+    }))
 }
 
 fn parse_decision(content: &str) -> Option<LifecycleDecision> {
@@ -124,7 +141,7 @@ pub fn classify(
         return Ok(None);
     };
     let envelope =
-        serde_json::to_string(&build_envelope(request)).map_err(|error| error.to_string())?;
+        serde_json::to_string(&build_envelope(request)?).map_err(|error| error.to_string())?;
     let mut router = router.clone();
     router.model = alias.clone();
     router.fallbacks.clear();
