@@ -35,10 +35,7 @@ pub(crate) fn slash_session_text(session: &Value) -> String {
             .trim()
             .to_string(),
         );
-        out.push(
-            serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))
-                .unwrap_or_else(|_| "{}".into()),
-        );
+        out.push(format!("{:#}", event["data"]));
         out.push(String::new());
     }
     out.join("\n")
@@ -78,8 +75,7 @@ pub(crate) fn slash_session_export(session: &Value, format: &str) -> Result<Stri
             )
             .trim()
             .to_string();
-            let data = serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))
-                .unwrap_or_else(|_| "{}".into());
+            let data = format!("{:#}", event["data"]);
             out.push_str(&format!("## {}\n\n```json\n{}\n```\n\n", label, data));
         }
         return Ok(out);
@@ -107,10 +103,7 @@ pub(crate) fn slash_session_export(session: &Value, format: &str) -> Result<Stri
                 )
                 .trim(),
             );
-            let data = slash_html_escape(
-                &serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))
-                    .unwrap_or_else(|_| "{}".into()),
-            );
+            let data = slash_html_escape(&format!("{:#}", event["data"]));
             body.push_str(&format!(
                 "<section><h2>{}</h2><pre>{}</pre></section>\n",
                 label, data

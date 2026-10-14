@@ -167,7 +167,7 @@ pub fn tools_json(cwd: &Path) -> String {
             |tool| json!({"name": tool.name, "description": tool.description, "input": tool.input}),
         )
         .collect::<Vec<_>>();
-    serde_json::to_string_pretty(&values).unwrap_or_else(|_| "[]".into()) + "\n"
+    format!("{:#}\n", Value::Array(values))
 }
 
 pub fn tools_output(cwd: &Path, json: bool) -> String {

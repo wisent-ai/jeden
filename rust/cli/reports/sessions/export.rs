@@ -41,8 +41,7 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
             )
             .trim()
             .to_string();
-            let data = serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))
-                .unwrap_or_else(|_| "{}".into());
+            let data = format!("{:#}", event["data"]);
             out.push_str(&format!("## {}\n\n```json\n{}\n```\n\n", label, data));
         }
         return Ok(out);
@@ -58,10 +57,7 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
                 )
                 .trim(),
             );
-            let body = html_escape(
-                &serde_json::to_string_pretty(event.get("data").unwrap_or(&Value::Null))
-                    .unwrap_or_else(|_| "{}".into()),
-            );
+            let body = html_escape(&format!("{:#}", event["data"]));
             sections.push_str(&format!(
                 "<section class=\"event\"><h2>{}</h2><pre>{}</pre></section>\n",
                 label, body
