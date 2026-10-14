@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { JedenAcpClient, type ClientInteraction } from "./acp/client.js";
 import { RedactingLogger } from "./logging.js";
 import { ExtensionModel, type Artifact, type DiagnosticRecord, type Job, type PendingAction } from "./model.js";
-import type { InputRequest, PermissionRequest, SessionEventEnvelope } from "./acp/protocol.js";
+import { isObject, isText, type InputRequest, type PermissionRequest, type SessionEventEnvelope } from "./acp/protocol.js";
 import { StdioAcpTransport } from "./acp/transport.js";
 
 class ModelTreeProvider<T extends { readonly id: string }> implements vscode.TreeDataProvider<T> {
@@ -21,24 +21,33 @@ class DiffContentProvider implements vscode.TextDocumentContentProvider {
   constructor(private readonly model: ExtensionModel) {}
   provideTextDocumentContent(uri: vscode.Uri): string {
     const query = new URLSearchParams(uri.query);
-    const action = this.model.pending.get(query.get("id") ?? "");
-    return action?.kind === "diff" ? (query.get("side") === "after" ? action.after ?? "" : action.before ?? "") : "";
+    const id = query.get("id");
+    const action = id === null ? undefined : this.model.pending.get(id);
+    if (action?.kind !== "diff") throw new Error(`Jeden has no pending diff ${id} to show`);
+    const side = query.get("side");
+    const text = side === "after" ? action.after : action.before;
+    if (text === undefined) throw new Error(`Jeden's pending diff ${id} carries no ${side} text`);
+    return text;
   }
 }
 
 class VscodeInteraction implements ClientInteraction {
   private readonly resolutions = new Map<string, (value: string | undefined) => void>();
+  /** The allow-once option each pending permission offered, which Approve Pending Action answers with. */
+  private readonly allowing = new Map<string, string>();
   constructor(private readonly model: ExtensionModel) {}
 
   async requestPermission(request: PermissionRequest): Promise<string | undefined> {
     const id = typeof request.toolCall.toolCallId === "string" ? request.toolCall.toolCallId : `permission-${Date.now()}`;
     const title = typeof request.toolCall.title === "string" ? request.toolCall.title : "Jeden tool permission";
     this.model.pending.set(id, { id, kind: "approval", title }); this.model.emit("change");
+    const allowOnce = request.options.find((option) => option.kind === "allow_once");
+    if (allowOnce) this.allowing.set(id, allowOnce.optionId);
     const commandResult = new Promise<string | undefined>((resolve) => this.resolutions.set(id, resolve));
     const labels = request.options.map((option) => ({ title: option.name, optionId: option.optionId }));
     const modalResult = vscode.window.showInformationMessage(title, { modal: true, detail: "Review the pending action before allowing it." }, ...labels.map((option) => option.title));
     const selected = await Promise.race([commandResult, modalResult.then((label) => labels.find((option) => option.title === label)?.optionId)]);
-    this.resolutions.delete(id); this.model.pending.delete(id); this.model.emit("change"); return selected;
+    this.resolutions.delete(id); this.allowing.delete(id); this.model.pending.delete(id); this.model.emit("change"); return selected;
   }
 
   async requestInput(request: InputRequest): Promise<string | undefined> {
@@ -52,17 +61,28 @@ class VscodeInteraction implements ClientInteraction {
   }
 
   resolve(id: string, value: string | undefined): boolean { const resolve = this.resolutions.get(id); if (!resolve) return false; resolve(value); return true; }
+  /** Answer pending permission `id` with the allow-once option its request offered; refused when it offered none. */
+  allow(id: string): boolean {
+    const optionId = this.allowing.get(id);
+    if (optionId === undefined) throw new Error(`pending action ${id} offers no allow-once option; choose one of its options in its dialog`);
+    return this.resolve(id, optionId);
+  }
   cancelPending(): void { for (const resolve of this.resolutions.values()) resolve(undefined); this.resolutions.clear(); }
 }
 
 class ChatViewProvider implements vscode.WebviewViewProvider {
   private view: vscode.WebviewView | undefined;
-  constructor(private readonly model: ExtensionModel, private readonly run: (command: "connect" | "new" | "prompt" | "cancel", value?: string) => Promise<void>) {}
+  /** What each button of the chat view runs, by the command name its message carries. */
+  constructor(private readonly model: ExtensionModel, private readonly runners: Readonly<Record<string, (value: string | undefined) => Promise<void>>>) {}
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view; view.webview.options = { enableScripts: true };
     const nonce = randomBytes(16).toString("base64");
     view.webview.html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}'"><style nonce="${nonce}">body{font-family:var(--vscode-font-family);padding:8px}.messages{white-space:pre-wrap}.item{margin:8px 0;padding:6px;border-left:2px solid var(--vscode-focusBorder)}textarea{width:100%;box-sizing:border-box;resize:vertical}button{margin:6px 6px 0 0}.status{color:var(--vscode-descriptionForeground)}</style></head><body><div id="status" class="status"></div><div id="messages" class="messages"></div><textarea id="prompt" rows="4" aria-label="Prompt"></textarea><div><button id="send">Send</button><button id="cancel">Cancel</button><button id="new">New session</button><button id="connect">Connect</button></div><script nonce="${nonce}">const vscode=acquireVsCodeApi(),messages=document.getElementById('messages'),status=document.getElementById('status'),prompt=document.getElementById('prompt');addEventListener('message',({data})=>{status.textContent=data.status;messages.replaceChildren(...data.items.map(item=>{const el=document.createElement('div');el.className='item';el.textContent=item.role+': '+item.text;return el}))});document.getElementById('send').onclick=()=>{vscode.postMessage({command:'prompt',value:prompt.value});prompt.value=''};for(const id of ['cancel','new','connect'])document.getElementById(id).onclick=()=>vscode.postMessage({command:id});</script></body></html>`;
-    view.webview.onDidReceiveMessage((message: unknown) => { if (typeof message !== "object" || message === null) return; const value = message as { command?: unknown; value?: unknown }; if (value.command === "connect" || value.command === "new" || value.command === "cancel") void this.run(value.command); else if (value.command === "prompt" && typeof value.value === "string") void this.run("prompt", value.value); });
+    view.webview.onDidReceiveMessage((message: unknown) => {
+      const runner = isObject(message) && isText(message.command) && Object.hasOwn(this.runners, message.command) ? this.runners[message.command] : undefined;
+      if (!runner || !isObject(message)) { void vscode.window.showErrorMessage(`The Jeden chat view sent a message the extension does not handle: ${JSON.stringify(message)}`); return; }
+      void runner(isText(message.value) ? message.value : undefined);
+    });
     this.refresh();
   }
   refresh(): void { void this.view?.webview.postMessage({ status: `${this.model.serviceStatus} · ${this.model.modelStatus} · ${this.model.accountStatus}`, items: this.model.transcript }); }
@@ -114,13 +134,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const newSession = async (): Promise<void> => { client.requireCapability("sessionNew"); const cwd = workspace(); if (!cwd) throw new Error("Open a workspace before creating a Jeden session"); model.clearSession(); await client.newSession(cwd); await context.workspaceState.update("jeden.session", client.session); await updateContexts(); };
   const prompt = async (provided?: string): Promise<void> => { client.requireCapability("prompt"); const value = provided ?? await vscode.window.showInputBox({ title: "Prompt Jeden", ignoreFocusOut: true }); if (!value) return; model.transcript.push({ role: "user", text: value }); model.emit("change"); await client.prompt(value); };
   const runSafely = (operation: () => Promise<void>): void => { void operation().catch((error: unknown) => { logger.error("command.error", error); void vscode.window.showErrorMessage(error instanceof Error ? error.message : "Jeden command failed"); }); };
-  const chat = new ChatViewProvider(model, async (command, value) => { if (command === "connect") await connect(); else if (command === "new") await newSession(); else if (command === "prompt") await prompt(value); else await client.cancel(); });
+  const chat = new ChatViewProvider(model, { connect, new: newSession, prompt: (value) => prompt(value), cancel: () => client.cancel() });
   context.subscriptions.push(vscode.window.registerWebviewViewProvider("jeden.chat", chat));
 
   const selectPending = async (argument: PendingAction | undefined): Promise<PendingAction | undefined> => argument ?? (model.pending.size === 1 ? [...model.pending.values()][0] : await vscode.window.showQuickPick([...model.pending.values()].map((item) => ({ label: item.title, item }))).then((picked) => picked?.item));
   const approve = async (argument?: PendingAction): Promise<void> => {
     const action = await selectPending(argument); if (!action) return;
-    if (action.kind === "approval") { interaction.resolve(action.id, "allow-once"); return; }
+    if (action.kind === "approval") { interaction.allow(action.id); return; }
     if (action.kind !== "diff" || !action.uri) return;
     const uri = vscode.Uri.parse(action.uri); const document = await vscode.workspace.openTextDocument(uri); const current = document.getText();
     if (current !== action.before) throw new Error("Pending diff is stale; the document changed after it was proposed");
@@ -130,7 +150,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
   const reject = async (argument?: PendingAction): Promise<void> => { const action = await selectPending(argument); if (!action) return; if (action.kind === "approval") interaction.resolve(action.id, undefined); model.pending.delete(action.id); model.emit("change"); };
   const openDiff = async (argument?: PendingAction): Promise<void> => { const action = await selectPending(argument); if (!action || action.kind !== "diff") return; const before = vscode.Uri.from({ scheme: "jeden-diff", path: `/${encodeURIComponent(action.title)}.before`, query: new URLSearchParams({ id: action.id, side: "before" }).toString() }); const after = vscode.Uri.from({ scheme: "jeden-diff", path: `/${encodeURIComponent(action.title)}.after`, query: new URLSearchParams({ id: action.id, side: "after" }).toString() }); await vscode.commands.executeCommand("vscode.diff", before, after, action.title); };
-  const openArtifact = async (artifact?: Artifact): Promise<void> => { if (!artifact) return; const uri = vscode.Uri.parse(artifact.uri); if (uri.scheme === "file" || uri.scheme === "untitled") await vscode.window.showTextDocument(uri); else if (uri.scheme === "https") await vscode.env.openExternal(uri); else throw new Error(`Unsupported artifact URI scheme: ${uri.scheme}`); };
+  const artifactOpeners: Readonly<Record<string, (uri: vscode.Uri) => Thenable<unknown>>> = { file: (uri) => vscode.window.showTextDocument(uri), untitled: (uri) => vscode.window.showTextDocument(uri), https: (uri) => vscode.env.openExternal(uri) };
+  const openArtifact = async (artifact?: Artifact): Promise<void> => { if (!artifact) return; const uri = vscode.Uri.parse(artifact.uri); const open = Object.hasOwn(artifactOpeners, uri.scheme) ? artifactOpeners[uri.scheme] : undefined; if (!open) throw new Error(`Unsupported artifact URI scheme: ${uri.scheme}`); await open(uri); };
   const loadSession = async (): Promise<void> => { client.requireCapability("sessionLoad"); const cwd = workspace(); if (!cwd) throw new Error("Open a workspace before loading a session"); const sessionId = await vscode.window.showInputBox({ title: "Load Jeden session", prompt: "Session ID or durable session path", ignoreFocusOut: true }); if (!sessionId) return; model.clearSession(); await client.loadSession(sessionId, cwd); await context.workspaceState.update("jeden.session", client.session); await updateContexts(); };
 
   const handlers: ReadonlyArray<[string, (...args: unknown[]) => void]> = [
@@ -145,7 +166,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   model.on("change", () => {
     pendingProvider.refresh(); artifactProvider.refresh(); jobProvider.refresh(); diagnosticProvider.refresh(); chat.refresh(); status.text = `$(sparkle) Jeden: ${model.serviceStatus}`; status.tooltip = `${model.modelStatus} · ${model.accountStatus}`;
     const byUri = new Map<string, vscode.Diagnostic[]>();
-    for (const record of model.diagnostics.values()) { const severity = record.severity === "error" ? vscode.DiagnosticSeverity.Error : record.severity === "info" ? vscode.DiagnosticSeverity.Information : vscode.DiagnosticSeverity.Warning; const diagnostic = new vscode.Diagnostic(new vscode.Range(record.line, record.character, record.line, record.character + 1), record.message, severity); const values = byUri.get(record.uri) ?? []; values.push(diagnostic); byUri.set(record.uri, values); }
+    const severities: Readonly<Record<string, vscode.DiagnosticSeverity>> = { error: vscode.DiagnosticSeverity.Error, warning: vscode.DiagnosticSeverity.Warning, info: vscode.DiagnosticSeverity.Information };
+    for (const record of model.diagnostics.values()) {
+      const severity = Object.hasOwn(severities, record.severity) ? severities[record.severity] : undefined;
+      if (severity === undefined) { logger.error("diagnostic.severity", new Error(`diagnostic ${record.id} has severity ${record.severity}, which VS Code has no level for`)); continue; }
+      const diagnostic = new vscode.Diagnostic(new vscode.Range(record.line, record.character, record.line, record.character + 1), record.message, severity);
+      const values = byUri.get(record.uri);
+      if (values) values.push(diagnostic); else byUri.set(record.uri, [diagnostic]);
+    }
     diagnostics.clear(); for (const [uri, values] of byUri) diagnostics.set(vscode.Uri.parse(uri), values); void updateContexts();
   });
   client.on("event", (event: SessionEventEnvelope) => model.apply(event));
