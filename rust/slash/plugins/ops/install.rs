@@ -97,10 +97,9 @@ pub(crate) fn install_one(
         .catalog_sequence
         .checked_sub(0)
         .filter(|sequence| *sequence > 0);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // A clock before the epoch refuses: read as zero, every signed envelope
+    // was judged at 1970 and its validity window against that.
+    let now = crate::clock::unix_seconds().map_err(|error| error.to_string())?;
     let active = service.install_and_activate(
         &trust,
         &envelope,
