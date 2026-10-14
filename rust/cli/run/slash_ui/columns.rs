@@ -21,16 +21,17 @@ fn format_price(value: f64) -> String {
 }
 
 /// Price suffix in the oh-my-pi convention: priced models end with a `█` bar
-/// ($5/30█, $0.25/1.25█), free models with `free│`.
-pub(super) fn price_detail(price: &ModelPrice) -> String {
-    if price.input > 0.0 || price.output > 0.0 {
-        format!(
+/// ($5/30█, $0.25/1.25█), free models with `free│`, and a route the
+/// catalogue states no price for says so instead of reading as free.
+pub(super) fn price_detail(price: Option<&ModelPrice>) -> String {
+    match price {
+        Some(price) if price.input > 0.0 || price.output > 0.0 => format!(
             " · ${}/{}█",
             format_price(price.input),
             format_price(price.output)
-        )
-    } else {
-        " · free│".into()
+        ),
+        Some(_) => " · free│".into(),
+        None => " · not priced".into(),
     }
 }
 
@@ -63,7 +64,7 @@ fn metric_parts(model: &ModelEntry) -> Vec<String> {
             .trim_start_matches(" · ")
             .to_string(),
         context_metric(model.context_window),
-        price_detail(&model.price)
+        price_detail(model.price.as_ref())
             .trim_start_matches(" · ")
             .to_string(),
     ]

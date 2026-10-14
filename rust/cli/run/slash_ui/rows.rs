@@ -55,8 +55,16 @@ pub(super) fn model_row(
         "context {} · output {} · {}{}",
         declared(model.context_window),
         declared(model.max_output_tokens),
-        if model.tools { "tools" } else { "no tools" },
-        if model.reasoning { " · reasoning" } else { "" }
+        match model.tools {
+            Some(true) => "tools",
+            Some(false) => "no tools",
+            None => "tools not declared",
+        },
+        match model.reasoning {
+            Some(true) => " · reasoning",
+            Some(false) => "",
+            None => " · reasoning not declared",
+        }
     );
     let detail = model.unavailable_reason.clone().unwrap_or(detail);
     // The row shows figures in right-aligned columns (perf · context · price,

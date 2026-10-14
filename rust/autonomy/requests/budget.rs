@@ -96,11 +96,14 @@ pub(crate) fn reserve(
     let entry = catalog
         .resolve(model)
         .map_err(|e| format!("budget admission cannot price route {model}: {e}"))?;
+    let Some(price) = entry.price.as_ref() else {
+        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; the catalogue states no price for {model}"));
+    };
     let rates = [
-        decimal(entry.price.input)?,
-        decimal(entry.price.output)?,
-        decimal(entry.price.cache_read)?,
-        decimal(entry.price.cache_write)?,
+        decimal(price.input)?,
+        decimal(price.output)?,
+        decimal(price.cache_read)?,
+        decimal(price.cache_write)?,
     ];
     let (Some(context_window), Some(ceiling)) = (
         entry.context_window.filter(|tokens| *tokens > 0),

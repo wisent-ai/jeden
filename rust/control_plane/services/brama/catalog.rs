@@ -58,12 +58,14 @@ pub struct ModelEntry {
     pub input_modalities: Vec<String>,
     #[serde(default)]
     pub output_modalities: Vec<String>,
+    /// Brama answers `null` for tools, reasoning and price of a route its
+    /// registry holds no metadata for: unknown, never "no tools" or "free".
     #[serde(default)]
-    pub tools: bool,
+    pub tools: Option<bool>,
     #[serde(default)]
-    pub reasoning: bool,
+    pub reasoning: Option<bool>,
     #[serde(default, alias = "cost", alias = "pricing")]
-    pub price: ModelPrice,
+    pub price: Option<ModelPrice>,
     #[serde(default)]
     pub fallback: Vec<String>,
     #[serde(default)]
@@ -115,11 +117,12 @@ impl ModelCatalog {
         Ok(model)
     }
 
+    /// The price of an available route, when the catalogue states one.
     pub fn price(&self, id: &str) -> Option<&ModelPrice> {
         self.models
             .iter()
             .find(|model| model.id == id && model.available)
-            .map(|model| &model.price)
+            .and_then(|model| model.price.as_ref())
     }
 
     /// Resolve a bare (provider-less) model id to a catalog entry whose id
@@ -166,15 +169,19 @@ pub(super) fn validate_catalog(catalog: &ModelCatalog) -> Result<(), BramaError>
                 model.id
             )));
         }
-        if !model.price.input.is_finite()
-            || !model.price.output.is_finite()
-            || model.price.input < 0.0
-            || model.price.output < 0.0
-        {
-            return Err(BramaError::InvalidCatalog(format!(
-                "invalid price for `{}`",
-                model.id
-            )));
+        // Only a stated price is checked; an unpriced route is not invalid,
+        // it is unpriced, and every reader of its price says so.
+        if let Some(price) = &model.price {
+            if !price.input.is_finite()
+                || !price.output.is_finite()
+                || price.input < 0.0
+                || price.output < 0.0
+            {
+                return Err(BramaError::InvalidCatalog(format!(
+                    "invalid price for `{}`",
+                    model.id
+                )));
+            }
         }
     }
     Ok(())
