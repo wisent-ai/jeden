@@ -37,11 +37,12 @@ fn notebook_bytes(file: &std::path::Path, content: &str) -> Result<Vec<u8>, Stri
     {
         return Ok(content.as_bytes().to_vec());
     }
-    let mut parsed = if file.exists() {
-        serde_json::from_slice::<Value>(&fs::read(file).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())?
-    } else {
-        json!({"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5})
+    let mut parsed = match fs::read(file) {
+        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())?,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            json!({"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5})
+        }
+        Err(error) => return Err(format!("{} cannot be read: {error}", file.display())),
     };
     let mut cells = Vec::<(String, String)>::new();
     let mut kind = None::<String>;
@@ -138,16 +139,21 @@ pub(crate) fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let path = string_input(input, "path").ok_or("write_file requires path")?;
     let content = string_input(input, "content").ok_or("write_file requires content")?;
     let file = jail_write_path(runtime.cwd, &path)?;
-    if file.exists() {
-        let expected = string_input(input, "expectedSha256")
-            .ok_or("write_file overwrite requires expectedSha256")?;
-        let old = fs::read(&file).map_err(|e| e.to_string())?;
-        let actual = sha256_hex(&old);
-        if actual != expected {
-            return Err(format!(
-                "expectedSha256 mismatch for {path}: expected {expected}, actual {actual}"
-            ));
+    // The overwrite guard reads the file itself: `exists()` answered false
+    // for a file it could not stat, and the write then went ahead unguarded.
+    match fs::read(&file) {
+        Ok(old) => {
+            let expected = string_input(input, "expectedSha256")
+                .ok_or("write_file overwrite requires expectedSha256")?;
+            let actual = sha256_hex(&old);
+            if actual != expected {
+                return Err(format!(
+                    "expectedSha256 mismatch for {path}: expected {expected}, actual {actual}"
+                ));
+            }
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("{path} cannot be read: {error}")),
     }
     if let Some(parent) = file.parent() {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;

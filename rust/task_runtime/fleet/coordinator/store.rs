@@ -95,17 +95,21 @@ impl CoordinatorStore {
         let root = root.as_ref();
         fs::create_dir_all(root).map_err(storage)?;
         let path = root.join("coordinator-v1.json");
-        let mut state = if path.exists() {
-            serde_json::from_slice::<CoordinatorState>(&fs::read(&path).map_err(storage)?).map_err(
-                |e| {
-                    ProtocolError::Storage(format!(
-                        "read coordinator state {}: {e}",
-                        path.display()
-                    ))
-                },
-            )?
-        } else {
-            CoordinatorState::default()
+        // Only a state that does not exist starts fresh: one that could not
+        // be stat'ed did too, and the epoch and leases restarted from zero.
+        let mut state = match fs::read(&path) {
+            Ok(bytes) => serde_json::from_slice::<CoordinatorState>(&bytes).map_err(|e| {
+                ProtocolError::Storage(format!("read coordinator state {}: {e}", path.display()))
+            })?,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                CoordinatorState::default()
+            }
+            Err(error) => {
+                return Err(ProtocolError::Storage(format!(
+                    "read coordinator state {}: {error}",
+                    path.display()
+                )))
+            }
         };
         if state.schema_version != COORDINATOR_STORE_SCHEMA_VERSION {
             return Err(ProtocolError::Storage(format!(
