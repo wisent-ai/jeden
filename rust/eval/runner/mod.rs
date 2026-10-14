@@ -147,7 +147,9 @@ impl EvalRunner {
         );
         let isolated = isolated_run(&self.config.output_root, &run_key)?;
         let outcome_path = isolated.root.join("outcome.json");
-        if outcome_path.exists() {
+        // An outcome that cannot be examined refuses: read as absent, the
+        // case ran again and its new outcome replaced the recorded one.
+        if crate::tool_runtime::runtime_ops::platform::presence::present(&outcome_path)? {
             let outcome: RunOutcomeV1 = serde_json::from_slice(
                 &fs::read(&outcome_path).map_err(|error| error.to_string())?,
             )

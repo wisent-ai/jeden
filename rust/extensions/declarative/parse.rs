@@ -47,8 +47,13 @@ impl Notation {
 
 /// Every file under `root` written in a notation `accepts` takes.
 pub(super) fn collect(root: &Path, accepts: fn(Notation) -> bool, out: &mut Vec<PathBuf>) {
-    if !root.exists() {
-        return;
+    match crate::tool_runtime::runtime_ops::platform::presence::present(root) {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(cause) => {
+            eprintln!("jeden: declarative extensions were not loaded: {cause}");
+            return;
+        }
     }
     if root.is_file() {
         if Notation::of(root).is_some_and(accepts) {
