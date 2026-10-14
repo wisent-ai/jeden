@@ -37,7 +37,17 @@ export interface PermissionRequest { readonly sessionId: string; readonly toolCa
 export interface InputRequest { readonly sessionId: string; readonly prompt: string; readonly placeholder?: string; readonly password?: boolean; }
 
 export function isObject(value: unknown): value is Record<string, unknown> { return typeof value === "object" && value !== null && !Array.isArray(value); }
-export function asJsonValue(value: unknown): JsonValue { if (value === null || typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value))) return value; if (Array.isArray(value)) return value.map(asJsonValue); if (isObject(value)) { const out: Record<string, JsonValue> = {}; for (const [key, child] of Object.entries(value)) out[key] = asJsonValue(child); return out; } throw new Error("ACP message contains a non-JSON value"); }
+/** Whether a decoded JSON value is a string, a number or a boolean: the JSON type, read from the value. */
+export function isText(value: unknown): value is string { return typeof value === "string"; }
+export function isCount(value: unknown): value is number { return typeof value === "number"; }
+export function isFlag(value: unknown): value is boolean { return typeof value === "boolean"; }
+/** The string `field` of `params`; a message that lacks it is refused naming `where` and the field, never filled in. */
+export function required(params: Record<string, unknown>, field: string, where: string): string {
+  const value = params[field];
+  if (!isText(value)) throw new Error(`${where} carries no ${field}`);
+  return value;
+}
+export function asJsonValue(value: unknown): JsonValue { if (value === null || isText(value) || isFlag(value) || (isCount(value) && Number.isFinite(value))) return value; if (Array.isArray(value)) return value.map(asJsonValue); if (isObject(value)) { const out: Record<string, JsonValue> = {}; for (const [key, child] of Object.entries(value)) out[key] = asJsonValue(child); return out; } throw new Error("ACP message contains a non-JSON value"); }
 export function parseMessage(value: unknown): JsonRpcMessage {
   if (!isObject(value) || value.jsonrpc !== "2.0") throw new Error("Invalid ACP JSON-RPC envelope");
   if (typeof value.method === "string") {
@@ -46,7 +56,7 @@ export function parseMessage(value: unknown): JsonRpcMessage {
     if (value.id === undefined) { const method = value.method; return { jsonrpc: "2.0", method, params }; }
   }
   if ((typeof value.id === "number" && Number.isInteger(value.id)) || value.id === null) {
-    if ("error" in value && isObject(value.error) && typeof value.error.code === "number" && typeof value.error.message === "string") {
+    if ("error" in value && isObject(value.error) && isCount(value.error.code) && isText(value.error.message)) {
       const code = value.error.code;
       const message = value.error.message;
       const data = value.error.data;
