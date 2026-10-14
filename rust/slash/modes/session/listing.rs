@@ -61,10 +61,11 @@ fn first_task_in(reader: impl BufRead, transcript: &Path) -> Result<Option<Strin
 /// declared.
 fn user_text(payload: &serde_json::Value) -> Option<String> {
     let said = UserEventData::deserialize(payload.get("data")?).ok()?;
-    [&said.task, &said.content, &said.text]
+    let text = [&said.task, &said.content, &said.text]
         .into_iter()
         .find_map(serde_json::Value::as_str)
-        .map(str::to_string)
+        .map(str::to_string);
+    text
 }
 
 /// The row for something the listing could not read: disabled, its cause in

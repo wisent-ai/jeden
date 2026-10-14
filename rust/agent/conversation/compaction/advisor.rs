@@ -41,7 +41,6 @@ impl Conversation {
                         usage,
                         usage_cost(&args.cwd, &config, &router.model, usage),
                         None,
-                        None,
                     ) {
                         hooks.note(&format!("advisor review usage not recorded: {error}"));
                     }

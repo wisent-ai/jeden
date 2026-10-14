@@ -119,7 +119,7 @@ pub(crate) fn write_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Resul
         use std::os::unix::fs::OpenOptionsExt;
         options.mode(0o600);
     }
-    let result = (|| {
+    let result: Result<(), String> = (|| {
         let mut file = options.open(&staging).map_err(|error| error.to_string())?;
         serde_json::to_writer_pretty(&mut file, value).map_err(|error| error.to_string())?;
         file.write_all(b"\n").map_err(|error| error.to_string())?;

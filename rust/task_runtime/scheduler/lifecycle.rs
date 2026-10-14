@@ -7,7 +7,7 @@
 //! strategy list in `health` correctable at all.
 
 use super::support::terminate_group;
-use super::{default_steps, BatchTask, SpawnRequest, TaskScheduler};
+use super::{BatchTask, SpawnRequest, TaskScheduler};
 use crate::task_runtime::discovery::discover_agents;
 use crate::task_runtime::now_millis;
 use crate::task_runtime::types::{CapabilityHealth, JobRecord, JobStatus, TaskError};

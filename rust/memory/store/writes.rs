@@ -161,7 +161,7 @@ impl MemoryStore {
             .await
             .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
-            Ok(record(written))
+            record(written)
         })
     }
 
@@ -206,7 +206,7 @@ impl MemoryStore {
                 .await
                 .map_err(sql)?;
             tx.commit().await.map_err(sql)?;
-            Ok(record(written))
+            record(written)
         })
     }
 

@@ -1,6 +1,7 @@
 //! Moving a recorded session to another working directory (`/move`): the
 //! session's `state.json` is rewritten through a staged file.
 use super::*;
+use std::io::Write;
 
 impl SessionRecorder {
     pub(in crate::agent) fn set_cwd(&mut self, cwd: &Path) -> Result<(), String> {

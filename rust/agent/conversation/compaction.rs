@@ -86,7 +86,6 @@ impl Conversation {
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
                 None,
-                None,
             ) {
                 hooks.note(&format!("compaction summary usage not recorded: {error}"));
             }
@@ -157,7 +156,6 @@ impl Conversation {
                 &router,
                 usage,
                 usage_cost(&args.cwd, &config, &router.model, usage),
-                None,
                 None,
             ) {
                 hooks.note(&format!("handoff brief usage not recorded: {error}"));
