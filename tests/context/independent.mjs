@@ -91,8 +91,8 @@ try {
   assert.equal(statuses.memory.available, false,
     `the registry answered; run this journey during a real unanswering registry operation: ${JSON.stringify(advice)}`);
   assert.ok(statuses.memory.detail.includes('stado database resolve jeden'), statuses.memory.detail);
-  assert.ok(statuses.memory.detail.includes('Stado resolver state')
-    || statuses.memory.detail.includes('resolver-declared'), statuses.memory.detail);
+  assert.ok(statuses.memory.detail.includes('did not answer within the resolver-declared'), statuses.memory.detail);
+  assert.ok(statuses.memory.detail.includes('Stado resolver target'), statuses.memory.detail);
   assert.ok(advice.unanswered.some(source => source.source === 'memory'
     && source.detail === statuses.memory.detail), JSON.stringify(advice));
   assert.match(result.stderr, /blad czekania: context advisor source memory/);
@@ -106,6 +106,7 @@ try {
   assert.equal(probedMemory?.available, false,
     `the real registry answered during the source probe: ${JSON.stringify(inspection)}`);
   assert.ok(probedMemory.detail.includes('stado database resolve jeden'), probedMemory.detail);
+  assert.ok(probedMemory.detail.includes('did not answer within the resolver-declared'), probedMemory.detail);
   assert.match(probe.stderr, /blad czekania: context advisor probe memory/);
   report.probe = inspection.sources;
   report.verdict = 'passed';
