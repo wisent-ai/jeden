@@ -58,10 +58,9 @@ pub(crate) fn recover_json(
     plan: &MigrationPlan,
 ) -> Result<Option<MigrationOutcome>, String> {
     let journal_file = journal_path(path);
-    if !journal_file.exists() {
+    let Some(state) = journal::read(&journal_file)? else {
         return Ok(None);
-    }
-    let state = journal::read(&journal_file)?;
+    };
     if state.target != path || state.store != plan.store || state.to != plan.to {
         return Err(format!(
             "migration journal {} does not match requested store",

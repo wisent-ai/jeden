@@ -31,11 +31,18 @@ impl MarketplaceService {
 
     pub fn registry(&self) -> Result<ActiveRegistryV1, String> {
         let path = self.registry_path();
-        if !path.exists() {
-            return Ok(ActiveRegistryV1::default());
-        }
-        serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
-            .map_err(|error| error.to_string())
+        // Only a registry that does not exist is empty: one that could not
+        // be stat'ed was read as empty too, and the next install or removal
+        // wrote that empty registry over every active plugin.
+        let bytes = match fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(ActiveRegistryV1::default())
+            }
+            Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
+        };
+        serde_json::from_slice(&bytes)
+            .map_err(|error| format!("{} is not a plugin registry: {error}", path.display()))
     }
 
     pub(super) fn atomic_json<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), String> {

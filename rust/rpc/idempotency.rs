@@ -69,8 +69,7 @@ impl IdempotencyStore {
             .lock()
             .map_err(|_| IdempotencyError::Storage("idempotency lock poisoned".into()))?;
         let path = self.record_path(tenant, key);
-        if path.exists() {
-            let record = read_record(&path)?;
+        if let Some(record) = read_existing_record(&path)? {
             if record.tenant != tenant.as_str() || record.request_digest != request_digest {
                 return Err(IdempotencyError::Conflict);
             }
@@ -150,10 +149,9 @@ impl IdempotencyStore {
         key: &str,
     ) -> Result<Option<String>, IdempotencyError> {
         let path = self.record_path(tenant, key);
-        if !path.exists() {
+        let Some(record) = read_existing_record(&path)? else {
             return Ok(None);
-        }
-        let record = read_record(&path)?;
+        };
         if record.tenant != tenant.as_str() {
             return Ok(None);
         }
@@ -189,10 +187,34 @@ fn digest_key(value: &str) -> String {
 }
 
 fn read_record(path: &Path) -> Result<DurableRecord, IdempotencyError> {
-    let mut file = OpenOptions::new().read(true).open(path).map_err(storage)?;
+    read_existing_record(path)?.ok_or_else(|| {
+        IdempotencyError::Storage(format!(
+            "idempotency record {} does not exist",
+            path.display()
+        ))
+    })
+}
+
+/// The record at `path`, or `None` only when it does not exist. Testing
+/// `exists()` first answered false for a record that could not be stat'ed, so
+/// `begin` started the request again and overwrote the record of one already
+/// running or completed; any failure but NotFound is a storage error.
+fn read_existing_record(path: &Path) -> Result<Option<DurableRecord>, IdempotencyError> {
+    let mut file = match OpenOptions::new().read(true).open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(IdempotencyError::Storage(format!(
+                "idempotency record {} cannot be opened: {error}",
+                path.display()
+            )))
+        }
+    };
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes).map_err(storage)?;
-    serde_json::from_slice(&bytes).map_err(|error| IdempotencyError::Storage(error.to_string()))
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|error| IdempotencyError::Storage(error.to_string()))
 }
 
 fn atomic_write(path: &Path, record: &DurableRecord) -> Result<(), IdempotencyError> {

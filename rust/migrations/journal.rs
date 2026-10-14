@@ -49,9 +49,17 @@ pub fn write_durable(path: &Path, journal: &MigrationJournal) -> Result<(), Stri
     sync_parent(path)
 }
 
-pub fn read(path: &Path) -> Result<MigrationJournal, String> {
-    let bytes = fs::read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+/// The journal at `path`, or `None` only when it does not exist: a journal
+/// that cannot be read is refused, not passed over as no interrupted
+/// migration.
+pub fn read(path: &Path) -> Result<Option<MigrationJournal>, String> {
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("read {}: {error}", path.display())),
+    };
     serde_json::from_slice(&bytes)
+        .map(Some)
         .map_err(|error| format!("corrupt migration journal {}: {error}", path.display()))
 }
 
