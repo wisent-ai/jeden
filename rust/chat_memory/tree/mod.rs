@@ -21,6 +21,11 @@ use std::path::{Path, PathBuf};
 use super::log::{append_lines, day, now, read_lines, Entry};
 use super::message_level;
 
+mod build;
+
+use build::Made;
+pub use build::{Fitting, Of, Wanted};
+
 /// One node of the tree.
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Node {
@@ -140,19 +145,9 @@ impl Tree {
         Ok(node)
     }
 
-    /// Message `entry`'s node, built now when the tree has none, with
-    /// `context` (the view's lines before it) to resolve its references.
-    pub fn leaf(
-        &mut self,
-        entry: &Entry,
-        context: &str,
-        bytes: usize,
-        attempts: usize,
-        summarize: &Summarize,
-    ) -> Result<Node, String> {
-        if let Some(node) = self.get(message_level(), entry.i) {
-            return Ok(node.clone());
-        }
+    /// What message `entry`'s node is made of, with `context` (the lines
+    /// before it) to resolve its references.
+    fn leaf_made(entry: &Entry, context: &str, bytes: usize) -> Result<Made, String> {
         let whole = entry.labelled()?;
         let text = if whole.len() <= bytes {
             whole
@@ -163,31 +158,17 @@ impl Tree {
                  (about 70 words), the length of this ruler:\n{ruler}\n<input>\n{whole}\n</input>",
                 entry.i
             );
-            compress(&task, bytes, attempts, summarize)
-                .map_err(|error| format!("message {} could not be compressed: {error}", entry.i))?
+            return Ok(Made::Asked {
+                task,
+                failed: format!("message {} could not be compressed", entry.i),
+            });
         };
-        self.keep(Node {
-            l: message_level(),
-            i: entry.i,
-            size: text.len(),
-            text,
-        })
+        Ok(Made::Words(text))
     }
 
-    /// Node (l, i), built now from its two halves when the tree has none,
-    /// with `context` (the view's lines up to its last message).
-    pub fn parent(
-        &mut self,
-        l: u32,
-        i: u64,
-        context: &str,
-        bytes: usize,
-        attempts: usize,
-        summarize: &Summarize,
-    ) -> Result<Node, String> {
-        if let Some(node) = self.get(l, i) {
-            return Ok(node.clone());
-        }
+    /// What node (l, i) is made of, from its two halves, with `context` (the
+    /// lines up to its last message).
+    fn parent_made(&self, l: u32, i: u64, context: &str, bytes: usize) -> Result<Made, String> {
         let (left, right) = halves(l, i).ok_or_else(|| {
             format!(
                 "node {} is a message's own node, made of no halves",
@@ -221,15 +202,12 @@ impl Tree {
                 a.line(),
                 b.line()
             );
-            compress(&task, bytes, attempts, summarize)
-                .map_err(|error| format!("node {} could not be merged: {error}", name(l, i)))?
+            return Ok(Made::Asked {
+                task,
+                failed: format!("node {} could not be merged", name(l, i)),
+            });
         };
-        self.keep(Node {
-            l,
-            i,
-            size: text.len(),
-            text,
-        })
+        Ok(Made::Words(text))
     }
 }
 
@@ -258,12 +236,12 @@ fn compress(
         if line.len() <= bytes {
             break;
         }
-        let cut = line
+        // What of the line fits before the limit, whole characters only.
+        let cut: String = line
             .char_indices()
-            .map(|(at, character)| at + character.len_utf8())
-            .take_while(|end| *end <= bytes)
-            .last()
-            .map_or("", |end| &line[..end]);
+            .take_while(|(at, character)| at + character.len_utf8() <= bytes)
+            .map(|(_, character)| character)
+            .collect();
         let retry = format!(
             "Too long: your line is {} bytes, over the {bytes}-byte limit. Write\n\
              the whole line again for the same <input>, cutting just enough of the\n\

@@ -1,11 +1,12 @@
 use super::*;
 
 pub(super) fn normalized_history(cwd: &Path, mut turns: Vec<Value>) -> Result<Vec<Value>, String> {
+    // Only a history that carries the marker asks for the base system prompt.
     let needs_base_system = turns
         .first()
         .and_then(|message| message.get("_jedenNeedsBaseSystem"))
         .and_then(Value::as_bool)
-        .unwrap_or(false);
+        == Some(true);
     if needs_base_system {
         if let Some(first) = turns.first_mut().and_then(Value::as_object_mut) {
             first.remove("_jedenNeedsBaseSystem");
@@ -60,11 +61,11 @@ impl Conversation {
         let leaf = self.recorder.active_leaf()?;
         let mut recorder = prepare_child(cwd, &parent, leaf, "reset")?;
         recorder.record_context("reset_seed", &messages)?;
+        // The chat goes on in the new session directory: what was said so
+        // far joins it before the window is cleared.
+        self.leave_memory()?;
         self.recorder = recorder;
         self.messages = messages;
-        // A new session directory: its chat memory is opened there at the
-        // next step, not appended to the one before the reset.
-        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("reset");
         Ok(())
@@ -115,11 +116,11 @@ impl Conversation {
         let leaf = crate::cli::sessions::session_active_leaf(source)?;
         let mut recorder = prepare_child(cwd, source, leaf, "resume")?;
         recorder.record_context("resume_seed", &messages)?;
+        // The resumed child goes on in its chat, which already holds the
+        // history the source logged.
+        self.leave_memory()?;
         self.recorder = recorder;
         self.messages = messages;
-        // The resumed child is its own session directory; its chat memory is
-        // opened there at the next step with the resumed history.
-        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("resume");
         Ok(())
@@ -147,12 +148,12 @@ impl Conversation {
         // follows the note. A process that never opened the memory (a
         // one-shot `/rewind`) writes the same note from the history as it
         // stands now.
-        let unopened = self.memory.is_none() && crate::chat_memory::settings(self.cwd())?.is_some();
         if let Some(memory) = &mut self.memory {
             memory.replaced(&self.messages)?;
-        } else if unopened {
+        } else {
             crate::chat_memory::session::ChatMemory::rewound_unopened(
                 &self.recorder.path(),
+                self.cwd(),
                 &self.messages,
             )?;
         }
@@ -170,10 +171,10 @@ impl Conversation {
         let parent_entry = self.recorder.active_leaf()?;
         let mut recorder = prepare_child(cwd, &parent, parent_entry, "fork")?;
         recorder.record_context("fork_seed", &self.messages)?;
+        // The fork records into its own session directory and goes on in the
+        // same chat, which holds the history it carries.
+        self.leave_memory()?;
         self.recorder = recorder;
-        // The fork records into its own session directory, whose chat memory
-        // is opened there at the next step with the history it carries.
-        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("fork");
         Ok(self.recorder.path())
@@ -185,9 +186,9 @@ impl Conversation {
         let parent_entry = self.recorder.active_leaf()?;
         let mut recorder = prepare_child(cwd, &parent, parent_entry, "branch")?;
         recorder.record_context("branch_seed", &self.messages)?;
+        // As for a fork: the same chat, from the branch's next step.
+        self.leave_memory()?;
         self.recorder = recorder;
-        // As for a fork: the branch's own chat memory, opened at its next step.
-        self.memory = None;
         self.reconcile_completion = true;
         self.session_context_pending = Some("branch");
         Ok(self.recorder.path())

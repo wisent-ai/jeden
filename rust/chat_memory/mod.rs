@@ -8,12 +8,15 @@
 //! message was said. Compaction, which replaced the history and lost what
 //! the operator said, is not used while the chat memory is on.
 //!
+//! One chat belongs to one agent and outlives its sessions (`chat`): a new
+//! session, a reset, a resume, a fork or a branch goes on in the same chat.
 //! The operator turns it on per workspace or user with `chatMemory` in
 //! Jeden's configuration, naming `summaryModel`: the Brama route or alias of
 //! the cheap model. Every size is the operator's own number, declared
-//! beside this file. Everything lives under the session directory in
-//! `chat-memory/`.
+//! beside this file; how many compactions run at once is what this machine
+//! runs in parallel, measured when a chat opens.
 
+pub mod chat;
 mod log;
 pub mod session;
 mod tree;
@@ -21,11 +24,11 @@ mod view;
 
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::LazyLock;
 
 pub use log::{Entry, Kind, Log};
-pub use tree::{Node, Summarize, Tree};
+pub use tree::{Fitting, Node, Summarize, Tree};
 pub use view::View;
 
 #[derive(Deserialize)]
@@ -78,11 +81,36 @@ pub fn message_level() -> u32 {
     LIMITS.message_level.value
 }
 
+/// How many compactions run at once: as many as this machine runs in
+/// parallel, as the operating system reports it.
+pub fn compaction_calls() -> Result<usize, String> {
+    std::thread::available_parallelism()
+        .map(std::num::NonZeroUsize::get)
+        .map_err(|error| {
+            format!("this machine does not say how many threads it runs at once, so the chat memory cannot size its compactions: {error}")
+        })
+}
+
+/// The operator's numbers and how many compactions run at once, with the
+/// cheap model that writes the lines.
+pub fn fitting(summarize: &Summarize) -> Result<Fitting<'_>, String> {
+    Ok(Fitting {
+        summary_bytes: summary_bytes(),
+        attempts: summary_attempts(),
+        calls: compaction_calls()?,
+        high: view_high(),
+        low: view_low(),
+        summarize,
+    })
+}
+
 /// What the operator set the chat memory to.
 #[derive(Clone, Debug)]
 pub struct Settings {
     /// The Brama route or alias the summaries are written with.
     pub summary_model: String,
+    /// The chat the configuration names (`chatMemory.chat`), if it names one.
+    pub chat: Option<String>,
 }
 
 /// The chat memory's settings in `cwd`'s configuration: none when the
@@ -109,10 +137,17 @@ pub fn settings(cwd: &Path) -> Result<Option<Settings>, String> {
         .filter(|model| !model.is_empty())
         .ok_or("chatMemory.summaryModel is required: the Brama route or alias of the cheap model the summary tree is written with")?
         .to_string();
-    Ok(Some(Settings { summary_model }))
-}
-
-/// Where a session keeps its chat memory.
-pub fn dir(session_dir: &Path) -> PathBuf {
-    session_dir.join("chat-memory")
+    let chat = match section.get("chat") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(name)) => Some(chat::checked_name(name, "chatMemory.chat")?),
+        Some(other) => {
+            return Err(format!(
+                "chatMemory.chat is the name of the chat this workspace writes to; {other} is not a name"
+            ))
+        }
+    };
+    Ok(Some(Settings {
+        summary_model,
+        chat,
+    }))
 }

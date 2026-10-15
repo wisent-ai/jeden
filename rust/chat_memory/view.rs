@@ -13,6 +13,11 @@
 //! and among equally due pairs the oldest merges first. The view is saved to
 //! `view.json` as its `[l, i]` pairs and loaded at start; it is never
 //! rebuilt from the log, since a rebuilt view differs from the live one.
+//!
+//! New messages' lines are built in rounds of as many compactions at once
+//! as the fitting allows, each round shown the view before it; a batch first
+//! builds the parent of every sibling pair in the view the same way, so the
+//! merges it then makes rarely wait on the model.
 
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -20,17 +25,7 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 
 use super::log::Entry;
-use super::tree::{count, halves, last, Node, Summarize, Tree};
-
-/// How a view's lines are built and merged: the operator's numbers and the
-/// cheap model.
-pub struct Fitting<'a> {
-    pub summary_bytes: usize,
-    pub attempts: usize,
-    pub high: usize,
-    pub low: usize,
-    pub summarize: &'a Summarize,
-}
+use super::tree::{count, first, halves, last, Fitting, Node, Of, Tree, Wanted};
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 #[serde(transparent)]
@@ -53,6 +48,36 @@ pub fn render(nodes: &[Node]) -> String {
 /// How many bytes `nodes` take as lines.
 pub fn bytes(nodes: &[Node]) -> usize {
     nodes.iter().map(|node| node.line().len()).sum()
+}
+
+/// The lines of `nodes` up to message `upto`: what a merge ending there is
+/// shown of the chat.
+fn context_upto(nodes: &[Node], upto: u64) -> String {
+    let shown: Vec<Node> = nodes
+        .iter()
+        .take_while(|node| first(node.l, node.i) <= upto)
+        .cloned()
+        .collect();
+    render(&shown)
+}
+
+/// The parent of every sibling pair in `nodes`, each shown the lines up to
+/// its last message: what a batch may merge.
+pub fn pairs<'a>(nodes: &[Node]) -> Vec<Wanted<'a>> {
+    let two = NonZeroUsize::MIN.get() + NonZeroUsize::MIN.get();
+    nodes
+        .windows(two)
+        .filter_map(|window| match window {
+            [left, right] => {
+                let (l, i) = parent_of(left);
+                (halves(l, i) == Some(((left.l, left.i), (right.l, right.i)))).then(|| Wanted {
+                    of: Of::Pair(l, i),
+                    context: context_upto(nodes, last(l, i)),
+                })
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 impl View {
@@ -112,9 +137,22 @@ impl View {
             .collect()
     }
 
+    /// The messages of `entries` the view does not cover yet.
+    pub fn fresh<'a>(&self, entries: &'a [Entry]) -> Result<&'a [Entry], String> {
+        let covered = usize::try_from(self.covered()).map_err(|error| {
+            format!("the view covers more messages than this machine counts: {error}")
+        })?;
+        entries.get(covered..).ok_or_else(|| {
+            format!(
+                "the chat memory view covers {covered} message(s), but the chat log holds {}",
+                entries.len()
+            )
+        })
+    }
+
     /// Append the line of every message in `entries` the view does not
-    /// cover yet, building each from the lines before it, then, once the
-    /// view passes the high size, merge it down to the low size in one
+    /// cover yet, built in rounds each shown the view before it, then, once
+    /// the view passes the high size, merge it down to the low size in one
     /// batch. Answers whether a batch merged.
     pub fn grow(
         &mut self,
@@ -123,43 +161,41 @@ impl View {
         fitting: &Fitting,
     ) -> Result<bool, String> {
         let mut nodes = self.nodes(tree)?;
-        let covered = usize::try_from(self.covered()).map_err(|error| {
-            format!("the view covers more messages than this machine counts: {error}")
-        })?;
-        let fresh = entries.get(covered..).ok_or_else(|| {
-            format!(
-                "the chat memory view covers {covered} message(s), but the chat log holds {}",
-                entries.len()
-            )
-        })?;
-        for entry in fresh {
-            let leaf = tree.leaf(
-                entry,
-                &render(&nodes),
-                fitting.summary_bytes,
-                fitting.attempts,
-                fitting.summarize,
-            )?;
-            self.0.push((leaf.l, leaf.i));
-            nodes.push(leaf);
+        for round in self.fresh(entries)?.chunks(fitting.calls) {
+            let context = render(&nodes);
+            let wanted: Vec<Wanted> = round
+                .iter()
+                .map(|entry| Wanted {
+                    of: Of::Message(entry),
+                    context: context.clone(),
+                })
+                .collect();
+            tree.build(&wanted, fitting)?;
+            for entry in round {
+                let leaf = tree
+                    .get(super::message_level(), entry.i)
+                    .cloned()
+                    .ok_or_else(|| {
+                        format!(
+                            "message {} was built but the tree does not hold its line",
+                            entry.i
+                        )
+                    })?;
+                self.0.push((leaf.l, leaf.i));
+                nodes.push(leaf);
+            }
         }
         if bytes(&nodes) <= fitting.high {
             return Ok(false);
         }
+        tree.build(&pairs(&nodes), fitting)?;
         let total = self.covered();
         while bytes(&nodes) > fitting.low {
             let Some(at) = most_due(&nodes, total) else {
                 break;
             };
             let (l, i) = parent_of(&nodes[at]);
-            let parent = tree.parent(
-                l,
-                i,
-                &render(&nodes[..=at + NonZeroUsize::MIN.get()]),
-                fitting.summary_bytes,
-                fitting.attempts,
-                fitting.summarize,
-            )?;
+            let parent = tree.parent(l, i, context_upto(&nodes, last(l, i)), fitting)?;
             nodes.splice(at..=at + NonZeroUsize::MIN.get(), [parent]);
         }
         self.0 = nodes.iter().map(|node| (node.l, node.i)).collect();

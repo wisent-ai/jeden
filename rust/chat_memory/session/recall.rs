@@ -62,8 +62,10 @@ pub fn date(dir: &Path, id: &str) -> Result<Value, String> {
     Ok(json!({ "id": id, "date": entry.date }))
 }
 
-/// The memory of a session as a whole: the log, the view a turn is given
-/// now and its size between the design's bounds, and every node built.
+/// A chat's memory as a whole: the chat's record and whether a process
+/// writes it now, the log, the view a turn is given now and its size
+/// between the design's bounds, how many compactions run at once, and every
+/// node built.
 pub fn describe(dir: &Path) -> Result<Value, String> {
     let log = Log::at(dir);
     let entries = log.read()?;
@@ -71,9 +73,11 @@ pub fn describe(dir: &Path) -> Result<Value, String> {
     let view = View::load(dir)?;
     let nodes = view.nodes(&tree)?;
     Ok(json!({
+        "chat": super::super::chat::summary(dir)?,
         "directory": dir,
         "log": { "directory": log.dir(), "messages": entries.len() },
         "summaryBytes": summary_bytes(),
+        "compactionCalls": super::super::compaction_calls()?,
         "view": {
             "pairs": view.0,
             "covers": view.covered(),

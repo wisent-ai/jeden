@@ -48,9 +48,9 @@ short list is never mistaken for a complete one.
 Before its first model call, every turn receives the top recommendations as a
 `[Context recommendations]` block, recorded in the session's own `user` event.
 `context.advisor.sources` defaults to `files,memory`, the two that answer from
-local state; `--source all` adds the archive and the index. Sources run
-concurrently and nothing cuts one short: there is no deadline setting and no
-`--timeout-ms` flag, because a guessed interval reports nothing and explains
+local state; `--source all` adds the archive and the index. Sources run side
+by side and nothing cuts one short: no setting or flag bounds how long a
+source may take, because a guessed interval reports nothing and explains
 nothing. Choose the source set explicitly. `jeden context prompt "<task>"` prints exactly what the next turn would
 receive, `jeden context sources` reports what each source is and whether it
 answers now, and `context.advisor.enabled false` switches the block off.
@@ -79,53 +79,99 @@ names of the missing ones.
 ### Never-ending chat memory
 
 With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
-(user), a session keeps every message and stops compacting, as the operator's
-OptChat design lays it out:
+(user), an agent keeps one chat that never ends and stops compacting, as the
+operator's OptChat design lays it out:
 
 ```json
-{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>" } }
+{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>", "chat": "<optional chat name>" } }
 ```
 
-- Every message is appended word for word to
-  `<session>/chat-memory/main/YYYY-MM-DD.jsonl`, one line
-  `{i, kind, text, size, date}` each, flushed, never edited: `user` (the
-  user's words), `jeden` (a reply), `tool` (a tool call: its name and JSON
-  input), `echo` (a tool's output, clipped to its head and tail), `note` (what
-  the chat records itself, such as a rewind). One process writes a chat; a
-  second is refused naming `chat-memory/owner.lock`.
-- Over the log grows a binary tree in `chat-memory/tree/YYYY-MM-DD.jsonl`, one
-  line `{l, i, text, size}` per node: node(0, i) is message i in one line,
-  node(l, i) merges node(l-1, 2i) and node(l-1, 2i+1), and it is named
-  `id+n`, its first message and how many it covers. A source that fits the
-  summary size is its own line with no model call (a short message word for
-  word, two short lines joined by a newline); anything longer is compressed by
-  `summaryModel` through Brama, shown the size as a ruler and asked again when
-  the line is too long, keeping the shortest. Each node is built once.
+- A chat outlives its sessions. Every session of an agent appends to the same
+  chat, so a new session, `/reset`, a resume, `/fork` and `/branch` go on from
+  everything the agent was told before instead of starting from nothing. A
+  new session's chat is named, in this order, by `JEDEN_CHAT` (what a
+  launcher sets for each agent it starts), by `chatMemory.chat`, and otherwise
+  it is the workspace's own chat, `workspace-<directory>-<SHA-256 of its
+  path>`. Named chats live beside the session root in `chats/<name>/`
+  (`~/.jeden/chats/` by default, beside `JEDEN_SESSION_ROOT` when that is
+  set). A delegated task keeps its own chat in its session directory, so its
+  steps stay out of the chat that delegated it. A name is letters, digits,
+  `-`, `_` and `.`, not starting with a dot; anything else is refused before
+  any model call: ``chatMemory.chat names the chat `<name>`, which is not a
+  chat name: …`` (or `JEDEN_CHAT names the chat …`).
+- A session keeps the chat it started in. Each session records the chat it
+  writes to and which of its messages the chat holds in
+  `<session>/chat-memory.json`; a resumed session goes on from its own record,
+  and a session made from another (`/reset`, a resume's child, `/fork`,
+  `/branch`) from its parent's, so it stays in that chat and the history it
+  carries is not logged twice. `JEDEN_CHAT` and `chatMemory.chat` name the
+  chat a new session starts in, so a launcher can set `JEDEN_CHAT` for every
+  start and a session it resumes stays in its own chat; a `JEDEN_CHAT` that
+  is no chat name is still refused. A session imported from another harness
+  (`jeden import`) has no chat yet: the first run that continues it starts
+  one, and the whole conversation it carries comes into that chat.
+- Only the agent's own conversation writes to its chat: the one that keeps
+  the task's completion, or a `--model-only` run. An intake or acceptance
+  inspection and a Pursuit stage are the harness's machinery and keep their
+  messages out of it.
+- One process writes a chat. A second one is refused with ``the chat `<name>`
+  is written by another process now (it holds <chat>/owner.lock); one process
+  writes a chat, so give this agent its own with JEDEN_CHAT=<name> or
+  chatMemory.chat``.
+- Every message is appended word for word to `<chat>/main/YYYY-MM-DD.jsonl`,
+  one line `{i, kind, text, size, date}` each, flushed, never edited: `user`
+  (the user's words), `jeden` (a reply), `tool` (a tool call: its name and JSON
+  input), `echo` (a tool's output, clipped to its head and tail), `work` (the
+  report of a task given to `delegate_task`, starting `[delegate_task]`; the
+  task's own steps stay in its own chat), `note` (what the chat records
+  itself: a rewind, or a message of an imported session).
+- Over the log grows a binary tree in `<chat>/tree/YYYY-MM-DD.jsonl`, one line
+  `{l, i, text, size}` per node: node(0, i) is message i in one line, node(l,
+  i) merges node(l-1, 2i) and node(l-1, 2i+1), and it is named `id+n`, its
+  first message and how many it covers. A source that fits the summary size is
+  its own line with no model call (a short message word for word, two short
+  lines joined by a newline); anything longer is compressed by `summaryModel`
+  through Brama, shown the size as a ruler and asked again when the line is
+  too long, keeping the shortest. Each node is built once. Compactions run
+  side by side, as many at a time as the operating system says this machine
+  runs threads; `jeden chat-memory show` prints that number.
 - Each turn sends the conversation's system messages, then the view — one
-  `id+n|text` line per node covering every message before the turn, inside
-  `<chat>` tags, never a whole message — and then the turn itself from the
-  user's message on. Each new message appends its line. Once the view passes
-  the high size, one batch merges the most due sibling pairs, due =
-  (T - last) / 2^l with T the messages in the chat and last the pair's last
-  message, oldest first among equals, until it is at most the low size; so
-  the view is a sawtooth between the two and its beginning stays put between
-  batches. The view is saved in `chat-memory/view.json` as its `[l, i]` pairs,
-  loaded at start and never rebuilt from the log. The sizes, the tool output
-  clip and the retry count are the operator's numbers, declared with his
-  words in `rust/chat_memory/numeric-provenance.json`.
+  `id+n|text` line per node covering every message of the chat before the
+  turn, every earlier session included, inside `<chat>` tags, never a whole
+  message — and then the turn itself from the user's message on. Each new
+  message appends its line; the lines of new messages are built in rounds,
+  each round shown the view before it. Once the view passes the high size,
+  the parent of every sibling pair in it is built, and one batch merges the
+  most due sibling pairs, due = (T - last) / 2^l with T the messages in the
+  chat and last the pair's last message, oldest first among equals, until it
+  is at most the low size; so the view is a sawtooth between the two and its
+  beginning stays put between batches. The view is saved in
+  `<chat>/view.json` as its `[l, i]` pairs, loaded at start and never rebuilt
+  from the log. The sizes, the tool output clip and the retry count are the
+  operator's numbers, declared with his words in
+  `rust/chat_memory/numeric-provenance.json`.
 - Between turns a background thread builds the line of every message the
   view does not cover yet and the parent of every sibling pair in the view.
 - `recall_conversation` with `id` and `n` opens line `id+n` into the two lines
   it was made from, down to the message whole for a line of one message, and
-  with `date=<id>` answers when message id was said. `jeden chat-memory
-  show|zoom|date` answers the same from the command line.
+  with `date=<id>` answers when message id was said. `jeden chat-memory`
+  lists the chats and shows, zooms and dates any of them from the command
+  line, by chat name or by a session that wrote to it, and imports an earlier
+  session into a chat as notes, once per session; Jeden RPC answers the same
+  as `chat-memory/list`, `chat-memory/show`, `chat-memory/zoom`,
+  `chat-memory/date` and `chat-memory/import`.
 - A `/rewind` keeps the log as it is and appends a `note` naming the messages
   taken back; what is said after it follows the note.
 - A `chatMemory` without `summaryModel`, one still naming `viewBytes`, a
-  summary model Brama's catalog refuses, and a chat memory in the earlier
-  `log.jsonl` layout stop the turn with that cause. An unreadable log, tree or
-  view is refused naming the file, never restarted.
-- The real journey is `node tests/chat_memory/journey.mjs` with `JEDEN_BIN`,
-  `JEDEN_TEST_SOURCE_REVISION`, `JEDEN_TEST_MODEL`, `JEDEN_TEST_SUMMARY_MODEL`,
-  `JEDEN_TEST_MAX_STEPS` and `JEDEN_TEST_BATCHES`; it writes its report under
+  `chat` that is not a name, and a summary model Brama's catalog refuses stop
+  the turn with that cause. An unreadable log, tree, view, chat record or
+  session record is refused naming the file, never restarted.
+- The real journeys are `node tests/chat_memory/journey.mjs` (the sawtooth,
+  zoom, date, a next process continuing the kept view, and rewind; with
+  `JEDEN_TEST_MAX_STEPS` and `JEDEN_TEST_BATCHES`) and
+  `node tests/chat_memory/chats.mjs` (a new session answering what an earlier
+  one was told, the second writer's refusal, `list`, `show` by session,
+  `import` and its refusals, and the name refusals), both with `JEDEN_BIN`,
+  `JEDEN_TEST_SOURCE_REVISION`, `JEDEN_TEST_MODEL` and
+  `JEDEN_TEST_SUMMARY_MODEL`; they write their reports under
   `.build/chat-memory/`.

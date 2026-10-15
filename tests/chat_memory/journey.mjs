@@ -13,9 +13,10 @@
 // leaves a note in the log. A chatMemory section without its summary model,
 // or still naming a view size, refuses the run with the setting.
 // Required: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_MODEL,
-// JEDEN_TEST_SUMMARY_MODEL (the cheap Brama route), JEDEN_TEST_MAX_STEPS and
+// JEDEN_TEST_SUMMARY_MODEL (the cheap model), JEDEN_TEST_MAX_STEPS and
 // JEDEN_TEST_BATCHES (how many merge batches the run goes through), with the
-// normal Brama environment.
+// environment of the model route: Brama, or the OpenAI-compatible provider
+// JEDEN_MODEL_ENDPOINT names; the report records which.
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -39,7 +40,7 @@ const summaryModel = required('JEDEN_TEST_SUMMARY_MODEL');
 const maxSteps = Number(required('JEDEN_TEST_MAX_STEPS'));
 const wanted = Number(required('JEDEN_TEST_BATCHES'));
 assert.ok(Number.isInteger(wanted) && wanted > Number.MIN_VALUE, 'JEDEN_TEST_BATCHES is a whole number of batches');
-assert.ok(!process.env.JEDEN_MODEL_ENDPOINT, 'the journey requires the real Brama route');
+const route = process.env.JEDEN_MODEL_ENDPOINT ? `direct ${process.env.JEDEN_MODEL_ENDPOINT}` : 'brama';
 // The design's numbers as Jeden declares them.
 const declared = JSON.parse(readFileSync(join(root, 'rust/chat_memory/numeric-provenance.json'), 'utf8'));
 const summaryBytes = declared.summary_bytes_max.value;
@@ -50,7 +51,8 @@ const runs = join(root, '.build/chat-memory');
 mkdirSync(runs, { recursive: true });
 const output = mkdtempSync(join(runs, 'run-'));
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
-const report = { revision, binary, binarySha256: hash(binary), model, summaryModel, summaryBytes, high, low, wanted,
+const report = { revision, binary, binarySha256: hash(binary), route, model, summaryModel, summaryBytes, high, low,
+  wanted,
   testSha256: hash(fileURLToPath(import.meta.url)), commands: [], frames: [], observations: {}, verdict: 'failed' };
 
 function invoke(program, args, cwd, env) {
@@ -70,7 +72,10 @@ function project(name, chatMemory) {
   writeFileSync(join(directory, '.jeden/config.json'), JSON.stringify({ chatMemory }));
   const sessions = join(directory, 'sessions');
   mkdirSync(sessions, { recursive: true });
-  return { directory, env: { ...process.env, JEDEN_SESSION_ROOT: sessions }, sessions };
+  // The chat is the one the configuration names, never one the caller set.
+  const env = { ...process.env, JEDEN_SESSION_ROOT: sessions };
+  delete env.JEDEN_CHAT;
+  return { directory, env, sessions };
 }
 const jeden = (args, place) => invoke(binary, args, place.directory, place.env);
 const show = (session, place) => JSON.parse(succeeds(jeden(['chat-memory', 'show', session, '--json'], place)));
@@ -104,7 +109,7 @@ try {
   // One real RPC session, turn after turn: each prompt a paragraph that
   // just fits one line, each answer that paragraph back, so the view grows
   // by about two lines a turn and its batches come within a few hundred turns.
-  const chat = project('chat', { summaryModel });
+  const chat = project('chat', { summaryModel, chat: 'journey' });
   const ask = '\nRespond with exactly the paragraph above and nothing else.';
   const paragraph = (turn) => {
     let text = `ORDER-${turn}: the operator ordered this, word for word, and it must be kept.`;
@@ -143,8 +148,8 @@ try {
     await client.end();
   }
 
-  // The layout the design names.
-  const memory = join(session, 'chat-memory');
+  // The layout the design names, in the chat beside the session root.
+  const memory = join(chat.directory, 'chats', 'journey');
   const logged = lines(join(memory, 'main'));
   const built = lines(join(memory, 'tree'));
   report.observations.logged = logged.length;

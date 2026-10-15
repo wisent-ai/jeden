@@ -50,8 +50,29 @@ pub(super) fn clipped(text: &str, max: usize) -> String {
     format!("{start}\n[{} characters left out]\n{end}", total - max)
 }
 
+/// The tool whose result is a subagent's report: the chat log keeps it as a
+/// `work` message starting `[delegate_task]`, as the design names one.
+const DELEGATION: &str = "delegate_task";
+
+/// The ids of every tool call among `messages` that delegated a task.
+pub(super) fn delegations<'a>(messages: impl Iterator<Item = &'a Value>) -> Vec<String> {
+    messages
+        .filter_map(|message| message.get("tool_calls").and_then(Value::as_array))
+        .flatten()
+        .filter(|call| call.pointer("/function/name").and_then(Value::as_str) == Some(DELEGATION))
+        .filter_map(|call| call.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect()
+}
+
 /// The log entries one conversation message becomes, from index `next` on.
-pub(super) fn entries_of(message: &Value, next: u64, date: &str) -> Result<Vec<Entry>, String> {
+/// A tool result answering one of the `delegated` calls is a subagent's
+/// report, kept as `work`.
+pub(super) fn entries_of(
+    message: &Value,
+    next: u64,
+    date: &str,
+    delegated: &[String],
+) -> Result<Vec<Entry>, String> {
     let role = message.get("role").and_then(Value::as_str).ok_or_else(|| {
         format!("message {next} of the conversation names no role, so the chat log cannot keep it")
     })?;
@@ -87,7 +108,14 @@ pub(super) fn entries_of(message: &Value, next: u64, date: &str) -> Result<Vec<E
                 push(Kind::Tool, format!("{name} {arguments}"));
             }
         }
-        "tool" => push(Kind::Echo, clipped(&content_text(message), echo_chars())),
+        "tool" => {
+            let answered = message.get("tool_call_id").and_then(Value::as_str);
+            let text = clipped(&content_text(message), echo_chars());
+            match answered.is_some_and(|id| delegated.iter().any(|call| call == id)) {
+                true => push(Kind::Work, format!("[{DELEGATION}] {text}")),
+                false => push(Kind::Echo, text),
+            }
+        }
         other => {
             return Err(format!(
                 "message {next} of the conversation has the role `{other}`, which the chat log has no kind for"

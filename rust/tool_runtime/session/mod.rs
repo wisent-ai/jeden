@@ -130,19 +130,19 @@ pub(crate) fn recall_conversation(
             dir.display().to_string()
         }
     };
-    // The chat memory answers zoom(id, n) into a line of its view, down to a
-    // message whole, and date(id) of a message.
-    let memory = crate::chat_memory::dir(&crate::cli::sessions::session_dir_for(&target));
+    // The chat memory of the session's chat answers zoom(id, n) into a line
+    // of its view, down to a message whole, and date(id) of a message.
+    let memory = || crate::chat_memory::chat::resolve(&target);
     // A message id or a count, given as a number or as its digits.
     let number = |key: &str| match input.get(key) {
         Some(Value::Number(value)) => Some(value.to_string()),
         _ => string_input(input, key),
     };
     if let Some(id) = number("date") {
-        return crate::chat_memory::session::date(&memory, &id);
+        return crate::chat_memory::session::date(&memory()?, &id);
     }
     match (number("id"), number("n")) {
-        (Some(id), Some(n)) => return crate::chat_memory::session::zoom(&memory, &id, &n),
+        (Some(id), Some(n)) => return crate::chat_memory::session::zoom(&memory()?, &id, &n),
         (Some(_), None) | (None, Some(_)) => {
             return Err(
                 "recall_conversation opens a line of the chat memory with both id and n, as the view names it `id+n|`".into(),
@@ -163,17 +163,24 @@ pub(crate) fn recall_conversation(
 /// asking again; every question asked and its answer go into the register.
 pub(crate) fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let question = string_input(input, "question").ok_or("ask_user requires question")?;
-    let options = input
-        .get("options")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(Value::as_str)
-                .map(ToString::to_string)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    // A question asked without options offers none.
+    let options: Vec<String> = match input.get("options") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| match item {
+                Value::String(text) => Ok(text.clone()),
+                other => Err(format!(
+                    "ask_user options are answers in text; {other} is not"
+                )),
+            })
+            .collect::<Result<_, _>>()?,
+        Some(other) => {
+            return Err(format!(
+                "ask_user options are a list of answers; {other} is not"
+            ))
+        }
+    };
     let session = runtime.artifact_dir.and_then(Path::parent);
     if let Some(session) = session {
         let recalled = crate::completion::recall_question(runtime.cwd, session, &question)?;
@@ -199,17 +206,18 @@ pub(crate) fn ask_user(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value
         }
         eprintln!("\n[ask_user] {question}");
         if !options.is_empty() {
-            for (index, option) in options.iter().enumerate() {
-                eprintln!("  {}. {}", index + 1, option);
+            for (number, option) in (std::num::NonZeroUsize::MIN.get()..).zip(&options) {
+                eprintln!("  {number}. {option}");
             }
         }
         eprint!("Answer: ");
         io::stderr().flush().map_err(|e| e.to_string())?;
         let mut answer = String::new();
-        let bytes = io::stdin()
+        io::stdin()
             .read_line(&mut answer)
             .map_err(|e| e.to_string())?;
-        if bytes == 0 {
+        // Standard input that ended before a line answers nothing.
+        if answer.is_empty() {
             return Err("ask_user requires interactive input".into());
         }
         answer.trim_end_matches(['\r', '\n']).to_string()

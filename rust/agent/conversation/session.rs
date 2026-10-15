@@ -40,18 +40,23 @@ impl Conversation {
     /// The messages a step sends: the chat memory's view of this
     /// conversation, opening the memory at the first step when the
     /// configuration turns it on, or the conversation's own messages when it
-    /// is off.
+    /// is off. Only the agent's own conversation writes to its chat — the one
+    /// that keeps the task's completion, or a model-only run; an intake or
+    /// acceptance inspection and a Pursuit stage are the harness's machinery,
+    /// and their messages stay out of it.
     pub(super) fn step_messages(
         &mut self,
         config: &Config,
         args: &Args,
     ) -> Result<Vec<Value>, String> {
-        if self.memory.is_none() {
+        let own = !self.inspection && (self.manages_completion || args.model_only);
+        if self.memory.is_none() && own {
             if let Some(settings) = crate::chat_memory::settings(&args.cwd)? {
                 let summarize = self.summarizer(&settings, config, args)?;
                 self.memory = Some(ChatMemory::open(
                     &self.recorder.path(),
-                    settings,
+                    &args.cwd,
+                    &settings,
                     summarize,
                     &self.messages,
                 )?);
@@ -73,6 +78,18 @@ impl Conversation {
             memory.sync(&self.messages)?;
             memory.build_in_background();
         }
+        Ok(())
+    }
+
+    /// Before the conversation records into a new session directory (a
+    /// `/reset`, a resume, `/fork` or `/branch`), what it said so far joins
+    /// its chat and the chat is let go; the new session opens the same chat
+    /// at its next step and goes on from there.
+    pub(super) fn leave_memory(&mut self) -> Result<(), String> {
+        if let Some(memory) = &mut self.memory {
+            memory.sync(&self.messages)?;
+        }
+        self.memory = None;
         Ok(())
     }
 
