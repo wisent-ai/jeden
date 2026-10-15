@@ -122,9 +122,11 @@ operator's OptChat design lays it out:
   one line `{i, kind, text, size, date}` each, flushed, never edited: `user`
   (the user's words), `jeden` (a reply), `tool` (a tool call: its name and JSON
   input), `echo` (a tool's output, clipped to its head and tail), `work` (the
-  report of a task given to `delegate_task`, starting `[delegate_task]`; the
-  task's own steps stay in its own chat), `note` (what the chat records
-  itself: a rewind, or a message of an imported session).
+  report of a task given to `delegate_task`: `[<agent> <job id>]` and the
+  subagent's final output, clipped like a tool's; a delegation that failed
+  before a subagent ran stays the tool's `echo`, and the task's own steps stay
+  in its own chat), `note` (what the chat records itself: a rewind, or a
+  message of an imported session).
 - Over the log grows a binary tree in `<chat>/tree/YYYY-MM-DD.jsonl`, one line
   `{l, i, text, size}` per node: node(0, i) is message i in one line, node(l,
   i) merges node(l-1, 2i) and node(l-1, 2i+1), and it is named `id+n`, its

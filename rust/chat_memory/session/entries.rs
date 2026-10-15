@@ -50,9 +50,39 @@ pub(super) fn clipped(text: &str, max: usize) -> String {
     format!("{start}\n[{} characters left out]\n{end}", total - max)
 }
 
-/// The tool whose result is a subagent's report: the chat log keeps it as a
-/// `work` message starting `[delegate_task]`, as the design names one.
+/// The tool whose result is a subagent's report.
 const DELEGATION: &str = "delegate_task";
+
+/// What a delegated task's tool result is: the subagent's report, or the
+/// error the tool answered when the delegation failed before a subagent
+/// ran (a text that is no job's result).
+enum Delegated {
+    Report(String),
+    Failed,
+}
+
+/// A delegated task's result read by its structure: a job's result is the
+/// design's `work` message, `[agent job]` and the subagent's final output.
+fn delegated_result(text: &str) -> Delegated {
+    let parsed: Result<Value, _> = serde_json::from_str(text);
+    let job = parsed.as_ref().map(|result| {
+        (
+            result.pointer("/job/agent").and_then(Value::as_str),
+            result.pointer("/job/id").and_then(Value::as_str),
+            result.get("delegated"),
+        )
+    });
+    match job {
+        Ok((Some(agent), Some(id), Some(output))) => {
+            let output = match output {
+                Value::String(output) => output.clone(),
+                other => other.to_string(),
+            };
+            Delegated::Report(format!("[{agent} {id}] {}", clipped(&output, echo_chars())))
+        }
+        Ok(_) | Err(_) => Delegated::Failed,
+    }
+}
 
 /// The ids of every tool call among `messages` that delegated a task.
 pub(super) fn delegations<'a>(messages: impl Iterator<Item = &'a Value>) -> Vec<String> {
@@ -110,10 +140,11 @@ pub(super) fn entries_of(
         }
         "tool" => {
             let answered = message.get("tool_call_id").and_then(Value::as_str);
-            let text = clipped(&content_text(message), echo_chars());
-            match answered.is_some_and(|id| delegated.iter().any(|call| call == id)) {
-                true => push(Kind::Work, format!("[{DELEGATION}] {text}")),
-                false => push(Kind::Echo, text),
+            let text = content_text(message);
+            let delegation = answered.is_some_and(|id| delegated.iter().any(|call| call == id));
+            match delegation.then(|| delegated_result(&text)) {
+                Some(Delegated::Report(work)) => push(Kind::Work, work),
+                Some(Delegated::Failed) | None => push(Kind::Echo, clipped(&text, echo_chars())),
             }
         }
         other => {
