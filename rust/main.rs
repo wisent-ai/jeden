@@ -1,4 +1,3 @@
-use serde_json::json;
 use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -66,6 +65,11 @@ pub(crate) use cli::workspace::command as workspace_command;
 
 pub(crate) const JEDEN_VERSION: &str = env!("JEDEN_VERSION");
 
+/// The exit status of a command line its program refuses as usage, every
+/// other failure exiting 1, as shells report misuse:
+/// https://www.gnu.org/software/bash/manual/html_node/Exit-Status.html
+const USAGE_STATUS: u8 = 2;
+
 fn version_text() -> String {
     format!("jeden {JEDEN_VERSION}")
 }
@@ -74,9 +78,12 @@ fn config_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/config.json")
 }
 fn session_root() -> PathBuf {
-    env::var_os("JEDEN_SESSION_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| dirs_home().join(".jeden/sessions"))
+    match env::var_os("JEDEN_SESSION_ROOT") {
+        Some(root) => PathBuf::from(root),
+        // Unset, sessions live in the user's own Jeden directory, which is
+        // where the documentation says they are.
+        None => dirs_home().join(".jeden/sessions"),
+    }
 }
 fn legacy_user_config_path() -> PathBuf {
     dirs_home().join(".jeden/config.json")
@@ -86,13 +93,14 @@ fn user_config_path() -> PathBuf {
 }
 
 pub fn main() -> ExitCode {
-    let argv = env::args().skip(usize::from(true)).collect::<Vec<_>>();
+    // The first argument is the program's own path, not part of the command.
+    let mut arguments = env::args();
+    arguments.next();
+    let argv = arguments.collect::<Vec<_>>();
     let mut args = match parse_args(argv) {
         Ok(v) => v,
         Err(e) => {
-            // A command line that does not parse is a usage error: exit 2,
-            // every other failure exits 1.
-            const USAGE_STATUS: u8 = 2;
+            // A command line that does not parse is a usage error.
             eprintln!("Error: {}\n{}", e, usage());
             return ExitCode::from(USAGE_STATUS);
         }
@@ -246,10 +254,10 @@ pub fn main() -> ExitCode {
         }
         Err(e) => {
             eprintln!("Error: {}", e);
-            // A command's refusal of its own invocation exits 2, every other
-            // failure 1 (cli.md rule 10).
+            // A command's refusal of its own invocation is a usage error
+            // (cli.md rule 10).
             if cli::invocation::refusal::is_usage(&e) {
-                ExitCode::from(2)
+                ExitCode::from(USAGE_STATUS)
             } else {
                 ExitCode::FAILURE
             }
