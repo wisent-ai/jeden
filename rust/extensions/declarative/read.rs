@@ -16,8 +16,8 @@ use std::fs;
 use std::path::Path;
 
 /// The text `key` holds in a definition: none when it is absent or null, and
-/// a refusal naming the key when it holds anything but text, which was read
-/// as absent and replaced by the default.
+/// a refusal naming the key when it holds anything but text, so a value of
+/// the wrong type is never read as absent and replaced by a default.
 fn text<'a>(
     object: &'a serde_json::Map<String, Value>,
     key: &str,
