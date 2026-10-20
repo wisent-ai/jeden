@@ -73,7 +73,7 @@ pub enum Role {
 
 impl Role {
     pub fn name(self) -> String {
-        crate::agent::approval_spelling(self)
+        crate::vocabulary::spelling(self)
     }
 }
 
@@ -175,9 +175,8 @@ pub fn default_turn_kind(input: &str) -> TurnKind {
     if !trimmed.starts_with('/') {
         return TurnKind::Background;
     }
-    let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
-    match command {
-        "/retry" | "/btw" | "/login" | "/logout" | "/model" | "/usage" | "/providers" => {
+    match trimmed.split_whitespace().next() {
+        Some("/retry" | "/btw" | "/login" | "/logout" | "/model" | "/usage" | "/providers") => {
             TurnKind::Background
         }
         _ => TurnKind::Foreground,

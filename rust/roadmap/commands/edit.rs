@@ -84,14 +84,18 @@ pub(super) fn unblock_command(
     options: &ParsedOptions,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
-    let id = options
+    let (id, rest) = options
         .positionals
-        .first()
+        .split_first()
         .ok_or_else(|| RoadmapError::Usage("Usage: roadmap unblock <id> [reason]".into()))?;
-    let positional_reason = options.positionals.get(1..).unwrap_or_default().join(" ");
-    let reason = options.one("reason").map(str::to_string).or_else(|| {
-        (!positional_reason.trim().is_empty()).then(|| positional_reason.trim().to_string())
-    });
+    // The reason --reason names, else the words after the id, else none.
+    let positional_reason = rest.join(" ");
+    let reason = match options.one("reason") {
+        Some(named) => Some(named.to_string()),
+        None => {
+            (!positional_reason.trim().is_empty()).then(|| positional_reason.trim().to_string())
+        }
+    };
     let revision = expected_revision(store, options)?;
     let roadmap = store.mutate(
         revision,
@@ -139,13 +143,12 @@ pub(super) fn dependency_command(
     change: DependencyChange,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
-    let command = crate::agent::approval_spelling(change);
-    let id = options.positionals.first().ok_or_else(|| {
-        RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
-    })?;
-    let dependency = options.positionals.get(1).ok_or_else(|| {
-        RoadmapError::Usage(format!("Usage: roadmap {command} <id> <dependency-id>"))
-    })?;
+    let command = crate::vocabulary::spelling(change);
+    let [id, dependency, ..] = options.positionals.as_slice() else {
+        return Err(RoadmapError::Usage(format!(
+            "Usage: roadmap {command} <id> <dependency-id>"
+        )));
+    };
     let revision = expected_revision(store, options)?;
     let roadmap = store.mutate(
         revision,

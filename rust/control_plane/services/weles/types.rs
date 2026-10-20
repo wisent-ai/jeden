@@ -93,10 +93,7 @@ impl OperationState {
 
 impl std::fmt::Display for OperationState {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match serde_json::to_value(self) {
-            Ok(serde_json::Value::String(name)) => formatter.write_str(&name),
-            other => unreachable!("a unit state serializes as its name, not {other:?}"),
-        }
+        formatter.write_str(&crate::vocabulary::spelling(self))
     }
 }
 

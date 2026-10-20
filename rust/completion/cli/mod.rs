@@ -195,7 +195,7 @@ pub(crate) fn execute(
     let (verb, remaining) = match words.split_first() {
         None => (TodoVerb::List, &[][..]),
         Some((word, rest)) => (
-            crate::agent::approval_named::<TodoVerb>(word).ok_or_else(|| usage(format!("unknown todo action: {word}\n{USAGE}\nTask completion requires independent verification; there is no operator done command.")))?,
+            crate::vocabulary::named::<TodoVerb>(word).map_err(|cause| usage(format!("unknown todo action: {word} ({cause})\n{USAGE}\nTask completion requires independent verification; there is no operator done command.")))?,
             rest,
         ),
     };

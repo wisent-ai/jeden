@@ -31,7 +31,7 @@ impl ApprovalMode {
     /// explicit flags, and a missing setting keeps that gate.
     pub(crate) const DEFAULT: ApprovalMode = ApprovalMode::AlwaysAsk;
     pub(crate) fn name(self) -> String {
-        spelling(self)
+        crate::vocabulary::spelling(self)
     }
     /// Every mode's spelling, joined with `|` for a usage line.
     pub(crate) fn choices() -> String {
@@ -62,7 +62,7 @@ impl ToolPolicy {
     pub(crate) const ALL: &'static [ToolPolicy] =
         &[ToolPolicy::Allow, ToolPolicy::Deny, ToolPolicy::Prompt];
     pub(crate) fn name(self) -> String {
-        spelling(self)
+        crate::vocabulary::spelling(self)
     }
     /// Every policy's spelling, joined with `|` for a usage line.
     pub(crate) fn choices() -> String {
@@ -71,19 +71,6 @@ impl ToolPolicy {
             .map(|policy| policy.name())
             .collect::<Vec<_>>()
             .join("|")
-    }
-}
-
-/// The value of a declared vocabulary spelled `name`, or nothing.
-pub(crate) fn named<T: serde::de::DeserializeOwned>(name: &str) -> Option<T> {
-    serde_json::from_value(Value::String(name.trim().to_owned())).ok()
-}
-
-/// How a declared vocabulary value is spelled.
-pub(crate) fn spelling<T: serde::Serialize>(value: T) -> String {
-    match serde_json::to_value(value) {
-        Ok(Value::String(name)) => name,
-        other => unreachable!("a unit variant serializes as its name, not {other:?}"),
     }
 }
 
@@ -110,39 +97,60 @@ pub(super) fn tool_tier(tool: &str) -> ToolTier {
     ToolTier::Exec
 }
 
-pub(super) fn parse_approval_mode(value: &str) -> Option<ApprovalMode> {
-    named(value)
-}
-
-pub(super) fn approval_mode(args: &Args, state: &Value) -> ApprovalMode {
+/// The approval mode a session runs in: `--yolo`, then the mode the mode
+/// state records, then both allow flags, then [`ApprovalMode::DEFAULT`]. A
+/// recorded mode that is no mode is refused with the accepted spellings, not
+/// read as unset.
+pub(super) fn approval_mode(args: &Args, state: &Value) -> Result<ApprovalMode, String> {
     if args.yolo {
-        return ApprovalMode::Yolo;
+        return Ok(ApprovalMode::Yolo);
     }
-    if let Some(mode) = state
-        .pointer("/tools/approvalMode")
-        .and_then(Value::as_str)
-        .and_then(parse_approval_mode)
-    {
-        return mode;
+    match state.pointer("/tools/approvalMode") {
+        Some(Value::String(recorded)) => {
+            return crate::vocabulary::named(recorded)
+                .map_err(|cause| format!("tools.approvalMode in the mode state: {cause}"));
+        }
+        Some(other) => {
+            return Err(format!(
+                "tools.approvalMode in the mode state is not a word: {other}"
+            ))
+        }
+        None => {}
     }
     if args.allow_write && args.allow_command {
-        return ApprovalMode::Yolo;
+        return Ok(ApprovalMode::Yolo);
     }
-    ApprovalMode::DEFAULT
+    Ok(ApprovalMode::DEFAULT)
 }
 
-pub(super) fn parse_tool_policy(value: &str) -> Option<ToolPolicy> {
-    named(value)
+/// The policy the mode state records for `tool`, if it records one; a
+/// recorded policy that is no policy is refused with the accepted spellings.
+pub(super) fn tool_policy(state: &Value, tool: &str) -> Result<Option<ToolPolicy>, String> {
+    let pointer = format!(
+        "/tools/approval/{}",
+        tool.replace('~', "~0").replace('/', "~1")
+    );
+    match state.pointer(&pointer) {
+        Some(Value::String(recorded)) => crate::vocabulary::named(recorded)
+            .map(Some)
+            .map_err(|cause| format!("the {tool} policy in the mode state: {cause}")),
+        Some(other) => Err(format!(
+            "the {tool} policy in the mode state is not a word: {other}"
+        )),
+        None => Ok(None),
+    }
 }
 
-pub(super) fn tool_policy(state: &Value, tool: &str) -> Option<ToolPolicy> {
-    state
-        .pointer(&format!(
-            "/tools/approval/{}",
-            tool.replace('~', "~0").replace('/', "~1")
-        ))
-        .and_then(Value::as_str)
-        .and_then(parse_tool_policy)
+/// Whether the mode state turns plan mode on; a recorded value that is no
+/// boolean is refused rather than read as off.
+fn plan_enabled(state: &Value) -> Result<bool, String> {
+    match state.pointer("/plan/enabled") {
+        Some(Value::Bool(enabled)) => Ok(*enabled),
+        Some(other) => Err(format!(
+            "plan.enabled in the mode state is not a boolean: {other}"
+        )),
+        None => Ok(false),
+    }
 }
 
 pub(super) fn tier_flags(tier: ToolTier) -> (bool, bool) {
@@ -174,17 +182,18 @@ pub(super) fn resolve_tool_approval(args: &Args, tool: &str, hooks: &RunHooks) -
         Err(cause) => return ToolDecision::Deny(format!("tool {tool} denied: {cause}")),
     };
     let tier = tool_tier(tool);
-    let policy = tool_policy(&state, tool);
-    let mode = approval_mode(args, &state);
+    let read = tool_policy(&state, tool).and_then(|policy| {
+        let mode = approval_mode(args, &state)?;
+        Ok((policy, mode, plan_enabled(&state)?))
+    });
+    let (policy, mode, plan) = match read {
+        Ok(read) => read,
+        Err(cause) => return ToolDecision::Deny(format!("tool {tool} denied: {cause}")),
+    };
 
     // Plan mode is read-only by design: write- and exec-tier tools are denied
     // outright, with a hint on how to allow modifications again.
-    if tier != ToolTier::Read
-        && state
-            .pointer("/plan/enabled")
-            .and_then(Value::as_bool)
-            .unwrap_or(false)
-    {
+    if tier != ToolTier::Read && plan {
         return ToolDecision::Deny(format!(
             "tool {tool} is blocked (plan mode is on; /plan off to allow modifications)"
         ));

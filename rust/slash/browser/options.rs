@@ -89,15 +89,18 @@ pub(super) fn parse_browser_options(tokens: &[String]) -> Result<(Value, Value),
         {
             return Err(format!("Invalid browser option key \"{raw_key}\"."));
         }
-        let scoped = key_parts.split_first().and_then(|(scope, rest)| {
-            let scope: Scope = crate::agent::approval_named(scope)?;
-            let key = rest.last()?;
-            Some((scope, rest, *key))
-        });
-        let Some((scope, rest, key)) = scoped else {
-            return Err(format!(
+        let unknown = || {
+            format!(
                 "Unknown browser option \"{raw_key}\". Use launch.<key>=value or profile.<key>=value."
-            ));
+            )
+        };
+        let Some((scope, rest)) = key_parts.split_first() else {
+            return Err(unknown());
+        };
+        let scope: Scope =
+            crate::vocabulary::named(scope).map_err(|cause| format!("{} ({cause})", unknown()))?;
+        let Some(key) = rest.last() else {
+            return Err(unknown());
         };
         let target = match scope {
             Scope::Launch => &mut launch,

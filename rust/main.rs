@@ -44,6 +44,7 @@ pub mod tool_services;
 pub mod tools;
 pub mod tui;
 pub mod update;
+pub(crate) mod vocabulary;
 
 pub(crate) use cli::commands::expand::resolve_file_command;
 pub(crate) use cli::completions::completions_command;

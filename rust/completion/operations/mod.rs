@@ -161,14 +161,14 @@ pub enum ControlAction {
 }
 
 impl ControlAction {
-    /// The action `word` names, refused naming the word otherwise.
+    /// The action `word` names, refused naming the word and every action.
     pub fn named(word: &str) -> Result<Self, String> {
-        crate::agent::approval_named(word)
-            .ok_or_else(|| format!("unsupported operator task action: {word}"))
+        crate::vocabulary::named(word)
+            .map_err(|cause| format!("unsupported operator task action: {word} ({cause})"))
     }
 
     pub fn name(self) -> String {
-        crate::agent::approval_spelling(self)
+        crate::vocabulary::spelling(self)
     }
 }
 

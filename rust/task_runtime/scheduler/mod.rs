@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::AtomicU64;
 
 mod admission;
 mod lifecycle;
@@ -16,8 +15,6 @@ mod support;
 
 use support::process_alive;
 pub(crate) use support::workspace_root_for;
-
-static JOB_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(unix)]
 unsafe extern "C" {
@@ -30,6 +27,9 @@ pub struct TaskScheduler {
     pub cwd: PathBuf,
     pub limits: TaskLimits,
     exe: PathBuf,
+    /// Where isolated job workspaces are made, resolved once when the
+    /// scheduler opens.
+    workspace_root: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -78,17 +78,20 @@ impl TaskScheduler {
             fs::create_dir_all(path)?;
         }
         ensure_store_schema(store)?;
-        let exe = std::env::var_os("JEDEN_TASK_EXECUTABLE")
-            .map(PathBuf::from)
-            .map(Ok)
-            .unwrap_or_else(|| {
-                std::env::current_exe().map_err(|error| TaskError::Process(error.to_string()))
-            })?;
+        // The executable a job runs: the one JEDEN_TASK_EXECUTABLE names,
+        // else this running jeden.
+        let exe = match std::env::var_os("JEDEN_TASK_EXECUTABLE") {
+            Some(path) => PathBuf::from(path),
+            None => {
+                std::env::current_exe().map_err(|error| TaskError::Process(error.to_string()))?
+            }
+        };
         let this = Self {
             store: store.into(),
             cwd: cwd.into(),
             limits,
             exe,
+            workspace_root: workspace_root_for(store, cwd)?,
         };
         this.recover()?;
         Ok(this)
@@ -97,7 +100,7 @@ impl TaskScheduler {
         Mailbox::new(&self.store)
     }
     fn workspace_root(&self) -> PathBuf {
-        workspace_root_for(&self.store, &self.cwd)
+        self.workspace_root.clone()
     }
     fn job_path(&self, id: &str) -> PathBuf {
         self.store.join("jobs").join(format!("{id}.json"))
@@ -148,7 +151,9 @@ impl TaskScheduler {
     fn recover(&self) -> Result<(), TaskError> {
         let now = unix_millis()?;
         for mut job in self.list()? {
-            if job.status == JobStatus::Running && !job.pid.map(process_alive).unwrap_or(false) {
+            if job.status == JobStatus::Running
+                && !matches!(job.pid, Some(pid) if process_alive(pid))
+            {
                 job.status = JobStatus::Interrupted;
                 job.pid = None;
                 job.updated_at = now;

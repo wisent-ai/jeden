@@ -46,14 +46,14 @@ pub(crate) enum Command {
 }
 
 impl Command {
-    /// The command `word` names, refused when it names none.
+    /// The command `word` names, refused naming the word and every command.
     pub(crate) fn named(word: &str) -> Result<Self, String> {
-        crate::agent::approval_named(word).ok_or_else(|| format!("unknown command: {word}"))
+        crate::vocabulary::named(word).map_err(|cause| format!("unknown command: {word} ({cause})"))
     }
 
     /// How the command is spelled on the command line.
     pub(crate) fn name(self) -> String {
-        crate::agent::approval_spelling(self)
+        crate::vocabulary::spelling(self)
     }
 
     /// A command that works in a workspace: its directory is the workspace

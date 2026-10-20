@@ -10,7 +10,7 @@ use super::support::{
     agent_task_context, capture_pipe, configure_group, definition_output_is_unconstrained,
     validate_output,
 };
-use super::{SpawnRequest, TaskScheduler, JOB_SEQUENCE};
+use super::{SpawnRequest, TaskScheduler};
 use crate::clock::unix_millis;
 use crate::task_runtime::types::{JobRecord, JobStatus, TaskError};
 use crate::task_runtime::workspace::{isolate, IsolatedWorkspace};
@@ -18,7 +18,6 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use std::fs;
 use std::process::Stdio;
-use std::sync::atomic::Ordering;
 use std::thread;
 
 impl TaskScheduler {
@@ -34,8 +33,7 @@ impl TaskScheduler {
         self.validate_policy(&request, definition, depth, parent.as_ref())?;
         let child_task = agent_task_context(&self.cwd, definition, &request.task)?;
         let created = unix_millis()?;
-        let sequence = JOB_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-        let id = format!("job-{created}-{}-{sequence}", std::process::id());
+        let id = format!("job-{created}-{}", uuid::Uuid::new_v4().simple());
         let slot = self.reserve_slot(&id)?;
         let isolated = match isolate(&self.cwd, &self.workspace_root(), &id) {
             Ok(v) => v,
@@ -80,10 +78,6 @@ impl TaskScheduler {
         }
         command
             .env("JEDEN_TASK_JOB", &id)
-            .env(
-                "JEDEN_TASK_PARENT",
-                request.parent_job.as_deref().unwrap_or(""),
-            )
             .env("JEDEN_TASK_DEPTH", depth.to_string())
             .env("JEDEN_TASK_SESSION", &session_path)
             .env("JEDEN_SESSION_ROOT", &session_path);
@@ -145,13 +139,26 @@ impl TaskScheduler {
                         scope.spawn(|| capture_pipe(child_stdout, &stdout_path, max_output));
                     let stderr_reader =
                         scope.spawn(|| capture_pipe(child_stderr, &stderr_path, max_output));
-                    let status = child.wait();
-                    let stdout_result = stdout_reader.join().unwrap_or_else(|_| {
-                        Err(TaskError::Process("stdout capture panicked".into()))
-                    });
-                    let stderr_result = stderr_reader.join().unwrap_or_else(|_| {
-                        Err(TaskError::Process("stderr capture panicked".into()))
-                    });
+                    let status = stado_wait::blocking(
+                        stado_wait::Kind::Process,
+                        format!("task job {}", reaper_job.id),
+                        reaper_job.workspace.display(),
+                        || child.wait(),
+                    );
+                    let stdout_result = match stdout_reader.join() {
+                        Ok(result) => result,
+                        Err(panic) => Err(TaskError::Process(format!(
+                            "stdout capture panicked: {}",
+                            panic_cause(&*panic)
+                        ))),
+                    };
+                    let stderr_result = match stderr_reader.join() {
+                        Ok(result) => result,
+                        Err(panic) => Err(TaskError::Process(format!(
+                            "stderr capture panicked: {}",
+                            panic_cause(&*panic)
+                        ))),
+                    };
                     (status, stdout_result, stderr_result)
                 });
                 // A clock that cannot be read leaves the record at its start
@@ -164,10 +171,10 @@ impl TaskScheduler {
                 if let Err(error) = stdout_result.and(stderr_result) {
                     reaper_job.error = Some(error.to_string());
                 }
-                let cancelled = scheduler
-                    .get(&reaper_job.id)
-                    .map(|current| current.status == JobStatus::Cancelled)
-                    .unwrap_or(false);
+                // An unreadable record is said last, below, and read as not cancelled.
+                let current = scheduler.get(&reaper_job.id);
+                let cancelled =
+                    matches!(&current, Ok(current) if current.status == JobStatus::Cancelled);
                 if cancelled {
                     reaper_job.status = JobStatus::Cancelled;
                 } else {
@@ -231,11 +238,15 @@ impl TaskScheduler {
                         reaper_job.status = JobStatus::Failed;
                     }
                 }
-                // Said last, so no later failure of the job writes over it.
-                if let Err(error) = ended {
+                // Said last, so no later failure of the job writes over them.
+                let unread = current.err().map(|error| {
+                    format!("the job record could not be read back to learn whether it was cancelled: {error}")
+                });
+                let unclocked = ended.err().map(|error| format!("the end time was not read: {error}"));
+                for cause in unread.into_iter().chain(unclocked) {
                     reaper_job.error = Some(match reaper_job.error.take() {
-                        Some(earlier) => format!("{earlier}; the end time was not read: {error}"),
-                        None => format!("the end time was not read: {error}"),
+                        Some(earlier) => format!("{earlier}; {cause}"),
+                        None => cause,
                     });
                 }
                 // A job whose end cannot be written stays 'running' in its
@@ -274,4 +285,16 @@ fn released(slot: &std::path::Path, error: TaskError) -> TaskError {
         }
     }
     error
+}
+
+/// What a panicking capture thread said, when it said it as text.
+fn panic_cause(payload: &(dyn std::any::Any + Send)) -> String {
+    match (
+        payload.downcast_ref::<&str>(),
+        payload.downcast_ref::<String>(),
+    ) {
+        (Some(text), _) => (*text).to_string(),
+        (None, Some(text)) => text.clone(),
+        (None, None) => "its panic carried no text".to_string(),
+    }
 }

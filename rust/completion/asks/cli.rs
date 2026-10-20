@@ -8,6 +8,8 @@ use crate::completion::store;
 use serde_json::{json, Value};
 use std::path::Path;
 
+mod render;
+
 pub(crate) const USAGE: &str =
     "jeden asks [list|show <ask-id>|answer <ask-id> --text <answer>] [--json]";
 
@@ -122,110 +124,6 @@ pub(crate) fn answer_value(id: &str, text: &str) -> Result<Value, String> {
     serde_json::to_value(&report).map_err(|error| error.to_string())
 }
 
-fn render_list(value: &Value) -> String {
-    let asks = value["asks"].as_array().cloned().unwrap_or_default();
-    if asks.is_empty() {
-        return format!(
-            "Nothing has been asked of you. Register: {}",
-            value["register"].as_str().unwrap_or_default()
-        );
-    }
-    let mut lines = Vec::new();
-    for ask in &asks {
-        lines.push(render_summary(ask));
-    }
-    lines.join("\n")
-}
-
-fn render_summary(ask: &Value) -> String {
-    let count = ask["timesAsked"].as_u64().unwrap_or_default() as usize;
-    let mut text = format!(
-        "{} [{}] asked {} since {}: {}",
-        ask["id"].as_str().unwrap_or_default(),
-        ask["status"].as_str().unwrap_or_default(),
-        super::times(count),
-        ask["askedAt"].as_str().unwrap_or_default(),
-        ask["ask"].as_str().unwrap_or_default(),
-    );
-    if let Some(follows) = ask["follows"].as_str() {
-        text.push_str(&format!(
-            "\n  Asked again after ask {follows} because an operation failed after its answer"
-        ));
-    }
-    match ask["answer"].as_object() {
-        Some(answer) => text.push_str(&format!(
-            "\n  Your answer ({}): {}",
-            answer["answeredAt"].as_str().unwrap_or_default(),
-            answer["text"].as_str().unwrap_or_default()
-        )),
-        None => text.push_str(&format!(
-            "\n  Answer with: jeden asks answer {} --text <answer>",
-            ask["id"].as_str().unwrap_or_default()
-        )),
-    }
-    if let Some(oko) = ask["oko"].as_object() {
-        text.push_str(&format!(
-            "\n  Oko: {}",
-            oko.get("detail")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-        ));
-    }
-    text
-}
-
-fn render_show(value: &Value) -> String {
-    let mut lines = vec![render_summary(value)];
-    for place in value["occurrences"].as_array().into_iter().flatten() {
-        let mut line = format!(
-            "  Asked {} by {} in {}",
-            place["askedAt"].as_str().unwrap_or_default(),
-            place["source"].as_str().unwrap_or_default(),
-            place["sessionPath"].as_str().unwrap_or_default(),
-        );
-        if let Some(task) = place["taskId"].as_str() {
-            line.push_str(&format!(" for task {task}"));
-        }
-        if let Some(status) = place["taskStatus"].as_str() {
-            line.push_str(&format!(" (task {status})"));
-        }
-        if let Some(state) = place["taskState"].as_str() {
-            line.push_str(&format!(" ({state})"));
-        }
-        if place["answeredFromRegister"] == json!(true) {
-            line.push_str(" — answered from the register, not asked again");
-        }
-        lines.push(line);
-        lines.push(format!(
-            "    {}",
-            place["wording"].as_str().unwrap_or_default()
-        ));
-    }
-    lines.join("\n")
-}
-
-fn render_answer(value: &Value) -> String {
-    let mut lines = vec![format!(
-        "Recorded your answer to ask {}: {}",
-        value["ask"]["id"].as_str().unwrap_or_default(),
-        value["ask"]["answer"]["text"].as_str().unwrap_or_default()
-    )];
-    let deliveries = value["deliveries"].as_array().cloned().unwrap_or_default();
-    if deliveries.is_empty() {
-        lines.push("No task waits on this ask now.".into());
-    }
-    for delivery in deliveries {
-        lines.push(format!(
-            "  {} in {}: {} — {}",
-            delivery["taskId"].as_str().unwrap_or_default(),
-            delivery["sessionPath"].as_str().unwrap_or_default(),
-            delivery["outcome"].as_str().unwrap_or_default(),
-            delivery["detail"].as_str().unwrap_or_default(),
-        ));
-    }
-    lines.join("\n")
-}
-
 /// What `jeden asks` does, by the word that names it.
 #[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -258,20 +156,21 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
     let (action, rest) = match words.split_first() {
         None => (AskAction::List, &[][..]),
         Some((word, rest)) => (
-            crate::agent::approval_named::<AskAction>(word)
-                .ok_or_else(|| usage(format!("unknown asks action: {word}\n{USAGE}")))?,
+            crate::vocabulary::named::<AskAction>(word).map_err(|cause| {
+                usage(format!("unknown asks action: {word} ({cause})\n{USAGE}"))
+            })?,
             rest,
         ),
     };
     let (value, text_output) = match (action, rest) {
         (AskAction::List, []) => {
             let value = list_value()?;
-            let rendered = render_list(&value);
+            let rendered = render::register(&value)?;
             (value, rendered)
         }
         (AskAction::Show, [id]) => {
             let value = show_value(id)?;
-            let rendered = render_show(&value);
+            let rendered = render::show(&value)?;
             (value, rendered)
         }
         (AskAction::Answer, [id]) => {
@@ -281,13 +180,13 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
                 ))
             })?;
             let value = answer_value(id, answer)?;
-            let rendered = render_answer(&value);
+            let rendered = render::answer(&value)?;
             (value, rendered)
         }
         (_, []) => {
             return Err(usage(format!(
                 "{} requires an ask id\n{USAGE}",
-                crate::agent::approval_spelling(action)
+                crate::vocabulary::spelling(action)
             )))
         }
         _ => {

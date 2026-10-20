@@ -27,18 +27,16 @@ fn append_items(state: &mut CompletionState, phase: &str, items: &[Value]) -> Re
         .find(|request| !request.coverage_verified && !request.paused)
         .ok_or("todo requires an active captured user request")?;
     let request_id = request.id.clone();
-    let kind = state
+    // Items added to a request that is answered rather than worked are
+    // answer items too; every other request's items are work.
+    let kind = match state
         .tasks
         .iter()
         .find(|task| task.request_id == request_id)
-        .map(|task| {
-            if task.kind == TaskKind::Answer {
-                TaskKind::Answer
-            } else {
-                TaskKind::Work
-            }
-        })
-        .unwrap_or(TaskKind::Work);
+    {
+        Some(task) if task.kind == TaskKind::Answer => TaskKind::Answer,
+        _ => TaskKind::Work,
+    };
     for item in items {
         let title = item_text(item)?;
         if state
@@ -75,13 +73,14 @@ fn selected(state: &CompletionState, input: &Value, allow_all: bool) -> Result<V
             .filter(|(_, task)| task.id == selector || task.text == selector)
             .map(|(index, _)| index)
             .collect();
-        if matches.is_empty() {
-            return Err(format!("unknown task: {selector}"));
-        }
-        if matches.len() != usize::from(true) {
-            return Err(format!(
-                "task text is ambiguous; use its task id: {selector}"
-            ));
+        match matches.as_slice() {
+            [] => return Err(format!("unknown task: {selector}")),
+            [_] => {}
+            _ => {
+                return Err(format!(
+                    "task text is ambiguous; use its task id: {selector}"
+                ))
+            }
         }
         return Ok(matches);
     }
@@ -142,16 +141,16 @@ impl TodoOp {
     pub(crate) fn names() -> Vec<String> {
         Self::ALL
             .iter()
-            .map(|op| crate::agent::approval_spelling(*op))
+            .map(|op| crate::vocabulary::spelling(*op))
             .collect()
     }
 
     fn of(input: &Value) -> Result<Self, String> {
         let named = text(input, "op")
             .ok_or_else(|| format!("todo requires op, one of {}", Self::names().join(", ")))?;
-        crate::agent::approval_named(named).ok_or_else(|| {
+        crate::vocabulary::named(named).map_err(|cause| {
             format!(
-                "unknown todo op {named:?}; the ops are {}",
+                "unknown todo op {named:?} ({cause}); the ops are {}",
                 Self::names().join(", ")
             )
         })
@@ -270,13 +269,14 @@ pub(crate) fn execute(session: &Path, input: &Value) -> Result<Value, String> {
 fn summary(state: &CompletionState) -> Value {
     let mut phases: Vec<Value> = Vec::new();
     for task in &state.tasks {
-        let index = phases
-            .iter()
-            .position(|phase| phase["phase"] == task.phase)
-            .unwrap_or_else(|| {
+        let index = match phases.iter().position(|phase| phase["phase"] == task.phase) {
+            Some(index) => index,
+            None => {
+                let index = phases.len();
                 phases.push(json!({"phase": task.phase, "items": []}));
-                phases.len() - usize::from(true)
-            });
+                index
+            }
+        };
         phases[index]["items"]
             .as_array_mut()
             .expect("phase items")
@@ -285,12 +285,16 @@ fn summary(state: &CompletionState) -> Value {
     let mut output = snapshot_value(state);
     output["phases"] = json!(phases);
     output["items"] = json!(state.tasks);
-    output["active"] = state
+    // The active item: the first in progress, else the first not finished,
+    // else none.
+    let active = state
         .tasks
         .iter()
-        .find(|task| task.status == TaskStatus::InProgress)
-        .or_else(|| state.tasks.iter().find(|task| !task.status.terminal()))
-        .map(|task| json!(task.text))
-        .unwrap_or(Value::Null);
+        .filter(|task| !task.status.terminal())
+        .min_by_key(|task| task.status != TaskStatus::InProgress);
+    output["active"] = match active {
+        Some(task) => json!(task.text),
+        None => Value::Null,
+    };
     output
 }

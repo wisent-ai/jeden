@@ -18,11 +18,21 @@ use std::process::Command;
 use super::kill;
 
 /// Root directory that holds the isolated workspaces for jobs of a scheduler
-/// with the given store and cwd (`TaskScheduler::workspace_root`).
-pub(crate) fn workspace_root_for(store: &Path, cwd: &Path) -> PathBuf {
-    let store = fs::canonicalize(store).unwrap_or_else(|_| store.to_path_buf());
-    let cwd = fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf());
-    if store.starts_with(&cwd) {
+/// with the given store and cwd (`TaskScheduler::workspace_root`). Both are
+/// resolved through their links, so a store inside the workspace is seen as
+/// inside it; a path that cannot be resolved is refused naming it.
+pub(crate) fn workspace_root_for(store: &Path, cwd: &Path) -> Result<PathBuf, TaskError> {
+    let resolved = |what: &str, path: &Path| {
+        fs::canonicalize(path).map_err(|error| {
+            TaskError::Invalid(format!(
+                "the {what} {} cannot be resolved: {error}",
+                path.display()
+            ))
+        })
+    };
+    let store = resolved("task store", store)?;
+    let cwd = resolved("workspace", cwd)?;
+    Ok(if store.starts_with(&cwd) {
         let mut hash = DefaultHasher::new();
         cwd.hash(&mut hash);
         std::env::temp_dir()
@@ -30,7 +40,7 @@ pub(crate) fn workspace_root_for(store: &Path, cwd: &Path) -> PathBuf {
             .join(format!("{:016x}", hash.finish()))
     } else {
         store.join("workspaces")
-    }
+    })
 }
 
 pub(super) fn agent_task_context(
@@ -86,11 +96,11 @@ pub(super) fn agent_task_context(
 }
 
 pub(super) fn definition_output_is_unconstrained(schema: &serde_json::Value) -> bool {
-    schema.is_null()
-        || schema
-            .as_object()
-            .map(|object| object.is_empty())
-            .unwrap_or(false)
+    match schema {
+        serde_json::Value::Null => true,
+        serde_json::Value::Object(object) => object.is_empty(),
+        _ => false,
+    }
 }
 
 /// A JSON Schema `type`, spelled as the schema spells it.
@@ -135,8 +145,8 @@ pub(super) fn validate_output(
         .and_then(serde_json::Value::as_str)
         .or_else(|| schema.as_str());
     if let Some(expected) = expected {
-        let kind: JsonType = crate::agent::approval_named(expected)
-            .ok_or_else(|| format!("{path} uses unsupported schema type {expected}"))?;
+        let kind: JsonType = crate::vocabulary::named(expected)
+            .map_err(|cause| format!("{path} uses unsupported schema type {expected} ({cause})"))?;
         if !kind.holds(value) {
             return Err(format!("{path} must be {expected}"));
         }
@@ -181,9 +191,17 @@ pub(super) fn capture_pipe(
     Ok(())
 }
 
+/// The null signal: `kill` checks that the process exists and may be
+/// signalled, and sends nothing.
+#[cfg(unix)]
+const NULL_SIGNAL: i32 = 0; // https://pubs.opengroup.org/onlinepubs/9799919799/functions/kill.html
+/// What `kill` returns when it succeeds.
+#[cfg(unix)]
+const KILL_SUCCEEDED: i32 = 0; // https://pubs.opengroup.org/onlinepubs/9799919799/functions/kill.html
+
 #[cfg(unix)]
 pub(super) fn process_alive(pid: u32) -> bool {
-    unsafe { kill(pid as i32, 0) == 0 }
+    unsafe { kill(pid as i32, NULL_SIGNAL) == KILL_SUCCEEDED }
 }
 #[cfg(not(unix))]
 pub(super) fn process_alive(_pid: u32) -> bool {
@@ -195,7 +213,7 @@ pub(super) fn process_alive(_pid: u32) -> bool {
 #[cfg(unix)]
 pub(super) fn terminate_group(pid: u32) {
     unsafe {
-        kill(-(pid as i32), 9);
+        kill(-(pid as i32), libc::SIGKILL);
     }
 }
 #[cfg(not(unix))]
