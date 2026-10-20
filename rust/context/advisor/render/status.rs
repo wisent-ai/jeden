@@ -15,7 +15,9 @@ pub(crate) struct SourceStatus {
     /// The observed state in one sentence: what was read, or what refused and
     /// why. Never empty.
     pub(crate) detail: String,
-    pub(crate) considered: usize,
+    /// How much the source read to answer; none when it read nothing it can
+    /// count (a health route) or could not answer.
+    pub(crate) considered: Option<usize>,
     /// How many recommendations the source returned; none when it was asked
     /// for none (a health probe) or could not answer.
     pub(crate) returned: Option<usize>,
@@ -44,18 +46,19 @@ impl SourceStatus {
             source: source.to_string(),
             available: true,
             detail: detail.into(),
-            considered,
+            considered: Some(considered),
             returned: Some(returned),
             elapsed_ms: started.elapsed().as_millis(),
         }
     }
 
     /// A source that answered a health probe: it was asked for no
-    /// recommendation, so it returned none.
+    /// recommendation, so it returned none, and it states what it counted
+    /// when its health answer counts anything.
     pub(crate) fn probed(
         source: &str,
         detail: impl Into<String>,
-        considered: usize,
+        considered: Option<usize>,
         started: Instant,
     ) -> Self {
         Self {

@@ -39,16 +39,19 @@ pub(crate) fn render_text(advice: &Advice) -> String {
     }
     out.push_str("\nSources:\n");
     for status in &advice.sources {
+        let considered = match status.considered {
+            Some(considered) => format!("considered {considered}"),
+            None => "read nothing countable".to_string(),
+        };
         let returned = match status.returned {
             Some(returned) => format!("returned {returned}"),
             None => "asked for no recommendation".to_string(),
         };
         out.push_str(&format!(
-            "- {}: {} — {} (considered {}, {returned}, {} ms)\n",
+            "- {}: {} — {} ({considered}, {returned}, {} ms)\n",
             status.source,
             availability_word(status.available),
             status.detail,
-            status.considered,
             status.elapsed_ms
         ));
     }

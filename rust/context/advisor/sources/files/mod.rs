@@ -31,7 +31,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
     }
     let corpus = Corpus::read(settings, &request.cancellation);
     if let Some(mut cancelled) = request.cancelled_outcome("files", started) {
-        cancelled.status.considered = corpus.sections.len();
+        cancelled.status.considered = Some(corpus.sections.len());
         return cancelled;
     }
     if corpus.sections.is_empty() {
@@ -45,7 +45,7 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
     let mut scored: Vec<(f64, Recommendation)> = Vec::new();
     for (considered, section) in corpus.sections.iter().enumerate() {
         if let Some(mut cancelled) = request.cancelled_outcome("files", started) {
-            cancelled.status.considered = considered;
+            cancelled.status.considered = Some(considered);
             return cancelled;
         }
         let score = rank::score_section(section, &weighed);
@@ -75,11 +75,12 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
             },
         ));
     }
+    // Scores are finite ranks; total_cmp orders every f64, so no pair of
+    // scores is declared equal for want of a comparison.
     scored.sort_by(|left, right| {
         right
             .0
-            .partial_cmp(&left.0)
-            .unwrap_or(std::cmp::Ordering::Equal)
+            .total_cmp(&left.0)
             .then_with(|| left.1.locator.cmp(&right.1.locator))
     });
     let hits: Vec<Recommendation> = scored
@@ -88,26 +89,27 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
         .take(request.limit)
         .collect();
     SourceOutcome {
-        status: corpus_status(&corpus, hits.len(), started),
+        status: corpus_status(&corpus, Some(hits.len()), started),
         hits,
     }
 }
 
-fn corpus_status(corpus: &Corpus, returned: usize, started: Instant) -> SourceStatus {
-    if corpus.unreadable.is_empty() {
-        SourceStatus::available(
+/// The files source's state over the corpus it read: `returned` is the
+/// recommendations a search returned, none for a probe that asked for none.
+fn corpus_status(corpus: &Corpus, returned: Option<usize>, started: Instant) -> SourceStatus {
+    let mut status = if corpus.unreadable.is_empty() {
+        SourceStatus::probed(
             "files",
             detail(corpus),
-            corpus.sections.len(),
-            returned,
+            Some(corpus.sections.len()),
             started,
         )
     } else {
-        let mut status = SourceStatus::unavailable("files", detail(corpus), started);
-        status.considered = corpus.sections.len();
-        status.returned = returned;
-        status
-    }
+        SourceStatus::unavailable("files", detail(corpus), started)
+    };
+    status.considered = Some(corpus.sections.len());
+    status.returned = returned;
+    status
 }
 
 fn detail(corpus: &Corpus) -> String {
@@ -146,7 +148,7 @@ pub(crate) fn probe(
     } else if corpus.sections.is_empty() {
         SourceStatus::unavailable("files", corpus.empty_detail(), started)
     } else {
-        corpus_status(&corpus, usize::default(), started)
+        corpus_status(&corpus, None, started)
     };
     probe_value(
         &status,

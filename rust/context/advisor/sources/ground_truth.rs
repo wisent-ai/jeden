@@ -148,11 +148,12 @@ pub(crate) fn probe(settings: &Settings, cancellation: &CancellationToken) -> Va
     } else {
         let url = format!("{}/health", settings.ground_truth_url);
         match get(&url, &[], cancellation) {
-            Ok((status, _)) if status.is_success() => SourceStatus::available(
+            // The health route counts nothing and is asked for no
+            // recommendation; neither count is reported as zero.
+            Ok((status, _)) if status.is_success() => SourceStatus::probed(
                 "ground-truth",
                 format!("{url} answered {status}"),
-                usize::default(),
-                usize::default(),
+                None,
                 started,
             ),
             Ok((status, body)) => SourceStatus::unavailable(

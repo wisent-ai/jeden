@@ -38,9 +38,9 @@ pub(crate) use status::{SourceOutcome, SourceStatus};
 /// a tie for the first recommendation.
 pub(crate) const SOURCES: &[&str] = &["files", "ground-truth", "memory", "transcripts"];
 
-/// The network index and archive are selected explicitly. The memory source
-/// uses Stado's published refresh interval to bound a silent registry read,
-/// without limiting independent local or cited sources.
+/// The network index and archive are selected explicitly. Memory reads the
+/// configured database, or Jeden's own SQLite file when none is configured,
+/// under the caller's cancellation and with no deadline of its own.
 pub(crate) const DEFAULT_SOURCES: &str = "files,memory";
 /// Which file types the walk reads. Empty means every readable text file —
 /// code, configuration and prose alike; a list narrows it.

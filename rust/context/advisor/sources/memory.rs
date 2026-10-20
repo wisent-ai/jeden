@@ -85,7 +85,7 @@ pub(crate) fn probe() -> Value {
                     Ok(considered) => SourceStatus::probed(
                         "memory",
                         format!("{memories} active memory record(s)"),
-                        considered,
+                        Some(considered),
                         started,
                     ),
                     Err(error) => SourceStatus::unavailable(
