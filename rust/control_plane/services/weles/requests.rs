@@ -34,10 +34,7 @@ impl WelesClient {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Value, WelesError> {
-        let sequence = self.correlation.fetch_add(
-            std::num::NonZeroU64::MIN.get(),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        let sequence = crate::tally::draw(&self.correlation);
         let meta = if method == reqwest::Method::GET {
             RequestMeta::read(format!("weles-{sequence}"))
         } else {

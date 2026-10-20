@@ -111,7 +111,7 @@ where
         context_requests: context::Requests::default(),
         bridge,
         writer: writer.clone(),
-        next_session: AtomicU64::new(std::num::NonZeroU64::MIN.get()),
+        next_session: AtomicU64::new(crate::tally::FIRST),
         shutting_down: AtomicBool::new(false),
     });
     writer.send(&json!({

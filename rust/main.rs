@@ -39,6 +39,7 @@ pub mod rpc;
 pub mod sdk;
 mod session_import;
 pub mod slash;
+pub(crate) mod tally;
 pub mod task_runtime;
 pub mod tool_runtime;
 pub mod tool_services;

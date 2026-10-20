@@ -94,8 +94,7 @@ fn write_env_keys(updates: &[(String, String)]) -> Result<PathBuf, String> {
     let mut parsed = declarations(&path, &existing)?.into_iter().peekable();
     let mut text = String::with_capacity(existing.len());
     for (line, written) in existing.split_inclusive('\n').enumerate() {
-        if parsed.peek().is_some_and(|entry| entry.line == line) {
-            let declaration = parsed.next().expect("peeked declaration");
+        if let Some(declaration) = parsed.next_if(|entry| entry.line == line) {
             if let Some(position) = pending.iter().position(|(key, _)| key == declaration.key) {
                 let (key, value) = pending.remove(position);
                 text.push_str(&encode(key, value)?);

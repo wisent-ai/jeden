@@ -20,36 +20,34 @@ fn required<'a>(params: &'a Value, name: &str) -> Result<&'a str, (&'static str,
         })
 }
 
+fn rows() -> Result<Vec<credential::tokens::TokenRow>, (&'static str, String)> {
+    match Store::open_existing().map_err(failed)? {
+        Some(store) => store.list().map_err(failed),
+        None => Ok(Vec::new()),
+    }
+}
+
 fn list() -> Answer {
-    let tokens = match Store::open_existing().map_err(failed)? {
-        Some(store) => store.list().map_err(failed)?,
-        None => Vec::new(),
-    };
-    Ok(json!({ "tokens": tokens }))
+    Ok(json!({ "tokens": rows()? }))
 }
 
 pub(crate) fn request(method: &str, params: &Value) -> Answer {
     match method {
         "token/list" => list(),
         "token/status" => {
-            let mut value = list()?;
+            let rows = rows()?;
+            let mut value = json!({ "tokens": &rows });
             match credential::direct_provider() {
                 Some((endpoint, key)) => {
-                    let rows = value["tokens"]
-                        .as_array()
-                        .expect("token/list returns an array of tokens");
                     let selected = if key.is_none() {
                         json!(rows
                             .iter()
-                            .find(|row| row["active"].as_bool() == Some(true)
-                                && row["endpoint"].as_str() == Some(endpoint.as_str()))
-                            .and_then(|row| row["id"].as_str()))
+                            .find(|row| row.active && row.endpoint == endpoint)
+                            .map(|row| row.id.as_str()))
                     } else {
                         Value::Null
                     };
-                    let stored = rows
-                        .iter()
-                        .any(|row| row["endpoint"].as_str() == Some(endpoint.as_str()));
+                    let stored = rows.iter().any(|row| row.endpoint == endpoint);
                     value["route"] = json!("direct");
                     value["endpoint"] = json!(endpoint);
                     value["keySource"] = json!(if key.is_some() {

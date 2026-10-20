@@ -24,7 +24,9 @@ fn declared_catalog_ttl() -> Result<Option<Duration>, String> {
 
 #[path = "request/auth.rs"]
 mod auth;
+#[path = "catalog/cache.rs"]
 mod cache;
+#[path = "catalog/catalog.rs"]
 mod catalog;
 #[path = "request/contract_impl.rs"]
 mod contract_impl;

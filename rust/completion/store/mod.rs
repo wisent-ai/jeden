@@ -90,7 +90,7 @@ pub(crate) fn update<T>(
     let output = change(&mut state)?;
     state.revision = state
         .revision
-        .checked_add(std::num::NonZeroU64::MIN.get())
+        .checked_add(u64::from(crate::tally::STEP))
         .ok_or("completion revision overflow")?;
     state.validate()?;
     write_atomic(&dir.join(STATE_FILE), &state)?;

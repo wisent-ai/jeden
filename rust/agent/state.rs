@@ -164,7 +164,7 @@ pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option
         .and_then(Value::as_u64)
     {
         None => None,
-        Some(count) => match count.checked_sub(std::num::NonZeroU64::MIN.get()) {
+        Some(count) => match count.checked_sub(u64::from(crate::tally::STEP)) {
             Some(next) => Some(next),
             None => {
                 disable_loop(cwd, &mut state)?;

@@ -2,7 +2,9 @@ use super::*;
 use crate::model_router::RouteDescriptor;
 
 mod config;
+#[path = "config/guidance.rs"]
 mod guidance;
+#[path = "config/inputs.rs"]
 mod inputs;
 mod settings;
 mod usage;

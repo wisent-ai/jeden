@@ -15,6 +15,10 @@ use crate::model_router::{chat_completion, ChatConfig};
 
 const SYSTEM_PROMPT: &str = include_str!("prompt.txt");
 const KIND: &str = "rule";
+/// An operator's own rule is kept as certain: memory confidence is a
+/// probability, and certainty is the probability of the whole sample space,
+/// one (<https://en.wikipedia.org/wiki/Probability_axioms#Second_axiom>).
+const CERTAIN: f64 = 1.0;
 
 /// The scope every operator rule is kept under: the operator of this home,
 /// across repositories and sessions.
@@ -110,7 +114,7 @@ fn keep(rules: &[String], session_id: Option<String>) -> Result<(), String> {
             rule,
             &["operator-rule".into()],
             &source,
-            1.0,
+            CERTAIN,
         )?;
     }
     Ok(())

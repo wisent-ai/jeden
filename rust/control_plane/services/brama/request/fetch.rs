@@ -94,13 +94,7 @@ impl BramaClient {
             );
             headers.insert(
                 "x-correlation-id".into(),
-                format!(
-                    "brama-{}",
-                    self.correlation.fetch_add(
-                        std::num::NonZeroU64::MIN.get(),
-                        std::sync::atomic::Ordering::Relaxed,
-                    )
-                ),
+                format!("brama-{}", crate::tally::draw(&self.correlation)),
             );
             insert_caller_auth_headers(&mut headers, &[]);
         }

@@ -80,8 +80,9 @@ pub(super) fn cycle_errors(roadmap: &RoadmapFile) -> Vec<String> {
     errors
 }
 
-/// The first number a roadmap gives an id it numbers itself.
-pub(super) const FIRST_NUMBER: u64 = std::num::NonZeroU64::MIN.get();
+/// The first number a roadmap gives an id it numbers itself, and the step
+/// from the highest number to the next.
+pub(super) const FIRST_NUMBER: u64 = crate::tally::FIRST;
 
 /// The number after the highest `<prefix><digits>` among `ids`, or the first
 /// when none is numbered so; an id named otherwise is not counted. A number

@@ -1,8 +1,14 @@
 //! Operator-owned model API keys. SQLite serializes selection across processes.
 use rusqlite::{params, Connection, OpenFlags, OptionalExtension, TransactionBehavior};
 use serde::Serialize;
-use std::fs::{self, OpenOptions};
-use std::path::{Path, PathBuf};
+use std::fs;
+use std::path::Path;
+
+mod files;
+pub(crate) use files::canonical_endpoint;
+#[cfg(unix)]
+use files::check_directory;
+use files::{check_file, store_directory, store_path};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,116 +27,11 @@ pub(crate) struct Store {
     connection: Connection,
 }
 
-pub(crate) fn canonical_endpoint(endpoint: &str) -> Result<String, String> {
-    let url =
-        url::Url::parse(endpoint).map_err(|error| format!("invalid model endpoint: {error}"))?;
-    let loopback = match url.host() {
-        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
-        Some(url::Host::Domain(name)) => name == "localhost",
-        None => false,
-    };
-    let secure = url.scheme() == "https";
-    let local = url.scheme() == "http" && loopback;
-    let userinfo = endpoint.split_once("://").is_some_and(|(_, rest)| {
-        rest.split('/')
-            .next()
-            .is_some_and(|authority| authority.contains('@'))
-    });
-    if !(secure || local)
-        || userinfo
-        || !url.username().is_empty()
-        || url.password().is_some()
-        || url.query().is_some()
-        || url.fragment().is_some()
-    {
-        return Err(
-            "model endpoint must be HTTPS or loopback HTTP, without credentials, query or fragment"
-                .into(),
-        );
-    }
-    Ok(url.as_str().trim_end_matches('/').to_owned())
-}
-fn path() -> PathBuf {
-    crate::dirs_home().join(".jeden/model-tokens.sqlite3")
-}
-
-#[cfg(unix)]
-fn check_directory(dir: &Path, protect: bool) -> Result<(), String> {
-    use std::os::unix::fs::{MetadataExt, PermissionsExt};
-    let meta = fs::symlink_metadata(dir)
-        .map_err(|error| format!("inspect token directory {}: {error}", dir.display()))?;
-    if !meta.is_dir() || meta.uid() != unsafe { libc::geteuid() } {
-        return Err(format!(
-            "token directory {} is not owned by this user or is a symlink",
-            dir.display()
-        ));
-    }
-    if protect {
-        fs::set_permissions(dir, fs::Permissions::from_mode(libc::S_IRWXU as u32))
-            .map_err(|error| format!("protect token directory {}: {error}", dir.display()))?;
-    } else if std::num::NonZeroU32::new(
-        meta.permissions().mode() & ((libc::S_IRWXG | libc::S_IRWXO) as u32),
-    )
-    .is_some()
-    {
-        return Err(format!("token directory {} is not private", dir.display()));
-    }
-    Ok(())
-}
-fn check_file(path: &Path, create: bool) -> Result<(), String> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
-        if create {
-            match OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode((libc::S_IRUSR | libc::S_IWUSR) as u32)
-                .open(path)
-            {
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => {
-                    return Err(format!("create token store {}: {error}", path.display()))
-                }
-            }
-        }
-        let meta = fs::symlink_metadata(path)
-            .map_err(|error| format!("inspect token store {}: {error}", path.display()))?;
-        if !meta.is_file()
-            || std::num::NonZeroU32::new(
-                meta.permissions().mode() & ((libc::S_IRWXG | libc::S_IRWXO) as u32),
-            )
-            .is_some()
-            || meta.uid() != unsafe { libc::geteuid() }
-        {
-            return Err(format!(
-                "token store {} is not a private file owned by this user",
-                path.display()
-            ));
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        if create {
-            match OpenOptions::new().write(true).create_new(true).open(path) {
-                Ok(_) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(error) => {
-                    return Err(format!("create token store {}: {error}", path.display()))
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 impl Store {
     pub fn open_existing() -> Result<Option<Self>, String> {
-        let path = path();
-        let dir = path.parent().expect("token store has parent");
-        match fs::symlink_metadata(dir) {
+        let path = store_path();
+        let dir = store_directory();
+        match fs::symlink_metadata(&dir) {
             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
                 return Err(format!(
                     "token directory {} is a symlink or not a directory",
@@ -149,7 +50,7 @@ impl Store {
         match fs::symlink_metadata(&path) {
             Ok(_) => {
                 #[cfg(unix)]
-                check_directory(path.parent().expect("token store has parent"), false)?;
+                check_directory(&dir, false)?;
                 Self::open_at(&path, false).map(Some)
             }
             // No store, no secret to protect: the directory's mode matters
@@ -159,12 +60,12 @@ impl Store {
         }
     }
     pub fn open() -> Result<Self, String> {
-        let path = path();
-        let dir = path.parent().expect("token store has parent");
-        fs::create_dir_all(dir)
+        let path = store_path();
+        let dir = store_directory();
+        fs::create_dir_all(&dir)
             .map_err(|error| format!("create token directory {}: {error}", dir.display()))?;
         #[cfg(unix)]
-        check_directory(dir, true)?;
+        check_directory(&dir, true)?;
         Self::open_at(&path, true)
     }
     fn open_at(path: &Path, create: bool) -> Result<Self, String> {
@@ -185,7 +86,7 @@ impl Store {
         let mut statement = self.connection.prepare("SELECT t.id AS id,t.label AS label,t.endpoint AS endpoint,
                 t.last_failure AS last_failure, s.id IS NOT NULL AND s.id = t.id AS active FROM tokens t
                 LEFT JOIN selection s ON s.endpoint = t.endpoint ORDER BY t.rowid")
-            .map_err(|error| format!("prepare token list {}: {error}", path().display()))?;
+            .map_err(|error| format!("prepare token list {}: {error}", store_path().display()))?;
         let rows = statement
             .query_map([], |row| {
                 Ok(TokenRow {
@@ -196,9 +97,9 @@ impl Store {
                     active: row.get("active")?,
                 })
             })
-            .map_err(|error| format!("read token list {}: {error}", path().display()))?;
+            .map_err(|error| format!("read token list {}: {error}", store_path().display()))?;
         rows.collect::<Result<Vec<_>, _>>()
-            .map_err(|error| format!("decode token list {}: {error}", path().display()))
+            .map_err(|error| format!("decode token list {}: {error}", store_path().display()))
     }
     pub fn count_for(&self, endpoint: &str) -> Result<i64, String> {
         self.connection
@@ -259,10 +160,17 @@ impl Store {
             .connection
             .transaction_with_behavior(TransactionBehavior::Immediate)
             .map_err(|error| format!("begin token removal {id}: {error}"))?;
-        let count = tx
-            .execute("DELETE FROM tokens WHERE id=?1", [id])
+        // The removed row answers whether the id was stored; none removed is
+        // an id the store never held.
+        let removed: Option<String> = tx
+            .query_row(
+                "DELETE FROM tokens WHERE id=?1 RETURNING id AS id",
+                [id],
+                |row| row.get("id"),
+            )
+            .optional()
             .map_err(|error| format!("remove token {id}: {error}"))?;
-        if std::num::NonZeroUsize::new(count).is_none() {
+        if removed.is_none() {
             return Err(format!(
                 "unknown token id: {id}; run `jeden token list` to see stored IDs"
             ));
