@@ -179,8 +179,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         },
     };
     // `--help` or `-h` after a subcommand answers with that subcommand's
-    // usage lines and never runs it: `jeden roadmap drop --help` used to read
-    // `--help` as the value of an option, and `jeden config --help` refused it.
+    // usage lines and never runs it, before any option reads its value.
     let rest_words: Vec<String> = rest.collect();
     if command != Command::Interactive
         && rest_words
