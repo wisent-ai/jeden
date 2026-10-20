@@ -9,7 +9,7 @@
 // its exit status and its output are kept in the run's report.json.
 //
 // Run: JEDEN_BIN=target/debug/jeden JEDEN_TEST_SOURCE_REVISION=$(git rev-parse HEAD) \
-//   node tests/cli/config_unreadable_layer.mjs
+//   node tests/config/unreadable_layer.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';

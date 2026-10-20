@@ -54,19 +54,27 @@ impl Conversation {
                         "advisor review not recorded in the session: {error}"
                     ));
                 }
-                // Persist the review so `/advisor dump` can surface it.
-                if let Some(obj) = state.as_object_mut() {
-                    let advisor = obj.entry("advisor").or_insert_with(|| json!({}));
-                    if let Some(advisor_obj) = advisor.as_object_mut() {
-                        advisor_obj.insert(
-                            "lastReview".into(),
-                            json!({ "text": review.clone(), "at": now_stamp() }),
-                        );
-                    }
-                    if let Err(error) = write_mode_state(&args.cwd, &state) {
-                        hooks.note(&format!(
-                            "advisor review not kept for /advisor dump: {error}"
-                        ));
+                // Persist the review so `/advisor dump` can surface it; one
+                // the clock cannot date is not kept with an invented time.
+                match now_stamp() {
+                    Err(error) => hooks.note(&format!(
+                        "advisor review not kept for /advisor dump: it cannot be dated: {error}"
+                    )),
+                    Ok(at) => {
+                        if let Some(obj) = state.as_object_mut() {
+                            let advisor = obj.entry("advisor").or_insert_with(|| json!({}));
+                            if let Some(advisor_obj) = advisor.as_object_mut() {
+                                advisor_obj.insert(
+                                    "lastReview".into(),
+                                    json!({ "text": review.clone(), "at": at }),
+                                );
+                            }
+                            if let Err(error) = write_mode_state(&args.cwd, &state) {
+                                hooks.note(&format!(
+                                    "advisor review not kept for /advisor dump: {error}"
+                                ));
+                            }
+                        }
                     }
                 }
                 Ok(format!("{}\n\n— Advisor review —\n{}", answer, review))

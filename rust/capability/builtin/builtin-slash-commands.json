@@ -2,7 +2,7 @@
   { "name": "login", "description": "Automated OAuth login", "view": true },
   { "name": "logout", "description": "Logout provider", "view": true },
   { "name": "refresh", "description": "Refresh expiring Weles account", "view": false },
-  { "name": "token", "description": "Show the agent Brama token (always redacted in the transcript)", "view": false },
+  { "name": "token", "description": "Show the model route and credential source", "view": false },
   { "name": "model", "description": "Switch model", "view": true },
   { "name": "prompt", "description": "Show the effective system prompt", "view": true },
   { "name": "help", "description": "Show slash commands", "view": false },

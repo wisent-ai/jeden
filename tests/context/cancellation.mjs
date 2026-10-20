@@ -137,7 +137,7 @@ try {
   await assert.rejects(transport.rpc('context/recommend', { query, limit: 'many', cwd: workspace }),
     /invalid_params: context\/recommend limit must be a whole number/);
   await assert.rejects(transport.rpc('context/sources', { cwd: [workspace] }),
-    /invalid_params: context cwd must be a path string/);
+    /invalid_params: cwd must be a path string/);
   report.cases.push({ case: 'malformed-parameters-refused', verdict: 'passed' });
   report.verdict = 'passed';
 } catch (error) {

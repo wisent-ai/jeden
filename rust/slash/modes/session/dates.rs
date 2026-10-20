@@ -68,10 +68,12 @@ fn parse_rfc3339_epoch(value: &str) -> Option<u64> {
 
 pub(super) fn relative_age(started: &str) -> Option<String> {
     let epoch = started_epoch(started)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
+    // A clock that cannot be read has no age to give; the listing says so
+    // rather than show every session as started just now.
+    let now = match crate::clock::unix_seconds() {
+        Ok(now) => now,
+        Err(error) => return Some(format!("age unreadable: {error}")),
+    };
     let elapsed = now.saturating_sub(epoch);
     Some(if elapsed < 60 {
         format!("{elapsed}s")

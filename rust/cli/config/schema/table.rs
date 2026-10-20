@@ -41,7 +41,7 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "model",
         typ: "string",
-        description: "The model route turns run on, as Brama advertises it; /setup records it here, and JEDEN_MODEL or --model overrides it for one run. Empty means no model is selected.",
+        description: "The model ID selected from Brama or the explicitly configured direct provider; /setup records it here, and JEDEN_MODEL or --model overrides it for one run. Empty means no model is selected.",
         default_json: "\"\"",
         enum_values: &[],
     },

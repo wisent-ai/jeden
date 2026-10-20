@@ -1,6 +1,6 @@
 // Exercises the real source-all advisor, including the fleet memory database.
-// No provider, network server or child process is simulated.
-// Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_CONTEXT_LIMIT.
+// No provider, network server or child process is simulated. An isolated
+// SQLite database in the ignored build directory is the real memory store.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -22,6 +22,11 @@ const runs = join(root, '.build/context-dependencies');
 mkdirSync(runs, { recursive: true });
 const output = mkdtempSync(join(runs, 'run-'));
 const workspace = join(output, 'workspace');
+const home = join(output, 'home');
+mkdirSync(home);
+const databaseFile = join(output, 'memory.sqlite3');
+const journeyEnv = { ...process.env, HOME: home,
+  JEDEN_DATABASE_URL: `sqlite://${databaseFile}?mode=rwc` };
 mkdirSync(join(workspace, '.jeden'), { recursive: true });
 const query = `advisorjourney${randomUUID().replaceAll('-', '')}`;
 const fixture = join(workspace, 'entry.rs');
@@ -35,7 +40,7 @@ const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex
 const report = {
   startedAt: new Date().toISOString(), binary, declaredSourceRevision: revision,
   binarySha256: hash(binary), testSha256: hash(fileURLToPath(import.meta.url)),
-  query, workspace, commands: [], cases: [], verdict: 'failed',
+  query, workspace, databaseFile, commands: [], cases: [], verdict: 'failed',
 };
 const persist = () => writeFileSync(join(output, 'report.json'), JSON.stringify(report));
 persist();
@@ -46,7 +51,7 @@ function invoke(program, args, cwd = workspace) {
   const stdoutPath = join(output, `${report.commands.length}.stdout`);
   const stderrPath = join(output, `${report.commands.length}.stderr`);
   return new Promise((resolveResult, reject) => {
-    const child = spawn(program, args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { cwd, env: journeyEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     record.pid = child.pid;
     persist();
     const stdout = [];
@@ -118,6 +123,8 @@ try {
   }
   const memoryProbe = inspection.sources.find(source => source.source === 'memory');
   assert.equal(memoryProbe?.available, true, JSON.stringify(inspection));
+  assert.ok(statSync(databaseFile).isFile(),
+    'a real memory query must create its isolated persistent database file');
   report.cases.push({ case: 'real-source-inspection', verdict: 'passed', result: inspection });
   const originalMode = statSync(fixture).mode;
   const originalBytes = readFileSync(fixture);

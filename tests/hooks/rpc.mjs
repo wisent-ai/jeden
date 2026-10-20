@@ -3,11 +3,15 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
-export function startRpc({ binary, cwd, env, report }) {
+export function startRpc({ binary, cwd, env, report, redactFrame }) {
   const pending = new Map();
   let processFailure;
   const command = { program: binary, args: ['rpc'], cwd, stderr: '', protocolErrors: [] };
   report.commands.push(command);
+  // Redact retained evidence without changing the frame sent to Jeden.
+  const recordFrame = (direction, frame) => {
+    report.frames.push({ direction, frame: redactFrame ? redactFrame(frame) : frame });
+  };
   const child = spawn(binary, command.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'] });
   // The process a journey reads from the kernel (its open files) while it runs.
   command.pid = child.pid;
@@ -31,7 +35,7 @@ export function startRpc({ binary, cwd, env, report }) {
   createInterface({ input: child.stdout }).on('line', (line) => {
     try {
       const frame = JSON.parse(line);
-      report.frames.push({ direction: 'response', frame });
+      recordFrame('response', frame);
       const request = pending.get(frame.id);
       if (!request) return;
       pending.delete(frame.id);
@@ -48,7 +52,7 @@ export function startRpc({ binary, cwd, env, report }) {
     if (processFailure) return { id: undefined, response: Promise.reject(processFailure) };
     const id = randomUUID();
     const frame = { id, method, params };
-    report.frames.push({ direction: 'request', frame });
+    recordFrame('request', frame);
     const response = new Promise((resolveRequest, reject) => {
       pending.set(id, { resolve: resolveRequest, reject });
       child.stdin.write(`${JSON.stringify(frame)}\n`, (error) => {

@@ -32,7 +32,8 @@ fn evidence(
             ]
             .concat(),
         ),
-        earned: if passed { spec.points() } else { 0 },
+        // The grader's points when it passed; none when it did not.
+        earned: passed.then(|| spec.points()).into_iter().sum(),
         possible: spec.points(),
         passed,
         hard: spec.hard(),
@@ -121,17 +122,15 @@ pub fn grade(
             })?;
             let actual: serde_json::Value = serde_json::from_slice(&bytes)
                 .map_err(|error| format!("grader {} invalid JSON: {error}", spec.id()))?;
-            validate_schema(schema, &actual, "$").map_or_else(
-                |detail| {
-                    evidence(
-                        spec,
-                        false,
-                        format!("schema mismatch for {path}: {detail}"),
-                        &bytes,
-                    )
-                },
-                |_| evidence(spec, true, format!("JSON Schema match for {path}"), &bytes),
-            )
+            match validate_schema(schema, &actual, "$") {
+                Err(detail) => evidence(
+                    spec,
+                    false,
+                    format!("schema mismatch for {path}: {detail}"),
+                    &bytes,
+                ),
+                Ok(_) => evidence(spec, true, format!("JSON Schema match for {path}"), &bytes),
+            }
         }
         GraderSpecV1::Process {
             argv,
@@ -139,34 +138,35 @@ pub fn grade(
             stdout_contains,
             ..
         } => {
-            let executable = argv
-                .first()
-                .ok_or_else(|| format!("grader {} has empty argv", spec.id()))?;
+            let [executable, arguments @ ..] = argv.as_slice() else {
+                return Err(format!("grader {} has empty argv", spec.id()));
+            };
             let mut command = Command::new(executable);
             command
-                .args(&argv[1..])
+                .args(arguments)
                 .current_dir(workspace)
                 .env_clear()
                 .envs(isolated_env)
                 .stdin(Stdio::null())
                 .stderr(Stdio::piped())
                 .stdout(Stdio::piped());
-            let output = command.output().map_err(|error| {
+            let output = stado_wait::output(&mut command).map_err(|error| {
                 format!("grader {} process failed to start: {error}", spec.id())
             })?;
-            let exit = output.status.code().unwrap_or(-1);
             let stdout = String::from_utf8_lossy(&output.stdout);
-            let passed = exit == *expected_exit
+            // A process ended by a signal has no exit code: it never passes,
+            // and the evidence names the status instead of a code nobody
+            // returned.
+            let passed = output.status.code() == Some(*expected_exit)
                 && stdout_contains
                     .as_ref()
-                    .map(|needle| stdout.contains(needle))
-                    .unwrap_or(true);
+                    .is_none_or(|needle| stdout.contains(needle));
             let mut payload = output.stdout;
             payload.extend_from_slice(&output.stderr);
             evidence(
                 spec,
                 passed,
-                format!("process exit={exit}, expected={expected_exit}"),
+                format!("process {}, expected exit={expected_exit}", output.status),
                 &payload,
             )
         }

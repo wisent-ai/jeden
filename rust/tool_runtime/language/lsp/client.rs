@@ -209,12 +209,29 @@ pub(super) fn start(
 
 pub(super) fn ensure_open(client: &mut LspClient, path: &Path) -> Result<(), String> {
     let metadata = fs::metadata(path).map_err(|error| error.to_string())?;
-    let version = metadata
-        .modified()
-        .ok()
-        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
-        .map(|duration| duration.as_millis() as i64)
-        .unwrap_or(1);
+    // The document version is its modification time: read as a constant,
+    // every later change of the file looked already sent and the server kept
+    // answering about the first text it saw.
+    let modified = metadata.modified().map_err(|error| {
+        format!(
+            "{} has no modification time to version: {error}",
+            path.display()
+        )
+    })?;
+    let since_epoch = modified
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| {
+            format!(
+                "{} was modified before the Unix epoch: {error}",
+                path.display()
+            )
+        })?;
+    let version = i64::try_from(since_epoch.as_millis()).map_err(|error| {
+        format!(
+            "{} has a modification time past an i64 version: {error}",
+            path.display()
+        )
+    })?;
     if client.opened.get(path) == Some(&version) {
         return Ok(());
     }
