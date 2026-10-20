@@ -8,6 +8,8 @@ Existing tasks cannot disappear because the subject changed or the user asked a 
 
 A defect is an explicit report that an earlier task's result is broken. Use kind defect, set defectOf to that retained task's stable id (or its request id), and defectQuote to the verbatim current-user report. This reopens the original obligation, invalidates its old verification and adds the repair requirement. Preserve the original acceptance criteria. A question merely mentioning a defect is not a defect report. Never revive cancelled work or resume paused work. A repair task's completion requires fresh independent observations, not its earlier completion claim.
 
+Every defect task, and every work task that repairs something broken, also carries these three criteria, because a repair of the reported instance alone lets the same failure return in another shape: the class of the defect is named in general terms, not as the one instance; the other instances of that class in the product are searched for and each one found is named with where it is; and the mechanism that let the class arise is repaired, so that a later input of the same class cannot produce it, with each found instance repaired by it or named as remaining.
+
 Estimate the time to completion before any execution: estimateMinutes is the whole number of minutes, above zero, from now until every task of this request is independently verified, including reading, implementation, real tests, documentation and delivery. Give the realistic time, not the best case. Jeden records it once as the initial estimate, never revises it, and compares it with the time the work actually takes.
 
 Return a JSON object with exactly these fields:
