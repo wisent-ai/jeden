@@ -98,8 +98,9 @@ try {
     '--model-only', '--json'], workspace, env));
   const [session] = sessionDirectories(sessions);
   assert.ok(session, 'the run recorded no session');
-  const exported = JSON.parse(succeeds(invoke(binary, ['export', session], workspace, env)));
-  writeFileSync(join(session, 'qualification-export.json'), JSON.stringify(exported));
+  const exportPath = join(session, 'qualification-export.json');
+  succeeds(invoke(binary, ['export', session, exportPath], workspace, env));
+  const exported = JSON.parse(readFileSync(exportPath, 'utf8'));
   const leased = exported.events.filter((event) => event.type === 'model_subscription_route');
   report.observations.leasedSteps = leased.map((event) => event.data);
   const lease = [...report.observations.leasedSteps].pop();

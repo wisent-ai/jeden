@@ -31,7 +31,7 @@ pub(crate) struct Conversation {
 
 impl Conversation {
     pub(crate) fn new(cwd: &Path) -> Result<Self, String> {
-        let mut recorder = SessionRecorder::new(cwd);
+        let mut recorder = SessionRecorder::new(cwd)?;
         recorder.ensure()?;
         Ok(Self {
             messages: vec![json!({ "role": "system", "content": system_prompt_checked(cwd)? })],
@@ -46,7 +46,7 @@ impl Conversation {
     }
 
     pub(crate) fn new_model_only(cwd: &Path) -> Result<Self, String> {
-        let mut recorder = SessionRecorder::new(cwd);
+        let mut recorder = SessionRecorder::new(cwd)?;
         recorder.ensure()?;
         Ok(Self {
             messages: vec![json!({

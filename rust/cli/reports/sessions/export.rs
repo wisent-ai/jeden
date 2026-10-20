@@ -24,13 +24,15 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
     let id = session
         .get("id")
         .and_then(Value::as_str)
-        .unwrap_or("session");
-    let path = session.get("path").and_then(Value::as_str).unwrap_or("");
+        .ok_or("session export cannot render: recorded session has no string id")?;
+    let path = session
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("session export cannot render: recorded session has no string path")?;
     let events = session
         .get("events")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
+        .ok_or("session export cannot render: recorded session has no events array")?;
     if format == "markdown" {
         let mut out = format!("# Jeden session {}\n\n{}\n\n", id, path);
         for event in events {
@@ -79,16 +81,29 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
             "export requires a session id or path: {USAGE}"
         ))
     })?;
-    let mut format = "json".to_string();
+    if args.json {
+        return Err(crate::cli::invocation::refusal::usage(format!(
+            "export writes JSON by default; --json is not an option; {USAGE}"
+        )));
+    }
+    let mut format = "json";
+    let mut explicit_format = false;
     let mut output = None;
     for arg in rest {
-        if arg == "--html" {
-            format = "html".into();
-        } else if arg == "--markdown" {
-            format = "markdown".into();
-        } else if arg.starts_with("--") || output.is_some() {
-            // An unknown flag is not a file name, and a second path is not
-            // silently preferred over the first.
+        let chosen = match arg.as_str() {
+            "--html" => Some("html"),
+            "--markdown" => Some("markdown"),
+            _ => None,
+        };
+        if let Some(chosen) = chosen {
+            if explicit_format {
+                return Err(crate::cli::invocation::refusal::usage(format!(
+                    "export accepts only one format option; {USAGE}"
+                )));
+            }
+            format = chosen;
+            explicit_format = true;
+        } else if arg.starts_with('-') || output.is_some() {
             return Err(crate::cli::invocation::refusal::usage(format!(
                 "export: unexpected argument {arg:?}; {USAGE}"
             )));
@@ -101,7 +116,9 @@ pub(crate) fn export_session_command(args: &Args) -> Result<String, String> {
             "export requires the file to write: {USAGE}"
         )));
     };
-    let payload = render_session_export(&read_session_value(id)?, &format)?;
+    let session = read_session_value(id)?;
+    let payload = render_session_export(&session, format)
+        .map_err(|error| format!("session {id} cannot be exported: {error}"))?;
     fs::write(&path, &payload)
         .map_err(|error| format!("cannot write the export to {path}: {error}"))?;
     Ok(format!("{}\n", path))

@@ -26,6 +26,7 @@ pub mod memory;
 pub mod model_router;
 pub mod net;
 pub mod onboarding;
+pub(crate) mod operator_rules;
 
 // Moved to the modules that own them, under the paths every caller uses:
 // the action protocol the agent speaks and the terminal QR rendering.
@@ -194,6 +195,9 @@ pub fn main() -> ExitCode {
         Command::Sessions => match args.positionals.split_first() {
             None => list_sessions(None, args.json),
             Some((verb, query)) if verb == "search" => search_sessions_command(query, args.json),
+            Some((_, [unexpected, ..])) => Err(cli::invocation::refusal::usage(format!(
+                "sessions: unexpected argument {unexpected:?}; usage: jeden sessions [limit] [--json]"
+            ))),
             Some((raw, _)) => raw
                 .parse()
                 .map_err(|_| {
@@ -207,13 +211,17 @@ pub fn main() -> ExitCode {
         // A session that cannot be read or rendered is a failure with its
         // cause, never an exit 0 carrying an error object or nothing. Text is
         // the session's events one heading each; --json is the whole record.
-        Command::Show => match args.positionals.first() {
-            Some(id) => read_session_value(id)
+        Command::Show => match args.positionals.as_slice() {
+            [id] => read_session_value(id)
                 .map_err(|error| format!("session {id} cannot be read: {error}"))
                 .and_then(|session| {
                     render_session_export(&session, if args.json { "json" } else { "markdown" })
+                        .map_err(|error| format!("session {id} cannot be rendered: {error}"))
                 }),
-            None => Err(cli::invocation::refusal::usage(
+            [_, unexpected, ..] => Err(cli::invocation::refusal::usage(format!(
+                "show: unexpected argument {unexpected:?}; usage: jeden show <session-id-or-path> [--json]"
+            ))),
+            [] => Err(cli::invocation::refusal::usage(
                 "show requires a session id",
             )),
         },

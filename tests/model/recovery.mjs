@@ -69,10 +69,10 @@ try {
       '--model', scenario.model, '--model-only', '--json'], workspace, env);
     const paths = transcripts(sessions);
     const events = paths.flatMap((path) => {
-      const exported = invoke(binary, ['export', dirname(path)], workspace, env);
+      const exportPath = join(dirname(path), 'qualification-export.json');
+      const exported = invoke(binary, ['export', dirname(path), exportPath], workspace, env);
       assert.ok(exported.status !== null && !exported.status, exported.stderr);
-      writeFileSync(join(dirname(path), 'qualification-export.json'), exported.stdout);
-      return JSON.parse(exported.stdout).events;
+      return JSON.parse(readFileSync(exportPath, 'utf8')).events;
     });
     const changes = events.filter((event) => event.type === 'model_route_result'
       && event.data?.result?.reason === 'context promotion').map((event) => event.data.result.to);

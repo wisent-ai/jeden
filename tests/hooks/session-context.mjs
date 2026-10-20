@@ -56,9 +56,9 @@ function readRules(name) {
 }
 let client;
 function exported(sessionPath, name) {
-  const text = invoke(binary, ['export', sessionPath]);
-  writeFileSync(join(output, `${name}.json`), text);
-  const value = JSON.parse(text);
+  const path = join(output, `${name}.json`);
+  invoke(binary, ['export', sessionPath, path]);
+  const value = JSON.parse(readFileSync(path, 'utf8'));
   assert.ok(Array.isArray(value.events), 'export must contain the real ledger');
   return value.events;
 }
@@ -78,6 +78,9 @@ try {
   assert.equal(invoke('git', ['status', '--porcelain'], root).trim(), '',
     'commit the candidate and tests before qualification');
   report.binaryVersion = invoke(binary, ['--version']);
+  const short = invoke('git', ['rev-parse', '--short', revision], root).trim();
+  assert.ok(report.binaryVersion.trim().endsWith(`.${short}`),
+    `the real CLI must embed the clean source revision: ${report.binaryVersion}`);
   const startupRules = readRules('startup');
   client = startRpc({ binary, cwd, env, report });
   const { rpc, command } = client;

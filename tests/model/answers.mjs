@@ -65,9 +65,9 @@ try {
     const result = invoke(binary, args, workspace, env);
     const paths = transcripts(sessions);
     const events = paths.flatMap((path) => {
-      const exported = succeeds(invoke(binary, ['export', dirname(path)], workspace, env));
-      writeFileSync(join(dirname(path), 'qualification-export.json'), exported);
-      return JSON.parse(exported).events;
+      const exportPath = join(dirname(path), 'qualification-export.json');
+      succeeds(invoke(binary, ['export', dirname(path), exportPath], workspace, env));
+      return JSON.parse(readFileSync(exportPath, 'utf8')).events;
     });
     const violations = events.filter((event) => event.data?.rule === 'model-answer').map((event) => event.data);
     assert.ok(violations.length, 'the real model did not exercise answer correction');

@@ -35,7 +35,7 @@ pub(super) fn prepare_child(
     leaf: Option<String>,
     transition: &str,
 ) -> Result<SessionRecorder, String> {
-    let mut recorder = SessionRecorder::child(cwd, parent.to_path_buf(), leaf);
+    let mut recorder = SessionRecorder::child(cwd, parent.to_path_buf(), leaf)?;
     let destination = recorder.path();
     recorder.ensure().map_err(|reason| {
         format!(

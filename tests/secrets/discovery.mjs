@@ -82,9 +82,9 @@ try {
     succeeds(result);
     const paths = transcripts(home);
     const events = paths.flatMap((path) => {
-      const exported = succeeds(invoke(binary, ['export', dirname(path)], workspace, env));
-      writeFileSync(join(dirname(path), 'qualification-export.json'), exported);
-      return JSON.parse(exported).events;
+      const exportPath = join(dirname(path), 'qualification-export.json');
+      succeeds(invoke(binary, ['export', dirname(path), exportPath], workspace, env));
+      return JSON.parse(readFileSync(exportPath, 'utf8')).events;
     });
     const expected = entry.redact ? replacement : secret;
     assert.ok(events.some((event) => event.type === 'final' && event.data.text.trim() === expected),

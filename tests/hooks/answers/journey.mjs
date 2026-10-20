@@ -121,9 +121,9 @@ try {
     const candidate = inputs.find((input) => input.last_assistant_message?.includes(rejected));
     assert.ok(candidate, 'the real model must reach the requested hook candidate, not an easier path');
     const session = dirname(candidate.transcript_path);
-    const exported = invoke(binary, ['export', session], workspace, env);
-    const events = JSON.parse(succeeds(exported)).events;
-    writeFileSync(join(directory, 'session-export.json'), exported.stdout);
+    const exportPath = join(directory, 'session-export.json');
+    succeeds(invoke(binary, ['export', session, exportPath], workspace, env));
+    const events = JSON.parse(readFileSync(exportPath, 'utf8')).events;
     const actions = events.filter((event) => event.type === 'action').map((event) => event.data.action);
     assert.ok(actions.some((action) => action.action === expectedAction && action.text?.includes(rejected)),
       'a real action of the requested kind must have been produced');

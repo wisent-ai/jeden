@@ -8,7 +8,7 @@
 // reads them and writes only under the package's build directory.
 // Every command, its exit status and output go to the run's report.json.
 //
-// Usage: JEDEN_BIN=<built jeden> node tests/cli/export_writes.mjs
+// Usage: JEDEN_BIN=<built jeden> JEDEN_TEST_SOURCE_REVISION=<commit> node tests/cli/export_writes.mjs
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -20,6 +20,8 @@ const binary = process.env.JEDEN_BIN;
 if (!binary) {
   throw new Error('JEDEN_BIN must name the built jeden this test runs; the test proves that binary, not whichever is on PATH');
 }
+const expectedRevision = process.env.JEDEN_TEST_SOURCE_REVISION;
+assert.ok(expectedRevision?.trim(), 'JEDEN_TEST_SOURCE_REVISION must name the candidate checkout');
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const runs = join(root, 'build/real-tests/export-writes');
 mkdirSync(runs, { recursive: true });
@@ -35,17 +37,32 @@ function jeden(args) {
   assert.ok(!result.error, `jeden ${args.join(' ')} did not run: ${result.error}`);
   return result;
 }
+function git(args) {
+  const result = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+  report.commands.push({ program: 'git', args, exit_status: result.status, signal: result.signal,
+    stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
 
 try {
-  report.revision = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim();
+  report.revision = git(['rev-parse', 'HEAD']);
+  assert.equal(report.revision, expectedRevision, 'qualify only the declared checkout');
+  assert.equal(git(['status', '--porcelain']), '', 'commit the candidate and journey before qualification');
+  const short = git(['rev-parse', '--short', expectedRevision]);
+  const version = jeden(['--version']);
+  assert.equal(version.status, 0, version.stderr);
+  assert.ok(version.stdout.trim().endsWith(`.${short}`),
+    `the CLI binary must embed the clean source revision: ${version.stdout}`);
   report.test_sha256 = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
   report.binary_sha256 = createHash('sha256').update(readFileSync(binary)).digest('hex');
 
-  // The status a usage refusal exits with, measured on a command jeden does
-  // not have rather than written down here.
-  const unknown = jeden(['no-such-command']);
-  assert.ok(unknown.status, `an unknown command was accepted: ${unknown.stdout}`);
-  const usage = unknown.status;
+  // Measure a usage refusal, not an unknown command's execution failure.
+  const invalidLimit = jeden(['sessions', 'not-a-number']);
+  assert.ok(invalidLimit.status, 'an invalid sessions limit was accepted');
+  assert.match(invalidLimit.stderr, /whole number/);
+  const usage = invalidLimit.status;
 
   const bare = jeden(['export']);
   assert.equal(bare.status, usage, `export without a session exited ${bare.status}`);
@@ -56,6 +73,15 @@ try {
   const [session] = JSON.parse(listed.stdout);
   assert.ok(session, 'BLOCKED: no recorded session on this machine, so export has nothing to write');
   report.session = session;
+  const zero = jeden(['sessions', '0', '--json']);
+  assert.equal(zero.status, 0, zero.stderr);
+  assert.deepEqual(JSON.parse(zero.stdout), [], 'a zero limit must list no sessions');
+  for (const args of [['sessions', '1', 'extra'], ['show', session, 'extra']]) {
+    const refused = jeden(args);
+    assert.equal(refused.status, usage, `${args[0]} accepted a trailing argument`);
+    assert.match(refused.stderr, /unexpected argument "extra"/);
+    assert.equal(refused.stdout, '', 'an invalid read command printed a successful session');
+  }
 
   const printed = jeden(['export', session]);
   assert.equal(printed.status, usage, `export without a file exited ${printed.status}`);
