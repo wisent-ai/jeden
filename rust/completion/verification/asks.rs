@@ -56,8 +56,8 @@ pub(super) fn check(
 /// register ask shows the same sentence; the same ask keeps its date. A
 /// verdict that is not blocked drops an unanswered ask, which is moot, and
 /// keeps an answered one beside the work it fed. The register keeps every
-/// ask either way.
-pub(super) fn record(task: &mut WorkTask, verdict: &TaskReview, link: Option<&Link>) {
+/// ask either way. A new ask is dated `at`, the time of the review.
+pub(super) fn record(task: &mut WorkTask, verdict: &TaskReview, link: Option<&Link>, at: &str) {
     let ask = link
         .map(|link| link.ask.as_str())
         .or_else(|| named(verdict));
@@ -66,7 +66,7 @@ pub(super) fn record(task: &mut WorkTask, verdict: &TaskReview, link: Option<&Li
             Some(existing)
         }
         (Some(ask), _) => Some(OperatorRequest {
-            asked_at: crate::agent::now_stamp(),
+            asked_at: at.to_string(),
             ask: ask.to_string(),
             answer: None,
         }),

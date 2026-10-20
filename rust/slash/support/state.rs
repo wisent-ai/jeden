@@ -3,7 +3,6 @@ use serde_json::Value;
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ModeState {
@@ -265,35 +264,6 @@ pub(crate) fn write_mode_state(cwd: &Path, state: &ModeState) -> Result<(), Stri
         .parent()
         .ok_or_else(|| "mode-state path has no parent".to_string())?;
     ensure_mode_state_dir(parent)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| {
-            format!("the mode state cannot be staged: the clock is before the epoch: {error}")
-        })?
-        .as_nanos();
-    let temp = parent.join(format!(
-        ".mode-state.json.tmp-{}-{nonce}",
-        std::process::id()
-    ));
     let text = serde_json::to_string_pretty(state).map_err(|error| error.to_string())? + "\n";
-    let result = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temp)
-        .and_then(|mut file| {
-            file.write_all(text.as_bytes())?;
-            file.flush()?;
-            file.sync_all()
-        })
-        .and_then(|()| fs::rename(&temp, &path))
-        .and_then(|()| File::open(parent)?.sync_all())
-        .map_err(|error| error.to_string());
-    if result.is_err() {
-        if let Err(left) = fs::remove_file(&temp) {
-            if left.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("jeden: {} is left behind: {left}", temp.display());
-            }
-        }
-    }
-    result
+    crate::tool_runtime::runtime_ops::durable::replace(&path, text.as_bytes())
 }

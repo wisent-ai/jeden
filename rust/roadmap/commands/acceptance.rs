@@ -4,7 +4,7 @@
 //! Split out of `roadmap/mod.rs`, which had grown past the module line cap.
 
 use super::super::model::{AcceptanceCriterion, EvidenceLink, RoadmapError, RoadmapStatus};
-use super::super::normalize::{actor, find_item, find_item_mut, now};
+use super::super::normalize::{actor, find_item, find_item_mut, next_number, now};
 use super::super::store::RoadmapStore;
 use super::options::{expected_revision, format_json, ParsedOptions};
 use serde_json::json;
@@ -14,14 +14,11 @@ pub(super) fn acceptance_command(
     options: &ParsedOptions,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
-    let operation = options
-        .positionals
-        .first()
-        .map(String::as_str)
-        .unwrap_or("list");
-    let item_id = options.positionals.get(1).ok_or_else(|| {
-        RoadmapError::Usage("Usage: roadmap acceptance <list|add|evidence> <item-id> ...".into())
-    })?;
+    let [operation, item_id, rest @ ..] = options.positionals.as_slice() else {
+        return Err(RoadmapError::Usage(
+            "Usage: roadmap acceptance <list|add|evidence> <item-id> ...".into(),
+        ));
+    };
     if operation == "list" {
         let roadmap = store.load()?;
         let item = find_item(&roadmap, item_id)?;
@@ -47,9 +44,9 @@ pub(super) fn acceptance_command(
         return Ok(output);
     }
     let revision = expected_revision(store, options)?;
-    match operation {
+    match operation.as_str() {
         "add" => {
-            let text = options.positionals.get(2..).unwrap_or_default().join(" ");
+            let text = rest.join(" ");
             if text.trim().is_empty() {
                 return Err(RoadmapError::Usage(
                     "Usage: roadmap acceptance add <item-id> <criterion>".into(),
@@ -62,10 +59,18 @@ pub(super) fn acceptance_command(
                 json!({"itemId": item_id, "operation": "add", "text": text}),
                 |roadmap| {
                     let item = find_item_mut(roadmap, item_id)?;
-                    criterion_id = options
-                        .one("id")
-                        .map(str::to_string)
-                        .unwrap_or_else(|| format!("acceptance-{}", item.acceptance.len() + 1));
+                    criterion_id = match options.one("id") {
+                        Some(named) => named.to_string(),
+                        None => format!(
+                            "acceptance-{}",
+                            next_number(
+                                item.acceptance
+                                    .iter()
+                                    .map(|criterion| criterion.id.as_str()),
+                                "acceptance-",
+                            )?
+                        ),
+                    };
                     item.acceptance.push(AcceptanceCriterion {
                         id: criterion_id.clone(),
                         text,
@@ -83,18 +88,13 @@ pub(super) fn acceptance_command(
             }
         }
         "evidence" => {
-            let criterion_id = options.positionals.get(2).ok_or_else(|| {
-                RoadmapError::Usage(
+            let [criterion_id, uri, ..] = rest else {
+                return Err(RoadmapError::Usage(
                     "Usage: roadmap acceptance evidence <item-id> <acceptance-id> <artifact-uri>"
                         .into(),
-                )
-            })?;
-            let uri = options.positionals.get(3).ok_or_else(|| {
-                RoadmapError::Usage(
-                    "Usage: roadmap acceptance evidence <item-id> <acceptance-id> <artifact-uri>"
-                        .into(),
-                )
-            })?;
+                ));
+            };
+            let added_at = now()?;
             let roadmap = store.mutate(
                 revision,
                 "roadmap_evidence_attached",
@@ -114,7 +114,7 @@ pub(super) fn acceptance_command(
                     item.evidence.push(EvidenceLink {
                         uri: uri.clone(),
                         acceptance_id: Some(criterion_id.clone()),
-                        added_at: now(),
+                        added_at: added_at.clone(),
                         added_by: actor()?,
                     });
                     Ok(())
@@ -152,13 +152,15 @@ pub(super) fn work_command(
             item.id, item.status
         )));
     }
-    let blockers = item
-        .depends_on
-        .iter()
-        .filter_map(|dependency| find_item(&roadmap, dependency).ok())
-        .filter(|dependency| dependency.status != RoadmapStatus::Passed)
-        .map(|dependency| format!("{} ({})", dependency.id, dependency.status))
-        .collect::<Vec<_>>();
+    // A dependency the roadmap does not hold is refused by name: skipped,
+    // the item would start as if that dependency had passed.
+    let mut blockers = Vec::new();
+    for dependency in &item.depends_on {
+        let dependency = find_item(&roadmap, dependency)?;
+        if dependency.status != RoadmapStatus::Passed {
+            blockers.push(format!("{} ({})", dependency.id, dependency.status));
+        }
+    }
     if !blockers.is_empty() {
         return Err(RoadmapError::Invalid(format!(
             "{} is blocked by unresolved dependencies: {}",

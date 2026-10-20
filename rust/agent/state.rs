@@ -70,38 +70,25 @@ pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, 
         }
     }
     // /plan: research + plan, no file changes.
-    if state
-        .pointer("/plan/enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if state.pointer("/plan/enabled").and_then(Value::as_bool) == Some(true) {
         parts.push("Plan mode is active: research and lay out a concrete, ordered plan for this task before doing the work. Do not modify files unless the user explicitly asks in this turn; end with the plan.".to_string());
     }
     // /goal: keep every step aligned with the stored objective.
-    if state
-        .pointer("/goal/enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if state.pointer("/goal/enabled").and_then(Value::as_bool) == Some(true) {
         if let Some(objective) = state
             .pointer("/goal/objective")
             .and_then(Value::as_str)
             .filter(|o| !o.trim().is_empty())
         {
-            let budget = state
-                .pointer("/goal/budget")
-                .and_then(Value::as_f64)
-                .map(|b| format!(" Respect the working budget of {}.", b))
-                .unwrap_or_default();
+            let budget = match state.pointer("/goal/budget").and_then(Value::as_f64) {
+                Some(budget) => format!(" Respect the working budget of {}.", budget),
+                None => String::new(),
+            };
             parts.push(format!("Active goal: {}. Keep every step aligned with this goal and note progress toward it.{}", objective.trim(), budget));
         }
     }
     // /guided-goal: one-shot — refine a rough objective this turn, then clear it.
-    if state
-        .pointer("/guidedGoal/active")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if state.pointer("/guidedGoal/active").and_then(Value::as_bool) == Some(true) {
         if let Some(rough) = state
             .pointer("/guidedGoal/roughObjective")
             .and_then(Value::as_str)
@@ -138,11 +125,7 @@ pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, 
 /// is never taken for plan mode being off.
 pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) -> Result<(), String> {
     let mut state = read_mode_state(cwd)?;
-    if !state
-        .pointer("/plan/enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if state.pointer("/plan/enabled").and_then(Value::as_bool) != Some(true) {
         return Ok(());
     }
     if let Some(obj) = state.as_object_mut() {
@@ -155,52 +138,53 @@ pub(super) fn capture_plan_if_enabled(cwd: &Path, text: &str) -> Result<(), Stri
     Ok(())
 }
 
-/// If loop mode is active and not exhausted, return the stored prompt to
+/// If loop mode is active and not spent, return the stored prompt to
 /// resubmit and consume one iteration (decrement `remaining`; disable when the
-/// remaining count is exhausted or the `until` deadline passes). Returns `None`
+/// remaining count is spent or the `until` end time passes). Returns `None`
 /// when the loop stops, including when `/loop` stored no explicit prompt. A
 /// mode state that cannot be read is the error, not a stopped loop.
 pub(crate) fn loop_next_prompt(cwd: &Path, _current_task: &str) -> Result<Option<String>, String> {
     let mut state = read_mode_state(cwd)?;
-    if !state
-        .pointer("/loop_mode/enabled")
-        .and_then(Value::as_bool)
-        .unwrap_or(false)
-    {
+    if state.pointer("/loop_mode/enabled").and_then(Value::as_bool) != Some(true) {
         return Ok(None);
     }
-    // Duration guard: stop once the deadline has passed.
+    // Duration guard: stop once the end time has passed.
     if let Some(until) = state.pointer("/loop_mode/until").and_then(Value::as_u64) {
         let now = crate::clock::unix_millis()
-            .map_err(|error| format!("the /loop deadline cannot be checked: {error}"))?;
+            .map_err(|error| format!("the /loop end time cannot be checked: {error}"))?;
         if now >= until {
             disable_loop(cwd, &mut state)?;
             return Ok(None);
         }
     }
-    // Count guard: a remaining of 0 means exhausted.
-    let remaining = state
+    // Count guard: a count with no iteration left to take stops the loop;
+    // otherwise this iteration is taken from it.
+    let remaining = match state
         .pointer("/loop_mode/remaining")
-        .and_then(Value::as_u64);
-    if remaining == Some(0) {
-        disable_loop(cwd, &mut state)?;
-        return Ok(None);
-    }
-    let prompt = state
+        .and_then(Value::as_u64)
+    {
+        None => None,
+        Some(count) => match count.checked_sub(std::num::NonZeroU64::MIN.get()) {
+            Some(next) => Some(next),
+            None => {
+                disable_loop(cwd, &mut state)?;
+                return Ok(None);
+            }
+        },
+    };
+    let Some(prompt) = state
         .pointer("/loop_mode/prompt")
         .and_then(Value::as_str)
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    if prompt.trim().is_empty() {
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+        .map(str::to_string)
+    else {
         disable_loop(cwd, &mut state)?;
         return Ok(None);
-    }
-    // Consume one iteration.
-    if let Some(n) = remaining {
+    };
+    if let Some(next) = remaining {
         if let Some(obj) = state.as_object_mut() {
             if let Some(lm) = obj.get_mut("loop_mode").and_then(Value::as_object_mut) {
-                let next = n.saturating_sub(1);
                 lm.insert("remaining".into(), json!(next));
             }
         }
@@ -244,8 +228,19 @@ pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), St
 }
 
 /// Append a branch record to mode-state so `/tree` can list it and `/resume`
-/// can navigate to its session path. Backs a real fork-based `/branch`.
+/// can navigate to its session path. Backs a real fork-based `/branch`. The
+/// branch is named by its session, which no other branch shares.
 pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<String, String> {
+    let id = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .ok_or_else(|| {
+            format!(
+                "a branch cannot be named: {} has no session name",
+                path.display()
+            )
+        })?;
+    let created_at = now_stamp()?;
     let mut state = read_mode_state(cwd)?;
     let map = state.as_object_mut().expect("mode state object");
     let roadmap_item = map
@@ -254,7 +249,6 @@ pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<Stri
         .map(str::to_string);
     let branches = map.entry("branches").or_insert_with(|| json!([]));
     let arr = branches.as_array_mut().ok_or("branches is not an array")?;
-    let id = format!("branch-{}", arr.len() + 1);
     let title = if title.trim().is_empty() {
         id.clone()
     } else {
@@ -263,7 +257,7 @@ pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<Stri
     arr.push(json!({
         "id": id,
         "title": title,
-        "createdAt": now_stamp(),
+        "createdAt": created_at,
         "path": path.to_string_lossy(),
         "roadmapItem": roadmap_item
     }));

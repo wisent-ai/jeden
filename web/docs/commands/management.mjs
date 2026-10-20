@@ -109,15 +109,17 @@ export const managementCommands = [
   {
     path: "roadmap/add",
     group: "Roadmap",
-    invocation: "jeden roadmap add <title> | --title <title> [--area AREA] [--priority P0|P1|P2|P3] [--summary TEXT] [--acceptance TEXT] [--depends-on ID] [--capability ID] [--external-prerequisite TEXT] [--status STATUS] [--revision N] [--json]",
+    invocation: "jeden roadmap add <title> | --title <title> --area AREA --priority P0|P1|P2|P3 --summary TEXT [--acceptance TEXT] [--depends-on ID] [--capability ID] [--external-prerequisite TEXT] [--status STATUS] [--id ID] [--revision N] [--json]",
     purpose: "Create a new validated roadmap item.",
     inputs: [
-      "Required: a positional title or <code>--title</code>, but not both.",
-      "Optional metadata includes explicit id, area, priority, summary, implementation/rationale/order, repeatable acceptance, dependencies, capabilities, prerequisites, initial status, and expected revision.",
+      "Required: a positional title or <code>--title</code>, but not both, and <code>--area</code>, <code>--priority</code> and <code>--summary</code>: an item is filed under the area, priority and summary its author gives it, never under ones Jeden picks.",
+      "Optional: an explicit id, implementation/rationale/order text (written empty when not given), repeatable acceptance criteria numbered <code>acceptance-1</code> upward, dependencies, capabilities, prerequisites, an initial status (backlog when not given), and the expected revision.",
     ],
-    effect: "Builds the item with actor/timestamp metadata, assigns the requested or next ID, validates the entire roadmap, atomically commits a new revision, and prints the created item or ID/revision.",
+    effect: "Builds the item with actor/timestamp metadata, assigns the requested ID or the one after the highest <code>JED-</code> number, validates the entire roadmap, atomically commits a new revision, and prints the created item or ID/revision.",
     refusals: [
       "Supplying both title forms is refused; an empty title returns the exact add usage.",
+      "A missing <code>--area</code>, <code>--priority</code> or <code>--summary</code> is refused as <code>roadmap add requires --&lt;name&gt;: ...</code> without committing.",
+      "A host clock set before the Unix epoch refuses the change as <code>the roadmap change cannot be dated: ...</code> instead of dating it at the epoch; the same holds for status changes and attached evidence.",
       "Invalid priority, status, duplicate or missing IDs/dependencies, invalid acceptance/evidence, cycles, and stale revisions are refused without committing.",
     ],
   },

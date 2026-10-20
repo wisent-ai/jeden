@@ -132,7 +132,8 @@ impl Linker {
         if self.links.is_empty() {
             return Ok(());
         }
-        let stamp = crate::agent::now_stamp();
+        let stamp = crate::agent::now_stamp()
+            .map_err(|error| format!("the review asks cannot be dated: {error}"))?;
         update(|register| {
             for link in &self.links {
                 if let Some(new) = &link.new {

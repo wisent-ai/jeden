@@ -3,7 +3,7 @@
 //! Split out of `roadmap/mod.rs`, which had grown past the module line cap.
 
 use super::model::{AcceptanceCriterion, RoadmapError, RoadmapFile, RoadmapItem, RoadmapStatus};
-use super::normalize::{actor, find_item, find_item_mut, next_item_id, now};
+use super::normalize::{actor, find_item, next_item_id, now, FIRST_NUMBER};
 use super::{render::render_markdown, store::RoadmapStore};
 use serde_json::json;
 use std::{path::Path, str::FromStr};
@@ -20,8 +20,12 @@ use status::{mutate_status, mutate_status_explicit};
 
 pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String, RoadmapError> {
     let store = RoadmapStore::new(cwd);
-    let command = args.first().map(String::as_str).unwrap_or("list");
-    let options = ParsedOptions::parse(args.get(1..).unwrap_or_default())?;
+    // `jeden roadmap` with no command lists the roadmap.
+    let (command, rest) = match args {
+        [] => ("list", args),
+        [command, rest @ ..] => (command.as_str(), rest),
+    };
+    let options = ParsedOptions::parse(rest)?;
     match command {
         "list" => {
             let roadmap = store.load()?;
@@ -34,9 +38,9 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             let items = roadmap
                 .items
                 .iter()
-                .filter(|item| status.as_ref().map(|v| v == &item.status).unwrap_or(true))
-                .filter(|item| area.map(|v| v == item.area).unwrap_or(true))
-                .filter(|item| priority.map(|v| v == item.priority).unwrap_or(true))
+                .filter(|item| status.as_ref().is_none_or(|wanted| *wanted == item.status))
+                .filter(|item| area.is_none_or(|wanted| wanted == item.area))
+                .filter(|item| priority.is_none_or(|wanted| wanted == item.priority))
                 .cloned()
                 .collect::<Vec<_>>();
             if json_output {
@@ -99,25 +103,35 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                         .into(),
                 ));
             }
-            let title = options
-                .one("title")
-                .map(str::to_string)
-                .unwrap_or(positional_title);
+            let title = match options.one("title") {
+                Some(title) => title.to_string(),
+                None => positional_title,
+            };
             if title.trim().is_empty() {
                 return Err(RoadmapError::Usage(
                     "Usage: roadmap add <title> | --title <title> --area <area> --priority <P0|P1|P2|P3> --summary <text> --acceptance <text> [--revision <n>]".into(),
                 ));
             }
+            let required = |name: &str| {
+                options.one(name).map(str::to_string).ok_or_else(|| {
+                    RoadmapError::Usage(format!(
+                        "roadmap add requires --{name}: an item is filed under the area, priority and summary its author gives it"
+                    ))
+                })
+            };
+            let area = required("area")?;
+            let priority = required("priority")?;
+            let summary = required("summary")?;
             let revision = expected_revision(&store, &options)?;
-            let area = options.one("area").unwrap_or("general").to_string();
-            let priority = options.one("priority").unwrap_or("P2").to_string();
-            let summary = options.one("summary").unwrap_or(&title).to_string();
-            let acceptance = options
-                .many("acceptance")
-                .into_iter()
-                .enumerate()
-                .map(|(index, text)| AcceptanceCriterion {
-                    id: format!("acceptance-{}", index + 1),
+            // An optional text the author did not give is written as empty.
+            let optional = |name: &str| match options.one(name) {
+                Some(text) => text.to_string(),
+                None => String::new(),
+            };
+            let acceptance = (FIRST_NUMBER..)
+                .zip(options.many("acceptance"))
+                .map(|(number, text)| AcceptanceCriterion {
+                    id: format!("acceptance-{number}"),
                     text,
                 })
                 .collect::<Vec<_>>();
@@ -128,12 +142,12 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 .collect::<Vec<_>>();
             let capabilities = options.many("capability");
             let prerequisites = options.many("external-prerequisite");
-            let status = options
-                .one("status")
-                .map(RoadmapStatus::from_str)
-                .transpose()?
-                .unwrap_or(RoadmapStatus::Backlog);
-            let created_at = now();
+            // A new item starts in the backlog unless its author names a status.
+            let status = match options.one("status") {
+                Some(named) => RoadmapStatus::from_str(named)?,
+                None => RoadmapStatus::Backlog,
+            };
+            let created_at = now()?;
             let created_by = actor()?;
             let mut created_id = String::new();
             let roadmap = store.mutate(
@@ -141,10 +155,10 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                 "roadmap_item_created",
                 json!({"title": title}),
                 |roadmap| {
-                    let id = options
-                        .one("id")
-                        .map(str::to_ascii_uppercase)
-                        .unwrap_or_else(|| next_item_id(roadmap));
+                    let id = match options.one("id") {
+                        Some(named) => named.to_ascii_uppercase(),
+                        None => next_item_id(roadmap)?,
+                    };
                     created_id = id.clone();
                     roadmap.items.push(RoadmapItem {
                         id,
@@ -153,18 +167,9 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
                         priority,
                         status,
                         summary,
-                        implementation: options
-                            .one("implementation")
-                            .unwrap_or_default()
-                            .to_string(),
-                        rationale: options
-                            .one("rationale")
-                            .unwrap_or_default()
-                            .to_string(),
-                        implementation_order: options
-                            .one("implementation-order")
-                            .unwrap_or_default()
-                            .to_string(),
+                        implementation: optional("implementation"),
+                        rationale: optional("rationale"),
+                        implementation_order: optional("implementation-order"),
                         acceptance,
                         depends_on: dependencies,
                         capabilities,
@@ -224,16 +229,13 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             json_output,
         ),
         "status" => {
-            let id = options
-                .positionals
-                .first()
-                .ok_or_else(|| RoadmapError::Usage("Usage: roadmap status <id> <status>".into()))?;
-            let status = options
-                .positionals
-                .get(1)
-                .ok_or_else(|| RoadmapError::Usage("Usage: roadmap status <id> <status>".into()))?
-                .parse()?;
-            mutate_status_explicit(&store, &options, id, status, false, 2, json_output)
+            let [id, status, reason_words @ ..] = options.positionals.as_slice() else {
+                return Err(RoadmapError::Usage(
+                    "Usage: roadmap status <id> <status>".into(),
+                ));
+            };
+            let status = status.parse()?;
+            mutate_status_explicit(&store, &options, id, status, false, reason_words, json_output)
         }
         "depends" => dependency_command(&store, &options, DependencyChange::Depends, json_output),
         "undepends" => {

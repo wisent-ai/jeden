@@ -16,6 +16,8 @@ pub(crate) fn plan_request(
     request_id: &str,
     plan: IntakePlan,
 ) -> Result<CompletionState, String> {
+    let recorded_at = crate::agent::now_stamp()
+        .map_err(|error| format!("the plan's estimate cannot be dated: {error}"))?;
     let (_, state) = store::update(session, Some(revision), |state| {
         let request = state
             .requests
@@ -112,7 +114,7 @@ pub(crate) fn plan_request(
         request.planned = true;
         request.estimate = Some(CompletionEstimate {
             minutes,
-            recorded_at: crate::agent::now_stamp(),
+            recorded_at: recorded_at.clone(),
         });
         state.blocker = None;
         Ok(())
@@ -125,6 +127,8 @@ pub(crate) fn observed_blocker(
     operation: &str,
     message: &str,
 ) -> Result<CompletionState, String> {
+    let observed_at = crate::agent::now_stamp()
+        .map_err(|error| format!("the {operation} blocker cannot be dated: {error}"))?;
     let (_, state) = store::update(session, None, |state| {
         if operation == "turn_cancelled" && (state.complete() || state.status() == "paused") {
             return Ok(());
@@ -132,7 +136,7 @@ pub(crate) fn observed_blocker(
         state.blocker = Some(CompletionBlocker {
             operation: operation.to_string(),
             message: message.to_string(),
-            observed_at: crate::agent::now_stamp(),
+            observed_at: observed_at.clone(),
         });
         Ok(())
     })?;
@@ -210,12 +214,12 @@ pub(crate) fn operator_control(
                     id: uuid::Uuid::new_v4().to_string(),
                     request_id: request.id.clone(),
                     phase: "Requests".into(),
-                    text: request
-                        .prompt
-                        .lines()
-                        .next()
-                        .unwrap_or(&request.prompt)
-                        .to_string(),
+                    // The prompt's first line; a prompt of one line is its own.
+                    text: match request.prompt.split_once('\n') {
+                        Some((first, _)) => first.trim_end_matches('\r'),
+                        None => request.prompt.as_str(),
+                    }
+                    .to_string(),
                     criteria: vec![request.prompt.clone()],
                     kind: TaskKind::Work,
                     defect_of: None,

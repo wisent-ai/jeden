@@ -27,6 +27,10 @@ pub(crate) fn apply_review(
         return Err("the execution conversation cannot verify its own completion".into());
     }
     let mut linker = super::asks::Linker::new(super::asks::read()?);
+    // One time for the whole review, read before the state changes: a clock
+    // that cannot give one leaves the session as it was.
+    let reviewed_at = crate::agent::now_stamp()
+        .map_err(|error| format!("the review cannot be dated: {error}"))?;
     let (_, state) = store::update(session, Some(expected_revision), |state| {
         let expected: BTreeSet<_> = state
             .tasks
@@ -40,16 +44,21 @@ pub(crate) fn apply_review(
         // unambiguous case is bound here; with more than one task open the
         // verdict must say which, and the refusal lists the identifiers.
         let mut review = review;
-        let verdicts = review.tasks.len();
+        let mut open = expected.iter();
+        let sole_open = match (open.next(), open.next()) {
+            (Some(id), None) if review.tasks.len() == expected.len() => Some((*id).to_owned()),
+            _ => None,
+        };
         for verdict in &mut review.tasks {
             if verdict.task_id.is_none() {
-                if verdicts == expected.len() && verdicts == usize::from(true) {
-                    verdict.task_id = expected.iter().next().map(|id| (*id).to_owned());
-                } else {
-                    return Err(format!(
-                        "a verdict names no task; taskId must be one of {}",
-                        expected.iter().copied().collect::<Vec<_>>().join(", ")
-                    ));
+                match &sole_open {
+                    Some(id) => verdict.task_id = Some(id.clone()),
+                    None => {
+                        return Err(format!(
+                            "a verdict names no task; taskId must be one of {}",
+                            expected.iter().copied().collect::<Vec<_>>().join(", ")
+                        ))
+                    }
                 }
             }
         }
@@ -127,11 +136,7 @@ pub(crate) fn apply_review(
                 // rests on work done somewhere else is refused here.
                 if verdict.status == ReviewStatus::Done && task.kind != TaskKind::Answer {
                     let wanted = paths::named(&task.criteria[criterion.index], &hosts);
-                    let workspace = state
-                        .requests
-                        .iter()
-                        .find(|request| request.id == task.request_id)
-                        .map_or_else(|| PathBuf::from("."), |request| PathBuf::from(&request.cwd));
+                    let workspace = PathBuf::from(request_workspace(state, task)?);
                     if let Some(place) = paths::unmatched(&wanted, &places, &workspace) {
                         return Err(format!(
                             "task {} criterion {} names {place}, and no accepted observation happened there",
@@ -155,12 +160,7 @@ pub(crate) fn apply_review(
             }
             asks::check(task, verdict, observed_failure, failed_since_answer)?;
             if let Some(ask) = asks::named(verdict) {
-                let workspace = state
-                    .requests
-                    .iter()
-                    .find(|request| request.id == task.request_id)
-                    .map(|request| request.cwd.clone())
-                    .unwrap_or_default();
+                let workspace = request_workspace(state, task)?.to_string();
                 let evidence = &verdict.evidence;
                 linker.resolve(
                     &task.id,
@@ -201,7 +201,7 @@ pub(crate) fn apply_review(
                 ReviewStatus::Blocked => TaskStatus::Blocked,
             };
             let link = linker.link_for(&task.id);
-            asks::record(task, &verdict, link);
+            asks::record(task, &verdict, link, &reviewed_at);
             let mut references = verdict.evidence;
             for criterion in &verdict.criteria {
                 for reference in &criterion.evidence {
@@ -211,7 +211,7 @@ pub(crate) fn apply_review(
                 }
             }
             task.verification = Some(TaskVerification {
-                reviewed_at: crate::agent::now_stamp(),
+                reviewed_at: reviewed_at.clone(),
                 reviewer_session: reviewer.display().to_string(),
                 explanation: verdict.explanation,
                 evidence: references,
@@ -239,7 +239,7 @@ pub(crate) fn apply_review(
                     .iter()
                     .any(|task| task.request_id == request.id && task.status == TaskStatus::Done)
             {
-                request.completed_at = Some(crate::agent::now_stamp());
+                request.completed_at = Some(reviewed_at.clone());
             }
             let owned: Vec<_> = state
                 .tasks
@@ -278,4 +278,20 @@ pub(crate) fn apply_review(
     // each ask was put, so a refused review leaves no ask behind.
     linker.commit(&super::asks::session_key(session))?;
     Ok(state)
+}
+
+/// The workspace of the request `task` belongs to; a task whose request the
+/// session does not hold is refused, never checked against another place.
+fn request_workspace<'a>(state: &'a CompletionState, task: &WorkTask) -> Result<&'a str, String> {
+    state
+        .requests
+        .iter()
+        .find(|request| request.id == task.request_id)
+        .map(|request| request.cwd.as_str())
+        .ok_or_else(|| {
+            format!(
+                "task {} names request {}, which this session does not hold",
+                task.id, task.request_id
+            )
+        })
 }

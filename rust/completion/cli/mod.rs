@@ -254,12 +254,8 @@ pub(crate) fn execute(
     };
     let value = operations::snapshot_value(&state);
     if verb != TodoVerb::List {
-        crate::cli::sessions::append_ledger_entry(
-            &session,
-            crate::agent::now_stamp(),
-            "completion_state",
-            value.clone(),
-        )?;
+        let at = crate::agent::now_stamp()?;
+        crate::cli::sessions::append_ledger_entry(&session, at, "completion_state", value.clone())?;
     }
     if json {
         serde_json::to_string_pretty(&value).map_err(|error| error.to_string())

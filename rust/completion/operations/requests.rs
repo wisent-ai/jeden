@@ -12,6 +12,8 @@ pub(crate) fn capture_request(
     if prompt.trim().is_empty() {
         return Err("completion request must not be empty".into());
     }
+    let captured_at = crate::agent::now_stamp()
+        .map_err(|error| format!("the request cannot be dated: {error}"))?;
     store::update(session, None, |state| {
         let id = uuid::Uuid::new_v4().to_string();
         state.requests.push(WorkRequest {
@@ -19,7 +21,7 @@ pub(crate) fn capture_request(
             prompt: prompt.to_string(),
             cwd: cwd.display().to_string(),
             paused: false,
-            captured_at: crate::agent::now_stamp(),
+            captured_at: captured_at.clone(),
             planned: false,
             coverage_verified: false,
             estimate: None,

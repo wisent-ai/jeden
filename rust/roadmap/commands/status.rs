@@ -18,36 +18,36 @@ pub(super) fn mutate_status(
     reject_dependents: bool,
     json_output: bool,
 ) -> Result<String, RoadmapError> {
-    let id = options
-        .positionals
-        .first()
-        .ok_or_else(|| RoadmapError::Usage(format!("Usage: roadmap {} <id>", status.as_str())))?;
+    let [id, reason_words @ ..] = options.positionals.as_slice() else {
+        return Err(RoadmapError::Usage(format!(
+            "Usage: roadmap {} <id>",
+            status.as_str()
+        )));
+    };
     mutate_status_explicit(
         store,
         options,
         id,
         status,
         reject_dependents,
-        1,
+        reason_words,
         json_output,
     )
 }
 
+/// Move item `id` to `status`; the words after the positionals that named
+/// the item and its status are the reason, unless `--reason` gives one.
 pub(super) fn mutate_status_explicit(
     store: &RoadmapStore,
     options: &ParsedOptions,
     id: &str,
     status: RoadmapStatus,
     reject_dependents: bool,
-    reason_start: usize,
+    reason_words: &[String],
     json_output: bool,
 ) -> Result<String, RoadmapError> {
     let revision = expected_revision(store, options)?;
-    let positional_reason = options
-        .positionals
-        .get(reason_start..)
-        .unwrap_or_default()
-        .join(" ");
+    let positional_reason = reason_words.join(" ");
     let reason = options.one("reason").map(str::to_string).or_else(|| {
         (!positional_reason.trim().is_empty()).then(|| positional_reason.trim().to_string())
     });
@@ -63,7 +63,7 @@ pub(super) fn mutate_status_explicit(
         ));
     }
     let evidence_uris = options.many("evidence");
-    let evidence_added_at = now();
+    let evidence_added_at = now()?;
     let evidence_added_by = actor()?;
     let event_type = if status == RoadmapStatus::Passed {
         "roadmap_item_passed"

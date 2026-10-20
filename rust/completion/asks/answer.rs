@@ -2,7 +2,7 @@
 //! every task, in every session, that waits on the ask.
 
 use super::{session_key, AskRegister, AskSource, OperatorAsk};
-use crate::completion::model::{CompletionState, OperatorAnswer, TaskStatus, WorkTask};
+use crate::completion::model::{CompletionState, OperatorAnswer, TaskStatus};
 use crate::completion::store;
 use serde::Serialize;
 use std::path::Path;
@@ -81,6 +81,8 @@ fn record(id: &str, text: &str, expected: Option<(&Path, u64)>) -> Result<Answer
             ));
         }
     }
+    let answered_at = crate::agent::now_stamp()
+        .map_err(|error| format!("ask {id} cannot be answered undated: {error}"))?;
     let (ask, register) = super::update(|register| {
         let ask = register
             .asks
@@ -96,7 +98,7 @@ fn record(id: &str, text: &str, expected: Option<(&Path, u64)>) -> Result<Answer
             ));
         }
         ask.answer = Some(OperatorAnswer {
-            answered_at: crate::agent::now_stamp(),
+            answered_at: answered_at.clone(),
             text: text.to_string(),
         });
         Ok(ask.clone())
@@ -117,17 +119,13 @@ fn record(id: &str, text: &str, expected: Option<(&Path, u64)>) -> Result<Answer
                 detail: "the task returned to pending with the answer".into(),
             },
             Ok((false, state)) => Delivery {
-                detail: state
-                    .tasks
-                    .iter()
-                    .find(|task| task.id == task_id)
-                    .map(|task| {
-                        format!(
-                            "the task no longer waits on this ask (status {})",
-                            task.status
-                        )
-                    })
-                    .unwrap_or_else(|| "the session no longer holds this task".into()),
+                detail: match state.tasks.iter().find(|task| task.id == task_id) {
+                    Some(task) => format!(
+                        "the task no longer waits on this ask (status {})",
+                        task.status
+                    ),
+                    None => "the session no longer holds this task".into(),
+                },
                 session_path: session,
                 task_id,
                 outcome: "not_waiting",

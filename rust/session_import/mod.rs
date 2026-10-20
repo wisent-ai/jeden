@@ -57,9 +57,8 @@ pub(crate) fn import_paths(paths: &[PathBuf], refresh: bool) -> Result<Value, St
         .map_err(|e| format!("cannot open import lock {}: {e}", lock_path.display()))?;
     lock.try_lock()
         .map_err(|e| format!("another import holds {}: {e}", lock_path.display()))?;
-    let mut sessions = Vec::new();
+    let mut imported = Vec::new();
     let mut failures = Vec::new();
-    let mut existing = 0;
     let mut sources = Vec::new();
     for path in paths {
         match collect(path, &mut sources) {
@@ -76,13 +75,15 @@ pub(crate) fn import_paths(paths: &[PathBuf], refresh: bool) -> Result<Value, St
     }
     for source_path in sources {
         match import_source(&root, &source_path, refresh) {
-            Ok((record, was_existing)) => {
-                existing += usize::from(was_existing);
-                sessions.push(record);
-            }
+            Ok(outcome) => imported.push(outcome),
             Err(error) => failures.push(json!({"sourcePath":source_path,"error":error})),
         }
     }
+    let existing = imported
+        .iter()
+        .filter(|(_, was_existing)| *was_existing)
+        .count();
+    let sessions: Vec<_> = imported.into_iter().map(|(record, _)| record).collect();
     Ok(
         json!({"imported":sessions.len()-existing, "existing":existing,
         "sessions":sessions, "failures":failures}),
@@ -105,13 +106,12 @@ fn collect(path: &Path, sources: &mut Vec<PathBuf>) -> Result<(), String> {
             if entry.is_dir() {
                 collect(&entry, sources)?;
             } else if entry.is_file() {
-                match source::detect(&entry) {
-                    Ok(Some(_)) => sources.push(entry),
-                    Ok(None) => {}
-                    // A file that cannot be read is kept, so the import names
-                    // it under failures with its cause rather than skipping a
-                    // transcript in silence as "not a transcript".
-                    Err(_) => sources.push(entry),
+                // Only a file that is no supported transcript is left out. One that
+                // cannot be read is kept: its import reads it again and names
+                // it under failures with its cause, rather than skipping a
+                // transcript in silence as "not a transcript".
+                if !matches!(source::detect(&entry), Ok(None)) {
+                    sources.push(entry);
                 }
             }
         }
@@ -182,10 +182,11 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
             .and_then(|f| f.sync_all())
             .map_err(|e| e.to_string())?;
         let after = fs::metadata(&source_path).map_err(|e| e.to_string())?;
-        if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+        if before.len() != after.len() || modified(&before)? != modified(&after)? {
             return Err("source changed during import; stop its writer through its normal interface and retry".into());
         }
-        let timestamp = crate::agent::now_stamp();
+        let timestamp = crate::agent::now_stamp()
+            .map_err(|error| format!("the imported session cannot be dated: {error}"))?;
         write_json(
             &staging.join("state.json"),
             &json!({

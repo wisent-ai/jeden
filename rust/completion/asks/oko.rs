@@ -28,17 +28,20 @@ pub(crate) struct OkoAsk {
     pub detail: String,
 }
 
-fn binary() -> String {
-    std::env::var(OKO_BINARY_VARIABLE)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or_else(|| "oko".to_string())
+/// The `oko` to run: the one `JEDEN_OKO_BIN` names, or the one on PATH when
+/// it names none. A value that is not text is refused, never replaced.
+fn binary() -> Result<String, String> {
+    match std::env::var(OKO_BINARY_VARIABLE) {
+        Ok(value) if !value.trim().is_empty() => Ok(value),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok("oko".to_string()),
+        Err(error) => Err(format!("{OKO_BINARY_VARIABLE} cannot be read: {error}")),
+    }
 }
 
 /// Run `oko` and read its JSON answer, or say why there is none.
 fn run(arguments: &[&str]) -> Result<Value, String> {
-    let program = binary();
-    let output = Command::new(&program).args(arguments).output().map_err(|error| {
+    let program = binary()?;
+    let output = stado_wait::output(Command::new(&program).args(arguments)).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             format!("{program} is not installed on this machine (set {OKO_BINARY_VARIABLE} to its path)")
         } else {
@@ -49,7 +52,7 @@ fn run(arguments: &[&str]) -> Result<Value, String> {
         let said = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(format!(
             "oko {} refused: {}",
-            arguments.first().copied().unwrap_or_default(),
+            arguments.join(" "),
             if said.is_empty() {
                 output.status.to_string()
             } else {
@@ -61,65 +64,74 @@ fn run(arguments: &[&str]) -> Result<Value, String> {
         .map_err(|error| format!("oko answered unreadable JSON: {error}"))
 }
 
-/// Put `ask` to the operator through Oko.
-pub(crate) fn put(ask: &OperatorAsk) -> OkoAsk {
+/// One delivery Oko reported, or the row itself when it does not name its
+/// channel, outcome and detail.
+fn delivery(row: &Value) -> String {
+    match (
+        row["channel"].as_str(),
+        row["outcome"].as_str(),
+        row["detail"].as_str(),
+    ) {
+        (Some(channel), Some(outcome), Some(detail)) => format!("{channel} {outcome}: {detail}"),
+        _ => format!("a delivery Oko reported without its channel, outcome and detail: {row}"),
+    }
+}
+
+/// Put `ask` to the operator through Oko. The time is read first: an ask the
+/// clock cannot date is not put, so it is never recorded as asked at the epoch.
+pub(crate) fn put(ask: &OperatorAsk) -> Result<OkoAsk, String> {
+    let at = crate::agent::now_stamp()
+        .map_err(|error| format!("ask {} cannot be put on Oko undated: {error}", ask.id))?;
     let detail = format!(
         "Asked by Jeden in {}. Answer here, or with: jeden asks answer {} --text <answer>",
         ask.workspace, ask.id
     );
     let subject = format!("ask-{}", ask.id);
-    let at = crate::agent::now_stamp();
-    match run(&[
-        "asks",
-        "ask",
-        "--from",
-        "jeden",
-        "--subject",
-        &subject,
-        "--question",
-        &ask.ask,
-        "--detail",
-        &detail,
-    ]) {
-        Ok(answer) => {
-            let oko_id = answer
-                .pointer("/ask/id")
-                .and_then(Value::as_str)
-                .map(str::to_string);
-            let deliveries = answer["deliveries"]
-                .as_array()
-                .map(|rows| {
-                    rows.iter()
-                        .map(|row| {
+    Ok(
+        match run(&[
+            "asks",
+            "ask",
+            "--from",
+            "jeden",
+            "--subject",
+            &subject,
+            "--question",
+            &ask.ask,
+            "--detail",
+            &detail,
+        ]) {
+            Ok(answer) => {
+                let oko_id = answer
+                    .pointer("/ask/id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let deliveries = answer["deliveries"]
+                    .as_array()
+                    .map(|rows| rows.iter().map(delivery).collect::<Vec<_>>().join("; "))
+                    .filter(|text| !text.is_empty());
+                OkoAsk {
+                    at,
+                    detail: match (&oko_id, deliveries) {
+                        (Some(id), Some(deliveries)) => {
+                            format!("asked in Oko as {id}: {deliveries}")
+                        }
+                        (Some(id), None) => {
                             format!(
-                                "{} {}: {}",
-                                row["channel"].as_str().unwrap_or_default(),
-                                row["outcome"].as_str().unwrap_or_default(),
-                                row["detail"].as_str().unwrap_or_default()
+                                "asked in Oko as {id}; `oko asks show {id}` lists its deliveries"
                             )
-                        })
-                        .collect::<Vec<_>>()
-                        .join("; ")
-                })
-                .filter(|text| !text.is_empty());
-            OkoAsk {
-                at,
-                detail: match (&oko_id, deliveries) {
-                    (Some(id), Some(deliveries)) => format!("asked in Oko as {id}: {deliveries}"),
-                    (Some(id), None) => {
-                        format!("asked in Oko as {id}; `oko asks show {id}` lists its deliveries")
-                    }
-                    (None, _) => "oko asks ask answered without an ask id".to_string(),
-                },
-                oko_id,
+                        }
+                        (None, _) => "oko asks ask answered without an ask id".to_string(),
+                    },
+                    oko_id,
+                }
             }
-        }
-        Err(reason) => OkoAsk {
-            at,
-            oko_id: None,
-            detail: reason,
+            Err(reason) => OkoAsk {
+                at,
+                oko_id: None,
+                detail: reason,
+            },
         },
-    }
+    )
 }
 
 /// The answer the operator gave to `oko_id` in Oko, if he did.
@@ -149,8 +161,8 @@ pub(crate) fn put_waiting(ids: &[String]) -> Result<(), String> {
     }
     let put: Vec<(String, OkoAsk)> = waiting
         .iter()
-        .map(|ask| (ask.id.clone(), self::put(ask)))
-        .collect();
+        .map(|ask| self::put(ask).map(|oko| (ask.id.clone(), oko)))
+        .collect::<Result<_, String>>()?;
     super::update(|register| {
         for (id, oko) in &put {
             if let Some(ask) = register.asks.iter_mut().find(|ask| &ask.id == id) {

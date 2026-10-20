@@ -1,4 +1,6 @@
 pub(crate) mod context;
+#[path = "../durable/mod.rs"]
+pub mod durable;
 mod host;
 pub mod kernel;
 pub(crate) mod output;
@@ -137,12 +139,13 @@ pub(crate) fn capability_descriptors(
         let health = if runtime.healthy {
             CapabilityHealth::healthy()
         } else {
-            CapabilityHealth::unavailable(
-                runtime
-                    .detail
-                    .clone()
-                    .unwrap_or_else(|| "runtime probe failed".into()),
-            )
+            CapabilityHealth::unavailable(match runtime.detail.clone() {
+                Some(detail) => detail,
+                None => format!(
+                    "the {} runtime probe reported it unhealthy and stated no cause",
+                    runtime.name
+                ),
+            })
         };
         let tools = match runtime.name {
             "eval_session" => vec![(

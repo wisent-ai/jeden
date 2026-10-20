@@ -21,12 +21,8 @@ impl AgentSession {
         let cwd = crate::completion::cli::workspace(&path)?;
         let (_, state) = crate::completion::capture_request(&path, &cwd, prompt)?;
         let value = crate::completion::snapshot_value(&state);
-        crate::cli::sessions::append_ledger_entry(
-            &path,
-            crate::agent::now_stamp(),
-            "completion_state",
-            value.clone(),
-        )?;
+        let at = crate::agent::now_stamp()?;
+        crate::cli::sessions::append_ledger_entry(&path, at, "completion_state", value.clone())?;
         Ok(value)
     }
 
@@ -64,12 +60,8 @@ impl AgentSession {
             crate::tool_runtime::runtime_ops::announce_cancellation();
         }
         let value = crate::completion::snapshot_value(&state);
-        crate::cli::sessions::append_ledger_entry(
-            &path,
-            crate::agent::now_stamp(),
-            "completion_state",
-            value.clone(),
-        )?;
+        let at = crate::agent::now_stamp()?;
+        crate::cli::sessions::append_ledger_entry(&path, at, "completion_state", value.clone())?;
         Ok(value)
     }
 }

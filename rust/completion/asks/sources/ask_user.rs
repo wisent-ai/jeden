@@ -22,6 +22,8 @@ pub(crate) fn recall(
         return Ok(None);
     }
     let session = super::super::session_key(session);
+    let asked_at = crate::agent::now_stamp()
+        .map_err(|error| format!("the answered question cannot be dated: {error}"))?;
     super::super::update(|register| {
         let Some(ask) = register
             .asks
@@ -32,7 +34,7 @@ pub(crate) fn recall(
             return Ok(None);
         };
         ask.occurrences.push(AskOccurrence {
-            asked_at: crate::agent::now_stamp(),
+            asked_at: asked_at.clone(),
             source: AskSource::AskUser,
             session_path: session,
             task_id: None,
@@ -51,7 +53,8 @@ pub(crate) fn record(
     question: &str,
     answer: &str,
 ) -> Result<String, String> {
-    let stamp = crate::agent::now_stamp();
+    let stamp = crate::agent::now_stamp()
+        .map_err(|error| format!("the answered question cannot be dated: {error}"))?;
     let id = uuid::Uuid::new_v4().to_string();
     super::super::update(|register| {
         register.asks.push(OperatorAsk {

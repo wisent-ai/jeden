@@ -80,15 +80,38 @@ pub(super) fn cycle_errors(roadmap: &RoadmapFile) -> Vec<String> {
     errors
 }
 
-pub(super) fn next_item_id(roadmap: &RoadmapFile) -> String {
-    let next = roadmap
-        .items
-        .iter()
-        .filter_map(|item| item.id.strip_prefix("JED-")?.parse::<u64>().ok())
-        .max()
-        .unwrap_or(0)
-        .saturating_add(1);
-    format!("JED-{next:03}")
+/// The first number a roadmap gives an id it numbers itself.
+pub(super) const FIRST_NUMBER: u64 = std::num::NonZeroU64::MIN.get();
+
+/// The number after the highest `<prefix><digits>` among `ids`, or the first
+/// when none is numbered so; an id named otherwise is not counted. A number
+/// too large to count past is refused, naming its id.
+pub(super) fn next_number<'a>(
+    ids: impl Iterator<Item = &'a str>,
+    prefix: &str,
+) -> Result<u64, RoadmapError> {
+    let mut highest = None;
+    for digits in ids.filter_map(|id| id.strip_prefix(prefix)) {
+        if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+            continue;
+        }
+        let number = digits.parse::<u64>().map_err(|error| {
+            RoadmapError::Invalid(format!("{prefix}{digits} cannot be counted: {error}"))
+        })?;
+        highest = highest.max(Some(number));
+    }
+    match highest {
+        None => Ok(FIRST_NUMBER),
+        Some(number) => number.checked_add(FIRST_NUMBER).ok_or_else(|| {
+            RoadmapError::Invalid(format!("{prefix}{number} cannot be counted past"))
+        }),
+    }
+}
+
+/// The id the next item is given.
+pub(super) fn next_item_id(roadmap: &RoadmapFile) -> Result<String, RoadmapError> {
+    let next = next_number(roadmap.items.iter().map(|item| item.id.as_str()), "JED-")?;
+    Ok(format!("JED-{next:03}"))
 }
 
 /// Who records a roadmap change: USER, or USERNAME where USER is unset. A
@@ -105,8 +128,11 @@ pub(super) fn actor() -> Result<String, RoadmapError> {
     })
 }
 
-pub(super) fn now() -> String {
+/// When a roadmap change is recorded; a clock that cannot say refuses the
+/// change rather than dating it at the epoch.
+pub(super) fn now() -> Result<String, RoadmapError> {
     crate::agent::now_stamp()
+        .map_err(|error| RoadmapError::Io(format!("the roadmap change cannot be dated: {error}")))
 }
 
 pub(crate) fn find_item<'a>(

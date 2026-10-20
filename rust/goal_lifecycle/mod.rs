@@ -201,14 +201,13 @@ pub(crate) fn spawn_turn_classification(
 }
 
 /// Append one lifecycle entry to the session ledger; an entry that cannot be
-/// written is said, since the ledger is where the decision is read back.
+/// dated or written is said, since the ledger is where the decision is read
+/// back.
 fn recorded(session_dir: &Path, kind: &str, data: serde_json::Value) {
-    if let Err(cause) = crate::cli::sessions::append_ledger_entry(
-        session_dir,
-        crate::agent::now_stamp(),
-        kind,
-        data,
-    ) {
+    let written = crate::agent::now_stamp()
+        .map_err(|error| format!("it cannot be dated: {error}"))
+        .and_then(|at| crate::cli::sessions::append_ledger_entry(session_dir, at, kind, data));
+    if let Err(cause) = written {
         eprintln!(
             "jeden: the {kind} entry is not in {}: {cause}",
             session_dir.display()
@@ -240,9 +239,11 @@ pub(crate) fn finish_verified_goal(
     if !state.goal.enabled || objective.is_empty() {
         return Ok(());
     }
+    let at = crate::agent::now_stamp()
+        .map_err(|error| format!("the finished goal cannot be dated: {error}"))?;
     crate::cli::sessions::append_ledger_entry(
         session_dir,
-        crate::agent::now_stamp(),
+        at,
         "goal_lifecycle",
         json!({"action": "finishGoal", "judge": "verified_tasks",
             "goal": objective, "completionRevision": completion.revision}),

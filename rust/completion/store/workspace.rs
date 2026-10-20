@@ -25,6 +25,8 @@ pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), Stri
         };
         let cwd_text = cwd.display().to_string();
         let id = format!("legacy-workspace-{:x}", Sha256::digest(cwd_text.as_bytes()));
+        let captured_at = crate::agent::now_stamp()
+            .map_err(|error| format!("the workspace task request cannot be dated: {error}"))?;
         update(&session, None, |state: &mut CompletionState| {
             if state.requests.iter().any(|request| request.id == id) {
                 return Ok(());
@@ -40,7 +42,7 @@ pub(crate) fn migrate(cwd: &Path, destination: Option<&Path>) -> Result<(), Stri
                 prompt: format!("Inspect prior results and finish every retained workspace task below. Old status labels were claims, not verification; do not repeat effects already established by evidence.\n{items}"),
                 cwd: cwd_text.clone(),
                 paused: false,
-                captured_at: crate::agent::now_stamp(),
+                captured_at: captured_at.clone(),
                 planned: false,
                 coverage_verified: false,
                 estimate: None,
