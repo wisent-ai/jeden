@@ -1,14 +1,12 @@
 //! The services this harness talks to, and what is built on top of them:
 //! Brama for model routing and its catalogue, Weles for accounts, providers,
-//! billing and long operations, the quota figure an operator reads, and the
-//! staging check that drives both before a release is trusted.
+//! billing and long operations, and the quota figure an operator reads.
 //!
 //! Grouped here so the `control_plane` folder keeps to five entries; the
 //! module above re-exports these under the names callers already use.
 
 pub mod brama;
 pub mod quota;
-pub mod staging;
 pub mod weles;
 
 // The shared vocabulary each service is written against, under the names they
