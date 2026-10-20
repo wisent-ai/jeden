@@ -14,6 +14,9 @@ pub(super) struct Prepared {
     pub(super) tracks_completion: bool,
     pub(super) language: crate::cli::config::UiLanguage,
     pub(super) classification: Option<std::thread::JoinHandle<()>>,
+    /// The background reading of this turn's operator message for standing
+    /// rules, joined before the turn answers so a one-shot run keeps them.
+    pub(super) rules_reading: Option<std::thread::JoinHandle<()>>,
     /// When this turn began, so its answer reports the time to completion of
     /// exactly the requests an independent review accepted during the turn.
     pub(super) started_at: u64,
@@ -154,6 +157,7 @@ impl Conversation {
             self.prepare_completion(args, hooks)?;
         }
         let mut classification = None;
+        let mut rules_reading = None;
         if !args.model_only && !args.autonomous && !continuing {
             // Oko goal-lifecycle classification: background-only and fail-open.
             // Results update mode state and session events, never this turn's
@@ -174,6 +178,13 @@ impl Conversation {
                 turn_index,
                 hooks.goal_event.clone(),
             ));
+            // A standing rule the operator states holds in every later turn,
+            // whatever this session keeps: read in the background and kept.
+            rules_reading = Some(crate::operator_rules::spawn_reading(
+                router.clone(),
+                task.to_string(),
+                self.recorder.path(),
+            ));
         }
         self.messages
             .push(json!({ "role": "user", "content": effective_task }));
@@ -184,6 +195,7 @@ impl Conversation {
             tracks_completion,
             language,
             classification,
+            rules_reading,
             started_at,
             stop_refused: false,
         })

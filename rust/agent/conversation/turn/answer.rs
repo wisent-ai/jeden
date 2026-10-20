@@ -215,6 +215,11 @@ impl Conversation {
                 prepared.classification.take(),
             )?;
         }
+        if let Some(reading) = prepared.rules_reading.take() {
+            if reading.join().is_err() {
+                eprintln!("jeden: reading this turn's operator message for standing rules panicked; its rules are not kept");
+            }
+        }
         self.recorder.record(
             "final",
             json!({ "step": step, "text": text, "taskStatus": if blocked { "blocked" } else { "complete" } }),

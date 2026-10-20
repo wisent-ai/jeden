@@ -118,6 +118,7 @@ pub(crate) fn system_prompt_checked(cwd: &Path) -> Result<String, String> {
     contract.push_str("\n\n");
     contract.push_str(&super::task_contract::section(&ui_lang));
     append_operator_contracts(&mut contract, &config, &ui_lang);
+    contract.push_str(&crate::operator_rules::section());
     let policy = crate::context::ContextPolicy::load(cwd, &config)?;
     let tools = crate::tools::list_tools(cwd)
         .into_iter()
