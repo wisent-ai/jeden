@@ -25,14 +25,11 @@ pub(crate) fn render_text(advice: &Advice) -> String {
             out.push_str("No recommendations were returned; unavailable sources do not establish that no match exists.\n");
         }
     }
-    for (index, hit) in advice.recommendations.iter().enumerate() {
+    // Listed in rank order, best first.
+    for hit in &advice.recommendations {
         out.push_str(&format!(
-            "{}. [{}] {} — {} (score {:.1})\n",
-            index + 1,
-            hit.source,
-            hit.locator,
-            hit.title,
-            hit.score
+            "- [{}] {} — {} (score {:.1})\n",
+            hit.source, hit.locator, hit.title, hit.score
         ));
         for line in hit.snippet.lines() {
             out.push_str("     ");
@@ -42,13 +39,16 @@ pub(crate) fn render_text(advice: &Advice) -> String {
     }
     out.push_str("\nSources:\n");
     for status in &advice.sources {
+        let returned = match status.returned {
+            Some(returned) => format!("returned {returned}"),
+            None => "asked for no recommendation".to_string(),
+        };
         out.push_str(&format!(
-            "- {}: {} — {} (considered {}, returned {}, {} ms)\n",
+            "- {}: {} — {} (considered {}, {returned}, {} ms)\n",
             status.source,
             availability_word(status.available),
             status.detail,
             status.considered,
-            status.returned,
             status.elapsed_ms
         ));
     }

@@ -15,6 +15,8 @@ mod execution;
 mod render;
 mod settings;
 mod sources;
+#[path = "render/status.rs"]
+mod status;
 mod text;
 
 use std::path::Path;
@@ -29,6 +31,7 @@ use crate::tool_runtime::runtime_ops::CancellationToken;
 pub(crate) use render::{availability_word, probe_value, prompt_section, render_text};
 pub(crate) use settings::{parse_sources, settings, unknown_sources, Settings};
 use sources::{files, ground_truth, transcripts};
+pub(crate) use status::{SourceOutcome, SourceStatus};
 
 /// Source order is the presentation order: local and cited sources first,
 /// scans last. Interleaving walks this list, so it decides which source wins
@@ -59,54 +62,6 @@ pub(crate) struct Recommendation {
     /// be explained rather than guessed at.
     pub(crate) matched: Vec<String>,
     pub(crate) snippet: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct SourceStatus {
-    pub(crate) source: String,
-    pub(crate) available: bool,
-    /// The observed state in one sentence: what was read, or what refused and
-    /// why. Never empty.
-    pub(crate) detail: String,
-    pub(crate) considered: usize,
-    pub(crate) returned: usize,
-    pub(crate) elapsed_ms: u128,
-}
-
-impl SourceStatus {
-    pub(super) fn unavailable(source: &str, detail: impl Into<String>, started: Instant) -> Self {
-        Self {
-            source: source.to_string(),
-            available: false,
-            detail: detail.into(),
-            elapsed_ms: started.elapsed().as_millis(),
-            ..Self::default()
-        }
-    }
-
-    pub(super) fn available(
-        source: &str,
-        detail: impl Into<String>,
-        considered: usize,
-        returned: usize,
-        started: Instant,
-    ) -> Self {
-        Self {
-            source: source.to_string(),
-            available: true,
-            detail: detail.into(),
-            considered,
-            returned,
-            elapsed_ms: started.elapsed().as_millis(),
-        }
-    }
-}
-
-/// One source's answer: what it found and what state it was in.
-pub(crate) struct SourceOutcome {
-    pub(crate) hits: Vec<Recommendation>,
-    pub(crate) status: SourceStatus,
 }
 
 #[derive(Debug, Clone)]
@@ -195,11 +150,13 @@ pub(crate) fn recommend(cwd: &Path, config: &Config, request: &Request) -> Advic
 /// verbose document outrank a cited answer for arithmetic reasons.
 fn interleave(per_source: Vec<Vec<Recommendation>>, limit: usize) -> Vec<Recommendation> {
     let mut out = Vec::new();
-    let mut round = 0usize;
+    // One hit from each source per round, in the sources' order, until the
+    // limit is reached or every source is spent.
+    let mut rounds: Vec<_> = per_source.into_iter().map(Vec::into_iter).collect();
     loop {
         let mut added = false;
-        for hits in per_source.iter() {
-            if let Some(hit) = hits.get(round).cloned() {
+        for hits in rounds.iter_mut() {
+            if let Some(hit) = hits.next() {
                 out.push(hit);
                 added = true;
                 if out.len() >= limit {
@@ -210,7 +167,6 @@ fn interleave(per_source: Vec<Vec<Recommendation>>, limit: usize) -> Vec<Recomme
         if !added {
             return out;
         }
-        round += 1;
     }
 }
 

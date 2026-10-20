@@ -77,16 +77,15 @@ pub(crate) fn search(cwd: &Path, terms: &[String], query: &str, limit: usize) ->
 /// from an empty store.
 pub(crate) fn probe() -> Value {
     let started = Instant::now();
-    let location = "fleet database jeden";
+    let location = "JEDEN_DATABASE_URL";
     let status = match MemoryStore::open() {
         Ok(store) => match store.health() {
             Ok(health) => match health.get("activeMemories").and_then(Value::as_u64) {
                 Some(memories) => match usize::try_from(memories) {
-                    Ok(considered) => SourceStatus::available(
+                    Ok(considered) => SourceStatus::probed(
                         "memory",
                         format!("{memories} active memory record(s)"),
                         considered,
-                        usize::default(),
                         started,
                     ),
                     Err(error) => SourceStatus::unavailable(
