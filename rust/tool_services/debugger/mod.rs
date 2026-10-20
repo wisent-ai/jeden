@@ -4,7 +4,7 @@ use super::types::{
 };
 use crate::tool_runtime::runtime_ops::OperationContext;
 use parking_lot::Mutex;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -24,6 +24,12 @@ pub(crate) const TOOLS: &[(&str, &str)] = &[
         "Send a typed request to a reusable DAP session",
     ),
 ];
+
+/// The `seq` of a client's first message, and how far each later one advances.
+const FIRST_SEQUENCE: u64 = 1; // https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_ProtocolMessage
+const SEQUENCE_STEP: u64 = 1; // https://microsoft.github.io/debug-adapter-protocol/specification#Base_Protocol_ProtocolMessage
+/// The session a call that names none uses: every such call shares it.
+const SHARED_SESSION: &str = "default";
 
 struct DapSession {
     child: Child,
@@ -53,22 +59,14 @@ impl DapSession {
     }
 }
 
-/// The `debug_session` commands that end a session.
-#[derive(Clone, Copy)]
+/// The `debug_session` commands that end a session, as DAP spells them.
+#[derive(Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 enum SessionEnd {
     Disconnect,
     Terminate,
 }
 
-impl SessionEnd {
-    fn named(command: &str) -> Option<Self> {
-        match command {
-            "disconnect" => Some(Self::Disconnect),
-            "terminate" => Some(Self::Terminate),
-            _ => None,
-        }
-    }
-}
 impl Drop for DapSession {
     fn drop(&mut self) {
         // An adapter that cannot be killed outlives jeden, so that is said.
@@ -78,7 +76,16 @@ impl Drop for DapSession {
                 self.child.id()
             );
         }
-        let _ = self.child.wait();
+        let process = self.child.id();
+        let reaped = stado_wait::blocking(
+            stado_wait::Kind::Process,
+            format!("debug adapter process {process}"),
+            &self.adapter,
+            || self.child.wait(),
+        );
+        if let Err(error) = reaped {
+            eprintln!("jeden: debug adapter process {process} could not be reaped: {error}");
+        }
     }
 }
 
@@ -183,7 +190,7 @@ impl DebuggerService {
             child,
             stdin,
             responses: rx,
-            sequence: 1,
+            sequence: FIRST_SEQUENCE,
             adapter: command.to_string(),
             stderr_log,
         })
@@ -202,29 +209,28 @@ impl DebuggerService {
                 detail: health.detail,
             });
         }
-        let session_key = input
-            .get("session")
-            .and_then(Value::as_str)
-            .filter(|s| !s.is_empty())
-            .unwrap_or("default")
-            .to_string();
+        let session_key = match input.get("session") {
+            None => SHARED_SESSION.to_string(),
+            Some(Value::String(name)) if !name.is_empty() => name.clone(),
+            Some(other) => {
+                return Err(ServiceError::InvalidInput(format!(
+                    "session must name a session as non-empty text, not {other}"
+                )))
+            }
+        };
         let command = input
             .get("command")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty())
             .ok_or_else(|| ServiceError::InvalidInput("command is required".into()))?;
-        if tool == "debug_session" && SessionEnd::named(command).is_some() {
+        if tool == "debug_session" && crate::vocabulary::named::<SessionEnd>(command).is_ok() {
             let mut sessions = self.sessions.lock();
             let Some(mut session) = sessions.remove(&session_key) else {
                 return Err(ServiceError::InvalidInput(format!(
                     "debug session {session_key} does not exist"
                 )));
             };
-            let request = dap_request(
-                session.sequence,
-                command,
-                input.get("arguments").cloned().unwrap_or_else(|| json!({})),
-            );
+            let request = dap_request(session.sequence, command, input.get("arguments"));
             write_frame(&mut session.stdin, &request)?;
             let sequence = session.sequence;
             let response = wait_response(&mut session, context, sequence)?;
@@ -250,12 +256,8 @@ impl DebuggerService {
             return Err(session.stopped("the adapter exited before this request"));
         }
         let seq = session.sequence;
-        session.sequence = session.sequence.saturating_add(1);
-        let request = dap_request(
-            seq,
-            command,
-            input.get("arguments").cloned().unwrap_or_else(|| json!({})),
-        );
+        session.sequence = session.sequence.saturating_add(SEQUENCE_STEP);
+        let request = dap_request(seq, command, input.get("arguments"));
         write_frame(&mut session.stdin, &request)?;
         let response = wait_response(session, context, seq)?;
         bounded_json(context, "debugger", &response)
@@ -289,7 +291,9 @@ fn wait_response(
             }
             Ok(Ok(_event)) => continue,
             Ok(Err(error)) => return Err(session.stopped(&error.to_string())),
-            Err(_) => return Err(session.stopped("its response channel closed")),
+            Err(closed) => {
+                return Err(session.stopped(&format!("its response channel closed: {closed}")))
+            }
         }
     }
 }

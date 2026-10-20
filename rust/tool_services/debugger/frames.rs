@@ -9,8 +9,14 @@ use serde_json::{json, Value};
 
 use super::super::types::{ServiceError, ServiceResult};
 
-pub(super) fn dap_request(seq: u64, command: &str, arguments: Value) -> Value {
-    json!({"seq":seq,"type":"request","command":command,"arguments":arguments})
+/// A DAP request; `arguments` is sent only when the caller gave them, as the
+/// protocol declares them optional.
+pub(super) fn dap_request(seq: u64, command: &str, arguments: Option<&Value>) -> Value {
+    let mut request = json!({"seq":seq,"type":"request","command":command});
+    if let Some(arguments) = arguments {
+        request["arguments"] = arguments.clone();
+    }
+    request
 }
 
 pub(super) fn write_frame(stdin: &mut ChildStdin, value: &Value) -> ServiceResult<()> {
