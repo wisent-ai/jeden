@@ -17,9 +17,9 @@ pub(in crate::agent) struct SessionRecorder {
 }
 
 impl SessionRecorder {
-    pub(in crate::agent) fn new(cwd: &Path) -> Self {
-        let id = stamp();
-        Self {
+    pub(in crate::agent) fn new(cwd: &Path) -> Result<Self, String> {
+        let id = stamp()?;
+        Ok(Self {
             dir: session_root().join(&id),
             id,
             cwd: cwd.to_path_buf(),
@@ -28,17 +28,17 @@ impl SessionRecorder {
             lineage: None,
             pending_tool_results: None,
             _held: None,
-        }
+        })
     }
 
     pub(in crate::agent) fn child(
         cwd: &Path,
         parent_session: PathBuf,
         parent_entry: Option<String>,
-    ) -> Self {
-        let mut recorder = Self::new(cwd);
+    ) -> Result<Self, String> {
+        let mut recorder = Self::new(cwd)?;
         recorder.lineage = Some((parent_session, parent_entry));
-        recorder
+        Ok(recorder)
     }
 
     pub(in crate::agent) fn open(cwd: &Path, dir: &Path) -> Result<Self, String> {
@@ -97,7 +97,7 @@ impl SessionRecorder {
         // A state that cannot be examined refuses: read as absent, a fresh
         // state was written over the session's own.
         if !crate::tool_runtime::runtime_ops::platform::presence::present(&state_path)? {
-            self.write_state(now_stamp())?;
+            self.write_state(now_stamp()?)?;
         }
         self._held = Some(held(&self.dir)?);
         self.ready = true;
@@ -140,38 +140,33 @@ impl SessionRecorder {
     ) -> Result<crate::cli::sessions::LedgerEntry, String> {
         self.ensure()?;
         if event_type == "action" {
-            let count = data
+            self.pending_tool_results = data
                 .pointer("/action/tools")
                 .and_then(Value::as_array)
-                .map(Vec::len);
-            self.pending_tool_results = count
-                .filter(|count| *count > 0)
-                .map(|count| (count, Vec::with_capacity(count)));
+                .filter(|tools| !tools.is_empty())
+                .map(|tools| (tools.len(), Vec::with_capacity(tools.len())));
         } else if event_type == "tool_result" {
-            let result = data.get("result").cloned().unwrap_or(Value::Null);
-            if self.pending_tool_results.is_some() {
-                let completed = {
-                    let (remaining, results) =
-                        self.pending_tool_results.as_mut().expect("checked above");
-                    results.push(result);
-                    *remaining = remaining.saturating_sub(1);
-                    if *remaining == 0 {
-                        Some(crate::tool_runtime::format_tool_result(&json!(results)))
-                    } else {
-                        data["replayPending"] = json!(true);
-                        None
-                    }
-                };
-                if let Some(content) = completed {
-                    data["replayMessage"] = json!(content);
+            let result = data.get("result").cloned().ok_or_else(|| {
+                format!(
+                    "a tool result cannot be recorded in {}: the record carries no result",
+                    self.dir.display()
+                )
+            })?;
+            if let Some((expected, results)) = self.pending_tool_results.as_mut() {
+                results.push(result);
+                if results.len() == *expected {
+                    data["replayMessage"] =
+                        json!(crate::tool_runtime::format_tool_result(&json!(results)));
                     self.pending_tool_results = None;
+                } else {
+                    data["replayPending"] = json!(true);
                 }
             } else {
                 data["replayMessage"] = json!(crate::tool_runtime::format_tool_result(&result));
             }
         }
-        let entry =
-            crate::cli::sessions::append_ledger_entry(&self.dir, now_stamp(), event_type, data)?;
+        let stamp = now_stamp()?;
+        let entry = crate::cli::sessions::append_ledger_entry(&self.dir, stamp, event_type, data)?;
         self.active_leaf = Some(entry.id.clone());
         Ok(entry)
     }
@@ -193,8 +188,9 @@ impl SessionRecorder {
         messages: &[Value],
     ) -> Result<String, String> {
         self.ensure()?;
+        let stamp = now_stamp()?;
         let entry =
-            crate::cli::sessions::append_checkpoint_entry(&self.dir, now_stamp(), label, messages)?;
+            crate::cli::sessions::append_checkpoint_entry(&self.dir, stamp, label, messages)?;
         self.active_leaf = Some(entry.id.clone());
         Ok(entry.id)
     }
@@ -204,8 +200,9 @@ impl SessionRecorder {
         checkpoint_id: &str,
     ) -> Result<(String, Vec<Value>), String> {
         self.ensure()?;
+        let stamp = now_stamp()?;
         let (entry, messages) =
-            crate::cli::sessions::append_rewind_entry(&self.dir, now_stamp(), checkpoint_id)?;
+            crate::cli::sessions::append_rewind_entry(&self.dir, stamp, checkpoint_id)?;
         self.active_leaf = Some(entry.id.clone());
         self.pending_tool_results = None;
         Ok((entry.id, messages))
@@ -242,23 +239,18 @@ fn held(dir: &Path) -> Result<fs::File, String> {
         .map_err(|error| format!("cannot open {} for append: {error}", transcript.display()))
 }
 
-fn stamp() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let suffix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(6)
-        .map(char::from)
-        .collect();
-    format!("{}-{}", secs, suffix)
+/// A new session's id: the second it started and a random tail. A clock
+/// before the epoch is refused: read as zero, every session sorted first.
+fn stamp() -> Result<String, String> {
+    let secs = crate::clock::unix_seconds()
+        .map_err(|error| format!("a new session cannot be named: {error}"))?;
+    Ok(format!("{}-{}", secs, uuid::Uuid::new_v4().simple()))
 }
 
-pub(crate) fn now_stamp() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs()
-        .to_string()
+/// Seconds since the epoch as the text every session record is stamped with,
+/// or why the clock has none to give.
+pub(crate) fn now_stamp() -> Result<String, String> {
+    crate::clock::unix_seconds()
+        .map(|secs| secs.to_string())
+        .map_err(|error| error.to_string())
 }
