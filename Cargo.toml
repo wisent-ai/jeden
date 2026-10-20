@@ -31,7 +31,7 @@ path = "rust/bin/jeden-sandbox-helper.rs"
 # By git rev, not by sibling path: a path dependency outside this repository
 # resolves only on a machine that happens to hold both checkouts, and nowhere in
 # CI. `image-video-router` consumes the same crate this way.
-wisent-onboarding-client = { git = "https://github.com/wisent-ai/echo-web", rev = "22437b2e8c29291f3db6c4d605d20e7db3bdb2e1", package = "wisent-onboarding-client" }
+wisent-onboarding-client = { git = "https://github.com/wisent-ai/echo-web", rev = "17f8a8a52add00b41f515d98682e5f33f86f71b1", package = "wisent-onboarding-client" }
 pursuit = { git = "https://github.com/wisent-ai/pursuit", rev = "8955ef3db3a91a22cefa73bbd4f9fb36ec6f3e44" }
 agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
 base64 = "0.22"
