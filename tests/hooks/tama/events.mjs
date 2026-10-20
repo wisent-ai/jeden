@@ -63,7 +63,24 @@ function invoke(args) {
   return result;
 }
 
+function sourceCommand(program, args) {
+  const result = spawnSync(program, args, { cwd: root, encoding: 'utf8' });
+  report.commands.push({ program, args, status: result.status, signal: result.signal,
+    stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+  return result.stdout.trim();
+}
+
 try {
+  report.checkoutRevision = sourceCommand('git', ['rev-parse', 'HEAD']);
+  assert.equal(report.checkoutRevision, revision, 'qualify the declared checkout');
+  const short = sourceCommand('git', ['rev-parse', '--short', revision]);
+  assert.equal(sourceCommand('git', ['status', '--porcelain']), '',
+    'commit the candidate and journey before qualification');
+  report.binaryVersion = sourceCommand(binary, ['--version']);
+  assert.ok(report.binaryVersion.endsWith(`.${short}`),
+    `candidate binary must embed the clean source revision: ${report.binaryVersion}`);
   const listed = invoke(['run', '/hooks', '--json', '--cwd', project]);
   assert.ok(listed.status !== null && !listed.status, listed.stderr);
   const text = JSON.parse(listed.stdout).text;
@@ -89,6 +106,42 @@ try {
   const marked = readFileSync(marks, 'utf8');
   report.marks = marked;
   assert.ok(marked.includes('list_dir'), `the any-tool hook did not run after list_dir: ${marked}`);
+
+  for (const [brokenRegistry, reason] of [
+    [{ managedBy: 'tama' }, 'has no events table'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { blocking: 'yes', hooks: [] },
+    } }, 'which is not true or false'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { blocking: null, hooks: [] },
+    } }, 'which is not true or false'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { hooks: [{ id: 'invalid-flag', type: 'command',
+        command: '/usr/bin/true', blocking: null }] },
+    } }, 'which is not true or false'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { hooks: [{ type: 'command', command: '/usr/bin/true' }] },
+    } }, 'registers a hook without an id'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { hooks: 'not a list' },
+    } }, 'declares hooks that are not a list'],
+    [{ managedBy: 'tama', events: {
+      'pre_tool_use:any': { hooks: null },
+    } }, 'declares hooks that are not a list'],
+  ]) {
+    writeFileSync(registry, JSON.stringify(brokenRegistry));
+    const result = invoke(['run', '/hooks', '--json', '--cwd', project]);
+    assert.equal(result.status, 0, result.stderr);
+    const description = JSON.parse(result.stdout).text;
+    assert.ok(description.includes(reason), `the registry refusal must name its cause: ${description}`);
+    assert.ok(description.includes(registry), `the registry refusal must name its file: ${description}`);
+  }
+  const refusedTurn = invoke(['run', 'Call list_dir on . once, then respond exactly: LISTED',
+    '--cwd', project, '--model', route]);
+  assert.ok(refusedTurn.status, 'a malformed pre-tool registry must refuse the turn');
+  const refusal = `${refusedTurn.stdout}\n${refusedTurn.stderr}`;
+  assert.ok(refusal.includes(registry) && refusal.includes('declares hooks that are not a list'),
+    `the tool refusal must name the registry and invalid hooks value: ${refusal}`);
   report.verdict = 'passed';
 } finally {
   writeFileSync(join(output, 'report.json'), JSON.stringify(report, null, '  '));
