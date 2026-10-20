@@ -87,8 +87,14 @@ pub(crate) const INHERITED: &str = "JEDEN_LEASE";
 /// session runs on it and takes none of its own, because the starter's
 /// proxy names the account on every request and relays no lease route.
 /// Unset is no such lease; a value that is not Unicode or not a lease
-/// document is refused with its cause, never read as no lease.
+/// document is refused with its cause, never read as no lease. An explicit
+/// direct provider does not use a Brama lease and ignores this variable.
 pub(crate) fn inherited() -> Result<Option<SessionLease>, String> {
+    if crate::agent::credential::direct_provider().is_some()
+        || crate::agent::credential::direct_refusal().is_some()
+    {
+        return Ok(None);
+    }
     let raw = match std::env::var(INHERITED) {
         Ok(raw) => raw,
         Err(std::env::VarError::NotPresent) => return Ok(None),

@@ -19,81 +19,57 @@ pub(crate) fn model_picker(
 ) -> Result<PickerSpec, String> {
     let config = load_config(cwd);
     let lang = ui_language(&config).code().to_string();
-    let endpoint = crate::agent::credential::brama_url();
-    let active = current_model
-        .map(str::to_string)
-        .or(config.model)
-        .or_else(|| std::env::var("JEDEN_MODEL").ok());
-    let client = crate::control_plane::brama::BramaClient::configured(
-        endpoint,
-        std::env::var("BRAMA_TOKEN").ok(),
-    );
+    let active = if let Some(model) = current_model {
+        Some(model.to_owned())
+    } else if let Some(model) = config.model {
+        Some(model)
+    } else {
+        match std::env::var("JEDEN_MODEL") {
+            Ok(model) => Some(model),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
+        }
+    };
+    let client = crate::control_plane::model_client()?;
     if !client.health().available {
         return Err(client.health().detail);
     }
     let catalog = crate::control_plane::model_catalog(cwd, &client, false)
         .map_err(|error| error.to_string())?;
+    let direct = crate::agent::credential::direct_provider().is_some();
     let total = catalog.models.len();
     let active = active.as_deref();
-    // Curated mode lists the active route plus credential-backed models; when
-    // neither exists there is nothing to curate, so show the full catalog.
+    // A direct provider exposes concrete routes, not subscription aliases.
+    // Brama's curated mode keeps the active and credential-backed routes.
     let show_all = show_all
+        || direct
         || !catalog
             .models
             .iter()
             .any(|model| model.available || active == Some(model.id.as_str()));
     let mut items = Vec::new();
-    for (route, detail) in [
-        ("any", "auto-select across available subscriptions"),
-        (
-            "any-vision-capable",
-            "auto-select a vision-capable subscription",
-        ),
-    ] {
-        let selected = active == Some(route);
-        items.push(
-            PickerItem::action(route, format!("/model {route}"))
-                .detail(detail)
-                .badge(if selected {
-                    tr(&lang, "badge.active")
-                } else {
-                    tr(&lang, "badge.auto")
-                })
-                .disabled(selected),
-        );
-    }
-    let mut models = catalog.models;
-    // Summary block: one row per subscription provider with ≥1 available
-    // model (●), plus the public-catalog remainder (○). Disabled and
-    // command-less, so the picker skips them like group headers.
-    let mut summary = Vec::new();
-    let mut covered = 0_usize;
-    for provider in SUBSCRIPTION_PROVIDERS {
-        let count = models
-            .iter()
-            .filter(|model| model.available && provider_group(&model.id) == *provider)
-            .count();
-        if count > 0 {
-            covered += count;
-            summary.push(summary_row(
-                format!("● {provider}"),
-                tr(
-                    &lang,
-                    summary_key("picker.summary.subscription", &lang, count),
-                )
-                .replace("{}", &count.to_string()),
-            ));
+    if !direct {
+        for (route, detail) in [
+            ("any", "auto-select across available subscriptions"),
+            (
+                "any-vision-capable",
+                "auto-select a vision-capable subscription",
+            ),
+        ] {
+            let selected = active == Some(route);
+            items.push(
+                PickerItem::action(route, format!("/model {route}"))
+                    .detail(detail)
+                    .badge(if selected {
+                        tr(&lang, "badge.active")
+                    } else {
+                        tr(&lang, "badge.auto")
+                    })
+                    .disabled(selected),
+            );
         }
     }
-    let remainder = total.saturating_sub(covered);
-    let catalog_row = summary_row(
-        "○ catalog".to_string(),
-        tr(
-            &lang,
-            summary_key("picker.summary.catalog", &lang, remainder),
-        )
-        .replace("{}", &remainder.to_string()),
-    );
+    let mut models = catalog.models;
     if show_all {
         // No summary rows here: with a category bar the picker renders as two
         // panes and the left one already lists every provider with its count.
@@ -116,13 +92,14 @@ pub(crate) fn model_picker(
                 tabs.push((*provider).to_string());
             }
         }
+        let catalog_tab = tabs.len();
         tabs.push("catalog".to_string());
-        let catalog_tab = tabs.len() - 1;
         let tab_index = |id: &str| -> usize {
             let group = provider_group(id);
-            tabs.iter()
-                .position(|name| name.as_str() == group)
-                .unwrap_or(catalog_tab)
+            match tabs.iter().position(|name| name.as_str() == group) {
+                Some(index) => index,
+                None => catalog_tab,
+            }
         };
         let widths = metric_widths(&models);
         items.extend(
@@ -130,9 +107,11 @@ pub(crate) fn model_picker(
                 .iter()
                 .map(|model| model_row(model, active, &lang, &widths).tab(tab_index(&model.id))),
         );
-        items.push(
-            PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
-        );
+        if !direct {
+            items.push(
+                PickerItem::action("Show configured only", "/model").badge(tr(&lang, "badge.more")),
+            );
+        }
         // Marks: "All" and every subscription provider are reachable (●); the
         // aggregate catalog tab is not (○), and the pane rules a line there.
         let marks = tabs
@@ -144,6 +123,20 @@ pub(crate) fn model_picker(
             .with_tab_marks(marks)
             .localized(&lang))
     } else {
+        let remainder = models
+            .iter()
+            .filter(|model| {
+                !(model.available && SUBSCRIPTION_PROVIDERS.contains(&provider_group(&model.id)))
+            })
+            .count();
+        let catalog_row = summary_row(
+            "○ catalog".to_string(),
+            tr(
+                &lang,
+                summary_key("picker.summary.catalog", &lang, remainder),
+            )
+            .replace("{}", &remainder.to_string()),
+        );
         // Curated view, same two-pane shape as `--all`: the brands column is
         // the picker's left pane, so the provider rows are not repeated among
         // the models. `/model` is what people type; it must not be the one
@@ -155,7 +148,9 @@ pub(crate) fn model_picker(
                 .then_with(|| model_rank(left, active).cmp(&model_rank(right, active)))
                 .then_with(|| left.id.cmp(&right.id))
         });
-        let mut tabs = vec![tr(&lang, "picker.tab.all").to_string()];
+        let mut tabs = Vec::new();
+        let all_tab = tabs.len();
+        tabs.push(tr(&lang, "picker.tab.all").to_string());
         for provider in SUBSCRIPTION_PROVIDERS {
             if models
                 .iter()
@@ -166,9 +161,10 @@ pub(crate) fn model_picker(
         }
         let tab_index = |id: &str| -> usize {
             let group = provider_group(id);
-            tabs.iter()
-                .position(|name| name.as_str() == group)
-                .unwrap_or_default()
+            match tabs.iter().position(|name| name.as_str() == group) {
+                Some(index) => index,
+                None => all_tab,
+            }
         };
         let widths = metric_widths(&models);
         items.extend(

@@ -46,11 +46,12 @@ export const sessionPages = [
         title: "Inspect, export, resume",
         paragraphs: [
           "<code>jeden sessions search</code>, <code>show</code>, <code>export</code>, <code>artifacts</code>, <code>artifact</code> and <code>resume</code> inspect or reuse recorded work; inside a session the agent's <code>recall_conversation</code> tool reads the same text-only transcript <code>show</code> prints. Resume inherits both selected history and retained tasks into a child session. Without a new prompt it continues unfinished work, preserving the recorded workspace and requiring explicit execution grants.",
+          "<code>jeden export &lt;session&gt; &lt;output&gt; [--html|--markdown]</code> writes JSON by default, or the one selected readable format. It refuses an absent output, an unknown option (including a single-dash spelling), a second output or repeated/conflicting format options before reading the session or writing a file. A missing or unreadable session and a failed output write name their cause; HTML and Markdown also refuse a recorded session without a string id, string path or events array instead of inventing content.",
         ],
         commands: [
           {
             label: "Session commands",
-            code: 'jeden sessions\njeden sessions search "query"\njeden show <session>\njeden export <session> <output>\njeden artifacts <session>\njeden artifact <session> <name> <output>\njeden resume <session> "continue"',
+            code: 'jeden sessions\njeden sessions search "query"\njeden show <session>\njeden export <session> <output>\njeden export <session> <output.html> --html\njeden export <session> <output.md> --markdown\njeden artifacts <session>\njeden artifact <session> <name> <output>\njeden resume <session> "continue"',
           },
         ],
       },
@@ -112,7 +113,7 @@ export const sessionPages = [
       {
         title: "Durable memory",
         paragraphs: [
-          "Durable memory lives in the fleet database <code>jeden</code> (tables <code>memories</code> and <code>memory_*</code>), so every host and session reads the same memories. Jeden resolves it through <code>stado database resolve jeden</code> and reads its address from Skarbiec as <code>jeden-database-client</code>; when that fails, <code>/memory stats</code> and <code>jeden doctor</code> report the failed step. Recall ranks with Postgres full-text search.",
+          "Durable memory uses the database named by <code>JEDEN_DATABASE_URL</code> (tables <code>memories</code> and <code>memory_*</code>). Hosts share memories when they use the same server database; a local SQLite file is local to its host. A server URL also requires <code>JEDEN_DATABASE_CA_FILE</code> for certificate verification. Jeden does not resolve or read this credential through Skarbiec. An absent or non-Unicode URL, unreadable certificate, failed connection or migration is named by <code>/memory stats</code> and <code>jeden doctor</code>; an unreadable URL is identified without echoing credential bytes. PostgreSQL recall uses full-text ranking.",
           "<code>/memory enqueue</code>, <code>/memory queue</code>, <code>/memory queue run LIMIT LEASE_MS</code>, <code>/memory queue drain LIMIT LEASE_MS</code>, and <code>/memory rebuild</code> expose durable worker and index maintenance; <code>/memory rebuild</code> reconstructs the memory index. <code>run</code> and <code>drain</code> process at most LIMIT jobs and claim each for LEASE_MS milliseconds, the time this worker holds a job before another worker may reclaim it; both are required positive integers with no default, and a missing or invalid one is refused by name. A failed job returns to the queue at once with its error and is claimable on the next pass; there is no attempt count or backoff. <code>/memory queue</code> lists every job.",
         ],
       },
@@ -121,6 +122,10 @@ export const sessionPages = [
         paragraphs: [
           "Process environment wins over every file. User config loads from <code>~/.jeden/config.json</code> and <code>~/.jeden/config.yml</code>; project config loads from <code><cwd>/.jeden/config.json</code> and overrides user config.",
           "A configuration layer that exists and cannot be read, is not JSON or YAML, has no object at its root, or holds a value its setting cannot take is never read as empty: every <code>jeden</code> command refuses to start with <code>Error: configuration &lt;path&gt; cannot be read: &lt;cause&gt;</code>, <code>… is not valid: &lt;cause&gt;</code> or <code>… does not hold valid settings: &lt;cause&gt;</code>. A layer that breaks during a run stops that run with the same sentence; a file that does not exist is no layer.",
+          "Environment files load from the selected workspace (<code>.env</code>, <code>.env.local</code>, <code>.env.production</code>, <code>.env.vercel</code>, in that order) and then <code>~/.jeden/.env</code> before a command runs; a variable the environment already names is never replaced. Each line is a <code>KEY=value</code> declaration with no whitespace in the key, a <code>#</code> comment or blank. Any other line, including <code>export KEY=value</code>, whitespace before the key or <code>=</code>, and a line without <code>=</code>, stops every command with <code>&lt;file&gt;: line index &lt;n&gt; (zero-based) holds `&lt;line&gt;`, not KEY=value</code> instead of being skipped. <code>/setup</code> reads and writes <code>~/.jeden/.env</code> through the same reader, so it refuses the same line rather than offering to set a key the file already tries to hold.",
+          "A trailing <code> #</code> outside quotes begins a comment; the same text inside a quoted value remains part of the value. <code>/setup</code> quotes values that would parse differently, including a hash, whitespace, embedded quotes or backslashes; the next run reads those bytes intact.",
+          "Double-quoted values use JSON string escaping, including embedded quotes and backslashes. An unclosed quote or invalid escape refuses the file and zero-based line index with the parser's cause rather than loading a partial value.",
+          "When <code>/setup</code> updates an existing key, it leaves unrelated lines and their original line endings unchanged. An unreadable file is refused before any rewrite, with its path and read cause.",
           "Before each run, Jeden loads user context from <code>~/.jeden/instructions.md</code> and <code>~/.jeden/context.md</code>. Project context walks from the project ancestor to <code>--cwd</code> and reads:",
         ],
         bullets: [
@@ -131,6 +136,10 @@ export const sessionPages = [
           "<code>.jeden/instructions.md</code>",
           "<code>.jeden/context.md</code>",
         ],
+        commands: [{
+          label: "Inspect and save the user environment",
+          code: 'jeden run "/setup status" --json\njeden run "/setup brama-url https://brama.example" --json\njeden run "/setup agent-id operator-id" --json',
+        }],
         callout: {
           tone: "note",
           text: "A context line such as <code>@./extra.md</code> imports another file under the same context root; an import cycle or an import outside the root is refused by name. Every context file is included whole unless you declare a byte budget with <code>jeden config set context.maxBytes &lt;bytes&gt;</code>; with one, the file that reaches it is cut there and the run's warnings name it. File-based custom commands load from project and user <code>.jeden/commands/</code> directories; native extensions load from <code>.jeden/extensions/</code>, and plugin and marketplace state lives under <code>~/.jeden/plugins/</code>.",

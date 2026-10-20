@@ -47,8 +47,10 @@ short list is never mistaken for a complete one.
 
 Before its first model call, every turn receives the top recommendations as a
 `[Context recommendations]` block, recorded in the session's own `user` event.
-`context.advisor.sources` defaults to `files,memory`, the two that answer from
-local state; `--source all` adds the archive and the index. Sources run side
+`context.advisor.sources` defaults to `files,memory`. Files read local state;
+memory opens the explicitly configured `JEDEN_DATABASE_URL` without a Skarbiec
+lookup and reports its configuration, connection or query refusal when it
+cannot answer. `--source all` adds the archive and the index. Sources run side
 by side and nothing cuts one short: no setting or flag bounds how long a
 source may take, because a guessed interval reports nothing and explains
 nothing. Choose the source set explicitly. `jeden context prompt "<task>"` prints exactly what the next turn would
@@ -83,7 +85,7 @@ With `chatMemory` in `.jeden/config.json` (project) or `~/.jeden/config.json`
 operator's OptChat design lays it out:
 
 ```json
-{ "chatMemory": { "summaryModel": "<cheap Brama route or alias>", "chat": "<optional chat name>" } }
+{ "chatMemory": { "summaryModel": "<model on the selected route>", "chat": "<optional chat name>" } }
 ```
 
 - A chat outlives its sessions. Every session of an agent appends to the same
@@ -133,8 +135,9 @@ operator's OptChat design lays it out:
   first message and how many it covers. A source that fits the summary size is
   its own line with no model call (a short message word for word, two short
   lines joined by a newline); anything longer is compressed by `summaryModel`
-  through Brama, shown the size as a ruler and asked again when the line is
-  too long, keeping the shortest. Each node is built once. Compactions run
+  on the selected direct provider or Brama route, shown the size as a ruler
+  and asked again when the line is too long, keeping the shortest. Each node
+  is built once. Compactions run
   side by side, as many at a time as the operating system says this machine
   runs threads; `jeden chat-memory show` prints that number.
 - Each turn sends the conversation's system messages, then the view — one
@@ -165,9 +168,9 @@ operator's OptChat design lays it out:
 - A `/rewind` keeps the log as it is and appends a `note` naming the messages
   taken back; what is said after it follows the note.
 - A `chatMemory` without `summaryModel`, one still naming `viewBytes`, a
-  `chat` that is not a name, and a summary model Brama's catalog refuses stop
-  the turn with that cause. An unreadable log, tree, view, chat record or
-  session record is refused naming the file, never restarted.
+  `chat` that is not a name, and a summary model the selected provider's
+  catalog refuses stop the turn with that cause. An unreadable log, tree, view,
+  chat record or session record is refused naming the file, never restarted.
 - The real journeys are `node tests/chat_memory/journey.mjs` (the sawtooth,
   zoom, date, a next process continuing the kept view, and rewind; with
   `JEDEN_TEST_MAX_STEPS` and `JEDEN_TEST_BATCHES`) and

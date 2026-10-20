@@ -23,6 +23,9 @@ impl ChatConfig {
                 }
             }
         }
+        if !self.bearer_token.is_empty() && message.contains(&self.bearer_token) {
+            message = message.replace(&self.bearer_token, "[REDACTED]");
+        }
         message
     }
 }

@@ -10,7 +10,8 @@
 //   3. without a Stado CLI, the file's address is used and Stado's refusal
 //      is named;
 //   4. without Stado and without any address, `jeden run` refuses before any
-//      model call and says what to declare.
+//      model call, says what to declare, and says that no provider in
+//      Jeden's token store stands in for Brama.
 // Every command, its exit status and output go to the run's report.json.
 //
 // Usage: JEDEN_BIN=<built jeden> node tests/cli/brama_route.mjs
@@ -97,6 +98,7 @@ try {
   assert.ok(refused.status && !refused.error, `jeden run should have been refused: ${refused.stdout}`);
   assert.match(refused.stderr, /BRAMA_URL is required; declare Jeden's route with `stado service directory consumer add brama jeden/);
   assert.match(refused.stderr, /Stado did not route it: the Stado CLI could not be started/);
+  assert.match(refused.stderr, /no provider stands in for it: Jeden's token store holds no OpenAI-compatible provider/);
 
   report.routed_url = routed;
   report.verdict = 'passed';

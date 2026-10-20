@@ -1,160 +1,172 @@
-//! `jeden token` — which Brama credential this agent uses: the router URL,
-//! the agent id, where the secret came from and a redacted form of it.
-//! Provider OAuth tokens live in Skarbiec/Brama and are never held by jeden.
-//! The secret itself is never printed (cli.md rule 15): outside the
-//! credential boundary only the role whose vault item holds it,
-//! `wisent-app-agent`, travels, and a script that needs the value reads that
-//! role through its own grant.
-
-use std::env;
-
+//! `jeden token`: manage local model credentials without printing secret values.
+use crate::agent::credential::{self, tokens::Store, Source};
 use crate::Args;
+use serde_json::json;
+use std::io::{IsTerminal, Read};
 
-const SECRET_KEY: &str = "WISENT_APP_AGENT_AUTH_SECRET";
-const AGENT_ID_KEY: &str = "WISENT_APP_AGENT_ID";
-
-fn redacted(value: &str) -> String {
-    let tail: String = value
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("…{tail} ({} chars)", value.chars().count())
-}
-
-fn brama_url() -> Result<String, String> {
-    let route = crate::agent::credential::brama_route();
-    route
-        .url
-        .clone()
-        .ok_or_else(|| match route.source.refusal() {
-            Some(said) => format!("BRAMA_URL is required; Stado did not route it: {said}"),
-            None => {
-                "BRAMA_URL is required; configure the Brama model-router service URL".to_string()
-            }
-        })
-}
-
-/// The router, the agent id (none when the launcher declared none), the
-/// secret and where it came from. An agent id that is not text is refused;
-/// read as empty it printed an agent with no name.
-fn configured() -> Result<(String, Option<String>, String, &'static str), String> {
-    // Where the value came from is part of the answer: an operator reading
-    // this needs to know whether the launcher carried it or the vault did.
-    // The same resolution every request path uses: the secret comes from
-    // Stado when this process was not launched carrying it. The refusal below
-    // used to name `scripts/run-with-stado.sh`, a file this repository
-    // deleted, which left a reader with an instruction that could not be
-    // followed; it now carries what Stado itself said.
-    let (secret_source, _) = crate::agent::credential::ensure();
-    let url = brama_url()?;
-    let secret = match env::var(SECRET_KEY) {
-        Ok(secret) if !secret.is_empty() => secret,
-        Ok(_) | Err(env::VarError::NotPresent) => {
-            let (role, field) = crate::agent::credential::SECRET_ROLE;
-            return Err(match secret_source.refusal() {
-                Some(said) => format!("{SECRET_KEY} is not configured: {said}"),
-                None => format!(
-                    "{SECRET_KEY} is not configured; the vault item playing role `{role}` holds it and \
-                     `stado credentials get --role {role} --field {field}` is how this process reads it"
-                ),
-            });
-        }
-        Err(error) => return Err(format!("{SECRET_KEY} cannot be read: {error}")),
-    };
-    let agent_id = match env::var(AGENT_ID_KEY) {
-        Ok(agent) if !agent.trim().is_empty() => Some(agent),
-        Ok(_) | Err(env::VarError::NotPresent) => None,
-        Err(error) => return Err(format!("{AGENT_ID_KEY} cannot be read: {error}")),
-    };
-    Ok((url, agent_id, secret, secret_source.as_str()))
-}
-
-/// The agent line a person reads.
-fn agent_line(agent_id: &Option<String>) -> String {
-    match agent_id {
-        Some(agent) => agent.clone(),
-        None => format!("none declared ({AGENT_ID_KEY} is not set)"),
+fn rows() -> Result<Vec<credential::tokens::TokenRow>, String> {
+    match Store::open_existing()? {
+        Some(store) => store.list(),
+        None => Ok(Vec::new()),
     }
 }
 
-/// CLI `jeden token [--list] [--json]`.
-pub(crate) fn token_command(args: &Args) -> Result<String, String> {
-    let (role, field) = crate::agent::credential::SECRET_ROLE;
-    if let Some(unknown) = args
-        .positionals
-        .iter()
-        .find(|part| *part != "--list" && *part != "list")
-    {
-        return Err(format!(
-            "jeden token takes --list and --json; got {unknown}. The secret is never printed: read role {role} through a grant of its own"
+fn format_rows(tokens: &[credential::tokens::TokenRow]) -> String {
+    let mut text = String::new();
+    for token in tokens {
+        text.push_str(&format!(
+            "{} {} {}{}\n",
+            token.id,
+            token.label,
+            token.endpoint,
+            if token.active { " [last selected]" } else { "" }
         ));
+        if let Some(failure) = &token.last_failure {
+            text.push_str(&format!("  last failure: {failure}\n"));
+        }
     }
-    let list = !args.positionals.is_empty();
-    let (brama, agent_id, secret, source) = configured()?;
-    if args.json {
+    text
+}
+
+fn status(json_output: bool) -> Result<String, String> {
+    let tokens = rows()?;
+    let direct = credential::direct_provider();
+    if let Some(cause) = direct.is_none().then(credential::direct_refusal).flatten() {
+        if json_output {
+            return serde_json::to_string(&json!({
+                "route": "direct", "endpoint": null, "keySource": "refused",
+                "selected": null, "routeRefusal": cause, "tokens": tokens,
+            }))
+            .map(|text| format!("{text}\n"))
+            .map_err(|error| error.to_string());
+        }
         return Ok(format!(
-            "{{\"bramaUrl\":{},\"agentId\":{},\"token\":{},\"tokenSource\":{},\"tokenRole\":{}}}\n",
-            serde_json::to_string(&brama).map_err(|error| error.to_string())?,
-            serde_json::to_string(&agent_id).map_err(|error| error.to_string())?,
-            serde_json::to_string(&redacted(&secret)).map_err(|error| error.to_string())?,
-            serde_json::to_string(source).map_err(|error| error.to_string())?,
-            serde_json::to_string(role).map_err(|error| error.to_string())?,
+            "Direct provider refused: {cause}\nKey source: refused\n{}",
+            format_rows(&tokens)
         ));
     }
-    let mut lines = vec![
-        format!("Brama:   {brama}"),
-        format!("Agent:   {}", agent_line(&agent_id)),
-        match source {
-            "stado" => format!(
-                "Token:   {} — read through Stado from the vault item playing role {role}",
-                redacted(&secret)
-            ),
-            _ => format!(
-                "Token:   {} — carried in this process's environment",
-                redacted(&secret)
-            ),
-        },
-        format!(
-            "Role:    {role} (the value stays in Skarbiec; read it through a grant of its own)"
-        ),
-    ];
-    if list {
-        let client = crate::control_plane::weles::WelesClient::from_env();
-        if client.health().available {
-            match client.accounts(None) {
-                Ok(accounts) => {
-                    lines.push(format!("Weles accounts ({}):", accounts.len()));
-                    for account in accounts {
-                        lines.push(format!(
-                            "- {} [{} · {}]",
-                            account.display_name, account.provider, account.status
-                        ));
-                    }
-                }
-                Err(error) => lines.push(format!("Weles accounts unavailable: {error}")),
+    let active_endpoint = direct.as_ref().map(|(endpoint, _)| endpoint.as_str());
+    let stored = active_endpoint
+        .is_some_and(|endpoint| tokens.iter().any(|token| token.endpoint == endpoint));
+    let key_source = match &direct {
+        Some((_, Some(_))) => "environment",
+        Some(_) if stored => "local-token-list",
+        Some(_) => "none",
+        None => "not-needed",
+    };
+    let selected = if key_source == "local-token-list" {
+        tokens
+            .iter()
+            .find(|token| token.active && Some(token.endpoint.as_str()) == active_endpoint)
+            .map(|token| token.id.as_str())
+    } else {
+        None
+    };
+    if json_output {
+        let value = match &direct {
+            Some((endpoint, _)) => json!({
+                "route": "direct", "endpoint": endpoint,
+                "keySource": key_source,
+                "selected": selected,
+                "tokens": tokens,
+            }),
+            None => {
+                let route = credential::brama_route();
+                let (secret, bearer) = credential::ensure();
+                json!({
+                    "route": "brama", "endpoint": route.url,
+                    "origin": credential::route_origin(),
+                    "signingCredential": secret.as_str(), "gatewayBearer": bearer.as_str(),
+                    "keySource": bearer.as_str(), "selected": selected,
+                    "signingRefusal": secret.refusal(), "bearerRefusal": bearer.refusal(),
+                    "tokens": tokens,
+                })
             }
-        } else {
-            lines.push(format!("Weles unavailable: {}", client.health().detail));
-        }
+        };
+        return serde_json::to_string(&value)
+            .map(|text| format!("{text}\n"))
+            .map_err(|error| error.to_string());
     }
-    lines.push(format!(
-        "Example: curl -H \"Authorization: Bearer $(stado credentials get --role {role} --field {field})\" {brama}/v1/models"
-    ));
-    Ok(lines.join("\n") + "\n")
+    let mut text = match &direct {
+        Some((endpoint, _)) => format!("Direct provider: {endpoint}\nKey source: {key_source}\n"),
+        None => {
+            let route = credential::brama_route();
+            let endpoint = match (route.url.as_deref(), &route.source) {
+                (Some(url), _) => url.to_string(),
+                (
+                    None,
+                    Source::Refused(cause)
+                    | Source::EnvironmentRefused(cause)
+                    | Source::DirectRefused(cause),
+                ) => format!("unavailable: {cause}"),
+                (None, source) => {
+                    return Err(format!(
+                        "Brama route has no endpoint (source: {})",
+                        source.as_str()
+                    ))
+                }
+            };
+            let (secret, bearer) = credential::ensure();
+            let mut text = format!(
+                "Brama: {endpoint}\nOrigin: {}\nSigning credential: {}\nGateway bearer: {}\n",
+                credential::route_origin(),
+                secret.as_str(),
+                bearer.as_str()
+            );
+            if let Some(cause) = secret.refusal() {
+                text.push_str(&format!("Signing refusal: {cause}\n"));
+            }
+            if let Some(cause) = bearer.refusal() {
+                text.push_str(&format!("Bearer refusal: {cause}\n"));
+            }
+            text
+        }
+    };
+    text.push_str(&format_rows(&tokens));
+    Ok(text)
 }
 
-/// Slash `/token`: redacted summary only. The transcript is model-bound, so
-/// the full secret is never printed here by design.
+fn list(json_output: bool) -> Result<String, String> {
+    let tokens = rows()?;
+    if json_output {
+        return serde_json::to_string(&json!({ "tokens": tokens }))
+            .map(|text| format!("{text}\n"))
+            .map_err(|error| error.to_string());
+    }
+    Ok(format_rows(&tokens))
+}
+
+pub(crate) fn token_command(args: &Args) -> Result<String, String> {
+    match args.positionals.as_slice() {
+        [] => status(args.json),
+        [verb] if verb == "status" => status(args.json),
+        [verb] if verb == "list" => list(args.json),
+        [verb, label, flag, endpoint] if verb == "add" && flag == "--endpoint" => {
+            if std::io::stdin().is_terminal() {
+                return Err(crate::cli::invocation::refusal::usage(
+                    "token add reads the key from stdin; pipe it instead of placing it on argv"));
+            }
+            let mut secret = String::new();
+            std::io::stdin().read_to_string(&mut secret)
+                .map_err(|error| format!("read model token from stdin: {error}"))?;
+            let row = Store::add(label, endpoint, &secret)?;
+            if args.json {
+                serde_json::to_string(&row).map(|text| format!("{text}\n"))
+                    .map_err(|error| error.to_string())
+            } else {
+                Ok(format!("stored token {} for {} (id {})\n", row.label, row.endpoint, row.id))
+            }
+        }
+        [verb, id] if verb == "remove" => {
+            Store::remove_existing(id)?;
+            if args.json { Ok(json!({"removed": id}).to_string() + "\n") }
+            else { Ok(format!("removed token {id}\n")) }
+        }
+        _ => Err(crate::cli::invocation::refusal::usage(
+            "usage: jeden token [status|list|add LABEL --endpoint URL|remove ID] [--json]; add reads the secret from stdin")),
+    }
+}
+
 pub(crate) fn token_slash() -> Result<String, String> {
-    let (brama, agent_id, secret, source) = configured()?;
-    let (role, _) = crate::agent::credential::SECRET_ROLE;
-    Ok(format!(
-        "Agent token for Brama scripting.\nBrama: {brama}\nAgent: {}\nToken: {} (redacted, source: {source}).\nThe value stays in the vault item playing role {role}.\n",
-        agent_line(&agent_id),
-        redacted(&secret)
-    ))
+    status(false)
 }

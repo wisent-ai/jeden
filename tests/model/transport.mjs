@@ -68,6 +68,8 @@ try {
   assert.equal(route.consumer, 'jeden');
   assert.ok(route.url, 'the real directory must name the observed adapter');
   report.route = route;
+  const superseded = `${route.url.replace(/\/$/, '')}/superseded-${randomUUID()}`;
+  writeFileSync(join(workspace, '.env'), `BRAMA_URL=${superseded}\n`);
   const bind = new URL(route.url).host;
   const channelArgs = ['resolver', 'channels', '--bind', bind, '--json'];
   function channels() {
@@ -89,11 +91,15 @@ try {
   assert.ok(diagnostic.includes(`${route.url.replace(/\/$/, '')}/v1/chat/completions`), diagnostic);
   assert.ok(diagnostic.includes('Brama') && diagnostic.includes('Stado'), diagnostic);
   assert.ok(diagnostic.includes(cause), 'the original observed transport cause must remain visible');
+  assert.ok(diagnostic.includes('environment file held a different address'),
+    'the route origin must distinguish a superseded file value from the live Stado route');
+  assert.ok(!diagnostic.includes(superseded),
+    'the route diagnostic must not disclose the superseded environment-file address');
   const paths = transcripts(sessions);
   const events = paths.flatMap((path) => {
-    const exported = succeeds(invoke(binary, ['export', dirname(path)], env));
-    writeFileSync(join(dirname(path), 'qualification-export.json'), exported);
-    return JSON.parse(exported).events;
+    const exportPath = join(dirname(path), 'qualification-export.json');
+    succeeds(invoke(binary, ['export', dirname(path), exportPath], env));
+    return JSON.parse(readFileSync(exportPath, 'utf8')).events;
   });
   const failure = events.find((event) => event.type === 'run_error' && event.data?.message?.includes(cause));
   assert.ok(failure, 'the actual refusal must remain in the durable session');
@@ -101,6 +107,8 @@ try {
     'the retained failure must identify the host selected by the real directory');
   assert.ok(failure.data.message.includes(`from ${route.from}`),
     'the retained failure must identify the actual directory vantage');
+  assert.ok(!failure.data.message.includes(superseded),
+    'the exported session must not disclose the superseded environment-file address');
   if (channelRefusal) {
     assert.ok(failure.data.message.includes(channelRefusal),
       'a reader failure must retain its own cause as well as the original model failure');
@@ -137,15 +145,17 @@ try {
         'the graphical-client refusal lost the failed model endpoint');
       assert.ok(text.includes(`placed_on ${route.placed_on}`), 'the selected host was lost');
       assert.ok(text.includes(`from ${route.from}`), 'the directory vantage was lost');
+      assert.ok(!text.includes(superseded),
+        'the RPC refusal must not disclose the superseded environment-file address');
       if (channelRefusal) {
         assert.ok(text.includes(channelRefusal), 'the secondary observation refusal was lost');
         assert.ok(text.includes(`stado resolver channels --bind ${bind}`),
           'the failed observation command was lost');
       }
     }
-    const exported = succeeds(invoke(binary, ['export', session.sessionPath], env));
-    writeFileSync(join(area, 'rpc-session-export.json'), exported);
-    const retained = JSON.parse(exported).events;
+    const exportPath = join(area, 'rpc-session-export.json');
+    succeeds(invoke(binary, ['export', session.sessionPath, exportPath], env));
+    const retained = JSON.parse(readFileSync(exportPath, 'utf8')).events;
     assert.ok(retained.some((event) => event.type === 'run_error' && event.data?.message?.includes(cause)),
       'the graphical-client refusal must remain in its own durable session');
     assert.ok(!retained.some((event) => event.type === 'final'),

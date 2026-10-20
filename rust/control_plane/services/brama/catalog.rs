@@ -85,7 +85,7 @@ fn default_true() -> bool {
 pub struct ModelCatalog {
     #[serde(default, alias = "revision")]
     pub catalog_revision: String,
-    #[serde(default = "api_version")]
+    #[serde(default)]
     pub version: String,
     /// Brama answers `models`; an OpenAI-compatible provider named by
     /// `JEDEN_MODEL_ENDPOINT` answers `data`, whose entries carry the same `id`.
@@ -93,9 +93,6 @@ pub struct ModelCatalog {
     pub models: Vec<ModelEntry>,
     #[serde(default)]
     pub degraded: bool,
-}
-fn api_version() -> String {
-    API_VERSION.into()
 }
 
 impl ModelCatalog {
@@ -108,10 +105,10 @@ impl ModelCatalog {
         if !model.available {
             return Err(BramaError::UnavailableModel {
                 model: id.to_string(),
-                reason: model
-                    .unavailable_reason
-                    .clone()
-                    .unwrap_or_else(|| "catalog marks route unavailable".into()),
+                reason: match &model.unavailable_reason {
+                    Some(reason) => reason.clone(),
+                    None => "the catalog marks the route unavailable and states no reason".into(),
+                },
             });
         }
         Ok(model)
@@ -136,9 +133,9 @@ impl ModelCatalog {
             .iter()
             .filter(|entry| entry.id.ends_with(suffix.as_str()))
             .collect::<Vec<_>>();
-        match matches.len() {
-            0 => Ok(None),
-            1 => Ok(matches.into_iter().next()),
+        match matches.as_slice() {
+            [] => Ok(None),
+            [only] => Ok(Some(*only)),
             _ => Err(format!(
                 "model `{model}` is ambiguous; it matches multiple Brama routes: {}; use the full route id",
                 matches
@@ -151,8 +148,13 @@ impl ModelCatalog {
     }
 }
 
-pub(super) fn validate_catalog(catalog: &ModelCatalog) -> Result<(), BramaError> {
-    if catalog.version != API_VERSION {
+/// A catalogue is checked for what every reader relies on: non-empty,
+/// distinct model ids and stated prices that are finite and not negative.
+/// Only a catalogue Brama served carries Brama's protocol version; a direct
+/// OpenAI-compatible provider negotiates no Brama schema and may state a
+/// version of its own, which is not Brama's to judge.
+pub(super) fn validate_catalog(catalog: &ModelCatalog, via_brama: bool) -> Result<(), BramaError> {
+    if via_brama && catalog.version != API_VERSION {
         return Err(BramaError::InvalidCatalog(format!(
             "unsupported version `{}`",
             catalog.version
@@ -172,10 +174,11 @@ pub(super) fn validate_catalog(catalog: &ModelCatalog) -> Result<(), BramaError>
         // Only a stated price is checked; an unpriced route is not invalid,
         // it is unpriced, and every reader of its price says so.
         if let Some(price) = &model.price {
+            // Comparing with magnitude preserves signed zero as nonnegative.
             if !price.input.is_finite()
                 || !price.output.is_finite()
-                || price.input < 0.0
-                || price.output < 0.0
+                || price.input < price.input.abs()
+                || price.output < price.output.abs()
             {
                 return Err(BramaError::InvalidCatalog(format!(
                     "invalid price for `{}`",

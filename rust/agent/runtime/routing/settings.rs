@@ -54,17 +54,26 @@ pub(super) fn route_descriptors(
 
 pub(super) fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
     let defaults = RetryPolicy::default();
-    let retry = routing.get("retry").unwrap_or(&Value::Null);
+    let absent = Value::Null;
+    let retry = match routing.get("retry") {
+        Some(retry) => retry,
+        None => &absent,
+    };
     if !retry.is_null() && !retry.is_object() {
         return Err("modelRouting.retry must be an object".into());
     }
     let max_attempts = match retry.get("maxAttempts") {
         None => defaults.max_attempts,
-        Some(raw) => raw
-            .as_u64()
-            .and_then(|value| usize::try_from(value).ok())
-            .filter(|value| *value >= 1)
-            .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?,
+        Some(raw) => {
+            let value = raw
+                .as_u64()
+                .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?;
+            let value = usize::try_from(value)
+                .map_err(|_| "modelRouting.retry.maxAttempts exceeds the supported size")?;
+            std::num::NonZeroUsize::new(value)
+                .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?
+                .get()
+        }
     };
     Ok(RetryPolicy { max_attempts })
 }

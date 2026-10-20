@@ -93,10 +93,9 @@ impl Conversation {
         Ok(())
     }
 
-    /// The cheap model the operator named (`chatMemory.summaryModel`),
-    /// reached through Brama on this session's lease, writing one summary of
-    /// at most the bytes it is given. A model Brama's catalog refuses is
-    /// refused here, before any summary is asked for.
+    /// The cheap model named by `chatMemory.summaryModel` writes a summary
+    /// within the given byte ruler on the selected route. A model the
+    /// selected provider's catalog refuses is rejected before summarizing.
     fn summarizer(
         &self,
         settings: &Settings,
@@ -126,9 +125,8 @@ impl Conversation {
 }
 
 impl Drop for Conversation {
-    /// The session ended in this process: the accounts it leased from Brama
-    /// carry one session fewer. A release Brama refuses is said, with its
-    /// cause; `jeden lease end <session-id>` ends it later.
+    /// A session that held Brama leases releases them on exit, reporting any
+    /// release refusal. A direct-provider session holds none.
     fn drop(&mut self) {
         // The answer a turn ended with joined the conversation after its
         // last step; it joins the chat log now, with any failure said.

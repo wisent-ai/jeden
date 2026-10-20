@@ -1,10 +1,8 @@
-use rand::{distributions::Alphanumeric, Rng};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::model_router::{
     chat_completion, chat_completion_streaming, ChatConfig, CompletionUsage,
@@ -45,8 +43,13 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
     let mut router = runtime::model_router_config(config, args);
 
     if let Some(unread) = catalog_left_unread(&router) {
+        let source = if router.via_brama {
+            "Brama"
+        } else {
+            "direct provider"
+        };
         eprintln!(
-            "jeden: the Brama catalog could not be read ({unread}); continuing with the configured route `{}`",
+            "jeden: the {source} catalog could not be read ({unread}); continuing with the configured route `{}`",
             router.model
         );
         router.config_error = None;
@@ -58,12 +61,12 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> crate::model_
 /// the configured model.
 ///
 /// Discovery is how a model name becomes a readable refusal; it is not the
-/// authority on whether a route works, because the gateway that serves the
+/// authority on whether a route works, because the endpoint that serves the
 /// request is: one `GET /v1/models` can time out while chat calls in the same
 /// minute are being served, and an assignment ended on that read ends on
-/// `Brama transport error` for nothing. A configured route reaches the gateway
+/// `model endpoint transport error` for nothing. A configured route reaches its endpoint
 /// and the request itself answers. Routing sets `catalog_unanswered` from the typed `BramaError`
-/// (`left_unanswered`: transport, busy or 5xx without Brama's explicit
+/// (`left_unanswered`: transport, busy or 5xx without an explicit
 /// `retryable: false`); a refusal, a missing model or any other configuration
 /// error still stops the run here.
 fn catalog_left_unread(router: &ChatConfig) -> Option<&str> {
@@ -106,15 +109,14 @@ pub(crate) fn record_roadmap_event(
         .filter(|path| path.join("state.json").is_file());
     let mut recorder = match last_session {
         Some(path) => SessionRecorder::open(cwd, &path)?,
-        None => SessionRecorder::new(cwd),
+        None => SessionRecorder::new(cwd)?,
     };
     recorder.record(event_type, data)?;
     let path = recorder.path();
     if let Some(item_id) = active_roadmap_item {
         let metadata = serde_json::to_string_pretty(&json!({
-            "schemaVersion": 1,
             "itemId": item_id,
-            "activatedAt": now_stamp()
+            "activatedAt": now_stamp()?
         }))
         .map_err(|error| error.to_string())?
             + "\n";

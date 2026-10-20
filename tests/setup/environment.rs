@@ -1,6 +1,23 @@
 use super::{report::checklist_text, setup_picker, setup_state, SlashContext};
 use std::path::PathBuf;
 
+fn git(args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .output()
+        .expect("read source revision");
+    assert!(
+        output.status.success(),
+        "git {args:?} refused: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("source revision is UTF-8")
+        .trim()
+        .to_owned()
+}
+
 #[test]
 fn environment_read_failure_stays_unknown_until_same_process_recovery() {
     let home = PathBuf::from(std::env::var_os("HOME").expect("isolated HOME is required"))
@@ -26,6 +43,17 @@ fn environment_read_failure_stays_unknown_until_same_process_recovery() {
     }
     let revision =
         std::env::var("JEDEN_TEST_SOURCE_REVISION").expect("exact source revision required");
+    assert_eq!(git(&["rev-parse", "HEAD"]), revision);
+    let short = git(&["rev-parse", "--short", &revision]);
+    assert!(
+        git(&["status", "--porcelain"]).is_empty(),
+        "commit the candidate and journey before qualification"
+    );
+    assert!(
+        crate::JEDEN_VERSION.ends_with(&format!(".{short}")),
+        "candidate binary must embed the clean source revision: {}",
+        crate::JEDEN_VERSION
+    );
     let url =
         std::env::var("JEDEN_TEST_SETUP_BRAMA_URL").expect("actual declared Brama URL required");
     let agent = std::env::var("JEDEN_TEST_SETUP_AGENT_ID")
@@ -76,6 +104,14 @@ fn environment_read_failure_stays_unknown_until_same_process_recovery() {
     assert!(checklist.contains(&cause));
     assert!(!checklist.contains("/setup brama-url"));
     assert!(!checklist.contains("/setup agent-id"));
+    let refused = super::steps::handle_text("agent-id isolated-agent", &context)
+        .expect_err("/setup must not replace an environment file it cannot read");
+    assert!(refused.contains(&cause));
+    assert!(refused.contains(&*path.to_string_lossy()));
+    assert!(
+        path.is_dir(),
+        "the unreadable environment path must remain untouched"
+    );
     assert_eq!(
         std::fs::read_to_string(&retained).expect("retained environment"),
         original

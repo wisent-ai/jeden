@@ -6,6 +6,7 @@ use super::API_VERSION;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BramaError {
     Unconfigured,
+    Configuration(String),
     Transport(String),
     /// A non-2xx answer. `retryable` is Brama's own `error.retryable` field
     /// when the body is its error document, so callers read the gateway's
@@ -37,22 +38,23 @@ impl std::fmt::Display for BramaError {
             Self::Unconfigured => {
                 f.write_str("BRAMA_URL is required; configure the Brama model-router service URL")
             }
-            Self::Transport(e) => write!(f, "Brama transport error: {e}"),
+            Self::Configuration(e) => write!(f, "model endpoint configuration error: {e}"),
+            Self::Transport(e) => write!(f, "model endpoint transport error: {e}"),
             Self::Http {
                 status, message, ..
-            } => write!(f, "Brama returned HTTP {status}: {message}"),
+            } => write!(f, "model endpoint returned HTTP {status}: {message}"),
             Self::RateLimited { retry_after_ms, .. } => write!(
                 f,
-                "Brama rate limited the request; retry after {:?} ms",
+                "model endpoint rate limited the request; retry after {:?} ms",
                 retry_after_ms
             ),
-            Self::InvalidCatalog(e) => write!(f, "invalid Brama catalog: {e}"),
-            Self::InvalidResponse(e) => write!(f, "invalid Brama response: {e}"),
-            Self::UnknownModel(id) => write!(f, "model `{id}` is not in the Brama catalog"),
+            Self::InvalidCatalog(e) => write!(f, "invalid model catalog: {e}"),
+            Self::InvalidResponse(e) => write!(f, "invalid model response: {e}"),
+            Self::UnknownModel(id) => write!(f, "model `{id}` is not in the selected catalog"),
             Self::UnavailableModel { model, reason } => {
                 write!(f, "model `{model}` is unavailable: {reason}")
             }
-            Self::Cancelled => f.write_str("Brama request cancelled"),
+            Self::Cancelled => f.write_str("model request cancelled"),
         }
     }
 }
@@ -71,9 +73,12 @@ impl BramaError {
     /// Brama's `error.retryable` verdict from its error document, if the
     /// body is one.
     pub(super) fn stated_retryable(body: &[u8]) -> Option<bool> {
-        serde_json::from_slice::<serde_json::Value>(body)
-            .ok()
-            .and_then(|document| document.pointer("/error/retryable")?.as_bool())
+        let Ok(document) = serde_json::from_slice::<serde_json::Value>(body) else {
+            return None;
+        };
+        document
+            .pointer("/error/retryable")
+            .and_then(serde_json::Value::as_bool)
     }
 
     /// Brama said, in its error document, that retrying will not help.

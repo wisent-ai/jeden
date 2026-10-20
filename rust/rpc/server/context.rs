@@ -15,14 +15,14 @@ use crate::context::advisor;
 
 const INVALID: &str = "invalid_params";
 
-/// The workspace a context request reads from: its `cwd`, or this server's
-/// own working directory when the request names none. A `cwd` that is not a
+/// The workspace an RPC request reads from: its `cwd`, or this server's own
+/// working directory when the request names none. A `cwd` that is not a
 /// string, or a server whose own directory cannot be read, is refused with the
 /// cause instead of reading from an empty path.
-fn cwd(params: &Value) -> Result<PathBuf, (&'static str, String)> {
+pub(super) fn cwd(params: &Value) -> Result<PathBuf, (&'static str, String)> {
     match params.get("cwd") {
         Some(Value::String(path)) => Ok(PathBuf::from(path)),
-        Some(other) => Err((INVALID, format!("context cwd must be a path string; got {other}"))),
+        Some(other) => Err((INVALID, format!("cwd must be a path string; got {other}"))),
         None => std::env::current_dir().map_err(|error| {
             (
                 "internal_error",
@@ -56,15 +56,18 @@ pub(super) fn recommend(
     let stated = match params.get("limit") {
         None => None,
         Some(limit) => {
-            let count = limit
-                .as_u64()
-                .and_then(|count| usize::try_from(count).ok())
-                .ok_or_else(|| {
-                    (
-                        INVALID,
-                        format!("context/recommend limit must be a whole number; got {limit}"),
-                    )
-                })?;
+            let whole = limit.as_u64().ok_or_else(|| {
+                (
+                    INVALID,
+                    format!("context/recommend limit must be a whole number; got {limit}"),
+                )
+            })?;
+            let count = usize::try_from(whole).map_err(|error| {
+                (
+                    INVALID,
+                    format!("context/recommend limit {whole} cannot be held here: {error}"),
+                )
+            })?;
             Some(count)
         }
     };

@@ -11,10 +11,10 @@
 //!
 //! One refusal cannot be repaired by wording alone. An answer the output
 //! budget cut mid-JSON was already longer than the budget allows, so every
-//! inspection is asked for the routed model's own declared output ceiling
-//! (Brama's catalog `max_output_tokens`), and the single correction names
-//! the shortest form of the answer. A model whose catalog states no ceiling
-//! is asked without one: the provider's own limit decides.
+//! inspection is asked for the routed model's declared output ceiling
+//! (`max_output_tokens` in the selected provider catalog), and the single
+//! correction names the shortest form of the answer. A model whose catalog
+//! states no ceiling is asked without one: the provider's own limit decides.
 
 use super::super::*;
 
@@ -77,7 +77,8 @@ impl Conversation {
         accept: &mut dyn FnMut(&str) -> Result<T, String>,
     ) -> Result<(T, PathBuf), String> {
         let mut correction: Option<String> = None;
-        let ceiling = output_ceiling(args);
+        let ceiling =
+            output_ceiling(args).map_err(|error| self.completion_failure(stage, &error, hooks))?;
         loop {
             let asked = match &correction {
                 None => instruction.to_string(),
@@ -118,37 +119,38 @@ fn cut_off(refusal: &str) -> bool {
     refusal.contains(crate::protocol::INCOMPLETE_ANSWER)
 }
 
-/// The routed model's declared output ceiling from Brama's catalog. A catalog
-/// that cannot be read, or an entry that declares none, leaves the request
-/// without one, said on standard error, as every model read does.
-fn output_ceiling(args: &Args) -> Option<u32> {
+/// The routed model's declared output ceiling from the selected provider
+/// catalog. An unreadable catalog or an unrepresentable ceiling refuses the
+/// inspection with its cause; a model that declares no ceiling uses the
+/// provider's own limit.
+fn output_ceiling(args: &Args) -> Result<Option<u32>, String> {
     let config = load_config(&args.cwd);
     let router = model_router_config(&config, args);
     let client = crate::control_plane::brama::BramaClient::configured(
         Some(router.url.clone()),
         Some(router.bearer_token.clone()),
     );
-    let declared = client
-        .catalog(false)
-        .map_err(|error| error.to_string())
-        .and_then(|catalog| {
-            catalog
-                .resolve(&router.model)
-                .map(|entry| entry.max_output_tokens)
-                .map_err(|error| error.to_string())
-        });
+    let catalog =
+        crate::control_plane::model_catalog(&args.cwd, &client, false).map_err(|error| {
+            format!(
+                "the model catalog for inspection route {} could not be read: {error}",
+                router.model
+            )
+        })?;
+    let declared = catalog
+        .resolve(&router.model)
+        .map_err(|error| format!("inspection route {}: {error}", router.model))?
+        .max_output_tokens;
     match declared {
-        Ok(Some(tokens)) => u32::try_from(tokens).ok(),
-        Ok(None) => {
+        Some(tokens) => u32::try_from(tokens)
+            .map(Some)
+            .map_err(|error| format!("inspection route {} declares an output ceiling {tokens} that Jeden cannot represent: {error}", router.model)),
+        None => {
             eprintln!(
                 "jeden: {} declares no output ceiling; the inspection is asked without one",
                 router.model
             );
-            None
-        }
-        Err(error) => {
-            eprintln!("jeden: the model catalog could not be read for the inspection's output ceiling: {error}");
-            None
+            Ok(None)
         }
     }
 }

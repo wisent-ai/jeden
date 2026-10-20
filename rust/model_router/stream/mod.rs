@@ -1,10 +1,12 @@
 use super::*;
 
 mod attempt;
+mod request;
 mod support;
 mod wire;
 
 pub(crate) use attempt::*;
+pub(crate) use request::*;
 pub(crate) use support::*;
 pub(crate) use wire::*;
 
@@ -25,6 +27,14 @@ pub fn chat_completion_streaming(
     on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StreamingCompletion, StreamFailure> {
+    if let Some(cause) = crate::agent::credential::direct_refusal() {
+        return Err(stream_failure(
+            StreamErrorClass::Permanent,
+            cause.to_owned(),
+            Vec::new(),
+            false,
+        ));
+    }
     if let Some(message) = &config.config_error {
         return Err(stream_failure(
             StreamErrorClass::Permanent,
@@ -51,9 +61,26 @@ pub fn chat_completion_streaming(
     let attempts = config.retry.max_attempts;
     let mut route_results = Vec::with_capacity(routes.len().saturating_mul(attempts));
     let mut last_error: Option<AttemptError> = None;
-    for (route_index, route) in routes.iter().enumerate() {
+    let mut remaining_routes = routes.iter().peekable();
+    while let Some(route) = remaining_routes.next() {
+        let following_route = remaining_routes.peek().copied();
+        if !config.via_brama && is_virtual_model_route(&route.model) {
+            let message = format!(
+                "{} is a Brama virtual route; choose a concrete direct-provider model with /model",
+                route.model
+            );
+            if let Some(next) = following_route {
+                route_results.push(RouteResult::RouteChanged {
+                    from: route.clone(),
+                    to: next.clone(),
+                    reason: message.clone(),
+                });
+            }
+            last_error = Some(AttemptError::permanent(message));
+            continue;
+        }
         if let Err(message) = ensure_image_capability(config, &route.model, &messages) {
-            if let Some(next) = routes.get(route_index + 1) {
+            if let Some(next) = following_route {
                 route_results.push(RouteResult::RouteChanged {
                     from: route.clone(),
                     to: next.clone(),
@@ -69,7 +96,7 @@ pub fn chat_completion_streaming(
         let mut leased = match lease::for_route(config, &route.model) {
             Ok(leased) => leased,
             Err(message) => {
-                if let Some(next) = routes.get(route_index + 1) {
+                if let Some(next) = following_route {
                     route_results.push(RouteResult::RouteChanged {
                         from: route.clone(),
                         to: next.clone(),
@@ -86,7 +113,7 @@ pub fn chat_completion_streaming(
                 accounts_tried.insert(held.subscription_id.clone());
             }
             let mut moved = None;
-            for _attempt in 1..=attempts {
+            for _attempt in std::iter::repeat_n((), attempts) {
                 if cancelled() {
                     return Err(stream_failure(
                         StreamErrorClass::Cancelled,
@@ -176,7 +203,7 @@ pub fn chat_completion_streaming(
             });
             leased = Some(next);
         }
-        if let Some(next) = routes.get(route_index + 1) {
+        if let Some(next) = following_route {
             route_results.push(RouteResult::RouteChanged {
                 from: route.clone(),
                 to: next.clone(),
@@ -184,7 +211,10 @@ pub fn chat_completion_streaming(
             });
         }
     }
-    let error = last_error.unwrap_or_else(|| AttemptError::permanent("no model route configured"));
+    let error = match last_error {
+        Some(error) => error,
+        None => AttemptError::permanent("no model route configured"),
+    };
     Err(stream_failure(
         error.class,
         error.message,

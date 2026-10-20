@@ -9,17 +9,23 @@ fn usage_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/usage.json")
 }
 
+/// Brama passes on models.dev's prices, each the cost of a million tokens
+/// in USD: https://github.com/anomalyco/models.dev/blob/dev/README.md
+const TOKENS_PER_PRICE: f64 = 1_000_000.0;
+
 pub(in crate::agent) fn usage_cost(
     cwd: &Path,
     _config: &Config,
     model: &str,
     usage: &CompletionUsage,
 ) -> Option<Value> {
-    let endpoint = crate::agent::credential::brama_url();
-    let client = crate::control_plane::brama::BramaClient::configured(
-        endpoint,
-        env::var("BRAMA_TOKEN").ok(),
-    );
+    let client = match crate::control_plane::model_client() {
+        Ok(client) => client,
+        Err(error) => {
+            eprintln!("jeden: the model route could not be read to price {model}; the call is recorded without a cost: {error}");
+            return None;
+        }
+    };
     // An unpriced model and an unreadable catalogue both leave the call
     // without a cost; only the second is a failure, so it is said with its cause.
     let catalog = match crate::control_plane::model_catalog(cwd, &client, false) {
@@ -30,10 +36,10 @@ pub(in crate::agent) fn usage_cost(
         }
     };
     let cost = catalog.price(model)?;
-    let input = usage.input_tokens * cost.input / 1_000_000.0;
-    let output = usage.output_tokens * cost.output / 1_000_000.0;
-    let cache_read = usage.cache_read_tokens * cost.cache_read / 1_000_000.0;
-    let cache_write = usage.cache_write_tokens * cost.cache_write / 1_000_000.0;
+    let input = usage.input_tokens * cost.input / TOKENS_PER_PRICE;
+    let output = usage.output_tokens * cost.output / TOKENS_PER_PRICE;
+    let cache_read = usage.cache_read_tokens * cost.cache_read / TOKENS_PER_PRICE;
+    let cache_write = usage.cache_write_tokens * cost.cache_write / TOKENS_PER_PRICE;
     Some(json!({
         "input": input,
         "output": output,
@@ -51,6 +57,9 @@ pub(in crate::agent) fn append_usage_event(
     lease: Option<&crate::model_router::lease::SessionLease>,
 ) -> Result<(), String> {
     let path = usage_path(cwd);
+    // The time is read before the ledger: a clock that cannot give one
+    // leaves the ledger as it was, never stamped as the epoch.
+    let at = now_stamp()?;
     // Only a ledger that is not there starts empty: one that cannot be read
     // or is not JSON was replaced by this single event, losing every event
     // recorded before it.
@@ -62,7 +71,7 @@ pub(in crate::agent) fn append_usage_event(
             )
         })?,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            json!({"version": 1, "events": []})
+            json!({"events": []})
         }
         Err(error) => {
             return Err(format!(
@@ -83,7 +92,7 @@ pub(in crate::agent) fn append_usage_event(
         .as_array_mut()
         .ok_or("usage events must be an array")?;
     let mut event = json!({
-        "at": now_stamp(),
+        "at": at.clone(),
         "model": router.model.clone(),
         "serviceTier": if router.service_tier.trim().is_empty() { Value::Null } else { json!(router.service_tier.clone()) },
         "inputTokens": usage.input_tokens,
@@ -105,8 +114,7 @@ pub(in crate::agent) fn append_usage_event(
     }
     events.push(event);
     if let Some(obj) = document.as_object_mut() {
-        obj.insert("version".into(), json!(1));
-        obj.insert("updatedAt".into(), json!(now_stamp()));
+        obj.insert("updatedAt".into(), json!(at));
     }
     fs::write(
         &path,

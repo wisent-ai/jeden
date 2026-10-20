@@ -196,13 +196,20 @@ pub(crate) fn streaming_attempt_inner(
                 retry_after,
             } => {
                 content_type = kind;
-                if !(200..300).contains(&status) {
+                if !reqwest::StatusCode::from_u16(status).is_ok_and(|code| code.is_success()) {
                     let body = match recv_until(&receiver, cancelled) {
                         Ok(WireMessage::FullBody(Ok(body))) => body,
                         Ok(WireMessage::FullBody(Err(error))) | Ok(WireMessage::Network(error)) => {
                             error
                         }
-                        _ => String::new(),
+                        Err(StreamErrorClass::Cancelled) => return Err(AttemptError {
+                            class: StreamErrorClass::Cancelled,
+                            message: "Turn cancelled.".into(),
+                            retry_after: None,
+                            visible_output: state.visible_output,
+                        }),
+                        Err(class) => format!("model stream adapter disconnected while reading HTTP {status} refusal body ({class:?})"),
+                        Ok(_) => format!("model stream adapter did not send the HTTP {status} refusal body"),
                     };
                     return Err(http_error(status, body, retry_after));
                 }

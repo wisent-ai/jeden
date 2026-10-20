@@ -34,6 +34,8 @@ export const sessionCommands = [
       "A <code>--resume-session</code> that names no session is refused naming the file it could not read (<code>cannot read &lt;dir&gt;/state.json: …</code>; interactively <code>--resume-session names no session: &lt;dir&gt; does not exist</code>). A session command with neither a named nor a recorded last session is refused as <code>No prior session found. Run a task first, or name one with --resume-session.</code>",
       "A missing value for a valued option is refused (for example <code>--model requires a value</code>); non-integer token or step bounds are refused.",
       "Model work fails closed when required router configuration or credentials are absent, and write or command tools remain approval-gated unless their tier was granted.",
+      "An explicit direct provider endpoint must be HTTPS or loopback HTTP, without embedded credentials, query or fragment. Jeden refuses <code>JEDEN_MODEL_ENDPOINT</code> before sending a catalog credential to any other address; a process-owned key does not override this safety check.",
+      "Completion intake and acceptance inspections read the selected route's model catalog for its declared output ceiling, using the same direct-provider token list and rotation as a run when <code>JEDEN_MODEL_KEY</code> is unset. An unreadable catalog, unresolved model or ceiling too large for Jeden refuses the inspection with its cause; an entry declaring no ceiling uses the provider's own limit.",
       "On macOS, a missing task sandbox helper is reported as <code>jeden-sandbox-helper is not installed beside the Jeden executable; build and code-sign it or set JEDEN_TASK_SANDBOX_HELPER</code>. Install the complete release, keeping its signed <code>jeden-sandbox-helper</code> beside <code>jeden</code>; the release SBOM and provenance identify both executables.",
       "After a request is captured, a preparation failure is retained in the session transcript as <code>run_error</code>, with <code>operation: prepare_turn</code> and the original failure message. Inspect it with <code>jeden show &lt;session-id&gt;</code>. The same conversation path serves CLI and RPC; a recorded refusal is not successful execution and does not complete the retained request. Failures before conversation creation are not covered by this event. If writing the event also fails, the returned error names both failures.",
       "A non-rate-limit HTTP failure from Brama includes its status, the requested API path, and the quoted response body. An empty quoted body means that the upstream server supplied no error detail; it is not a model answer. The CLI and RPC report the same failure.",
@@ -57,7 +59,7 @@ export const sessionCommands = [
       "The workspace, model route, grants, JSON output, and maximum steps use the same options as <code>run</code>.",
       "Transcript Lake preference evidence is consulted only when command execution is granted; otherwise pursuit proceeds without that external executable.",
       "An immutable request has <code>schema_version: 1</code>, <code>request_id</code>, <code>initiative_id</code>, <code>objective</code>, absolute canonical <code>cwd</code>, <code>evidence_refs</code>, decimal-string <code>budget_usd</code>, <code>allow_write</code>, <code>allow_command</code>, and optional <code>repositories</code> containing exact GitHub owner/name pairs. Submission needs CLI grants matching every requested grant.",
-      "Request values, completed stages and the inference ledger live in the fleet database <code>jeden</code> (tables <code>pursuit_values</code>, <code>pursuit_stages</code>, <code>pursuit_calls</code>), keyed by request ID, so a request submitted on one host can be read or resumed on another. Run artifacts and the owner lock <code>owner.lock</code> stay under <code>JEDEN_PURSUIT_STATE_ROOT</code>, or <code>~/.jeden/pursuit</code>. When <code>HOME</code> is isolated, <code>JEDEN_STADO_HOME</code> names the home whose <code>.stado/</code> holds Stado and the <code>jeden-database-client</code> bearer. A request ID cannot be rebound to different input. Resume retains its original execution options and grants; it is not a way to enlarge authority.",
+      "Request values, completed stages and the inference ledger live in the database named by <code>JEDEN_DATABASE_URL</code> (tables <code>pursuit_values</code>, <code>pursuit_stages</code>, <code>pursuit_calls</code>), keyed by request ID. Hosts share these values only when they use the same server database; a SQLite file remains local. Run artifacts and the owner lock <code>owner.lock</code> stay under <code>JEDEN_PURSUIT_STATE_ROOT</code>, or <code>~/.jeden/pursuit</code>. A request ID cannot be rebound to different input. Resume retains its original execution options and grants; it is not a way to enlarge authority. An absent URL or database refusal names the operation and cause rather than asking Stado or Skarbiec for a credential.",
     ],
     effect: "Runs canonical Pursuit stages through persistent planner/executor conversations and fresh read-only reviewers. Machine responses include request and initiative identities, state, actual known spend, errors, source revisions and contract/verdict/receipt paths. Completed stages are reused only for the same role and input digest. Independent acceptance is bound to clean source revisions observed before and after review; successful machine requests must also match remote main. Status reads retained state without starting another run. A completed request is returned rather than executed again.",
     refusals: [
@@ -100,10 +102,13 @@ export const sessionCommands = [
       "Optional: a text file of revoked client-certificate serials.",
       "Each identity-map entry supplies <code>tenant</code> and either <code>san</code> with <code>principal</code> (a client certificate) or <code>wisentOrganization</code>, a Wisent organization UUID whose members sign in with their Wisent identity. Either kind may supply <code>workspaces</code>: a list of absolute host directories that principal is granted.",
       "When the map names at least one <code>wisentOrganization</code>, the listener also finishes handshakes without a client certificate. Such a connection's first request must be <code>identity/authenticate</code> with <code>accessToken</code> (the Wisent access token the person signed in with) and <code>organizationId</code>. The daemon asks Wisent Identity (<code>authorize_organization</code> on the identity project that <code>JEDEN_WISENT_AUTH_URL</code> and <code>JEDEN_WISENT_AUTH_ANON_KEY</code> name; nothing is compiled in, and a map with a <code>wisentOrganization</code> entry refuses to start without them as <code>JEDEN_WISENT_AUTH_URL is not set; Wisent Identity has no address</code>) and answers <code>principal</code> (<code>wisent-user:&lt;user id&gt;</code>), <code>tenant</code>, <code>organizationId</code> and <code>role</code>. A certificate, when presented, is still verified exactly as before.",
+      "Host-wide model keys are optional and distinct from workspace grants. Set <code>JEDEN_CREDENTIAL_MANAGER_USER_ID</code> to the Wisent user UUID that may manage this host's pool. Without it the token methods refuse <code>access_denied</code>; another member, even with a workspace grant, has no credential-management authority.",
       "The same completion get, control and continue methods are available after session creation or open, subject to the existing tenant/workspace authorization. Continue uses the request metadata idempotency key and returns the same started, reattached or completed response as session/prompt.",
       "Jeden iOS closes established and still-authenticating connections when the signed-in user or selected organization changes. Pending callers receive the connection failure, and a late authentication result cannot restore the previous identity's socket. A subsequent request authenticates with the current shared Wisent session.",
       "The iOS host readiness badge accepts only the latest probe for the current identity. Identity changes and host removal invalidate pending results; cancelled probes clear their own pending badge without overwriting a newer request.",
       "<code>asks/list</code>, <code>asks/get {askId}</code> and <code>asks/answer {askId,text}</code> return what the RPC methods of the same names return, without the host's <code>register</code> path. A principal sees an ask first asked in a workspace it is granted, or asked in a session it holds; <code>asks/list</code> leaves every other ask out, and <code>asks/get</code> and <code>asks/answer</code> refuse it <code>access_denied</code>. An id the register does not hold is refused with <code>unknown ask: &lt;id&gt;; jeden asks list shows every recorded ask</code>.",
+      "<code>token/status</code> returns route, key source, token metadata and refusals without secrets; <code>token/list</code> returns metadata; <code>token/add {label,endpoint,token}</code> stores a key on the host; <code>token/remove {id}</code> removes it. Jeden iOS presents these on the selected host's Model credentials screen and sends a new key only over its authenticated TLS connection.",
+      "<code>health/readiness</code> returns the executor state and the live daemon's embedded build <code>version</code>. A real host qualification compares its clean source revision to the version suffix; a reachable listener alone does not prove the changed daemon is running.",
     ],
     effect: "Creates <code>.jeden/headless</code> service state, a durable reconnect key, tenant idempotency/replay stores, and an mTLS listener at the requested address. Beyond <code>health/readiness</code>, <code>session/create</code>, <code>session/reconnect</code>, <code>session/prompt</code>, <code>session/replay</code> and <code>session/cancel</code>, it serves <code>session/list</code>, <code>session/open</code> and <code>session/history</code>: a principal with granted <code>workspaces</code> lists the host's own sessions whose recorded <code>cwd</code> lies inside a grant, opens one under its own host session id so later prompts continue that very ledger, and reads its replayed turns without resuming it. A principal without <code>workspaces</code> keeps seeing only the sessions it created here, jailed to its tenant scratch workspace.",
     refusals: [
@@ -111,6 +116,7 @@ export const sessionCommands = [
       "Unreadable or invalid identity maps, empty maps, invalid mappings, TLS material failures, revoked certificates, certificates without an identity SAN, and bind failures are refused.",
       "A <code>workspaces</code> entry that is not an absolute path, contains <code>..</code>, or is not an existing readable directory is named and refused when the identity map is loaded.",
       "An identity-map entry that names both <code>san</code> and <code>wisentOrganization</code>, or neither, is refused when the map is loaded. A certificate-less connection whose first request is not <code>identity/authenticate</code> is answered <code>unauthenticated</code> and closed; a non-UUID <code>organizationId</code> is <code>invalid_organization</code>; a token Wisent Identity rejects is <code>unauthenticated</code>; a user who is not a member is <code>forbidden</code>; an organization the map does not name is <code>access_denied</code>; an unreachable Wisent Identity is the retryable <code>identity_unavailable</code> carrying the cause.",
+      "A non-Unicode or invalid <code>JEDEN_CREDENTIAL_MANAGER_USER_ID</code> returns <code>credential_configuration</code> with cause. An unset manager or another identity returns <code>access_denied</code> before reading token metadata or touching storage. Add and remove preserve the same invalid endpoint, duplicate label, unsafe store and unknown ID causes as the local <code>jeden token</code> RPC.",
       "<code>session/open</code> and <code>session/history</code> refuse <code>access_denied</code> for a principal without granted workspaces, for an id that is not a session directory under the session root, and for a session whose recorded <code>cwd</code> lies outside every grant; a missing or blank <code>sessionId</code> and a <code>limit</code> below one are <code>invalid_request</code>.",
       "A session directory whose <code>state.json</code> cannot be read is left out of <code>session/list</code> and counted in the reply's <code>skipped</code> field rather than silently dropped.",
       "Tenant request, session, and stored-byte limits are enforced instead of admitting excess work.",
@@ -144,7 +150,7 @@ export const sessionCommands = [
     refusals: [
       "Bind failures stop startup.",
       "The relay refuses missing or invalid write tokens, empty bodies, blobs over 1 MiB, unsupported methods, invalid roles, and unknown routes with explicit HTTP errors. A sequence outside the database or host integer representation is refused before persistence.",
-      "When the fleet database cannot be reached, <code>/health</code> and reads answer HTTP 500 with the failed step (Stado resolve, the Skarbiec route or bearer <code>jeden-database-client</code>, or the Postgres connection) in <code>error</code>.",
+      "When <code>JEDEN_DATABASE_URL</code> is absent, not Unicode, or its direct connection fails, <code>/health</code> and reads answer HTTP 500 with the configuration, connection or migration cause in <code>error</code>; unreadable URL bytes are not echoed and no Skarbiec credential is consulted.",
     ],
   },
   {
@@ -153,13 +159,14 @@ export const sessionCommands = [
     invocation: "jeden sessions [limit] [--json]",
     purpose: "List locally stored Jeden session identifiers.",
     inputs: [
-      "Optional: a positive integer-style positional limit. With no limit, every directory in the session root is considered.",
+      "Optional: a whole-number positional limit, including zero for no rows. With no limit, every directory in the session root is considered.",
       "Optional: <code>--json</code> prints the identifiers as one JSON array.",
       "The session root is <code>~/.jeden/sessions</code> unless <code>JEDEN_SESSION_ROOT</code> overrides it.",
     ],
     effect: "Reads session directory names and prints one per line, or the JSON array; it does not mutate session data. A root that does not exist prints <code>No sessions found.</code> (or <code>[]</code>).",
     refusals: [
       "A limit that is not a whole number is refused as <code>sessions takes a whole number of sessions to list, not \"VALUE\"</code>.",
+      "A second positional argument is refused as <code>sessions: unexpected argument \"ARG\"; usage: jeden sessions [limit] [--json]</code> before listing anything.",
       "A session root that exists but cannot be read is refused as <code>the session root PATH cannot be read: CAUSE</code>.",
       "Unknown global options are refused before dispatch.",
     ],
@@ -173,7 +180,8 @@ export const sessionCommands = [
     effect: "Reads the session state and validated transcript ledger. Without <code>--json</code> it prints the session id and path and each event's time, type and data; with <code>--json</code> it prints its id, path, ledger version, active leaf, recovery flag, and exported events. It does not mutate the session.",
     refusals: [
       "A missing selector is refused as <code>show requires a session id</code>.",
-      "A session that cannot be read is refused as <code>session ID cannot be read: CAUSE</code>; nothing is printed on stdout.",
+      "An extra positional argument is refused as <code>show: unexpected argument \"ARG\"; usage: jeden show &lt;session-id-or-path&gt; [--json]</code> before reading the session.",
+      "A session that cannot be read is refused as <code>session ID cannot be read: CAUSE</code>. A readable record missing a field needed for text rendering is refused as <code>session ID cannot be rendered: CAUSE</code>; nothing is printed on stdout.",
     ],
   },
   {
@@ -183,14 +191,14 @@ export const sessionCommands = [
     purpose: "Write a recorded session to a file as JSON, HTML, or Markdown. Printing a session is <code>jeden show</code>.",
     inputs: [
       "Required: a session identifier or path, and the output file.",
-      "Optional: <code>--html</code> or <code>--markdown</code>; JSON is the default.",
+      "Optional: exactly one of <code>--html</code> or <code>--markdown</code>; JSON is the default.",
     ],
     effect: "Writes the payload to the output path and prints the path.",
     refusals: [
       "A missing selector is refused as <code>export requires a session id or path: usage: …</code> and exits 2.",
       "A missing output file is refused as <code>export requires the file to write: usage: jeden export &lt;session-id-or-path&gt; &lt;output&gt; [--html|--markdown]; `jeden show` prints a session</code> and exits 2; nothing is printed or written.",
-      "Any other flag, or a second output path, is refused as <code>export: unexpected argument \"ARG\"; usage: …</code> and exits 2.",
-      "Missing sessions, invalid ledgers, unsupported renderer formats, and output write errors (<code>cannot write the export to PATH: CAUSE</code>) are returned without a partial successful result.",
+      "An unknown flag (including a single-dash spelling) or a second output path is refused as <code>export: unexpected argument \"ARG\"; usage: …</code> and exits 2. <code>--json</code> is refused because JSON is already the default. Repeated or conflicting format flags are refused as <code>export accepts only one format option; usage: …</code>. No session is read and no file is written.",
+      "Missing or unreadable sessions, recorded sessions without string id/path or an events array when rendering HTML/Markdown (<code>session ID cannot be exported: CAUSE</code>), and output write errors (<code>cannot write the export to PATH: CAUSE</code>) are returned without a partial successful result.",
     ],
   },
   {

@@ -1,5 +1,5 @@
-//! The model route: does the model this checkout would send resolve in the
-//! catalog Brama serves it, and is Brama ready to take it.
+//! The model route: does the selected provider's catalog contain the configured
+//! model, and does Brama report readiness when it is the selected transport?
 use super::{elapsed, HealthProbe, ProbeState};
 use serde_json::json;
 use std::path::Path;
@@ -8,77 +8,122 @@ use std::time::Instant;
 /// The model this checkout would actually send, in the precedence
 /// `model_router_config` uses minus the `--model` flag no diagnostic has: the
 /// merged config first, then `JEDEN_MODEL`.
-fn configured_model(cwd: &Path) -> Option<String> {
-    crate::cli::config::load_config(cwd)
-        .model
-        .or_else(|| std::env::var("JEDEN_MODEL").ok())
+fn configured_model(cwd: &Path) -> Result<Option<String>, String> {
+    let declared = crate::cli::config::load_config(cwd).model;
+    let model = match declared {
+        Some(model) => Some(model),
+        None => match std::env::var("JEDEN_MODEL") {
+            Ok(model) => Some(model),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
+        },
+    };
+    Ok(model
         .map(|model| model.trim().to_string())
-        .filter(|model| !model.is_empty())
+        .filter(|model| !model.is_empty()))
 }
 
-/// Brama, judged on what a prompt needs rather than on whether the service
-/// answers. Three things can be true at once and only the first was ever
-/// reported: the catalog lists, the credentials behind it are refused, and the
-/// model this checkout is configured to send is not in the catalog at all. The
-/// first was `healthy`, which is how a doctor said fine for a day while every
-/// `jeden run` died — the failure this pack has a written rule about.
+/// Probe the selected model route rather than treating a responding service as
+/// proof that a prompt can run. A catalog can answer while the selected model
+/// is absent, or Brama can list models while its runtime is not ready.
 pub(super) fn brama_probe(
     cwd: &Path,
     client: &crate::control_plane::brama::BramaClient,
 ) -> HealthProbe {
     let started = Instant::now();
-    let health = client.health();
-    let origin = crate::agent::credential::route_origin();
-    if !health.available {
-        return HealthProbe::unavailable("brama", started, format!("{} ({origin})", health.detail));
+    let direct = crate::agent::credential::direct_provider();
+    if direct.is_none() {
+        if let Some(cause) = crate::agent::credential::direct_refusal() {
+            return HealthProbe::unavailable(
+                "model",
+                started,
+                format!("direct provider route refused: {cause}"),
+            );
+        }
     }
-    let catalog = match client.catalog(false) {
+    let is_direct = direct.is_some();
+    let subsystem = if is_direct { "model" } else { "brama" };
+    let active = match direct {
+        Some((endpoint, key)) => {
+            crate::control_plane::brama::BramaClient::configured(Some(endpoint), key)
+        }
+        None => client.clone(),
+    };
+    let origin = if is_direct {
+        "direct provider selected by JEDEN_MODEL_ENDPOINT".to_string()
+    } else {
+        crate::agent::credential::route_origin()
+    };
+    let health = active.health();
+    if !health.available {
+        return HealthProbe::unavailable(
+            subsystem,
+            started,
+            format!("{} ({origin})", health.detail),
+        );
+    }
+    let catalog = match crate::control_plane::model_catalog(cwd, &active, is_direct) {
         Ok(catalog) => catalog,
         Err(error) => {
-            return HealthProbe::unavailable("brama", started, format!("{error} ({origin})"))
+            return HealthProbe::unavailable(subsystem, started, format!("{error} ({origin})"))
         }
     };
-    let readiness = client.readiness();
-    let configured = configured_model(cwd);
-    // The same rule the run loop applies in `model_router_config`: a virtual
-    // route resolves itself, everything else has to resolve against the catalog,
-    // and `resolve` is what says why when it does not.
+    if is_direct && catalog.degraded {
+        return HealthProbe::unavailable(subsystem, started,
+            "GET /v1/models at the direct provider failed; only a stale catalog was available, so this route is not qualified");
+    }
+    let configured = match configured_model(cwd) {
+        Ok(model) => model,
+        Err(error) => return HealthProbe::unavailable(subsystem, started, error),
+    };
+    if configured.is_none() {
+        return HealthProbe::unavailable(subsystem, started,
+            format!("catalog answered through {origin}, but no model is selected; configure JEDEN_MODEL or config.model"));
+    }
     let route_error = configured.as_deref().and_then(|model| {
         if crate::model_router::is_virtual_model_route(model) {
-            return None;
+            return is_direct.then(|| (model.to_owned(),
+                "Brama virtual route cannot be used with a direct provider; choose a concrete provider model".into()));
         }
-        catalog
-            .resolve(model)
-            .err()
-            .map(|error| (model.to_owned(), error.to_string()))
+        catalog.resolve(model).err().map(|error| (model.to_owned(), error.to_string()))
     });
+    let readiness = if is_direct {
+        None
+    } else {
+        Some(active.readiness())
+    };
+    let readiness_evidence = match &readiness {
+        Some(Ok(value)) => Some(value),
+        _ => None,
+    };
     let evidence = json!({
         "health": health,
-        "probe": {"version": catalog.version, "models": catalog.models.len()},
+        "probe": {"version": catalog.version, "catalogRevision": catalog.catalog_revision, "models": catalog.models.len()},
         "configuredModel": configured,
         "route": origin,
-        "readiness": readiness.as_ref().ok(),
+        "readiness": readiness_evidence,
     });
-    // Fatal, not degraded: `available()` is what the report's verdict and the
-    // exit code read, and a model that does not resolve fails every prompt this
-    // checkout can send. `HealthProbe::unavailable` carries no evidence, so the
-    // state is set here to keep the catalog and the readiness answer attached.
     if let Some((model, error)) = route_error {
         return HealthProbe {
-            subsystem: "brama",
+            subsystem,
             state: ProbeState::Unavailable,
             active: false,
             latency_ms: elapsed(started),
             detail: format!(
-                "configured model `{model}` does not resolve in the catalog Brama serves this agent ({} route(s)): {error}",
-                catalog.models.len()
+                "configured model `{model}` does not resolve in the selected catalog: {error}"
             ),
             evidence: Some(evidence),
         };
     }
     match readiness {
-        Ok(readiness) if !readiness.ready => HealthProbe::unavailable(
-            "brama",
+        None => HealthProbe::healthy(
+            subsystem,
+            started,
+            "direct provider catalog resolves; chat authorization is verified by a real model call",
+            Some(evidence),
+        ),
+        Some(Ok(readiness)) if !readiness.ready => HealthProbe::unavailable(
+            subsystem,
             started,
             format!(
                 "Brama is not ready: {}",
@@ -89,22 +134,17 @@ pub(super) fn brama_probe(
                 }
             ),
         ),
-        Ok(readiness) if readiness.degraded || readiness.operator_action_required => {
-            HealthProbe::degraded("brama", started, readiness.reason.clone(), Some(evidence))
+        Some(Ok(readiness)) if readiness.degraded || readiness.operator_action_required => {
+            HealthProbe::degraded(subsystem, started, readiness.reason.clone(), Some(evidence))
         }
-        // A Brama too old to serve `/readyz` leaves the catalog as the only
-        // evidence there is, and says so rather than borrowing its verdict.
-        Err(error) => HealthProbe::degraded(
-            "brama",
+        Some(Err(error)) => HealthProbe::degraded(
+            subsystem,
             started,
-            format!(
-                "catalog lists {} route(s); readiness is unknown: {error}",
-                catalog.models.len()
-            ),
+            format!("catalog resolves; readiness is unknown: {error}"),
             Some(evidence),
         ),
-        Ok(_) => HealthProbe::healthy(
-            "brama",
+        Some(Ok(_)) => HealthProbe::healthy(
+            subsystem,
             started,
             "catalog resolves and Brama reports itself ready",
             Some(evidence),

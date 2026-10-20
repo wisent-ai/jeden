@@ -1,92 +1,40 @@
-//! Asking the gateway for its readiness and its catalogue, and deciding when
-//! the answer already in hand is good enough.
+//! Catalog retrieval and cache policy for Brama and direct providers.
 //!
 //! Split out of `control_plane/services/brama.rs`, which had grown past the
 //! module line cap.
 
-use super::super::contract::RequestMeta;
-use super::super::transport::{SecretRef, TransportRequest, TransportResponse};
+use super::super::transport::{SecretRef, TransportRequest};
 use super::cache::{catalog_cache_key, read_disk_cache, write_disk_cache, CachedCatalog, CACHE};
 use super::catalog::validate_catalog;
-use super::{BramaClient, BramaError, BramaReadiness, ModelCatalog};
+use super::{BramaClient, BramaError, ModelCatalog};
 use crate::control_plane::services::brama::auth::insert_caller_auth_headers;
 use crate::control_plane::services::brama::API_VERSION;
 use reqwest::StatusCode;
-use serde_json::Value;
+use sha2::Digest;
 use std::collections::BTreeMap;
 use std::time::Instant;
 
 impl BramaClient {
-    ///
-    /// It is not under `/v1`, so it does not go through the versioned request
-    /// helper and negotiates no schema headers.
-    /// What Brama says about its own readiness, which is the only answer that
-    /// covers credentials: `/health` reports that a process exists and
-    /// `/v1/models` that a catalog can be listed, while a subscription whose
-    /// credential the provider rejects appears in neither. This route redeems
-    /// one credential per configured provider and answers `degraded` with its
-    /// own sentence, which is the state `jeden run` then fails inside.
-    pub fn readiness(&self) -> Result<BramaReadiness, BramaError> {
-        let endpoint = self.key()?;
-        let mut headers = BTreeMap::new();
-        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
-            headers.insert("authorization".into(), format!("Bearer {token}"));
-        }
-        let response = self
-            .transport
-            .execute(TransportRequest {
-                method: reqwest::Method::GET,
-                url: format!("{endpoint}/readyz"),
-                headers,
-                body: None,
-            })
-            .map_err(BramaError::Transport)?;
-        let value: Value = serde_json::from_slice(&response.body).map_err(|error| {
-            BramaError::InvalidResponse(format!("readiness response is not JSON: {error}"))
-        })?;
-        let flag = |name: &str| value.get(name).and_then(Value::as_bool).unwrap_or(false);
-        Ok(BramaReadiness {
-            status: response.status,
-            ready: flag("ready"),
-            degraded: flag("degraded"),
-            operator_action_required: flag("operator_action_required"),
-            reason: value
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string(),
-            providers_without_credential: value
-                .get("providers")
-                .and_then(Value::as_array)
-                .map(|providers| {
-                    providers
-                        .iter()
-                        .filter(|provider| {
-                            !provider
-                                .get("credential")
-                                .and_then(Value::as_bool)
-                                .unwrap_or(false)
-                        })
-                        .filter_map(|provider| {
-                            provider
-                                .get("provider")
-                                .and_then(Value::as_str)
-                                .map(str::to_owned)
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-        })
-    }
     pub fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
         let endpoint = self.key()?;
-        let key = catalog_cache_key(&endpoint, self.authorization.as_ref());
-        let prior = CACHE
-            .lock()
-            .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
-            .get(&key)
-            .cloned();
-        if !force {
+        let direct =
+            crate::agent::credential::direct_provider().is_some_and(|(url, _)| url == endpoint);
+        // A direct provider's authorization may rotate between requests.
+        // An ETag and catalog saved under one token cannot validate a later
+        // request made with another token or no token.
+        let authorization = SecretRef::resolve_optional(self.authorization.as_ref())
+            .map_err(BramaError::Configuration)?;
+        let key = catalog_cache_key(&endpoint, authorization.as_deref());
+        let prior = if direct {
+            None
+        } else {
+            CACHE
+                .lock()
+                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+                .get(&key)
+                .cloned()
+        };
+        if !force && !direct {
             if let Some(cached) = &prior {
                 if self.ttl.is_some_and(|ttl| cached.fetched.elapsed() < ttl) {
                     return Ok(cached.catalog.clone());
@@ -128,26 +76,37 @@ impl BramaClient {
         }
         // A stale disk entry still seeds the conditional request: on 304 we
         // rehydrate from disk instead of downloading the full catalog.
-        let disk_prior = if prior.is_none() {
-            read_disk_cache(&key)
-        } else {
+        let disk_prior = if direct || prior.is_some() {
             None
+        } else {
+            read_disk_cache(&key)
         };
         let mut headers = BTreeMap::new();
-        headers.insert("x-jeden-schema-min".into(), "1".into());
-        headers.insert("x-jeden-schema-max".into(), "1".into());
-        headers.insert(
-            "x-correlation-id".into(),
-            format!(
-                "brama-{}",
-                self.correlation
-                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            ),
-        );
-        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+        // Direct requests neither construct nor send Brama's signed headers.
+        if !direct {
+            headers.insert(
+                "x-jeden-schema-min".into(),
+                super::super::contract::MIN_SCHEMA_VERSION.to_string(),
+            );
+            headers.insert(
+                "x-jeden-schema-max".into(),
+                super::super::contract::MIN_SCHEMA_VERSION.to_string(),
+            );
+            headers.insert(
+                "x-correlation-id".into(),
+                format!(
+                    "brama-{}",
+                    self.correlation.fetch_add(
+                        std::num::NonZeroU64::MIN.get(),
+                        std::sync::atomic::Ordering::Relaxed,
+                    )
+                ),
+            );
+            insert_caller_auth_headers(&mut headers, &[]);
+        }
+        if let Some(token) = authorization {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
-        insert_caller_auth_headers(&mut headers, &[]);
         if let Some(etag) = prior
             .as_ref()
             .and_then(|entry| entry.etag.as_ref())
@@ -163,6 +122,11 @@ impl BramaClient {
         }) {
             Ok(response) => response,
             Err(error) => {
+                if direct {
+                    return Err(BramaError::Transport(format!(
+                        "direct provider GET {endpoint}/{API_VERSION}/models failed: {error}"
+                    )));
+                }
                 if let Some(mut cached) = prior.map(|entry| entry.catalog) {
                     cached.degraded = true;
                     return Ok(cached);
@@ -174,9 +138,11 @@ impl BramaClient {
                 return Err(BramaError::Transport(error));
             }
         };
-        super::super::contract::negotiate_response(&response.headers).map_err(|error| {
-            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
-        })?;
+        if !direct {
+            super::super::contract::negotiate_response(&response.headers).map_err(|error| {
+                BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
+            })?;
+        }
         if response.status == StatusCode::NOT_MODIFIED.as_u16() {
             let mut cached = prior.or_else(|| {
                 disk_prior.map(|(catalog, etag, _)| CachedCatalog {
@@ -198,7 +164,7 @@ impl BramaClient {
             return Ok(catalog);
         }
         let status = response.status;
-        if !(200..300).contains(&status) {
+        if !StatusCode::from_u16(status).is_ok_and(|status| status.is_success()) {
             return Err(BramaError::http(status, "/models", &response.body));
         }
         let etag = response.headers.get("etag").cloned();
@@ -207,77 +173,40 @@ impl BramaClient {
         let mut catalog: ModelCatalog =
             serde_json::from_str(&text).map_err(|e| BramaError::InvalidCatalog(e.to_string()))?;
         if catalog.catalog_revision.is_empty() {
-            catalog.catalog_revision = response
-                .headers
-                .get("x-catalog-revision")
-                .cloned()
-                .or_else(|| etag.clone())
-                .unwrap_or_else(|| catalog.version.clone());
+            catalog.catalog_revision = if direct {
+                format!(
+                    "sha256:{}",
+                    hex::encode(sha2::Sha256::digest(text.as_bytes()))
+                )
+            } else {
+                response
+                    .headers
+                    .get("x-catalog-revision")
+                    .cloned()
+                    .or_else(|| etag.clone())
+                    .or_else(|| (!catalog.version.is_empty()).then(|| catalog.version.clone()))
+                    .ok_or_else(|| {
+                        BramaError::InvalidCatalog(
+                            "model catalog has no revision header, ETag, or version".into(),
+                        )
+                    })?
+            };
         }
-        validate_catalog(&catalog)?;
-        write_disk_cache(&key, &catalog, etag.as_deref());
-        let mut cache = CACHE
-            .lock()
-            .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
-        cache.insert(
-            key,
-            CachedCatalog {
-                catalog: catalog.clone(),
-                etag,
-                fetched: Instant::now(),
-            },
-        );
+        validate_catalog(&catalog, !direct)?;
+        if !direct {
+            write_disk_cache(&key, &catalog, etag.as_deref());
+            let mut cache = CACHE
+                .lock()
+                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
+            cache.insert(
+                key,
+                CachedCatalog {
+                    catalog: catalog.clone(),
+                    etag,
+                    fetched: Instant::now(),
+                },
+            );
+        }
         Ok(catalog)
-    }
-    /// One versioned request, its answer read whole: a JSON reply, a
-    /// generated image or a spoken text alike.
-    pub(super) fn request_json(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-        body: Option<Vec<u8>>,
-        meta: &RequestMeta,
-    ) -> Result<TransportResponse, BramaError> {
-        super::super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
-            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
-        })?;
-        let mut headers = BTreeMap::new();
-        headers.insert("x-jeden-schema-min".into(), meta.schema_min.to_string());
-        headers.insert("x-jeden-schema-max".into(), meta.schema_max.to_string());
-        headers.insert("x-correlation-id".into(), meta.correlation_id.clone());
-        if let Some(key) = &meta.idempotency_key {
-            headers.insert("idempotency-key".into(), key.clone());
-        }
-        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
-            headers.insert("authorization".into(), format!("Bearer {token}"));
-        }
-        insert_caller_auth_headers(&mut headers, body.as_deref().unwrap_or_default());
-        let response = self
-            .transport
-            .execute(TransportRequest {
-                method,
-                url: format!("{}/{API_VERSION}{path}", self.key()?),
-                headers,
-                body,
-            })
-            .map_err(BramaError::Transport)?;
-        super::super::contract::negotiate_response(&response.headers).map_err(|error| {
-            BramaError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
-        })?;
-        if response.status == 429 {
-            let retry_after_ms = response
-                .headers
-                .get("retry-after")
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|seconds| seconds.saturating_mul(1000));
-            return Err(BramaError::RateLimited {
-                retry_after_ms,
-                retryable: BramaError::stated_retryable(&response.body),
-            });
-        }
-        if !(200..300).contains(&response.status) {
-            return Err(BramaError::http(response.status, path, &response.body));
-        }
-        Ok(response)
     }
 }

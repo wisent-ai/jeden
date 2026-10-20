@@ -73,18 +73,22 @@ pub(crate) fn update_command() -> Result<String, String> {
     ))
 }
 
-/// Resolve a model route against the Brama catalog, returning the canonical
-/// route id. A bare (provider-less) id resolves to the unique catalog route
-/// whose id ends with `/<model>`; an ambiguous id errors naming every match.
+/// Resolve a model route against the selected model catalog, returning its
+/// canonical id. A bare id resolves to a unique provider route; ambiguity
+/// names every matching route.
 pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<String, String> {
     if crate::model_router::is_virtual_model_route(model) {
+        if crate::agent::credential::direct_provider().is_some() {
+            return Err(format!(
+                "{model} is a Brama virtual route; choose a concrete direct-provider model with /model"
+            ));
+        }
+        if let Some(cause) = crate::agent::credential::direct_refusal() {
+            return Err(cause.to_owned());
+        }
         return Ok(model.to_string());
     }
-    let endpoint = crate::agent::credential::brama_url();
-    let client = crate::control_plane::brama::BramaClient::configured(
-        endpoint,
-        env::var("BRAMA_TOKEN").ok(),
-    );
+    let client = crate::control_plane::model_client()?;
     let catalog = crate::control_plane::model_catalog(cwd, &client, false)
         .map_err(|error| error.to_string())?;
     match catalog.resolve(model) {
@@ -124,13 +128,24 @@ fn handle_model_slash(
             .map(|spec| crate::tui::CommandOutcome::Picker(spec).into_text());
     }
     if next.is_empty() {
-        let configured = current_model
-            .map(str::to_string)
-            .or_else(|| load_config(cwd).model)
-            .or_else(|| env::var("JEDEN_MODEL").ok());
-        return Ok(configured
-            .map(|model| format!("Current model route: {model}."))
-            .unwrap_or_else(|| "No model route selected; choose one advertised by Brama.".into()));
+        let configured = if let Some(model) = current_model {
+            Some(model.to_owned())
+        } else if let Some(model) = load_config(cwd).model {
+            Some(model)
+        } else {
+            match env::var("JEDEN_MODEL") {
+                Ok(model) => Some(model),
+                Err(env::VarError::NotPresent) => None,
+                Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
+            }
+        };
+        return Ok(match configured {
+            Some(model) => format!("Current model route: {model}."),
+            None if crate::agent::credential::direct_provider().is_some() => {
+                "No model route selected; choose one advertised by the direct provider.".into()
+            }
+            None => "No model route selected; choose one advertised by Brama.".into(),
+        });
     }
     set_model_route(cwd, next)
 }
@@ -187,7 +202,9 @@ fn billing_slash_usage(command: &str) -> String {
 pub(crate) fn handle_slash(cwd: &Path, input: &str, model: Option<&str>) -> Result<String, String> {
     let trimmed = input.trim();
     let mut parts = trimmed.split_whitespace();
-    let command = parts.next().unwrap_or("");
+    let Some(command) = parts.next() else {
+        return Err("slash command is empty".into());
+    };
     if command.eq_ignore_ascii_case("/update") {
         return update_command();
     }

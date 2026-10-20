@@ -4,7 +4,6 @@
 //! Split out of `control_plane/services/brama.rs`, which had grown past the
 //! module line cap.
 
-use super::super::transport::SecretRef;
 use super::ModelCatalog;
 use crate::control_plane::services::brama::auth::caller_credentials;
 use std::collections::HashMap;
@@ -21,7 +20,7 @@ pub(super) static CACHE: LazyLock<Mutex<HashMap<String, CachedCatalog>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// On-disk catalog cache shared across processes: `~/.jeden/cache/`
-/// `brama-models-<sha256(endpoint + bearer + agent scope)[:16]>.json`. The
+/// `brama-models-<sha256(endpoint + bearer + agent scope)>.json`. The
 /// caller scope is part of the key because Brama filters and discovers models
 /// for the signed agent. The in-memory CACHE above only lives for one process,
 /// so a fresh `jeden` start can reuse the matching scoped catalog.
@@ -30,7 +29,7 @@ fn disk_cache_path(key: &str) -> std::path::PathBuf {
     let digest = sha2::Sha256::digest(key.as_bytes());
     crate::dirs_home().join(format!(
         ".jeden/cache/brama-models-{}.json",
-        &hex::encode(digest)[..16]
+        hex::encode(digest)
     ))
 }
 
@@ -96,14 +95,15 @@ pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&
     }
 }
 
-pub(super) fn catalog_cache_key(endpoint: &str, authorization: Option<&SecretRef>) -> String {
+pub(super) fn catalog_cache_key(endpoint: &str, bearer: Option<&str>) -> String {
     use sha2::Digest;
-    let bearer_scope = authorization
-        .and_then(SecretRef::resolve)
-        .map(|token| hex::encode(sha2::Sha256::digest(token.as_bytes())))
-        .unwrap_or_else(|| "anonymous".into());
-    let agent_scope = caller_credentials()
-        .map(|(agent_id, _)| agent_id)
-        .unwrap_or_else(|| "unsigned".into());
+    let bearer_scope = match bearer {
+        Some(token) => hex::encode(sha2::Sha256::digest(token.as_bytes())),
+        None => "anonymous".to_string(),
+    };
+    let agent_scope = match caller_credentials() {
+        Some((agent_id, _)) => agent_id,
+        None => "unsigned".to_string(),
+    };
     format!("{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}")
 }

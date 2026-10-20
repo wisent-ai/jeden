@@ -11,6 +11,22 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
+fn retry_after_ms(headers: &BTreeMap<String, String>) -> Result<Option<u64>, WelesError> {
+    let Some(value) = headers.get("retry-after") else {
+        return Ok(None);
+    };
+    let seconds = value.parse::<u64>().map_err(|error| {
+        WelesError::InvalidResponse(format!(
+            "Weles Retry-After header is not whole seconds ({value}): {error}"
+        ))
+    })?;
+    Ok(Some(
+        std::time::Duration::from_secs(seconds)
+            .as_millis()
+            .min(u128::from(u64::MAX)) as u64,
+    ))
+}
+
 impl WelesClient {
     pub(super) fn request(
         &self,
@@ -18,9 +34,10 @@ impl WelesClient {
         path: &str,
         body: Option<&Value>,
     ) -> Result<Value, WelesError> {
-        let sequence = self
-            .correlation
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let sequence = self.correlation.fetch_add(
+            std::num::NonZeroU64::MIN.get(),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let meta = if method == reqwest::Method::GET {
             RequestMeta::read(format!("weles-{sequence}"))
         } else {
@@ -53,7 +70,9 @@ impl WelesClient {
         if let Some(key) = &meta.idempotency_key {
             headers.insert("idempotency-key".into(), key.clone());
         }
-        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+        if let Some(token) = SecretRef::resolve_optional(self.authorization.as_ref())
+            .map_err(WelesError::Configuration)?
+        {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
         let body = body
@@ -72,15 +91,12 @@ impl WelesClient {
         super::contract::negotiate_response(&response.headers).map_err(|error| {
             WelesError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
-        if response.status == 429 {
-            let retry_after_ms = response
-                .headers
-                .get("retry-after")
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|seconds| seconds.saturating_mul(1000));
-            return Err(WelesError::RateLimited { retry_after_ms });
+        if response.status == reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16() {
+            return Err(WelesError::RateLimited {
+                retry_after_ms: retry_after_ms(&response.headers)?,
+            });
         }
-        if !(200..300).contains(&response.status) {
+        if !reqwest::StatusCode::from_u16(response.status).is_ok_and(|status| status.is_success()) {
             return Err(WelesError::Http {
                 status: response.status,
                 message: "request failed; response body suppressed".into(),
@@ -101,10 +117,17 @@ impl WelesClient {
         meta: &RequestMeta,
         financial_mutation: bool,
     ) -> Result<T, WelesError> {
-        if super::contract::negotiate(meta.schema_min, meta.schema_max).ok() != Some(2) {
-            return Err(WelesError::InvalidRequest(
-                "Weles v2 requires schema version 2",
-            ));
+        let billing_schema = RequestMeta::read_v2("").schema_min;
+        let negotiated =
+            super::contract::negotiate(meta.schema_min, meta.schema_max).map_err(|error| {
+                WelesError::Configuration(format!(
+                    "Weles v2 requires its declared schema: {error:?}"
+                ))
+            })?;
+        if negotiated != billing_schema {
+            return Err(WelesError::Configuration(format!(
+                "Weles v2 requires schema version {billing_schema}; negotiated {negotiated}"
+            )));
         }
         if meta.correlation_id.is_empty() {
             return Err(WelesError::InvalidRequest("correlation id is required"));
@@ -121,7 +144,9 @@ impl WelesClient {
         if let Some(key) = &meta.idempotency_key {
             headers.insert("idempotency-key".into(), key.clone());
         }
-        if let Some(token) = self.authorization.as_ref().and_then(SecretRef::resolve) {
+        if let Some(token) = SecretRef::resolve_optional(self.authorization.as_ref())
+            .map_err(WelesError::Configuration)?
+        {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
         let body = body
@@ -139,32 +164,33 @@ impl WelesClient {
             .map_err(WelesError::Transport)?;
         super::contract::negotiate_response(&response.headers)
             .and_then(|version| {
-                (version == 2).then_some(()).ok_or(
+                (version == billing_schema).then_some(()).ok_or(
                     super::super::contract::ContractError::SchemaSkew {
                         service_min: version,
                         service_max: version,
                     },
                 )
             })
-            .map_err(|_| WelesError::InvalidResponse("schema negotiation failed".into()))?;
-        if response.status == 429 {
-            let retry_after_ms = response
-                .headers
-                .get("retry-after")
-                .and_then(|value| value.parse::<u64>().ok())
-                .map(|seconds| seconds.saturating_mul(1_000));
-            return Err(WelesError::RateLimited { retry_after_ms });
+            .map_err(|error| {
+                WelesError::InvalidResponse(format!(
+                    "Weles v2 schema negotiation failed: {error:?}"
+                ))
+            })?;
+        if response.status == reqwest::StatusCode::TOO_MANY_REQUESTS.as_u16() {
+            return Err(WelesError::RateLimited {
+                retry_after_ms: retry_after_ms(&response.headers)?,
+            });
         }
-        if !(200..300).contains(&response.status) {
+        if !reqwest::StatusCode::from_u16(response.status).is_ok_and(|status| status.is_success()) {
             return Err(WelesError::Http {
                 status: response.status,
                 message: "request failed; response body suppressed".into(),
             });
         }
-        serde_json::from_slice(&response.body).map_err(|_| {
-            WelesError::InvalidResponse(
-                "response did not match the bounded Weles v2 contract".into(),
-            )
+        serde_json::from_slice(&response.body).map_err(|error| {
+            WelesError::InvalidResponse(format!(
+                "response did not match the bounded Weles v2 contract: {error}"
+            ))
         })
     }
 }

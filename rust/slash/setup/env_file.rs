@@ -5,6 +5,7 @@
 
 use super::super::common::dirs_home;
 use super::{AGENT_ID_KEY, BRAMA_URL_KEY};
+use crate::cli::config::env_files::declarations;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,61 +13,33 @@ pub(super) fn env_file_path() -> PathBuf {
     dirs_home().join(".jeden/.env")
 }
 
-/// Parse one `KEY=value` line the same way the main env loader does: trim,
-/// strip a trailing ` #` comment, unquote, and expand `\n`.
-fn parse_env_line_value(raw: &str) -> String {
-    let mut value = raw.trim().to_string();
-    if let Some(index) = value.find(" #") {
-        value.truncate(index);
-        value = value.trim().to_string();
-    }
-    let unquoted = value
-        .strip_prefix('"')
-        .and_then(|v| v.strip_suffix('"'))
-        .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')));
-    if let Some(inner) = unquoted {
-        value = inner.to_string();
-    }
-    value.replace("\\n", "\n")
-}
-
-/// The non-empty value of `key` in the env file at `path`. An absent file
-/// holds no value; one that cannot be read names itself and the cause, where
-/// it used to read as unconfigured and offer to set keys it already holds.
+/// The first non-empty value of `key` in the env file at `path`, read by the
+/// loader's own reader. An absent file holds no value; one that cannot be
+/// read, or holds a line that is not a declaration, names itself and the
+/// cause, where it used to read as unconfigured and offer to set keys it
+/// already holds.
 fn env_file_value(path: &Path, key: &str) -> Result<Option<String>, String> {
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
     };
-    for line in text.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-        let Some((name, raw_value)) = trimmed.split_once('=') else {
-            continue;
-        };
-        if name.trim() == key {
-            let value = parse_env_line_value(raw_value);
-            if !value.trim().is_empty() {
-                return Ok(Some(value));
-            }
-        }
-    }
-    Ok(None)
+    Ok(declarations(path, &text)?
+        .into_iter()
+        .find(|declaration| declaration.key == key && !declaration.value.trim().is_empty())
+        .map(|declaration| declaration.value))
 }
 
 /// Effective value for a router key: the process environment wins, then the
 /// persisted `~/.jeden/.env` file. Empty values count as unconfigured; an
 /// env file that cannot be read is an error, not "unconfigured".
 pub(super) fn configured_value(key: &str) -> Result<Option<String>, String> {
-    match std::env::var(key)
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-    {
-        Some(value) => Ok(Some(value)),
-        None => env_file_value(&env_file_path(), key),
+    match std::env::var(key) {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value)),
+        Ok(_) | Err(std::env::VarError::NotPresent) => env_file_value(&env_file_path(), key),
+        Err(error) => Err(format!(
+            "{key} cannot be read from the process environment: {error}"
+        )),
     }
 }
 
@@ -96,11 +69,18 @@ pub(super) fn example_prefill(cwd: &Path, key: &str) -> Result<Option<String>, S
 /// survive the loader's comment/quote parsing are written double-quoted.
 fn write_env_keys(updates: &[(String, String)]) -> Result<PathBuf, String> {
     let path = env_file_path();
-    let encode = |key: &str, value: &str| {
-        if value.contains('#') || value.contains(char::is_whitespace) {
-            format!("{key}=\"{value}\"")
+    let encode = |key: &str, value: &str| -> Result<String, String> {
+        if value.contains('#')
+            || value.contains(char::is_whitespace)
+            || value.contains('"')
+            || value.contains('\\')
+            || value.starts_with('\'')
+        {
+            let quoted = serde_json::to_string(value)
+                .map_err(|error| format!("cannot encode {key} for {}: {error}", path.display()))?;
+            Ok(format!("{key}={quoted}"))
         } else {
-            format!("{key}={value}")
+            Ok(format!("{key}={value}"))
         }
     };
     // Only a missing file starts empty: rewriting one that could not be read
@@ -111,35 +91,44 @@ fn write_env_keys(updates: &[(String, String)]) -> Result<PathBuf, String> {
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     let mut pending: Vec<&(String, String)> = updates.iter().collect();
-    let mut lines: Vec<String> = existing.lines().map(str::to_string).collect();
-    for line in lines.iter_mut() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
+    let mut parsed = declarations(&path, &existing)?.into_iter().peekable();
+    let mut text = String::with_capacity(existing.len());
+    for (line, written) in existing.split_inclusive('\n').enumerate() {
+        if parsed.peek().is_some_and(|entry| entry.line == line) {
+            let declaration = parsed.next().expect("peeked declaration");
+            if let Some(position) = pending.iter().position(|(key, _)| key == declaration.key) {
+                let (key, value) = pending.remove(position);
+                text.push_str(&encode(key, value)?);
+                if written.ends_with("\r\n") {
+                    text.push_str("\r\n");
+                } else if written.ends_with('\n') {
+                    text.push('\n');
+                }
+                continue;
+            }
         }
-        let Some((name, _)) = trimmed.split_once('=') else {
-            continue;
-        };
-        let name = name.trim();
-        if let Some(position) = pending.iter().position(|(key, _)| key == name) {
-            let (key, value) = pending.remove(position);
-            *line = encode(key, value);
-        }
+        text.push_str(written);
     }
     for (key, value) in pending {
-        lines.push(encode(key, value));
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
+        text.push_str(&encode(key, value)?);
+        text.push('\n');
     }
-    let mut text = lines.join("\n");
-    text.push('\n');
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    fs::write(&path, text).map_err(|error| error.to_string())?;
+    fs::write(&path, text).map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-            .map_err(|error| error.to_string())?;
+        fs::set_permissions(
+            &path,
+            fs::Permissions::from_mode((libc::S_IRUSR | libc::S_IWUSR) as u32),
+        )
+        .map_err(|error| format!("cannot make {} private: {error}", path.display()))?;
     }
     // Make the values effective for this running session (catalog fetch,
     // agent identity) without requiring a restart.

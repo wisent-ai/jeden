@@ -22,16 +22,7 @@ const REFUSED: &str = "lease_error";
 /// address, bearer and signing secret a session's model calls use. A
 /// configuration that does not reach Brama holds no lease, and says why.
 fn gateway(params: &Value) -> Result<ChatConfig, (&'static str, String)> {
-    let cwd = match params.get("cwd") {
-        Some(Value::String(path)) => std::path::PathBuf::from(path),
-        Some(other) => return Err((INVALID, format!("lease cwd must be a path string; got {other}"))),
-        None => std::env::current_dir().map_err(|error| {
-            (
-                "internal_error",
-                format!("the request names no cwd and this server's working directory cannot be read: {error}"),
-            )
-        })?,
-    };
+    let cwd = super::context::cwd(params)?;
     let args = Args {
         command: crate::Command::Lease,
         cwd: cwd.clone(),

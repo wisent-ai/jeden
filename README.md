@@ -8,88 +8,46 @@
 [![Source](https://img.shields.io/badge/GitHub-Source-181717?logo=github)](https://github.com/wisent-ai/jeden) [![Issues](https://img.shields.io/badge/GitHub-Issues-181717?logo=github)](https://github.com/wisent-ai/jeden/issues) [![Wisent](https://img.shields.io/badge/Wisent-Website-0B0B0B)](https://wisent.com) [![Discord](https://img.shields.io/badge/Discord-Join-5865F2?logo=discord&logoColor=white)](https://discord.gg/qRjpkthq54) [![LinkedIn](https://img.shields.io/badge/LinkedIn-Follow-0A66C2?logo=linkedin&logoColor=white)](https://www.linkedin.com/company/wisent-ai/) [![X](https://img.shields.io/badge/X-Follow-000000?logo=x&logoColor=white)](https://x.com/wisentai) [![Enterprise](https://img.shields.io/badge/Enterprise-Book%20a%20call-0B0B0B?logo=calendly)](https://calendly.com/lbartoszcze)
 <!-- wisent-readme-signals:end -->
 
-# Jeden: The Ultimate Self-Improving Coding Agent with Internet Access, Embedded Secret Management, QA, and More
-The Ultimate AI Agent for Autonomous Company Building.
+# Jeden
 
-Jeden is a harness for AI Agents built from real-life experiences. It routes your models intelligently, manages credentials, understands how to pursue, complete and verify tasks over time. Turns your AI into a 10x harness. Compatible with OpenAI, Anthropic, Kimi and any other model.
+Jeden is a local coding-agent harness for interactive work, one-shot tasks and
+contract-driven pursuit. It records sessions and tool decisions, asks for
+approval before writes and commands unless the invocation grants them, and
+keeps model access under the operator's control. The
+[product documentation](https://jeden.wisent.com/docs) defines supported
+behavior; the [CLI reference](https://jeden.wisent.com/docs/cli) lists commands,
+refusals and examples.
 
-The Ultimate Self-Improving AI Harness. Delivered by the Wisent Team and incorporating our custom solutions into one agentic form. Experience the power of Weles (Browser Use), Skarbiec (Credential Management), Stado (Fleet Management), Tama (Automatic Blocks, Sandboxing and Hooks), Probierz (Autonomous QA), Most (Connectors), Brama (Model Routing) and Oko (Team Strategy Management Tool).
+## Model access and credentials
 
-## Problem and intended users
+An explicit `JEDEN_MODEL_ENDPOINT` sends OpenAI-compatible catalog and chat
+requests directly to that provider. A nonempty `JEDEN_MODEL_KEY` from the
+process environment takes precedence; otherwise Jeden optionally reads its own
+private token list at `~/.jeden/model-tokens.sqlite3`. `jeden token status`,
+`list`, `add LABEL --endpoint URL` and `remove ID` manage that list; `add` reads
+the secret from standard input, not a command argument. The selected key
+advances per endpoint and a pre-output authentication, payment or rate-limit
+refusal tries another untried key. Status and diagnostics reveal no secret.
+[Jeden Desktop Settings](https://github.com/wisent-ai/jeden-desktop/blob/main/docs/model-credentials.md)
+uses the same RPC operations on its selected host. See the
+[token command](https://jeden.wisent.com/docs/cli/token) for refusal details.
 
-Wisent engineers run coding agents against production-adjacent repositories and need the agent's inference path, spend attribution, and tool permissions to remain under Wisent's control rather than a third-party hosted agent's. Hosted agent products route prompts and code through external infrastructure, bill through opaque accounts, and enforce tool policy server-side.
+Without a direct endpoint, Jeden uses Brama. Stado's service directory locates
+its address unless the caller exports `BRAMA_URL`; the Brama signing credential
+`WISENT_APP_AGENT_AUTH_SECRET` and distinct `BRAMA_TOKEN` come from the process
+environment. Jeden does not fetch model secrets from Skarbiec. Brama retains
+its own account leases and routing; a direct provider requires neither a
+Brama signature nor a gateway lease. `/setup` and `jeden doctor` report the
+active route and observed catalog refusal.
 
-Jeden serves two audiences:
+Durable memory, pursuit request state and collab-relay rooms require an explicit
+`JEDEN_DATABASE_URL`, with `JEDEN_DATABASE_CA_FILE` for a server database. A
+SQLite file is local to its host; hosts share a server database when they use
+the same one. Configuration, certificate, connection, migration and query
+errors name the failed operation and cause. The database path does not consult
+Skarbiec. See [sessions and memory](https://jeden.wisent.com/docs/sessions).
 
-- **Wisent engineers**, who run interactive and one-shot coding tasks in the terminal with local approval over every write and command;
-- **Wisent tooling and automation**, which drives the same harness through its machine interfaces (RPC, ACP, headless mode, SDKs) inside editors and workflows.
-
-## Product boundaries
-
-Included capabilities are listed under [Current scope](#current-scope). Explicit non-goals:
-
-- Jeden is not a hosted or multi-tenant service; it is a local harness.
-- Jeden's local runtime is usable without a hosted Wisent account.
-- Jeden does not provide model inference itself; it uses Brama or another compatible OpenAI-style endpoint and caller-supplied credentials.
-- Jeden never handles cardholder data; commercial billing is owned by Wisent Platform Billing.
-- Jeden does not define autonomous objective pursuit; [Pursuit](https://github.com/wisent-ai/pursuit) owns intent distillation, outcome contracts, independent reviews, repair loops, validators, and receipts, while Jeden supplies model conversations and tools through the integration interface.
-
-Supported promoted environments: Stado builds `darwin-arm64` and `linux-amd64` from `.wisent-release.json`. The Windows native build remains checked by CI; the release manifest does not declare a Windows fleet runner or pretend another platform produced Windows bytes.
-
-Operator-managed and external: the Brama URL and signing credential (Stado/Skarbiec-managed), Wisent Platform Billing configuration, and MCP server configuration.
-
-## Core use cases
-
-1. **Interactive task with approvals.** A Wisent engineer in a project checkout wants a code change executed and reviewed. They run `jeden` and type the task; the agent works through jailed tools, and every file write or shell command pauses for interactive approval unless explicitly enabled. The result is the applied change with visual diffs and a full transcript under `~/.jeden/sessions/`. Constraint: no write or command executes without a grant, and destructive confirmations default to **Cancel**.
-2. **One-shot scripted task.** Automation needs a bounded task without a terminal. It runs `jeden run "<task>"`, optionally with `--allow-write` or `--allow-command`. The result is the final answer on stdout with the session recorded. Constraint: grants are explicit per invocation, and failover never occurs after model output has become visible.
-3. **Continuing prior work.** `jeden resume <session>` inherits both conversation history and retained requests, then inspects existing results before continuing. `jeden todo list --session <session>` shows the same request, acceptance and verification state without running a model.
-4. **Editor and machine integration.** An editor extension or a CI job needs the same harness programmatically. It uses `jeden acp`, `jeden rpc`, `jeden headless`, or the TypeScript/Python SDKs. The result is protocol-level access to the same run loop; non-terminal output is deterministic text.
-5. **Autonomous outcome pursuit.** An operator has a rough objective but cannot stay present to correct each interpretation. They run `jeden pursue "<objective>"` with explicit execution grants. Pursuit recovers and reviews the finish line; Jeden supplies its Brama-backed conversations and approval-gated tools to the accepted execution stages. The result is a durable contract, verdict, receipt, and stage-session provenance under `<cwd>/.pursuit/runs/`.
-
-## Design contract
-
-Jeden separates five concerns:
-
-- **Inference** — model calls go through Brama using HMAC-signed OpenAI-compatible chat completions.
-- **Policy** — the harness prompt and approval rules are explicit and local.
-- **Operator contracts** — two local, editable settings separately define how Jeden communicates and how it executes and completes work.
-- **Tools** — a small allowlisted registry enforces path jails and write or command permission.
-- **Run loop** — the model may return native tool calls or strict JSON actions that enter the same local execution loop.
-- **Pursuit adapter** — `jeden pursue` maps the separately owned engine stages onto persistent planner and executor conversations plus fresh read-only reviewers.
-
-Tool schemas are derived from each input contract and sent with the model request. Tool results are recorded in the session and returned to the model until it produces a final answer.
-
-Terminal input and worker output wake the same event-driven renderer; no timer polls
-for keys or turn completion. The busy indicator advances on activity, and Esc or
-Ctrl-C announces cancellation. Foreground commands take stdin after the reader is released.
-
-## How it works
-
-Jeden records each original request before model access and its acceptance requirements before execution. The execution agent proposes a result; a separate read-only conversation observes it, and the native controller checks every retained request before allowing a final answer. Unfinished actionable work continues, while genuine failures remain recorded as incomplete. Model access still goes only through Brama.
-
-```mermaid
-flowchart LR
-    User["Developer or automation"] --> Iface["CLI, TUI, rpc, acp, headless, SDK"]
-    Iface --> Loop["Local run loop"]
-    Loop --> Tools["Jailed tool registry, approval-gated"]
-    Tools --> Repo["Project checkout"]
-    Loop --> State["Local state: ~/.jeden and .jeden"]
-    Loop --> Brama["Brama model router, HMAC-signed"]
-    Brama --> Loop
-```
-
-`jeden pursue` integrates the same local run loop with [Pursuit](https://github.com/wisent-ai/pursuit): read-only distillation, independent contract review, granted execution, and independent acceptance review. Pursuit owns the orchestration state machine and artifacts; Jeden owns only the Brama-backed `StageRunner` adapter, its conversations, and its tool policy.
-
-- **Durable state:** Sessions live under `~/.jeden/sessions/` (`JEDEN_SESSION_ROOT` overrides). Each session directory holds `state.json` and `transcript.jsonl`, an append-only ledger of sequenced, parent-linked, checksum-sealed events that is validated on read and `fsync`ed on every append. `jeden workspace adopt <path>` validates an existing directory and atomically stores only its canonical path as `workspace.defaultPath` in `~/.jeden/config.yml`; interactive and agent commands use it unless `--cwd` is explicit. It does not copy or alter the repository or its sessions. Durable memory, pursuit request state and collab-relay rooms are in the fleet database `jeden` (see [Sessions and memory](#sessions-and-memory)). The rest of `~/.jeden/` holds `.env`, `config.json`/`config.yml`, the Brama model-catalog cache, and user-scoped `tools/`, `extensions/`, `commands/`, and `plugins/`. Per-project state lives in `<cwd>/.jeden/`. Sessions and that local state stay on the operator's disk; Jeden uploads none of it.
-- **Credential boundary:** `WISENT_APP_AGENT_AUTH_SECRET` lives in the process environment only. When the environment does not carry it, Jeden reads its signing credential through `stado credentials get`, under Stado's identity, and keeps it in memory. `/setup` writes only non-secret values (`BRAMA_URL`, `WISENT_APP_AGENT_ID`, model, preferences) to `~/.jeden/.env` at mode `0600` and never writes the secret. Each Brama request carries `x-agent-id`, `x-agent-timestamp`, `x-agent-body-sha256`, and `x-agent-signature`, an HMAC over the request body, so the secret itself never leaves the process. Configured and automatically discovered secret values are replaced with `[REDACTED]` in the model-bound copy of the context while the local transcript keeps the original text.
-- **Network boundary:** Jeden initiates every connection. The terminal, `jeden run`, `jeden rpc`, and `jeden acp` are stdio-only and open no socket; listening sockets exist only in the opt-in `jeden headless <addr>` (TLS 1.3; each client proves itself with a certificate whose SAN the identity map names, or with the Wisent identity of an organization the map names, checked against Wisent Identity), `jeden relay serve <addr>`, and `jeden stats --serve` (bound to `127.0.0.1`). A `jeden headless` principal may be granted named absolute workspaces in the identity map, and may then list, open, and continue the host's own sessions whose recorded working directory lies inside one of those workspaces; a principal without that grant stays confined to the sessions it created through the daemon. The one required outbound dependency is `BRAMA_URL`, which also serves the `image_generate` and `tts` tools through its `image-model` and `voice-model` aliases and leases the account each session runs on. Optional outbound dependencies activate only when configured or first used: the fleet database `jeden` (resolved through Stado, its address read from Skarbiec) for memory, pursuit request state and collab-relay rooms, Wisent Platform Billing for quota reports and payment policy, the Stado integration API for onboarding bundles and funnel events, Wisent Identity for `jeden headless` maps that name a Wisent organization, and the release manifest host for `jeden update`. Tool-initiated network access (`fetch_url`, `fetch_readable_url`, SSH) is checked against the execution grant's host and port allowlist, rejects non-`http(s)` schemes and URL userinfo, resolves and pins the address, re-authorizes every redirect, and refuses non-public addresses unless the grant permits them.
-- **Failure boundary:** Everything fails closed. Without `BRAMA_URL` the run stops with `BRAMA_URL is required` and no model call is made. Write and command tools stop for approval unless `--allow-write`, `--allow-command`, or `--yolo` is passed, and project hooks in `.jeden/hooks.json` run only with `--allow-command` so a cloned repository cannot silently execute shell. A transient model error moves to the next route, and a failure on the session's leased Brama account first asks Brama for an account with capacity; neither happens once model output has become visible. A transcript with a truncated tail refuses further appends and must be resumed into a child session. `jeden update` stages, journals, and post-health-checks the new binary, and restores the last-known-good copy when any step fails.
-
-The action, tool-call, selector, and guarded-mutation contracts are maintained at [jeden.wisent.com/docs/tools](https://jeden.wisent.com/docs/tools).
-
-## Quick start
-
-Use a configured Brama route and the native product build workflow:
+## Start and interfaces
 
 ```sh
 npm run build:rust
@@ -97,235 +55,46 @@ jeden
 jeden run "Read this project's package.json and explain its entry points."
 ```
 
-The [canonical documentation](https://jeden.wisent.com/docs) owns the full setup, credential, platform, approval, onboarding and operational instructions. The [CLI reference](https://jeden.wisent.com/docs/cli) describes every command and refusal. Keep the signed sandbox helper beside the executable on macOS.
-
-On macOS, the native build signs both executables through
-`stado product signing sign --product jeden`, using an available Apple
-Development or Developer ID Application identity. An ad-hoc sandbox helper is
-refused. `/rebuild` captures the running identity before compilation and
-verifies the replacement against that identity before resuming the session.
-On a Mac without Stado, `/rebuild` stops with `cannot inspect the running code
-identity through Stado: …; without Stado set JEDEN_CODESIGN_IDENTITY to a
-codesign identity, or - for ad-hoc`. With `JEDEN_CODESIGN_IDENTITY` set it
-signs the new build with `/usr/bin/codesign --force --sign <identity>` and asks
-Stado nothing; it does not compare that identity with the running one.
-The release recipe uses `stado product cargo stage --bin jeden --bin
-jeden-sandbox-helper` to build both executables through Stado's shared Cargo
-source handling and place them in `WISENT_OUTPUT_DIR`, from where the recipe
-archives them as `bin/jeden` and `bin/jeden-sandbox-helper`. Its native staging
-qualification is `tests/release/stage.mjs`. The Stado running the release job,
-or `stado product install` during local installation,
-signs the declared native stage before archiving or installing it. Stado's signed
-build and publication receipts describe those final bytes.
-See the shared [macOS signing contract](https://stado.wisent.com/docs/signing).
-
-## Retained task completion
-
-`completion.json` in the session directory retains every original request, its workspace, acceptance criteria, task state and independent observation references. A new question, context reset, fork or resume does not erase older work.
-The model's `todo done` requests verification; it cannot approve its own result or remove user-owned obligations. Native checks require full task/request coverage and real evidence references; the independent model still interprets natural-language criteria.
-Every request also gets a time to completion. The independent intake records an estimate in whole minutes before any execution, and nothing revises it; an accepted independent review records when the request was really done, and a defect that reopens it removes that moment again. `jeden todo list` prints both under each request, `--json` carries them in `timing`, the Tasks panels of Desktop and mobile print the same words, and the answer of the turn in which a request is accepted ends with its measured time. The task contract (version 2) states the same clause.
-`jeden todo list`, `add`, `pause`, `resume`, `cancel` and `continue` expose the retained state. Operator controls require the current revision and a reason. Desktop and mobile provide the same operations in the Conversation screen's Tasks panel.
-What Jeden asks of the operator is kept in one register for the machine, `operator-asks.json` beside the session root. A review that blocks a task on something only the operator holds, and an `ask_user` question, both enter it with every place they were asked; the same thing asked again by another task or session becomes another place, not another ask, and the stop message shows each ask once with how many times and since when it was asked. `jeden asks list|show|answer` reads and answers it: one answer reaches every task waiting on that ask, in every session. Reviews and the execution agent read the register, and a review that blocks on an ask that already holds the operator's answer is refused unless an operation failed after that answer. `jeden todo answer` answers the same register ask from the task. The RPC methods `asks/list`, `asks/get` and `asks/answer` serve Jeden Desktop and the headless daemon. See [operator asks](https://jeden.wisent.com/docs/cli/asks).
-Model errors, unavailable verification and explicit execution limits remain incomplete. `assistantMessage` carries progress or an interim answer without ending the retained work. See [task commands](https://jeden.wisent.com/docs/cli/todo) and [session recovery](https://jeden.wisent.com/docs/sessions).
-
-## Real verification
-
-```sh
-npm run test:contracts
-```
-
-The suite uses real CLI/RPC operations and the configured Brama dependency, retaining source revision, binary digest, commands, exit status and saved state under `target/contract-runs`. The runner compiles the tests, builds and signs the native product through its normal workflow, then executes the suite without another source change. A failed model journey remains failed, not skipped or counted as passed. Probierz remains an optional runner.
-
-
-## Primary interfaces
-
-- **CLI** (`jeden`, `jeden run`, `jeden pursue`, management subcommands) — canonical for human interactive, direct one-shot, and contract-driven autonomous use.
-- **Interactive terminal views and slash commands** — canonical for in-terminal management; non-terminal stdin renders deterministic text lists for scripts.
-- **`jeden rpc` (NDJSON), `jeden acp`, `jeden headless`** — canonical for automation and editor integration; `--json` flags cover scripting.
-- **SDKs** — the Rust SDK in `rust/sdk` and `packages/sdk-typescript` for embedding the machine interfaces.
-- **MCP** — the extension interface for external tool servers.
-
-## Current scope
-
-The private milestone includes the capabilities below. The live product documentation at [jeden.wisent.com/docs](https://jeden.wisent.com/docs) describes the supported contract; unlisted or incomplete behavior is not promised.
-
-- interactive terminal and one-shot `jeden run` modes;
-- autonomous outcome pursuit through `jeden pursue`, with source-grounded contracts, independent reviews, and durable receipts;
-- session transcripts and artifacts under `~/.jeden/sessions/`;
-- model routing through Brama at the address Stado's service directory routes the consumer `jeden` to (an exported `BRAMA_URL` overrides it), `WISENT_APP_AGENT_ID`, and `WISENT_APP_AGENT_AUTH_SECRET`;
-- model selection through `--model`, `JEDEN_MODEL`, or native config;
-- jailed filesystem, document, archive, image, SQLite, search, Git, process, evaluation, URL, artifact, memory, todo, delegation, and MCP tools;
-- guarded file mutations using the digest or snapshot tag returned by `read_file`;
-- custom JavaScript tools from `~/.jeden/tools/` and `<cwd>/.jeden/tools/`;
-- project and user lifecycle hooks;
-- native `.jeden` configuration, context, command, extension, plugin, memory, and mode-state paths;
-- editable communication and functionality contracts through CLI, RPC, and Jeden Desktop Settings;
-- interactive approval for writes and commands unless explicitly enabled.
-
-File mutations return Jeden-native visual diffs and previews. Oversized tool results are persisted as session artifacts and replaced in the model loop with a compact reference.
-
-## Tool policy
-
-- Discover files with `glob_paths` or `list_dir` before reading unknown paths.
-- Search content with `grep_regex` or `search_files` rather than shell discovery commands.
-- Use targeted `read_file` selectors instead of dumping large files.
-- Retry with a narrower path or alternate pattern before concluding that a symbol is absent.
-- Use `run_package_script` for declared package scripts and reserve general process tools for commands without a safer built-in.
-- Verify behavior changes with the narrowest relevant check.
-
-## CLI
-
-Use `jeden run` for a concrete task and `jeden pursue` for a rough objective whose contract Pursuit must first establish. Session inspection, configuration and runtime operations are listed in the [complete CLI reference](https://jeden.wisent.com/docs/cli).
-
-`jeden todo list --json` reads the current work; `jeden todo continue --allow-write` continues it with the stated grants.
-
-
-## Interactive terminal views
-
-Management commands open searchable native pickers. Type to filter, use arrows to choose, Enter to execute and Escape to close. Non-terminal use retains direct command arguments.
-`/todo` exposes the retained task operations. `/goal` manages the active goal; Oko can label or start it, but only the native completion controller accepts task completion. Explicit cancellation is not verified implementation.
-
-
-## Roadmap Registry
-
-The roadmap registry, its schema and the rules every mutation follows are
-documented in [docs/roadmap.md](docs/roadmap.md).
-
-## Billing and subscription routing
-
-Wisent Platform Billing owns billing. Jeden reads its endpoint from `WISENT_PLATFORM_BILLING_URL` and its bearer from `WISENT_PLATFORM_BILLING_TOKEN`; no other spelling is read. Weles Automation is not the billing owner. Jeden never accepts or stores card numbers, CVC/CVV values, processor tokens, or addresses. `/payment-method setup --account <id>` opens the configured platform-hosted HTTPS setup URL.
-
-The interactive slash surface provides:
-
-- `/billing policy get|set|reset` for an explicit, revision-pinned purchase policy with product, currency, per-purchase, and per-period caps;
-- `/subscriptions list|status` for redacted subscription and quota views;
-- `/subscriptions purchase|renew|disable` for approved, caller-idempotent mutations.
-
-`policy set` requires `--approve`; automatic purchase and renewal remain disabled until the Weles policy is explicitly enabled. Financial mutations require a caller-supplied idempotency key and are validated against pinned policy and quote revisions by Weles.
-
-Model accounts are Brama's. A session whose route names a provider Brama keeps a pool of accounts for takes a lease on that provider for the session (`POST /v1/subscription-pool/leases`, holder `jeden`, signed as Jeden's agent) and names the leased account on every request in `x-brama-subscription` and `x-brama-account`. Brama spreads the machine's sessions over the pool and gives a session that already holds a lease the same lease back. When a call on the leased account fails before any output is visible, the session releases the lease and takes it again; Brama passes over an account its ledger holds a rate or quota block against and an account at the operator's limit, so a different account is one with capacity and the call is retried on it. A pool with no account left is Brama's `409 pool_full` or `503 no_usable_member`, with the verdict of the acquisition Brama started, and that refusal is the route's error. The session's end releases its leases; `jeden lease [list|release <lease-id>|end <session-id>]` shows and ends them. The lease and account are recorded as `model_subscription_route` in the session and as `billing` in the usage ledger.
-
-## Release automation
-
-The exact release version is the SemVer in `Cargo.toml`. Stado reads it through `.wisent-release.json` and supplies `WISENT_OUTPUT_DIR` to `stado product cargo stage`; no run number or provider identity participates in the release version.
-
-The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. Stado signs the declared native stage before producing the archive and its signed source/build/publication receipts. Darwin release jobs obtain the certificate and private key through the manifest's exact Skarbiec field references and use the signer's temporary keychain; they do not request a system consent dialog.
-
-Release builders receive locked private Git crates as the immutable
-`private-cargo-sources` input, without GitHub credentials or sibling checkouts.
-After changing those package names, versions or revisions, run
-`stado release catalog pin-input . --name private-cargo-sources --source . --revision HEAD --cargo --json`
-from the committed checkout, then commit the updated `.wisent-release.json`.
-Stado vendors, publishes and pins the input through one shared operation;
-changing only Jeden's version does not invalidate it. See
-[private Cargo build inputs](https://stado.wisent.com/docs/builds#private-cargo-build-inputs)
-for commands, desktop controls, refusals and the real publication journey.
-
-Release quality uses `stado product cargo build`, and the build step is
-`stado product cargo stage`, the same executor: it builds each `--bin` with the
-locked sources and places it at `WISENT_OUTPUT_DIR/<name>`.
-Missing output or private input, stale private packages and inconsistent source
-configuration are refusals, not reasons to fetch private repositories on the
-worker. Cargo verifies the vendored checksums and preserves the source lockfile.
-Jeden has no separate private-source exporter or source-replacement wrapper.
-
-The recipe runs `JEDEN_TEST_SUCCESS_EXIT=0 node tests/release/stage.mjs` with
-the worker's `WISENT_SOURCE_DIR`, `WISENT_SOURCE_COMMIT`, `WISENT_OUTPUT_DIR`
-and `WISENT_INPUT_PRIVATE_CARGO_SOURCES_DIR`. This builds and executes the
-staged CLI, checks the helper's staged bytes, and verifies that missing output
-or input does not replace successful artifacts or change the lockfile.
-Reports and command logs are archived under `evidence/release-tests`.
-This check does not qualify signing, sandbox execution or a model-backed task.
-
-The version gate (`.github/workflows/version-check.yml`) compares the public command vocabulary with `released-surface.json` using the same tool: `jeden-tools surface` reads the dispatcher and the compiled slash catalogue, `jeden-tools versioning decide` is the Rust port of the fleet's AutoVersion rule, and `jeden-tools versioning baseline` regenerates the baseline from the newest published release.
-
-Jeden is a command-line package, not a fleet service. Publication therefore does not start a daemon or claim a host has installed the package. A consumer must install `bin/jeden` and `bin/jeden-sandbox-helper` from the same Darwin archive and keep them together; installing only the primary executable leaves sandboxed runs unavailable.
-
-`darwin-arm64` and `linux-amd64` are the declared promoted outputs. A compilation gate is not evidence that the model-backed completion journey passed; the real contract run and its result remain separate recorded evidence.
-
-The documentation site at [jeden.wisent.com/docs](https://jeden.wisent.com/docs) is published from source, and no rendered page is committed. Vercel deploys `web/` on every push to `main`: its build installs the repository's locked Node packages (`npm ci --prefix ..`) and runs `node docs/pages.mjs`, which renders `web/docs/**/*.html`, `web/sitemap.xml` and `web/wisent-components.css` from the page sources in `web/docs/` (`pages.mjs`, `cli-pages.mjs`, `content/`, `commands/`). A documentation change is therefore published by pushing its source. `npm run build:docs` renders the same files for a local preview; git ignores them. `node tests/docs/published-pages.probierz.spec.mjs` fetches every production page, the sitemap and the stylesheet, and fails with the page and the first differing text unless production serves exactly what the sources of the checked-out revision render. Run it once that revision is deployed: a failed Vercel build leaves the previous deployment in production, and the check reports that as a difference.
-
-## Configuration and context
-
-Where configuration is read from and what context a run is given is documented
-in [docs/configuration.md](docs/configuration.md).
-
-## Sessions and memory
-
-`jeden resume` inherits recorded history and completion state; without a new prompt it continues unfinished work in the recorded workspace. See the canonical [session and memory contract](https://jeden.wisent.com/docs/sessions).
-
-`workspace discover` validates an existing directory, its existing
-`.jeden/config.json`, Git worktree marker, and the canonical session states that
-name a `cwd` inside it. `workspace adopt` performs that entire read before one
-atomic user-config write. Repeating the same path reports `unchanged`; malformed
-project config, missing paths, and `..` are refused before selection changes,
-while unreadable session directories are counted as rejected rather than
-silently hidden. `workspace status` returns the accepted path, repository root,
-source kind, and accepted/rejected session counts. The complete command
-contract is at [jeden.wisent.com/docs/cli/workspace](https://jeden.wisent.com/docs/cli/workspace).
-
-`/checkpoint [label]` records the exact model-visible context, `/checkpoint list` prints durable checkpoint event IDs, and `/rewind <checkpoint-event-id>` appends a new active lineage without deleting abandoned history. In the interactive attachment tray, `/attach <relative-path>`, `/attachments`, and `/detach <id|all>` manage bounded workspace-jailed text and PNG, JPEG, GIF, or WebP inputs consumed by the next submitted turn.
-
-A session's chat memory never ends: with `chatMemory.summaryModel` configured, every message is appended to the session's `log.jsonl` with every field it carries (tool calls and the ids of the calls a tool result answers), a tree of summaries (`tree.jsonl`) is built over it in the background through Brama on the session's lease, and the model is given a constant-size view (`view.json`, at most `chatMemory.viewBytes`, the newest turn always whole) instead of compacting the session away; a resumed session continues from the kept view. `jeden chat-memory show|zoom|dates` and the `recall_conversation` tool read any part of it back word for word; Jeden Desktop's Chat memory screen shows the same view, zooms into its nodes and lists the messages of a picked time. The configuration and every refusal are in [docs/configuration.md](docs/configuration.md).
-
-Durable memory, pursuit request state and collab-relay rooms live in the fleet database `jeden`, reached through Stado's shared connector `stado-database` as a SeaORM connection: `stado database resolve jeden --consumer jeden`, the Skarbiec route from `stado service directory connect skarbiec --consumer jeden`, and `pooler_url` plus `ca_certificate` read as `jeden-database-client` with the bearer in `~/.stado/jeden-database-client-skarbiec-token` (`JEDEN_STADO_HOME` names that home when `HOME` is isolated). Tables are SeaORM entities; `sea-orm-migration` creates `memories`, `memory_*`, `pursuit_*` and `relay_*` on first connection. Every failure names the step that failed. Recall uses Postgres full-text search over a generated `tsvector` column. `/memory enqueue`, `/memory queue`, `/memory queue run`, `/memory queue drain`, and `/memory rebuild` expose durable worker and index maintenance.
-
-## MCP and hooks
-
-MCP servers load from `~/.jeden/mcp.json` and `<cwd>/.jeden/mcp.json` using the standard `mcpServers` shape. Generic MCP tools list and call server tools, resources, and prompts; configured server tools may also appear under native `mcp__<server>__<tool>` names.
-
-Shared lifecycle hooks receive user-prompt, pre-tool, post-tool, session-start, and stop events. Hook output may add context, replace supported input fields, or block an action through the documented decision contract.
-
-## Custom tools
-
-Custom modules export a default factory that receives the current workspace helpers and returns one tool or a list of tools. Tool names must be unique and cannot collide with built-ins. Custom execution remains subject to the same jail, approval, and hook policy as built-in tools.
-
-List active tools with:
-
-```sh
-jeden tools --cwd .
-```
-
-## JSON action protocol
-
-The complete native action, tool-call, selector, and anchored-patch contract is documented at [jeden.wisent.com/docs/tools](https://jeden.wisent.com/docs/tools).
-
-### Session envelope
-
-`protocol/schema/v1/envelope.schema.json` is the `jeden.session.v1` envelope,
-and it is the only place a field name is written. The TypeScript SDK's
-validators read their allowed and required keys from
-`packages/sdk-typescript/src/protocol-keys.ts`, which
-`packages/sdk-typescript/scripts/protocol-keys.mjs` generates out of that
-schema — `npm run generate:protocol` inside the package, and `npm run build`
-does it first. `node tests/protocol/envelope-keys.mjs` is the gate: it fails
-when the generated module has drifted from the schema, then drives the built
-validators over `protocol/schema/v1/golden/envelopes.json` and over the
-refusals the schema demands — an unknown field, a request without its
-idempotency key, an event without its cursor, an error body without
-`retryable`.
-
-`protocol/contract.json` states the same field lists a second time on purpose,
-and `jeden-tools protocol-check` holds the schema, the golden envelopes and the
-SDK sources to it: a gate that reads its expectation out of the document under
-test always passes. It runs in CI and in `tests/versioning`.
-
-## Operational model
-
-| Concern | Contract |
-|---|---|
-| Configuration | Process environment wins over every file. At startup Jeden loads `<cwd>/.env`, `.env.local`, `.env.production`, `.env.vercel`, then `~/.jeden/.env`, and each file sets only variables that are still unset. Brama's address is the exception: unless the caller exported `BRAMA_URL`, Jeden asks `stado service directory connect brama --consumer jeden --no-verify` at every start and that answer replaces an address a file held; the file's copy is used only when Stado cannot answer, and the refusal is named. Project `<cwd>/.jeden/config.json` overrides user `~/.jeden/config.json` and `~/.jeden/config.yml`. `/setup` appends non-secret keys to `~/.jeden/.env` at mode `0600` and applies them to the running process; other file changes take effect on the next invocation. |
-| State | Operator-owned. User scope `~/.jeden/`: `sessions/`, `operator-asks.json` (the operator ask register), `.env`, `config.json`/`config.yml`, `cache/`, `tools/`, `extensions/`, `commands/`, `plugins/`, `hooks.json`, `mcp.json`. Memory, pursuit request state and collab-relay rooms are in the fleet database `jeden`, shared by every host. Project scope `<cwd>/.jeden/`: `config.json`, `usage.json`, `mode-state.json`, `tasks/`, `commands/`, `extensions/`, `tools/`, `hooks.json`, `mcp.json`. Account leases are Brama's register, not a Jeden file. Pursuit independently owns preference profiles and autonomous-run artifacts under `.pursuit/`; its receipts reference Jeden session paths without moving those sessions. Session transcripts are append-only and are never expired or deleted by Jeden. |
-| Credentials | `WISENT_APP_AGENT_AUTH_SECRET` is the Brama signing credential and exists only in the process environment; Jeden obtains it through `stado credentials get` when the environment does not carry it. `BRAMA_TOKEN` is a distinct bearer, obtained through the same interface for deployments whose Brama requires one. Rotation and revocation are owned by Skarbiec, not by Jeden: the harness holds no credential store and writes no secret to disk. |
-| Networking | Outbound only, initiated by Jeden. Required: `BRAMA_URL` over `http(s)`, which also serves image generation and speech — or, without Brama, an OpenAI-compatible provider named by `JEDEN_MODEL_ENDPOINT` (bearer `JEDEN_MODEL_KEY`), which serves `/v1/models` and `/v1/chat/completions` only. Optional when configured: Wisent Platform Billing, the Stado integration API, and the update manifest host. Brama and Weles surface HTTP `429` as a typed rate-limit error carrying `Retry-After`; MCP servers that keep failing open a circuit breaker instead of retrying. Tool network egress is confined to the execution grant's host/port allowlist with pinned addresses and re-authorized redirects. |
-| Cost | The operator's Brama routing and the Brama accounts it leases incur the cost; model calls are the only action that creates it. Every completion appends tokens, the Brama-catalog-priced cost breakdown, and the provider, account, subscription and lease it ran on to `<cwd>/.jeden/usage.json`. Purchases are bounded by an explicit, revision-pinned policy with allowed products, allowed currencies, a per-purchase cap, and a per-period cap; auto-purchase and auto-renew both default to disabled, and every financial mutation requires `--approve` plus a caller-supplied idempotency key. |
-| Observability | `jeden doctor` returns a JSON health report probing Brama, Weles, storage, process, sandbox, MCP, extensions, LSP, browser, task, memory, collab, and keymap, and exits non-zero when any probe is unavailable. `jeden conformance` reports completion-area coverage. `jeden stats` (`--json`, `--summary`, or `--serve` on `127.0.0.1`) and `/usage show` read the usage ledger. The per-session event ledger is Jeden's audit record; Pursuit emits `contract.json`, `verdict.json`, and `receipt.json` beneath `<cwd>/.pursuit/runs/<run-id>/` with references to the contributing sessions. Jeden emits no telemetry to Wisent from a default local run. |
-| Upgrades | `jeden update` verifies a DSSE release manifest at `JEDEN_UPDATE_MANIFEST` against the binary's embedded `canary` and `stable` ed25519 trust roots, checks the artifact digest plus SBOM and provenance evidence, then installs transactionally. `JEDEN_UPDATE_CHANNEL` selects `canary` or `stable` and defaults to `stable`; no other channel is accepted. Version floor is the SemVer in `Cargo.toml`; the released command vocabulary is frozen in `released-surface.json`. |
-| Recovery | Backing up `~/.jeden/` and `<cwd>/.jeden/` is the operator's responsibility — Jeden ships no backup or restore command. A failed update rolls back to the journaled last-known-good binary automatically. A session transcript with a truncated tail is read up to the last valid event and must be continued in a child session; `/checkpoint` and `/rewind` add lineage without deleting abandoned history. `/memory rebuild` reconstructs the memory index. The roadmap registry and the cooldown store write a temporary file, `fsync` it, and rename it into place, so a crash leaves the previous document intact. |
-
-## Project status and support
-
-- **Maturity**: public development source at SemVer `0.x` — there is no stable public contract yet. The released command vocabulary is frozen in `released-surface.json`.
-- **Channels**: Stado owns immutable `candidate` and `stable` promotion and reconciliation; product scripts only build and stage deterministic bytes and evidence.
-- **Distribution**: source is available under the Apache License 2.0; promoted Darwin ARM64 and Linux AMD64 archives are identified by Stado release receipts.
-- **Support and security reports**: use the public `wisent-ai/jeden` issue tracker for non-sensitive reports and GitHub Security Advisories for vulnerabilities.
+A direct provider can be selected with `JEDEN_MODEL_ENDPOINT` and a key in
+the environment or the optional private list. Brama instead needs its route
+and process-owned credentials. Keep the signed sandbox helper beside the
+executable on macOS; see the [signing contract](https://stado.wisent.com/docs/signing).
+
+- `jeden run` handles a concrete task; `jeden pursue` integrates Pursuit's
+  outcome contract and independent review with Jeden's model conversations.
+- The interactive terminal has searchable management pickers and slash
+  commands. `jeden todo list --json` reads retained work;
+  `jeden todo continue --allow-write` continues with an explicit grant.
+- `jeden rpc`, `jeden acp`, headless mode, the Rust SDK and the TypeScript SDK
+  expose the same session protocol to automation and editors.
+- Tools stay within the workspace jail and execution grants. File mutations
+  return visual diffs; oversized results become referenced session artifacts.
+
+Sessions and artifacts live under `~/.jeden/sessions/` unless
+`JEDEN_SESSION_ROOT` is set. A task's completion state retains original
+requests across new prompts, resets, forks and resumes. The native controller
+checks acceptance evidence; a model's assertion alone is not completion.
+
+## Verification and source contracts
+
+`npm run test:contracts` builds the product and executes the real CLI and RPC
+journeys with their declared dependencies, recording revision, binary digest,
+commands, exit statuses and saved state. The direct-token qualification is
+`node tests/model/tokens.mjs` with the real provider inputs documented by the
+[token command](https://jeden.wisent.com/docs/cli/token). A failed or blocked
+model journey is not a pass. Probierz is optional.
+
+- [Configuration and context](docs/configuration.md)
+- [Release automation](docs/release.md)
+- [Roadmap registry](docs/roadmap.md)
+- [Extension reload](docs/extension-reload.md)
+- [Tools and action protocol](https://jeden.wisent.com/docs/tools)
+- [Sessions and memory](https://jeden.wisent.com/docs/sessions)
+
+Jeden is a command-line package, not a fleet service. Stado builds, signs and
+publishes the declared artifacts; consumers install the executable and its
+matching sandbox helper. The documentation site renders its pages from the
+source on each push to `main`, so a documentation change is delivered with
+its source revision. Non-sensitive support reports belong in the public
+[issue tracker](https://github.com/wisent-ai/jeden/issues); vulnerabilities
+belong in GitHub Security Advisories.

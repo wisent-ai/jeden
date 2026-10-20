@@ -1,9 +1,9 @@
 //! Guided environment configuration wizard (`/setup`).
 //!
 //! The wizard is idempotent: every step checks live state first and renders
-//! already-configured items as disabled `[OK]` rows. Nonsecret router settings
-//! may be persisted locally; credentials are injected by the trusted Stado
-//! launcher and are never written by the wizard.
+//! already-configured items as disabled `[OK]` rows. Nonsecret settings
+//! may be persisted locally; credentials come from the process environment
+//! or Jeden's private token list, never a vault.
 
 use std::path::{Path, PathBuf};
 
@@ -11,6 +11,7 @@ use super::SlashContext;
 use crate::cli::config::{load_config, ui_language};
 use crate::tui::{PickerItem, PickerSpec};
 
+mod direct;
 mod env_file;
 mod report;
 mod steps;
@@ -33,6 +34,7 @@ struct SetupState {
     /// Why `~/.jeden/.env` could not be read; the values it would hold are
     /// then unknown, not unconfigured.
     env_file_error: Option<String>,
+    model_error: Option<String>,
     model: Option<String>,
     language: String,
     theme: String,
@@ -40,18 +42,20 @@ struct SetupState {
 
 fn setup_state(context: &SlashContext<'_>) -> SetupState {
     let config = load_config(context.cwd);
-    let model = context
-        .model
-        .map(str::to_string)
-        .or(config.model.clone())
-        .or_else(|| std::env::var("JEDEN_MODEL").ok())
-        .filter(|value| !value.trim().is_empty());
-    let theme = crate::cli::config::merged_config_value(context.cwd)
-        .get("ui")
-        .and_then(|ui| ui.get("theme"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("auto")
-        .to_string();
+    let mut model_error = None;
+    let model = match context.model.map(str::to_string).or(config.model.clone()) {
+        Some(model) => Some(model),
+        None => match std::env::var("JEDEN_MODEL") {
+            Ok(model) => Some(model),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(error) => {
+                model_error = Some(format!("JEDEN_MODEL cannot be read: {error}"));
+                None
+            }
+        },
+    }
+    .filter(|value| !value.trim().is_empty());
+    let theme = config.ui.theme.clone();
     let (workspace, workspace_error) = match crate::cli::workspace::status(context.cwd) {
         Ok(Some(report)) => (Some(report.workspace), None),
         Ok(None) => (None, None),
@@ -75,6 +79,7 @@ fn setup_state(context: &SlashContext<'_>) -> SetupState {
         brama_url,
         agent_id,
         secret_configured,
+        model_error,
         model,
         language: ui_language(&config).code().to_string(),
         theme,
@@ -122,6 +127,13 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             .badge("WORKSPACE")
             .prefill(),
         ),
+    }
+    if let Some(error) = &state.model_error {
+        items.push(error_row("Model selection cannot be read", error));
+    }
+    if let Some(direct) = direct::items(&state)? {
+        items.extend(direct);
+        return Ok(PickerSpec::new("Setup — direct model access", items).localized(&lang));
     }
     if let Some(error) = &state.env_file_error {
         items.push(error_row("Environment file is unreadable", error));
@@ -179,7 +191,7 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
     if state.secret_configured {
         items.push(configured_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET configured",
-            "read by Jeden with `stado credentials get --role wisent-app-agent --field value`",
+            "supplied to this process to sign Brama requests",
         ));
     } else if state.env_file_error.is_some() {
         items.push(error_row(
@@ -187,9 +199,9 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             "Resolve the environment file read error before interpreting this value as unavailable.",
         ));
     } else {
-        items.push(configured_row(
+        items.push(error_row(
             "4. WISENT_APP_AGENT_AUTH_SECRET unavailable",
-            "`stado credentials get --role wisent-app-agent --field value` must answer for Stado's identity",
+            "Set the signing credential in the process environment for Brama requests; Jeden never fetches it from Skarbiec",
         ));
     }
     match &state.model {

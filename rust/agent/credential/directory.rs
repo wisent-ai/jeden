@@ -66,17 +66,20 @@ pub(super) fn resolve() -> Result<(String, Provenance), String> {
 }
 
 pub(super) fn origin(route: &Route) -> String {
-    let mut origin = match (&route.source, &route.url, &route.replaced_file_value) {
+    let mut origin = match (&route.source, &route.url, route.replaced_written_address) {
         (Source::Environment, _, _) => {
             "address from BRAMA_URL in the process environment".to_string()
         }
-        (Source::Stado, _, Some(written)) => format!(
-            "address from Stado's service directory (consumer jeden); an environment file \
-             still holds {written}, which that route replaced"
-        ),
-        (Source::Stado, _, None) => {
+        (Source::Stado, _, true) => {
+            "address from Stado's service directory (consumer jeden); an environment file held a different address, which that route replaced".to_string()
+        },
+        (Source::Stado, _, false) => {
             "address from Stado's service directory (consumer jeden)".to_string()
         }
+        (Source::DirectRefused(said), _, _) =>
+            format!("direct provider route refused: {said}"),
+        (Source::EnvironmentRefused(said), _, _) =>
+            format!("BRAMA_URL in the process environment refused: {said}"),
         (Source::Refused(said), Some(_), _) => {
             format!("address from an environment file, because Stado did not route it: {said}")
         }

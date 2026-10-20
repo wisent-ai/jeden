@@ -1,7 +1,7 @@
 //! A chat's memory that never ends, as the operator's OptChat design lays it
 //! out: every message logged word for word in `main/YYYY-MM-DD.jsonl`, a
-//! binary tree of one-line summaries of at most 512 bytes built from it by a
-//! cheap model through Brama in `tree/YYYY-MM-DD.jsonl`, and a view of those
+//! binary tree of one-line summaries of at most 512 bytes built from it by
+//! the selected model route in `tree/YYYY-MM-DD.jsonl`, and a view of those
 //! lines, 64 to 128 KB, that each turn is given before its new message,
 //! saved in `view.json` and never rebuilt. The model opens a line with
 //! zoom(id, n), down to the message itself, and asks date(id) for when a
@@ -11,8 +11,8 @@
 //! One chat belongs to one agent and outlives its sessions (`chat`): a new
 //! session, a reset, a resume, a fork or a branch goes on in the same chat.
 //! The operator turns it on per workspace or user with `chatMemory` in
-//! Jeden's configuration, naming `summaryModel`: the Brama route or alias of
-//! the cheap model. Every size is the operator's own number, declared
+//! Jeden's configuration, naming `summaryModel`: a concrete direct-provider
+//! model or a Brama route or alias. Every size is the operator's own number, declared
 //! beside this file; how many compactions run at once is what this machine
 //! runs in parallel, measured when a chat opens.
 
@@ -107,7 +107,7 @@ pub fn fitting(summarize: &Summarize) -> Result<Fitting<'_>, String> {
 /// What the operator set the chat memory to.
 #[derive(Clone, Debug)]
 pub struct Settings {
-    /// The Brama route or alias the summaries are written with.
+    /// The selected model route the summaries are written with.
     pub summary_model: String,
     /// The chat the configuration names (`chatMemory.chat`), if it names one.
     pub chat: Option<String>,
@@ -135,7 +135,7 @@ pub fn settings(cwd: &Path) -> Result<Option<Settings>, String> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|model| !model.is_empty())
-        .ok_or("chatMemory.summaryModel is required: the Brama route or alias of the cheap model the summary tree is written with")?
+        .ok_or("chatMemory.summaryModel is required: name the model route that writes the summary tree")?
         .to_string();
     let chat = match section.get("chat") {
         None | Some(Value::Null) => None,

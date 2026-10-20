@@ -47,20 +47,22 @@ fn route_provider(model: &str) -> Option<&str> {
         .filter(|provider| !provider.is_empty())
 }
 
-/// The lease a call on `route` runs on. A session its starter holds a lease
-/// for (`JEDEN_LEASE`) runs every call on that lease and asks Brama for
-/// none: the starter's proxy names that account on every request whatever
-/// the route, and relays no lease route. Otherwise none when the
-/// configuration does not reach Brama, names no session, or the route's
-/// provider is not one Brama keeps a pool of accounts for (Brama serves it
-/// with its own credential). A provider Brama declares without a sessions
-/// limit is refused with Brama's own sentence: no lease can be taken for it,
-/// and the session is not run outside the pool instead.
+/// The lease a call on `route` runs on. A Brama session its starter holds a
+/// lease for (`JEDEN_LEASE`) runs its Brama calls on that lease and asks Brama
+/// for none: the starter's proxy names that account on each request and
+/// relays no lease route. An explicit direct provider ignores that lease.
+/// Otherwise no lease is taken when the configuration does not reach Brama,
+/// names no session, or the route's provider is not pooled by Brama.
+/// A provider Brama declares without a sessions limit is refused with its
+/// reason: no lease can be taken and the session is not run outside the pool.
 pub(crate) fn for_route(config: &ChatConfig, route: &str) -> Result<Option<SessionLease>, String> {
+    if !config.via_brama {
+        return Ok(None);
+    }
     if let Some(inherited) = &config.inherited_lease {
         return Ok(Some(inherited.clone()));
     }
-    let Some(session_id) = config.session_id.as_deref().filter(|_| config.via_brama) else {
+    let Some(session_id) = config.session_id.as_deref() else {
         return Ok(None);
     };
     let Some(provider) = route_provider(route) else {

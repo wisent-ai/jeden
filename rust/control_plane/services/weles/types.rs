@@ -135,6 +135,7 @@ pub trait InteractionBridge {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WelesError {
     Unconfigured,
+    Configuration(String),
     Transport(String),
     Http {
         status: u16,
@@ -167,6 +168,7 @@ impl std::fmt::Display for WelesError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unconfigured => f.write_str("Weles service endpoint is not configured"),
+            Self::Configuration(e) => write!(f, "Weles configuration error: {e}"),
             Self::Transport(e) => write!(f, "Weles transport error: {e}"),
             Self::Http { status, message } => write!(f, "Weles returned HTTP {status}: {message}"),
             Self::InvalidResponse(e) => write!(f, "invalid Weles response: {e}"),

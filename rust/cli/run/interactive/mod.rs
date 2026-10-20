@@ -25,9 +25,10 @@ fn input_accepts_attachments(input: &str) -> bool {
     if !trimmed.starts_with('/') {
         return true;
     }
-    let (command, rest) = trimmed
-        .split_once(char::is_whitespace)
-        .unwrap_or((trimmed, ""));
+    let (command, rest) = match trimmed.split_once(char::is_whitespace) {
+        Some(parts) => parts,
+        None => (trimmed, ""),
+    };
     match command {
         "/retry" | "/btw" => true,
         "/force" => {
@@ -62,25 +63,36 @@ fn model_attachments(
 
 pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let config = load_config(&args.cwd);
-    let model = args
-        .model
-        .clone()
-        .or(config.model)
-        .or_else(|| env::var("JEDEN_MODEL").ok())
-        .or_else(|| env::var("MODEL").ok())
-        .filter(|model| !model.trim().is_empty());
+    let model = (if let Some(model) = args.model.clone() {
+        Some(model)
+    } else if let Some(model) = config.model {
+        Some(model)
+    } else {
+        match env::var("JEDEN_MODEL") {
+            Ok(model) => Some(model),
+            Err(env::VarError::NotPresent) => match env::var("MODEL") {
+                Ok(model) => Some(model),
+                Err(env::VarError::NotPresent) => None,
+                Err(error) => return Err(format!("MODEL cannot be read: {error}")),
+            },
+            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
+        }
+    })
+    .filter(|model| !model.trim().is_empty());
     let initial_model_picker = if model.is_none() {
-        // Brama unconfigured: skip the startup picker so the REPL still opens;
-        // the welcome tip points at /setup to connect a router.
-        let endpoint = crate::agent::credential::brama_url();
-        let brama = crate::control_plane::brama::BramaClient::configured(
-            endpoint,
-            env::var("BRAMA_TOKEN").ok(),
-        );
-        if brama.health().available {
-            Some(model_picker(&args.cwd, None, false)?)
-        } else {
+        // Keep /setup reachable when a direct route variable is unreadable;
+        // its picker reports the refusal without treating Brama as selected.
+        if crate::agent::credential::direct_provider().is_none()
+            && crate::agent::credential::direct_refusal().is_some()
+        {
             None
+        } else {
+            let client = crate::control_plane::model_client()?;
+            if client.health().available {
+                Some(model_picker(&args.cwd, None, false)?)
+            } else {
+                None
+            }
         }
     } else {
         None
@@ -105,15 +117,20 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
     if let Some(session_path) = &resumed {
         let mut turns = session_conversation_turns(session_path)?;
-        if turns
+        let has_system = turns
             .first()
             .and_then(|turn| turn.get("role"))
             .and_then(Value::as_str)
-            == Some("system")
-        {
-            turns.remove(0);
+            == Some("system");
+        let count = turns.len() - usize::from(has_system);
+        if has_system {
+            if let Some(first) = turns.first_mut() {
+                *first = serde_json::json!({
+                    "role": "system",
+                    "content": agent::system_prompt_checked(&args.cwd)?
+                });
+            }
         }
-        let count = turns.len();
         initial_conversation.load_history(&args.cwd, turns, session_path)?;
         println!(
             "Resumed {} prior turn(s) from {}.",
@@ -154,10 +171,10 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
             } else {
                 "ask".into()
             },
-            model: status_model
-                .lock()
-                .clone()
-                .unwrap_or_else(|| "not selected".into()),
+            model: match status_model.lock().clone() {
+                Some(model) => model,
+                None => "not selected".into(),
+            },
             service_tier: service_tier_prompt(&cwd),
             branch,
             dirty_count,
@@ -168,12 +185,11 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     };
 
     let classify = |input: &str| {
-        let trimmed = input.trim();
-        let command = trimmed.split_whitespace().next().unwrap_or(trimmed);
-        if command == "/compact" || command == "/handoff" {
+        let command = input.trim().split_whitespace().next();
+        if matches!(command, Some("/compact" | "/handoff")) {
             return tui::TurnKind::Background;
         }
-        if command.starts_with('/') && !is_builtin_slash(command) {
+        if command.is_some_and(|command| command.starts_with('/') && !is_builtin_slash(command)) {
             return tui::TurnKind::Background;
         }
         tui::default_turn_kind(input)

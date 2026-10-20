@@ -1,4 +1,3 @@
-use super::contract::{ModelRequest, ModelStreamResultV1, RequestMeta, RouteRequest};
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
 use super::ServiceHealth;
 use std::sync::Arc;
@@ -10,16 +9,16 @@ pub(super) const API_VERSION: &str = "v1";
 /// answers with 304 when nothing changed.
 const CATALOG_TTL_ENV: &str = "BRAMA_CATALOG_TTL_MS";
 
-/// The declared catalog age, `None` when unset or not a whole number of
-/// milliseconds (the latter said on standard error).
-fn declared_catalog_ttl() -> Option<Duration> {
-    let value = std::env::var(CATALOG_TTL_ENV).ok()?;
-    match value.trim().parse::<u64>() {
-        Ok(millis) => Some(Duration::from_millis(millis)),
-        Err(_) => {
-            eprintln!("jeden: {CATALOG_TTL_ENV} must be a whole number of milliseconds; it is {value:?}, so every catalog read revalidates");
-            None
-        }
+/// The declared catalog age. Missing means revalidate; an invalid value
+/// stops the client before a catalog or model request.
+fn declared_catalog_ttl() -> Result<Option<Duration>, String> {
+    match std::env::var(CATALOG_TTL_ENV) {
+        Ok(value) => value.trim().parse::<u64>()
+            .map(Duration::from_millis)
+            .map(Some)
+            .map_err(|error| format!("{CATALOG_TTL_ENV} must be a whole number of milliseconds, got {value:?}: {error}")),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(format!("{CATALOG_TTL_ENV} cannot be read: {error}")),
     }
 }
 
@@ -27,11 +26,16 @@ fn declared_catalog_ttl() -> Option<Duration> {
 mod auth;
 mod cache;
 mod catalog;
+#[path = "request/contract_impl.rs"]
+mod contract_impl;
 mod error;
 #[path = "request/fetch.rs"]
 mod fetch;
 #[path = "request/media.rs"]
 mod media;
+mod readiness;
+#[path = "request/versioned.rs"]
+mod versioned;
 
 use cache::{catalog_cache_key, CACHE};
 pub use catalog::{BramaReadiness, ModelCatalog, ModelEntry, ModelPerf, ModelPrice};
@@ -44,24 +48,33 @@ pub struct BramaClient {
     /// The declared catalog age; `None` revalidates on every read.
     pub(super) ttl: Option<Duration>,
     transport: Arc<dyn ControlPlaneTransport>,
+    configuration_error: Option<String>,
     pub(super) correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 impl BramaClient {
     pub fn from_env() -> Self {
-        Self::with_secret_ref(
+        let mut client = Self::with_secret_ref(
             crate::agent::credential::brama_url(),
             Some(SecretRef::environment("BRAMA_TOKEN")),
-            declared_catalog_ttl(),
+            None,
             ReqwestTransport::production(),
-        )
+        );
+        client.apply_declared_catalog_ttl();
+        client
     }
 
     pub fn configured(endpoint: Option<String>, bearer: Option<String>) -> Self {
-        Self::new(endpoint, bearer, declared_catalog_ttl())
+        let (direct, transport) = crate::control_plane::model_transport(endpoint.as_deref());
+        let mut client = Self::with_transport(endpoint, bearer, None, transport);
+        if !direct {
+            client.apply_declared_catalog_ttl();
+        }
+        client
     }
 
     pub fn new(endpoint: Option<String>, bearer: Option<String>, ttl: Option<Duration>) -> Self {
-        Self::with_transport(endpoint, bearer, ttl, ReqwestTransport::production())
+        let (_, transport) = crate::control_plane::model_transport(endpoint.as_deref());
+        Self::with_transport(endpoint, bearer, ttl, transport)
     }
 
     pub fn with_transport(
@@ -70,7 +83,14 @@ impl BramaClient {
         ttl: Option<Duration>,
         transport: Arc<dyn ControlPlaneTransport>,
     ) -> Self {
-        Self::with_secret_ref(endpoint, bearer.map(SecretRef::inline), ttl, transport)
+        Self::with_secret_ref(
+            endpoint,
+            bearer
+                .filter(|token| !token.is_empty())
+                .map(SecretRef::inline),
+            ttl,
+            transport,
+        )
     }
 
     pub fn with_secret_ref(
@@ -87,142 +107,88 @@ impl BramaClient {
             authorization,
             ttl,
             transport,
-            correlation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            correlation: Arc::new(std::sync::atomic::AtomicU64::default()),
+            configuration_error: None,
+        }
+    }
+
+    fn apply_declared_catalog_ttl(&mut self) {
+        match declared_catalog_ttl() {
+            Ok(ttl) => self.ttl = ttl,
+            Err(error) => self.configuration_error = Some(error),
         }
     }
 
     pub(super) fn key(&self) -> Result<String, BramaError> {
+        if let Some(cause) = crate::agent::credential::direct_refusal() {
+            return Err(BramaError::Configuration(cause.to_owned()));
+        }
+        if let Some(error) = &self.configuration_error {
+            return Err(BramaError::Configuration(error.clone()));
+        }
         self.endpoint.clone().ok_or(BramaError::Unconfigured)
     }
 
     pub fn health(&self) -> ServiceHealth {
-        let available = self.endpoint.is_some();
+        let refused = crate::agent::credential::direct_refusal();
+        let direct = refused.is_some()
+            || crate::agent::credential::direct_provider()
+                .is_some_and(|(url, _)| self.endpoint.as_deref() == Some(url.as_str()));
+        let available =
+            refused.is_none() && self.endpoint.is_some() && self.configuration_error.is_none();
         ServiceHealth {
-            service: "brama".into(),
-            version: API_VERSION.into(),
-            available,
-            endpoint: self.endpoint.clone(),
-            detail: if available {
-                "configured; catalog is resolved on demand".into()
+            service: if direct { "model" } else { "brama" }.into(),
+            version: if direct {
+                String::new()
             } else {
-                "BRAMA_URL is required; configure the Brama model-router service URL".into()
+                API_VERSION.into()
+            },
+            available,
+            endpoint: if refused.is_some() {
+                None
+            } else {
+                self.endpoint.clone()
+            },
+            detail: if let Some(cause) = refused {
+                format!("direct provider route refused: {cause}")
+            } else {
+                match (&self.configuration_error, &self.endpoint) {
+                    (Some(error), _) => format!("model endpoint configuration error: {error}"),
+                    (None, Some(_)) if direct => {
+                        "direct provider configured; catalog is resolved on demand".into()
+                    }
+                    (None, Some(_)) => "configured; catalog is resolved on demand".into(),
+                    (None, None) => {
+                        "BRAMA_URL is required; configure the Brama model-router service URL".into()
+                    }
+                }
             },
         }
     }
 
     pub fn invalidate(&self) {
         if let Some(endpoint) = &self.endpoint {
-            let key = catalog_cache_key(endpoint, self.authorization.as_ref());
-            if let Ok(mut cache) = CACHE.lock() {
-                cache.remove(&key);
+            let bearer = match SecretRef::resolve_optional(self.authorization.as_ref()) {
+                Ok(bearer) => bearer,
+                Err(error) => {
+                    eprintln!("jeden: cannot invalidate model catalog cache: {error}");
+                    return;
+                }
+            };
+            let key = catalog_cache_key(endpoint, bearer.as_deref());
+            match CACHE.lock() {
+                Ok(mut cache) => {
+                    cache.remove(&key);
+                }
+                Err(error) => eprintln!("jeden: cannot invalidate model catalog cache: {error}"),
             }
         }
     }
 
     pub fn invalidate_all() {
-        if let Ok(mut cache) = CACHE.lock() {
-            cache.clear();
+        match CACHE.lock() {
+            Ok(mut cache) => cache.clear(),
+            Err(error) => eprintln!("jeden: cannot invalidate model catalog cache: {error}"),
         }
-    }
-}
-
-impl super::contract::BramaApiV1 for BramaClient {
-    fn health(&self) -> ServiceHealth {
-        BramaClient::health(self)
-    }
-
-    fn readiness(&self) -> Result<super::contract::Readiness, BramaError> {
-        let catalog = self.catalog(false)?;
-        super::contract::negotiate(1, 1).map_err(|error| {
-            BramaError::InvalidCatalog(format!("schema negotiation failed: {error:?}"))
-        })?;
-        Ok(super::contract::Readiness {
-            ready: true,
-            schema_min: 1,
-            schema_max: 1,
-            detail: format!(
-                "{} routes available",
-                catalog
-                    .models
-                    .iter()
-                    .filter(|model| model.available)
-                    .count()
-            ),
-        })
-    }
-
-    fn capabilities(&self, meta: &RequestMeta) -> Result<Vec<String>, BramaError> {
-        let response = self.request_json(reqwest::Method::GET, "/capabilities", None, meta)?;
-        let value: serde_json::Value = serde_json::from_slice(&response.body)
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        serde_json::from_value(value.get("capabilities").cloned().unwrap_or(value))
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))
-    }
-
-    fn catalog(&self, force: bool) -> Result<ModelCatalog, BramaError> {
-        BramaClient::catalog(self, force)
-    }
-
-    fn resolve(
-        &self,
-        request: &RouteRequest,
-        meta: &RequestMeta,
-    ) -> Result<ModelEntry, BramaError> {
-        let body = serde_json::to_vec(request)
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        let response = self.request_json(reqwest::Method::POST, "/resolve", Some(body), meta)?;
-        let route: ModelEntry = serde_json::from_slice(&response.body)
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        if route.id.trim().is_empty() {
-            return Err(BramaError::InvalidResponse("served route is empty".into()));
-        }
-        Ok(route)
-    }
-
-    fn stream(
-        &self,
-        request: &ModelRequest,
-        meta: &RequestMeta,
-        cancelled: &dyn Fn() -> bool,
-    ) -> Result<ModelStreamResultV1, BramaError> {
-        if cancelled() {
-            return Err(BramaError::Cancelled);
-        }
-        let body = serde_json::to_vec(request)
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        let response = self.request_json(reqwest::Method::POST, "/stream", Some(body), meta)?;
-        if cancelled() {
-            return Err(BramaError::Cancelled);
-        }
-        let mut result: ModelStreamResultV1 = serde_json::from_slice(&response.body)
-            .map_err(|error| BramaError::InvalidResponse(error.to_string()))?;
-        if result.served_route.trim().is_empty()
-            || result.finish_reason.trim().is_empty()
-            || result.correlation_id != meta.correlation_id
-        {
-            return Err(BramaError::InvalidResponse(
-                "stream terminal metadata is incomplete or correlation mismatched".into(),
-            ));
-        }
-        if result.selected_route.is_empty() {
-            result.selected_route = request.route.clone();
-        }
-        if result.selected_route != request.route {
-            return Err(BramaError::InvalidResponse(
-                "selected route does not match the requested route".into(),
-            ));
-        }
-        if let Some(snapshot) = &result.billing {
-            if snapshot.provider_id.is_empty()
-                || snapshot.account_id.is_empty()
-                || snapshot.subscription_id.is_empty()
-                || snapshot.quota.subscription_id != snapshot.subscription_id
-            {
-                return Err(BramaError::InvalidResponse(
-                    "billing attribution is incomplete or mismatched".into(),
-                ));
-            }
-        }
-        Ok(result)
     }
 }

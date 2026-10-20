@@ -8,8 +8,8 @@
 //! first message and how many it covers. A source that fits the summary size
 //! is its own node with no model call (a short message word for word, two
 //! short lines joined by a newline); anything longer is compressed by the
-//! cheap model through Brama, shown the size as a ruler and asked again when
-//! its line is too long, keeping the shortest. Each node is built once,
+//! selected summary model, shown the size as a ruler and asked again when its
+//! line is too long, keeping the shortest. Each node is built once,
 //! appended and never built again.
 
 use serde::{Deserialize, Serialize};
@@ -78,8 +78,8 @@ impl Node {
     }
 }
 
-/// What writes a line: the cheap model through Brama, given the messages
-/// of one compaction call, answering the line.
+/// What writes a line: the selected summary model, given the messages of one
+/// compaction call, answering the line.
 pub type Summarize = dyn Fn(&[Value]) -> Result<String, String> + Send + Sync;
 
 /// What every compaction call is told before its task.

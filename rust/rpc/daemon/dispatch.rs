@@ -1,4 +1,5 @@
 use super::*;
+mod credential;
 
 impl<B: SessionBackend> HeadlessDaemon<B> {
     // `ErrorV1` is the wire envelope `jeden.session.v1` puts on the socket, so
@@ -17,9 +18,10 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         })?;
 
         match request.method.as_str() {
-            "health/readiness" | "readiness" => {
-                Ok(json!({"state": format!("{:?}", self.service.readiness()).to_lowercase()}))
-            }
+            "health/readiness" | "readiness" => Ok(json!({
+                "state": format!("{:?}", self.service.readiness()).to_lowercase(),
+                "version": env!("JEDEN_VERSION"),
+            })),
             "session/create" => {
                 // Read before the session exists, so a clock that cannot be
                 // read creates nothing.
@@ -195,6 +197,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     .answer_ask(&connection.identity, ask_id, text)
                     .map_err(service_error)
             }
+            method @ ("token/status" | "token/list" | "token/add" | "token/remove") => {
+                credential::request(connection, method, &request.params)
+            }
             _ => Err(protocol_error("method_not_found", "unknown session method")),
         }
     }
@@ -218,13 +223,19 @@ fn string_field<'a>(params: &'a Value, field: &str) -> Result<&'a str, ErrorV1> 
 fn positive_limit(params: &Value) -> Result<Option<usize>, ErrorV1> {
     match params.get("limit") {
         None | Some(Value::Null) => Ok(None),
-        Some(value) => match value.as_u64() {
-            Some(limit) if limit >= 1 => Ok(Some(usize::try_from(limit).unwrap_or(usize::MAX))),
-            _ => Err(protocol_error(
-                "invalid_request",
-                "limit must be an integer of at least 1",
-            )),
-        },
+        Some(value) => {
+            let error = || {
+                protocol_error(
+                    "invalid_request",
+                    "limit must be a positive integer representable on this host",
+                )
+            };
+            let parsed = value.as_u64().ok_or_else(error)?;
+            let parsed = usize::try_from(parsed).map_err(|_| error())?;
+            std::num::NonZeroUsize::new(parsed)
+                .map(|limit| Some(limit.get()))
+                .ok_or_else(error)
+        }
     }
 }
 

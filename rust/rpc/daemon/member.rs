@@ -50,11 +50,18 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 .params
                 .get(name)
                 .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned()
+                .filter(|value| !value.trim().is_empty())
+                .ok_or_else(|| {
+                    refusal(
+                        id.clone(),
+                        "invalid_request",
+                        format!("identity/authenticate requires non-empty {name}"),
+                        false,
+                    )
+                })
         };
-        let (token, organization) = (field("accessToken"), field("organizationId"));
-        let member = authority.authorize(&token, &organization).await.map_err(
+        let (token, organization) = (field("accessToken")?, field("organizationId")?);
+        let member = authority.authorize(token, organization).await.map_err(
             |refused: IdentityRefusal| {
                 refusal(
                     id.clone(),

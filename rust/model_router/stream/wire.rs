@@ -1,90 +1,5 @@
 use super::*;
 
-pub(crate) fn spawn_openai_stream_adapter(
-    config: &ChatConfig,
-    body_text: String,
-    lease_headers: Vec<(&'static str, String)>,
-    sender: Sender<WireMessage>,
-) -> Result<(), AttemptError> {
-    use std::io::{BufRead, BufReader};
-    let signed = agent_headers(&body_text, &config.agent_id, &config.secret)
-        .map_err(AttemptError::permanent)?;
-    let url = format!("{}/v1/chat/completions", config.url.trim_end_matches('/'));
-    let bearer_token = config.bearer_token.clone();
-    std::thread::Builder::new()
-        .name("model-stream-adapter".into())
-        .spawn(move || {
-            let client = match crate::net::blocking_builder().build() {
-                Ok(client) => client,
-                Err(error) => {
-                    let _ = sender.send(WireMessage::Network(
-                        crate::control_plane::transport::describe_reqwest(error),
-                    ));
-                    return;
-                }
-            };
-            let mut request = client
-                .post(url)
-                .bearer_auth(bearer_token)
-                .header("content-type", "application/json")
-                .header("accept", "text/event-stream");
-            for (name, value) in signed.into_iter().chain(lease_headers) {
-                request = request.header(name, value);
-            }
-            let response = match request.body(body_text).send() {
-                Ok(response) => response,
-                Err(error) => {
-                    let _ = sender.send(WireMessage::Network(
-                        crate::control_plane::transport::describe_reqwest(error),
-                    ));
-                    return;
-                }
-            };
-            let status = response.status().as_u16();
-            let content_type = response
-                .headers()
-                .get("content-type")
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let retry_after = response
-                .headers()
-                .get("retry-after")
-                .and_then(|value| value.to_str().ok())
-                .and_then(parse_retry_after);
-            if sender
-                .send(WireMessage::Headers {
-                    status,
-                    content_type: content_type.clone(),
-                    retry_after,
-                })
-                .is_err()
-            {
-                return;
-            }
-            if !(200..300).contains(&status) || !content_type.contains("event-stream") {
-                let result = response
-                    .text()
-                    .map_err(crate::control_plane::transport::describe_reqwest);
-                let _ = sender.send(WireMessage::FullBody(result));
-                return;
-            }
-            for line in BufReader::new(response).lines() {
-                if sender
-                    .send(WireMessage::Line(line.map_err(|error| error.to_string())))
-                    .is_err()
-                {
-                    return;
-                }
-            }
-            let _ = sender.send(WireMessage::Eof);
-        })
-        .map_err(|error| {
-            AttemptError::permanent(format!("cannot start model stream adapter: {error}"))
-        })?;
-    Ok(())
-}
-
 #[derive(Default)]
 pub(crate) struct SseDecoder {
     pub(crate) data: String,
@@ -98,8 +13,14 @@ impl SseDecoder {
         if line.starts_with(':') {
             return Ok(None);
         }
-        let (field, value) = line.split_once(':').unwrap_or((line, ""));
-        let value = value.strip_prefix(' ').unwrap_or(value);
+        let (field, value) = match line.split_once(':') {
+            Some(parts) => parts,
+            None => (line, ""),
+        };
+        let value = match value.strip_prefix(' ') {
+            Some(stripped) => stripped,
+            None => value,
+        };
         match field {
             "data" => {
                 if !self.data.is_empty() {
@@ -211,7 +132,7 @@ pub(crate) fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent
     if let Some(error) = chunk.get("error") {
         return Err(format!("model stream error event: {error}"));
     }
-    let mut events = Vec::with_capacity(4);
+    let mut events = Vec::new();
     if let Some(usage) = usage_from_value(&chunk) {
         events.push(OpenAiStreamEvent::Usage(usage));
     }
@@ -249,10 +170,11 @@ pub(crate) fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent
         }
         recognized = true;
     }
-    if let Some(reasoning) = delta
-        .get("reasoning_content")
-        .or_else(|| delta.get("reasoning"))
-    {
+    let reasoning = match delta.get("reasoning_content") {
+        Some(value) => Some(value),
+        None => delta.get("reasoning"),
+    };
+    if let Some(reasoning) = reasoning {
         match reasoning {
             Value::Null => {}
             Value::String(text) if !text.is_empty() => {

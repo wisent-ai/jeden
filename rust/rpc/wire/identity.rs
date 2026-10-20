@@ -78,7 +78,7 @@ pub struct WisentIdentityAuthority {
 
 impl WisentIdentityAuthority {
     pub fn from_environment() -> Result<Self, String> {
-        let origin = configured("JEDEN_WISENT_AUTH_URL")
+        let origin = configured("JEDEN_WISENT_AUTH_URL")?
             .ok_or_else(|| {
                 "JEDEN_WISENT_AUTH_URL is not set; Wisent Identity has no address".to_string()
             })?
@@ -89,7 +89,7 @@ impl WisentIdentityAuthority {
                 "JEDEN_WISENT_AUTH_URL must be an https origin, got {origin}"
             ));
         }
-        let anon_key = configured("JEDEN_WISENT_AUTH_ANON_KEY")
+        let anon_key = configured("JEDEN_WISENT_AUTH_ANON_KEY")?
             .ok_or_else(|| "JEDEN_WISENT_AUTH_ANON_KEY is not set".to_string())?;
         let client = reqwest::Client::builder()
             .redirect(reqwest::redirect::Policy::none())
@@ -113,20 +113,20 @@ impl WisentIdentityAuthority {
         if bearer.trim().is_empty() {
             return Err(IdentityRefusal::Unauthorized);
         }
-        let response = self
-            .client
-            .post(format!(
-                "{}/rest/v1/rpc/authorize_organization",
-                self.origin
-            ))
-            .header("apikey", &self.anon_key)
-            .header("Accept", "application/vnd.pgrst.object+json")
-            .header(WISENT_ORGANIZATION_HEADER, organization_id.to_string())
-            .bearer_auth(bearer.trim())
-            .json(&json!({ "target_org_id": organization_id }))
-            .send()
-            .await
-            .map_err(|error| IdentityRefusal::Unavailable(error.to_string()))?;
+        let response = stado_wait::request(
+            self.client
+                .post(format!(
+                    "{}/rest/v1/rpc/authorize_organization",
+                    self.origin
+                ))
+                .header("apikey", &self.anon_key)
+                .header("Accept", "application/vnd.pgrst.object+json")
+                .header(WISENT_ORGANIZATION_HEADER, organization_id.to_string())
+                .bearer_auth(bearer.trim())
+                .json(&json!({ "target_org_id": organization_id })),
+        )
+        .await
+        .map_err(|error| IdentityRefusal::Unavailable(error.to_string()))?;
         let status = response.status();
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(IdentityRefusal::Unauthorized);
@@ -157,9 +157,10 @@ impl WisentIdentityAuthority {
     }
 }
 
-fn configured(variable: &str) -> Option<String> {
-    std::env::var(variable)
-        .ok()
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
+fn configured(variable: &str) -> Result<Option<String>, String> {
+    match std::env::var(variable) {
+        Ok(value) if !value.trim().is_empty() => Ok(Some(value.trim().to_owned())),
+        Ok(_) | Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(format!("read {variable} from environment: {error}")),
+    }
 }

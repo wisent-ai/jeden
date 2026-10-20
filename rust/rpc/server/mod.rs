@@ -1,13 +1,17 @@
 mod context;
+mod dispatch;
 mod hosting;
 mod lease;
 mod operations;
 mod parking;
 mod prompt;
+mod token;
+use dispatch::handle_request;
 use hosting::quick_replies;
 pub use hosting::serve_headless_cli;
 use operations::*;
 use prompt::handle_prompt;
+pub(crate) use token::request as credential_request;
 
 use super::{
     AgentSessionFacade, BoundedExecutor, HeadlessConfig, HeadlessDaemon, IdempotencyStore,
@@ -39,14 +43,12 @@ use std::thread;
 pub(crate) struct JsonWriter {
     inner: Arc<Mutex<Box<dyn Write + Send>>>,
 }
-
 impl JsonWriter {
     fn new<W: Write + Send + 'static>(writer: W) -> Self {
         Self {
             inner: Arc::new(Mutex::new(Box::new(writer))),
         }
     }
-
     pub(crate) fn send(&self, value: &Value) -> Result<(), String> {
         let mut writer = self.inner.lock().map_err(|_| "output lock poisoned")?;
         serde_json::to_writer(&mut *writer, value).map_err(|error| error.to_string())?;
@@ -63,7 +65,6 @@ pub(super) struct WireRequest {
     #[serde(default)]
     pub(super) params: Value,
 }
-
 pub(super) struct ServerState {
     pub(super) sessions: Mutex<HashMap<String, AgentSession>>,
     context_requests: context::Requests,
@@ -97,7 +98,6 @@ pub fn serve_stdio() -> Result<(), String> {
     let input = io::BufReader::new(io::stdin());
     serve(input, io::stdout())
 }
-
 pub fn serve<R, W>(input: R, output: W) -> Result<(), String>
 where
     R: BufRead + Send + 'static,
@@ -111,13 +111,15 @@ where
         context_requests: context::Requests::default(),
         bridge,
         writer: writer.clone(),
-        next_session: AtomicU64::new(1),
+        next_session: AtomicU64::new(std::num::NonZeroU64::MIN.get()),
         shutting_down: AtomicBool::new(false),
     });
     writer.send(&json!({
         "type": "ready",
         "protocol": "jeden-rpc",
-        "version": 1,
+        "version": crate::rpc::PROTOCOL_VERSION.rsplit_once('v').map(|(_, version)| version)
+            .ok_or("RPC protocol declaration has no version")?.parse::<u64>()
+            .map_err(|error| format!("RPC protocol version is not a number: {error}"))?,
         "capabilities": AgentSession::capabilities(),
         "quickReplies": quick_replies()
     }))?;
@@ -139,7 +141,9 @@ where
                 if let Some(notice) = notice {
                     eprintln!(
                         "jeden rpc parked ({}): nothing ran for {} s",
-                        notice["reason"].as_str().unwrap_or_default(),
+                        notice["reason"]
+                            .as_str()
+                            .ok_or("park notice missing reason")?,
                         notice["quietSeconds"]
                     );
                     writer.send(&notice)?;
@@ -194,8 +198,7 @@ where
                     Ok(value) => success_response(request.id, value),
                     Err((code, detail)) => error_response(request.id, code, &detail),
                 };
-                // A client that has received the terminal response must be
-                // able to reuse the id without racing this worker's teardown.
+                // Reuse of the id must not race this worker's teardown.
                 drop(context_request);
                 worker_state.writer.send(&response)
             }));
@@ -231,68 +234,4 @@ where
         session.dispose()?;
     }
     Ok(())
-}
-
-fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), Value> {
-    let id = request.id.clone();
-    let result = match request.method.as_str() {
-        "initialize" => Ok(json!({
-            "protocol": "jeden-rpc",
-            "capabilities": AgentSession::capabilities(),
-            "quickReplies": quick_replies()
-        })),
-        "session/new" => create_session(state, request.params, false),
-        "config/contracts/get" => Ok(crate::cli::config::schema::contract_settings()),
-        "config/contracts/set" => set_contract_settings(&request.params),
-        "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
-        "config/communication/set" => set_communication_settings(&request.params),
-        "config/task-limits/get" => Ok(crate::task_runtime::limits_settings()),
-        "config/task-limits/set" => request
-            .params
-            .get("limits")
-            .cloned()
-            .ok_or_else(|| {
-                (
-                    "invalid_params",
-                    "config/task-limits/set requires limits".to_string(),
-                )
-            })
-            .and_then(|limits| {
-                crate::task_runtime::set_limits(limits)
-                    .map_err(|error| ("invalid_params", error.to_string()))
-            }),
-        "context/cancel" => context::cancel(state, &request.params),
-        "workspace/status" => workspace_status(),
-        "workspace/discover" => workspace_discover(&request.params),
-        "workspace/adopt" => workspace_adopt(&request.params),
-        "session/import" => import_sessions(&request.params),
-        "session/open" | "session/load" => create_session(state, request.params, true),
-        "session/cancel" => abort_session(state, &request.params),
-        "session/status" => session_status(state, &request.params),
-        "session/completion/get" | "session/completion/control" | "session/completion/add" => {
-            completion_request(state, &request.params, &request.method)
-        }
-        "asks/list" | "asks/get" | "asks/answer" => asks_request(&request.params, &request.method),
-        "session/dispose" => dispose_session(state, &request.params, false),
-        "session/retire" => dispose_session(state, &request.params, true),
-        "session/input_response" => resolve_elicitation(state, &request.params),
-        "session/permission_response" => resolve_approval(state, &request.params),
-        "shutdown" => {
-            state.shutting_down.store(true, Ordering::Release);
-            Ok(json!({"shuttingDown": true}))
-        }
-        _ => match request.method.as_str() {
-            "lease/list" => lease::list(&request.params),
-            "lease/release" => lease::release(&request.params),
-            "lease/end" => lease::end(&request.params),
-            other => Err(("method_not_found", format!("unknown method: {other}"))),
-        },
-    };
-    match result {
-        Ok(value) => state
-            .writer
-            .send(&success_response(id, value))
-            .map_err(|error| error_response(Value::Null, "write_error", &error)),
-        Err((code, message)) => Err(error_response(id, code, &message)),
-    }
 }

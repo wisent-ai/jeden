@@ -17,20 +17,24 @@ impl SecretRef {
         Self::Inline(value.into())
     }
     /// The value behind this reference, or nothing when it is unset or blank.
-    ///
-    /// Every control-plane secret in this binary is read by name here, so this
-    /// is where Jeden's own credential gets a chance to exist: the first read
-    /// of any name asks Stado for the signing secret and the gateway bearer
-    /// when this process was not launched carrying them, and installs them in
-    /// the environment the readers below and in the Brama client use. The work
-    /// happens once per process.
-    pub fn resolve(&self) -> Option<String> {
+    /// An unreadable process value refuses before a request is dispatched.
+    pub fn resolve(&self) -> Result<Option<String>, String> {
         crate::agent::credential::ensure();
         match self {
-            Self::Environment(name) => std::env::var(name)
-                .ok()
-                .filter(|value| !value.trim().is_empty()),
-            Self::Inline(value) => (!value.trim().is_empty()).then(|| value.clone()),
+            Self::Environment(name) => match std::env::var(name) {
+                Ok(value) => Ok((!value.trim().is_empty()).then_some(value)),
+                Err(std::env::VarError::NotPresent) => Ok(None),
+                Err(std::env::VarError::NotUnicode(_)) => {
+                    Err(format!("{name} cannot be read: value is not Unicode"))
+                }
+            },
+            Self::Inline(value) => Ok((!value.trim().is_empty()).then(|| value.clone())),
+        }
+    }
+    pub fn resolve_optional(reference: Option<&Self>) -> Result<Option<String>, String> {
+        match reference {
+            Some(reference) => reference.resolve(),
+            None => Ok(None),
         }
     }
 }
@@ -83,7 +87,7 @@ pub trait ControlPlaneTransport: Send + Sync {
 
 #[derive(Clone)]
 pub struct ReqwestTransport {
-    client: Client,
+    client: Result<Client, String>,
 }
 impl ReqwestTransport {
     /// The control-plane client. A call ends when the control plane answers
@@ -91,7 +95,7 @@ impl ReqwestTransport {
     pub fn production() -> Arc<dyn ControlPlaneTransport> {
         let client = crate::net::blocking_builder()
             .build()
-            .unwrap_or_else(|_| Client::new());
+            .map_err(describe_reqwest);
         Arc::new(Self { client })
     }
 }
@@ -109,7 +113,11 @@ pub(crate) fn describe_reqwest(error: reqwest::Error) -> String {
 
 impl ControlPlaneTransport for ReqwestTransport {
     fn execute(&self, request: TransportRequest) -> Result<TransportResponse, String> {
-        let mut builder = self.client.request(request.method, request.url);
+        let client = self
+            .client
+            .as_ref()
+            .map_err(|error| format!("create HTTP client for {}: {error}", request.url))?;
+        let mut builder = client.request(request.method, request.url);
         for (name, value) in request.headers {
             builder = builder.header(name, value);
         }
@@ -128,13 +136,13 @@ impl ControlPlaneTransport for ReqwestTransport {
         let headers = response
             .headers()
             .iter()
-            .filter_map(|(name, value)| {
-                value
+            .map(|(name, value)| {
+                let text = value
                     .to_str()
-                    .ok()
-                    .map(|value| (name.as_str().to_ascii_lowercase(), value.to_string()))
+                    .map_err(|error| format!("read response header {name}: {error}"))?;
+                Ok((name.as_str().to_ascii_lowercase(), text.to_owned()))
             })
-            .collect();
+            .collect::<Result<BTreeMap<_, _>, String>>()?;
         let mut body = Vec::new();
         let mut response = response;
         response
