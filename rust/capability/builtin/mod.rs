@@ -20,6 +20,17 @@ pub(crate) struct SlashSpec {
     pub(crate) description: String,
     /// Whether the command renders a native interactive view.
     pub(crate) view: bool,
+    /// The subsystem the command drives, recorded as its descriptors'
+    /// `metadata.service` the way every tool service records its own, so a
+    /// probe selects the subsystem by what it declares and not by its name.
+    pub(crate) service: Option<String>,
+}
+
+/// The metadata a command's descriptors carry: the service it declares.
+fn spec_metadata(spec: &SlashSpec) -> Option<serde_json::Value> {
+    spec.service
+        .as_ref()
+        .map(|service| serde_json::json!({ "service": service }))
 }
 
 static SLASH_COMMANDS: LazyLock<Vec<SlashSpec>> = LazyLock::new(|| {
@@ -35,7 +46,7 @@ pub(super) fn builtin_slash_descriptors() -> Vec<CapabilityDescriptor> {
     builtin_slash_specs()
         .iter()
         .map(|spec| {
-            CapabilityDescriptor::new(
+            let descriptor = CapabilityDescriptor::new(
                 format!("slash/{}", spec.name),
                 CapabilityKind::SlashCommand,
                 "jeden-core",
@@ -46,7 +57,11 @@ pub(super) fn builtin_slash_descriptors() -> Vec<CapabilityDescriptor> {
                 },
             )
             .operation("invoke")
-            .executable(format!("/{}", spec.name))
+            .executable(format!("/{}", spec.name));
+            match spec_metadata(spec) {
+                Some(metadata) => descriptor.metadata(metadata),
+                None => descriptor,
+            }
         })
         .collect()
 }
@@ -56,7 +71,7 @@ pub(super) fn native_view_descriptors() -> Vec<CapabilityDescriptor> {
         .iter()
         .filter(|spec| spec.view)
         .map(|spec| {
-            CapabilityDescriptor::new(
+            let descriptor = CapabilityDescriptor::new(
                 format!("view/{}", spec.name),
                 CapabilityKind::View,
                 "jeden-core",
@@ -68,7 +83,11 @@ pub(super) fn native_view_descriptors() -> Vec<CapabilityDescriptor> {
             )
             .dependency(format!("slash/{}", spec.name))
             .operation("render")
-            .executable(format!("/{}", spec.name))
+            .executable(format!("/{}", spec.name));
+            match spec_metadata(spec) {
+                Some(metadata) => descriptor.metadata(metadata),
+                None => descriptor,
+            }
         })
         .collect()
 }

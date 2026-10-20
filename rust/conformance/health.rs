@@ -111,16 +111,13 @@ pub fn doctor(cwd: &Path) -> DoctorReport {
             CapabilityKind::Extension | CapabilityKind::PluginContribution
         )
     });
-    let lsp = registry::registry_probe(cwd, "lsp", |d| {
-        d.id.contains("lsp") || d.operations.iter().any(|op| op.contains("lsp"))
-    });
-    let browser = registry::registry_probe(cwd, "browser", |d| {
-        d.id.contains("browser")
-            || d.metadata.get("service").and_then(Value::as_str) == Some("browser")
-    });
-    let collab = registry::registry_probe(cwd, "collab", |d| {
-        d.id.contains("collab") || d.operations.iter().any(|op| op.contains("collab"))
-    });
+    // Each subsystem is read from what its capabilities declare: the LSP by
+    // the exact tool id it is registered under, the browser and collab by
+    // the `metadata.service` their tool services and commands record.
+    let lsp = registry::registry_probe(cwd, "lsp", |d| d.id == "tool/lsp");
+    let browser =
+        registry::registry_probe(cwd, "browser", |d| declared_service(d) == Some("browser"));
+    let collab = registry::registry_probe(cwd, "collab", |d| declared_service(d) == Some("collab"));
     let keymap = registry::keymap_probe(cwd);
     let hooks = registry::hooks_probe(cwd);
     let task = runtime::task_probe(cwd);
@@ -131,9 +128,19 @@ pub fn doctor(cwd: &Path) -> DoctorReport {
     ];
     let healthy = probes.iter().all(HealthProbe::available);
     DoctorReport {
-        schema_version: 1,
+        schema_version: DOCTOR_REPORT_SCHEMA_VERSION,
         healthy,
         cwd: cwd.to_path_buf(),
         probes,
     }
+}
+
+/// The version of the doctor report's JSON format, as the command's page
+/// documents it: https://jeden.wisent.com/docs/cli/doctor
+const DOCTOR_REPORT_SCHEMA_VERSION: u32 = 1;
+
+/// The service a capability declares in its metadata, as tool services and
+/// slash commands record it.
+fn declared_service(descriptor: &crate::capability::CapabilityDescriptor) -> Option<&str> {
+    descriptor.metadata.get("service").and_then(Value::as_str)
 }
