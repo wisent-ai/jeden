@@ -1,9 +1,9 @@
-// Qualifies source isolation against the real fleet memory database and a real file.
+// Qualifies source isolation without a configured database: Jeden's own SQLite file stands in.
 // Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_CONTEXT_LIMIT.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,6 +20,8 @@ const runs = join(root, '.build/context-independent');
 mkdirSync(runs, { recursive: true });
 const output = mkdtempSync(join(runs, 'run-'));
 const workspace = join(output, 'workspace');
+const home = join(output, 'home');
+mkdirSync(home);
 mkdirSync(join(workspace, '.jeden'), { recursive: true });
 const query = `independent${randomUUID().replaceAll('-', '')}`;
 const fixture = join(workspace, 'entry.rs');
@@ -28,6 +30,7 @@ writeFileSync(fixture, `${fixtureText}\n`);
 writeFileSync(join(workspace, '.jeden/config.json'), JSON.stringify({
   context: { advisor: { roots: workspace, fileExtensions: 'rs' } },
 }));
+const journeyEnv = { ...process.env, HOME: home, JEDEN_DATABASE_URL: '' };
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const report = {
   declaredSourceRevision: revision, binarySha256: hash(binary),
@@ -42,7 +45,7 @@ function invoke(program, args, cwd = workspace) {
   report.commands.push(record);
   persist();
   return new Promise((resolveResult, reject) => {
-    const child = spawn(program, args, { cwd, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn(program, args, { cwd, env: journeyEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     record.pid = child.pid;
     const stdout = [];
     const stderr = [];
@@ -88,26 +91,18 @@ try {
   assert.match(result.stderr, /context advisor source files/);
   assert.match(result.stderr, /context advisor source memory/);
   assert.match(result.stderr, /context advisor source transcripts/);
-  assert.equal(statuses.memory.available, false,
-    `the registry answered; run this journey during a real unanswering registry operation: ${JSON.stringify(advice)}`);
-  assert.ok(statuses.memory.detail.includes('stado database resolve jeden'), statuses.memory.detail);
-  assert.ok(statuses.memory.detail.includes('did not answer within the resolver-declared'), statuses.memory.detail);
-  assert.ok(statuses.memory.detail.includes('Stado resolver target'), statuses.memory.detail);
-  assert.ok(advice.unanswered.some(source => source.source === 'memory'
-    && source.detail === statuses.memory.detail), JSON.stringify(advice));
-  assert.match(result.stderr, /blad czekania: context advisor source memory/);
-  report.registryOutcome = 'unavailable';
+  const standIn = join(home, '.jeden/state.sqlite3');
+  assert.equal(statuses.memory.available, true, JSON.stringify(advice));
+  assert.ok(result.stderr.includes(`Jeden's durable state is the local SQLite file ${standIn}`), result.stderr);
+  assert.ok(existsSync(standIn), `the stand-in database ${standIn} was not created`);
+  report.databaseOutcome = 'local SQLite stand-in';
   report.sources = advice.sources;
   const probe = await invoke(binary, ['context', 'sources', '--json', '--cwd', workspace]);
   const inspection = JSON.parse(succeeds(probe));
   const probedFiles = inspection.sources.find(source => source.source === 'files');
   const probedMemory = inspection.sources.find(source => source.source === 'memory');
   assert.equal(probedFiles?.available, true, JSON.stringify(inspection));
-  assert.equal(probedMemory?.available, false,
-    `the real registry answered during the source probe: ${JSON.stringify(inspection)}`);
-  assert.ok(probedMemory.detail.includes('stado database resolve jeden'), probedMemory.detail);
-  assert.ok(probedMemory.detail.includes('did not answer within the resolver-declared'), probedMemory.detail);
-  assert.match(probe.stderr, /blad czekania: context advisor probe memory/);
+  assert.equal(probedMemory?.available, true, JSON.stringify(inspection));
   report.probe = inspection.sources;
   report.verdict = 'passed';
 } catch (error) {

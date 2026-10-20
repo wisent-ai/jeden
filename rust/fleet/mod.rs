@@ -1,12 +1,10 @@
-//! Where Jeden keeps durable shared state: the fleet database `jeden`,
-//! reached the one way every Wisent product reaches its database —
-//! `stado_database` (Stado resolve, the Skarbiec route, the
-//! `jeden-database-client` bearer) — as a SeaORM connection. Tables are
-//! SeaORM entities in the modules that own them; `migration` creates them.
-//!
-//! Much of Jeden calls storage from synchronous code, so it uses Stado's
-//! shared synchronous client and hands it entity work with `run`; the
-//! process opens that client once, on first use.
+//! Jeden's durable shared state. The database is an explicitly configured
+//! PostgreSQL, MySQL or SQLite URL, not an implicit Skarbiec credential; with
+//! none configured, Jeden's own SQLite file under `~/.jeden` stands in and the
+//! process says so on standard error. Stado's synchronous SeaORM client still
+//! supplies the connection and migrations; its direct environment route does
+//! not contact Stado or Skarbiec. Tables are SeaORM entities in their owning
+//! modules.
 
 mod cancellation;
 pub(crate) use cancellation::with_cancellation;
@@ -19,8 +17,8 @@ use stado_database::sync::Client;
 use std::future::Future;
 use std::sync::{Arc, Condvar, Mutex};
 
-/// `HOME` holding `.stado/` when the process's own `HOME` is isolated, as in
-/// the pursuit journeys; Jeden then still reaches the fleet as this host.
+/// Home used by the database client for its descriptor; a direct URL does
+/// not resolve any service or credential there.
 const STADO_HOME_VARIABLE: &str = "JEDEN_STADO_HOME";
 
 enum ConnectionState {
@@ -50,7 +48,45 @@ fn failed(step: &str, detail: impl std::fmt::Display) -> String {
     format!("jeden fleet database: {step}: {detail}")
 }
 
+/// The variable naming Jeden's database, and the file that stands in for it.
+const DATABASE_VARIABLE: &str = "JEDEN_DATABASE_URL";
+const STAND_IN_FILE: &str = ".jeden/state.sqlite3";
+
+/// With no database configured, Jeden's own SQLite file serves: named in
+/// `JEDEN_DATABASE_URL` for this process, created on first use, and said on
+/// standard error. A configured database that does not answer is refused
+/// instead: moving state to another store silently would split it in two.
+fn stand_in() -> Result<(), String> {
+    let path = crate::dirs_home().join(STAND_IN_FILE);
+    let directory = path
+        .parent()
+        .expect("the stand-in file sits in a directory");
+    std::fs::create_dir_all(directory).map_err(|error| {
+        failed(
+            "configure storage",
+            format!("create {}: {error}", directory.display()),
+        )
+    })?;
+    let url = format!("sqlite://{}?mode=rwc", path.display());
+    unsafe { std::env::set_var(DATABASE_VARIABLE, &url) };
+    eprintln!(
+        "jeden: no fleet database is configured ({DATABASE_VARIABLE}); Jeden's durable state is the local SQLite file {}",
+        path.display()
+    );
+    Ok(())
+}
+
 fn open() -> Result<Client, String> {
+    match std::env::var(DATABASE_VARIABLE) {
+        Ok(value) if !value.trim().is_empty() => {}
+        Ok(_) | Err(std::env::VarError::NotPresent) => stand_in()?,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(failed(
+                "configure storage",
+                "JEDEN_DATABASE_URL cannot be read: value is not Unicode",
+            ))
+        }
+    }
     let database = stado_database::FleetDatabase::for_product("jeden", STADO_HOME_VARIABLE)
         .map_err(|error| error.to_string())?;
     let cancellation = cancellation::database();
