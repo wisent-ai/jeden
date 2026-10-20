@@ -203,7 +203,7 @@ try {
   const insecureRun = invoke(binary, ['run', prompt, '--model-only',
     '--cwd', workspace, '--model', model], {
     ...env, JEDEN_MODEL_ENDPOINT: 'http://example.com', JEDEN_MODEL_KEY: goodA,
-    STADO_MODEL_ROUTER_URL: endpoint, STADO_MODEL_ROUTER_TOKEN: goodB,
+    BRAMA_URL: endpoint, BRAMA_TOKEN: goodB,
   });
   refuses(insecureRun, 'JEDEN_MODEL_ENDPOINT: model endpoint must be HTTPS or loopback HTTP');
   assert.ok(!`${insecureRun.stdout}\n${insecureRun.stderr}`.includes(goodA),
