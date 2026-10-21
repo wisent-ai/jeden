@@ -90,8 +90,8 @@ fn send_request(
         let retry_after = match response.headers().get("retry-after") {
             Some(value) => value
                 .to_str()
-                .map(parse_retry_after)
-                .map_err(|error| format!("read model retry-after: {error}")),
+                .map_err(|error| format!("read model retry-after: {error}"))
+                .and_then(|text| parse_retry_after(text).map(Some)),
             None => Ok(None),
         };
         let switch = matches!(
