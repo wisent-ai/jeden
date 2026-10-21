@@ -15,20 +15,53 @@
         "WISENT_CODESIGN_PRIVATE_KEY_PEM": "macos-development-signing#private_key"
       },
       "quality": [
-        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"], "kind": "format"},
+        {
+          "name": "fmt",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "kind": "format"
+        },
         {
           "name": "release-compile",
-          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"],
+          "argv": [
+            "stado",
+            "product",
+            "cargo",
+            "build",
+            "--locked",
+            "--release",
+            "--bin",
+            "jeden-quality-report"
+          ],
           "kind": "lint"
         },
         {
           "name": "native-stage",
           "kind": "test",
-          "argv": ["env", "JEDEN_TEST_SUCCESS_EXIT=0", "node", "tests/release/stage.mjs"]
+          "argv": [
+            "env",
+            "JEDEN_TEST_SUCCESS_EXIT=0",
+            "node",
+            "tests/release/stage.mjs"
+          ]
         }
       ],
       "build": {
-        "argv": ["stado", "product", "cargo", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": [
+          "stado",
+          "product",
+          "cargo",
+          "stage",
+          "--bin",
+          "jeden",
+          "--bin",
+          "jeden-sandbox-helper"
+        ]
       },
       "stage": {
         "jeden": "bin/jeden",
@@ -39,20 +72,53 @@
     "linux-amd64": {
       "runner_platform": "linux-amd64",
       "quality": [
-        {"name": "fmt", "argv": ["cargo", "fmt", "--all", "--", "--check"], "kind": "format"},
+        {
+          "name": "fmt",
+          "argv": [
+            "cargo",
+            "fmt",
+            "--all",
+            "--",
+            "--check"
+          ],
+          "kind": "format"
+        },
         {
           "name": "release-compile",
-          "argv": ["stado", "product", "cargo", "build", "--locked", "--release", "--bin", "jeden-quality-report"],
+          "argv": [
+            "stado",
+            "product",
+            "cargo",
+            "build",
+            "--locked",
+            "--release",
+            "--bin",
+            "jeden-quality-report"
+          ],
           "kind": "lint"
         },
         {
           "name": "native-stage",
           "kind": "test",
-          "argv": ["env", "JEDEN_TEST_SUCCESS_EXIT=0", "node", "tests/release/stage.mjs"]
+          "argv": [
+            "env",
+            "JEDEN_TEST_SUCCESS_EXIT=0",
+            "node",
+            "tests/release/stage.mjs"
+          ]
         }
       ],
       "build": {
-        "argv": ["stado", "product", "cargo", "stage", "--bin", "jeden", "--bin", "jeden-sandbox-helper"]
+        "argv": [
+          "stado",
+          "product",
+          "cargo",
+          "stage",
+          "--bin",
+          "jeden",
+          "--bin",
+          "jeden-sandbox-helper"
+        ]
       },
       "stage": {
         "jeden": "bin/jeden",
@@ -94,8 +160,8 @@
   },
   "inputs": {
     "private-cargo-sources": {
-      "uri": "stado://sources/jeden/private-cargo-sources/2032a0c8cc4dadfc9a71872dec6a3a0e5270fb8a9160b09889de0ec9acb668f2/private-cargo-sources.tar.gz",
-      "sha256": "2032a0c8cc4dadfc9a71872dec6a3a0e5270fb8a9160b09889de0ec9acb668f2",
+      "uri": "stado://sources/jeden/dependencies/private-cargo-sources/sha256/7466d0e71e515aeda1a3d2a55e334e6dfda69472b04a130cc27eea88fc882c24/source.tar.gz",
+      "sha256": "7466d0e71e515aeda1a3d2a55e334e6dfda69472b04a130cc27eea88fc882c24",
       "mount": "private-cargo-sources",
       "extract": true
     }
@@ -104,38 +170,85 @@
     {
       "name": "darwin-jeden",
       "platform": "darwin-arm64",
-      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden", "--name", "jeden"],
+      "argv": [
+        "stado",
+        "release",
+        "local",
+        "install",
+        "--member",
+        "bin/jeden",
+        "--name",
+        "jeden"
+      ],
       "required": true,
       "secret_env": {},
-      "target": { "product": "jeden" }
+      "target": {
+        "product": "jeden"
+      }
     },
     {
       "name": "darwin-sandbox-helper",
       "platform": "darwin-arm64",
-      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "argv": [
+        "stado",
+        "release",
+        "local",
+        "install",
+        "--member",
+        "bin/jeden-sandbox-helper",
+        "--name",
+        "jeden-sandbox-helper"
+      ],
       "required": true,
       "secret_env": {},
-      "target": { "product": "jeden" }
+      "target": {
+        "product": "jeden"
+      }
     },
     {
       "name": "linux-jeden",
       "platform": "linux-amd64",
-      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden", "--name", "jeden"],
+      "argv": [
+        "stado",
+        "release",
+        "local",
+        "install",
+        "--member",
+        "bin/jeden",
+        "--name",
+        "jeden"
+      ],
       "required": true,
       "secret_env": {},
-      "target": { "product": "jeden" }
+      "target": {
+        "product": "jeden"
+      }
     },
     {
       "name": "linux-sandbox-helper",
       "platform": "linux-amd64",
-      "argv": ["stado", "release", "local", "install", "--member", "bin/jeden-sandbox-helper", "--name", "jeden-sandbox-helper"],
+      "argv": [
+        "stado",
+        "release",
+        "local",
+        "install",
+        "--member",
+        "bin/jeden-sandbox-helper",
+        "--name",
+        "jeden-sandbox-helper"
+      ],
       "required": true,
       "secret_env": {},
-      "target": { "product": "jeden" }
+      "target": {
+        "product": "jeden"
+      }
     }
   ],
   "promotion": {
-    "channels": ["candidate", "stable"],
+    "channels": [
+      "candidate",
+      "stable"
+    ],
     "reconcile": false
   }
 }
