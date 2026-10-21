@@ -58,7 +58,7 @@ pub trait SessionBackend: Send + Sync + 'static {
     /// Resume an existing host session ledger at `dir` and register it under
     /// `session_id` so prompts address it exactly like a created session.
     fn open(&self, tenant: &TenantId, session_id: &str, dir: &Path) -> Result<PathBuf, String>;
-    /// The replayed `{"role","content"}` turns of the ledger at `dir`.
+    /// The replayed turns of the ledger at `dir`, each with its role and content.
     fn turns(&self, dir: &Path) -> Result<Vec<Value>, String>;
     fn prompt(
         &self,
@@ -175,17 +175,10 @@ struct SessionState {
     started_at: String,
 }
 
-/// A short, sortable stamp for one service instance: the second it started and a
-/// random half, so two daemons started in the same second on one store still
-/// hand out distinct ids.
+/// A random identity for one service instance, so two daemons on one store
+/// hand out distinct session ids without reading the clock.
 fn instance_stamp() -> String {
-    let started = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let mut nonce = [0_u8; 3];
-    rand::RngCore::fill_bytes(&mut rand::rngs::OsRng, &mut nonce);
-    format!("{started}{}", hex::encode(nonce))
+    uuid::Uuid::new_v4().simple().to_string()
 }
 
 fn session_state(dir: &Path) -> Result<SessionState, String> {
@@ -202,7 +195,7 @@ fn session_state(dir: &Path) -> Result<SessionState, String> {
     let started_at = value
         .get("startedAt")
         .and_then(Value::as_str)
-        .unwrap_or_default()
+        .ok_or_else(|| format!("{} has no startedAt", path.display()))?
         .to_owned();
     Ok(SessionState {
         cwd: PathBuf::from(cwd),
