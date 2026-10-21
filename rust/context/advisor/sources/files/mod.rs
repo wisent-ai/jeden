@@ -94,20 +94,19 @@ pub(crate) fn search(settings: &Settings, request: &Request, terms: &[String]) -
     }
 }
 
-/// The files source's state over the corpus it read: `returned` is the
-/// recommendations a search returned, none for a probe that asked for none.
+/// The files source's state over the corpus it read: the chunks it read are
+/// what it considered, whether or not every file could be read, and
+/// `returned` is the recommendations a search returned, none for a probe
+/// that asked for none.
 fn corpus_status(corpus: &Corpus, returned: Option<usize>, started: Instant) -> SourceStatus {
+    let considered = Some(corpus.sections.len());
     let mut status = if corpus.unreadable.is_empty() {
-        SourceStatus::probed(
-            "files",
-            detail(corpus),
-            Some(corpus.sections.len()),
-            started,
-        )
+        SourceStatus::probed("files", detail(corpus), considered, started)
     } else {
-        SourceStatus::unavailable("files", detail(corpus), started)
+        let mut unavailable = SourceStatus::unavailable("files", detail(corpus), started);
+        unavailable.considered = considered;
+        unavailable
     };
-    status.considered = Some(corpus.sections.len());
     status.returned = returned;
     status
 }
