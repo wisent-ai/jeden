@@ -32,7 +32,6 @@ const save = () => writeFileSync(join(area, 'report.json'), JSON.stringify(repor
 const schema = JSON.parse(readFileSync(join(root, 'report/schema/quality-evidence-v1.schema.json'), 'utf8'));
 const schemaVersion = schema.properties.schema_version.const;
 const now = spawnSync('date', ['+%s'], { encoding: 'utf8' }).stdout.trim();
-const exitSuccess = spawnSync('true').status;
 const EVIDENCE_TYPE = 'application/vnd.jeden.quality-evidence.v1+json';
 const REPORT_TYPE = 'application/vnd.jeden.quality-report.v1+json';
 
@@ -78,7 +77,10 @@ function quality(name, args, expectedSuccess) {
     stdout: result.stdout, stderr: result.stderr, error: result.error?.message });
   save();
   assert.ifError(result.error);
-  assert.equal(result.status === exitSuccess, expectedSuccess, `${name}: ${result.stderr}`);
+  // A process succeeded when it exited on its own with status zero; one a
+  // signal ended has no status and did not.
+  const succeeded = result.signal === null && !result.status;
+  assert.equal(succeeded, expectedSuccess, `${name}: ${result.stderr}`);
   return result;
 }
 
