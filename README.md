@@ -35,10 +35,21 @@ uses the same RPC operations on its selected host. See the
 Without a direct endpoint, Jeden uses Brama. Stado's service directory locates
 its address unless the caller exports `BRAMA_URL`; the Brama signing credential
 `WISENT_APP_AGENT_AUTH_SECRET` and distinct `BRAMA_TOKEN` come from the process
-environment. Jeden does not fetch model secrets from Skarbiec. Brama retains
-its own account leases and routing; a direct provider requires neither a
-Brama signature nor a gateway lease. `/setup` and `jeden doctor` report the
-active route and observed catalog refusal.
+environment. Jeden does not fetch model secrets from Skarbiec; the launcher
+that starts it hands them over:
+
+```bash
+stado credentials run \
+  --env WISENT_APP_AGENT_AUTH_SECRET=role:jeden-agent-auth#agent_auth_secret \
+  --env BRAMA_TOKEN=role:jeden-model-router#token \
+  -- jeden run
+```
+
+Stado reads both fields into Jeden's environment only and then becomes Jeden;
+a missing role or field is refused naming the variable before Jeden starts.
+Brama retains its own account leases and routing; a direct provider requires
+neither a Brama signature nor a gateway lease. `/setup` and `jeden doctor`
+report the active route and observed catalog refusal.
 
 Durable memory, pursuit request state and collab-relay rooms require an explicit
 `JEDEN_DATABASE_URL`, with `JEDEN_DATABASE_CA_FILE` for a server database. A
