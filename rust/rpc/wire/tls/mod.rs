@@ -6,6 +6,7 @@
 use rustls::ServerConfig;
 use std::collections::HashSet;
 use std::path::PathBuf;
+use std::num::NonZeroU64;
 use std::sync::{Arc, RwLock};
 use tokio::net::TcpStream;
 use tokio_rustls::server::TlsStream;
@@ -66,7 +67,6 @@ pub enum TlsError {
     Expired,
     Revoked,
     MissingIdentitySan,
-    TrustStateUnavailable,
     /// The host clock gave no time to check the certificate's validity
     /// against; read as zero, every certificate read as not yet valid.
     ClockUnreadable(String),
@@ -92,7 +92,7 @@ impl ReloadableTrustStore {
     pub fn new(trusted_issuers: impl IntoIterator<Item = String>) -> Self {
         Self {
             state: Arc::new(RwLock::new(TrustState {
-                generation: 1,
+                generation: NonZeroU64::MIN.get(),
                 trusted_issuers: trusted_issuers.into_iter().collect(),
                 revoked_serials: HashSet::new(),
             })),
@@ -104,13 +104,16 @@ impl ReloadableTrustStore {
         trusted_issuers: impl IntoIterator<Item = String>,
         revoked_serials: impl IntoIterator<Item = String>,
     ) -> Result<u64, TlsError> {
-        let mut state = self
-            .state
-            .write()
-            .map_err(|_| TlsError::TrustStateUnavailable)?;
-        state.generation = state.generation.saturating_add(1);
-        state.trusted_issuers = trusted_issuers.into_iter().collect();
-        state.revoked_serials = revoked_serials.into_iter().collect();
+        // The new sets are built before the lock is taken and stored together,
+        // so no holder can panic between them: a poisoned lock still holds one
+        // whole trust state, and is taken back rather than refusing every
+        // later handshake.
+        let trusted_issuers = trusted_issuers.into_iter().collect();
+        let revoked_serials = revoked_serials.into_iter().collect();
+        let mut state = crate::panicked::written(&self.state);
+        state.generation = state.generation.saturating_add(NonZeroU64::MIN.get());
+        state.trusted_issuers = trusted_issuers;
+        state.revoked_serials = revoked_serials;
         Ok(state.generation)
     }
 
@@ -133,10 +136,7 @@ impl ClientCertificateVerifier for ReloadableTrustStore {
             .peer_chain
             .first()
             .ok_or(TlsError::ClientCertificateRequired)?;
-        let state = self
-            .state
-            .read()
-            .map_err(|_| TlsError::TrustStateUnavailable)?;
+        let state = crate::panicked::read_held(&self.state);
         if !state
             .trusted_issuers
             .contains(&certificate.issuer_fingerprint)
@@ -186,24 +186,20 @@ pub(super) struct ConcreteTrustState {
 
 impl ReloadableTlsAcceptor {
     pub fn new(config: MtlsConfig) -> Result<Self, String> {
-        let state = load_server_config(&config, 1)?;
+        let state = load_server_config(&config, NonZeroU64::MIN.get())?;
         Ok(Self {
             state: Arc::new(RwLock::new(state)),
         })
     }
 
     pub fn reload(&self, config: MtlsConfig) -> Result<u64, String> {
-        let generation = self
-            .state
-            .read()
-            .map_err(|_| "TLS trust state lock poisoned")?
+        // Built outside the lock and replaced whole, so a poisoned lock still
+        // holds one configuration; taken back, the daemon keeps accepting.
+        let generation = crate::panicked::read_held(&self.state)
             .generation
-            .saturating_add(1);
+            .saturating_add(NonZeroU64::MIN.get());
         let replacement = load_server_config(&config, generation)?;
-        *self
-            .state
-            .write()
-            .map_err(|_| "TLS trust state lock poisoned")? = replacement;
+        *crate::panicked::written(&self.state) = replacement;
         Ok(generation)
     }
 
@@ -212,10 +208,7 @@ impl ReloadableTlsAcceptor {
         stream: TcpStream,
     ) -> Result<(TlsStream<TcpStream>, TlsPeer), String> {
         let (config, revoked, generation) = {
-            let state = self
-                .state
-                .read()
-                .map_err(|_| "TLS trust state lock poisoned")?;
+            let state = crate::panicked::read_held(&self.state);
             (
                 state.config.clone(),
                 state.revoked_serials.clone(),

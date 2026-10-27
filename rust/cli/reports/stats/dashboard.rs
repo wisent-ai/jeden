@@ -6,9 +6,11 @@
 //! and the terminal cannot show different numbers.
 
 use super::stats_json;
-use std::io::{Read, Write};
-use std::net::TcpListener;
+use reqwest::StatusCode;
+use std::io::Write;
+use std::net::Ipv4Addr;
 use std::path::{Path, PathBuf};
+use tiny_http::{Header, Request, Response, Server};
 
 const DASHBOARD_HTML: &str = concat!(
     r#"<!doctype html>
@@ -38,52 +40,63 @@ button{background:#21262d;color:inherit;border:1px solid #8b949e;border-radius:5
     r#"</script></body></html>"#
 );
 
-fn write_response(stream: &mut std::net::TcpStream, status: &str, content_type: &str, body: &str) {
-    let _ = write!(
-        stream,
-        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len()
-    );
+fn respond(request: Request, status: StatusCode, content_type: &str, body: String) {
+    let url = request.url().to_owned();
+    let Ok(header) = Header::from_bytes("content-type".as_bytes(), content_type.as_bytes()) else {
+        eprintln!(
+            "jeden stats dashboard: the answer to {url} is not sent: its content type {content_type:?} is not a valid header value"
+        );
+        return;
+    };
+    let response = Response::from_string(body)
+        .with_status_code(status.as_u16())
+        .with_header(header);
+    if let Err(error) = request.respond(response) {
+        eprintln!("jeden stats dashboard: the answer to {url} could not be sent: {error}");
+    }
 }
 
-/// Serve the dashboard on `port`, or on a port the operating system assigns
-/// when none is named, and print the address actually bound.
+/// Serve the dashboard on `port` of the loopback address, or on a port the
+/// operating system assigns (port zero) when none is named, and print the
+/// address actually bound.
 pub(super) fn serve(cwd: &Path, port: Option<u16>) -> Result<String, String> {
-    let asked = port.unwrap_or_default();
-    let listener = TcpListener::bind(("127.0.0.1", asked))
-        .map_err(|error| format!("cannot bind 127.0.0.1:{asked}: {error}"))?;
-    let bound = listener.local_addr().map_err(|error| {
-        format!("cannot read the address 127.0.0.1:{asked} was bound to: {error}")
-    })?;
-    println!("jeden stats dashboard: http://{bound}  (Ctrl-C to stop)");
-    let _ = std::io::stdout().flush();
+    let address = match port {
+        Some(port) => format!("{}:{port}", Ipv4Addr::LOCALHOST),
+        None => format!("{}:0", Ipv4Addr::LOCALHOST),
+    };
+    let server = Server::http(&address).map_err(|error| format!("cannot bind {address}: {error}"))?;
+    println!(
+        "jeden stats dashboard: http://{}  (Ctrl-C to stop)",
+        server.server_addr()
+    );
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("cannot print the dashboard's address: {error}"))?;
     let cwd: PathBuf = cwd.to_path_buf();
-    for stream in listener.incoming() {
-        let Ok(mut stream) = stream else { continue };
+    for request in server.incoming_requests() {
         let cwd = cwd.clone();
         std::thread::spawn(move || {
-            let mut buffer = [0_u8; 4096];
-            let read = stream.read(&mut buffer).unwrap_or_default();
-            let request = String::from_utf8_lossy(&buffer[..read]);
-            let path = request
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("/")
-                .split('?')
-                .next()
-                .unwrap_or("/");
-            match path {
-                "/" => write_response(
-                    &mut stream,
-                    "200 OK",
+            let path = match request.url().split_once('?') {
+                Some((path, _query)) => path.to_owned(),
+                None => request.url().to_owned(),
+            };
+            match path.as_str() {
+                "/" => respond(
+                    request,
+                    StatusCode::OK,
                     "text/html; charset=utf-8",
-                    DASHBOARD_HTML,
+                    DASHBOARD_HTML.to_owned(),
                 ),
                 "/api/stats" => {
                     let body = stats_json(&cwd).to_string();
-                    write_response(&mut stream, "200 OK", "application/json", &body);
+                    respond(request, StatusCode::OK, "application/json", body);
                 }
-                _ => write_response(&mut stream, "404 Not Found", "text/plain", "not found"),
+                _ => respond(
+                    request,
+                    StatusCode::NOT_FOUND,
+                    "text/plain",
+                    format!("{path} is not a dashboard page"),
+                ),
             }
         });
     }

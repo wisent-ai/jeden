@@ -51,7 +51,11 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
                     value["route"] = json!("direct");
                     value["endpoint"] = json!(endpoint);
                     value["keySource"] = json!(if key.is_some() {
-                        "environment"
+                        if credential::standing_in().is_some() {
+                            "own-gateway"
+                        } else {
+                            "environment"
+                        }
                     } else if stored {
                         "local-token-list"
                     } else {
@@ -77,6 +81,10 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
                         value["selected"] = Value::Null;
                         value["signingRefusal"] = json!(secret.refusal());
                         value["bearerRefusal"] = json!(bearer.refusal());
+                        value["ownGateway"] = json!({
+                            "grantsFile": credential::private_gateway::grants_file(),
+                            "state": credential::private_gateway::described(),
+                        });
                     }
                 }
             }
@@ -93,6 +101,22 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
             let id = required(params, "id")?;
             Store::remove_existing(id).map_err(failed)?;
             Ok(json!({ "removed": id }))
+        }
+        // A hand sign-in into Jeden's own gateway, as `jeden token sign-in`
+        // runs it, in the two steps a screen takes: the page, then the paste.
+        "token/sign-in/begin" => {
+            let provider = required(params, "provider")?;
+            let account = required(params, "account")?;
+            let reason = required(params, "reason")?;
+            let (sign_in, url) =
+                credential::private_gateway::sign_in_begin(provider, account, reason)
+                    .map_err(failed)?;
+            Ok(json!({ "signInId": sign_in, "url": url }))
+        }
+        "token/sign-in/complete" => {
+            let sign_in = required(params, "signInId")?;
+            let code = required(params, "code")?;
+            credential::private_gateway::sign_in_complete(sign_in, code).map_err(failed)
         }
         _ => Err((
             "method_not_found",

@@ -98,7 +98,10 @@ pub(super) fn run_turn(
     }
 
     if !ctx.attachments.is_empty() && !input_accepts_attachments(input) {
-        let command = input.split_whitespace().next().unwrap_or(input);
+        let command = match input.split_whitespace().next() {
+            Some(command) => command,
+            None => input,
+        };
         return Err(format!(
                 "attachments cannot be used with local command `{command}`; submit them with a model prompt"
             ));
@@ -113,9 +116,11 @@ pub(super) fn run_turn(
     }
     let result: Result<String, String> = if input.trim_start().starts_with('/') {
         let trimmed = input.trim();
-        let (command, rest) = trimmed
-            .split_once(char::is_whitespace)
-            .unwrap_or((trimmed, ""));
+        // A command written alone carries no arguments.
+        let (command, rest) = match trimmed.split_once(char::is_whitespace) {
+            Some(split) => split,
+            None => (trimmed, ""),
+        };
         if let Some(outcome) = commands::session_command(
             command,
             rest,
@@ -230,7 +235,7 @@ pub(super) fn run_turn(
                         crate::context::advisor::render_text(&advice),
                     ));
                 }
-                let context_limit = super::status::context_limit();
+                let context_limit = super::status::context_limit()?;
                 let conv = handler_conv.lock();
                 Ok(format!(
                     "Live conversation: {} message(s), ~{} tokens.{}",
@@ -251,10 +256,7 @@ pub(super) fn run_turn(
             _ => {
                 if is_builtin_slash(command) {
                     handle_slash(&run_args.cwd, input, handler_model.lock().as_deref())
-                } else if let Some(expanded) = {
-                    crate::cli::commands::readable_file_command(&run_args.cwd, command)?;
-                    resolve_file_command(&run_args.cwd, command, rest)
-                } {
+                } else if let Some(expanded) = resolve_file_command(&run_args.cwd, command, rest)? {
                     run_turn_shared(handler_conv, &run_args, &expanded, &attachments, &mut hooks)
                         .map(|text| policy.answer(text))
                 } else {

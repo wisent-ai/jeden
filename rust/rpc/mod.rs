@@ -9,10 +9,10 @@ use wire::{identity, tenant, tls, transport};
 pub use daemon::{BoundedExecutor, HeadlessConfig, HeadlessDaemon, Readiness, SubmitError};
 pub use idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};
 pub use identity::{IdentityRefusal, WisentIdentityAuthority, WisentMember};
-pub use replay::{EventCursor, ReplayError, ReplayStore, SessionEventV1};
+pub use replay::{EventCursor, EventDraft, ReplayError, ReplayStore, SessionEventV1};
 pub use service::{
     AgentSessionFacade, ServiceError, SessionBackend, SessionListing, SessionService,
-    SessionSummary, SubmitOutcome,
+    SessionSummary, SubmitOutcome, UnreadableSession,
 };
 pub use tenant::{
     TenantDirectory, TenantError, TenantGuard, TenantId, TenantLimits, TenantPrincipal,

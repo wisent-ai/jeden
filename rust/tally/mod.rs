@@ -11,6 +11,10 @@ pub(crate) const STEP: u8 = 1;
 /// The number the first item of a numbering takes: one step from none.
 pub(crate) const FIRST: u64 = STEP as u64;
 
+/// The position of a list's first item: the number of items before it, which
+/// an empty list measures.
+pub(crate) const ORIGIN: usize = (&[] as &[()]).len();
+
 /// The next number a shared counter hands out, counting this draw: the first
 /// draw answers the counter's starting value.
 pub(crate) fn draw(counter: &AtomicU64) -> u64 {

@@ -25,9 +25,14 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             }
         }
     }
-    let direct = crate::agent::credential::direct_provider();
+    let direct = crate::agent::credential::stand_in::selected_provider();
+    let own_gateway = direct.as_ref().is_some_and(|provider| provider.own_gateway);
     let (endpoint, bearer_read, secret_read) = match &direct {
-        Some((url, key)) => (Some(url.clone()), Ok(key.clone()), Ok(String::new())),
+        Some(provider) => (
+            Some(provider.endpoint.clone()),
+            Ok(provider.key.clone()),
+            Ok(String::new()),
+        ),
         None => (
             crate::agent::credential::brama_url(),
             crate::agent::credential::bearer_token(),
@@ -44,7 +49,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         Err(cause) => (None, Some(cause)),
     };
     let (selected_model, model_error) =
-        match inputs::model(args.model.as_deref(), config.model.as_deref()) {
+        match inputs::selected_model(args.model.as_deref(), config.model.as_deref()) {
             Ok(model) => (model, None),
             Err(cause) => (None, Some(cause)),
         };
@@ -244,7 +249,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
                 crate::agent::credential::brama_route().source,
                 crate::agent::credential::Source::Stado
             ),
-        endpoint_origin: if direct.is_some() {
+        endpoint_origin: if own_gateway {
+            "Jeden's own gateway on its subscription grants".to_owned()
+        } else if direct.is_some() {
             format!(
                 "OpenAI-compatible provider selected by {}",
                 crate::agent::credential::DIRECT_URL
@@ -256,6 +263,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             Some(token) => token,
             None => String::new(),
         },
+        own_gateway,
         agent_id,
         secret,
         model: match selected_model {

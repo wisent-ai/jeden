@@ -5,8 +5,7 @@
 //! cap.
 
 use serde::Serialize;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs::{self, File};
 use std::path::Path;
 
 pub(super) fn sync_dir(path: &Path) -> Result<(), String> {
@@ -15,31 +14,27 @@ pub(super) fn sync_dir(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("fsync directory {}: {error}", path.display()))
 }
 
+/// `value` as JSON over `path` through the shared durable replace. The
+/// staging file was one fixed <name>.tmp, so two updaters wrote into one.
 pub(super) fn durable_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let temp = path.with_extension("tmp");
-    let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temp)
-        .map_err(|error| format!("write {}: {error}", temp.display()))?;
-    file.write_all(&bytes)
-        .and_then(|_| file.write_all(b"\n"))
-        .and_then(|_| file.sync_all())
-        .map_err(|error| format!("fsync {}: {error}", temp.display()))?;
-    fs::rename(&temp, path).map_err(|error| format!("replace {}: {error}", path.display()))?;
-    sync_dir(path.parent().ok_or("durable JSON has no parent")?)
+    let mut bytes = serde_json::to_vec(value)
+        .map_err(|error| format!("encode {}: {error}", path.display()))?;
+    bytes.push(b'\n');
+    crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
 }
 
 #[cfg(unix)]
 pub(super) fn make_executable(path: &Path) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
     let mut permissions = fs::metadata(path)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("read the permissions of {}: {error}", path.display()))?
         .permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(path, permissions).map_err(|error| error.to_string())
+    // Owner reads, writes and runs it; group and others read and run it.
+    permissions.set_mode(u32::from(
+        libc::S_IRWXU | libc::S_IRGRP | libc::S_IXGRP | libc::S_IROTH | libc::S_IXOTH,
+    ));
+    fs::set_permissions(path, permissions)
+        .map_err(|error| format!("mark {} executable: {error}", path.display()))
 }
 #[cfg(windows)]
 pub(super) fn make_executable(path: &Path) -> Result<(), String> {

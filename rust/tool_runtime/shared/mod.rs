@@ -1,9 +1,15 @@
-use serde_json::{json, Value};
+use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::ToolRuntime;
+
+mod lines;
+
+pub(crate) use lines::{
+    selected_lines, simple_diff, snapshot_name, snapshot_tag, split_edit_lines, LineWindow,
+};
 
 pub(crate) fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
@@ -27,7 +33,7 @@ pub(crate) fn jail_path(cwd: &Path, input: &str) -> Result<PathBuf, String> {
         match absolute.strip_prefix(cwd) {
             Ok(inside) if inside.as_os_str().is_empty() => ".".to_string(),
             Ok(inside) => inside.to_string_lossy().into_owned(),
-            Err(_) => {
+            Err(_outside) => {
                 return Err(format!(
                     "{raw} is outside this workspace; paths are taken from the workspace root {}",
                     cwd.display()
@@ -76,12 +82,61 @@ pub(crate) fn string_input(input: &Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-pub(crate) fn bool_input(input: &Value, key: &str, default: bool) -> bool {
-    input.get(key).and_then(Value::as_bool).unwrap_or(default)
+/// The archive formats a `path` may read or write into as `<archive>:<entry>`.
+pub(crate) const ARCHIVE_SUFFIXES: &[&str] = &[".tar.gz", ".tgz", ".tar", ".zip"];
+
+/// The database formats a `path` may address as `<database>:<table>[:<key>]`.
+pub(crate) const DATABASE_SUFFIXES: &[&str] = &[".sqlite", ".db"];
+
+/// `path` split at the first `<suffix>:` of any of `suffixes`, matched without
+/// regard to case: the container file and what follows the colon. `None`
+/// when the path names no such container.
+pub(crate) fn container_path<'a>(path: &'a str, suffixes: &[&str]) -> Option<(&'a str, &'a str)> {
+    let lower = path.to_ascii_lowercase();
+    suffixes.iter().find_map(|suffix| {
+        let index = lower.find(&format!("{suffix}:"))?;
+        let (container, rest) = path.split_at(index + suffix.len());
+        rest.strip_prefix(':').map(|inner| (container, inner))
+    })
 }
 
-pub(crate) fn u64_input(input: &Value, key: &str, default: u64) -> u64 {
-    input.get(key).and_then(Value::as_u64).unwrap_or(default)
+/// A yes/no the tool's schema lets the caller leave out: `None` when it is
+/// absent, refused by name when it is present but not a boolean.
+pub(crate) fn optional_bool_input(
+    input: &Value,
+    key: &str,
+    tool: &str,
+) -> Result<Option<bool>, String> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Bool(value)) => Ok(Some(*value)),
+        Some(other) => Err(format!("{tool} {key} must be true or false, not {other}")),
+    }
+}
+
+/// A switch that is on only when the caller sets it to true.
+pub(crate) fn flag_input(input: &Value, key: &str, tool: &str) -> Result<bool, String> {
+    Ok(optional_bool_input(input, key, tool)? == Some(true))
+}
+
+/// A count the tool's schema lets the caller leave out — how many leading
+/// matches to pass over, how many levels to descend. The default is none.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Amount(pub(crate) usize);
+
+/// The amount stated under `key`: none when it is absent, refused by name
+/// when it is present but not a whole number this machine can count to.
+pub(crate) fn amount_input(input: &Value, key: &str, tool: &str) -> Result<Amount, String> {
+    let value = match input.get(key) {
+        None | Some(Value::Null) => return Ok(Amount::default()),
+        Some(value) => value,
+    };
+    let whole = value
+        .as_u64()
+        .ok_or_else(|| format!("{tool} {key} must be a whole number, not {value}"))?;
+    usize::try_from(whole)
+        .map(Amount)
+        .map_err(|error| format!("{tool} {key} {whole} is more than this machine can count: {error}"))
 }
 
 /// An amount a tool works to — how many entries it answers, how many bytes
@@ -108,12 +163,14 @@ pub(crate) fn machine_parallelism(tool: &str) -> Result<usize, String> {
         })
 }
 
-pub(crate) fn object_input(input: &Value, key: &str) -> Value {
-    input
-        .get(key)
-        .filter(|value| value.is_object())
-        .cloned()
-        .unwrap_or_else(|| json!({}))
+/// The arguments object a call passes on: no arguments when `key` is absent,
+/// refused by name when it is present but not an object.
+pub(crate) fn arguments_input(input: &Value, key: &str, tool: &str) -> Result<Value, String> {
+    match input.get(key) {
+        None | Some(Value::Null) => Ok(Value::Object(Map::new())),
+        Some(Value::Object(arguments)) => Ok(Value::Object(arguments.clone())),
+        Some(other) => Err(format!("{tool} {key} must be an object, not {other}")),
+    }
 }
 
 /// The media type `bytes` carry, read from the bytes themselves: an image
@@ -131,76 +188,8 @@ pub(crate) fn mime_type_of(bytes: &[u8]) -> &'static str {
     match std::str::from_utf8(bytes) {
         Ok(_) => super::read::TEXT_TYPE,
         Err(error) if error.error_len().is_none() => super::read::TEXT_TYPE,
-        Err(_) => super::read::BINARY_TYPE,
+        Err(_invalid) => super::read::BINARY_TYPE,
     }
-}
-
-pub(crate) fn parse_line_range_token(
-    token: &str,
-    line_count: usize,
-    full_range: &str,
-) -> Result<(usize, usize), String> {
-    let trimmed = token.trim();
-    let (start, end) = if let Some((a, b)) = trimmed.split_once('+') {
-        let start = a
-            .parse::<usize>()
-            .map_err(|_| format!("invalid range: {full_range}"))?;
-        let count = b
-            .parse::<usize>()
-            .map_err(|_| format!("invalid range: {full_range}"))?;
-        (start, start.saturating_add(count).saturating_sub(1))
-    } else if let Some((a, b)) = trimmed.split_once('-') {
-        let start = a
-            .parse::<usize>()
-            .map_err(|_| format!("invalid range: {full_range}"))?;
-        let end = if b.is_empty() {
-            line_count
-        } else {
-            b.parse::<usize>()
-                .map_err(|_| format!("invalid range: {full_range}"))?
-        };
-        (start, end)
-    } else {
-        let line = trimmed
-            .parse::<usize>()
-            .map_err(|_| format!("invalid range: {full_range}"))?;
-        (line, line)
-    };
-    if start == 0 || end < start {
-        return Err(format!("invalid range: {full_range}"));
-    }
-    Ok((start, end.min(line_count)))
-}
-
-pub(crate) fn line_window(
-    text: &str,
-    range: &str,
-) -> Result<(String, usize, usize, Vec<Value>), String> {
-    let lines: Vec<&str> = text.lines().collect();
-    if lines.is_empty() {
-        return Ok((
-            String::new(),
-            1,
-            0,
-            vec![json!({"startLine": 1, "endLine": 0})],
-        ));
-    }
-    let mut chunks = Vec::new();
-    let mut ranges = Vec::new();
-    let mut first_start = usize::MAX;
-    let mut last_end = 0usize;
-    for token in range.split(',') {
-        let (start, end) = parse_line_range_token(token, lines.len(), range)?;
-        first_start = first_start.min(start);
-        last_end = last_end.max(end);
-        let start_idx = start.saturating_sub(1).min(lines.len());
-        let end_idx = end.min(lines.len());
-        if start_idx < end_idx {
-            chunks.push(lines[start_idx..end_idx].join("\n"));
-        }
-        ranges.push(json!({"startLine": start, "endLine": end}));
-    }
-    Ok((chunks.join("\n"), first_start, last_end, ranges))
 }
 
 pub(crate) fn verify_expected_sha(
@@ -216,52 +205,6 @@ pub(crate) fn verify_expected_sha(
         ));
     }
     Ok(bytes)
-}
-
-pub(crate) fn split_edit_lines(content: &str) -> (Vec<String>, bool) {
-    let has_trailing = content.ends_with('\n');
-    let body = if has_trailing {
-        &content[..content.len().saturating_sub(1)]
-    } else {
-        content
-    };
-    let lines = if body.is_empty() {
-        Vec::new()
-    } else {
-        body.lines().map(ToString::to_string).collect()
-    };
-    (lines, has_trailing)
-}
-
-pub(crate) fn simple_diff(path: &str, before: &str, after: &str) -> String {
-    if before == after {
-        return String::new();
-    }
-    let (old_lines, _) = split_edit_lines(before);
-    let (new_lines, _) = split_edit_lines(after);
-    let mut out = vec![
-        format!("--- {path}"),
-        format!("+++ {path}"),
-        format!("@@ -1,{} +1,{} @@", old_lines.len(), new_lines.len()),
-    ];
-    for line in &old_lines {
-        out.push(format!("-{line}"));
-    }
-    for line in &new_lines {
-        out.push(format!("+{line}"));
-    }
-    out.join("\n")
-}
-
-pub(crate) fn snapshot_tag(hash: &str) -> String {
-    hash.chars()
-        .take(4)
-        .collect::<String>()
-        .to_ascii_uppercase()
-}
-
-pub(crate) fn snapshot_name(path: &str, hash: &str) -> String {
-    format!("{}#{}", path, snapshot_tag(hash))
 }
 
 pub(crate) fn run_read_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {

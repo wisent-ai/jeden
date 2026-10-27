@@ -122,10 +122,12 @@ pub(crate) fn streaming_attempt(
     on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<Completion, AttemptError> {
+    let request_route = config.request_route().map_err(AttemptError::permanent)?;
     let reservation = crate::autonomy::requests::budget::reserve(config, &route.model, max_tokens)
         .map_err(AttemptError::permanent)?;
     let completion = streaming_attempt_inner(
         config,
+        &request_route,
         route,
         messages,
         max_tokens,
@@ -137,7 +139,7 @@ pub(crate) fn streaming_attempt(
     )
     .map_err(|mut error| {
         if error.class != StreamErrorClass::Cancelled {
-            error.message = config.endpoint_failure("stream model request", &error.message);
+            error.message = request_route.failure(config, "stream model request", &error.message);
         }
         error
     })?;
@@ -149,6 +151,7 @@ pub(crate) fn streaming_attempt(
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn streaming_attempt_inner(
     config: &ChatConfig,
+    request_route: &super::super::transport::RequestRoute<'_>,
     route: &RouteDescriptor,
     messages: &[Value],
     max_tokens: Option<usize>,
@@ -169,7 +172,7 @@ pub(crate) fn streaming_attempt_inner(
         .into_iter()
         .flat_map(lease::SessionLease::headers)
         .collect();
-    spawn_openai_stream_adapter(config, body_text, lease_headers, sender.clone())?;
+    spawn_openai_stream_adapter(config, request_route, body_text, lease_headers, sender.clone())?;
     // An announced cancellation wakes the blocked receive below; the wake
     // removes itself once this attempt's receiver is gone.
     crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {

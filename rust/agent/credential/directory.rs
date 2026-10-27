@@ -89,13 +89,11 @@ pub(super) fn origin(route: &Route) -> String {
         }
     };
     if let Some(provenance) = &route.directory {
-        use std::fmt::Write;
         let (service, consumer) = DIRECTORY_ROUTE;
-        let _ = write!(
-            origin,
+        origin.push_str(&format!(
             "; directory selected service {service}, consumer {consumer}, placed_on {}, from {}, verified {}",
             provenance.placed_on, provenance.from, provenance.verified
-        );
+        ));
     }
     origin
 }

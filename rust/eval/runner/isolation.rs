@@ -7,13 +7,14 @@ use super::super::dataset::{safe_relative, EvalCaseV1, FixtureV1};
 use super::IsolatedRunV1;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(super) fn resolve_repo_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     let candidate = root.join(safe_relative(relative)?);
-    if !candidate.exists() {
+    // An artifact that cannot be examined is refused: read as absent, it was
+    // handed back unresolved and its escape from the root went unchecked.
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&candidate)? {
         return Ok(candidate);
     }
     let canonical = candidate.canonicalize().map_err(|error| {
@@ -105,8 +106,9 @@ pub(super) fn isolated_run(output_root: &Path, run_key: &str) -> Result<Isolated
 pub(super) fn materialize_fixture(fixture: &FixtureV1, workspace: &Path) -> Result<(), String> {
     for (relative, content) in &fixture.files {
         let target = workspace.join(safe_relative(relative)?);
-        if target.exists() {
-            let existing = fs::read(&target).map_err(|error| error.to_string())?;
+        if crate::tool_runtime::runtime_ops::platform::presence::present(&target)? {
+            let existing = fs::read(&target)
+                .map_err(|error| format!("fixture file {} cannot be read: {error}", target.display()))?;
             if existing != content.as_bytes() {
                 return Err(format!(
                     "partially materialized fixture differs at {relative}"
@@ -114,35 +116,7 @@ pub(super) fn materialize_fixture(fixture: &FixtureV1, workspace: &Path) -> Resu
             }
             continue;
         }
-        if let Some(parent) = target.parent() {
-            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        }
-        atomic_write_new(&target, content.as_bytes())?;
+        crate::tool_runtime::runtime_ops::durable::replace(&target, content.as_bytes())?;
     }
     Ok(())
-}
-
-pub(super) fn atomic_write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let temporary = path.with_extension("tmp");
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
-    let result = (|| {
-        file.write_all(bytes).map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
-        fs::rename(&temporary, path).map_err(|error| error.to_string())
-    })();
-    if result.is_err() {
-        if let Err(left) = fs::remove_file(&temporary) {
-            if left.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("jeden: {} is left behind: {left}", temporary.display());
-            }
-        }
-    }
-    result
 }

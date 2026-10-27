@@ -1,8 +1,6 @@
 //! The rows the terminal shows when one of these session commands is opened
-//! without arguments.
-//!
-//! Split out of `slash/session/mod.rs`, which had grown past the module line
-//! cap.
+//! without arguments. Without a current session a row is shown disabled,
+//! with the reason there is none as its detail, and carries no command.
 
 use crate::slash::session::{slash_command_path, slash_session_dir};
 use crate::slash::SlashContext;
@@ -11,65 +9,69 @@ use crate::tui::{PickerItem, PickerSpec};
 fn current_session_picker_detail(context: &SlashContext<'_>) -> String {
     match slash_session_dir(context, "") {
         Ok(path) => {
-            let id = path
-                .file_name()
-                .map(|value| value.to_string_lossy())
-                .unwrap_or_else(|| path.to_string_lossy());
+            let id = match path.file_name() {
+                Some(name) => name.to_string_lossy(),
+                None => path.to_string_lossy(),
+            };
             format!("Current session {id} at {}", path.display())
         }
         Err(error) => error,
     }
 }
 
+/// `command` addressed to the current session, or none when there is no
+/// session; why there is none is the detail of the row it would run from.
 fn current_session_command(context: &SlashContext<'_>, command: &str) -> Option<String> {
-    slash_session_dir(context, "")
-        .ok()
-        .map(|path| format!("{command} {}", slash_command_path(&path)))
+    match slash_session_dir(context, "") {
+        Ok(path) => Some(format!("{command} {}", slash_command_path(&path))),
+        Err(_said_in_the_detail) => None,
+    }
+}
+
+/// A row that runs `command`, or a disabled row with no command to run.
+fn session_row(label: &str, command: Option<String>) -> PickerItem {
+    match command {
+        Some(command) => PickerItem::action(label, command),
+        None => PickerItem::action(label, String::new()).disabled(true),
+    }
 }
 
 pub(crate) fn dump_picker(context: &SlashContext<'_>) -> PickerSpec {
     let command = current_session_command(context, "/dump");
     PickerSpec::new(
         "Dump session",
-        vec![PickerItem::action(
-            "Print current session transcript",
-            command.clone().unwrap_or_default(),
-        )
-        .detail(current_session_picker_detail(context))
-        .badge("text")
-        .disabled(command.is_none())],
+        vec![session_row("Print current session transcript", command)
+            .detail(current_session_picker_detail(context))
+            .badge("text")],
     )
 }
 
 pub(crate) fn export_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let session = slash_session_dir(context, "").ok();
+    let session = match slash_session_dir(context, "") {
+        Ok(path) => Some(path),
+        Err(_said_in_the_detail) => None,
+    };
     let detail = current_session_picker_detail(context);
     let command = |prefix: &str| {
-        session
-            .as_ref()
-            .map(|path| {
-                let path = slash_command_path(path)
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"");
-                format!("{prefix} \"{path}\"")
-            })
-            .unwrap_or_default()
+        session.as_ref().map(|path| {
+            let path = slash_command_path(path)
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
+            format!("{prefix} \"{path}\"")
+        })
     };
     PickerSpec::new(
         "Export session",
         vec![
-            PickerItem::action("Print JSON export", command("/export"))
+            session_row("Print JSON export", command("/export"))
                 .detail(&detail)
-                .badge("JSON")
-                .disabled(session.is_none()),
-            PickerItem::action("Print Markdown export", command("/export --markdown"))
+                .badge("JSON"),
+            session_row("Print Markdown export", command("/export --markdown"))
                 .detail(&detail)
-                .badge("Markdown")
-                .disabled(session.is_none()),
-            PickerItem::action("Print HTML export", command("/export --html"))
+                .badge("Markdown"),
+            session_row("Print HTML export", command("/export --html"))
                 .detail(detail)
-                .badge("HTML")
-                .disabled(session.is_none()),
+                .badge("HTML"),
         ],
     )
 }

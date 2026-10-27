@@ -10,6 +10,7 @@ mod settings;
 mod usage;
 
 pub(crate) use config::model_router_config;
+pub(crate) use inputs::{selected_model, selected_service_tier};
 pub(in crate::agent) use guidance::{env_usize, memory_guidance_for_prompt};
 use settings::{retry_policy, route_descriptors};
 pub(in crate::agent) use usage::{append_usage_event, usage_cost};

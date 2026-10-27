@@ -1,37 +1,45 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
+import { constants, existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { inspect } from "node:util";
 
-const argv = process.argv.slice(2);
-const option = (name, fallback = undefined) => {
-  const index = argv.indexOf(name);
-  return index >= 0 && index + 1 < argv.length ? argv[index + 1] : fallback;
+const argv = process.argv;
+/** The value after `name` on the command line, or undefined when `name` is not there. */
+const option = name => {
+  if (!argv.includes(name)) return undefined;
+  const [, value] = argv.slice(argv.indexOf(name));
+  if (value === undefined) throw new Error(`${name} is given without its value`);
+  return value;
 };
 const flag = name => argv.includes(name);
-const session = option("--session", "default").replace(/[^a-zA-Z0-9_.-]/g, "_");
+const named = option("--session");
+if (named === undefined) throw new Error("--session is required: the browser service names the session every bridge call belongs to");
+const session = named.replace(/[^\w.-]/g, "_");
 const chrome = option("--chrome");
 const visible = flag("--visible");
-const sessionHash = [...session].reduce((hash, character) => ((hash * 33) ^ character.charCodeAt(0)) >>> 0, 5381);
-const port = Number(option("--port", String(9300 + (sessionHash % 300))));
-const root = join(option("--state-dir", join(process.cwd(), ".jeden", "browser")), session);
-const profile = option("--user-data-dir", join(root, "profile"));
+const root = join(process.cwd(), ".jeden", "browser", session);
+const statedProfile = option("--user-data-dir");
+const profile = statedProfile === undefined ? join(root, "profile") : statedProfile;
 const statePath = join(root, "state.json");
-const endpoint = `http://127.0.0.1:${port}`;
+// The CDP endpoint of this session's browser, as Chromium announced it when it started.
+let endpoint;
 
 const readStdin = async () => {
   const chunks = [];
   for await (const chunk of process.stdin) chunks.push(chunk);
   const text = Buffer.concat(chunks).toString("utf8").trim();
-  return text ? JSON.parse(text) : {};
+  if (!text) throw new Error("the bridge was given no request on stdin");
+  return JSON.parse(text);
 };
+// A session that never started a browser has no state yet.
 const readState = async () => {
+  if (!existsSync(statePath)) return {};
   try {
     return JSON.parse(await readFile(statePath, "utf8"));
   } catch (error) {
-    if (error.code === "ENOENT") return {};
     throw new Error(`Browser state ${statePath} could not be read: ${inspect(error, {
       depth: null, maxArrayLength: null, maxStringLength: null,
     })}`, { cause: error });
@@ -39,9 +47,10 @@ const readState = async () => {
 };
 const saveState = async state => {
   await mkdir(root, { recursive: true });
-  await writeFile(statePath, `${JSON.stringify(state)}\n`, { mode: 0o600 });
+  // Owner read and write only: the state names the session's browser process.
+  await writeFile(statePath, `${JSON.stringify(state)}\n`, { mode: constants.S_IRUSR | constants.S_IWUSR });
 };
-const requestJson = async (path, init = undefined) => {
+const requestJson = async (path, init) => {
   const url = `${endpoint}${path}`;
   try {
     const response = await fetch(url, init);
@@ -53,30 +62,35 @@ const requestJson = async (path, init = undefined) => {
     })}`);
   }
 };
-const browserReady = async () => {
+const unready = cause => ({ ready: false, cause });
+/** Whether the browser the state recorded still answers CDP, and why not when it does not. */
+const probe = async state => {
+  if (typeof state.endpoint !== "string") return unready("this session has not started a browser");
+  endpoint = state.endpoint;
   try {
     const version = await requestJson("/json/version");
-    return typeof version.webSocketDebuggerUrl === "string";
-  } catch {
-    return false;
+    return { ready: typeof version.webSocketDebuggerUrl === "string", cause: "its /json/version names no webSocketDebuggerUrl" };
+  } catch (error) {
+    return unready(error instanceof Error ? error.message : String(error));
   }
 };
-// Chromium announces "DevTools listening on ws://…" on stderr once CDP accepts
-// connections on the requested port. DevToolsActivePort is written only for a
-// requested port of zero, so it never appears for the session's fixed port.
-// The announcement is the readiness event and the child's exit, with the
-// stderr it wrote, is the failure; there is no retry loop and no deadline
-// (cli.md rule 8). It answers the session state that records the browser it
-// found or started, so a later action failure still reports that browser.
+// Chromium is started with a remote-debugging port the system chooses and
+// announces "DevTools listening on ws://<host>:<port>/…" on stderr once CDP
+// accepts connections; that announcement is the endpoint and the readiness
+// event, and the child's exit, with the stderr it wrote, is the failure.
+// There is no retry loop and no deadline (cli.md rule 8). It answers the
+// session state that records the browser it found or started, so a later
+// action failure still reports that browser.
 const ensureBrowser = async () => {
-  if (await browserReady()) return await readState();
-  if (!chrome) throw new Error("Chromium executable is not configured");
   const state = await readState();
+  const recorded = await probe(state);
+  if (recorded.ready) return state;
+  if (!chrome) throw new Error(`Chromium executable is not configured, and ${recorded.cause}`);
   await mkdir(profile, { recursive: true });
   const browserTmp = join(root, "tmp");
   await mkdir(browserTmp, { recursive: true });
   const args = [
-    `--remote-debugging-port=${port}`,
+    "--remote-debugging-port=0",
     `--user-data-dir=${profile}`,
     "--remote-allow-origins=*",
     "--no-first-run",
@@ -91,13 +105,9 @@ const ensureBrowser = async () => {
   ];
   if (!visible) args.push("--headless=new", "--disable-gpu");
   args.push("about:blank");
-  const child = spawn(chrome, args, {
-    detached: true,
-    stdio: "pipe",
-    env: { ...process.env, TMPDIR: browserTmp },
-  });
+  const child = spawn(chrome, args, { detached: true, stdio: "pipe", env: { ...process.env, TMPDIR: browserTmp } });
   // Nothing is written to the browser and its stdout is not read, so both are
-  // released; stderr carries the readiness announcement and the failure cause.
+  // released; stderr carries the announcement and the failure cause.
   child.stdin.end();
   child.stdout.resume();
   let stderr = "";
@@ -105,21 +115,22 @@ const ensureBrowser = async () => {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", chunk => {
       stderr += chunk;
-      if (stderr.includes("DevTools listening on ")) resolve();
+      const announced = /DevTools listening on (?<socket>ws:\/\/\S+)/.exec(stderr);
+      if (announced) resolve(new URL(announced.groups.socket));
     });
   });
   const exited = new Promise(resolve => {
     child.once("error", error => resolve(new Error(`Chromium could not start: ${error.message}`, { cause: error })));
-    child.once("exit", (code, signal) => resolve(new Error(
-      `Chromium exited (code ${code}, signal ${signal}) before exposing CDP on ${endpoint}`,
-    )));
+    child.once("exit", (code, signal) => resolve(new Error(`Chromium exited (code ${code}, signal ${signal}) before exposing CDP`)));
   });
-  const readiness = Promise.race([listening, exited]);
   try {
     state.browserPid = child.pid;
     await saveState(state);
-    const failure = await readiness;
-    if (failure) throw failure;
+    const outcome = await Promise.race([listening, exited]);
+    if (outcome instanceof Error) throw outcome;
+    state.endpoint = `http://${outcome.host}`;
+    endpoint = state.endpoint;
+    await saveState(state);
     const version = await requestJson("/json/version");
     if (typeof version.webSocketDebuggerUrl !== "string") {
       throw new Error(`CDP readiness at ${endpoint}/json/version returned no string webSocketDebuggerUrl`);
@@ -152,14 +163,21 @@ const ensureBrowser = async () => {
 const listTabs = async () => (await requestJson("/json/list"))
   .filter(target => target.type === "page")
   .map(target => ({ id: target.id, title: target.title, url: target.url, type: target.type }));
+/** The tab the caller named as `tab`, else the session's current tab, else its first; undefined when none is open. */
 const resolveTab = async (input, state) => {
   const tabs = await listTabs();
-  const requested = input.tab ?? input.targetId ?? state.currentTab;
-  return tabs.find(tab => tab.id === requested) ?? tabs[0] ?? null;
+  if (input.tab !== undefined) {
+    const tab = tabs.find(candidate => candidate.id === input.tab);
+    if (!tab) throw new Error(`no open tab ${input.tab}`);
+    return tab;
+  }
+  const current = tabs.find(tab => tab.id === state.currentTab);
+  if (current) return current;
+  const [first] = tabs;
+  return first;
 };
 const openTab = async url => {
-  const encoded = encodeURIComponent(url || "about:blank");
-  const target = await requestJson(`/json/new?${encoded}`, { method: "PUT" });
+  const target = await requestJson(`/json/new?${encodeURIComponent(url)}`, { method: "PUT" });
   return { id: target.id, title: target.title, url: target.url, type: target.type };
 };
 const activateTab = async id => {
@@ -173,7 +191,8 @@ class CdpClient {
   constructor(url) {
     this.url = url;
     this.socket = null;
-    this.sequence = 1;
+    // Every call's method in the order it was sent; a call's id is its place here.
+    this.issued = [];
     this.pending = new Map();
     this.events = new Map();
     // The error the socket closed with; a call or event subscription made
@@ -184,18 +203,18 @@ class CdpClient {
     this.socket = new WebSocket(this.url);
     this.socket.addEventListener("message", event => {
       const message = JSON.parse(String(event.data));
-      if (!message.id) {
+      if (message.id === undefined) {
         const listeners = this.events.get(message.method);
         if (!listeners) return;
         this.events.delete(message.method);
-        for (const listener of listeners) listener.resolve(message.params ?? {});
+        for (const listener of listeners) listener.resolve(message.params);
         return;
       }
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(message.error.message ?? JSON.stringify(message.error)));
-      else pending.resolve(message.result ?? {});
+      if (message.error) pending.reject(new Error(`CDP ${pending.method} failed: ${JSON.stringify(message.error)}`));
+      else pending.resolve(message.result);
     });
     // A closed socket fails every call and event still outstanding on it.
     this.socket.addEventListener("close", event => {
@@ -216,11 +235,11 @@ class CdpClient {
       this.socket.addEventListener("close", () => reject(this.closed), { once: true });
     });
   }
-  send(method, params = {}) {
+  send(method, params) {
     if (this.closed) return Promise.reject(new Error(`${method}: ${this.closed.message}`));
-    const id = this.sequence++;
+    const id = this.issued.push(method);
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      this.pending.set(id, { method, resolve, reject });
       try {
         this.socket.send(JSON.stringify({ id, method, params }));
       } catch (error) {
@@ -233,58 +252,11 @@ class CdpClient {
   next(method) {
     if (this.closed) return Promise.reject(new Error(`${method}: ${this.closed.message}`));
     return new Promise((resolve, reject) => {
-      const listeners = this.events.get(method) ?? [];
-      listeners.push({ resolve, reject });
-      this.events.set(method, listeners);
+      if (!this.events.has(method)) this.events.set(method, []);
+      this.events.get(method).push({ resolve, reject });
     });
   }
   close() {
     if (this.socket?.readyState === WebSocket.OPEN) this.socket.close();
   }
 }
-
-const evaluate = async (client, expression, awaitPromise = true) => {
-  const result = await client.send("Runtime.evaluate", {
-    expression,
-    awaitPromise,
-    returnByValue: true,
-    userGesture: true,
-  });
-  if (result.exceptionDetails) {
-    throw new Error(result.exceptionDetails.exception?.description ?? result.exceptionDetails.text ?? "evaluation failed");
-  }
-  return result.result?.value;
-};
-const jsString = value => JSON.stringify(String(value));
-// An element appears when the page renders it: the page's own MutationObserver
-// reports it, and the turn's own cancellation ends a request that should stop.
-const untilSelector = (client, selector) => evaluate(client, `new Promise(resolve => {
-  const selector = ${jsString(selector)};
-  if (document.querySelector(selector)) { resolve(true); return; }
-  const observer = new MutationObserver(() => {
-    if (document.querySelector(selector)) { observer.disconnect(); resolve(true); }
-  });
-  observer.observe(document, { childList: true, subtree: true, attributes: true });
-})`);
-const pageSnapshotExpression = `(() => {
-  // The browser answers whether an element is rendered and visible
-  // (Element.checkVisibility, which covers display and visibility); an
-  // element with no box takes no click.
-  const visible = element => {
-    const rect = element.getBoundingClientRect();
-    return element.checkVisibility({ visibilityProperty: true }) && rect.width > 0 && rect.height > 0;
-  };
-  const elements = [...document.querySelectorAll("a,button,input,textarea,select,[role],[contenteditable=true]")]
-    .filter(visible).slice(0, 200).map((element, index) => ({
-      index,
-      tag: element.tagName.toLowerCase(),
-      role: element.getAttribute("role"),
-      text: (element.innerText || element.value || element.getAttribute("aria-label") || element.getAttribute("title") || "").trim().slice(0, 300),
-      id: element.id || null,
-      name: element.getAttribute("name"),
-      type: element.getAttribute("type"),
-      href: element.href || null,
-      disabled: Boolean(element.disabled),
-    }));
-  return { title: document.title, url: location.href, text: (document.body?.innerText || "").slice(0, 20000), elements };
-})()`;

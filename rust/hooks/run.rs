@@ -11,8 +11,9 @@ use super::{
 /// The exit code of an outcome whose hook gave none of its own: it could
 /// not start, could not be waited on, was not handed its payload, or was an
 /// extension dispatch that failed. Every reader takes a negative code for
-/// exactly that.
-const NO_EXIT_CODE: i32 = -1;
+/// exactly that; no process exits with a negative code, so it is the failure
+/// exit negated.
+const NO_EXIT_CODE: i32 = -libc::EXIT_FAILURE;
 
 /// The user and project configs, and why any config that applies could not
 /// be read. The project config applies only when `allow_project`.
@@ -38,18 +39,17 @@ fn trusted_configs(cwd: &Path, allow_project: bool) -> (Value, Value, Vec<String
 /// nobody saw into an allowed action. A spawn failure surfaces as a non-zero
 /// outcome rather than aborting the turn.
 pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
-    let child = Command::new("sh")
-        .arg("-c")
-        .arg(&hook.command)
-        .current_dir(cwd)
-        .env(
-            "JEDEN_HOOK_EVENT",
-            payload.get("event").and_then(Value::as_str).unwrap_or(""),
-        )
-        .env(
-            "JEDEN_HOOK_TOOL",
-            payload.get("tool").and_then(Value::as_str).unwrap_or(""),
-        )
+    let mut command = Command::new("sh");
+    command.arg("-c").arg(&hook.command).current_dir(cwd);
+    // A payload that names no event or tool leaves its variable unset, so a
+    // hook can tell a name that was not stated from an empty one.
+    if let Some(event) = payload.get("event").and_then(Value::as_str) {
+        command.env("JEDEN_HOOK_EVENT", event);
+    }
+    if let Some(tool) = payload.get("tool").and_then(Value::as_str) {
+        command.env("JEDEN_HOOK_TOOL", tool);
+    }
+    let child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -70,12 +70,21 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
     };
     // A hook that is not handed its payload judges an empty event; that is
     // the hook's failure with its cause, not an answer. A hook that closed its
-    // input without reading it answered without the payload and stands.
-    let handed = match child.stdin.take() {
-        Some(mut stdin) => stdin.write_all(payload.to_string().as_bytes()),
-        None => Ok(()),
-    };
-    let output = match child.wait_with_output() {
+    // input without reading it answered without the payload and stands. The
+    // payload is written from its own thread while the outputs are read: a
+    // payload beyond a pipe buffer, written first, blocked Jeden on stdin
+    // while a hook that prints as it reads blocked on stdout.
+    let body = payload.to_string().into_bytes();
+    let writer = child
+        .stdin
+        .take()
+        .map(|mut stdin| std::thread::spawn(move || stdin.write_all(&body)));
+    let output = match stado_wait::blocking(
+        stado_wait::Kind::Process,
+        format!("the hook `{}`", hook.command),
+        cwd.display(),
+        || child.wait_with_output(),
+    ) {
         Ok(o) => o,
         Err(e) => {
             return HookOutcome {
@@ -88,6 +97,14 @@ pub fn run_hook(cwd: &Path, hook: &Hook, payload: &Value) -> HookOutcome {
                 ),
             }
         }
+    };
+    let handed = match writer.map(std::thread::JoinHandle::join) {
+        None => Ok(()),
+        Some(Ok(written)) => written,
+        Some(Err(panic)) => Err(std::io::Error::other(crate::panicked::refusal(
+            "the hook payload writer",
+            &*panic,
+        ))),
     };
     if let Err(error) = handed {
         if error.kind() != std::io::ErrorKind::BrokenPipe {
@@ -182,7 +199,7 @@ pub fn fire_event(
     }
     match super::extensions::fire_hooks(cwd, event, tool, payload, allow_project) {
         Ok(values) => outcomes.extend(values.into_iter().map(|value| HookOutcome {
-            exit_code: 0,
+            exit_code: libc::EXIT_SUCCESS,
             stdout: match value {
                 Value::String(text) => text,
                 Value::Null => String::new(),
@@ -211,7 +228,10 @@ pub fn has_event_hooks(cwd: &Path, event: &str, allow_project: bool) -> bool {
             .iter()
             .any(|config| match config {
                 Ok(config) => !parse_event_hooks(config, event).is_empty(),
-                Err(_) => true,
+                // A plugin hook file that cannot be read may hold a hook for
+                // this event, so the answer is held for it; the read failure
+                // itself is reported when the event fires.
+                Err(_unreadable) => true,
             })
         || !super::tama::load_event_hooks(cwd, event, "", None).is_empty()
         || super::extensions::has_hooks(cwd, event)

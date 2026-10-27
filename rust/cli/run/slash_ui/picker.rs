@@ -19,17 +19,7 @@ pub(crate) fn model_picker(
 ) -> Result<PickerSpec, String> {
     let config = load_config(cwd);
     let lang = ui_language(&config).code().to_string();
-    let active = if let Some(model) = current_model {
-        Some(model.to_owned())
-    } else if let Some(model) = config.model {
-        Some(model)
-    } else {
-        match std::env::var("JEDEN_MODEL") {
-            Ok(model) => Some(model),
-            Err(std::env::VarError::NotPresent) => None,
-            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
-        }
-    };
+    let active = crate::agent::selected_model(current_model, config.model.as_deref())?;
     let client = crate::control_plane::model_client()?;
     if !client.health().available {
         return Err(client.health().detail);
@@ -179,7 +169,7 @@ pub(crate) fn model_picker(
         );
         // Every tab here is a subscription the user holds, so all are ●; the
         // catalog stays a row in the item pane with its own ○.
-        let marks = tabs.iter().map(|_| true).collect::<Vec<_>>();
+        let marks = vec![true; tabs.len()];
         Ok(PickerSpec::new(tr(&lang, "view.model.title"), items)
             .with_tabs(tabs)
             .with_tab_marks(marks)

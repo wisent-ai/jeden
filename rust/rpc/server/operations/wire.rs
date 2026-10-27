@@ -24,10 +24,13 @@ pub(super) fn text_param(params: &Value, key: &str) -> Result<String, String> {
         .ok_or_else(|| format!("{} must be a string", key))
 }
 
+/// A JSON-RPC request id as text: a string id is its own text, a number id
+/// (the other form JSON-RPC allows) its JSON.
 pub(crate) fn wire_id(id: &Value) -> String {
-    id.as_str()
-        .map(str::to_string)
-        .unwrap_or_else(|| id.to_string())
+    match id {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
 }
 
 pub(crate) fn success_response(id: Value, result: Value) -> Value {

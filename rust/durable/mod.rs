@@ -6,15 +6,40 @@
 //! those steps.
 
 use std::ffi::OsString;
+use std::fs::Permissions;
 use std::io::Write;
 use std::path::Path;
 
 use super::platform::{native, PlatformError, SecureTemp};
 
-/// Write `bytes` as the whole content of `path`. When a step fails the
-/// staged file is removed; a staged file that cannot be removed is named
-/// in the error beside the cause.
+/// Write `bytes` as the whole content of `path`, created private to its
+/// owner. When a step fails the staged file is removed; a staged file that
+/// cannot be removed is named in the error beside the cause.
 pub fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    publish(path, bytes, None)
+}
+
+/// As [`replace`], for a file whose mode belongs to its owner (a source file
+/// the agent rewrites, a session state): the staged file takes the
+/// destination's current permissions before it is renamed over it, so an
+/// executable script stays executable and a shared file stays shared. A
+/// destination that does not exist yet is created private, as [`replace`]
+/// creates it; one whose permissions cannot be read is refused naming it.
+pub fn replace_keeping_mode(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let kept = match std::fs::metadata(path) {
+        Ok(metadata) => Some(metadata.permissions()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(format!(
+                "the permissions of {} cannot be read to keep them: {error}",
+                path.display()
+            ))
+        }
+    };
+    publish(path, bytes, kept)
+}
+
+fn publish(path: &Path, bytes: &[u8], kept: Option<Permissions>) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
@@ -30,7 +55,13 @@ pub fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
     } = platform
         .create_secure_temp(parent, &prefix)
         .map_err(|error| format!("cannot stage {}: {error}", path.display()))?;
-    let written = file.write_all(bytes).and_then(|()| file.flush());
+    let written = file
+        .write_all(bytes)
+        .and_then(|()| file.flush())
+        .and_then(|()| match kept {
+            Some(permissions) => file.set_permissions(permissions),
+            None => Ok(()),
+        });
     drop(file);
     let replaced = match written {
         Ok(()) => platform.atomic_replace(&staging, path, None),

@@ -35,10 +35,11 @@ impl GithubService {
         context: &OperationContext<'_>,
         allow_write: bool,
     ) -> ServiceResult<Value> {
-        let action = input
-            .get("action")
-            .and_then(Value::as_str)
-            .unwrap_or("list");
+        // A request that names no action lists the worktrees.
+        let action = match input.get("action").and_then(Value::as_str) {
+            Some(action) => action,
+            None => "list",
+        };
         let mut args = vec!["worktree".into(), action.into()];
         match action {
             "list" => args.push("--porcelain".into()),
@@ -129,11 +130,36 @@ impl GithubService {
                 )));
             }
         }
-        let remote = input
-            .get("remote")
-            .and_then(Value::as_str)
-            .unwrap_or("origin");
-        if !safe_git_name(remote) {
+        // The remote a push goes to is the one named, else the one git itself
+        // would push this branch to (pushRemote, pushDefault, the branch's
+        // remote); a branch with none is refused rather than pushed to a
+        // remote nobody chose.
+        let remote = match input.get("remote").and_then(Value::as_str) {
+            Some(named) => named.to_string(),
+            None => {
+                let configured = process::run(
+                    "github",
+                    context,
+                    &self.cwd,
+                    "git",
+                    &[
+                        "for-each-ref".into(),
+                        "--format=%(push:remotename)".into(),
+                        format!("refs/heads/{branch}"),
+                    ],
+                    None,
+                )?
+                .trim()
+                .to_string();
+                if configured.is_empty() {
+                    return Err(ServiceError::InvalidInput(format!(
+                        "branch {branch} has no push remote configured; name one with remote"
+                    )));
+                }
+                configured
+            }
+        };
+        if !safe_git_name(&remote) {
             return Err(ServiceError::InvalidInput(
                 "remote contains unsafe characters".into(),
             ));
@@ -145,7 +171,7 @@ impl GithubService {
             "git",
             &[
                 "push".into(),
-                remote.into(),
+                remote.clone(),
                 format!("HEAD:refs/heads/{branch}"),
                 "--porcelain".into(),
             ],

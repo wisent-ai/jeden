@@ -11,7 +11,7 @@ mod isolation;
 mod resume;
 
 use budget::enforce_budget;
-use isolation::{atomic_write_new, isolated_run, materialize_fixture, resolve_repo_path, run_key};
+use isolation::{isolated_run, materialize_fixture, resolve_repo_path, run_key};
 
 pub const MANIFEST_SCHEMA: &str = "jeden.eval-manifest.v1";
 
@@ -97,7 +97,9 @@ impl EvalRunner {
             .map_err(|error| format!("invalid catalog artifact: {error}"))?;
         serde_json::from_slice::<serde_json::Value>(&policy)
             .map_err(|error| format!("invalid policy artifact: {error}"))?;
-        let _ = load_dataset(&dataset_path)?;
+        // Refuses a dataset that does not parse before any run starts; the
+        // run itself reads the retained bytes.
+        load_dataset(&dataset_path)?;
         Ok(Self {
             config,
             manifest,
@@ -259,10 +261,10 @@ impl EvalRunner {
             hard_violations,
             artifacts,
         };
-        atomic_write_new(
-            &outcome_path,
-            &serde_json::to_vec(&outcome).map_err(|error| error.to_string())?,
-        )?;
+        let encoded = serde_json::to_vec(&outcome).map_err(|error| {
+            format!("the outcome of case {} cannot be encoded as JSON: {error}", outcome_path.display())
+        })?;
+        crate::tool_runtime::runtime_ops::durable::replace(&outcome_path, &encoded)?;
         Ok(outcome)
     }
 }

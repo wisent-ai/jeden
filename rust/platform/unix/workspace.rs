@@ -6,8 +6,8 @@
 
 use super::super::*;
 use super::UnixPlatform;
+use crate::tool_runtime::runtime_ops::captured::{bounded, bounded_with_stdin, checked};
 use std::fs;
-use std::io::Write;
 use std::process::{Command, Stdio};
 
 impl WorkspacePlatform for UnixPlatform {
@@ -75,7 +75,8 @@ impl WorkspacePlatform for UnixPlatform {
                     ])
                     .current_dir(workspace),
                 max,
-                true,
+                // git diff without --exit-code succeeds whatever it finds.
+                false,
             )
         } else {
             bounded(
@@ -84,6 +85,7 @@ impl WorkspacePlatform for UnixPlatform {
                     .arg(parent)
                     .arg(workspace),
                 max,
+                // diff(1) answers found differences with a failing status.
                 true,
             )
         }
@@ -97,7 +99,7 @@ impl WorkspacePlatform for UnixPlatform {
         if snapshot.is_empty() {
             return Ok(());
         }
-        let (ok, _, stderr) = bounded_with_stdin(
+        let (ok, _stdout, stderr) = bounded_with_stdin(
             Command::new("git")
                 .args(["apply", "--3way", "--whitespace=nowarn", "-"])
                 .current_dir(parent),
@@ -107,9 +109,11 @@ impl WorkspacePlatform for UnixPlatform {
         if ok {
             Ok(())
         } else {
-            Err(PlatformError::Process(
-                String::from_utf8_lossy(&stderr).into_owned(),
-            ))
+            Err(PlatformError::Process(format!(
+                "git apply --3way of the workspace snapshot onto {} failed: {}",
+                parent.display(),
+                String::from_utf8_lossy(&stderr).trim()
+            )))
         }
     }
 }
@@ -129,61 +133,6 @@ fn cloned(command: &mut Command, target: &Path) -> Result<Option<String>, Platfo
         fs::remove_dir_all(target)?;
     }
     Ok(Some(cause))
-}
-
-/// Run `command`, refusing its failure with what it was doing, its exit
-/// status and what it printed on stderr.
-fn checked(command: &mut Command, what: &str) -> Result<(), PlatformError> {
-    let output = stado_wait::output(command.stdin(Stdio::null()))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(PlatformError::Process(format!(
-            "{what} failed with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
-    }
-}
-
-fn bounded(command: &mut Command, max: u64, allow_one: bool) -> Result<Vec<u8>, PlatformError> {
-    let out = command.output()?;
-    if out.stdout.len() as u64 > max {
-        return Err(PlatformError::TooLarge {
-            size: out.stdout.len() as u64,
-            limit: max,
-        });
-    }
-    if !out.status.success() && !(allow_one && out.status.code() == Some(1)) {
-        return Err(PlatformError::Process(
-            String::from_utf8_lossy(&out.stderr).into_owned(),
-        ));
-    }
-    Ok(out.stdout)
-}
-
-fn bounded_with_stdin(
-    command: &mut Command,
-    max: u64,
-    input: &[u8],
-) -> Result<(bool, Vec<u8>, Vec<u8>), PlatformError> {
-    let mut child = command
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    child
-        .stdin
-        .take()
-        .ok_or_else(|| PlatformError::Process("snapshot stdin unavailable".into()))?
-        .write_all(input)?;
-    let out = child.wait_with_output()?;
-    if out.stdout.len() as u64 > max || out.stderr.len() as u64 > max {
-        return Err(PlatformError::Process(format!(
-            "workspace diagnostics exceed {max} bytes"
-        )));
-    }
-    Ok((out.status.success(), out.stdout, out.stderr))
 }
 
 fn copy_tree(source: &Path, dest: &Path) -> Result<(), PlatformError> {

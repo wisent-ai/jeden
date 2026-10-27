@@ -55,7 +55,7 @@ pub fn verify_envelope(
     }
     let payload = base64::engine::general_purpose::STANDARD
         .decode(&envelope.payload)
-        .map_err(|_| "DSSE payload is not canonical base64".to_string())?;
+        .map_err(|error| format!("DSSE payload is not canonical base64: {error}"))?;
     if base64::engine::general_purpose::STANDARD.encode(&payload) != envelope.payload {
         return Err("DSSE payload is not canonical base64".into());
     }
@@ -87,12 +87,12 @@ pub fn verify_envelope(
         .ok_or_else(|| format!("DSSE envelope has no signature from {}", manifest.key_id))?;
     let signature_bytes = base64::engine::general_purpose::STANDARD
         .decode(&signature.sig)
-        .map_err(|_| "DSSE signature is not base64".to_string())?;
+        .map_err(|error| format!("DSSE signature is not base64: {error}"))?;
     let signature = Signature::from_slice(&signature_bytes)
-        .map_err(|_| "DSSE signature must be 64 bytes".to_string())?;
+        .map_err(|error| format!("DSSE signature must be 64 bytes: {error}"))?;
     root.key
         .verify(&pae(envelope.payload_type.as_bytes(), &payload), &signature)
-        .map_err(|_| "release manifest Ed25519 signature verification failed".to_string())?;
+        .map_err(|error| format!("release manifest Ed25519 signature verification failed: {error}"))?;
     Ok(manifest)
 }
 

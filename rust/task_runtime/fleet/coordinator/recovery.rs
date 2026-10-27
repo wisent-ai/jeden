@@ -58,7 +58,7 @@ impl Coordinator {
                 current.updated_at = now;
             }
             if let Some(worker) = state.workers.get_mut(worker_id) {
-                worker.running = worker.running.saturating_sub(1);
+                worker.running = worker.running.saturating_sub(u32::from(crate::tally::STEP));
             }
             Ok(())
         })
@@ -87,26 +87,23 @@ impl Coordinator {
                 current.updated_at = now;
             }
             if let Some(worker) = state.workers.get_mut(worker_id) {
-                worker.running = worker.running.saturating_sub(1);
+                worker.running = worker.running.saturating_sub(u32::from(crate::tally::STEP));
             }
             Ok(())
         })
     }
     pub fn expire_leases(&self, now: u64) -> Result<Vec<String>, ProtocolError> {
         self.store.transact(|state| {
-            let expired = state
-                .jobs
-                .iter()
-                .filter_map(|(id, job)| {
-                    job.lease
-                        .as_ref()
-                        .filter(|lease| lease.expires_at <= now && !job.phase.terminal())
-                        .map(|_| id.clone())
-                })
-                .collect::<Vec<_>>();
-            for id in &expired {
-                let job = state.jobs.get_mut(id).expect("collected job exists");
-                let lease = job.lease.take().expect("collected lease exists");
+            // Each lease is taken off its job in the pass that finds it
+            // expired, so the job and its lease are never looked up twice.
+            let mut expired = Vec::new();
+            for (id, job) in state.jobs.iter_mut() {
+                if job.phase.terminal() {
+                    continue;
+                }
+                let Some(lease) = job.lease.take_if(|lease| lease.expires_at <= now) else {
+                    continue;
+                };
                 if let Some(attempt) = job.attempts.last_mut() {
                     attempt.phase = AttemptPhase::Failed;
                     attempt.updated_at = now;
@@ -121,8 +118,9 @@ impl Coordinator {
                     lease.fencing_token, lease.expires_at
                 ));
                 if let Some(worker) = state.workers.get_mut(&lease.worker_id) {
-                    worker.running = worker.running.saturating_sub(1);
+                    worker.running = worker.running.saturating_sub(u32::from(crate::tally::STEP));
                 }
+                expired.push(id.clone());
             }
             Ok(expired)
         })
@@ -145,7 +143,10 @@ impl Coordinator {
                 attempt,
                 fence,
             )?;
-            let lease = job.lease.as_mut().expect("validated lease");
+            let lease = job
+                .lease
+                .as_mut()
+                .ok_or_else(|| ProtocolError::LeaseLost(format!("{job_id} holds no lease to adopt")))?;
             if lease.expires_at <= now {
                 return Err(ProtocolError::LeaseLost(format!(
                     "lease for {job_id} expired"

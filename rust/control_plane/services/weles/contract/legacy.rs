@@ -17,14 +17,16 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
     }
 
     fn readiness(&self) -> Result<contract::Readiness, WelesError> {
-        contract::negotiate(1, 1).map_err(|error| {
+        // This client speaks only the first Weles schema.
+        let schema = crate::tally::FIRST as u32;
+        contract::negotiate(schema, schema).map_err(|error| {
             WelesError::InvalidResponse(format!("schema negotiation failed: {error:?}"))
         })?;
         let providers = self.providers()?;
         Ok(contract::Readiness {
             ready: true,
-            schema_min: 1,
-            schema_max: 1,
+            schema_min: schema,
+            schema_max: schema,
             detail: format!("{} providers advertised", providers.len()),
         })
     }
@@ -57,14 +59,14 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
         cursor: Option<&str>,
         meta: &RequestMeta,
     ) -> Result<OperationV1, WelesError> {
-        let suffix = cursor
-            .map(|value| {
-                format!(
-                    "?cursor={}",
-                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
-                )
-            })
-            .unwrap_or_default();
+        // A read without a cursor starts from the operation's first event.
+        let suffix = match cursor {
+            Some(value) => format!(
+                "?cursor={}",
+                url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+            ),
+            None => String::new(),
+        };
         let value = self.request_with_meta(
             reqwest::Method::GET,
             &format!("/operations/{operation_id}{suffix}"),
@@ -99,7 +101,7 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
             Some(&json!({"field": field, "value": value})),
             meta,
         )
-        .map(|_| ())
+        .map(|_acknowledgement| ())
     }
 
     fn cancel_operation(&self, operation_id: &str, meta: &RequestMeta) -> Result<(), WelesError> {
@@ -109,7 +111,13 @@ impl crate::control_plane::contract::WelesApiV1 for WelesClient {
             Some(&json!({})),
             meta,
         ) {
-            Ok(_) | Err(WelesError::Http { status: 409, .. }) => Ok(()),
+            // An operation that already ended answers a cancel with a conflict.
+            Ok(_) => Ok(()),
+            Err(WelesError::Http { status, .. })
+                if status == reqwest::StatusCode::CONFLICT.as_u16() =>
+            {
+                Ok(())
+            }
             Err(error) => Err(error),
         }
     }

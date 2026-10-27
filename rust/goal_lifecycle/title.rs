@@ -38,13 +38,22 @@ fn transcript_lake_title(executable: &Path, prompt: &str) -> Result<String, Stri
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|error| failed("cannot start", error.to_string()))?;
-    let written = match child.stdin.take() {
-        Some(mut stdin) => stdin.write_all(prompt.as_bytes()),
-        None => Err(std::io::Error::from(std::io::ErrorKind::BrokenPipe)),
-    };
-    written.map_err(|error| failed("cannot write the prompt", error.to_string()))?;
+    // The prompt is written from its own thread while the answer is read:
+    // written first, a child that answers before it reads all of a long
+    // prompt filled its output pipe and both waited on each other.
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| failed("cannot write the prompt", "the child has no stdin pipe".to_string()))?;
+    let input = prompt.as_bytes().to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
     let output = stado_wait::child_output(child, &command_line)
         .map_err(|error| failed("cannot collect the answer", error.to_string()))?;
+    match writer.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => return Err(failed("cannot write the prompt", error.to_string())),
+        Err(panic) => return Err(failed("cannot write the prompt", crate::panicked::refusal("the prompt writer", &*panic))),
+    }
     if !output.status.success() {
         return Err(failed(
             &output.status.to_string(),

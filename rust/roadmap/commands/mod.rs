@@ -246,10 +246,14 @@ pub fn execute(cwd: &Path, args: &[String], json_output: bool) -> Result<String,
             let report = store.check();
             if json_output {
                 format_json(&report)
-            } else if report.ok {
+            } else if let (true, Some(schema), Some(revision), Some(items)) = (
+                report.ok,
+                report.schema_version,
+                report.revision,
+                report.item_count,
+            ) {
                 Ok(format!(
-                    "Roadmap valid: schema {}, revision {}, {} items.\n",
-                    report.schema_version, report.revision, report.item_count
+                    "Roadmap valid: schema {schema}, revision {revision}, {items} items.\n"
                 ))
             } else {
                 Err(RoadmapError::Invalid(report.errors.join("\n")))

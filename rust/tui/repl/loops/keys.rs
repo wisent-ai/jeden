@@ -50,6 +50,7 @@ where
             let operation = OperationContext::new(
                 CancellationToken::new(),
                 ArtifactSink::new(std::env::temp_dir().join("jeden-external-editor-artifacts")),
+                std::path::PathBuf::from(&cwd),
             );
             let result = external_editor(editor, Path::new(&cwd), &operation);
             enable_raw_mode()?;
@@ -58,11 +59,11 @@ where
             if let Err(error) = result {
                 messages.push(Message::new(Role::Error, error));
             }
-            *slash_selection = 0;
+            *slash_selection = crate::tally::ORIGIN;
         }
         KeyCode::Esc => {
             editor.clear();
-            *slash_selection = 0;
+            *slash_selection = crate::tally::ORIGIN;
         }
         KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::CONTROL) => {
             let cwd = status_provider().cwd;
@@ -84,7 +85,7 @@ where
         }
         KeyCode::Enter if key.modifiers.contains(KeyModifiers::ALT) => {
             editor.apply(EditorAction::InsertNewline);
-            *slash_selection = 0;
+            *slash_selection = crate::tally::ORIGIN;
         }
         KeyCode::Enter | KeyCode::Char('\r') | KeyCode::Char('\n') => submit = true,
         KeyCode::Char('m') | KeyCode::Char('j')
@@ -98,7 +99,7 @@ where
             } else {
                 editor.insert("  ");
             }
-            *slash_selection = 0;
+            *slash_selection = crate::tally::ORIGIN;
         }
         KeyCode::Right
             if editor.cursor() == editor.text().len()
@@ -106,16 +107,17 @@ where
         {
             if let Some(completed) = complete_slash_input(editor.text(), *slash_selection) {
                 editor.set_text(completed);
-                *slash_selection = 0;
+                *slash_selection = crate::tally::ORIGIN;
             }
         }
         KeyCode::Up => {
             let count = slash_matches(editor.text()).len();
-            if count > 0 {
-                *slash_selection = if *slash_selection == 0 {
-                    count - 1
-                } else {
-                    *slash_selection - 1
+            let step = usize::from(crate::tally::STEP);
+            // Above the first match the selection wraps to the last.
+            if let Some(last) = count.checked_sub(step) {
+                *slash_selection = match slash_selection.checked_sub(step) {
+                    Some(previous) => previous,
+                    None => last,
                 };
             } else if editor.text()[..editor.cursor()].contains('\n') {
                 editor.apply(EditorAction::MoveUp);
@@ -125,8 +127,9 @@ where
         }
         KeyCode::Down => {
             let count = slash_matches(editor.text()).len();
-            if count > 0 {
-                *slash_selection = (*slash_selection + 1) % count;
+            // Below the last match the selection wraps to the first.
+            if let Some(next) = (*slash_selection + usize::from(crate::tally::STEP)).checked_rem(count) {
+                *slash_selection = next;
             } else if editor.text()[editor.cursor()..].contains('\n') {
                 editor.apply(EditorAction::MoveDown);
             } else {
@@ -135,8 +138,11 @@ where
         }
         _ => {
             if editor.handle_key(key) {
-                *slash_selection =
-                    (*slash_selection).min(slash_matches(editor.text()).len().saturating_sub(1));
+                *slash_selection = (*slash_selection).min(
+                    slash_matches(editor.text())
+                        .len()
+                        .saturating_sub(usize::from(crate::tally::STEP)),
+                );
             }
         }
     }

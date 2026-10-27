@@ -90,21 +90,25 @@ pub(super) fn collect(root: &Path, accepts: fn(Notation) -> bool, out: &mut Vec<
     }
 }
 
+/// The line that opens YAML frontmatter, and the one that closes it.
+const FRONTMATTER_OPEN: &str = "---\n";
+const FRONTMATTER_CLOSE: &str = "\n---\n";
+
 pub(super) fn parse_frontmatter(text: &str) -> Result<(Map<String, Value>, String), String> {
     let normalized = text.replace("\r\n", "\n");
-    if !normalized.starts_with("---\n") {
+    if !normalized.starts_with(FRONTMATTER_OPEN) {
         return Ok((Map::new(), normalized));
     }
-    let tail = &normalized[4..];
-    let end = tail
-        .find("\n---\n")
+    let tail = &normalized[FRONTMATTER_OPEN.len()..];
+    let (front, body) = tail
+        .split_once(FRONTMATTER_CLOSE)
         .ok_or("unterminated YAML frontmatter")?;
-    let metadata: Value = serde_yaml::from_str(&tail[..end]).map_err(|error| error.to_string())?;
+    let metadata: Value = serde_yaml::from_str(front).map_err(|error| error.to_string())?;
     let metadata = metadata
         .as_object()
         .cloned()
         .ok_or("frontmatter must be an object")?;
-    Ok((metadata, tail[end + 5..].to_string()))
+    Ok((metadata, body.to_string()))
 }
 
 pub(super) fn string_list(value: Option<&Value>) -> Result<Vec<String>, String> {
@@ -139,7 +143,9 @@ pub(super) fn matches(matchers: &[String], prompt: &str) -> bool {
 
 pub(super) fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<PathBuf>, String> {
     let relative = string_list(raw)?;
-    let root = skill_file.parent().unwrap_or_else(|| Path::new("."));
+    let root = skill_file
+        .parent()
+        .ok_or_else(|| format!("skill file {} has no directory to hold its assets", skill_file.display()))?;
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let mut assets = Vec::new();
     for asset in relative {
@@ -154,18 +160,19 @@ pub(super) fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<
     Ok(assets)
 }
 
+/// A skill's id: its file's name, or for a `SKILL.md` the name of the
+/// directory that holds it. Names are read as text, a byte that is not
+/// UTF-8 shown as the replacement character rather than replaced by a word.
 pub(crate) fn skill_file_id(path: &Path) -> String {
-    let file = path
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("skill");
-    if file.eq_ignore_ascii_case("skill") {
-        path.parent()
-            .and_then(Path::file_name)
-            .and_then(|value| value.to_str())
-            .unwrap_or(file)
-            .to_string()
-    } else {
-        file.to_string()
+    let file = match path.file_stem() {
+        Some(stem) => stem.to_string_lossy().into_owned(),
+        None => path.to_string_lossy().into_owned(),
+    };
+    if !file.eq_ignore_ascii_case("skill") {
+        return file;
+    }
+    match path.parent().and_then(Path::file_name) {
+        Some(directory) => directory.to_string_lossy().into_owned(),
+        None => file,
     }
 }

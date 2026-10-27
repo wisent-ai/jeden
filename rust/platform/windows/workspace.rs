@@ -1,26 +1,15 @@
 //! Isolating and diffing a job workspace on Windows.
 //!
-//! Split out of `windows.rs` because the operator's rule keeps every source
-//! file at three hundred lines or fewer, and the write guard answers an
-//! oversized file by refusing every edit to it in both directions — so the
-//! change below could not be made until the file was split. The FFI
-//! declarations and constants deliberately stayed in the parent module, which
-//! is why nothing here needed its visibility widened.
-//!
-//! `git worktree add --detach` is gone from `isolate`. The operator's rule is
-//! "MA BYC NIEMOZLIWE UZYCIE WORKTREES. ZERO SUBAGENTOW NA OSOBNYCH
-//! WORKTREES", and a job workspace is exactly the subagent case. What remains
-//! is the recursive copy this file already carried, so an isolated workspace
-//! registers nothing in the parent repository.
-//!
-//! The unix sibling, `platform/unix/workspace.rs`, was changed the same way
-//! and keeps its clone paths; this platform has no clone path to keep.
+//! Isolation is a recursive copy, so an isolated workspace registers nothing
+//! in the parent repository (no Git worktree). Snapshots are taken and applied
+//! through the shared captured runs, which name every wait and feed git
+//! apply's stdin from its own thread.
 
 use super::*;
+use crate::tool_runtime::runtime_ops::captured::{bounded, bounded_with_stdin, checked};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Command;
 
 impl WorkspacePlatform for NativePlatform {
     fn isolate(&self, parent: &Path, target: &Path) -> Result<&'static str, PlatformError> {
@@ -45,28 +34,20 @@ impl WorkspacePlatform for NativePlatform {
                 .current_dir(workspace),
             "git add -N --all while preparing the workspace snapshot",
         )?;
-        let out = Command::new("git")
-            .args([
-                "diff",
-                "--binary",
-                "--no-ext-diff",
-                "--src-prefix=a/",
-                "--dst-prefix=b/",
-            ])
-            .current_dir(workspace)
-            .output()?;
-        if !out.status.success() {
-            return Err(PlatformError::Process(
-                String::from_utf8_lossy(&out.stderr).into_owned(),
-            ));
-        }
-        if out.stdout.len() as u64 > max {
-            return Err(PlatformError::TooLarge {
-                size: out.stdout.len() as u64,
-                limit: max,
-            });
-        }
-        Ok(out.stdout)
+        bounded(
+            Command::new("git")
+                .args([
+                    "diff",
+                    "--binary",
+                    "--no-ext-diff",
+                    "--src-prefix=a/",
+                    "--dst-prefix=b/",
+                ])
+                .current_dir(workspace),
+            max,
+            // git diff without --exit-code succeeds whatever it finds.
+            false,
+        )
     }
     fn apply_snapshot(
         &self,
@@ -77,46 +58,22 @@ impl WorkspacePlatform for NativePlatform {
         if snapshot.is_empty() {
             return Ok(());
         }
-        let mut child = Command::new("git")
-            .args(["apply", "--3way", "--whitespace=nowarn", "-"])
-            .current_dir(parent)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?;
-        child
-            .stdin
-            .take()
-            .ok_or_else(|| PlatformError::Process("git apply stdin unavailable".into()))?
-            .write_all(snapshot)?;
-        let out = child.wait_with_output()?;
-        if out.stderr.len() as u64 > max {
-            return Err(PlatformError::Process(
-                "git apply diagnostics exceeded limit".into(),
-            ));
-        }
-        if out.status.success() {
+        let (ok, _stdout, stderr) = bounded_with_stdin(
+            Command::new("git")
+                .args(["apply", "--3way", "--whitespace=nowarn", "-"])
+                .current_dir(parent),
+            max,
+            snapshot,
+        )?;
+        if ok {
             Ok(())
         } else {
-            Err(PlatformError::Process(
-                String::from_utf8_lossy(&out.stderr).into_owned(),
-            ))
+            Err(PlatformError::Process(format!(
+                "git apply --3way of the workspace snapshot onto {} failed: {}",
+                parent.display(),
+                String::from_utf8_lossy(&stderr).trim()
+            )))
         }
-    }
-}
-
-/// Run `command`, refusing its failure with what it was doing, its exit
-/// status and what it printed on stderr.
-fn checked(command: &mut Command, what: &str) -> Result<(), PlatformError> {
-    let output = stado_wait::output(command.stdin(Stdio::null()))?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(PlatformError::Process(format!(
-            "{what} failed with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr).trim()
-        )))
     }
 }
 

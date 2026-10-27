@@ -9,19 +9,35 @@ use super::super::{CapabilityHealth, CapabilityKind, CapabilityPolicy, FunctionT
 use super::current;
 use serde_json::{json, Value};
 
+/// The name a file is listed under: its file name, or the whole path when it
+/// has none.
+fn file_label(path: &Path) -> String {
+    match path.file_name() {
+        Some(name) => name.to_string_lossy().into_owned(),
+        None => path.display().to_string(),
+    }
+}
+
+/// A listing's health from what it was loaded with: healthy, or unavailable
+/// with the cause its loader kept.
+fn loaded_health(healthy: bool, error: Option<&String>, what: &Path) -> CapabilityHealth {
+    match (healthy, error) {
+        (true, _) => CapabilityHealth::healthy(),
+        (false, Some(error)) => CapabilityHealth::unavailable(error.clone()),
+        (false, None) => unreachable!("{} is unhealthy, and its loader keeps the cause", what.display()),
+    }
+}
+
 pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescriptor>, String> {
     let registry = current(cwd)?;
     let mut out = Vec::new();
     for extension in &registry.extensions {
-        let health = if extension.active {
-            CapabilityHealth::healthy()
-        } else {
-            CapabilityHealth::unavailable(
-                extension
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| extension.health.clone()),
-            )
+        // An extension that did not activate is said with its error, or with
+        // the health sentence it reported when it raised none.
+        let health = match (extension.active, &extension.error) {
+            (true, _) => CapabilityHealth::healthy(),
+            (false, Some(error)) => CapabilityHealth::unavailable(error.clone()),
+            (false, None) => CapabilityHealth::unavailable(extension.health.clone()),
         };
         out.push(
             RegistryDescriptor::new(
@@ -37,11 +53,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
                 ),
                 CapabilityKind::Extension,
                 extension.source.display().to_string(),
-                extension
-                    .source
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("extension"),
+                file_label(&extension.source),
                 format!("Extension module {}", extension.source.display()),
                 FunctionTarget::Extension {
                     source: extension.source.clone(),
@@ -74,6 +86,13 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
             );
         }
         for command in &extension.commands {
+            let Some(command_dir) = registry.command_dir.as_ref() else {
+                return Err(format!(
+                    "extension {} declares the command /{}, but the registry materialized no command directory to expand it from",
+                    extension.source.display(),
+                    command.name
+                ));
+            };
             out.push(
                 RegistryDescriptor::new(
                     format!("slash/{}", command.name),
@@ -83,11 +102,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
                     command.description.clone(),
                     FunctionTarget::FileSlash {
                         command: command.name.clone(),
-                        path: registry
-                            .command_dir
-                            .clone()
-                            .unwrap_or_default()
-                            .join(format!("{}.md", command.name)),
+                        path: command_dir.join(format!("{}.md", command.name)),
                     },
                 )
                 .operation("expand")
@@ -174,16 +189,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         .iter()
         .filter(|capability| capability.carried)
     {
-        let health = if capability.healthy {
-            CapabilityHealth::healthy()
-        } else {
-            CapabilityHealth::unavailable(
-                capability
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "declarative capability unavailable".into()),
-            )
-        };
+        let health = loaded_health(capability.healthy, capability.error.as_ref(), &capability.path);
         out.push(
             RegistryDescriptor::new(
                 format!(
@@ -198,11 +204,7 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
                 ),
                 CapabilityKind::PluginContribution,
                 capability.path.display().to_string(),
-                capability
-                    .path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or(capability.kind),
+                file_label(&capability.path),
                 format!("Activated {} contribution", capability.kind),
                 FunctionTarget::Declarative {
                     path: capability.path.clone(),
@@ -219,26 +221,11 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         .iter()
         .filter(|capability| capability.active || !capability.healthy)
     {
-        let kind = match capability.kind {
-            "skill" => CapabilityKind::Skill,
-            "agent" => CapabilityKind::Agent,
-            "rule" => CapabilityKind::Rule,
-            _ => CapabilityKind::PluginContribution,
-        };
-        let health = if capability.healthy {
-            CapabilityHealth::healthy()
-        } else {
-            CapabilityHealth::unavailable(
-                capability
-                    .error
-                    .clone()
-                    .unwrap_or_else(|| "definition activation failed".into()),
-            )
-        };
+        let health = loaded_health(capability.healthy, capability.error.as_ref(), &capability.path);
         out.push(
             RegistryDescriptor::new(
                 format!("{}/{}", capability.kind, capability.id),
-                kind,
+                capability.kind,
                 capability.path.display().to_string(),
                 capability.id.clone(),
                 capability.description.clone(),

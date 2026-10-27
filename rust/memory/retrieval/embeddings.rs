@@ -56,12 +56,15 @@ pub(crate) fn rebuild(provider: &dyn EmbeddingProvider) -> Result<usize, String>
     if vectors.len() != records.len() {
         return Err("embedding provider returned a different vector count".into());
     }
-    let dimensions = vectors.first().map(Vec::len).unwrap_or(0) as i64;
-    if vectors
-        .iter()
-        .any(|vector| vector.len() as i64 != dimensions || vector.iter().any(|v| !v.is_finite()))
-    {
-        return Err("embedding provider returned invalid or inconsistent vectors".into());
+    // Every vector is as wide as the first and holds only finite numbers.
+    if let Some(first) = vectors.first() {
+        let width = first.len();
+        if vectors
+            .iter()
+            .any(|vector| vector.len() != width || vector.iter().any(|v| !v.is_finite()))
+        {
+            return Err("embedding provider returned invalid or inconsistent vectors".into());
+        }
     }
     let now = crate::memory::now_ms()?;
     let model = provider.name().to_owned();
@@ -69,6 +72,7 @@ pub(crate) fn rebuild(provider: &dyn EmbeddingProvider) -> Result<usize, String>
         .into_iter()
         .zip(vectors)
         .map(|((id, text), vector)| {
+            let dimensions = vector.len() as i64;
             serde_json::to_string(&vector)
                 .map(|json| embedding::ActiveModel {
                     memory_id: Set(id),
@@ -125,7 +129,7 @@ pub(crate) fn health(provider: Option<&dyn EmbeddingProvider>) -> Result<Embeddi
                 .is_none_or(|text| row.content_hash != content_hash(text))
         })
         .count();
-    let available = provider.map(EmbeddingProvider::available).unwrap_or(false);
+    let available = provider.is_some_and(|provider| provider.available());
     Ok(EmbeddingHealth {
         available,
         provider: provider.map(|p| p.name().to_string()),
@@ -154,22 +158,30 @@ pub(super) fn semantic_scores(query: &[f32]) -> Result<Vec<(String, f64)>, Strin
     let mut result = Vec::new();
     for row in rows {
         let vector: Vec<f32> = serde_json::from_str(&row.vector_json).map_err(|e| e.to_string())?;
-        result.push((row.memory_id, cosine(query, &vector)));
+        // A zero vector points nowhere, so it has no angle to the query and
+        // takes no semantic score.
+        if let Some(score) = cosine(query, &vector) {
+            result.push((row.memory_id, score));
+        }
     }
     Ok(result)
 }
 
-fn cosine(a: &[f32], b: &[f32]) -> f64 {
-    let (mut dot, mut aa, mut bb) = (0.0_f64, 0.0_f64, 0.0_f64);
-    for (&x, &y) in a.iter().zip(b) {
-        let (x, y) = (x as f64, y as f64);
-        dot += x * y;
-        aa += x * x;
-        bb += y * y;
-    }
-    if aa == 0.0 || bb == 0.0 {
-        0.0
-    } else {
-        (dot / (aa.sqrt() * bb.sqrt())).clamp(-1.0, 1.0)
-    }
+/// The cosine of the angle between two vectors, or `None` when either is a
+/// zero vector, whose angle is undefined.
+fn cosine(a: &[f32], b: &[f32]) -> Option<f64> {
+    let dot: f64 = a
+        .iter()
+        .zip(b)
+        .map(|(&x, &y)| f64::from(x) * f64::from(y))
+        .sum();
+    let norm = |vector: &[f32]| {
+        vector
+            .iter()
+            .map(|&x| f64::from(x) * f64::from(x))
+            .sum::<f64>()
+            .sqrt()
+    };
+    let scale = norm(a) * norm(b);
+    (scale.classify() != std::num::FpCategory::Zero).then(|| dot / scale)
 }

@@ -1,7 +1,5 @@
 //! Reading and writing the operator's own configuration file without ever
 //! replacing something unreadable with something fresh.
-//!
-//! Split out of `cli/config/mod.rs`, which had grown past the module line cap.
 
 use super::super::migrations;
 use super::layers::read_config_layer;
@@ -17,20 +15,25 @@ use std::path::PathBuf;
 const LEGACY_VERSION_KEY: &str = "version";
 
 /// The writable user layer for operations that must never replace unreadable
-/// or malformed existing state with a fresh configuration.
+/// or malformed existing state with a fresh configuration: the current file
+/// when it holds settings, else the legacy file when there is one, else the
+/// current file as it stands. Only when neither file exists is the document
+/// empty, since the operator has configured nothing yet.
 pub(crate) fn read_user_writable_config_strict() -> Result<Value, String> {
     let current = read_config_layer(&user_config_path())?;
-    if current
+    if let Some(current) = current
         .as_ref()
-        .and_then(Value::as_object)
-        .is_some_and(|object| !object.is_empty())
+        .filter(|current| current.as_object().is_some_and(|object| !object.is_empty()))
     {
-        return Ok(current.expect("checked as present"));
+        return Ok(current.clone());
     }
     if let Some(legacy) = read_config_layer(&legacy_user_config_path())? {
         return Ok(legacy);
     }
-    Ok(current.unwrap_or_else(|| json!({})))
+    match current {
+        Some(current) => Ok(current),
+        None => Ok(json!({})),
+    }
 }
 
 /// Write the user's own configuration, and stop the superseded file from

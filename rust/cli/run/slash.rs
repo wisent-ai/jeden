@@ -9,17 +9,23 @@ use crate::cli::config::load_config;
 use crate::cli::config::schema::config_command;
 use crate::{config_path, session_root, slash, Args};
 
+/// Every slash command with its description, the names padded to the
+/// longest one so the descriptions line up.
 fn format_slash_help(cwd: &Path) -> String {
+    let rows: Vec<(String, String)> = crate::capability::slash_descriptors(cwd)
+        .into_iter()
+        .filter_map(|descriptor| {
+            let command = descriptor.ui.action.as_deref()?.trim_start_matches('/').to_string();
+            Some((command, descriptor.ui.description))
+        })
+        .collect();
+    let width = rows.iter().map(|(command, _)| command.chars().count()).max();
     let mut out = String::from("Jeden slash commands:\n");
-    for descriptor in crate::capability::slash_descriptors(cwd) {
-        let Some(command) = descriptor.ui.action.as_deref() else {
-            continue;
-        };
-        out.push_str(&format!(
-            "/{:<15} {}\n",
-            command.trim_start_matches('/'),
-            descriptor.ui.description
-        ));
+    for (command, description) in rows {
+        match width {
+            Some(width) => out.push_str(&format!("/{command:<width$} {description}\n")),
+            None => unreachable!("a row exists, so the longest command was measured"),
+        }
     }
     out
 }
@@ -31,21 +37,21 @@ pub(crate) fn is_builtin_slash(command: &str) -> bool {
 }
 
 pub(crate) fn update_command() -> Result<String, String> {
-    let manifest_location = env::var("JEDEN_UPDATE_MANIFEST").map_err(|_| {
-        "JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest".to_string()
+    let manifest_location = env::var("JEDEN_UPDATE_MANIFEST").map_err(|error| {
+        format!("JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest: {error}")
     })?;
     // The documented default channel applies only when none is declared; a
     // declaration that is not text is refused, not read as the default.
     let channel = match env::var("JEDEN_UPDATE_CHANNEL") {
         Ok(channel) => channel,
-        Err(env::VarError::NotPresent) => "stable".to_string(),
+        Err(env::VarError::NotPresent) => super::update::Channel::DEFAULT.name().to_string(),
         Err(error) => return Err(format!("JEDEN_UPDATE_CHANNEL cannot be read: {error}")),
     };
-    // The native triple is asked only when none is declared: asked first, a
-    // host whose own triple is unknown refused even a declared target.
+    // A declared target wins; otherwise the update is for the triple this
+    // binary was built for.
     let target_triple = match env::var("JEDEN_UPDATE_TARGET_TRIPLE") {
         Ok(triple) => triple,
-        Err(env::VarError::NotPresent) => super::update::native_target_triple()?,
+        Err(env::VarError::NotPresent) => super::update::native_target_triple(),
         Err(error) => {
             return Err(format!(
                 "JEDEN_UPDATE_TARGET_TRIPLE cannot be read: {error}"
@@ -111,7 +117,7 @@ pub(crate) fn set_model_route(cwd: &Path, model: &str) -> Result<String, String>
     let mut config = crate::slash::common::project_config_for_edit(cwd)?;
     config
         .as_object_mut()
-        .expect("a configuration layer is an object")
+        .ok_or_else(|| format!("{} does not hold a JSON object", path.display()))?
         .insert("model".into(), Value::String(resolved.clone()));
     crate::slash::common::write_json_value(&path, &config)?;
     Ok(format!("Model route set to {}.", resolved))
@@ -128,17 +134,8 @@ fn handle_model_slash(
             .map(|spec| crate::tui::CommandOutcome::Picker(spec).into_text());
     }
     if next.is_empty() {
-        let configured = if let Some(model) = current_model {
-            Some(model.to_owned())
-        } else if let Some(model) = load_config(cwd).model {
-            Some(model)
-        } else {
-            match env::var("JEDEN_MODEL") {
-                Ok(model) => Some(model),
-                Err(env::VarError::NotPresent) => None,
-                Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
-            }
-        };
+        let configured =
+            crate::agent::selected_model(current_model, load_config(cwd).model.as_deref())?;
         return Ok(match configured {
             Some(model) => format!("Current model route: {model}."),
             None if crate::agent::credential::direct_provider().is_some() => {

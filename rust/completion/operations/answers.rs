@@ -72,12 +72,20 @@ fn adopt(
     request: &OperatorRequest,
     session: &str,
 ) -> Result<String, String> {
+    // The ask is filed under the workspace its request was made in; a task
+    // whose request the state does not hold has no workspace to file it
+    // under, and is refused rather than filed under none.
     let workspace = state
         .requests
         .iter()
         .find(|item| item.id == task.request_id)
         .map(|item| item.cwd.clone())
-        .unwrap_or_default();
+        .ok_or_else(|| {
+            format!(
+                "task {} names request {}, which the completion state does not hold",
+                task.id, task.request_id
+            )
+        })?;
     let occurrence = asks::AskOccurrence {
         asked_at: request.asked_at.clone(),
         source: asks::AskSource::Review,

@@ -160,10 +160,54 @@ impl Conversation {
         } else {
             None
         };
+        // Follow-on tasks the report itself lists as still to do are work
+        // the turn goes back to, not a next-steps list handed to the user:
+        // every pass ends with a fresh review, so tasks keep being added and
+        // done until the report lists none open. A turn that requires no
+        // report has no follow-on list to read.
+        if let Some(open) = report
+            .as_ref()
+            .map(task_contract::DeliveryReport::open_follow_ons)
+            .filter(|open| !open.is_empty())
+        {
+            let can_continue = args.max_steps.is_none_or(|max| step < max);
+            let listed = open
+                .iter()
+                .map(|task| format!("- {task}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let instruction = format!(
+                "Your report lists follow-on tasks still to do:\n{listed}\nDo each of them now. Report each as done: with where it was done, or recorded: with its register id and the cause it cannot be done now. Then review the result again for every way it can be done better and every task that follows from it, and return the final action."
+            );
+            self.recorder.record(
+                task_contract::FOLLOW_ON_EVENT,
+                json!({
+                    "step": step,
+                    "open": &open,
+                    "outcome": if can_continue { "continued" } else { "rejected" },
+                }),
+            )?;
+            if can_continue {
+                hooks.note("the report lists open follow-on tasks; continuing with them");
+                self.messages.push(json!({ "role": "user", "content": instruction }));
+                return Ok(None);
+            }
+            let error = format!(
+                "Task contract not satisfied: the report leaves follow-on tasks open and the invocation has no step left: {}",
+                open.join("; ")
+            );
+            self.recorder
+                .record("run_error", json!({ "message": error }))?;
+            return Err(if prepared.tracks_completion {
+                self.completion_failure("follow_on_open", &error, hooks)
+            } else {
+                error
+            });
+        }
         if prepared.tracks_completion
             && !self.verify_completion(
                 args,
-                &text,
+                Some(&text),
                 serde_json::to_value(&report).map_err(|error| error.to_string())?,
                 hooks,
             )?
@@ -233,7 +277,7 @@ impl Conversation {
         // `/plan-review` can surface it.
         capture_plan_if_enabled(&args.cwd, &text)?;
         let answer = self.maybe_advisor_review(args, text, hooks)?;
-        let _ = self.maybe_auto_compact(args, hooks, "threshold", false)?;
+        self.maybe_auto_compact(args, hooks, "threshold", false)?;
         Ok(Some(answer))
     }
 }

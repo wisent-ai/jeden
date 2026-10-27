@@ -25,11 +25,11 @@ impl CommandOutcome {
             Self::Picker(spec) => {
                 let mut lines = vec![spec.title, spec.prompt];
                 let render_item = |item: &PickerItem| {
-                    let badge = item
-                        .badge
-                        .as_deref()
-                        .map(|value| format!(" [{}]", value))
-                        .unwrap_or_default();
+                    // A row without a badge or detail shows only its label.
+                    let badge = match item.badge.as_deref() {
+                        Some(value) => format!(" [{value}]"),
+                        None => String::new(),
+                    };
                     let detail = if item.detail.is_empty() {
                         String::new()
                     } else {
@@ -37,26 +37,32 @@ impl CommandOutcome {
                     };
                     format!("- {}{}{}", item.label, badge, detail)
                 };
-                if spec.tabs.len() > 1 {
-                    // Shared rows (tab 0) first, then one `── tab (n) ──`
-                    // section per non-empty category.
-                    for item in spec.items.iter().filter(|item| item.tab == 0) {
-                        lines.push(render_item(item));
-                    }
-                    for (tab, name) in spec.tabs.iter().enumerate().skip(1) {
-                        let group: Vec<&PickerItem> =
-                            spec.items.iter().filter(|item| item.tab == tab).collect();
-                        if group.is_empty() {
-                            continue;
-                        }
-                        lines.push(format!("── {name} ({}) ──", group.len()));
-                        for item in group {
+                // The first tab holds the shared rows; the ones after it are
+                // categories, numbered from the first after it.
+                let first_category = usize::from(crate::tally::STEP);
+                match spec.tabs.split_first() {
+                    Some((_shared, categories)) if !categories.is_empty() => {
+                        // Shared rows first, then one `── tab (n) ──` section
+                        // per non-empty category.
+                        for item in spec.items.iter().filter(|item| item.tab < first_category) {
                             lines.push(render_item(item));
                         }
+                        for (tab, name) in (first_category..).zip(categories) {
+                            let group: Vec<&PickerItem> =
+                                spec.items.iter().filter(|item| item.tab == tab).collect();
+                            if group.is_empty() {
+                                continue;
+                            }
+                            lines.push(format!("── {name} ({}) ──", group.len()));
+                            for item in group {
+                                lines.push(render_item(item));
+                            }
+                        }
                     }
-                } else {
-                    for item in &spec.items {
-                        lines.push(render_item(item));
+                    _ => {
+                        for item in &spec.items {
+                            lines.push(render_item(item));
+                        }
                     }
                 }
                 lines.push(tr(&spec.lang, "picker.footer").to_string());

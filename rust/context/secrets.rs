@@ -30,7 +30,7 @@ impl SecretPolicy {
         }
         for name in &config.environment {
             let value = env::var(name)
-                .map_err(|_| format!("configured secret environment variable {name} is not set"))?;
+                .map_err(|error| format!("configured secret environment variable {name} cannot be read: {error}"))?;
             add_secret(&mut sources, &value);
         }
         if config.discover_environment {
@@ -143,24 +143,18 @@ fn load_secret_file(path: &Path, sources: &mut Vec<SecretSource>) -> Result<(), 
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
-        let value = trimmed
-            .split_once('=')
-            .map(|(_, value)| value.trim().trim_matches(['\'', '"']))
-            .unwrap_or(trimmed);
+        // `NAME=value` protects the value; a bare line is the secret itself.
+        let value = match trimmed.split_once('=') {
+            Some((_, value)) => value.trim().trim_matches(['\'', '"']),
+            None => trimmed,
+        };
         add_secret(sources, value);
     }
     Ok(())
 }
 
+/// The secret's shape without any of its characters: one `*` per character,
+/// so the model sees that a value of that length stood there.
 fn obfuscate(value: &str) -> String {
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= 4 {
-        return "*".repeat(chars.len());
-    }
-    format!(
-        "{}{}{}",
-        chars[0],
-        "*".repeat(chars.len().saturating_sub(2)),
-        chars[chars.len() - 1]
-    )
+    "*".repeat(value.chars().count())
 }

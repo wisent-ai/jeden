@@ -10,23 +10,15 @@ use std::time::Instant;
 
 pub(super) fn process_probe(subsystem: &'static str, program: &str, args: &[&str]) -> HealthProbe {
     let started = Instant::now();
-    let mut child = match Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(child) => child,
-        Err(error) => {
-            return HealthProbe::unavailable(
-                subsystem,
-                started,
-                format!("cannot start {program}: {error}"),
-            )
-        }
-    };
-    match child.wait() {
+        .stderr(Stdio::null());
+    // The probe's own process is waited for through the shared wait
+    // mechanism, so a probe that hangs says on stderr what it waits for.
+    match stado_wait::status(&mut command) {
         Ok(status) if status.success() => HealthProbe::healthy(
             subsystem,
             started,
@@ -41,7 +33,7 @@ pub(super) fn process_probe(subsystem: &'static str, program: &str, args: &[&str
         Err(error) => HealthProbe::unavailable(
             subsystem,
             started,
-            format!("{program} probe failed: {error}"),
+            format!("{program} probe could not be run: {error}"),
         ),
     }
 }
@@ -50,19 +42,28 @@ pub(super) fn storage_probe(cwd: &Path) -> HealthProbe {
     let started = Instant::now();
     let dir = cwd.join(".jeden");
     if let Err(error) = fs::create_dir_all(&dir) {
-        return HealthProbe::unavailable("storage", started, error.to_string());
+        return HealthProbe::unavailable(
+            "storage",
+            started,
+            format!("storage probe directory {} cannot be created: {error}", dir.display()),
+        );
     }
     let path = dir.join(format!(".doctor-{}", std::process::id()));
+    let step = |action: &'static str| {
+        let path = path.clone();
+        move |error: std::io::Error| {
+            format!("storage probe {} cannot be {action}: {error}", path.display())
+        }
+    };
     let result = (|| -> Result<(), String> {
         let mut file = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(&path)
-            .map_err(|e| e.to_string())?;
-        file.write_all(b"jeden-health-v1")
-            .map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+            .map_err(step("created"))?;
+        file.write_all(b"jeden-health-v1").map_err(step("written"))?;
+        file.sync_all().map_err(step("synced"))?;
+        let bytes = fs::read(&path).map_err(step("read back"))?;
         if bytes != b"jeden-health-v1" {
             return Err("storage read-after-write mismatch".into());
         }
@@ -101,7 +102,12 @@ pub(super) fn sandbox_probe() -> HealthProbe {
         "backend": health.backend,
         "enforced": health.enforced,
         "helper": health.helper_path(),
-        "executable": std::env::current_exe().ok(),
+        "executable": match std::env::current_exe() {
+            Ok(path) => json!(path),
+            Err(error) => json!({
+                "error": format!("the running executable cannot be resolved: {error}")
+            }),
+        },
     });
     if health.enforced {
         HealthProbe::healthy("sandbox", started, health.detail.clone(), Some(evidence))

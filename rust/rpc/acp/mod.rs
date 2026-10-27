@@ -23,7 +23,7 @@ pub fn serve_stdio() -> Result<(), String> {
                     let _ = incoming_tx.unbounded_send(Err(error));
                     return;
                 }
-                None => std::process::exit(0),
+                None => return,
             }
         }
     });
@@ -48,6 +48,9 @@ pub(crate) fn unsupported(
     capability: &str,
     message: impl ToString,
 ) -> agent_client_protocol::Error {
+    // A JSON-RPC server-defined error code, from the range the
+    // specification reserves for servers:
+    // https://www.jsonrpc.org/specification#error_object
     agent_client_protocol::Error::new(-32004, "Unsupported capability")
         .data(json!({"capability": capability, "detail": message.to_string()}))
 }

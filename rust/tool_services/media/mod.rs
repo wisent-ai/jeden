@@ -39,18 +39,17 @@ pub(crate) struct MediaService {
 
 impl MediaService {
     pub(crate) fn discover(cwd: &Path, value: &Value) -> Self {
-        Self {
-            cwd: cwd.to_path_buf(),
-            brama: BramaClient::from_env(),
-            image_model: config::string(
-                value,
-                &["toolServices", "image", "model"],
-                "JEDEN_IMAGE_MODEL",
-            )
-            .unwrap_or_else(|| IMAGE_ALIAS.into()),
-            tts_model: config::string(value, &["toolServices", "tts", "model"], "JEDEN_TTS_MODEL")
-                .unwrap_or_else(|| VOICE_ALIAS.into()),
-        }
+        let image_model =
+            match config::string(value, &["toolServices", "image", "model"], "JEDEN_IMAGE_MODEL") {
+                Some(configured) => configured,
+                None => IMAGE_ALIAS.into(),
+            };
+        let tts_model =
+            match config::string(value, &["toolServices", "tts", "model"], "JEDEN_TTS_MODEL") {
+                Some(configured) => configured,
+                None => VOICE_ALIAS.into(),
+            };
+        Self { cwd: cwd.to_path_buf(), brama: BramaClient::from_env(), image_model, tts_model }
     }
 
     pub(crate) fn health_for(&self, tool: &str) -> HealthDescriptor {

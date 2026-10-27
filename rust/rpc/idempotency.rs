@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -31,7 +31,6 @@ enum DurableState {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct DurableRecord {
-    version: u32,
     tenant: String,
     key_digest: String,
     request_digest: String,
@@ -67,7 +66,7 @@ impl IdempotencyStore {
         let _guard = self
             .lock
             .lock()
-            .map_err(|_| IdempotencyError::Storage("idempotency lock poisoned".into()))?;
+            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
         let path = self.record_path(tenant, key);
         if let Some(record) = read_existing_record(&path)? {
             if record.tenant != tenant.as_str() || record.request_digest != request_digest {
@@ -81,7 +80,6 @@ impl IdempotencyStore {
             });
         }
         let record = DurableRecord {
-            version: 1,
             tenant: tenant.as_str().to_owned(),
             key_digest: digest_key(key),
             request_digest: request_digest.to_owned(),
@@ -103,7 +101,7 @@ impl IdempotencyStore {
         let _guard = self
             .lock
             .lock()
-            .map_err(|_| IdempotencyError::Storage("idempotency lock poisoned".into()))?;
+            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
         let path = self.record_path(tenant, key);
         let mut record = read_record(&path)?;
         if record.tenant != tenant.as_str() || record.request_digest != request_digest {
@@ -127,7 +125,7 @@ impl IdempotencyStore {
         let _guard = self
             .lock
             .lock()
-            .map_err(|_| IdempotencyError::Storage("idempotency lock poisoned".into()))?;
+            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
         let path = self.record_path(tenant, key);
         let record = read_record(&path)?;
         let matches = record.tenant == tenant.as_str()
@@ -136,7 +134,12 @@ impl IdempotencyStore {
         if !matches {
             return Err(IdempotencyError::Conflict);
         }
-        fs::remove_file(&path).map_err(storage)?;
+        fs::remove_file(&path).map_err(|error| {
+            IdempotencyError::Storage(format!(
+                "idempotency record {} cannot be removed: {error}",
+                path.display()
+            ))
+        })?;
         if let Some(parent) = path.parent() {
             sync_directory(parent)?;
         }
@@ -169,13 +172,13 @@ impl IdempotencyStore {
     }
 }
 
+/// A key is any non-empty text (the record is named by its digest, so its
+/// length never reaches the file system), the request id is non-empty, and
+/// the request digest is a hex SHA-256 as request_digest() writes it.
 fn validate(key: &str, request_digest: &str, request_id: &str) -> Result<(), IdempotencyError> {
-    if key.is_empty()
-        || key.len() > 512
-        || request_id.is_empty()
-        || request_digest.len() != 64
-        || !request_digest.bytes().all(|byte| byte.is_ascii_hexdigit())
-    {
+    let digest = hex::decode(request_digest)
+        .is_ok_and(|bytes| bytes.len() == <Sha256 as Digest>::output_size());
+    if key.is_empty() || request_id.is_empty() || !digest {
         Err(IdempotencyError::InvalidKey)
     } else {
         Ok(())
@@ -211,31 +214,32 @@ fn read_existing_record(path: &Path) -> Result<Option<DurableRecord>, Idempotenc
         }
     };
     let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(storage)?;
-    serde_json::from_slice(&bytes)
-        .map(Some)
-        .map_err(|error| IdempotencyError::Storage(error.to_string()))
+    file.read_to_end(&mut bytes).map_err(|error| {
+        IdempotencyError::Storage(format!(
+            "idempotency record {} cannot be read: {error}",
+            path.display()
+        ))
+    })?;
+    serde_json::from_slice(&bytes).map(Some).map_err(|error| {
+        IdempotencyError::Storage(format!(
+            "idempotency record {} is not a record: {error}",
+            path.display()
+        ))
+    })
 }
 
+/// `record` over `path` through the shared durable replace: a staged file of
+/// this write's own, so two requests recording one key never write into one
+/// shared staging file.
 fn atomic_write(path: &Path, record: &DurableRecord) -> Result<(), IdempotencyError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| IdempotencyError::Storage("record has no parent".into()))?;
-    fs::create_dir_all(parent).map_err(storage)?;
-    let temporary = path.with_extension("tmp");
-    let bytes =
-        serde_json::to_vec(record).map_err(|error| IdempotencyError::Storage(error.to_string()))?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(&temporary)
-        .map_err(storage)?;
-    file.write_all(&bytes).map_err(storage)?;
-    file.sync_all().map_err(storage)?;
-    fs::rename(&temporary, path).map_err(storage)?;
-    sync_directory(parent)?;
-    Ok(())
+    let bytes = serde_json::to_vec(record).map_err(|error| {
+        IdempotencyError::Storage(format!(
+            "idempotency record {} cannot be encoded: {error}",
+            path.display()
+        ))
+    })?;
+    crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
+        .map_err(IdempotencyError::Storage)
 }
 
 /// Flushes `directory`'s entries, so a record written or removed in it
@@ -252,8 +256,4 @@ fn sync_directory(directory: &Path) -> Result<(), IdempotencyError> {
                 directory.display()
             ))
         })
-}
-
-fn storage(error: std::io::Error) -> IdempotencyError {
-    IdempotencyError::Storage(error.to_string())
 }

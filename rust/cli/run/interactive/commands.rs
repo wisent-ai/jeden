@@ -53,10 +53,11 @@ pub(super) fn session_command(
                     return model_picker(&run_args.cwd, handler_model.lock().as_deref(), false)
                         .map(|picker| Some(tui::CommandOutcome::Picker(picker)));
                 }
-                return Ok(Some(tui::CommandOutcome::text(format!(
-                    "Current model route: {}.",
-                    handler_model.lock().as_deref().unwrap_or("not selected")
-                ))));
+                let current = match handler_model.lock().as_deref() {
+                    Some(model) => format!("Current model route: {model}."),
+                    None => "Current model route: not selected.".to_string(),
+                };
+                return Ok(Some(tui::CommandOutcome::text(current)));
             }
             let message = crate::cli::run::slash::set_model_route(&run_args.cwd, next)?;
             *handler_model.lock() = Some(next.to_string());

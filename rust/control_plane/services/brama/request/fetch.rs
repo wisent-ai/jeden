@@ -24,13 +24,13 @@ impl BramaClient {
         // request made with another token or no token.
         let authorization = SecretRef::resolve_optional(self.authorization.as_ref())
             .map_err(BramaError::Configuration)?;
-        let key = catalog_cache_key(&endpoint, authorization.as_deref());
+        let key = catalog_cache_key(&endpoint, authorization.as_deref()).map_err(BramaError::Configuration)?;
         let prior = if direct {
             None
         } else {
-            CACHE
-                .lock()
-                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+            // Catalog entries are inserted whole: a holder that panicked left a
+            // cache, not a reason to call Brama's model catalog unusable.
+            crate::panicked::held(&CACHE)
                 .get(&key)
                 .cloned()
         };
@@ -59,9 +59,7 @@ impl BramaClient {
                     }
                 };
                 if fresh {
-                    CACHE
-                        .lock()
-                        .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+                    crate::panicked::held(&CACHE)
                         .insert(
                             key.clone(),
                             CachedCatalog {
@@ -96,7 +94,7 @@ impl BramaClient {
                 "x-correlation-id".into(),
                 format!("brama-{}", crate::tally::draw(&self.correlation)),
             );
-            insert_caller_auth_headers(&mut headers, &[]);
+            insert_caller_auth_headers(&mut headers, &[]).map_err(BramaError::Configuration)?;
         }
         if let Some(token) = authorization {
             headers.insert("authorization".into(), format!("Bearer {token}"));
@@ -151,9 +149,7 @@ impl BramaClient {
             cached.fetched = Instant::now();
             let catalog = cached.catalog.clone();
             write_disk_cache(&key, &cached.catalog, cached.etag.as_deref());
-            CACHE
-                .lock()
-                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?
+            crate::panicked::held(&CACHE)
                 .insert(key, cached);
             return Ok(catalog);
         }
@@ -189,9 +185,7 @@ impl BramaClient {
         validate_catalog(&catalog, !direct)?;
         if !direct {
             write_disk_cache(&key, &catalog, etag.as_deref());
-            let mut cache = CACHE
-                .lock()
-                .map_err(|_| BramaError::Transport("catalog cache lock poisoned".into()))?;
+            let mut cache = crate::panicked::held(&CACHE);
             cache.insert(
                 key,
                 CachedCatalog {

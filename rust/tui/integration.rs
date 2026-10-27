@@ -33,7 +33,7 @@ pub struct RuntimeStatus {
     pub services_degraded: usize,
     pub services_unavailable: usize,
     pub route_health: Option<String>,
-    pub active_jobs: Option<usize>,
+    pub active_jobs: Option<u64>,
 }
 
 pub trait UiRuntimeAdapter: Send + Sync {
@@ -97,47 +97,25 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
     }
 
     fn read_clipboard(&self, cwd: &Path) -> Result<Option<ClipboardContent>, String> {
-        let image = self.availability(cwd, UiFeature::ClipboardImage);
-        let text = self.availability(cwd, UiFeature::ClipboardRead);
         #[cfg(target_os = "macos")]
         {
+            let image = self.availability(cwd, UiFeature::ClipboardImage);
+            let text = self.availability(cwd, UiFeature::ClipboardRead);
             let mut image_error = None;
             if image.available {
-                let path = std::env::temp_dir().join(format!(
-                    "jeden-clipboard-{}-{}.png",
-                    std::process::id(),
-                    capability::snapshot().generation
-                ));
-                let escaped = path
-                    .display()
-                    .to_string()
-                    .replace('\\', "\\\\")
-                    .replace('"', "\\\"");
-                let script = format!("set imageFile to open for access POSIX file \"{escaped}\" with write permission\nset eof imageFile to 0\nwrite (the clipboard as «class PNGf») to imageFile\nclose access imageFile");
-                match std::process::Command::new("osascript")
-                    .args(["-e", &script])
-                    .output()
-                {
-                    Ok(output) if output.status.success() => {
-                        let bytes = std::fs::read(&path)
-                            .map_err(|error| format!("Clipboard image read failed: {error}"));
-                        forget_clipboard_copy(&path);
-                        return bytes.map(|bytes| {
-                            Some(ClipboardContent::from(("clipboard.png".into(), bytes)))
-                        });
-                    }
-                    Ok(output) => {
-                        image_error =
-                            Some(String::from_utf8_lossy(&output.stderr).trim().to_string())
-                    }
-                    Err(error) => image_error = Some(error.to_string()),
+                match clipboard_image() {
+                    Ok(bytes) => return Ok(Some(ClipboardContent::from(("clipboard.png".into(), bytes)))),
+                    Err(error) => image_error = Some(error),
                 }
-                forget_clipboard_copy(&path);
             }
             if text.available {
-                let output = std::process::Command::new("pbpaste")
-                    .output()
-                    .map_err(|error| format!("Clipboard text read failed: {error}"))?;
+                let output = stado_wait::blocking(
+                    stado_wait::Kind::Process,
+                    "pbpaste reading the clipboard text",
+                    "pbpaste",
+                    || std::process::Command::new("pbpaste").output(),
+                )
+                .map_err(|error| format!("Clipboard text read failed: {error}"))?;
                 if !output.status.success() {
                     return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
                 }
@@ -148,32 +126,39 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     .map(|value| Some(ClipboardContent::from(value)))
                     .map_err(|error| format!("Clipboard text is not UTF-8: {error}"));
             }
-            Err(image_error
-                .or(image.reason)
-                .or(text.reason)
-                .unwrap_or_else(|| "Clipboard unavailable".into()))
+            // Neither read could be made: every cause there is, in order.
+            let causes: Vec<String> = [image_error, image.reason, text.reason].into_iter().flatten().collect();
+            match causes.as_slice() {
+                [] => Err("neither the clipboard image nor its text can be read, and no capability says why".into()),
+                _ => Err(causes.join("; ")),
+            }
         }
         #[cfg(not(target_os = "macos"))]
         {
-            let _ = (image, text);
-            Err("No native clipboard adapter is available on this platform".into())
+            Err(format!(
+                "No native clipboard adapter is available on this platform for {}",
+                cwd.display()
+            ))
         }
     }
 
     fn runtime_status(&self, cwd: &Path) -> RuntimeStatus {
         let snapshot = capability::for_cwd(cwd);
+        let services: Vec<_> = snapshot.kind(CapabilityKind::Service).collect();
+        let counted = |states: &[HealthState]| {
+            services
+                .iter()
+                .filter(|descriptor| states.contains(&descriptor.health.state))
+                .count()
+        };
         let mut status = RuntimeStatus {
             generation: snapshot.generation,
+            services_healthy: counted(&[HealthState::Healthy]),
+            services_degraded: counted(&[HealthState::Degraded]),
+            services_unavailable: counted(&[HealthState::Unavailable, HealthState::Disabled]),
             ..RuntimeStatus::default()
         };
-        for descriptor in snapshot.kind(CapabilityKind::Service) {
-            match descriptor.health.state {
-                HealthState::Healthy => status.services_healthy += 1,
-                HealthState::Degraded => status.services_degraded += 1,
-                HealthState::Unavailable | HealthState::Disabled => {
-                    status.services_unavailable += 1
-                }
-            }
+        for descriptor in &services {
             if descriptor
                 .operations
                 .iter()
@@ -194,23 +179,38 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                 .get("runningJobs")
                 .and_then(|value| value.as_u64())
             {
-                status.active_jobs = usize::try_from(running).ok();
+                status.active_jobs = Some(running);
             }
         }
         status
     }
 }
 
-/// Remove the copy of a clipboard image read through `osascript`; one that
-/// cannot be removed is said, since it holds what the operator copied.
+/// The clipboard's image as PNG bytes, read from the data AppleScript itself
+/// answers (`«data PNGf<hex>»`), so no copy of what the operator copied is
+/// written to any file. A clipboard holding no image is osascript's refusal.
 #[cfg(target_os = "macos")]
-fn forget_clipboard_copy(path: &Path) {
-    if let Err(error) = std::fs::remove_file(path) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            eprintln!(
-                "jeden: the clipboard image copy {} is left behind: {error}",
-                path.display()
-            );
-        }
+fn clipboard_image() -> Result<Vec<u8>, String> {
+    let output = stado_wait::blocking(
+        stado_wait::Kind::Process,
+        "osascript reading the clipboard image",
+        "osascript",
+        || {
+            std::process::Command::new("osascript")
+                .args(["-e", "the clipboard as «class PNGf»"])
+                .output()
+        },
+    )
+    .map_err(|error| format!("Clipboard image read failed: {error}"))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
+    let answered = String::from_utf8(output.stdout)
+        .map_err(|error| format!("osascript answered the clipboard image in text that is not UTF-8: {error}"))?;
+    let hex = answered
+        .trim()
+        .strip_prefix("«data PNGf")
+        .and_then(|rest| rest.strip_suffix('»'))
+        .ok_or_else(|| "osascript answered the clipboard image in a form other than «data PNGf…»".to_string())?;
+    hex::decode(hex).map_err(|error| format!("the clipboard image osascript answered is not hexadecimal: {error}"))
 }

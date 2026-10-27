@@ -3,6 +3,7 @@
 //!
 //! Split out of `tui/render/mod.rs`, which had grown past the module line cap.
 
+use super::panels::boxes::{frame_inner, prompt_corner, INPUT_PREFIX};
 use super::panels::{framed_header, input_prefix_width};
 use crate::tui::text::{
     clamp_visible, compact_path, paint, sanitize_terminal_text, visible_len, wrap_line,
@@ -25,17 +26,17 @@ pub(crate) fn compact_prompt(
     busy: bool,
     color: bool,
 ) -> Vec<String> {
-    let width = width.max(1);
+    let one = usize::from(crate::tally::STEP);
+    let width = width.max(one);
     let prefix_width = input_prefix_width(width);
-    let content_width = width.saturating_sub(prefix_width).max(1);
-    let model = sanitize_terminal_text(if status.model.is_empty() {
-        "default"
-    } else {
-        status.model.as_str()
-    });
+    let content_width = width.saturating_sub(prefix_width).max(one);
+    let model = match status.model.as_str() {
+        "" => "model not chosen".to_string(),
+        chosen => format!("model {}", sanitize_terminal_text(chosen)),
+    };
     let mut head = vec![
         format!("{PRODUCT} {APP} {VERSION}"),
-        format!("model {model}"),
+        model,
         sanitize_terminal_text(&compact_path(&status.cwd)),
     ];
     if busy {
@@ -50,7 +51,7 @@ pub(crate) fn compact_prompt(
     // Live segments: mode badges slot in after the route segment; the cost
     // and quota segments follow the context segment.
     let extras = status_extras(Path::new(&status.cwd));
-    let badges = extras.as_ref().map(mode_badges).unwrap_or_default();
+    let badges: Vec<String> = extras.as_ref().map(mode_badges).into_iter().flatten().collect();
     let cost_text = extras
         .as_ref()
         .and_then(|extras| cost_segment(status, extras));
@@ -60,7 +61,7 @@ pub(crate) fn compact_prompt(
         mid.push(format!(
             "{}{}",
             sanitize_terminal_text(branch),
-            if status.dirty_count > 0 { " dirty" } else { "" }
+            if status.dirty_count != crate::tally::ORIGIN { " dirty" } else { "" }
         ));
     }
     match (status.context_percent, status.context_limit.as_deref()) {
@@ -80,7 +81,9 @@ pub(crate) fn compact_prompt(
     if let Some(active_jobs) = runtime.active_jobs {
         tail.push(format!("jobs {active_jobs}"));
     }
-    if runtime.services_degraded > 0 || runtime.services_unavailable > 0 {
+    if runtime.services_degraded != crate::tally::ORIGIN
+        || runtime.services_unavailable != crate::tally::ORIGIN
+    {
         tail.push(format!(
             "services {}/{}",
             runtime.services_degraded, runtime.services_unavailable
@@ -110,7 +113,8 @@ pub(crate) fn compact_prompt(
     let mut status_line = compose(true, true, true);
     // Narrow terminals shed the live segments first — quota, then cost, then
     // the mode badges; framed_header still clamps whatever remains.
-    let overflows = |line: &str| width >= 6 && visible_len(line) + 4 > width;
+    let framed = frame_inner(width);
+    let overflows = |line: &str| framed.is_some_and(|inner| visible_len(line) > inner);
     if overflows(&status_line) {
         status_line = compose(true, true, false);
     }
@@ -120,48 +124,28 @@ pub(crate) fn compact_prompt(
     if overflows(&status_line) {
         status_line = compose(false, false, false);
     }
-    let mut out = if width >= 6 {
-        vec![framed_header(&status_line, width, color)]
-    } else {
-        vec![paint(&clamp_visible(&status_line, width), "dim", color)]
+    let mut out = match framed {
+        Some(_) => vec![framed_header(&status_line, width, color)],
+        None => vec![paint(&clamp_visible(&status_line, width), "dim", color)],
     };
+    // A framed prompt opens on the frame's corner; an unframed one on as much
+    // of the input prefix as fits. The rows after the first are indented as far.
+    let first_prefix: String = match framed {
+        Some(_) => prompt_corner(),
+        None => INPUT_PREFIX.chars().take(prefix_width).collect(),
+    };
+    let indent = " ".repeat(prefix_width);
     let safe_input = sanitize_terminal_text(input_text);
     let mut first = true;
     for logical in safe_input.split('\n') {
-        let wrapped = wrap_line(logical, content_width);
-        for line in wrapped {
-            let prefix = if first && width >= 6 {
-                "╰─"
-            } else if first && prefix_width == 2 {
-                "> "
-            } else if first && prefix_width == 1 {
-                ">"
-            } else if first {
-                ""
-            } else if prefix_width == 2 {
-                "  "
-            } else if prefix_width == 1 {
-                " "
-            } else {
-                ""
-            };
+        for line in wrap_line(logical, content_width) {
+            let prefix = if first { &first_prefix } else { &indent };
             out.push(format!("{prefix}{line}"));
             first = false;
         }
-        if logical.is_empty() && !first {
-            continue;
-        }
     }
     if first {
-        out.push(if width >= 6 {
-            "╰─".to_string()
-        } else if prefix_width == 2 {
-            "> ".to_string()
-        } else if prefix_width == 1 {
-            ">".to_string()
-        } else {
-            String::new()
-        });
+        out.push(first_prefix);
     }
     out
 }

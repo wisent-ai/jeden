@@ -6,7 +6,7 @@ use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::{v1::*, ProtocolVersion};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 mod interaction;
@@ -17,8 +17,6 @@ use crate::rpc::acp::agent::wiring::agent_capabilities;
 use crate::rpc::acp::internal;
 use crate::rpc::acp::invalid_params;
 pub(crate) use wiring::build_agent;
-
-static NEXT_PROMPT: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Default)]
 pub(super) struct AcpState {
@@ -36,16 +34,13 @@ impl AcpState {
         &self,
         request: InitializeRequest,
     ) -> agent_client_protocol::Result<InitializeResponse> {
-        *self
-            .client_capabilities
-            .lock()
-            .map_err(|_| super::internal("ACP capability lock poisoned"))? =
-            request.client_capabilities;
+        // Every ACP lock holds a value changed by whole steps (a replace, an
+        // insert, a remove), so a holder that panicked is recovered from.
+        *crate::panicked::held(&self.client_capabilities) = request.client_capabilities;
         self.initialized.store(true, Ordering::Release);
-        Ok(InitializeResponse::new(match request.protocol_version {
-            ProtocolVersion::V1 => ProtocolVersion::V1,
-            _ => ProtocolVersion::V1,
-        })
+        // This agent speaks one protocol version and answers it whatever the
+        // client asked for; the client decides whether it can speak it too.
+        Ok(InitializeResponse::new(ProtocolVersion::V1)
         .agent_capabilities(agent_capabilities())
         .agent_info(Implementation::new("jeden", crate::JEDEN_VERSION)))
     }
@@ -68,22 +63,16 @@ impl AcpState {
         validate_workspace(
             &request.cwd,
             &request.additional_directories,
-            request.mcp_servers.len(),
+            !request.mcp_servers.is_empty(),
         )?;
-        let session = AgentSession::new(SessionOptions {
-            cwd: request.cwd,
-            ..SessionOptions::default()
-        })
-        .map_err(super::internal)?;
+        let session =
+            AgentSession::new(SessionOptions::at(request.cwd)).map_err(super::internal)?;
         let session_id = session
             .session_path()
             .map_err(super::internal)?
             .display()
             .to_string();
-        self.sessions
-            .lock()
-            .map_err(|_| super::internal("ACP session lock poisoned"))?
-            .insert(session_id.clone(), session);
+        crate::panicked::held(&self.sessions).insert(session_id.clone(), session);
         Ok(NewSessionResponse::new(session_id))
     }
 
@@ -95,7 +84,7 @@ impl AcpState {
         validate_workspace(
             &request.cwd,
             &request.additional_directories,
-            request.mcp_servers.len(),
+            !request.mcp_servers.is_empty(),
         )?;
         let session_id = request.session_id.0.to_string();
         if !AgentSession::exists(&session_id).map_err(super::internal)? {
@@ -103,18 +92,9 @@ impl AcpState {
                 session_id,
             )));
         }
-        let session = AgentSession::resume(
-            SessionOptions {
-                cwd: request.cwd,
-                ..SessionOptions::default()
-            },
-            &session_id,
-        )
-        .map_err(super::internal)?;
-        self.sessions
-            .lock()
-            .map_err(|_| super::internal("ACP session lock poisoned"))?
-            .insert(session_id, session);
+        let session = AgentSession::resume(SessionOptions::at(request.cwd), &session_id)
+            .map_err(super::internal)?;
+        crate::panicked::held(&self.sessions).insert(session_id, session);
         Ok(LoadSessionResponse::new())
     }
 }
@@ -154,7 +134,7 @@ impl Drop for AcpState {
 fn validate_workspace(
     cwd: &Path,
     additional: &[std::path::PathBuf],
-    mcp_count: usize,
+    names_mcp_servers: bool,
 ) -> agent_client_protocol::Result<()> {
     if !cwd.is_absolute() {
         return Err(super::invalid_params("cwd must be absolute"));
@@ -165,7 +145,7 @@ fn validate_workspace(
             "additionalDirectories are not supported",
         ));
     }
-    if mcp_count != 0 {
+    if names_mcp_servers {
         return Err(super::unsupported(
             "session.mcpServers",
             "mcpServers are not supported by this adapter",

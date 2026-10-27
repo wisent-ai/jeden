@@ -10,6 +10,24 @@ use crate::control_plane::billing;
 use crate::control_plane::contract::RequestMeta;
 use serde_json::{json, Value};
 
+/// The list a v2 answer carries: Weles serves it bare, or as an object holding it
+/// under `key`. An object without `key`, or any other answer, is refused naming it.
+fn listed(value: Value, key: &str) -> Result<Value, WelesError> {
+    match value {
+        Value::Array(_) => Ok(value),
+        Value::Object(mut fields) => match fields.remove(key) {
+            Some(list) => Ok(list),
+            None => Err(WelesError::InvalidResponse(format!(
+                "Weles answered an object without {key}: {}",
+                Value::Object(fields)
+            ))),
+        },
+        other => Err(WelesError::InvalidResponse(format!(
+            "Weles answered {other} where the {key} list belongs"
+        ))),
+    }
+}
+
 impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     fn billing_status(
         &self,
@@ -48,7 +66,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
             meta,
         )?;
         let methods: Vec<billing::PaymentMethodReference> =
-            decode_v2(value.get("paymentMethods").cloned().unwrap_or(value))?;
+            decode_v2(listed(value, "paymentMethods")?)?;
         Ok(methods)
     }
 
@@ -58,14 +76,14 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         meta: &RequestMeta,
     ) -> Result<billing::HostedPaymentSetup, WelesError> {
         validate_identifier(&request.account_id)
-            .map_err(|_| WelesError::InvalidRequest("account id is invalid"))?;
+            .map_err(|_invalid| WelesError::InvalidRequest("account id is invalid"))?;
         let return_url = url::Url::parse(&request.return_url)
-            .map_err(|_| WelesError::InvalidRequest("return URL is invalid"))?;
+            .map_err(|error| WelesError::RequestRefused { what: "return URL is invalid", cause: error.to_string() })?;
         if return_url.scheme() != "https" {
             return Err(WelesError::InvalidRequest("return URL must use HTTPS"));
         }
         let body = serde_json::to_value(request)
-            .map_err(|_| WelesError::InvalidRequest("setup request encoding failed"))?;
+            .map_err(|error| WelesError::RequestRefused { what: "setup request encoding failed", cause: error.to_string() })?;
         let setup = self.request_v2(
             reqwest::Method::POST,
             "/payment-method-setups",
@@ -122,7 +140,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
     ) -> Result<billing::PurchasePolicy, WelesError> {
         billing::validate_policy(policy).map_err(WelesError::InvalidRequest)?;
         let body = serde_json::to_value(policy)
-            .map_err(|_| WelesError::InvalidRequest("policy encoding failed"))?;
+            .map_err(|error| WelesError::RequestRefused { what: "policy encoding failed", cause: error.to_string() })?;
         let applied = self.request_v2(
             reqwest::Method::PUT,
             &format!(
@@ -145,7 +163,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         meta: &RequestMeta,
     ) -> Result<billing::PurchasePolicy, WelesError> {
         validate_identifier(policy_revision)
-            .map_err(|_| WelesError::InvalidRequest("policy revision is invalid"))?;
+            .map_err(|_invalid| WelesError::InvalidRequest("policy revision is invalid"))?;
         let body = json!({"policyRevision": policy_revision});
         let policy = self.request_v2(
             reqwest::Method::POST,
@@ -181,7 +199,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
             meta,
         )?;
         let subscriptions: Vec<billing::SubscriptionV2> =
-            decode_v2(value.get("subscriptions").cloned().unwrap_or(value))?;
+            decode_v2(listed(value, "subscriptions")?)?;
         if subscriptions
             .iter()
             .any(|subscription| subscription.account_id != account_id)
@@ -215,7 +233,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         meta: &RequestMeta,
     ) -> Result<billing::OperationResult, WelesError> {
         let body = serde_json::to_value(request)
-            .map_err(|_| WelesError::InvalidRequest("purchase request encoding failed"))?;
+            .map_err(|error| WelesError::RequestRefused { what: "purchase request encoding failed", cause: error.to_string() })?;
         self.request_v2(
             reqwest::Method::POST,
             "/subscriptions/purchase",
@@ -232,7 +250,7 @@ impl crate::control_plane::contract::WelesApiV2 for WelesClient {
         meta: &RequestMeta,
     ) -> Result<billing::OperationResult, WelesError> {
         let body = serde_json::to_value(request)
-            .map_err(|_| WelesError::InvalidRequest("renew request encoding failed"))?;
+            .map_err(|error| WelesError::RequestRefused { what: "renew request encoding failed", cause: error.to_string() })?;
         self.request_v2(
             reqwest::Method::POST,
             &format!(

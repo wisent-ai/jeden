@@ -35,6 +35,15 @@ fn ssh_host_value(target: &str, options: &[String]) -> Option<Value> {
     Some(Value::Object(host))
 }
 
+/// What a configured host entry connects to: the entry itself when it is a
+/// target, or its `host` field; an entry with neither says so.
+fn host_target(value: &Value) -> String {
+    match value.as_str().or_else(|| value.get("host").and_then(Value::as_str)) {
+        Some(target) => target.to_string(),
+        None => format!("no target recorded in {value}"),
+    }
+}
+
 pub(crate) fn ssh_picker(context: &SlashContext<'_>) -> PickerSpec {
     let user = user_config_value();
     let project = read_config_value(&project_config_path(context.cwd));
@@ -46,25 +55,29 @@ pub(crate) fn ssh_picker(context: &SlashContext<'_>) -> PickerSpec {
         .badge("status")];
     if let Some(hosts) = ssh_hosts_from(&effective) {
         for (name, value) in std::collections::BTreeMap::from_iter(hosts.iter()) {
-            let project_owned = project_hosts
-                .map(|hosts| hosts.contains_key(name))
-                .unwrap_or(false);
+            let project_owned = project_hosts.is_some_and(|hosts| hosts.contains_key(name));
             let scope = if project_owned {
                 "project"
-            } else if user_hosts
-                .map(|hosts| hosts.contains_key(name))
-                .unwrap_or(false)
-            {
+            } else if user_hosts.is_some_and(|hosts| hosts.contains_key(name)) {
                 "user"
             } else {
                 "merged"
             };
-            let target = value
-                .as_str()
-                .or_else(|| value.get("host").and_then(Value::as_str))
-                .unwrap_or("configured target");
+            let target = host_target(value);
             if project_owned {
-                let quoted = serde_json::to_string(name).unwrap_or_else(|_| format!("\"{name}\""));
+                // The name goes into the command quoted as a JSON string, so a
+                // name with spaces or quotes still names this host.
+                let quoted = match serde_json::to_string(name) {
+                    Ok(quoted) => quoted,
+                    Err(error) => {
+                        let mut unquotable = PickerItem::action(format!("Remove {name}"), "")
+                            .detail(format!("its name cannot be quoted for the command: {error}"))
+                            .disabled(true);
+                        unquotable.command = None;
+                        items.push(unquotable);
+                        continue;
+                    }
+                };
                 items.push(
                     PickerItem::action(format!("Remove {name}"), format!("/ssh remove {quoted}"))
                         .detail(format!("{target}; stored in project config"))
@@ -90,100 +103,70 @@ pub(crate) fn ssh_picker(context: &SlashContext<'_>) -> PickerSpec {
     PickerSpec::new("SSH hosts", items)
 }
 
+const USAGE: &str = "Usage: /ssh list | add <name> <target> [key=value ...] | remove <name> | help";
+
+/// `/ssh` with no word lists the hosts, as `/ssh list` does.
 pub(crate) fn handle_ssh(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
-    let empty: &[String] = &[];
-    let (verb, after_verb) = argv
-        .split_first()
-        .map(|(word, rest)| (word.as_str(), rest))
-        .unwrap_or(("list", empty));
-    let (name, after_name) = after_verb
-        .split_first()
-        .map(|(word, rest)| (word.as_str(), rest))
-        .unwrap_or(("", empty));
-    let (target, options) = after_name
-        .split_first()
-        .map(|(word, rest)| (word.as_str(), rest))
-        .unwrap_or(("", empty));
+    let words: Vec<&str> = argv.iter().map(String::as_str).collect();
     let project_file = project_config_path(context.cwd);
-    if verb == "list" {
-        let config = merged_config_value(context.cwd);
-        let Some(hosts) = ssh_hosts_from(&config) else {
-            return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into());
-        };
-        let mut names = hosts.keys().cloned().collect::<Vec<_>>();
-        names.sort();
-        if names.is_empty() {
-            return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into());
-        }
-        let mut lines = Vec::new();
-        for host in names {
-            let value = hosts.get(&host).cloned().unwrap_or(Value::Null);
-            let rendered = match value.as_str() {
-                Some(text) => text.to_string(),
-                None => serde_json::to_string(&value).map_err(|error| error.to_string())?,
+    match words.as_slice() {
+        [] | ["list"] => {
+            let config = merged_config_value(context.cwd);
+            let hosts = match ssh_hosts_from(&config) {
+                Some(hosts) if !hosts.is_empty() => hosts,
+                _none => {
+                    return Ok("No SSH hosts configured in ~/.jeden/config.json or <cwd>/.jeden/config.json (sshHosts).".into())
+                }
             };
-            lines.push(format!("{}\t{}", host, rendered));
-        }
-        return Ok(lines.join("\n"));
-    }
-    if verb == "help" {
-        return Ok("Usage: /ssh list | add <name> <target> [key=value ...] | remove <name>. Hosts are stored in <cwd>/.jeden/config.json under sshHosts.".into());
-    }
-    if verb == "add" {
-        if name.is_empty() || target.is_empty() {
-            return Err("Usage: /ssh add <name> <target> [key=value ...]".into());
-        }
-        let value = ssh_host_value(target, options)
-            .ok_or_else(|| "Usage: /ssh add <name> <target> [key=value ...]".to_string())?;
-        let mut project = project_config_for_edit(context.cwd)?;
-        let object = project.as_object_mut().expect("project config object");
-        let hosts = object
-            .entry("sshHosts")
-            .or_insert_with(|| Value::Object(Map::new()));
-        if !hosts.is_object() {
-            *hosts = Value::Object(Map::new());
-        }
-        hosts
-            .as_object_mut()
-            .expect("sshHosts object")
-            .insert(name.to_string(), value);
-        write_json_value(&project_file, &project)?;
-        return Ok(format!(
-            "Added SSH host {} to {}.",
-            name,
-            project_file.display()
-        ));
-    }
-    if verb == "remove" {
-        if name.is_empty() {
-            return Err("Usage: /ssh remove <name>".into());
-        }
-        let effective = merged_config_value(context.cwd);
-        let mut project = project_config_for_edit(context.cwd)?;
-        let in_project = project
-            .get("sshHosts")
-            .and_then(Value::as_object)
-            .and_then(|hosts| hosts.get(name))
-            .is_some();
-        if !in_project {
-            if ssh_hosts_from(&effective)
-                .and_then(|hosts| hosts.get(name))
-                .is_some()
-            {
-                return Err(format!("SSH host {} is not in <cwd>/.jeden/config.json. Remove it from ~/.jeden/config.json or the config file that defines it.", name));
+            let mut lines = Vec::new();
+            for (host, value) in std::collections::BTreeMap::from_iter(hosts.iter()) {
+                let rendered = match value.as_str() {
+                    Some(text) => text.to_string(),
+                    None => serde_json::to_string(value).map_err(|error| error.to_string())?,
+                };
+                lines.push(format!("{host}\t{rendered}"));
             }
-            return Err(format!("SSH host not found: {}", name));
+            Ok(lines.join("\n"))
         }
-        if let Some(hosts) = project.get_mut("sshHosts").and_then(Value::as_object_mut) {
-            hosts.remove(name);
+        ["help"] => Ok("Usage: /ssh list | add <name> <target> [key=value ...] | remove <name>. Hosts are stored in <cwd>/.jeden/config.json under sshHosts.".into()),
+        ["add", name, target, options @ ..] => {
+            let options: Vec<String> = options.iter().map(|option| (*option).to_string()).collect();
+            let value = ssh_host_value(target, &options)
+                .ok_or_else(|| "Usage: /ssh add <name> <target> [key=value ...]".to_string())?;
+            let mut project = project_config_for_edit(context.cwd)?;
+            let object = project.as_object_mut().ok_or_else(|| {
+                format!("{} does not hold a JSON object, so no host is added", project_file.display())
+            })?;
+            let hosts = object
+                .entry("sshHosts")
+                .or_insert_with(|| Value::Object(Map::new()))
+                .as_object_mut()
+                .ok_or_else(|| {
+                    format!(
+                        "sshHosts in {} is not an object; it is left as it is and no host is added",
+                        project_file.display()
+                    )
+                })?;
+            hosts.insert((*name).to_string(), value);
+            write_json_value(&project_file, &project)?;
+            Ok(format!("Added SSH host {name} to {}.", project_file.display()))
         }
-        write_json_value(&project_file, &project)?;
-        return Ok(format!(
-            "Removed SSH host {} from {}.",
-            name,
-            project_file.display()
-        ));
+        ["add", ..] => Err("Usage: /ssh add <name> <target> [key=value ...]".into()),
+        ["remove", name] => {
+            let effective = merged_config_value(context.cwd);
+            let mut project = project_config_for_edit(context.cwd)?;
+            let Some(hosts) = project.get_mut("sshHosts").and_then(Value::as_object_mut).filter(|hosts| hosts.contains_key(*name)) else {
+                if ssh_hosts_from(&effective).is_some_and(|hosts| hosts.contains_key(*name)) {
+                    return Err(format!("SSH host {name} is not in <cwd>/.jeden/config.json. Remove it from ~/.jeden/config.json or the config file that defines it."));
+                }
+                return Err(format!("SSH host not found: {name}"));
+            };
+            hosts.remove(*name);
+            write_json_value(&project_file, &project)?;
+            Ok(format!("Removed SSH host {name} from {}.", project_file.display()))
+        }
+        ["remove", ..] => Err("Usage: /ssh remove <name>".into()),
+        _ => Err(USAGE.into()),
     }
-    Err("Usage: /ssh list | add <name> <target> [key=value ...] | remove <name> | help".into())
 }

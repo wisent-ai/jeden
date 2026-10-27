@@ -144,10 +144,31 @@ pub(crate) fn config_value_at<'a>(value: &'a Value, key: &str) -> Option<&'a Val
     Some(current)
 }
 
-pub(crate) fn config_set_value(value: &mut Value, key: &str, next: Value) -> Result<(), String> {
-    if !value.is_object() {
-        *value = json!({});
+/// The texts the config list `key` holds in `value`; none when it states
+/// none. A value in another shape, or an entry that is not text, is refused
+/// naming `key`: read as empty, a disabledExtensions in the wrong shape
+/// loaded every extension it was meant to keep out, and a debugger adapter
+/// started without the arguments it was configured with.
+pub(crate) fn config_texts<'a>(value: &'a Value, key: &str) -> Result<Vec<&'a str>, String> {
+    match value {
+        Value::Null => Ok(Vec::new()),
+        Value::Array(entries) => entries
+            .iter()
+            .map(|entry| {
+                entry
+                    .as_str()
+                    .ok_or_else(|| format!("config {key} holds an entry that is not text: {entry}"))
+            })
+            .collect(),
+        other => Err(format!("config {key} must be a list of text; it holds {other}")),
     }
+}
+
+/// Set `key` (dotted) in `value` to `next`, creating the tables on the way.
+/// A document or a table on the way that holds something other than an
+/// object is refused naming it, never replaced by an empty one, which would
+/// throw away whatever it held.
+pub(crate) fn config_set_value(value: &mut Value, key: &str, next: Value) -> Result<(), String> {
     let parts = key
         .split('.')
         .filter(|part| !part.is_empty())
@@ -155,20 +176,24 @@ pub(crate) fn config_set_value(value: &mut Value, key: &str, next: Value) -> Res
     let Some((last, prefix)) = parts.split_last() else {
         return Err("config key is required".into());
     };
-    let mut current = value;
-    for part in prefix {
-        if !current.get(*part).map(Value::is_object).unwrap_or(false) {
-            current
-                .as_object_mut()
-                .expect("object")
-                .insert((*part).to_string(), json!({}));
-        }
-        current = current.get_mut(*part).expect("inserted object");
-    }
-    current
+    let mut current = value
         .as_object_mut()
-        .expect("object")
-        .insert((*last).to_string(), next);
+        .ok_or_else(|| format!("the configuration document is not an object, so {key} is not set"))?;
+    for (depth, part) in prefix.iter().enumerate() {
+        let table = current
+            .entry((*part).to_string())
+            .or_insert_with(|| json!({}));
+        current = match table {
+            Value::Object(table) => table,
+            other => {
+                return Err(format!(
+                    "{} holds {other}, not a table, so {key} is not set",
+                    prefix[..=depth].join(".")
+                ))
+            }
+        };
+    }
+    current.insert((*last).to_string(), next);
     Ok(())
 }
 
@@ -200,7 +225,7 @@ pub(crate) fn config_remove_value(value: &mut Value, key: &str) -> Result<bool, 
     };
     let removed = object.remove(*last).is_some();
     if removed {
-        prune_empty_objects(value, &parts[..parts.len() - 1]);
+        prune_empty_objects(value, prefix);
     }
     Ok(removed)
 }
@@ -208,7 +233,7 @@ pub(crate) fn config_remove_value(value: &mut Value, key: &str) -> Result<bool, 
 /// Drop the objects the removal emptied, outermost last, so a file does not
 /// keep `"ui": {}` after its only setting is gone.
 fn prune_empty_objects(value: &mut Value, prefix: &[&str]) {
-    for depth in (0..prefix.len()).rev() {
+    for (depth, name) in prefix.iter().enumerate().rev() {
         let mut current = &mut *value;
         for part in &prefix[..depth] {
             let Some(next) = current.get_mut(*part) else {
@@ -220,28 +245,12 @@ fn prune_empty_objects(value: &mut Value, prefix: &[&str]) {
             return;
         };
         let empty = object
-            .get(prefix[depth])
+            .get(*name)
             .and_then(Value::as_object)
             .is_some_and(serde_json::Map::is_empty);
         if !empty {
             return;
         }
-        object.remove(prefix[depth]);
+        object.remove(*name);
     }
-}
-
-pub(crate) fn parse_config_literal(raw: &str) -> Value {
-    let trimmed = raw.trim();
-    if trimmed.eq_ignore_ascii_case("true") {
-        return json!(true);
-    }
-    if trimmed.eq_ignore_ascii_case("false") {
-        return json!(false);
-    }
-    if let Ok(number) = trimmed.parse::<f64>() {
-        if number.is_finite() {
-            return json!(number);
-        }
-    }
-    serde_json::from_str::<Value>(trimmed).unwrap_or_else(|_| json!(trimmed))
 }

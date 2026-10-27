@@ -45,9 +45,11 @@ pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     if name.contains('/') || name.contains("..") {
         return Err(format!("invalid artifact name: {name}"));
     }
-    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(dir)
+        .map_err(|error| format!("cannot create artifact directory {}: {error}", dir.display()))?;
     let path = dir.join(&name);
-    fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())?;
+    fs::write(&path, content.as_bytes())
+        .map_err(|error| format!("cannot write artifact {}: {error}", path.display()))?;
     Ok(json!({
         "ok": true,
         "name": name,
@@ -77,7 +79,9 @@ pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String>
     for entry in entries.into_iter().flatten() {
         let entry = entry
             .map_err(|error| format!("cannot list artifacts in {}: {error}", dir.display()))?;
-        let meta = entry.metadata().map_err(|e| e.to_string())?;
+        let meta = entry.metadata().map_err(|error| {
+            format!("cannot read artifact {}: {error}", entry.path().display())
+        })?;
         if meta.is_file() {
             artifacts
                 .push(json!({"name": entry.file_name().to_string_lossy(), "bytes": meta.len()}));
@@ -85,7 +89,7 @@ pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String>
     }
     Ok(json!({
         "ok": true,
-        "roadmapItem": artifact_roadmap_item(runtime, dir),
+        "roadmapItem": artifact_roadmap_item(runtime, dir)?,
         "artifacts": artifacts
     }))
 }
@@ -100,7 +104,8 @@ pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         return Err(format!("invalid artifact name: {name}"));
     }
     let path = dir.join(&name);
-    let bytes = fs::read(&path).map_err(|e| e.to_string())?;
+    let bytes = fs::read(&path)
+        .map_err(|error| format!("cannot read artifact {}: {error}", path.display()))?;
     let truncated = bytes.len() > max_bytes;
     let slice = &bytes[..bytes.len().min(max_bytes)];
     Ok(json!({
@@ -110,7 +115,7 @@ pub(crate) fn read_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         "truncated": truncated,
         "content": String::from_utf8_lossy(slice),
         "sha256": sha256_hex(&bytes),
-        "roadmapItem": artifact_roadmap_item(runtime, dir)
+        "roadmapItem": artifact_roadmap_item(runtime, dir)?
     }))
 }
 

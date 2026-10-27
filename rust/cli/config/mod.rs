@@ -13,8 +13,8 @@ pub(crate) mod schema;
 mod shapes;
 
 pub(crate) use document::{
-    config_layer_paths, config_remove_value, config_set_value, config_value_at,
-    merged_config_value, parse_config_literal, read_config_layer, read_config_typed,
+    config_layer_paths, config_remove_value, config_set_value, config_texts, config_value_at,
+    merged_config_value, read_config_layer, read_config_typed,
     read_config_value, read_user_writable_config_strict, user_config_value, write_user_config,
 };
 pub(crate) use shapes::*;
@@ -69,10 +69,23 @@ pub(crate) fn load_config(cwd: &Path) -> Config {
 }
 
 /// Resolve the conversation language: JEDEN_LANGUAGE wins over merged config,
-/// which already layers project over user. Invalid env values fall through.
+/// which already layers project over user. A value Jeden cannot use is said on
+/// stderr, naming it, and the configured language is used.
 pub(crate) fn ui_language(config: &Config) -> UiLanguage {
-    std::env::var("JEDEN_LANGUAGE")
-        .ok()
-        .and_then(|value| UiLanguage::parse(&value))
-        .unwrap_or_else(|| config.ui.language.clone())
+    match std::env::var("JEDEN_LANGUAGE") {
+        Err(std::env::VarError::NotPresent) => config.ui.language.clone(),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("jeden: JEDEN_LANGUAGE is not Unicode; using the configured ui.language");
+            config.ui.language.clone()
+        }
+        Ok(value) => match UiLanguage::parse(&value) {
+            Some(language) => language,
+            None => {
+                eprintln!(
+                    "jeden: JEDEN_LANGUAGE={value:?} is not a language Jeden speaks; using the configured ui.language"
+                );
+                config.ui.language.clone()
+            }
+        },
+    }
 }

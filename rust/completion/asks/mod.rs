@@ -27,7 +27,8 @@ use std::path::Path;
 
 use super::model::{CompletionState, OperatorAnswer};
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+/// The register is in its first schema.
+pub(crate) const SCHEMA_VERSION: u32 = crate::tally::FIRST as u32;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -100,11 +101,13 @@ fn normalized(text: &str) -> String {
         .to_lowercase()
 }
 
+/// The key a session's asks are filed under: its canonical path, or the path
+/// as named when it no longer exists to be resolved.
 pub(crate) fn session_key(session: &Path) -> String {
-    std::fs::canonicalize(session)
-        .unwrap_or_else(|_| session.to_path_buf())
-        .display()
-        .to_string()
+    match std::fs::canonicalize(session) {
+        Ok(canonical) => canonical.display().to_string(),
+        Err(_gone) => session.display().to_string(),
+    }
 }
 
 impl AskRegister {
@@ -124,7 +127,9 @@ impl AskRegister {
                         occurrence.session_path == session
                             && occurrence.task_id.as_deref() == Some(task_id)
                     })
-                    .map(|occurrence| occurrence.asked_at.parse::<u64>().unwrap_or_default())
+                    // Stamps are whole epoch seconds the register validated on
+                    // load; a longer one is later, equal lengths compare as text.
+                    .map(|occurrence| (occurrence.asked_at.len(), occurrence.asked_at.as_str()))
                     .max()
                     .map(|stamp| (stamp, ask))
             })
@@ -169,8 +174,9 @@ impl OperatorAsk {
     }
 }
 
+/// How often something happened, in words: once, or a count of times.
 pub(crate) fn times(count: usize) -> String {
-    if count == 1 {
+    if count == usize::from(crate::tally::STEP) {
         "once".into()
     } else {
         format!("{count} times")

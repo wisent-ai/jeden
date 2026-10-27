@@ -26,7 +26,7 @@ fn mutation_approval(
 fn json<T: Serialize>(value: &T) -> Result<String, BillingError> {
     serde_json::to_string_pretty(value)
         .map(|value| value + "\n")
-        .map_err(|_| BillingError::Backend("failed to render redacted billing output".into()))
+        .map_err(|error| BillingError::Backend(format!("failed to render redacted billing output: {error}")))
 }
 
 pub(crate) fn execute_billing_command(

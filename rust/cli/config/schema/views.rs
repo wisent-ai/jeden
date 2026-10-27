@@ -24,6 +24,24 @@ pub(super) fn config_list_json(cwd: &Path) -> Value {
     Value::Object(out)
 }
 
+/// The group a setting key belongs to: the part before its first dot, or the
+/// whole key when it has none.
+fn group_of(key: &str) -> &str {
+    match key.split_once('.') {
+        Some((group, _rest)) => group,
+        None => key,
+    }
+}
+
+/// A setting value as a person reads it: a string without its quotes, any
+/// other value as its JSON.
+fn shown(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        other => other.to_string(),
+    }
+}
+
 pub(super) fn config_list_text(cwd: &Path) -> String {
     let list = config_list_json(cwd);
     let lang = crate::cli::i18n::lang_code(cwd);
@@ -31,64 +49,44 @@ pub(super) fn config_list_text(cwd: &Path) -> String {
         crate::cli::i18n::tr(&lang, "view.settings.title").to_string(),
         format!("Config: {}", user_config_path().display()),
     ];
-    let mut current_group = "";
+    let mut current_group = None;
     for spec in settings_schema() {
-        let group = spec.key.split('.').next().unwrap_or("settings");
-        if group != current_group {
-            current_group = group;
+        let group = group_of(spec.key);
+        if current_group != Some(group) {
+            current_group = Some(group);
             lines.push(format!("\n[{group}]"));
         }
-        let value = &list[spec.key]["value"];
-        let value_text = value
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| value.to_string());
         lines.push(format!(
             "{} = {} ({}) - {}",
-            spec.key, value_text, spec.typ, spec.description
+            spec.key,
+            shown(&list[spec.key]["value"]),
+            spec.typ,
+            spec.description
         ));
     }
     lines.join("\n") + "\n"
 }
 
-/// Group rows by top-level key prefix into picker tabs: known prefixes in
-/// first-seen order, anything else under `other` after them. Row order within
-/// a group is kept. Returns the tab bar (index 0 = the catch-all "All" view)
-/// and the rows tagged with their 1-based tab index.
+/// Group rows by top-level key prefix into picker tabs, in the order the
+/// schema first names each prefix. Row order within a group is kept. Returns
+/// the tab bar (its first tab is the catch-all "All" view) and the rows tagged
+/// with the index of their group's tab.
 fn grouped_setting_rows(
     rows: Vec<(&str, PickerItem)>,
     lang: &str,
 ) -> (Vec<String>, Vec<PickerItem>) {
-    const KNOWN_PREFIXES: &[&str] = &[
-        "tools",
-        "commands",
-        "startup",
-        "context",
-        "contracts",
-        "communication",
-        "rules",
-        "hooks",
-        "secrets",
-        "ui",
-    ];
     let mut groups: Vec<(&str, Vec<PickerItem>)> = Vec::new();
     for (prefix, item) in rows {
-        let label = if KNOWN_PREFIXES.contains(&prefix) {
-            prefix
-        } else {
-            "other"
-        };
-        match groups.iter_mut().find(|(name, _)| *name == label) {
+        match groups.iter_mut().find(|(name, _)| *name == prefix) {
             Some((_, items)) => items.push(item),
-            None => groups.push((label, vec![item])),
+            None => groups.push((prefix, vec![item])),
         }
     }
-    groups.sort_by_key(|(name, _)| usize::from(*name == "other"));
     let mut tabs = vec![crate::cli::i18n::tr(lang, "picker.tab.all").to_string()];
     let mut items = Vec::new();
     for (name, group_rows) in groups {
+        let tab = tabs.len();
         tabs.push(name.to_string());
-        let tab = tabs.len() - 1;
         items.extend(group_rows.into_iter().map(|item| item.tab(tab)));
     }
     (tabs, items)
@@ -102,15 +100,13 @@ pub(crate) fn settings_picker(cwd: &Path) -> PickerSpec {
             effective_setting_value(&config, spec),
             setting_default(spec),
         );
-        let current_text = current
-            .as_str()
-            .map(str::to_string)
-            .unwrap_or_else(|| current.to_string());
+        let current_text = shown(&current);
         let detail = format!("{} Current: {current_text}.", spec.description);
-        let prefix = spec.key.split('.').next().unwrap_or("other");
+        let prefix = group_of(spec.key);
         match spec.typ {
             "boolean" => {
-                let next = !current.as_bool().unwrap_or(false);
+                // The toggle sets true unless the setting already is true.
+                let next = current != Value::Bool(true);
                 rows.push((
                     prefix,
                     PickerItem::action(

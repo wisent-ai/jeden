@@ -87,18 +87,28 @@ pub(crate) fn project_root(cwd: &Path) -> Result<PathBuf, String> {
         .canonicalize()
         .map_err(|error| format!("cannot resolve cwd {}: {error}", cwd.display()))?;
     let mut context_root = None;
+    // A marker that cannot be examined is refused naming it: read as absent,
+    // a repository root was passed over and a farther directory, or the cwd
+    // itself, became the project root the context was read from.
+    let present = crate::tool_runtime::runtime_ops::platform::presence::present;
     for ancestor in canonical.ancestors() {
-        if ancestor.join(".git").exists() {
+        if present(&ancestor.join(".git"))? {
             return Ok(ancestor.to_path_buf());
         }
-        if DESCRIPTORS
-            .iter()
-            .any(|descriptor| ancestor.join(descriptor.relative).is_file())
-        {
-            context_root = Some(ancestor.to_path_buf());
+        for descriptor in DESCRIPTORS.iter() {
+            let file = ancestor.join(descriptor.relative);
+            if present(&file)? && file.is_file() {
+                context_root = Some(ancestor.to_path_buf());
+                break;
+            }
         }
     }
-    Ok(context_root.unwrap_or(canonical))
+    // With neither a repository nor a context file above it, the directory is
+    // its own project root.
+    match context_root {
+        Some(root) => Ok(root),
+        None => Ok(canonical),
+    }
 }
 
 pub(crate) fn discover_context(
@@ -110,25 +120,13 @@ pub(crate) fn discover_context(
         .canonicalize()
         .map_err(|error| format!("cannot resolve cwd {}: {error}", cwd.display()))?;
     let root = project_root(&canonical_cwd)?;
-    let mut budget = Budget {
-        max_bytes: config.max_bytes,
-        used_bytes: 0,
-        warnings: Vec::new(),
-        warned_paths: BTreeSet::new(),
-    };
+    let mut budget = Budget::new(config.max_bytes);
     // Explicit sticky rules are load-bearing policy. Reserve their budget first,
     // while assigning their final precedence after discovered project files.
     let mut configured_entries = Vec::new();
-    let mut configured_precedence = 0usize;
-    append_configured_rules(
-        &root,
-        &mut budget,
-        &mut configured_entries,
-        &mut configured_precedence,
-        &rules.always_apply,
-    )?;
+    append_configured_rules(&root, &mut budget, &mut configured_entries, &rules.always_apply)?;
+    // An entry's precedence is its position: later entries apply over earlier.
     let mut entries = Vec::new();
-    let mut precedence = 0usize;
     for directory in ancestor_chain(&root, &canonical_cwd) {
         for descriptor in DESCRIPTORS {
             let path = directory.join(descriptor.relative);
@@ -148,16 +146,14 @@ pub(crate) fn discover_context(
                 id: descriptor.relative.to_string(),
                 kind: descriptor.kind,
                 always_apply: descriptor.kind == ContextKind::Rule,
-                precedence,
+                precedence: entries.len(),
                 content,
                 provenance,
             });
-            precedence = precedence.saturating_add(1);
         }
     }
     for mut entry in configured_entries {
-        entry.precedence = precedence;
-        precedence = precedence.saturating_add(1);
+        entry.precedence = entries.len();
         entries.push(entry);
     }
     let mut seen_ids = BTreeSet::new();
@@ -179,7 +175,6 @@ fn append_configured_rules(
     jail: &Path,
     budget: &mut Budget,
     entries: &mut Vec<ContextEntry>,
-    precedence: &mut usize,
     rules: &[AlwaysApplyRuleConfig],
 ) -> Result<(), String> {
     for rule in rules {
@@ -214,11 +209,10 @@ fn append_configured_rules(
             id: rule.id.clone(),
             kind: ContextKind::Rule,
             always_apply: true,
-            precedence: *precedence,
+            precedence: entries.len(),
             content,
             provenance,
         });
-        *precedence = precedence.saturating_add(1);
     }
     Ok(())
 }

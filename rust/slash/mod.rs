@@ -17,8 +17,12 @@ mod support;
 
 pub(crate) use commands::usage::totals as usage_ledger;
 pub(crate) use support::{common, state, validate};
+pub(crate) use modes::forceable;
 
-pub(crate) use plugins::ops::{installed_plugin_command_dirs, installed_plugin_hook_configs};
+pub(crate) use plugins::ops::{
+    installed_entries_for_scope, installed_plugin_command_dirs, installed_plugin_hook_configs,
+};
+pub(crate) use plugins::plugins_home;
 pub(crate) use session::clipboard::{read_clipboard, same_payload, write_clipboard};
 
 #[derive(Debug, Clone)]
@@ -40,6 +44,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/goal" => { let head = split_head(args).0; changed = !(head.is_empty() || head == "status"); Some(modes::handle_goal(args, &mut state)) },
         "/guided-goal" => { changed = true; Some(modes::handle_guided_goal(args, &mut state)) },
         "/loop" => { changed = split_head(args).0 != "status"; Some(modes::handle_loop(args, &mut state)) },
+        "/hillclimb" => Some(crate::hillclimb::status::text(context.cwd, None)),
         "/fast" => { changed = split_head(args).0 != "status"; Some(modes::handle_fast(args, &mut state)) },
         "/advisor" => { changed = !matches!(split_head(args).0, "" | "status" | "dump"); Some(modes::handle_advisor(args, &mut state, context)) },
         "/approval" => { changed = !matches!(split_head(args).0, "" | "status"); Some(modes::handle_approval(args, &mut state)) },
@@ -179,9 +184,17 @@ fn capability_picker(context: &SlashContext<'_>) -> PickerSpec {
     let mut items = crate::capability::management_items(context.cwd)
         .into_iter()
         .map(|(label, detail, badge, action, disabled)| {
-            let mut item = PickerItem::action(label, action.unwrap_or_default())
-                .detail(detail)
-                .badge(badge);
+            // A capability with no action is a row to read, not to run.
+            let mut item = match action {
+                Some(action) => PickerItem::action(label, action),
+                None => {
+                    let mut row = PickerItem::action(label, String::new());
+                    row.command = None;
+                    row
+                }
+            }
+            .detail(detail)
+            .badge(badge);
             if disabled {
                 item = item.disabled(true);
             }
@@ -205,10 +218,17 @@ pub(crate) fn interactive_picker(
     let lang = crate::cli::i18n::lang_code(context.cwd);
     let view = crate::capability::view_descriptor(context.cwd, command)?;
     if !view.health.is_executable() || !view.ui.executable {
-        let detail = view
-            .health
-            .detail
-            .unwrap_or_else(|| "Capability backend unavailable".into());
+        // The capability's own detail is the cause; a view the capability
+        // offers as not executable here, or a health without a detail, is
+        // said as such rather than as a stock sentence.
+        let detail = match view.health.detail.clone() {
+            Some(detail) => detail,
+            None if !view.ui.executable => format!("{} is not offered as a view here", view.ui.label),
+            None => format!(
+                "the {} capability reports {:?} without saying why",
+                view.ui.label, view.health.state
+            ),
+        };
         return Some(Ok(PickerSpec::new(
             format!("{} unavailable", view.ui.label),
             vec![PickerItem::action(view.ui.label, "")

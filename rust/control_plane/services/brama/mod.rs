@@ -177,7 +177,13 @@ impl BramaClient {
                     return;
                 }
             };
-            let key = catalog_cache_key(endpoint, bearer.as_deref());
+            let key = match catalog_cache_key(endpoint, bearer.as_deref()) {
+                Ok(key) => key,
+                Err(error) => {
+                    eprintln!("jeden: cannot invalidate model catalog cache: {error}");
+                    return;
+                }
+            };
             match CACHE.lock() {
                 Ok(mut cache) => {
                     cache.remove(&key);

@@ -15,25 +15,32 @@ impl EditorState {
         self.history_draft = None;
     }
 
+    /// Show the line submitted before the one shown, starting from the latest;
+    /// the first line stays shown once reached.
     pub fn history_previous(&mut self) {
-        if self.history.is_empty() {
-            return;
-        }
-        if self.history_index.is_none() {
-            self.history_draft = Some(self.snapshot());
-        }
-        let index = self
-            .history_index
-            .map_or(self.history.len() - 1, |i| i.saturating_sub(1));
+        let step = usize::from(crate::tally::STEP);
+        let index = match self.history_index {
+            Some(shown) => shown.saturating_sub(step),
+            None => {
+                let Some(latest) = self.history.len().checked_sub(step) else {
+                    return;
+                };
+                self.history_draft = Some(self.snapshot());
+                latest
+            }
+        };
         self.load_history(index);
     }
 
+    /// Show the line submitted after the one shown; past the latest, the
+    /// draft that was being written comes back.
     pub fn history_next(&mut self) {
         let Some(index) = self.history_index else {
             return;
         };
-        if index + 1 < self.history.len() {
-            self.load_history(index + 1);
+        let next = index + usize::from(crate::tally::STEP);
+        if next < self.history.len() {
+            self.load_history(next);
         } else if let Some(draft) = self.history_draft.take() {
             self.restore(draft);
             self.history_index = None;

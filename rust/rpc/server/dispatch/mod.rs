@@ -6,11 +6,15 @@ mod chat_memory;
 pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> Result<(), Value> {
     let id = request.id.clone();
     let result = match request.method.as_str() {
-        "initialize" => Ok(json!({
-            "protocol": "jeden-rpc",
-            "capabilities": AgentSession::capabilities(),
-            "quickReplies": quick_replies()
-        })),
+        "initialize" => quick_replies()
+            .map(|replies| {
+                json!({
+                    "protocol": "jeden-rpc",
+                    "capabilities": AgentSession::capabilities(),
+                    "quickReplies": replies
+                })
+            })
+            .map_err(|error| ("internal_error", error)),
         "session/new" => create_session(state, request.params, false),
         "config/contracts/get" => Ok(crate::cli::config::schema::contract_settings()),
         "config/contracts/set" => set_contract_settings(&request.params),
@@ -43,6 +47,9 @@ pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> 
             completion_request(state, &request.params, &request.method)
         }
         "asks/list" | "asks/get" | "asks/answer" => asks_request(&request.params, &request.method),
+        "hillclimb/status" => super::hillclimb::status(&request.params),
+        "hillclimb/cancel" => super::hillclimb::cancel(state, &request.params),
+        "hillclimb/active" => Ok(super::hillclimb::active(state)),
         "session/dispose" => dispose_session(state, &request.params, false),
         "session/retire" => dispose_session(state, &request.params, true),
         "session/input_response" => resolve_elicitation(state, &request.params),

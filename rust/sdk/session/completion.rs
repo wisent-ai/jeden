@@ -5,11 +5,8 @@ impl AgentSession {
         if self.inner.disposed.load(Ordering::Acquire) {
             return Err("session disposed".into());
         }
-        self.inner
-            .session_path
-            .read()
-            .map(|path| path.clone())
-            .map_err(|_| "session path lock poisoned".into())
+        // The path is replaced whole, so a writer that panicked left a path.
+        Ok(crate::panicked::read_held(&self.inner.session_path).clone())
     }
 
     pub fn completion(&self) -> Result<serde_json::Value, String> {
@@ -48,13 +45,7 @@ impl AgentSession {
                 )
         });
         if stopped {
-            for cancel in self
-                .inner
-                .active
-                .lock()
-                .map_err(|_| "active request lock poisoned")?
-                .values()
-            {
+            for cancel in crate::panicked::held(&self.inner.active).values() {
                 cancel.store(true, Ordering::Release);
             }
             crate::tool_runtime::runtime_ops::announce_cancellation();

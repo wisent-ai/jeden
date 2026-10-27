@@ -3,10 +3,13 @@
 //! Split out of `extensions/declarative.rs`, which had grown past the module
 //! line cap.
 
+use crate::capability::CapabilityKind;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
+/// One declared directory the declarative runtime reads: its kind as the
+/// root spells it (`DeclarativeKind::name`), where it is and its precedence.
 #[derive(Clone, Debug)]
 pub(crate) struct Input {
     pub kind: &'static str,
@@ -16,7 +19,7 @@ pub(crate) struct Input {
 
 #[derive(Clone, Debug)]
 pub(crate) struct LoadedCapability {
-    pub kind: &'static str,
+    pub kind: CapabilityKind,
     pub active: bool,
     pub id: String,
     pub path: PathBuf,
@@ -69,7 +72,7 @@ pub(crate) struct Loaded {
 #[derive(Clone, Debug)]
 pub(crate) struct PromptContribution {
     pub id: String,
-    pub kind: &'static str,
+    pub kind: CapabilityKind,
     pub content: String,
     pub source: PathBuf,
     pub precedence: usize,

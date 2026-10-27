@@ -73,6 +73,16 @@ fn mcp_scope_config(path: &Path) -> Result<Value, String> {
     mcp::read_config_file(path)
 }
 
+/// The configuration's top-level object, which `mcp_scope_config` validated.
+fn mcp_object<'a>(
+    config: &'a mut Value,
+    path: &Path,
+) -> Result<&'a mut serde_json::Map<String, Value>, String> {
+    config
+        .as_object_mut()
+        .ok_or_else(|| format!("{} does not hold a JSON object", path.display()))
+}
+
 const MCP_USAGE: &str = "Usage: /mcp list | status | add [--scope user|project] <name> [stdio <command> [args...] | http <url>] | remove [--scope user|project] <name> | enable [--scope user|project] <name> | disable [--scope user|project] <name> | tools <server> | resources <server> | prompts <server> | notifications <server> | test <server> | reload | reconnect <server>";
 
 pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
@@ -86,7 +96,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
         McpVerb::Status => serde_json::to_string_pretty(&mcp::manager_status(context.cwd)?)
             .map_err(|error| error.to_string()),
         McpVerb::Add => {
-            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
+            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest))?;
             let scope = normalize_scope(scope)?;
             let (name, after_name) = head_rest(&parts);
             if !valid_mcp_server_name(name) {
@@ -125,9 +135,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             };
             let path = mcp_scope_file(context.cwd, &scope)?;
             let mut config = mcp_scope_config(&path)?;
-            config
-                .as_object_mut()
-                .expect("checked object")
+            mcp_object(&mut config, &path)?
                 .entry("mcpServers")
                 .or_insert_with(|| json!({}));
             config["mcpServers"][name] = server;
@@ -139,7 +147,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             ))
         }
         McpVerb::Remove => {
-            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
+            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest))?;
             let scope = normalize_scope(scope)?;
             let Some(name) = parts
                 .first()
@@ -174,7 +182,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
         }
         McpVerb::Enable | McpVerb::Disable => {
             let disable = matches!(parsed, McpVerb::Disable);
-            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest));
+            let (_force, scope, parts) = parse_marketplace_flags(&split_args(rest))?;
             let scope = normalize_scope(scope)?;
             let Some(name) = parts
                 .first()
@@ -185,9 +193,7 @@ pub(crate) fn handle_mcp(args: &str, context: &SlashContext<'_>) -> Result<Strin
             };
             let path = mcp_scope_file(context.cwd, &scope)?;
             let mut config = mcp_scope_config(&path)?;
-            config
-                .as_object_mut()
-                .expect("checked object")
+            mcp_object(&mut config, &path)?
                 .entry("disabledServers")
                 .or_insert_with(|| json!([]));
             let disabled = config

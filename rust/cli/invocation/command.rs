@@ -15,6 +15,7 @@ pub(crate) enum Command {
     Conformance,
     Run,
     Pursue,
+    Hillclimb,
     Todo,
     Asks,
     Rpc,
@@ -61,7 +62,7 @@ impl Command {
     pub(crate) fn workspace_bound(self) -> bool {
         matches!(
             self,
-            Command::Interactive | Command::Run | Command::Pursue | Command::Rpc | Command::Acp
+            Command::Interactive | Command::Run | Command::Pursue | Command::Hillclimb | Command::Rpc | Command::Acp
         )
     }
 
@@ -87,6 +88,7 @@ impl Command {
                 | Command::Todo
                 | Command::Asks
                 | Command::Copy
+                | Command::Hillclimb
         )
     }
 }

@@ -10,8 +10,7 @@ use super::{
 };
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::fs::{self, File, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct RoadmapStore {
@@ -23,8 +22,6 @@ pub struct RoadmapStore {
 mod lock;
 
 use lock::StableLock;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 impl RoadmapStore {
     pub fn new(cwd: &Path) -> Self {
@@ -57,17 +54,17 @@ impl RoadmapStore {
                 let errors = self.validation_errors(&roadmap, true);
                 CheckReport {
                     ok: errors.is_empty(),
-                    schema_version: roadmap.schema_version,
-                    revision: roadmap.revision,
-                    item_count: roadmap.items.len(),
+                    schema_version: Some(roadmap.schema_version),
+                    revision: Some(roadmap.revision),
+                    item_count: Some(roadmap.items.len()),
                     errors,
                 }
             }
             Err(error) => CheckReport {
                 ok: false,
-                schema_version: 0,
-                revision: 0,
-                item_count: 0,
+                schema_version: None,
+                revision: None,
+                item_count: None,
                 errors: vec![error.to_string()],
             },
         }
@@ -92,7 +89,7 @@ impl RoadmapStore {
             });
         }
         change(&mut roadmap)?;
-        roadmap.revision = roadmap.revision.saturating_add(1);
+        roadmap.revision = roadmap.revision.saturating_add(u64::from(crate::tally::STEP));
         normalize(&mut roadmap);
         let errors = self.validation_errors(&roadmap, true);
         if !errors.is_empty() {
@@ -254,47 +251,19 @@ impl RoadmapStore {
     }
 }
 
+/// `roadmap` as YAML over `path` through the shared durable replace, so a
+/// reader sees the previous roadmap or the new one, never a torn write. The
+/// roadmap is a file of the project, so an existing one keeps its mode.
 fn atomic_write_yaml(path: &Path, roadmap: &RoadmapFile) -> Result<(), RoadmapError> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| RoadmapError::Io("roadmap path has no parent".into()))?;
-    fs::create_dir_all(parent)?;
-    let nonce = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| {
-            RoadmapError::Io(format!(
-                "the roadmap cannot be staged: the clock is before the epoch: {error}"
-            ))
-        })?
-        .as_nanos();
-    let temp = parent.join(format!(".roadmap.yaml.tmp-{}-{nonce}", std::process::id()));
-    let yaml =
-        serde_yaml::to_string(roadmap).map_err(|error| RoadmapError::Invalid(error.to_string()))?;
-    let result = (|| -> Result<(), RoadmapError> {
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp)?;
-        file.write_all(yaml.as_bytes())?;
-        file.flush()?;
-        file.sync_all()?;
-        fs::rename(&temp, path)?;
-        File::open(parent)?.sync_all()?;
-        Ok(())
-    })();
-    if result.is_err() {
-        if let Err(left) = fs::remove_file(&temp) {
-            if left.kind() != std::io::ErrorKind::NotFound {
-                eprintln!("jeden: {} is left behind: {left}", temp.display());
-            }
-        }
-    }
-    result
+    let yaml = serde_yaml::to_string(roadmap).map_err(|error| {
+        RoadmapError::Invalid(format!("the roadmap cannot be written as YAML: {error}"))
+    })?;
+    crate::tool_runtime::runtime_ops::durable::replace_keeping_mode(path, yaml.as_bytes())
+        .map_err(RoadmapError::Io)
 }
 
 fn relative_path(cwd: &Path, path: &Path) -> String {
-    path.strip_prefix(cwd)
-        .unwrap_or(path)
-        .to_string_lossy()
-        .into_owned()
+    // A path outside the workspace is named whole.
+    let shown = match path.strip_prefix(cwd) { Ok(inside) => inside, Err(_outside) => path };
+    shown.to_string_lossy().into_owned()
 }

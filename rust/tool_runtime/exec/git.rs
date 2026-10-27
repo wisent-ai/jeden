@@ -18,7 +18,7 @@ pub(crate) fn git_status(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
 pub(crate) fn git_diff(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let mut args = vec!["diff".to_string(), "--".to_string()];
     if let Some(path) = string_input(input, "path") {
-        let _ = jail_path(runtime.cwd, &path)?;
+        jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
     run_read_process(runtime, &json!({"command": "git", "args": args}))
@@ -34,24 +34,27 @@ pub(crate) fn git_log(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value,
         "--".to_string(),
     ];
     if let Some(path) = string_input(input, "path") {
-        let _ = jail_path(runtime.cwd, &path)?;
+        jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
     run_read_process(runtime, &json!({"command": "git", "args": args}))
 }
 
+/// `git show` of `ref`, or of what git itself shows with no revision named
+/// (HEAD) when the call names none; the default is git's, not a second copy.
 pub(crate) fn git_show(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let reference = string_input(input, "ref").unwrap_or_else(|| "HEAD".into());
     let mut args = vec![
         "show".to_string(),
         "--stat".to_string(),
         "--oneline".to_string(),
         "--decorate".to_string(),
-        reference,
-        "--".to_string(),
     ];
+    if let Some(reference) = string_input(input, "ref") {
+        args.push(reference);
+    }
+    args.push("--".to_string());
     if let Some(path) = string_input(input, "path") {
-        let _ = jail_path(runtime.cwd, &path)?;
+        jail_path(runtime.cwd, &path)?;
         args.push(path);
     }
     run_read_process(runtime, &json!({"command": "git", "args": args}))

@@ -7,10 +7,16 @@ use super::super::protocol::{Envelope, EventEnvelope};
 use super::errors::{ClientError, SessionTransport};
 use serde_json::Value;
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::task::JoinHandle;
+use uuid::Uuid;
+
+// The client's maps change by single inserts, removes and takes, so a lock a
+// panicking holder poisoned is entered as it stands rather than taken for a
+// failed client.
+use crate::panicked::held;
 
 pub(super) struct EventSubscriber {
     pub(super) events: mpsc::UnboundedSender<Result<EventEnvelope, ClientError>>,
@@ -20,11 +26,10 @@ pub(super) struct EventSubscriber {
 pub(super) struct ClientInner {
     pub(super) transport: Arc<dyn SessionTransport>,
     pub(super) pending: Mutex<HashMap<String, oneshot::Sender<Result<Value, ClientError>>>>,
-    pub(super) subscribers: Mutex<HashMap<u64, EventSubscriber>>,
+    /// Every live event stream, by the identity it was given when it subscribed.
+    pub(super) subscribers: Mutex<HashMap<Uuid, EventSubscriber>>,
     pub(super) cursors: Mutex<HashMap<String, String>>,
     pub(super) reader: Mutex<Option<JoinHandle<()>>>,
-    pub(super) next_request_id: AtomicU64,
-    pub(super) next_subscriber_id: AtomicU64,
     pub(super) disposed: AtomicBool,
     pub(super) terminated: AtomicBool,
     pub(super) terminated_notify: Notify,
@@ -35,23 +40,21 @@ impl ClientInner {
         self.disposed.store(true, Ordering::Release);
 
         let pending = {
-            let mut pending = self.pending.lock().unwrap_or_else(|lock| lock.into_inner());
+            let mut pending = held(&self.pending);
             std::mem::take(&mut *pending)
         };
         for sender in pending.into_values() {
-            let _ = sender.send(Err(error.clone()));
+            // A waiter that already gave up needs no answer.
+            let _unreceived = sender.send(Err(error.clone()));
         }
 
         let subscribers = {
-            let mut subscribers = self
-                .subscribers
-                .lock()
-                .unwrap_or_else(|lock| lock.into_inner());
+            let mut subscribers = held(&self.subscribers);
             std::mem::take(&mut *subscribers)
         };
         for mut subscriber in subscribers.into_values() {
             if let Some(sender) = subscriber.terminal.take() {
-                let _ = sender.send(error.clone());
+                let _unreceived = sender.send(error.clone());
             }
         }
         self.terminated.store(true, Ordering::Release);
@@ -59,14 +62,10 @@ impl ClientInner {
     }
 
     fn complete(&self, id: &str, result: Result<Value, ClientError>) -> bool {
-        let sender = self
-            .pending
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner())
-            .remove(id);
+        let sender = held(&self.pending).remove(id);
         match sender {
             Some(sender) => {
-                let _ = sender.send(result);
+                let _unreceived = sender.send(result);
                 true
             }
             None => false,
@@ -74,15 +73,9 @@ impl ClientInner {
     }
 
     fn publish(&self, event: EventEnvelope) {
-        self.cursors
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner())
-            .insert(event.session_id.clone(), event.cursor.clone());
+        held(&self.cursors).insert(event.session_id.clone(), event.cursor.clone());
 
-        let mut subscribers = self
-            .subscribers
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner());
+        let mut subscribers = held(&self.subscribers);
         // Every event reaches every subscriber, however far behind it reads;
         // only a subscriber whose stream is gone is dropped.
         subscribers.retain(|_, subscriber| subscriber.events.send(Ok(event.clone())).is_ok());

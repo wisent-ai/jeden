@@ -13,7 +13,7 @@ pub struct IsolatedWorkspace {
 pub fn isolate(parent: &Path, root: &Path, id: &str) -> Result<IsolatedWorkspace, TaskError> {
     fs::create_dir_all(root)?;
     let target = root.join(id);
-    if target.exists() {
+    if crate::tool_runtime::runtime_ops::platform::presence::present(&target).map_err(TaskError::Io)? {
         return Err(TaskError::Conflict(format!(
             "workspace already exists: {}",
             target.display()
@@ -44,7 +44,7 @@ impl IsolatedWorkspace {
         Ok(())
     }
     pub fn merge(&self, capture: &Path, max_output_bytes: u64) -> Result<(), TaskError> {
-        if !capture.exists() {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(capture).map_err(TaskError::Io)? {
             return Err(TaskError::NotFound(format!(
                 "capture not found: {}",
                 capture.display()

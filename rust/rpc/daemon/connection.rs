@@ -1,5 +1,15 @@
 use super::*;
 
+/// A TLS record begins with its content type and its two-byte
+/// legacy_record_version: <https://www.rfc-editor.org/rfc/rfc8446#section-5.1>.
+const TLS_RECORD_PREFIX: usize = 3;
+/// The handshake content type a ClientHello record carries:
+/// <https://www.rfc-editor.org/rfc/rfc8446#section-5.1>.
+const HANDSHAKE: u8 = 0x16;
+/// The major byte of every TLS legacy_record_version:
+/// <https://www.rfc-editor.org/rfc/rfc8446#section-5.1>.
+const TLS_MAJOR: u8 = 0x03;
+
 impl<B: SessionBackend> HeadlessDaemon<B> {
     /// Serve one connection; a connection that ends on an error is said
     /// with its cause, since the client sees only a dropped socket.
@@ -10,13 +20,13 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
     }
 
     pub(super) async fn serve_connection(&self, mut stream: TcpStream) -> Result<(), String> {
-        let mut record_prefix = [0_u8; 3];
+        let mut record_prefix: [u8; TLS_RECORD_PREFIX] = [Default::default(); TLS_RECORD_PREFIX];
         loop {
             let prefix_len = stream
                 .peek(&mut record_prefix)
                 .await
                 .map_err(|error| format!("TLS preface read failed: {error}"))?;
-            if prefix_len == 0 {
+            if record_prefix[..prefix_len].is_empty() {
                 return Err("connection closed before TLS preface".to_string());
             }
             if prefix_len >= record_prefix.len() {
@@ -24,9 +34,12 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             }
             tokio::task::yield_now().await;
         }
-        if record_prefix[0] != 0x16 || record_prefix[1] != 0x03 {
-            let _ = stream.shutdown().await;
-            return Err("plaintext or malformed TLS preface rejected".into());
+        if !matches!(record_prefix, [HANDSHAKE, TLS_MAJOR, _]) {
+            let rejected = "plaintext or malformed TLS preface rejected";
+            return Err(match stream.shutdown().await {
+                Ok(()) => rejected.to_string(),
+                Err(error) => format!("{rejected}; closing the connection failed: {error}"),
+            });
         }
         let (stream, peer) = self.tls.accept(stream).await?;
         let (reader, mut writer) = tokio::io::split(stream);
@@ -49,7 +62,11 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     }
                     Err(response) => {
                         write_async_frame(&mut writer, &response).await?;
-                        let _ = writer.shutdown().await;
+                        if let Err(error) = writer.shutdown().await {
+                            return Err(format!(
+                                "member authentication refused; closing the connection failed: {error}"
+                            ));
+                        }
                         return Ok(());
                     }
                 }
@@ -98,6 +115,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         }
     }
 }
+/// Refuse a connection the daemon has no capacity to admit. The refusal and
+/// the close are each said when they fail: the client then sees only a
+/// dropped socket.
 pub(super) async fn reject_overloaded(mut stream: TcpStream) {
     let response = wire_error(
         Value::Null,
@@ -108,8 +128,12 @@ pub(super) async fn reject_overloaded(mut stream: TcpStream) {
             details: json!({}),
         },
     );
-    let _ = write_async_frame(&mut stream, &response).await;
-    let _ = stream.shutdown().await;
+    if let Err(error) = write_async_frame(&mut stream, &response).await {
+        eprintln!("jeden daemon: the backpressure refusal could not be sent: {error}");
+    }
+    if let Err(error) = stream.shutdown().await {
+        eprintln!("jeden daemon: a refused connection could not be closed: {error}");
+    }
 }
 
 /// Read one newline-delimited frame. The peer sends it, or closes; a client
@@ -120,11 +144,12 @@ async fn read_async_frame<R: tokio::io::AsyncBufRead + Unpin>(
     max: usize,
 ) -> Result<Option<Vec<u8>>, String> {
     let mut frame = Vec::new();
-    let bytes = reader
+    // A read that appended nothing is the peer closing.
+    reader
         .read_until(b'\n', &mut frame)
         .await
         .map_err(|error| error.to_string())?;
-    if bytes == 0 {
+    if frame.is_empty() {
         return Ok(None);
     }
     if frame.len() > max {

@@ -1,7 +1,4 @@
 //! Rebuilding the model-visible conversation from a recorded session.
-//!
-//! Split out of `cli/reports/sessions.rs`, which had grown past the module
-//! line cap.
 
 use super::ledger_v2;
 use super::{LedgerEntry, SessionLedger};
@@ -115,8 +112,12 @@ pub(super) fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, St
                 }
             }
             "compaction" => {
-                let before = data.get("before").and_then(Value::as_u64).unwrap_or(0);
-                let summary = data.get("summary").and_then(Value::as_str).unwrap_or("");
+                // A compaction replaced the conversation with its summary; one
+                // recorded without the summary or its message count cannot be
+                // replayed, and is refused rather than replayed as empty.
+                let invalid = || format!("ledger entry {} has an invalid compaction", entry.id);
+                let before = data.get("before").and_then(Value::as_u64).ok_or_else(invalid)?;
+                let summary = data.get("summary").and_then(Value::as_str).ok_or_else(invalid)?;
                 messages = vec![
                     json!({ "role": "system", "content": format!("Prior conversation summary (compacted from {} messages):\n{}", before, summary), "_jedenNeedsBaseSystem": true }),
                 ];
@@ -131,11 +132,14 @@ pub(super) fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, St
             "contract_violation"
                 if data.get("outcome").and_then(Value::as_str) == Some("requested") =>
             {
-                messages.push(json!({
-                    "role": "user",
-                    "content": data.get("prompt").and_then(Value::as_str)
-                        .unwrap_or(crate::agent::task_contract::REPAIR_INSTRUCTION),
-                }));
+                // Entries recorded before the request's own wording was kept
+                // carry no prompt; what went to the model then was the repair
+                // instruction.
+                let prompt = match data.get("prompt").and_then(Value::as_str) {
+                    Some(prompt) => prompt,
+                    None => crate::agent::task_contract::REPAIR_INSTRUCTION,
+                };
+                messages.push(json!({ "role": "user", "content": prompt }));
             }
             _ => {}
         }

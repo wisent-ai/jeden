@@ -70,28 +70,33 @@ fn transport() -> Result<Box<dyn Transport>, String> {
 }
 
 pub(super) async fn start_client() -> Result<Client, String> {
-    let fallback = bundle_from_canonical(
-        FALLBACK,
-        Uuid::parse_str(JOURNEY_VERSION_ID).map_err(|error| error.to_string())?,
-    )
-    .map_err(|error| error.to_string())?;
+    let version = Uuid::parse_str(JOURNEY_VERSION_ID).map_err(|error| {
+        format!("the first-use journey version {JOURNEY_VERSION_ID} is not a UUID: {error}")
+    })?;
+    let fallback = bundle_from_canonical(FALLBACK, version).map_err(|error| {
+        format!("the first-use journey shipped with jeden (onboarding/first_use.json) cannot be read: {error}")
+    })?;
+    let state = state_path();
     let mut client = JourneyClient::new(
         "jeden",
         "first-use",
         subject_hash()?,
         ScopeKind::Device,
         transport()?,
-        FileStorage::new(state_path()),
+        FileStorage::new(state.clone()),
         fallback,
     )
-    .map_err(|error| error.to_string())?;
-    client
-        .start(EVIDENCE_REVISION)
-        .await
-        .map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        format!("the onboarding journey kept at {} cannot be opened: {error}", state.display())
+    })?;
+    client.start(EVIDENCE_REVISION).await.map_err(|error| {
+        format!("the onboarding journey kept at {} cannot be started: {error}", state.display())
+    })?;
     // Undelivered events stay queued in the client; only a storage failure
     // is an error here, and it is refused rather than dropped.
-    client.flush().await.map_err(|error| error.to_string())?;
+    client.flush().await.map_err(|error| {
+        format!("the onboarding events kept at {} cannot be stored: {error}", state.display())
+    })?;
     Ok(client)
 }
 
@@ -99,6 +104,6 @@ pub(super) fn run<T>(future: impl Future<Output = Result<T, String>>) -> Result<
     tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("the onboarding runtime cannot be started: {error}"))?
         .block_on(future)
 }

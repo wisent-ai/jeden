@@ -1,9 +1,8 @@
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::tool_runtime::runtime_ops::{
     ManagedCommand, OperationContext, ProcessManager, TerminationReason,
@@ -11,18 +10,27 @@ use crate::tool_runtime::runtime_ops::{
 
 use super::super::EditorState;
 
-static NEXT_TEMP_FILE: AtomicU64 = AtomicU64::new(0);
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct ExternalEditorCommand {
     program: OsString,
     args: Vec<OsString>,
 }
 
+/// An editor variable: absent when unset, refused by name when not Unicode.
+fn editor_variable(name: &str) -> Result<Option<String>, String> {
+    match env::var(name) {
+        Ok(value) => Ok(Some(value)),
+        Err(env::VarError::NotPresent) => Ok(None),
+        Err(env::VarError::NotUnicode(value)) => {
+            Err(format!("{name} is not Unicode ({value:?}); state the editor command as text"))
+        }
+    }
+}
+
 impl ExternalEditorCommand {
     fn from_environment() -> Result<Self, String> {
-        let visual = env::var("VISUAL").ok();
-        let editor = env::var("EDITOR").ok();
+        let visual = editor_variable("VISUAL")?;
+        let editor = editor_variable("EDITOR")?;
         Self::from_configuration(visual.as_deref(), editor.as_deref())
     }
 
@@ -50,7 +58,8 @@ impl ExternalEditorCommand {
 
     fn is_available(&self, cwd: &Path) -> bool {
         let program = Path::new(&self.program);
-        if program.components().count() > 1 {
+        // A program named with a directory is that file; a bare name is looked up on PATH.
+        if program.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
             let resolved = if program.is_absolute() {
                 program.to_path_buf()
             } else {
@@ -127,7 +136,7 @@ fn external_editor_with(
     let bytes = fs::read(temporary.path())
         .map_err(|error| format!("read external editor file: {error}"))?;
     let text = String::from_utf8(bytes)
-        .map_err(|_| "external editor produced invalid UTF-8".to_string())?;
+        .map_err(|error| format!("external editor produced invalid UTF-8: {error}"))?;
     Ok(editor.replace_all_transaction(text))
 }
 
@@ -137,29 +146,24 @@ struct TemporaryEditorFile {
 }
 
 impl TemporaryEditorFile {
+    /// A new draft file under `root`, readable and writable by this user only,
+    /// named so no other draft can hold the same name.
     fn create(root: &Path) -> Result<Self, String> {
-        for _ in 0..128 {
-            let id = NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed);
-            let path = root.join(format!("jeden-editor-{}-{id}.txt", std::process::id()));
-            let mut options = OpenOptions::new();
-            options.create_new(true).write(true);
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::OpenOptionsExt;
-                options.mode(0o600);
-            }
-            match options.open(&path) {
-                Ok(file) => {
-                    return Ok(Self {
-                        path,
-                        file: Some(file),
-                    })
-                }
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(format!("create external editor file: {error}")),
-            }
+        let path = root.join(format!("jeden-editor-{}.txt", uuid::Uuid::new_v4()));
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(u32::from(libc::S_IRUSR | libc::S_IWUSR));
         }
-        Err("create external editor file: exhausted unique names".into())
+        let file = options
+            .open(&path)
+            .map_err(|error| format!("create external editor file {}: {error}", path.display()))?;
+        Ok(Self {
+            path,
+            file: Some(file),
+        })
     }
 
     fn path(&self) -> &Path {
@@ -167,10 +171,12 @@ impl TemporaryEditorFile {
     }
 
     fn write(&mut self, bytes: &[u8]) -> Result<(), String> {
-        let mut file = self
-            .file
-            .take()
-            .expect("temporary editor file is written once");
+        let Some(mut file) = self.file.take() else {
+            return Err(format!(
+                "the external editor file {} was already written and closed; it is written once",
+                self.path.display()
+            ));
+        };
         file.write_all(bytes)
             .map_err(|error| format!("write external editor file: {error}"))?;
         file.sync_all()
@@ -194,12 +200,19 @@ impl Drop for TemporaryEditorFile {
     }
 }
 
+/// A file whose owner, group or others may execute it; a path that cannot be
+/// read is not one this process can run.
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    path.metadata()
-        .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
-        .unwrap_or(false)
+    let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
+    match path.metadata() {
+        Ok(metadata) => {
+            metadata.is_file()
+                && std::num::NonZeroU32::new(metadata.permissions().mode() & executable).is_some()
+        }
+        Err(_unreadable) => false,
+    }
 }
 
 #[cfg(not(unix))]

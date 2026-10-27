@@ -18,11 +18,13 @@ use crate::tool_runtime::shared::{jail_write_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 
 /// A writer that only feeds a digest, so a file can be hashed by copying it.
-struct Hashing(Sha256);
+struct Hashing {
+    digest: Sha256,
+}
 
 impl Write for Hashing {
     fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-        self.0.update(bytes);
+        self.digest.update(bytes);
         Ok(bytes.len())
     }
 
@@ -31,18 +33,28 @@ impl Write for Hashing {
     }
 }
 
+/// The refusal for one failed step of a rewrite, naming the step.
+fn failed<'a, E: std::fmt::Display>(step: &'a str) -> impl FnOnce(E) -> String + 'a {
+    move |error| format!("{step}: {error}")
+}
+
 fn rewrite_zip(
     source: File,
     target: &Path,
     entry_name: &str,
     content: Option<&[u8]>,
 ) -> Result<(), String> {
-    let mut archive = zip::ZipArchive::new(source).map_err(|error| error.to_string())?;
-    let output = File::create(target).map_err(|error| error.to_string())?;
+    let mut archive =
+        zip::ZipArchive::new(source).map_err(failed("the archive cannot be read as a zip"))?;
+    let output = File::create(target).map_err(|error| {
+        format!("the rewritten archive {} cannot be created: {error}", target.display())
+    })?;
     let mut writer = zip::ZipWriter::new(output);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
-    for index in 0..archive.len() {
-        let mut entry = archive.by_index(index).map_err(|error| error.to_string())?;
+    for index in crate::tally::ORIGIN..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|error| format!("zip entry number {index} cannot be read: {error}"))?;
         let name = entry.name().to_string();
         safe_entry(&name)?;
         if name == entry_name {
@@ -50,26 +62,29 @@ fn rewrite_zip(
         }
         if entry.is_dir() {
             writer
-                .add_directory(name, options)
-                .map_err(|error| error.to_string())?;
+                .add_directory(name.as_str(), options)
+                .map_err(|error| format!("zip directory {name} cannot be written: {error}"))?;
         } else {
             writer
-                .start_file(name, options)
-                .map_err(|error| error.to_string())?;
-            std::io::copy(&mut entry, &mut writer).map_err(|error| error.to_string())?;
+                .start_file(name.as_str(), options)
+                .map_err(|error| format!("zip entry {name} cannot be started: {error}"))?;
+            std::io::copy(&mut entry, &mut writer)
+                .map_err(|error| format!("zip entry {name} cannot be copied: {error}"))?;
         }
     }
     if let Some(bytes) = content {
         writer
             .start_file(entry_name, options)
-            .map_err(|error| error.to_string())?;
-        writer.write_all(bytes).map_err(|error| error.to_string())?;
+            .map_err(|error| format!("zip entry {entry_name} cannot be started: {error}"))?;
+        writer
+            .write_all(bytes)
+            .map_err(|error| format!("zip entry {entry_name} cannot be written: {error}"))?;
     }
     writer
         .finish()
-        .map_err(|error| error.to_string())?
+        .map_err(failed("the rewritten zip cannot be finished"))?
         .sync_all()
-        .map_err(|error| error.to_string())
+        .map_err(failed("the rewritten zip cannot be synced to disk"))
 }
 
 fn rewrite_tar(
@@ -84,7 +99,9 @@ fn rewrite_tar(
     } else {
         Box::new(source)
     };
-    let output = File::create(target).map_err(|error| error.to_string())?;
+    let output = File::create(target).map_err(|error| {
+        format!("the rewritten archive {} cannot be created: {error}", target.display())
+    })?;
     let sink: Box<dyn Write> = if gzip {
         Box::new(GzEncoder::new(output, Compression::default()))
     } else {
@@ -92,11 +109,14 @@ fn rewrite_tar(
     };
     let mut archive = tar::Archive::new(reader);
     let mut builder = tar::Builder::new(sink);
-    for entry in archive.entries().map_err(|error| error.to_string())? {
-        let mut entry = entry.map_err(|error| error.to_string())?;
+    for entry in archive
+        .entries()
+        .map_err(failed("the archive cannot be read as a tar"))?
+    {
+        let mut entry = entry.map_err(failed("a tar entry cannot be read"))?;
         let name = entry
             .path()
-            .map_err(|error| error.to_string())?
+            .map_err(failed("a tar entry's path cannot be read"))?
             .to_string_lossy()
             .to_string();
         safe_entry(&name)?;
@@ -106,20 +126,26 @@ fn rewrite_tar(
         let header = entry.header().clone();
         builder
             .append(&header, &mut entry)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("tar entry {name} cannot be copied: {error}"))?;
     }
     if let Some(bytes) = content {
         let mut header = tar::Header::new_gnu();
         header.set_size(bytes.len() as u64);
-        header.set_mode(0o644);
+        // A written entry is a regular file its owner may change and anyone may read.
+        header.set_mode(u32::from(libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH));
         header.set_cksum();
         builder
             .append_data(&mut header, entry_name, Cursor::new(bytes))
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("tar entry {entry_name} cannot be written: {error}"))?;
     }
-    builder.finish().map_err(|error| error.to_string())?;
-    let mut sink = builder.into_inner().map_err(|error| error.to_string())?;
-    sink.flush().map_err(|error| error.to_string())
+    builder
+        .finish()
+        .map_err(failed("the rewritten tar cannot be finished"))?;
+    let mut sink = builder
+        .into_inner()
+        .map_err(failed("the rewritten tar cannot be closed"))?;
+    sink.flush()
+        .map_err(failed("the rewritten tar cannot be flushed"))
 }
 
 pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -132,17 +158,21 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let expected =
         string_input(input, "expectedSha256").ok_or("write_archive requires expectedSha256")?;
     let path = jail_write_path(runtime.cwd, &label)?;
-    let mut source = File::open(&path).map_err(|error| error.to_string())?;
-    let mut hashing = Hashing(Sha256::new());
-    std::io::copy(&mut source, &mut hashing).map_err(|error| error.to_string())?;
-    let actual = hex::encode(hashing.0.finalize());
+    let mut source = File::open(&path).map_err(|error| format!("{label} cannot be opened: {error}"))?;
+    let mut hashing = Hashing { digest: Sha256::new() };
+    std::io::copy(&mut source, &mut hashing)
+        .map_err(|error| format!("{label} cannot be read to check its digest: {error}"))?;
+    let actual = hex::encode(hashing.digest.finalize());
     if actual != expected {
         return Err(format!(
             "expectedSha256 mismatch for {label}: expected {expected}, actual {actual}"
         ));
     }
-    source.rewind().map_err(|error| error.to_string())?;
-    let action = string_input(input, "action").unwrap_or_else(|| "upsert".into());
+    source
+        .rewind()
+        .map_err(|error| format!("{label} cannot be read again after its digest: {error}"))?;
+    let action =
+        string_input(input, "action").ok_or("write_archive requires action: upsert or delete")?;
     let content = match action.as_str() {
         "upsert" => Some(
             string_input(input, "content")
@@ -164,9 +194,14 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         Err("write_archive supports .zip, .tar, .tar.gz, and .tgz".into())
     };
     if let Err(error) = result {
-        return Err(failed_leaving(error, &temp));
+        return Err(failed_leaving(format!("{label} cannot be rewritten: {error}"), &temp));
     }
-    fs::rename(&temp, &path).map_err(|error| failed_leaving(error.to_string(), &temp))?;
+    fs::rename(&temp, &path).map_err(|error| {
+        failed_leaving(
+            format!("the rewritten archive cannot replace {label}: {error}"),
+            &temp,
+        )
+    })?;
     let (sha256, bytes) = file_sha(&path)?;
     Ok(json!({"ok":true,"path":label,"entry":entry,"action":action,"sha256":sha256,"bytes":bytes}))
 }

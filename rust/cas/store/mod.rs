@@ -9,7 +9,9 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(crate::tally::FIRST);
+/// The byte offset of an upload not begun: no bytes before it.
+const START: u64 = crate::tally::ORIGIN as u64;
 
 #[derive(Clone, Debug)]
 pub struct LocalCas {
@@ -54,9 +56,16 @@ impl LocalCas {
     pub(crate) fn objects_dir(&self) -> PathBuf {
         self.root.join("objects")
     }
+    /// The object's shard, named by its digest's first byte, and its path
+    /// there, named by the remaining bytes.
+    pub(crate) fn object_location(&self, digest: Digest) -> (PathBuf, PathBuf) {
+        let (first, rest) = digest.as_bytes().split_at(std::mem::size_of::<u8>());
+        let shard = self.objects_dir().join(hex::encode(first));
+        let path = shard.join(hex::encode(rest));
+        (shard, path)
+    }
     pub(crate) fn object_path(&self, digest: Digest) -> PathBuf {
-        let encoded = digest.to_string();
-        self.objects_dir().join(&encoded[..2]).join(&encoded[2..])
+        self.object_location(digest).1
     }
 
     pub fn put(&self, bytes: &[u8]) -> Result<Digest, CasError> {
@@ -103,7 +112,10 @@ impl LocalCas {
     pub fn contains(&self, digest: Digest) -> Result<bool, CasError> {
         let path = self.object_path(digest);
         match fs::symlink_metadata(&path) {
-            Ok(metadata) if metadata.file_type().is_file() => self.get(digest).map(|_| true),
+            Ok(metadata) if metadata.file_type().is_file() => {
+                self.get(digest)?;
+                Ok(true)
+            }
             Ok(_) => Err(CasError::UnsupportedEntry(path)),
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
             Err(error) => Err(CasError::io("inspect CAS object", path, error)),
@@ -123,7 +135,7 @@ impl LocalCas {
                 Ok(metadata.len())
             }
             Ok(_) => Err(CasError::UnsupportedEntry(path)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(0),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(START),
             Err(error) => Err(CasError::io("inspect partial upload", path, error)),
         }
     }
@@ -138,11 +150,11 @@ impl LocalCas {
         finish: bool,
     ) -> Result<UploadStatus, CasError> {
         if self.contains(expected)? {
-            if offset == 0 && chunk.is_empty() {
+            if offset == START && chunk.is_empty() {
                 return Ok(UploadStatus::Complete { digest: expected });
             }
             return Err(CasError::InvalidOffset {
-                expected: 0,
+                expected: START,
                 actual: offset,
             });
         }
@@ -180,14 +192,12 @@ impl LocalCas {
         if !finish {
             return Ok(UploadStatus::Incomplete { offset: next });
         }
-        file.seek(SeekFrom::Start(0))
+        file.seek(SeekFrom::Start(START))
             .map_err(|error| CasError::io("rewind partial upload", &path, error))?;
         let mut hash = Sha256::new();
         io::copy(&mut file, &mut HashWriter(&mut hash))
             .map_err(|error| CasError::io("hash partial upload", &path, error))?;
-        let mut actual_bytes = [0_u8; 32];
-        actual_bytes.copy_from_slice(&hash.finalize());
-        let actual = Digest::from_bytes(actual_bytes);
+        let actual = Digest::from_bytes(hash.finalize().into());
         drop(file);
         if actual != expected {
             return Err(CasError::DigestMismatch { expected, actual });
@@ -209,7 +219,7 @@ impl LocalCas {
         self.root.join("uploads").join(format!("{expected}.part"))
     }
     fn temporary_path(&self, prefix: &str) -> PathBuf {
-        let sequence = TEMP_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let sequence = crate::tally::draw(&TEMP_SEQUENCE);
         self.root
             .join("tmp")
             .join(format!("{prefix}-{}-{sequence}", std::process::id()))
@@ -229,9 +239,7 @@ impl LocalCas {
         let mut hash = Sha256::new();
         io::copy(&mut file, &mut HashWriter(&mut hash))
             .map_err(|error| CasError::io("verify CAS temporary object", temporary, error))?;
-        let mut bytes = [0_u8; 32];
-        bytes.copy_from_slice(&hash.finalize());
-        let actual = Digest::from_bytes(bytes);
+        let actual = Digest::from_bytes(hash.finalize().into());
         if actual != digest {
             return Err(CasError::DigestMismatch {
                 expected: digest,
@@ -244,10 +252,8 @@ impl LocalCas {
         permissions.set_readonly(true);
         fs::set_permissions(temporary, permissions)
             .map_err(|error| CasError::io("make CAS object immutable", temporary, error))?;
-        let destination = self.object_path(digest);
-        let parent = destination
-            .parent()
-            .expect("object paths always have a parent");
+        let (parent, destination) = self.object_location(digest);
+        let parent = parent.as_path();
         fs::create_dir_all(parent)
             .map_err(|error| CasError::io("create CAS object shard", parent, error))?;
         let parent_metadata = fs::symlink_metadata(parent)

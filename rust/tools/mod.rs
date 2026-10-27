@@ -66,6 +66,17 @@ impl BuiltinTool {
         self.probe_backed = true;
         self
     }
+    /// The arguments the tool reads: `properties` and the names of those it
+    /// requires, as the closed JSON schema the model is offered.
+    pub(crate) fn input(mut self, properties: Value, required: &[&str]) -> Self {
+        self.info.input = json!({
+            "type": "object",
+            "properties": properties,
+            "required": required,
+            "additionalProperties": false,
+        });
+        self
+    }
 }
 
 /// The declared tier of the builtin tool named `name`, or nothing when no
@@ -144,18 +155,27 @@ pub(crate) fn builtin_capability_descriptors() -> Vec<CapabilityDescriptor> {
     descriptors
 }
 
+/// Every executable tool of `cwd` with the input schema its producer
+/// declared. Every producer of tool capabilities (built-in, runtime, service,
+/// MCP and extension tools) declares one; offering a tool with an empty schema
+/// in its place hid that it reads parameters the model was never told about.
 pub fn list_tools(cwd: &Path) -> Vec<ToolInfo> {
     crate::capability::for_cwd(cwd)
         .executable_kind(CapabilityKind::Tool)
         .filter(|descriptor| crate::tool_runtime::tool_allowed_by_env(&descriptor.ui.label))
-        .map(|descriptor| ToolInfo {
-            name: descriptor.ui.label.clone(),
-            description: descriptor.ui.description.clone(),
-            input: descriptor
-                .metadata
-                .get("input")
-                .cloned()
-                .unwrap_or_else(|| json!({})),
+        .map(|descriptor| {
+            let input = match descriptor.metadata.get("input") {
+                Some(input) => input.clone(),
+                None => unreachable!(
+                    "the tool capability {} was registered without its input schema",
+                    descriptor.ui.label
+                ),
+            };
+            ToolInfo {
+                name: descriptor.ui.label.clone(),
+                description: descriptor.ui.description.clone(),
+                input,
+            }
         })
         .collect()
 }

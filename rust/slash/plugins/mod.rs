@@ -38,9 +38,10 @@ enum Toggle {
 /// Plugin cache home. Honors `JEDEN_PLUGINS_HOME` (used to keep tests hermetic);
 /// defaults to `~`.
 pub(crate) fn plugins_home() -> PathBuf {
-    env::var_os("JEDEN_PLUGINS_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(dirs_home)
+    match env::var_os("JEDEN_PLUGINS_HOME") {
+        Some(home) => PathBuf::from(home),
+        None => dirs_home(),
+    }
 }
 
 pub(crate) fn marketplace_cache_root() -> PathBuf {
@@ -57,10 +58,12 @@ fn empty_picker_item(message: &str) -> PickerItem {
         .disabled(true)
 }
 
-fn scoped_installed_plugins(cwd: &Path) -> Vec<(String, Value)> {
+/// Every installed plugin of each scope, by id then scope; a scope whose
+/// package registry cannot be read is refused, never listed as empty.
+fn scoped_installed_plugins(cwd: &Path) -> Result<Vec<(String, Value)>, String> {
     let mut plugins = Vec::new();
     for (scope, dir) in [("project", cwd.to_path_buf()), ("user", plugins_home())] {
-        for mut entry in installed_entries_for_scope(&dir) {
+        for mut entry in installed_entries_for_scope(&dir)? {
             if entry.get("scope").and_then(Value::as_str).is_none() {
                 entry["scope"] = json!(scope);
             }
@@ -70,28 +73,30 @@ fn scoped_installed_plugins(cwd: &Path) -> Vec<(String, Value)> {
     plugins.sort_by(|(scope_a, a), (scope_b, b)| {
         a.get("id")
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .cmp(b.get("id").and_then(Value::as_str).unwrap_or(""))
+            .cmp(&b.get("id").and_then(Value::as_str))
             .then_with(|| scope_a.cmp(scope_b))
     });
-    plugins
+    Ok(plugins)
 }
 
-fn plugin_management_items(cwd: &Path) -> Vec<PickerItem> {
+/// One field of an installed record as its row shows it, or that the record
+/// states none.
+fn stated<'a>(plugin: &'a Value, key: &str, absent: &'a str) -> &'a str {
+    match plugin.get(key).and_then(Value::as_str) {
+        Some(value) => value,
+        None => absent,
+    }
+}
+
+fn plugin_management_items(cwd: &Path) -> Result<Vec<PickerItem>, String> {
     let mut items = Vec::new();
-    for (scope, plugin) in scoped_installed_plugins(cwd) {
+    for (scope, plugin) in scoped_installed_plugins(cwd)? {
         let Some(id) = plugin.get("id").and_then(Value::as_str) else {
             continue;
         };
         let enabled = plugin.get("enabled").and_then(Value::as_bool) != Some(false);
-        let version = plugin
-            .get("version")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown version");
-        let source = plugin
-            .get("source")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown source");
+        let version = stated(&plugin, "version", "no version recorded");
+        let source = stated(&plugin, "source", "no source recorded");
         let state = if enabled { "enabled" } else { "disabled" };
         let detail = format!("{scope} scope · {version} · {source} · {state}");
         let toggle = if enabled { "disable" } else { "enable" };
@@ -120,27 +125,31 @@ fn plugin_management_items(cwd: &Path) -> Vec<PickerItem> {
             .badge("DESTRUCTIVE"),
         );
     }
-    items
+    Ok(items)
 }
 
 pub(crate) fn plugins_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let mut items = plugin_management_items(context.cwd);
-    if items.is_empty() {
-        items.push(empty_picker_item("No plugins installed"));
-    }
+    let items = match plugin_management_items(context.cwd) {
+        Ok(items) if items.is_empty() => vec![empty_picker_item("No plugins installed")],
+        Ok(items) => items,
+        // The registry that could not be read is one disabled error row, as
+        // the other plugin views show it, never "No plugins installed".
+        Err(cause) => vec![PickerItem::action(&cause, "").detail("error").disabled(true)],
+    };
     PickerSpec::new("Manage plugins", items)
 }
 
 pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
-    let verb = argv.first().map(String::as_str).unwrap_or("list");
+    // A bare /plugins lists, as its usage line reads.
+    let (verb, rest) = match argv.split_first() {
+        Some((verb, rest)) => (verb.as_str(), rest),
+        None => ("list", &argv[..]),
+    };
     if verb == "list" {
-        let mut installed = merged_installed_values(context.cwd);
+        let mut installed = merged_installed_values(context.cwd)?;
         installed.sort_by(|a, b| {
-            a.get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .cmp(b.get("id").and_then(Value::as_str).unwrap_or(""))
+            a.get("id").and_then(Value::as_str).cmp(&b.get("id").and_then(Value::as_str))
         });
         return Ok(if installed.is_empty() {
             "No plugins installed. Use /marketplace discover and /marketplace install <name@marketplace>.".into()
@@ -153,28 +162,39 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
         });
     }
     if let Ok(toggle) = serde_json::from_value::<Toggle>(Value::from(verb)) {
-        let rest = argv.split_first().map(|(_, r)| r).unwrap_or(&[]);
-        let (_force, scope, targets) = parse_marketplace_flags(rest);
+        let (_force, scope, targets) = parse_marketplace_flags(rest)?;
         let scope = normalize_scope(scope)?;
-        let target = targets.first().map(String::as_str).unwrap_or("");
-        if target.is_empty() {
+        let Some(target) = targets.first().map(String::as_str).filter(|target| !target.is_empty()) else {
             return Err(format!(
                 "Usage: /plugins {verb} [--scope user|project] <name@marketplace>"
             ));
-        }
+        };
         let reg_dir = registry_scope_dir(context.cwd, &scope);
+        let active_here = installed_entries_for_scope(&reg_dir)?
+            .iter()
+            .any(|entry| entry["id"] == target);
         let mut registry = plugin_registry(&reg_dir)?;
         let installed = registry
             .get_mut("installed")
             .and_then(Value::as_object_mut)
             .ok_or("invalid plugin registry")?;
+        // A package the marketplace installed has no toggle record until it
+        // is first enabled or disabled; one installed nowhere is refused.
+        if !installed.contains_key(target) {
+            if !active_here {
+                return Err(format!("Installed plugin not found in {scope} scope: {target}"));
+            }
+            installed.insert(target.to_string(), json!({ "id": target }));
+        }
         let plugin = installed
             .get_mut(target)
             .ok_or_else(|| format!("Installed plugin not found in {scope} scope: {target}"))?;
-        if !plugin.is_object() {
-            *plugin = json!({});
-        }
-        let plugin_obj = plugin.as_object_mut().expect("plugin object");
+        let Some(plugin_obj) = plugin.as_object_mut() else {
+            return Err(format!(
+                "the installed record of {target} in {scope} scope ({}) is not an object, so it is not changed",
+                reg_dir.display()
+            ));
+        };
         plugin_obj.insert("enabled".into(), json!(matches!(toggle, Toggle::Enable)));
         plugin_obj.insert("scope".into(), json!(scope.clone()));
         plugin_obj.insert("updatedAt".into(), json!(now_text()?));

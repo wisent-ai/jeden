@@ -81,15 +81,19 @@ impl Conversation {
         if self.reconcile_completion {
             self.reconcile_completion = false;
             hooks.note("inspecting retained results before continuing interrupted work");
+            // Interrupted work that never answered proposes nothing: the
+            // review is told so (`proposedAnswer: null`), not handed an
+            // empty answer to judge as if it had been given.
             let prior = self
                 .messages
                 .iter()
                 .rev()
                 .find(|message| message.get("role").and_then(Value::as_str) == Some("assistant"))
                 .and_then(|message| message.get("content").and_then(Value::as_str))
-                .unwrap_or_default()
-                .to_string();
-            let _ = self.verify_completion(args, &prior, Value::Null, hooks)?;
+                .map(str::to_string);
+            // A rejection already tells the conversation to keep the work
+            // open, and an acceptance is published; either way the turn goes on.
+            let _accepted = self.verify_completion(args, prior.as_deref(), Value::Null, hooks)?;
         }
         Ok(())
     }
@@ -135,7 +139,7 @@ impl Conversation {
     pub(super) fn verify_completion(
         &mut self,
         args: &Args,
-        answer: &str,
+        answer: Option<&str>,
         report: Value,
         hooks: &RunHooks<'_>,
     ) -> Result<bool, String> {

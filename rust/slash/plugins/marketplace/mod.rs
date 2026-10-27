@@ -45,7 +45,10 @@ pub(crate) fn sanitize_marketplace_name(value: &str) -> String {
 
 fn marketplace_source_name(source: &str) -> String {
     let text = source.trim().trim_end_matches('/');
-    let tail = text.rsplit('/').next().unwrap_or(text);
+    let tail = match text.rsplit_once('/') {
+        Some((_, tail)) => tail,
+        None => text,
+    };
     sanitize_marketplace_name(if tail.is_empty() { text } else { tail })
 }
 
@@ -65,28 +68,39 @@ fn marketplace_source_type(source: &str) -> &'static str {
 
 pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
-    let verb = argv.first().map(String::as_str).unwrap_or("help");
-    let rest = argv.split_first().map(|(_, r)| r).unwrap_or(&[]);
-    let first = rest.first().map(String::as_str).unwrap_or("");
+    // A bare /marketplace is its help, as the usage line reads.
+    let (verb, rest) = match argv.split_first() {
+        Some((verb, rest)) => (verb.as_str(), rest),
+        None => ("help", &argv[..]),
+    };
+    let first = match rest.first() {
+        Some(first) => first.as_str(),
+        None => "",
+    };
     let mut registry = plugin_registry(context.cwd)?;
     if verb == "help" {
         return Ok("Usage: /marketplace add <signed-source> | dev-link [--scope user|project] <id> <local-path> [entrypoint] | remove <name> | list | update [name] | discover [marketplace] | install [--force] [--scope user|project] <name@marketplace> | upgrade [--scope user|project] [name@marketplace] | installed | uninstall <name@marketplace>.".into());
     }
     if verb == "dev-link" {
-        let (_, requested_scope, positional) = parse_marketplace_flags(rest);
-        if positional.len() < 2 || positional.len() > 3 {
-            return Err("Usage: /marketplace dev-link [--scope user|project] <id> <local-path> [entrypoint]".into());
-        }
+        let (_, requested_scope, positional) = parse_marketplace_flags(rest)?;
+        // https://docs.npmjs.com/cli/configuring-npm/package-json#main
+        // "If main is not set, it defaults to index.js in the package's root folder."
+        let (id, local, entrypoint) = match positional.as_slice() {
+            [id, local] => (id, local, "index.js"),
+            [id, local, entrypoint] => (id, local, entrypoint.as_str()),
+            _ => {
+                return Err("Usage: /marketplace dev-link [--scope user|project] <id> <local-path> [entrypoint]".into())
+            }
+        };
         let scope = normalize_scope(requested_scope)?;
         let scope_dir = registry_scope_dir(context.cwd, &scope);
-        let raw_path = std::path::PathBuf::from(&positional[1]);
+        let raw_path = std::path::PathBuf::from(local);
         let path = if raw_path.is_absolute() {
             raw_path
         } else {
             context.cwd.join(raw_path)
         };
-        let entrypoint = positional.get(2).map(String::as_str).unwrap_or("index.js");
-        let record = production_service(&scope_dir).dev_link(&positional[0], &path, entrypoint)?;
+        let record = production_service(&scope_dir).dev_link(id, &path, entrypoint)?;
         return Ok(format!("Registered explicit untrusted dev-link {} at {} as installed/inactive; marketplace verification was not bypassed.", record.id, record.path.display()));
     }
     if verb == "add" {
@@ -104,13 +118,18 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         // authoritatively so errors surface, then rekey the cache to that name.
         let cache = fetch_marketplace(context.cwd, &provisional, &source)?;
         let catalog = read_marketplace_catalog(&cache)?;
-        let cn = catalog
+        let cn = match catalog
             .pointer("/catalog/catalogId")
             .or_else(|| catalog.get("name"))
             .and_then(Value::as_str)
-            .unwrap_or("")
-            .trim()
-            .to_string();
+        {
+            Some(named) => named.trim().to_string(),
+            None => {
+                return Err(format!(
+                    "Marketplace catalog at '{source}' names neither catalog.catalogId nor name."
+                ))
+            }
+        };
         let name = if valid_marketplace_name(&cn) {
             if cn != provisional {
                 let to = marketplace_cache_dir(&cn);
@@ -145,13 +164,17 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
             .get("sources")
             .and_then(Value::as_object)
             .and_then(|sources| sources.get(&name))
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+            .cloned();
         let now = now_text()?;
-        // A source added before keeps the time it was first added.
-        let added_at = match existing.get("addedAt") {
+        // A source added before keeps the time it was first added and the
+        // plugins it listed; a new one lists none yet.
+        let added_at = match existing.as_ref().and_then(|earlier| earlier.get("addedAt")) {
             Some(first) => first.clone(),
             None => json!(now),
+        };
+        let listed = match existing.as_ref().and_then(|earlier| earlier.get("plugins")).filter(|value| value.is_array()) {
+            Some(plugins) => plugins.clone(),
+            None => json!([]),
         };
         registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(name.clone(), json!({
         "name": name,
@@ -160,7 +183,7 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         "enabled": true,
         "addedAt": added_at,
         "updatedAt": now,
-        "plugins": existing.get("plugins").filter(|value| value.is_array()).cloned().unwrap_or_else(|| json!([])),
+        "plugins": listed,
     }));
         let file = save_plugin_registry(context.cwd, &registry)?;
         return Ok(format!(
@@ -185,12 +208,9 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
         return Ok(format!("Removed marketplace source {} from {}. Installed plugin records were kept; uninstall them explicitly if desired.", first, file.display()));
     }
     if verb == "list" {
-        let mut sources = sorted_object_values(&registry["sources"]);
+        let mut sources = sorted_object_values(&registry["sources"])?;
         sources.sort_by(|a, b| {
-            a.get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
+            a.get("name").and_then(Value::as_str).cmp(&b.get("name").and_then(Value::as_str))
         });
         return Ok(if sources.is_empty() {
             "No marketplace sources configured. Add one with /marketplace add <source>.".into()

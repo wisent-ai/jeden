@@ -1,8 +1,9 @@
 //! The interactive views a command can put on screen: a chooser, and the
 //! confirmation in front of anything destructive.
 
-const INITIAL_SELECTION: usize = usize::MIN;
-const SELECTION_STEP: usize = true as usize;
+/// A selection starts on the first row and moves one row at a time.
+const INITIAL_SELECTION: usize = crate::tally::ORIGIN;
+const SELECTION_STEP: usize = crate::tally::STEP as usize;
 
 mod confirm;
 mod outcome;

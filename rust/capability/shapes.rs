@@ -21,6 +21,24 @@ pub enum CapabilityKind {
     Service,
 }
 
+impl CapabilityKind {
+    /// The kind as the registry spells it (`skill`, `slash-command`, …): its
+    /// serde name, so the wire and every listing read the one spelling.
+    pub fn name(self) -> String {
+        match serde_json::to_value(self) {
+            Ok(serde_json::Value::String(name)) => name,
+            Ok(other) => unreachable!("a unit capability kind serializes as its name, not {other}"),
+            Err(error) => unreachable!("a unit capability kind always serializes: {error}"),
+        }
+    }
+}
+
+impl std::fmt::Display for CapabilityKind {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.name())
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HealthState {

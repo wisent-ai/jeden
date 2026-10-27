@@ -1,6 +1,6 @@
 use crate::clock::unix_millis;
 use crate::task_runtime::types::{MailMessage, TaskError};
-use crate::task_runtime::{atomic_json, next_sequence};
+use crate::task_runtime::atomic_json;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -39,7 +39,7 @@ impl Mailbox {
         let dir = self.agent_dir(to)?;
         fs::create_dir_all(&dir)?;
         let at = unix_millis()?;
-        let id = format!("msg-{at}-{}-{}", std::process::id(), next_sequence());
+        let id = format!("msg-{at}-{}", uuid::Uuid::new_v4());
         let message = MailMessage {
             id: id.clone(),
             from: from.into(),
@@ -57,13 +57,17 @@ impl Mailbox {
         )?;
         Ok(message)
     }
-    /// The agent's waiting messages, oldest first. With `deliver`, each is
+    /// The agent's waiting messages, oldest first by the millisecond each was
+    /// sent; messages sent in the same millisecond have no order between them.
+    /// With `deliver`, each is
     /// stamped delivered, handed back this once and leaves the inbox, so the
     /// inbox holds only what is still unread and needs no size of its own.
     pub fn inbox(&self, agent: &str, deliver: bool) -> Result<Vec<MailMessage>, TaskError> {
         let dir = self.agent_dir(agent)?;
         let mut messages = Vec::new();
-        if !dir.exists() {
+        // An inbox that cannot be examined is refused with its cause: read as
+        // absent, an agent's waiting mail was answered as no mail.
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(&dir).map_err(TaskError::Io)? {
             return Ok(messages);
         }
         let mut paths = Vec::new();
@@ -93,7 +97,12 @@ impl Mailbox {
             }
         }
         for path in paths {
-            let mut message: MailMessage = serde_json::from_slice(&fs::read(&path)?)?;
+            let bytes = fs::read(&path).map_err(|error| {
+                TaskError::Io(format!("mail message {} cannot be read: {error}", path.display()))
+            })?;
+            let mut message: MailMessage = serde_json::from_slice(&bytes).map_err(|error| {
+                TaskError::Invalid(format!("mail message {} is not a message: {error}", path.display()))
+            })?;
             if deliver {
                 if message.delivered_at.is_none() {
                     message.delivered_at = delivered;
@@ -138,10 +147,18 @@ impl Mailbox {
                 }
                 return Ok(found);
             }
-            watch.wait()?;
+            stado_wait::blocking(
+                stado_wait::Kind::Session,
+                format!("mail for {agent}"),
+                dir.display(),
+                || watch.wait(),
+            )?;
         }
     }
+    /// Whether a wake is waiting for `agent`; a wake file that cannot be
+    /// examined is refused, never read as no wake.
     pub fn wake_pending(&self, agent: &str) -> Result<bool, TaskError> {
-        Ok(self.root.join(format!("{agent}.wake.json")).exists())
+        crate::tool_runtime::runtime_ops::platform::presence::present(&self.root.join(format!("{agent}.wake.json")))
+            .map_err(TaskError::Io)
     }
 }

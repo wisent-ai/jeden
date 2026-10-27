@@ -4,6 +4,15 @@
 
 use super::super::*;
 
+/// Whether the conversation holds more than its one prompt: history a
+/// compaction can cut.
+fn has_history(messages: &[Value]) -> bool {
+    let mut spoken = messages
+        .iter()
+        .filter(|message| message.get("role").and_then(Value::as_str) != Some("system"));
+    spoken.next().is_some() && spoken.next().is_some()
+}
+
 impl Conversation {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn recover_stream_failure(
@@ -29,18 +38,24 @@ impl Conversation {
         }
         let overflow = failure.class == crate::model_router::StreamErrorClass::ContextOverflow;
         if overflow && !failure.visible_output {
-            while !router.context_promotions.is_empty() {
-                let next = router.context_promotions.remove(0);
+            // The promotions are tried in order; those not tried stay queued.
+            let mut promotions = std::mem::take(&mut router.context_promotions).into_iter();
+            while let Some(next) = promotions.next() {
                 let current = crate::model_router::RouteDescriptor {
                     model: router.model.clone(),
-                    service_tier: (!router.service_tier.trim().is_empty())
-                        .then(|| router.service_tier.clone()),
+                    service_tier: Some(router.service_tier.clone())
+                        .filter(|tier| !tier.trim().is_empty()),
                 };
                 if next == current {
                     continue;
                 }
+                router.context_promotions = promotions.collect();
                 router.model = next.model.clone();
-                router.service_tier = next.service_tier.clone().unwrap_or_default();
+                // The router states no tier as an empty one.
+                router.service_tier = match next.service_tier.clone() {
+                    Some(tier) => tier,
+                    None => String::new(),
+                };
                 let result = crate::model_router::RouteResult::RouteChanged {
                     from: current,
                     to: next,
@@ -65,7 +80,7 @@ impl Conversation {
             None
         };
         if let Some(reason) =
-            recovery_reason.filter(|_| !failure.visible_output && self.turn_len() > 1)
+            recovery_reason.filter(|_| !failure.visible_output && has_history(&self.messages))
         {
             self.recorder.record(
                 "run_error",

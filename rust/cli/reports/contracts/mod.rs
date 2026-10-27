@@ -138,11 +138,11 @@ fn existing_text(file: &Path) -> Result<String, String> {
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
-    let (verb, rest) = args
-        .positionals
-        .split_first()
-        .map(|(verb, rest)| (verb.as_str(), rest))
-        .unwrap_or(("render", &[]));
+    // `jeden contracts` with no verb renders them, as `jeden contracts render` does.
+    let (verb, rest) = match args.positionals.split_first() {
+        Some((verb, rest)) => (verb.as_str(), rest),
+        None => ("render", &args.positionals[..]),
+    };
     match verb {
         "render" => {
             if !rest.is_empty() {
@@ -218,7 +218,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
                 format!("{path} already carries the Jeden contracts\n")
             })
         }
-        // The inverse of install (cli.md rule 2): the block goes, the rest of
+        // The inverse of install (cli.md: every verb has its inverse): the block goes, the rest of
         // the file stays as it was.
         "uninstall" => {
             let file = target(rest)?;

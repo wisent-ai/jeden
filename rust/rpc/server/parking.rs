@@ -4,7 +4,7 @@
 //! jeden-session`, and the attach holds the kind's declared reservation for
 //! exactly as long as this process lives. A handful of idle tabs — resumed
 //! sessions stopped at their first model call with a completion blocker, or
-//! an empty tab — can hold more cores than a laptop has at 0.0% CPU, and the
+//! an empty tab — can hold more cores than a laptop has while using no CPU, and the
 //! laptop then refuses every fleet build with `reservations_exhausted`.
 //!
 //! Only this process knows whether a turn, a tool call, a question to the
@@ -30,7 +30,8 @@ use crate::sdk::AgentSession;
 use serde_json::{json, Value};
 use std::io::BufRead;
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use crate::panicked::held;
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -55,12 +56,11 @@ impl ParkPolicy {
         let raw = raw.to_string_lossy().into_owned();
         let seconds = raw
             .trim()
-            .parse::<u64>()
-            .ok()
-            .filter(|seconds| *seconds > 0)
-            .ok_or_else(|| {
-                format!("{PARK_AFTER_SETTING} must be a whole number of seconds above zero, got {raw:?}")
-            })?;
+            .parse::<std::num::NonZeroU64>()
+            .map_err(|error| {
+                format!("{PARK_AFTER_SETTING} must be a whole number of seconds above zero, got {raw:?}: {error}")
+            })?
+            .get();
         Ok(Some(Self {
             after: Duration::from_secs(seconds),
             check_every: Duration::from_secs(seconds),
@@ -92,7 +92,9 @@ where
         let inbound = match read_frame(&mut input) {
             Ok(Some(frame)) => Inbound::Frame(Ok(frame)),
             Ok(None) => {
-                let _ = frames.send(Inbound::Closed);
+                // The reader ends here either way; a closed receiver has
+                // already stopped listening for the end.
+                let _unreceived = frames.send(Inbound::Closed);
                 return;
             }
             Err(error) => Inbound::Frame(Err(error)),
@@ -152,15 +154,6 @@ pub(super) struct InFlight {
 impl Drop for InFlight {
     fn drop(&mut self) {
         self.activity.touch();
-    }
-}
-
-/// The guard of `lock`; a lock a panicking request poisoned still guards
-/// the value it held when it panicked.
-fn held<T>(lock: &Mutex<T>) -> MutexGuard<'_, T> {
-    match lock.lock() {
-        Ok(guard) => guard,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -224,10 +217,7 @@ fn survey(
     if activity.working() {
         return Ok(None);
     }
-    let sessions: Vec<(String, AgentSession)> = state
-        .sessions
-        .lock()
-        .map_err(|_| "sessions lock poisoned".to_string())?
+    let sessions: Vec<(String, AgentSession)> = crate::panicked::held(&state.sessions)
         .iter()
         .map(|(id, session)| (id.clone(), session.clone()))
         .collect();
@@ -239,11 +229,11 @@ fn survey(
             activity.touch();
             return Ok(None);
         }
-        let blocker = session
-            .completion()?
-            .get("blocker")
-            .cloned()
-            .unwrap_or(Value::Null);
+        // A completion without a blocker field has none.
+        let blocker = match session.completion()?.get("blocker") {
+            Some(blocker) => blocker.clone(),
+            None => Value::Null,
+        };
         if blocker.is_null() {
             every_blocked = false;
         }

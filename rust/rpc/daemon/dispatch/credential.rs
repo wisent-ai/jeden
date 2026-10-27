@@ -16,7 +16,7 @@ pub(super) fn request(
         };
         let text = raw
             .into_string()
-            .map_err(|_| "JEDEN_CREDENTIAL_MANAGER_USER_ID is not Unicode".to_string())?;
+            .map_err(|raw| format!("JEDEN_CREDENTIAL_MANAGER_USER_ID {raw:?} is not Unicode"))?;
         let user = uuid::Uuid::parse_str(text.trim())
             .map_err(|error| format!("JEDEN_CREDENTIAL_MANAGER_USER_ID is not a UUID: {error}"))?;
         Ok(Some(format!("wisent-user:{user}")))

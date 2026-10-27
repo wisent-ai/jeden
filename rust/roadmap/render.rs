@@ -81,11 +81,11 @@ pub(crate) fn render_markdown(roadmap: &RoadmapFile) -> String {
         if !item.evidence.is_empty() {
             out.push_str("\n### Evidence\n\n");
             for evidence in &item.evidence {
-                let criterion = evidence
-                    .acceptance_id
-                    .as_deref()
-                    .map(|id| format!(" ({id})"))
-                    .unwrap_or_default();
+                // Evidence tied to no acceptance criterion is listed by its URI alone.
+                let criterion = match evidence.acceptance_id.as_deref() {
+                    Some(id) => format!(" ({id})"),
+                    None => String::new(),
+                };
                 out.push_str(&format!("- `{}`{}\n", evidence.uri, criterion));
             }
         }

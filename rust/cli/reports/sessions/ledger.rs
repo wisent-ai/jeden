@@ -8,6 +8,9 @@ use super::ledger_v2::{
 };
 use super::{LedgerEntry, LEDGER_APPEND_LOCK, SESSION_LEDGER_VERSION};
 use crate::cli::reports::sessions::pending::unresolved_pending_claim;
+// The append lock guards `()`: a holder that panicked left nothing broken in
+// it, so later appends take it back instead of being refused for good.
+use crate::panicked::held;
 use crate::cli::reports::sessions::replay::parse_transcript;
 use serde_json::{json, Value};
 use std::path::Path;
@@ -30,10 +33,15 @@ pub(crate) fn append_ledger_entry(
     kind: &str,
     data: Value,
 ) -> Result<LedgerEntry, String> {
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     append_ledger_entry_unlocked(dir, ts, kind, data)
+}
+
+/// Retain the native identity without copying a query payload into a legacy entry.
+pub(crate) fn append_observation(dir: &Path, ts: String, data: Value) -> Result<String, String> {
+    let _guard = held(&LEDGER_APPEND_LOCK);
+    let payload = SessionPayloadV2::from_legacy("interaction", data)?;
+    ledger_v2::store::append(dir, ts, payload).map(|event| event.event_id)
 }
 
 pub(super) fn append_ledger_entry_unlocked(
@@ -52,9 +60,7 @@ pub(crate) fn append_checkpoint_entry(
     label: Option<String>,
     messages: &[Value],
 ) -> Result<LedgerEntry, String> {
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     let payload = SessionPayloadV2::checkpoint(CheckpointPayloadV2 {
         label,
         messages: messages.to_vec(),
@@ -67,9 +73,7 @@ pub(crate) fn append_rewind_entry(
     ts: String,
     checkpoint_id: &str,
 ) -> Result<(LedgerEntry, Vec<Value>), String> {
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     let ledger = parse_transcript(dir)?;
     if unresolved_pending_claim(&ledger.active_entries).is_some() {
         return Err("cannot rewind while a pending action claim is unresolved".into());
@@ -119,15 +123,23 @@ pub(crate) fn session_active_leaf(dir: &Path) -> Result<Option<String>, String> 
     ledger_v2::store::reconcile_active_leaf(dir)
 }
 
-pub(super) fn export_event(event: &SessionEventV2) -> Value {
-    let mut value = serde_json::to_value(event).unwrap_or(Value::Null);
-    if let Some(object) = value.as_object_mut() {
-        object.insert("version".into(), json!(event.schema_version));
-        object.insert("id".into(), json!(event.event_id));
-        object.insert("parentId".into(), json!(event.parent_id));
-        object.insert("ts".into(), json!(event.timestamp));
-        object.insert("type".into(), json!(event.payload.kind()));
-        object.insert("data".into(), event.payload.data().clone());
-    }
-    value
+pub(super) fn export_event(event: &SessionEventV2) -> Result<Value, String> {
+    let mut value = serde_json::to_value(event)
+        .map_err(|cause| format!("cannot export recorded event {}: {cause}", event.event_id))?;
+    let object = match &mut value {
+        Value::Object(object) => object,
+        other => {
+            return Err(format!(
+                "cannot export recorded event {}: expected an object, observed {other}",
+                event.event_id
+            ))
+        }
+    };
+    object.insert("version".into(), json!(event.schema_version));
+    object.insert("id".into(), json!(event.event_id));
+    object.insert("parentId".into(), json!(event.parent_id));
+    object.insert("ts".into(), json!(event.timestamp));
+    object.insert("type".into(), json!(event.payload.kind()));
+    object.insert("data".into(), event.payload.data().clone());
+    Ok(value)
 }

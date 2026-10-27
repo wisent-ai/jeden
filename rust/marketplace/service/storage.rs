@@ -6,8 +6,8 @@
 use super::{ActiveRegistryV1, MarketplaceService};
 use crate::cas::{Digest, LocalCas};
 use serde::Serialize;
-use std::fs::{self, OpenOptions};
-use std::io::{Cursor, Write};
+use std::fs;
+use std::io::Cursor;
 use std::path::{Component, Path, PathBuf};
 
 impl MarketplaceService {
@@ -17,7 +17,9 @@ impl MarketplaceService {
             .parent()
             .and_then(Path::parent)
             .ok_or("marketplace root must be nested under .jeden/plugins")?;
-        LocalCas::open(jeden_root.join("cas")).map_err(|error| error.to_string())
+        let cas = jeden_root.join("cas");
+        LocalCas::open(&cas)
+            .map_err(|error| format!("the content store {} cannot be opened: {error}", cas.display()))
     }
     pub(super) fn packages(&self) -> PathBuf {
         self.root.join("packages")
@@ -45,31 +47,14 @@ impl MarketplaceService {
             .map_err(|error| format!("{} is not a plugin registry: {error}", path.display()))
     }
 
+    /// `value` as JSON over `path` through the shared durable replace, so a
+    /// reader sees the previous registry or the new one. It is encoded
+    /// before anything is staged, so a value that cannot be encoded leaves
+    /// nothing behind.
     pub(super) fn atomic_json<T: Serialize>(&self, path: &Path, value: &T) -> Result<(), String> {
-        let parent = path.parent().ok_or("registry path has no parent")?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-        // Encoded before the staging file exists, so a value that cannot be
-        // encoded leaves no staging file behind.
-        let bytes = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| format!("{} cannot be staged: {error}", temporary.display()))?;
-        let result = (|| {
-            file.write_all(&bytes).map_err(|error| error.to_string())?;
-            file.sync_all().map_err(|error| error.to_string())?;
-            fs::rename(&temporary, path).map_err(|error| error.to_string())
-        })();
-        if result.is_err() {
-            if let Err(left) = fs::remove_file(&temporary) {
-                if left.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("jeden: {} is left behind: {left}", temporary.display());
-                }
-            }
-        }
-        result
+        let bytes = serde_json::to_vec(value)
+            .map_err(|error| format!("{} cannot be encoded as JSON: {error}", path.display()))?;
+        crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
     }
 
     pub(super) fn store_verified(
@@ -86,21 +71,32 @@ impl MarketplaceService {
         }
         let expected = expected_digest
             .parse::<Digest>()
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("artifact digest {expected_digest} is not a digest: {error}"))?;
         self.cas()?
             .put_verified(expected, bytes)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("artifact {expected_digest} cannot be stored: {error}"))?;
         Ok(expected)
     }
 
     pub(super) fn unpack_verified(&self, digest: Digest, destination: &Path) -> Result<(), String> {
-        fs::create_dir_all(destination).map_err(|error| error.to_string())?;
-        let mut archive = tar::Archive::new(Cursor::new(
-            self.cas()?.get(digest).map_err(|error| error.to_string())?,
-        ));
-        for item in archive.entries().map_err(|error| error.to_string())? {
-            let mut item = item.map_err(|error| error.to_string())?;
-            let relative = item.path().map_err(|error| error.to_string())?.into_owned();
+        fs::create_dir_all(destination).map_err(|error| {
+            format!("the plugin directory {} cannot be created: {error}", destination.display())
+        })?;
+        let stored = self
+            .cas()?
+            .get(digest)
+            .map_err(|error| format!("artifact {digest} cannot be read from the content store: {error}"))?;
+        let mut archive = tar::Archive::new(Cursor::new(stored));
+        for item in archive
+            .entries()
+            .map_err(|error| format!("artifact {digest} is not a tar archive: {error}"))?
+        {
+            let mut item =
+                item.map_err(|error| format!("an entry of artifact {digest} cannot be read: {error}"))?;
+            let relative = item
+                .path()
+                .map_err(|error| format!("an entry path of artifact {digest} cannot be read: {error}"))?
+                .into_owned();
             if relative.is_absolute()
                 || relative
                     .components()
@@ -114,16 +110,19 @@ impl MarketplaceService {
             }
             let target = destination.join(relative);
             if kind.is_dir() {
-                fs::create_dir_all(&target).map_err(|error| error.to_string())?;
+                fs::create_dir_all(&target)
+                    .map_err(|error| format!("{} cannot be created: {error}", target.display()))?;
                 continue;
             }
             if !kind.is_file() {
                 return Err("plugin artifact contains unsupported entry type".into());
             }
             if let Some(parent) = target.parent() {
-                fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("{} cannot be created: {error}", parent.display()))?;
             }
-            item.unpack(&target).map_err(|error| error.to_string())?;
+            item.unpack(&target)
+                .map_err(|error| format!("{} cannot be unpacked: {error}", target.display()))?;
         }
         Ok(())
     }

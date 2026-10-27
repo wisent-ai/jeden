@@ -17,3 +17,14 @@ pub fn present(path: &Path) -> Result<bool, String> {
         Err(error) => Err(format!("{} cannot be examined: {error}", path.display())),
     }
 }
+
+/// Remove the file `path` when it is there; `what` names it in a refusal.
+/// Only a file already gone counts as removed; every other failure is
+/// refused naming the path and the cause.
+pub fn remove_present(path: &Path, what: &str) -> Result<(), String> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("{what} {} cannot be removed: {error}", path.display())),
+    }
+}

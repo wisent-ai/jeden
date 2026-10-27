@@ -5,7 +5,6 @@
 //! module line cap.
 
 use super::discovery::{executable_exists, language_id};
-use crate::tool_runtime::language::lsp::NEXT_REQUEST;
 use crate::tool_runtime::ToolRuntime;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -13,7 +12,6 @@ use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::atomic::Ordering;
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -46,56 +44,82 @@ impl LspClient {
 
 impl Drop for LspClient {
     fn drop(&mut self) {
-        // A server that cannot be killed outlives jeden, so that is said.
+        // A server that cannot be killed outlives jeden, so that is said, and
+        // so is a killed server that cannot be reaped.
         if let Err(error) = self.child.kill() {
             eprintln!(
                 "jeden: LSP server {} cannot be killed: {error}",
                 self.program
             );
         }
-        let _ = self.child.wait();
+        let process = self.child.id();
+        if let Err(error) = stado_wait::blocking(
+            stado_wait::Kind::Process,
+            format!("LSP server process {process} to end"),
+            &self.program,
+            || self.child.wait(),
+        ) {
+            eprintln!(
+                "jeden: LSP server {} (process {process}) could not be reaped: {error}",
+                self.program
+            );
+        }
     }
 }
 
+/// Reads the server's frames on their own thread and hands each message to
+/// the client. The first failure ends the thread and is handed over as its
+/// cause; a client that has already gone reads nothing more, so a failed
+/// hand-over ends the thread too.
 fn reader_thread(stdout: impl Read + Send + 'static, sender: mpsc::Sender<Result<Value, String>>) {
     thread::spawn(move || {
         let mut reader = BufReader::new(stdout);
         loop {
-            let mut content_length = None;
-            loop {
-                let mut header = String::new();
-                match reader.read_line(&mut header) {
-                    Ok(0) => {
-                        let _ = sender.send(Err("LSP server closed stdout".into()));
-                        return;
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        let _ = sender.send(Err(error.to_string()));
-                        return;
-                    }
-                }
-                if header.trim().is_empty() {
-                    break;
-                }
-                if let Some(value) = header.trim().strip_prefix("Content-Length:") {
-                    content_length = value.trim().parse::<usize>().ok();
-                }
-            }
-            let Some(length) = content_length else {
-                continue;
-            };
-            let mut bytes = vec![0; length];
-            if let Err(error) = reader.read_exact(&mut bytes) {
-                let _ = sender.send(Err(error.to_string()));
-                return;
-            }
-            let message = serde_json::from_slice(&bytes).map_err(|error| error.to_string());
-            if sender.send(message).is_err() {
+            let message = read_frame(&mut reader);
+            let ended = message.is_err();
+            if sender.send(message).is_err() || ended {
                 return;
             }
         }
     });
+}
+
+/// One framed message: header lines up to a blank one, of which
+/// `Content-Length` is required, then that many bytes of JSON. A stream that
+/// closes, a length that is not a byte count, a header without one and a
+/// body cut short are each refused by name; a frame whose length cannot be
+/// read cannot be skipped, since the stream is then out of step.
+fn read_frame(reader: &mut impl BufRead) -> Result<Value, String> {
+    let mut content_length = None;
+    loop {
+        let mut header = String::new();
+        reader.read_line(&mut header).map_err(|error| error.to_string())?;
+        if header.is_empty() {
+            return Err("LSP server closed stdout".into());
+        }
+        if header.trim().is_empty() {
+            break;
+        }
+        if let Some(value) = header.trim().strip_prefix("Content-Length:") {
+            let length = value.trim().parse::<u64>().map_err(|error| {
+                format!("the LSP server's Content-Length {:?} is not a byte count: {error}", value.trim())
+            })?;
+            content_length = Some(length);
+        }
+    }
+    let length = content_length.ok_or("the LSP server sent a frame header without Content-Length")?;
+    let mut bytes = Vec::new();
+    reader
+        .take(length)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 != length {
+        return Err(format!(
+            "the LSP server closed stdout {} bytes into a {length}-byte message",
+            bytes.len()
+        ));
+    }
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
 pub(super) fn send(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> {
@@ -110,13 +134,13 @@ pub(super) fn send(stdin: &mut ChildStdin, value: &Value) -> Result<(), String> 
 pub(super) fn root_uri(cwd: &Path) -> Result<String, String> {
     url::Url::from_directory_path(cwd)
         .map(|uri| uri.to_string())
-        .map_err(|_| "cannot convert cwd to LSP root URI".into())
+        .map_err(|()| format!("cannot convert {} to an LSP root URI", cwd.display()))
 }
 
 pub(super) fn file_uri(path: &Path) -> Result<String, String> {
     url::Url::from_file_path(path)
         .map(|uri| uri.to_string())
-        .map_err(|_| "cannot convert path to LSP URI".into())
+        .map_err(|()| format!("cannot convert {} to an LSP URI", path.display()))
 }
 
 /// Wait for the server's answer to one request. The receive blocks; an
@@ -126,22 +150,27 @@ pub(super) fn file_uri(path: &Path) -> Result<String, String> {
 pub(super) fn await_response(
     runtime: &ToolRuntime<'_>,
     client: &mut LspClient,
-    id: u64,
+    id: &str,
 ) -> Result<Value, String> {
     loop {
         if runtime.operation.cancellation().is_cancelled() {
             return Err("LSP request cancelled".into());
         }
         match client.messages.recv() {
-            Ok(Ok(message)) if message.get("id").and_then(Value::as_u64) == Some(id) => {
+            Ok(Ok(message)) if message.get("id").and_then(Value::as_str) == Some(id) => {
                 if let Some(error) = message.get("error") {
                     return Err(format!("LSP error: {error}"));
                 }
-                return Ok(message.get("result").cloned().unwrap_or(Value::Null));
+                return message
+                    .get("result")
+                    .cloned()
+                    .ok_or_else(|| format!("the LSP server answered request {id} with neither result nor error"));
             }
             Ok(Ok(_notification_or_wake)) => {}
             Ok(Err(error)) => return Err(client.stopped(&error)),
-            Err(_) => return Err(client.stopped("its reader ended")),
+            // Every sender is gone: the reader thread ended after handing over
+            // its last message, and the cancellation wake with the client.
+            Err(mpsc::RecvError) => return Err(client.stopped("its reader ended")),
         }
     }
 }
@@ -194,12 +223,12 @@ pub(super) fn start(
         program: program.to_string(),
         stderr_log,
     };
-    let id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
+    let id = uuid::Uuid::new_v4().to_string();
     send(
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","id":id,"method":"initialize","params":{"processId":std::process::id(),"rootUri":root_uri(runtime.cwd)?,"capabilities":{"textDocument":{"publishDiagnostics":{},"definition":{},"references":{},"rename":{},"codeAction":{},"formatting":{}}}}}),
     )?;
-    let _ = await_response(runtime, &mut client, id)?;
+    await_response(runtime, &mut client, &id)?;
     send(
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","method":"initialized","params":{}}),

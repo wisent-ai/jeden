@@ -114,14 +114,30 @@ pub struct MailMessage {
     pub delivered_at: Option<u64>,
 }
 
+/// How many of something a health read found: the count, or none when the
+/// listing it counts could not be read, whose cause is then among the
+/// health's `errors`. A count nobody took is never written as a number.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(transparent)]
+pub struct Counted(pub Option<usize>);
+
+impl std::fmt::Display for Counted {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            Some(count) => write!(f, "{count}"),
+            None => f.write_str("not counted (its listing could not be read)"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CapabilityHealth {
     pub id: &'static str,
     pub healthy: bool,
     pub store: PathBuf,
-    pub discovered_agents: usize,
-    pub running: usize,
+    pub discovered_agents: Counted,
+    pub running: Counted,
     pub limits: TaskLimits,
     pub isolation_strategies: Vec<&'static str>,
     pub errors: Vec<String>,

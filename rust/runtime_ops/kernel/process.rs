@@ -1,29 +1,31 @@
 //! One interpreter process, and the framed conversation this workshop holds
 //! with it.
-//!
-//! Split out of `runtime_ops/kernel.rs`, which had grown past the module line
-//! cap.
 
-use super::super::platform::{native, PipeReader, ProcessSignal, ProcessTree};
+use super::super::platform::PipeReader;
 use super::super::{BoundedOutput, OperationProgress};
-use super::bootstrap::{JAVASCRIPT_BOOTSTRAP, PYTHON_BOOTSTRAP};
+use super::control::{self, SharedControl};
+use super::frame::{self, Frame, Stream};
+use super::output::{drain_kernel_stderr, finish_kernel, PIPE_READ_BYTES};
 use super::{KernelLanguage, KernelResult};
 use crate::tool_runtime::runtime_ops::context::OperationContext;
 use serde_json::{json, Value};
-use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::path::Path;
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::ChildStdin;
+use std::sync::Arc;
 
 pub(super) struct KernelProcess {
-    child: Child,
+    pub(super) control: SharedControl,
     stdin: ChildStdin,
     stdout: Box<dyn PipeReader>,
     stderr: Box<dyn PipeReader>,
-    process_tree: Box<dyn ProcessTree>,
     language: KernelLanguage,
     pending: Vec<u8>,
-    sequence: u64,
+    /// The id the running evaluation was sent under, fresh for each one;
+    /// frames under any other id are an earlier, interrupted evaluation's and
+    /// are skipped.
+    current: Option<String>,
+    pub(super) registered: Option<Arc<super::KernelKey>>,
 }
 
 impl KernelProcess {
@@ -32,70 +34,25 @@ impl KernelProcess {
         cwd: &Path,
         grant: &super::ExecutionGrant,
     ) -> Result<Self, String> {
-        let (program, args): (&OsStr, Vec<&OsStr>) = match language {
-            KernelLanguage::Python => (
-                OsStr::new("python3"),
-                vec![
-                    OsStr::new("-u"),
-                    OsStr::new("-c"),
-                    OsStr::new(PYTHON_BOOTSTRAP),
-                ],
-            ),
-            KernelLanguage::JavaScript => (
-                OsStr::new("node"),
-                vec![OsStr::new("-e"), OsStr::new(JAVASCRIPT_BOOTSTRAP)],
-            ),
-        };
-        let mut command = Command::new(program);
-        command
-            .args(args)
-            .current_dir(cwd)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        command.env_clear();
-        for key in &grant.process.environment {
-            if let Some(value) = std::env::var_os(key) {
-                command.env(key, value);
-            }
-        }
-        native()
-            .configure_command(&mut command)
-            .map_err(|error| error.to_string())?;
-        let mut child = command
-            .spawn()
-            .map_err(|error| format!("failed launching {} kernel: {error}", language.label()))?;
-        let process_tree = native()
-            .attach_process_tree(&child)
-            .map_err(|error| error.to_string())?;
-        let stdin = child.stdin.take().ok_or("kernel stdin unavailable")?;
-        let stdout = native()
-            .pipe_reader(Box::new(
-                child.stdout.take().ok_or("kernel stdout unavailable")?,
-            ))
-            .map_err(|error| error.to_string())?;
-        let stderr = native()
-            .pipe_reader(Box::new(
-                child.stderr.take().ok_or("kernel stderr unavailable")?,
-            ))
-            .map_err(|error| error.to_string())?;
-        // A cancelled turn interrupts the blocked frame read in `evaluate`.
-        crate::tool_runtime::runtime_ops::wake_on_cancellation(stdout.waker());
+        let launched = super::launch::spawn(language, cwd, grant)?;
         Ok(Self {
-            child,
-            stdin,
-            stdout,
-            stderr,
-            process_tree,
+            control: launched.control,
+            registered: None,
+            stdin: launched.stdin,
+            stdout: launched.stdout,
+            stderr: launched.stderr,
             language,
-            pending: Vec::with_capacity(8192),
-            sequence: 0,
+            pending: Vec::new(),
+            current: None,
         })
     }
 
-    pub(super) fn alive(&mut self) -> bool {
-        self.child.try_wait().ok().flatten().is_none()
+    /// Whether the kernel still runs; its exit is kept when it has ended, and
+    /// a status that cannot be read is refused with its cause.
+    pub(super) fn alive(&mut self) -> Result<bool, String> {
+        control::lock(&self.control)?.alive()
     }
+
 
     pub(super) fn evaluate(
         &mut self,
@@ -103,129 +60,132 @@ impl KernelProcess {
         code: &str,
         reset: bool,
     ) -> Result<(KernelResult, bool), String> {
-        self.sequence = self.sequence.wrapping_add(1);
-        let request = json!({"id": self.sequence, "code": code});
+        control::lock(&self.control)?.require_live()?;
+        if context.cancellation().is_cancelled() || control::lock(&self.control)?.cancelled() {
+            return Err(format!("{} kernel evaluation cancelled before code was written", self.language.label()));
+        }
+        let id = uuid::Uuid::new_v4().to_string();
+        let request = json!({"id": id, "code": code});
+        self.current = Some(id);
         serde_json::to_writer(&mut self.stdin, &request).map_err(|error| error.to_string())?;
         self.stdin
             .write_all(b"\n")
             .and_then(|_| self.stdin.flush())
             .map_err(|error| error.to_string())?;
-        let mut stdout = BoundedOutput::new(
-            "kernel-stdout",
-            context.output_limits(),
-            context.artifacts().clone(),
-        );
-        let mut stderr = BoundedOutput::new(
-            "kernel-stderr",
-            context.output_limits(),
-            context.artifacts().clone(),
-        );
-        let mut display = BoundedOutput::new(
-            "kernel-display",
-            context.output_limits(),
-            context.artifacts().clone(),
-        );
+        let capture = |name| BoundedOutput::new(name, context.output_limits(), context.artifacts().clone());
+        let (mut stdout, mut stderr) = (capture("kernel-stdout"), capture("kernel-stderr"));
+        let mut display = capture("kernel-display");
         let mut display_mime = None;
-        let mut progress_total = 0u64;
+        let mut progress_total: Option<u64> = None;
         loop {
-            drain_kernel_stderr(&mut self.stderr, &mut stderr)?;
-            if context.cancellation().is_cancelled() {
-                self.interrupt();
+            drain_kernel_stderr(&mut self.stderr, &mut stderr, || {
+                Ok(context.cancellation().is_cancelled() || control::lock(&self.control)?.cancelled())
+            })?;
+            if context.cancellation().is_cancelled() || control::lock(&self.control)?.cancelled() {
+                let said = match self.interrupt() {
+                    Ok(()) => "kernel evaluation cancelled".to_string(),
+                    Err(cause) => format!("kernel evaluation cancelled; {cause}"),
+                };
                 return Ok((
-                    finish_kernel(
-                        false,
-                        true,
-                        reset,
-                        stdout,
-                        stderr,
-                        display,
-                        display_mime,
-                        Some("kernel evaluation cancelled".into()),
-                    )?,
+                    finish_kernel(false, true, reset, stdout, stderr, display, display_mime, Some(said))?,
                     false,
                 ));
             }
-            if let Some(frame) = self.next_frame()? {
-                if frame.get("id").and_then(Value::as_u64) != Some(self.sequence) {
+            let Some(answer) = self.next_frame()? else {
+                if context.cancellation().is_cancelled() || control::lock(&self.control)?.cancelled() {
                     continue;
                 }
-                match frame.get("type").and_then(Value::as_str).unwrap_or("") {
-                    "chunk" => {
-                        let bytes = frame
-                            .get("data")
-                            .and_then(Value::as_str)
-                            .unwrap_or("")
-                            .as_bytes();
-                        match frame.get("stream").and_then(Value::as_str).unwrap_or("") {
-                            "stdout" => stdout.write_chunk(bytes),
-                            "stderr" => stderr.write_chunk(bytes),
-                            "display" => {
-                                if display_mime.is_none() {
-                                    display_mime = frame
-                                        .get("mime")
-                                        .and_then(Value::as_str)
-                                        .map(ToString::to_string);
-                                }
-                                display.write_chunk(bytes)
-                            }
-                            _ => continue,
-                        }
-                        .map_err(|e| e.to_string())?;
-                        progress_total = progress_total.saturating_add(bytes.len() as u64);
-                        context.progress(OperationProgress {
-                            stream: "kernel",
-                            bytes: bytes.len() as u64,
-                            total_bytes: progress_total,
-                        });
-                    }
-                    "done" => {
-                        let ok = frame.get("ok").and_then(Value::as_bool).unwrap_or(false);
-                        let error = frame
-                            .get("error")
-                            .and_then(Value::as_str)
-                            .map(ToString::to_string);
-                        return Ok((
-                            finish_kernel(
-                                ok,
-                                false,
-                                reset,
-                                stdout,
-                                stderr,
-                                display,
-                                display_mime,
-                                error,
-                            )?,
-                            true,
-                        ));
-                    }
-                    _ => {}
+                if !self.alive()? {
+                    drain_kernel_stderr(&mut self.stderr, &mut stderr, || {
+                        Ok(context.cancellation().is_cancelled() || control::lock(&self.control)?.cancelled())
+                    })?;
+                    let internal = stderr.finish().map_err(|e| e.to_string())?;
+                    let how = control::lock(&self.control)?.exit_status()
+                        .ok_or_else(|| format!("{} kernel reported an exit without its observed process status", self.language.label()))?
+                        .to_string();
+                    return Err(format!(
+                        "{} kernel exited before response ({how}): {}",
+                        self.language.label(),
+                        internal.text
+                    ));
                 }
-            } else if !self.alive() {
-                let internal = stderr.finish().map_err(|e| e.to_string())?;
-                return Err(format!(
-                    "{} kernel exited before response: {}",
-                    self.language.label(),
-                    internal.text
-                ));
+                continue;
+            };
+            let answer_id = frame::id_of(&answer)
+                .ok_or_else(|| format!("kernel protocol frame has no string evaluation id: {answer}"))?;
+            if Some(answer_id) != self.current.as_deref() {
+                continue;
+            }
+            match frame::read(&answer)? {
+                Frame::Chunk { stream, data, mime } => {
+                    let bytes = data.as_bytes();
+                    match stream {
+                        Stream::Stdout => stdout.write_chunk(bytes),
+                        Stream::Stderr => stderr.write_chunk(bytes),
+                        Stream::Display => {
+                            if display_mime.is_none() {
+                                display_mime = mime.map(str::to_owned);
+                            }
+                            display.write_chunk(bytes)
+                        }
+                    }
+                    .map_err(|e| e.to_string())?;
+                    let written = bytes.len() as u64;
+                    let total = match progress_total {
+                        Some(before) => before.saturating_add(written),
+                        None => written,
+                    };
+                    progress_total = Some(total);
+                    context.progress(OperationProgress {
+                        stream: "kernel",
+                        bytes: written,
+                        total_bytes: total,
+                    });
+                }
+                Frame::Done { ok, error } => {
+                    return Ok((
+                        finish_kernel(
+                            ok,
+                            false,
+                            reset,
+                            stdout,
+                            stderr,
+                            display,
+                            display_mime,
+                            error.map(str::to_owned),
+                        )?,
+                        true,
+                    ));
+                }
             }
         }
     }
 
     /// The next complete frame: one already buffered, or the next bytes the
     /// kernel writes. `None` when the read was woken by a cancellation, or when
-    /// the kernel closed stdout (its exit is then awaited, so `alive` answers).
+    /// the kernel exited. Closing the protocol stream while still running is
+    /// a protocol refusal, never a reason to wait for an unrelated process exit.
     fn next_frame(&mut self) -> Result<Option<Value>, String> {
         if let Some(frame) = self.buffered_frame()? {
             return Ok(Some(frame));
         }
-        let mut chunk = [0u8; 8192];
+        let mut chunk = [Default::default(); PIPE_READ_BYTES];
         match self.stdout.read_blocking(&mut chunk) {
-            Ok(0) => {
-                let _ = self.child.wait();
-                return Ok(None);
-            }
             Ok(count) => {
-                self.pending.extend_from_slice(&chunk[..count]);
+                let read = &chunk[..count];
+                if read.is_empty() {
+                    if control::lock(&self.control)?.cancelled() { return Ok(None); }
+                    if self.alive()? {
+                        return Err(format!(
+                            "{} kernel closed protocol stdout before completing the evaluation: process {} still runs, with {} unfinished frame bytes",
+                            self.language.label(),
+                            control::lock(&self.control)?.pid(),
+                            self.pending.len()
+                        ));
+                    }
+                    return Ok(None);
+                }
+                self.pending.extend_from_slice(read);
             }
             Err(error) if error.kind() == io::ErrorKind::Interrupted => return Ok(None),
             Err(error) => return Err(error.to_string()),
@@ -246,54 +206,18 @@ impl KernelProcess {
     /// The interrupted evaluation still answers with a `done` frame under its
     /// own id; the next evaluation skips frames that are not its own, so
     /// nothing here waits for it.
-    fn interrupt(&mut self) {
-        let _ = self.process_tree.signal(ProcessSignal::Interrupt);
+    fn interrupt(&mut self) -> Result<(), String> {
+        control::lock(&self.control)?.interrupt()
     }
-    /// An interpreter holds no state worth flushing, so it is killed and its
-    /// exit awaited.
-    pub(super) fn terminate(&mut self) {
-        let _ = self.process_tree.signal(ProcessSignal::Kill);
-        let _ = self.child.wait();
-    }
+
 }
 
-pub(super) fn drain_kernel_stderr(
-    reader: &mut Box<dyn PipeReader>,
-    output: &mut BoundedOutput,
-) -> Result<(), String> {
-    let mut buffer = [0u8; 8192];
-    loop {
-        match reader.read_available(&mut buffer) {
-            Ok(0) => return Ok(()),
-            Ok(count) => output
-                .write_chunk(&buffer[..count])
-                .map_err(|e| e.to_string())?,
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
-            Err(error) => return Err(error.to_string()),
+impl crate::tool_runtime::runtime_ops::session::PersistentProcess for KernelProcess {
+    fn retire(&mut self, cancelled: bool) {
+        if let Some(key) = &self.registered {
+            super::registry::finish(key, &self.control, cancelled);
+        } else {
+            control::retire(&self.control, cancelled);
         }
     }
-}
-// Three termination flags and three capture buffers, assembled by the poll
-// loop that owns them; this call is the first place they become one value.
-#[allow(clippy::too_many_arguments)]
-pub(super) fn finish_kernel(
-    ok: bool,
-    cancelled: bool,
-    reset: bool,
-    stdout: BoundedOutput,
-    stderr: BoundedOutput,
-    display: BoundedOutput,
-    mime: Option<String>,
-    error: Option<String>,
-) -> Result<KernelResult, String> {
-    Ok(KernelResult {
-        ok,
-        cancelled,
-        reset,
-        stdout: stdout.finish().map_err(|e| e.to_string())?,
-        stderr: stderr.finish().map_err(|e| e.to_string())?,
-        display: display.finish().map_err(|e| e.to_string())?,
-        display_mime: mime,
-        error,
-    })
 }

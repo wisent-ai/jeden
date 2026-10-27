@@ -102,7 +102,11 @@ impl Conversation {
             )?;
         }
         prepared.router.model = streaming.route.model.clone();
-        prepared.router.service_tier = streaming.route.service_tier.clone().unwrap_or_default();
+        // The router states a route that names no tier as an empty one.
+        prepared.router.service_tier = match &streaming.route.service_tier {
+            Some(tier) => tier.clone(),
+            None => String::new(),
+        };
         if let Some(usage) = &streaming.completion.usage {
             if let Err(error) = append_usage_event(
                 &args.cwd,

@@ -1,6 +1,7 @@
 use crate::collab::CollabRole;
 use crate::fleet::{run_db, sql};
-use sea_orm::sea_query::{Expr, OnConflict};
+use crate::tally::{FIRST, STEP};
+use sea_orm::sea_query::{Expr, LockType, OnConflict};
 use sea_orm::{
     ActiveValue::Set, ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
     QuerySelect, TransactionTrait,
@@ -11,6 +12,9 @@ mod entities;
 mod http;
 
 use auth::{now_ms, relay_response_authorized, token_hash, token_role};
+
+/// A role token's first generation; each rotation adds one step.
+const FIRST_GENERATION: i64 = FIRST as i64;
 use entities::{event, room, token};
 pub use http::serve;
 
@@ -52,9 +56,9 @@ impl RelayStore {
         let now = now_ms()?;
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
-            // Writers of one room serialize on its row.
+            // Writers of one room serialize on its row (SELECT … FOR UPDATE).
             let exists = room::Entity::find_by_id(room.clone())
-                .lock_exclusive()
+                .lock(LockType::Update)
                 .one(&tx)
                 .await
                 .map_err(sql)?
@@ -74,7 +78,7 @@ impl RelayStore {
                     room_id: Set(room.clone()),
                     role: Set(CollabRole::Full.name()),
                     token_hash: Set(hash.clone()),
-                    generation: Set(1),
+                    generation: Set(FIRST_GENERATION),
                 })
                 .exec_without_returning(&tx)
                 .await
@@ -96,14 +100,14 @@ impl RelayStore {
                 .count(&tx)
                 .await
                 .map_err(sql)?;
-            if count >= i64::MAX as u64 {
-                return Err(
-                    "collaboration event sequence exceeds the database integer range".into(),
-                );
-            }
-            let seq = count as i64 + 1;
-            let response_seq = usize::try_from(seq)
-                .map_err(|_| "collaboration event sequence exceeds the host address range")?;
+            // The event takes the place after the room's last one.
+            let seq = i64::try_from(count)
+                .map_err(|error| format!("the room holds more events than the database counts: {error}"))?
+                .checked_add(i64::from(STEP))
+                .ok_or("collaboration event sequence exceeds the database integer range")?;
+            let response_seq = usize::try_from(seq).map_err(|error| {
+                format!("collaboration event sequence exceeds the host address range: {error}")
+            })?;
             event::Entity::insert(event::ActiveModel {
                 room_id: Set(room),
                 seq: Set(seq),
@@ -117,12 +121,25 @@ impl RelayStore {
             Ok(response_seq)
         })
     }
-    pub fn get(&self, room: &str, since: usize) -> Result<(Vec<String>, usize), String> {
-        let (room, since) = (room.to_owned(), since as i64);
+    /// The room's events after `since` (all of them without one), and the
+    /// sequence of its last event, none for a room without events.
+    pub fn get(
+        &self,
+        room: &str,
+        since: Option<usize>,
+    ) -> Result<(Vec<String>, Option<usize>), String> {
+        let room = room.to_owned();
+        let since = match since.map(i64::try_from) {
+            Some(Ok(since)) => Some(since),
+            Some(Err(error)) => return Err(format!("the cursor is beyond the database integer range: {error}")),
+            None => None,
+        };
         run_db(move |db| async move {
-            let blobs = event::Entity::find()
-                .filter(event::Column::RoomId.eq(room.clone()))
-                .filter(event::Column::Seq.gt(since))
+            let mut events = event::Entity::find().filter(event::Column::RoomId.eq(room.clone()));
+            if let Some(since) = since {
+                events = events.filter(event::Column::Seq.gt(since));
+            }
+            let blobs = events
                 .order_by_asc(event::Column::Seq)
                 .all(&db)
                 .await
@@ -139,7 +156,12 @@ impl RelayStore {
                 .await
                 .map_err(sql)?
                 .flatten();
-            Ok((blobs, next.unwrap_or(0) as usize))
+            let next = match next.map(usize::try_from) {
+                Some(Ok(next)) => Some(next),
+                Some(Err(error)) => return Err(format!("the room's last sequence does not fit this host: {error}")),
+                None => None,
+            };
+            Ok((blobs, next))
         })
     }
     pub fn rotate_token(&self, room: &str, old: &str, new: &str) -> Result<bool, String> {
@@ -167,14 +189,14 @@ impl RelayStore {
                     room_id: Set(room),
                     role: Set(new_role.name()),
                     token_hash: Set(new_hash),
-                    generation: Set(1),
+                    generation: Set(FIRST_GENERATION),
                 })
                 .on_conflict(
                     OnConflict::columns([token::Column::RoomId, token::Column::Role])
                         .update_column(token::Column::TokenHash)
                         .value(
                             token::Column::Generation,
-                            Expr::col((token::Entity, token::Column::Generation)).add(1),
+                            Expr::col((token::Entity, token::Column::Generation)).add(i64::from(STEP)),
                         )
                         .to_owned(),
                 )
@@ -186,7 +208,7 @@ impl RelayStore {
                     .col_expr(token::Column::TokenHash, Expr::value(new_hash))
                     .col_expr(
                         token::Column::Generation,
-                        Expr::col(token::Column::Generation).add(1),
+                        Expr::col(token::Column::Generation).add(i64::from(STEP)),
                     )
                     .filter(token::Column::RoomId.eq(room))
                     .filter(token::Column::Role.eq(old_role.name()))

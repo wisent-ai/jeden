@@ -19,6 +19,7 @@ pub mod control_plane;
 pub mod eval;
 pub(crate) mod fleet;
 pub mod goal_lifecycle;
+pub(crate) mod hillclimb;
 pub mod hooks;
 pub mod marketplace;
 pub mod mcp;
@@ -27,6 +28,7 @@ pub mod model_router;
 pub mod net;
 pub mod onboarding;
 pub(crate) mod operator_rules;
+pub(crate) mod panicked;
 
 // Moved to the modules that own them, under the paths every caller uses:
 // the action protocol the agent speaks and the terminal QR rendering.
@@ -178,6 +180,7 @@ pub fn main() -> ExitCode {
         Command::Interactive => interactive(&args),
         Command::Run => agent::run_command(&args),
         Command::Pursue => autonomy::command(&args),
+        Command::Hillclimb => hillclimb::command(&args),
         Command::Todo => completion::command(&args),
         Command::Asks => completion::asks_command(&args),
         Command::Rpc => rpc::serve_stdio().map(|_| String::new()),
@@ -257,6 +260,11 @@ pub fn main() -> ExitCode {
         Command::Stats => stats_command(&args),
         Command::Gallery => gallery_command(&args),
     };
+    // The standalone gateway a stand-in started lives as long as the command
+    // that needed it; a gateway that cannot be stopped is said, not hidden.
+    if let Err(left) = agent::credential::private_gateway::stop() {
+        eprintln!("jeden: {left}");
+    }
     match result {
         Ok(text) => {
             print!("{}", text);

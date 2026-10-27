@@ -6,6 +6,7 @@ mod custom;
 mod edit;
 mod exec;
 mod language;
+mod observed;
 mod read;
 #[path = "../runtime_ops/mod.rs"]
 pub mod runtime_ops;
@@ -34,6 +35,9 @@ use session::{
     ask_user, context_tool, list_artifacts, memory_tool, read_artifact, recall_conversation,
     save_artifact, todo_tool,
 };
+
+pub use observed::execute;
+pub(crate) use edit::policy_subjects;
 
 #[derive(Clone, Debug)]
 pub struct DynamicToolDescriptor {
@@ -85,7 +89,7 @@ pub fn register_dynamic_tools(registration: DynamicToolRegistration) -> Result<(
             existing
                 .iter()
                 .find(|item| item.name == candidate.name)
-                .map(|_| candidate.name.clone())
+                .map(|_registered| candidate.name.clone())
         }) {
             return Err(format!("dynamic tool name already registered: {name}"));
         }
@@ -191,7 +195,7 @@ pub(crate) fn tool_allowed_by_env(tool: &str) -> bool {
     !any || matched
 }
 
-pub fn execute(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<Value, String> {
+fn execute_observed(runtime: &ToolRuntime<'_>, tool: &str, input: &Value) -> Result<Value, String> {
     ensure_dynamic_registrations();
     if !tool_allowed_by_env(tool) {
         return Err(format!("tool is not allowed for this agent: {tool}"));

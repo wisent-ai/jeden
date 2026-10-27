@@ -48,11 +48,11 @@ pub(super) fn validate(value: &Value, schema: &Value, root: &Value, location: &s
         failures.extend(validate(value, child, root, location));
     }
     if let Some(alternatives) = object.get("oneOf").and_then(Value::as_array) {
-        let matched = alternatives
+        let matched: Vec<&Value> = alternatives
             .iter()
             .filter(|child| validate(value, child, root, location).is_empty())
-            .count();
-        if matched != 1 {
+            .collect();
+        if !matches!(matched.as_slice(), [_]) {
             failures.push(format!(
                 "{location}: expected exactly one oneOf alternative to match"
             ));
@@ -204,11 +204,11 @@ pub(super) fn check(
         if document.value.get("$schema").is_some() {
             continue;
         }
-        let file = document
-            .path
-            .file_name()
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| document.path.display().to_string());
+        // A path without a final component is named whole.
+        let file = match document.path.file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => document.path.display().to_string(),
+        };
         for node in walk(&document.value) {
             let Some(kind) = node.get("type").and_then(Value::as_str) else {
                 continue;

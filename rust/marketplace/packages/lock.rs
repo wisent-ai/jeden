@@ -2,8 +2,6 @@ use super::manifest::PluginReleaseV1;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
-use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
@@ -61,35 +59,17 @@ impl PluginLockV1 {
     pub fn canonical_bytes(&self) -> Result<Vec<u8>, String> {
         let mut copy = self.clone();
         copy.plugins.sort();
-        let mut bytes = serde_json::to_vec(&copy).map_err(|error| error.to_string())?;
+        let mut bytes = serde_json::to_vec(&copy)
+            .map_err(|error| format!("the plugin lock cannot be encoded as JSON: {error}"))?;
         bytes.push(b'\n');
         Ok(bytes)
     }
 
+    /// The lock's canonical bytes over `path` through the shared durable
+    /// replace; encoded before anything is staged, so a lock that cannot be
+    /// encoded leaves nothing behind.
     pub fn write_atomic(&self, path: &Path) -> Result<(), String> {
-        let parent = path.parent().ok_or("lock path has no parent")?;
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-        // Encoded before the staging file exists, so a lock that cannot be
-        // encoded leaves no staging file behind.
         let bytes = self.canonical_bytes()?;
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(|error| format!("{} cannot be staged: {error}", temporary.display()))?;
-        let result = (|| {
-            file.write_all(&bytes).map_err(|error| error.to_string())?;
-            file.sync_all().map_err(|error| error.to_string())?;
-            fs::rename(&temporary, path).map_err(|error| error.to_string())
-        })();
-        if result.is_err() {
-            if let Err(left) = fs::remove_file(&temporary) {
-                if left.kind() != std::io::ErrorKind::NotFound {
-                    eprintln!("jeden: {} is left behind: {left}", temporary.display());
-                }
-            }
-        }
-        result
+        crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
     }
 }

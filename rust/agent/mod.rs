@@ -17,6 +17,7 @@ mod commands;
 mod conversation;
 pub(crate) mod credential;
 mod hooks;
+pub(crate) mod observations;
 mod runtime;
 mod state;
 
@@ -76,7 +77,7 @@ fn catalog_left_unread(router: &ChatConfig) -> Option<&str> {
     router.config_error.as_deref()
 }
 
-pub(crate) use runtime::now_stamp;
+pub(crate) use runtime::{now_stamp, selected_model, selected_service_tier};
 pub(crate) use runtime::specs::system_prompt_checked;
 pub(crate) use runtime::task_contract;
 pub(crate) use state::{
@@ -88,7 +89,10 @@ use runtime::{
     append_usage_event, env_usize, prepare_outbound_messages, rust_tool_specs, usage_cost,
     SessionRecorder,
 };
-use state::{apply_mode_instructions, capture_plan_if_enabled, read_mode_state, write_mode_state};
+use state::{
+    apply_mode_instructions, capture_plan_if_enabled, mode_state_fields, read_mode_state,
+    write_mode_state,
+};
 
 pub(crate) fn record_roadmap_event(
     cwd: &Path,

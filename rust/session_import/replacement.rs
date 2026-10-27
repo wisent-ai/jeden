@@ -9,59 +9,83 @@ pub(super) fn verify_unadopted(
     destination: &Path,
     format: super::Format,
 ) -> Result<(), String> {
-    if destination.join("adopted").exists() {
+    let adopted = destination.join("adopted");
+    if adopted.try_exists().map_err(|error| {
+        format!("cannot inspect native adoption marker {} before refresh: {error}", adopted.display())
+    })? {
         return Err("native session has been adopted; refusing import refresh".into());
     }
-    let snapshot = crate::cli::sessions::read_session_value(&destination.display().to_string())?;
+    let snapshot = crate::cli::sessions::read_session_value(&destination.display().to_string())
+        .map_err(|error| format!("cannot inspect imported native session {} before refresh: {error}", destination.display()))?;
     let events = snapshot["events"]
         .as_array()
-        .ok_or("native ledger has no events")?;
+        .ok_or_else(|| format!("native ledger {} has no events array", destination.display()))?;
     let reason = format!("{}-import", format.name());
-    if events.len() != 1
-        || events[0]["type"] != "context_snapshot"
-        || events[0].pointer("/data/reason").and_then(Value::as_str) != Some(reason.as_str())
+    // Import writes a context snapshot; any continuation changes this shape.
+    let [context] = events.as_slice() else {
+        return Err("native session has been used; refusing import refresh".into());
+    };
+    if context["type"] != "context_snapshot"
+        || context.pointer("/data/reason").and_then(Value::as_str) != Some(reason.as_str())
     {
         return Err("native session has been used; refusing import refresh".into());
     }
     let completion_path = destination.join("completion.json");
-    if completion_path.exists() {
-        let state: Value =
-            serde_json::from_slice(&fs::read(&completion_path).map_err(|e| e.to_string())?)
-                .map_err(|e| e.to_string())?;
-        let source = super::source::read(
-            &destination.join(format!("artifacts/{}-source.jsonl", format.name())),
-        )?;
-        let requests = state["requests"]
-            .as_array()
-            .ok_or("native requests are invalid")?;
-        if requests.len() != source.pending.len()
-            || requests
-                .iter()
-                .zip(&source.pending)
-                .any(|(request, prompt)| request["prompt"].as_str() != Some(prompt.as_str()))
-            || state["revision"].as_u64() != Some(requests.len() as u64)
-        {
-            return Err("native retained requests have changed; refusing import refresh".into());
-        }
-        if state["tasks"]
-            .as_array()
-            .is_some_and(|tasks| !tasks.is_empty())
-            || state["requests"].as_array().is_some_and(|requests| {
-                requests
-                    .iter()
-                    .any(|request| request["planned"] == true || request["paused"] == true)
-            })
-        {
-            return Err("native retained work has changed; refusing import refresh".into());
-        }
+    // Refresh has the same typed, read-only admission as the native work UI.
+    // The canonical reader also verifies legacy work and non-regular paths.
+    let state = crate::completion::read_state(destination).map_err(|error| {
+        format!("cannot inspect retained native work {} before refresh: {error}", completion_path.display())
+    })?;
+    let source = super::source::read(
+        &destination.join(format!("artifacts/{}-source.jsonl", format.name())),
+    )?;
+    if state.requests.len() != source.pending.len()
+        || state
+            .requests
+            .iter()
+            .zip(&source.pending)
+            .any(|(request, prompt)| request.prompt != *prompt)
+        || state.revision != state.requests.len() as u64
+    {
+        return Err("native retained requests have changed; refusing import refresh".into());
     }
-    for entry in fs::read_dir(root).map_err(|e| e.to_string())? {
-        let path = entry.map_err(|e| e.to_string())?.path().join("state.json");
-        if !path.is_file() {
+    if !state.tasks.is_empty()
+        || state.requests.iter().any(|request| request.planned || request.paused)
+    {
+        return Err("native retained work has changed; refusing import refresh".into());
+    }
+    for entry in fs::read_dir(root).map_err(|error| {
+        format!("cannot enumerate native lineage under {} before refresh: {error}", root.display())
+    })? {
+        let entry = entry.map_err(|error| {
+            format!("cannot read a native lineage entry under {} before refresh: {error}", root.display())
+        })?;
+        let directory = entry.path();
+        let metadata = fs::metadata(&directory).map_err(|error| {
+            format!("cannot inspect native lineage entry {} before refresh: {error}", directory.display())
+        })?;
+        if !metadata.is_dir() {
             continue;
         }
-        let state: Value = serde_json::from_slice(&fs::read(&path).map_err(|e| e.to_string())?)
-            .map_err(|e| format!("cannot verify native lineage {}: {e}", path.display()))?;
+        let path = directory.join("state.json");
+        let metadata = match fs::metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(format!(
+                "cannot inspect native lineage state {} before refresh: {error}", path.display()
+            )),
+        };
+        if !metadata.is_file() {
+            return Err(format!(
+                "cannot verify native lineage state {} before refresh: expected a file, observed {:?}",
+                path.display(), metadata.file_type()
+            ));
+        }
+        let bytes = fs::read(&path).map_err(|error| {
+            format!("cannot read native lineage state {} before refresh: {error}", path.display())
+        })?;
+        let state: Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("cannot decode native lineage state {} before refresh: {error}", path.display()))?;
         if state
             .pointer("/lineage/parentSession")
             .and_then(Value::as_str)
@@ -78,9 +102,19 @@ pub(super) fn verify_unadopted(
 
 pub(super) fn recover(root: &Path, destination: &Path, id: &str) -> Result<(), String> {
     let backup = root.join(format!(".previous-{id}"));
-    if backup.exists() && !destination.exists() {
-        fs::rename(&backup, destination)
-            .map_err(|e| format!("cannot recover interrupted import publication: {e}"))?;
+    let has_backup = backup.try_exists().map_err(|error| {
+        format!("cannot inspect interrupted import backup {}: {error}", backup.display())
+    })?;
+    let has_destination = destination.try_exists().map_err(|error| {
+        format!("cannot inspect import recovery destination {}: {error}", destination.display())
+    })?;
+    if has_backup && !has_destination {
+        fs::rename(&backup, destination).map_err(|error| {
+            format!(
+                "cannot recover interrupted import from {} to {}: {error}",
+                backup.display(), destination.display()
+            )
+        })?;
     }
     Ok(())
 }
@@ -93,22 +127,64 @@ pub(super) fn publish(
     format: super::Format,
 ) -> Result<(), String> {
     let backup = root.join(format!(".previous-{id}"));
-    if destination.exists() {
+    let has_destination = destination.try_exists().map_err(|error| {
+        format!("cannot inspect import publication destination {}: {error}", destination.display())
+    })?;
+    if has_destination {
         verify_unadopted(root, destination, format)?;
-        if backup.exists() {
-            fs::remove_dir_all(&backup).map_err(|e| e.to_string())?;
+        if backup.try_exists().map_err(|error| {
+            format!("cannot inspect previous import backup {}: {error}", backup.display())
+        })? {
+            fs::remove_dir_all(&backup).map_err(|error| {
+                format!(
+                    "cannot remove previous import backup {} before replacing {}: {error}",
+                    backup.display(), destination.display()
+                )
+            })?;
         }
-        fs::rename(destination, &backup).map_err(|e| e.to_string())?;
+        fs::rename(destination, &backup).map_err(|error| {
+            format!(
+                "cannot retain imported session {} as previous backup {}: {error}",
+                destination.display(), backup.display()
+            )
+        })?;
     }
     if let Err(error) = fs::rename(staging, destination) {
-        recover(root, destination, id)?;
-        return Err(format!("cannot publish imported session: {error}"));
+        let original = format!(
+            "cannot publish imported session from {} to {}: {error}",
+            staging.display(), destination.display()
+        );
+        return Err(match recover(root, destination, id) {
+            Ok(()) => original,
+            Err(recovery) => format!("{original}; import publication recovery also failed: {recovery}"),
+        });
     }
     fs::File::open(root)
-        .and_then(|f| f.sync_all())
-        .map_err(|e| e.to_string())?;
-    if backup.exists() {
-        fs::remove_dir_all(&backup).map_err(|e| e.to_string())?;
+        .map_err(|error| {
+            format!(
+                "imported session is published at {}; cannot open parent {} for synchronization: {error}",
+                destination.display(), root.display()
+            )
+        })?
+        .sync_all()
+        .map_err(|error| {
+            format!(
+                "imported session is published at {}; cannot synchronize parent {}: {error}",
+                destination.display(), root.display()
+            )
+        })?;
+    if backup.try_exists().map_err(|error| {
+        format!(
+            "imported session is published at {}; cannot inspect previous backup {}: {error}",
+            destination.display(), backup.display()
+        )
+    })? {
+        fs::remove_dir_all(&backup).map_err(|error| {
+            format!(
+                "imported session is published at {}; cannot remove previous backup {}: {error}",
+                destination.display(), backup.display()
+            )
+        })?;
     }
     Ok(())
 }

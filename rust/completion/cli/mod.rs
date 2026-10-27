@@ -165,7 +165,7 @@ pub(crate) fn execute(
                         .next()
                         .ok_or_else(|| usage("--revision requires a number"))?
                         .parse::<u64>()
-                        .map_err(|_| usage("--revision must be an unsigned integer"))?,
+                        .map_err(|error| usage(format!("--revision must be an unsigned integer: {error}")))?,
                 )
             }
             "--reason" => {

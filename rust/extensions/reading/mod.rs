@@ -47,33 +47,36 @@ pub(super) fn retire_generated_dirs(previous: Option<&Arc<Registry>>, current: &
     }
 }
 
+/// The generation a rebuilt registry takes: the one after the registry it
+/// replaces, or the first when none was loaded.
+fn next_generation(previous: Option<&Arc<Registry>>) -> u64 {
+    match previous {
+        Some(registry) => registry
+            .generation
+            .saturating_add(u64::from(crate::tally::STEP)),
+        None => crate::tally::FIRST,
+    }
+}
+
 pub(super) fn current(cwd: &Path) -> Result<Arc<Registry>, String> {
     let key = canonical_key(cwd);
     let sources = source_set(cwd)?;
-    let previous = REGISTRIES
-        .read()
-        .map_err(|_| "extension registry lock poisoned")?
-        .get(&key)
-        .cloned();
+    // Registries are inserted whole per workspace: a holder that panicked left
+    // a map every later load can still read.
+    let previous = crate::panicked::read_held(&REGISTRIES).get(&key).cloned();
     if let Some(registry) = &previous {
         if registry.fingerprint == sources.fingerprint {
             return Ok(registry.clone());
         }
     }
-    let generation = previous
-        .as_ref()
-        .map(|registry| registry.generation.saturating_add(1))
-        .unwrap_or(1);
+    let generation = next_generation(previous.as_ref());
     let previous_command_registry = previous.clone();
-    let built = match build_registry(cwd, sources, generation) {
-        Ok(registry) => Arc::new(registry),
-        Err(_) if previous.is_some() => return Ok(previous.expect("checked previous registry")),
-        Err(error) => return Err(error),
-    };
-    REGISTRIES
-        .write()
-        .map_err(|_| "extension registry lock poisoned")?
-        .insert(key, built.clone());
+    // The extension sources changed; a rebuild that fails is the answer, not
+    // the registry built from the sources as they were before.
+    let built = Arc::new(build_registry(cwd, sources, generation).map_err(|error| {
+        format!("the extensions changed and could not be loaded again: {error}")
+    })?);
+    crate::panicked::written(&REGISTRIES).insert(key, built.clone());
     retire_generated_dirs(previous_command_registry.as_ref(), &built);
     Ok(built)
 }
@@ -81,15 +84,8 @@ pub(super) fn current(cwd: &Path) -> Result<Arc<Registry>, String> {
 pub fn reload(cwd: &Path) -> Result<ReloadReport, String> {
     let key = canonical_key(cwd);
     let sources = source_set(cwd)?;
-    let previous = REGISTRIES
-        .read()
-        .map_err(|_| "extension registry lock poisoned")?
-        .get(&key)
-        .cloned();
-    let generation = previous
-        .as_ref()
-        .map(|registry| registry.generation.saturating_add(1))
-        .unwrap_or(1);
+    let previous = crate::panicked::read_held(&REGISTRIES).get(&key).cloned();
+    let generation = next_generation(previous.as_ref());
     let built = Arc::new(build_registry(cwd, sources, generation)?);
     let commands = built
         .extensions
@@ -131,10 +127,7 @@ pub fn reload(cwd: &Path) -> Result<ReloadReport, String> {
         hooks: built.hooks.len(),
         capabilities,
     };
-    REGISTRIES
-        .write()
-        .map_err(|_| "extension registry lock poisoned")?
-        .insert(key, built.clone());
+    crate::panicked::written(&REGISTRIES).insert(key, built.clone());
     retire_generated_dirs(previous.as_ref(), &built);
     crate::capability::invalidate();
     Ok(report)

@@ -3,24 +3,27 @@ use super::*;
 mod advisor;
 
 impl Conversation {
+    /// Compact the history when it has reached the declared threshold; below
+    /// it, with no threshold declared, or with nothing to compact, nothing
+    /// changes. A compaction that fails is recorded and refused.
     pub(in crate::agent) fn maybe_auto_compact(
         &mut self,
         args: &Args,
         hooks: &mut RunHooks,
         reason: &str,
         add_continue_prompt: bool,
-    ) -> Result<bool, String> {
+    ) -> Result<(), String> {
         let Some(threshold) = Self::auto_compaction_threshold()? else {
-            return Ok(false);
+            return Ok(());
         };
         let mut tokens = self.approx_tokens();
-        if tokens < threshold || self.turn_len() == 0 {
-            return Ok(false);
+        if tokens < threshold || self.is_empty_turn() {
+            return Ok(());
         }
         self.prune_tool_results_if_needed(threshold)?;
         tokens = self.approx_tokens();
         if tokens < threshold {
-            return Ok(false);
+            return Ok(());
         }
         self.recorder.record(
             "auto_compaction",
@@ -45,7 +48,12 @@ impl Conversation {
             self.messages
                 .push(json!({ "role": "user", "content": prompt }));
         }
-        Ok(true)
+        Ok(())
+    }
+
+    /// Whether the live history holds no turn yet.
+    fn is_empty_turn(&self) -> bool {
+        std::num::NonZeroUsize::new(self.turn_len()).is_none()
     }
 
     /// Summarize the live history into a single compact system note and drop the
@@ -56,7 +64,7 @@ impl Conversation {
         instructions: &str,
         hooks: &mut RunHooks,
     ) -> Result<String, String> {
-        if self.turn_len() == 0 {
+        if self.is_empty_turn() {
             return Err("Nothing to compact yet; the conversation is empty.".into());
         }
         if hooks.cancelled() {
@@ -127,7 +135,7 @@ impl Conversation {
         focus: &str,
         hooks: &mut RunHooks,
     ) -> Result<String, String> {
-        if self.turn_len() == 0 {
+        if self.is_empty_turn() {
             return Err("Nothing to hand off yet; the conversation is empty.".into());
         }
         if hooks.cancelled() {

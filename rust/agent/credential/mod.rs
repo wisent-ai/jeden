@@ -4,6 +4,7 @@ use std::env;
 use std::sync::{LazyLock, OnceLock};
 
 mod directory;
+pub(crate) mod private_gateway;
 pub(crate) mod stand_in;
 pub(crate) mod tokens;
 
@@ -59,15 +60,21 @@ static DIRECT_REFUSED: OnceLock<String> = OnceLock::new();
 /// selects no provider and no Brama either: its refusal is kept for
 /// `brama_route`, which every model call, doctor and Desktop read it through.
 pub(crate) fn direct_provider() -> Option<(String, Option<String>)> {
-    match direct_variables() {
-        Ok(Some(found)) => Some(found),
-        Ok(None) => stand_in::engaged().map(|standing| (standing.endpoint.clone(), None)),
-        Err(said) => {
-            let _ = DIRECT_REFUSED.set(said);
-            None
-        }
-    }
+    stand_in::selected_provider().map(|provider| (provider.endpoint, provider.key))
 }
+
+/// What serves this process in Brama's place, once a stand-in was engaged:
+/// Jeden's own gateway (on subscription grants signed in by hand) or a
+/// stored provider. The surfaces that report the route read this, so a
+/// bearer Jeden minted for its own gateway is never reported as the
+/// process environment's key.
+pub(crate) fn standing_in() -> Option<&'static str> {
+    stand_in::engaged().map(|standing| match standing.stored {
+        Some(_) => "stored-provider",
+        None => "own-gateway",
+    })
+}
+
 /// The refusal left by a direct provider variable read in this process.
 pub(crate) fn direct_refusal() -> Option<&'static str> {
     DIRECT_REFUSED.get().map(String::as_str)
@@ -125,7 +132,9 @@ pub(crate) fn ensure() -> &'static (Source, Source) {
 
 static FILE_SUPPLIED: OnceLock<Vec<String>> = OnceLock::new();
 pub(crate) fn record_file_supplied(names: Vec<String>) {
-    let _ = FILE_SUPPLIED.set(names);
+    // main records the names once, from the one credentials file it loads; a
+    // second recording would carry no other file, so the first stands.
+    let _already_recorded = FILE_SUPPLIED.set(names);
 }
 fn file_supplied(name: &str) -> bool {
     FILE_SUPPLIED

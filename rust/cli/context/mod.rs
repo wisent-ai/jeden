@@ -44,7 +44,7 @@ fn options(rest: &[String]) -> Result<Options, String> {
                 options.limit = Some(
                     value
                         .parse()
-                        .map_err(|_| usage(format!("--limit must be a number, not {value}")))?,
+                        .map_err(|error| usage(format!("--limit must be a number, not {value}: {error}")))?,
                 );
             }
             "--source" | "--sources" => {
@@ -69,12 +69,12 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     let signal_cancellation = cancellation.clone();
     ctrlc::try_set_handler(move || signal_cancellation.cancel())
         .map_err(|error| format!("context cancellation signal registration failed: {error}"))?;
-    let (verb, rest) = args
-        .positionals
-        .split_first()
-        .map(|(verb, rest)| (verb.as_str(), rest))
-        .unwrap_or(("help", &[]));
-    match verb {
+    // With no word at all there is nothing to recommend for: the usage is
+    // the answer, never a query made of the word "help".
+    let Some((verb, rest)) = args.positionals.split_first() else {
+        return Err(crate::cli::invocation::refusal::usage(USAGE));
+    };
+    match verb.as_str() {
         "recommend" => recommend(args, rest, &cancellation),
         "prompt" => prompt(args, rest, &cancellation),
         "sources" => sources(args, rest, &cancellation),
@@ -184,17 +184,14 @@ fn sources(
         );
     }
     let mut out = String::new();
-    let selected = report
-        .get("selected")
-        .and_then(|value| value.as_array())
-        .map(|values| {
-            values
-                .iter()
-                .filter_map(|value| value.as_str())
-                .collect::<Vec<_>>()
-                .join(", ")
-        })
-        .unwrap_or_default();
+    let selected = match report.get("selected").and_then(|value| value.as_array()) {
+        Some(values) => values
+            .iter()
+            .filter_map(|value| value.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+        None => "(the advisor's report names no selection)".to_string(),
+    };
     out.push_str(&format!("Selected for every run: {selected}\n\n"));
     if let Some(rows) = report.get("sources").and_then(|value| value.as_array()) {
         for row in rows {

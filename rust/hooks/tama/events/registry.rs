@@ -177,6 +177,9 @@ impl Registry {
                 let reason = unrunnable_reason(id, &written, &tried, &self.path);
                 (written, Some(reason))
             }
+            EntryCommand::Unexamined { written, reason } => {
+                (written, Some(format!("{what}: {reason}")))
+            }
         };
         Some(TamaHook {
             id: id.to_string(),

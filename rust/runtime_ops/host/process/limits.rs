@@ -1,5 +1,8 @@
 //! Applying the operating system's own limits to a child before it becomes
-//! the command.
+//! the command, through libc's declarations of setrlimit, the RLIMIT_*
+//! resources, close_range and F_SETFD. They were written here by hand as
+//! numbers and their results were dropped: an inherited descriptor that could
+//! not be marked close-on-exec stayed open in the command without a word.
 //!
 //! Split out of `runtime_ops/host/process.rs`, which had grown past the
 //! module line cap.
@@ -8,31 +11,57 @@
 use std::io;
 use std::process::Command;
 
+/// The type setrlimit names its resource with: glibc declares an enum,
+/// every other libc a plain int.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+type Resource = libc::__rlimit_resource_t;
+#[cfg(all(unix, not(all(target_os = "linux", target_env = "gnu"))))]
+type Resource = libc::c_int;
+
+/// The standard input, output and error every command keeps open; they are
+/// the lowest descriptors, so the first inherited one is numbered by their
+/// count.
+#[cfg(unix)]
+const STANDARD: &[libc::c_int] = &[libc::STDIN_FILENO, libc::STDOUT_FILENO, libc::STDERR_FILENO];
+
 #[cfg(unix)]
 pub(super) fn configure_resource_limits(
     command: &mut Command,
     limits: super::ResourceLimits,
 ) -> Result<(), String> {
+    use std::num::NonZeroU64;
     use std::os::unix::process::CommandExt;
-    if limits.cpu_seconds == 0
-        || limits.address_space_bytes < 16 * 1024 * 1024
-        || limits.open_files < 3
-        || limits.processes == 0
-        || limits.file_bytes == 0
-    {
-        return Err("invalid zero/unsafe process resource limit".into());
+    let named = [
+        ("cpuSeconds", limits.cpu_seconds),
+        ("addressSpaceBytes", limits.address_space_bytes),
+        ("openFiles", limits.open_files),
+        ("processes", limits.processes),
+        ("fileBytes", limits.file_bytes),
+    ];
+    if let Some((name, _zero)) = named.iter().find(|(_, value)| NonZeroU64::new(*value).is_none()) {
+        return Err(format!(
+            "process resource limit {name} is 0, which would let the command run nothing"
+        ));
     }
-    let inherited_fds = inherited_fds();
+    let standard = u64::try_from(STANDARD.len())
+        .map_err(|error| format!("the standard descriptors cannot be counted: {error}"))?;
+    if limits.open_files < standard {
+        return Err(format!(
+            "process resource limit openFiles is {}, which leaves the command no room for its standard input, output and error",
+            limits.open_files
+        ));
+    }
+    let inherited_fds = inherited_fds()?;
     unsafe {
         command.pre_exec(move || {
-            mark_inherited_fds_close_on_exec(&inherited_fds);
-            set_limit(RLIMIT_CPU, limits.cpu_seconds)?;
+            mark_inherited_fds_close_on_exec(&inherited_fds)?;
+            set_limit(libc::RLIMIT_CPU, limits.cpu_seconds)?;
             #[cfg(target_os = "linux")]
-            set_limit(RLIMIT_AS, limits.address_space_bytes)?;
-            set_limit(RLIMIT_NOFILE, limits.open_files)?;
+            set_limit(libc::RLIMIT_AS, limits.address_space_bytes)?;
+            set_limit(libc::RLIMIT_NOFILE, limits.open_files)?;
             #[cfg(target_os = "linux")]
-            set_limit(RLIMIT_NPROC, limits.processes)?;
-            set_limit(RLIMIT_FSIZE, limits.file_bytes)?;
+            set_limit(libc::RLIMIT_NPROC, limits.processes)?;
+            set_limit(libc::RLIMIT_FSIZE, limits.file_bytes)?;
             Ok(())
         });
     }
@@ -45,79 +74,73 @@ pub(super) fn configure_resource_limits(
 ) -> Result<(), String> {
     Err("native resource-limit backend unavailable".into())
 }
+
+/// Linux closes the inherited descriptors in the child by range, so none
+/// need listing.
 #[cfg(target_os = "linux")]
-fn inherited_fds() -> Vec<i32> {
-    Vec::new()
+fn inherited_fds() -> Result<Vec<libc::c_int>, String> {
+    Ok(Vec::new())
 }
+/// The descriptors this process holds above standard error, as /dev/fd lists
+/// them; a listing or an entry that cannot be read is refused naming it.
 #[cfg(target_os = "macos")]
-fn inherited_fds() -> Vec<i32> {
-    std::fs::read_dir("/dev/fd")
-        .into_iter()
-        .flatten()
-        .filter_map(|entry| {
-            entry
-                .ok()?
-                .file_name()
-                .to_string_lossy()
-                .parse::<i32>()
-                .ok()
-        })
-        .filter(|fd| *fd > 2)
-        .collect()
-}
-#[cfg(target_os = "linux")]
-fn mark_inherited_fds_close_on_exec(_fds: &[i32]) {
-    unsafe {
-        syscall(436usize, 3u32, u32::MAX, 4u32);
-    }
-}
-#[cfg(target_os = "macos")]
-fn mark_inherited_fds_close_on_exec(fds: &[i32]) {
-    for fd in fds {
-        unsafe {
-            fcntl(*fd, 2, 1);
+fn inherited_fds() -> Result<Vec<libc::c_int>, String> {
+    let entries = std::fs::read_dir("/dev/fd")
+        .map_err(|error| format!("/dev/fd cannot be listed to close inherited descriptors: {error}"))?;
+    let mut fds = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("an entry of /dev/fd cannot be read: {error}"))?;
+        let name = entry.file_name();
+        let text = name
+            .to_str()
+            .ok_or_else(|| format!("/dev/fd lists {name:?}, which is not text"))?;
+        let fd = text
+            .parse::<libc::c_int>()
+            .map_err(|error| format!("/dev/fd lists {text:?}, which is no descriptor: {error}"))?;
+        if !STANDARD.contains(&fd) {
+            fds.push(fd);
         }
     }
+    Ok(fds)
 }
-#[cfg(unix)]
-fn set_limit(resource: i32, value: u64) -> io::Result<()> {
-    let limit = RLimit {
-        current: value,
-        maximum: value,
+
+/// Mark every descriptor above the standard ones close-on-exec in the child.
+#[cfg(target_os = "linux")]
+fn mark_inherited_fds_close_on_exec(_fds: &[libc::c_int]) -> io::Result<()> {
+    let first = libc::c_uint::try_from(STANDARD.len()).map_err(io::Error::other)?;
+    let rc = unsafe {
+        libc::syscall(libc::SYS_close_range, first, libc::c_uint::MAX, libc::CLOSE_RANGE_CLOEXEC)
     };
-    if unsafe { setrlimit(resource, &limit) } == 0 {
-        Ok(())
-    } else {
+    if rc.is_negative() {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+#[cfg(target_os = "macos")]
+fn mark_inherited_fds_close_on_exec(fds: &[libc::c_int]) -> io::Result<()> {
+    for fd in fds {
+        let rc = unsafe { libc::fcntl(*fd, libc::F_SETFD, libc::FD_CLOEXEC) };
+        // A descriptor already closed (the /dev/fd listing's own) has
+        // nothing left to keep from the command.
+        if rc.is_negative() {
+            let error = io::Error::last_os_error();
+            if error.raw_os_error() != Some(libc::EBADF) {
+                return Err(error);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_limit(resource: Resource, value: u64) -> io::Result<()> {
+    let limit = libc::rlimit {
+        rlim_cur: value,
+        rlim_max: value,
+    };
+    if unsafe { libc::setrlimit(resource, &limit) }.is_negative() {
         Err(io::Error::last_os_error())
+    } else {
+        Ok(())
     }
 }
-#[cfg(unix)]
-#[repr(C)]
-struct RLimit {
-    current: u64,
-    maximum: u64,
-}
-#[cfg(unix)]
-extern "C" {
-    fn setrlimit(resource: i32, limit: *const RLimit) -> i32;
-}
-#[cfg(target_os = "linux")]
-extern "C" {
-    fn syscall(number: usize, ...) -> isize;
-}
-#[cfg(target_os = "macos")]
-extern "C" {
-    fn fcntl(fd: i32, command: i32, ...) -> i32;
-}
-#[cfg(unix)]
-const RLIMIT_CPU: i32 = 0;
-#[cfg(unix)]
-const RLIMIT_FSIZE: i32 = 1;
-#[cfg(target_os = "linux")]
-const RLIMIT_NPROC: i32 = 6;
-#[cfg(target_os = "linux")]
-const RLIMIT_NOFILE: i32 = 7;
-#[cfg(target_os = "linux")]
-const RLIMIT_AS: i32 = 9;
-#[cfg(target_os = "macos")]
-const RLIMIT_NOFILE: i32 = 8;

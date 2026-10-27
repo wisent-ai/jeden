@@ -10,7 +10,7 @@ use super::support::terminate_group;
 use super::{BatchTask, SpawnRequest, TaskScheduler};
 use crate::clock::unix_millis;
 use crate::task_runtime::discovery::discover_agents;
-use crate::task_runtime::types::{CapabilityHealth, JobRecord, JobStatus, TaskError};
+use crate::task_runtime::types::{CapabilityHealth, Counted, JobRecord, JobStatus, TaskError};
 use crate::task_runtime::workspace::IsolatedWorkspace;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -28,7 +28,12 @@ impl TaskScheduler {
             if job.status.terminal() {
                 return Ok(job);
             }
-            watch.wait()?;
+            stado_wait::blocking(
+                stado_wait::Kind::Process,
+                format!("job {id} to finish"),
+                self.store.join("jobs").display(),
+                || watch.wait(),
+            )?;
         }
     }
     pub fn deliver(&self, id: &str) -> Result<JobRecord, TaskError> {
@@ -47,12 +52,7 @@ impl TaskScheduler {
         loop {
             let before = targets.len();
             for job in &jobs {
-                if job
-                    .parent_job
-                    .as_ref()
-                    .map(|v| targets.contains(v))
-                    .unwrap_or(false)
-                {
+                if job.parent_job.as_ref().is_some_and(|parent| targets.contains(parent)) {
                     targets.insert(job.id.clone());
                 }
             }
@@ -99,8 +99,9 @@ impl TaskScheduler {
     pub fn batch(&self, tasks: Vec<BatchTask>) -> Result<Vec<JobRecord>, TaskError> {
         if tasks.is_empty() || tasks.len() > self.limits.max_batch {
             return Err(TaskError::Invalid(format!(
-                "batch size must be 1..{}",
-                self.limits.max_batch
+                "a batch holds at least one task and at most {}; this one holds {}",
+                self.limits.max_batch,
+                tasks.len()
             )));
         }
         let ids = tasks.iter().map(|t| t.id.clone()).collect::<BTreeSet<_>>();
@@ -162,18 +163,19 @@ impl TaskScheduler {
             id: "task-scheduler",
             healthy: errors.is_empty(),
             store: self.store.clone(),
-            discovered_agents: agents.as_ref().map(|v| v.len()).unwrap_or(0),
-            running: jobs
-                .as_ref()
-                .map(|v| v.iter().filter(|j| j.status == JobStatus::Running).count())
-                .unwrap_or(0),
+            discovered_agents: Counted(match &agents {
+                Ok(found) => Some(found.len()),
+                Err(_unread) => None,
+            }),
+            running: Counted(match &jobs {
+                Ok(listed) => Some(listed.iter().filter(|j| j.status == JobStatus::Running).count()),
+                Err(_unread) => None,
+            }),
             limits: self.limits.clone(),
             // Exactly the values `WorkspacePlatform::isolate` can return, read
             // from `platform/unix/workspace.rs` (`apfs-clone`, `reflink-copy`,
             // `native-copy`) and `platform/windows/workspace.rs`
-            // (`native-copy`). The list previously advertised `git-worktree`,
-            // which this product no longer does, and `copy`, which no
-            // implementation ever returned.
+            // (`native-copy`).
             isolation_strategies: vec!["apfs-clone", "reflink-copy", "native-copy"],
             errors,
         }

@@ -1,7 +1,5 @@
 use super::store::entities::job;
-use super::{
-    redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryScope, MemorySource, MemoryStore,
-};
+use super::{redacted, LeasedJob, MemoryQueueJob, MemoryQueueStatus, MemoryStore};
 use crate::fleet::{run_db, sql};
 use sea_orm::sea_query::{Condition, Expr, Order, SimpleExpr};
 use sea_orm::{
@@ -35,7 +33,8 @@ async fn update_leased(
         .filter(job::Column::LeaseOwner.eq(worker))
         .filter(job::Column::State.eq("leased"))
         .filter(job::Column::LeaseUntil.gt(now));
-    Ok(update.exec(db).await.map_err(sql)?.rows_affected == 1)
+    // The lease still held changes exactly the one job it names.
+    Ok(update.exec(db).await.map_err(sql)?.rows_affected == u64::from(crate::tally::STEP))
 }
 
 impl MemoryStore {
@@ -47,7 +46,8 @@ impl MemoryStore {
             kind: Set(kind.to_owned()),
             payload_json: Set(serde_json::to_string(payload).map_err(|e| e.to_string())?),
             state: Set("queued".into()),
-            attempts: Set(0),
+            // No attempt has been made at a job just queued.
+            attempts: Set(crate::tally::ORIGIN as i64),
             available_at: Set(now),
             lease_owner: Set(None),
             lease_until: Set(None),
@@ -108,10 +108,13 @@ impl MemoryStore {
                 updated_at: row.updated_at,
             })
             .collect();
-        let queued = state_counts.get("queued").copied().unwrap_or_default();
-        let leased = state_counts.get("leased").copied().unwrap_or_default();
-        let done = state_counts.get("done").copied().unwrap_or_default();
-        let failed = state_counts.get("failed").copied().unwrap_or_default();
+        // A state no job is in has no row in the grouped count.
+        let count = |state: &str| match state_counts.get(state) {
+            Some(jobs) => *jobs,
+            None => crate::tally::ORIGIN as i64,
+        };
+        let (queued, leased) = (count("queued"), count("leased"));
+        let (done, failed) = (count("done"), count("failed"));
         let total = state_counts.values().sum();
         Ok(MemoryQueueStatus {
             total,
@@ -141,7 +144,6 @@ impl MemoryStore {
                     ),
                 )
                 .order_by_asc(job::Column::CreatedAt)
-                .limit(1)
                 .lock_with_behavior(
                     sea_orm::sea_query::LockType::Update,
                     sea_orm::sea_query::LockBehavior::SkipLocked,
@@ -162,7 +164,7 @@ impl MemoryStore {
             if found.attempts == i64::MAX {
                 return Err("memory job attempt count exceeds the persisted integer range".into());
             }
-            let attempts = found.attempts + 1;
+            let attempts = found.attempts + i64::from(crate::tally::STEP);
             job::Entity::update_many()
                 .col_expr(job::Column::State, Expr::value("leased"))
                 .col_expr(job::Column::LeaseOwner, Expr::value(worker))
@@ -236,35 +238,6 @@ impl MemoryStore {
         }
         let outcome = (|| -> Result<(), String> {
             match job.kind.as_str() {
-                "extract" => {
-                    let scope: MemoryScope = serde_json::from_value(
-                        job.payload
-                            .get("scope")
-                            .cloned()
-                            .ok_or("extract job missing scope")?,
-                    )
-                    .map_err(|e| e.to_string())?;
-                    let text = job
-                        .payload
-                        .get("text")
-                        .and_then(Value::as_str)
-                        .ok_or("extract job missing text")?;
-                    let source = MemorySource {
-                        origin: "session_extraction".into(),
-                        session_id: job
-                            .payload
-                            .get("sessionId")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                        entry_id: job
-                            .payload
-                            .get("entryId")
-                            .and_then(Value::as_str)
-                            .map(str::to_string),
-                    };
-                    self.remember("session", &scope, text, &["automatic".into()], &source, 0.6)
-                        .map(|_| ())
-                }
                 kind if kind == super::REINDEX_JOB => self.rebuild_fts().map(|_| ()),
                 other => Err(format!("unsupported memory job kind: {other}")),
             }

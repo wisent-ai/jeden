@@ -17,6 +17,18 @@ fn html_escape(value: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// An exported event's heading: its timestamp and type as recorded. An event
+/// recording neither is headed as such, not left with an empty heading.
+fn heading(event: &Value) -> String {
+    let at = event.get("ts").and_then(Value::as_str);
+    let kind = event.get("type").and_then(Value::as_str);
+    match (at, kind) {
+        (Some(at), Some(kind)) => format!("{at} {kind}"),
+        (Some(only), None) | (None, Some(only)) => only.to_string(),
+        (None, None) => "event recording no time or type".to_string(),
+    }
+}
+
 pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<String, String> {
     if format == "json" {
         return Ok(serde_json::to_string_pretty(session).map_err(|e| e.to_string())? + "\n");
@@ -36,13 +48,7 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
     if format == "markdown" {
         let mut out = format!("# Jeden session {}\n\n{}\n\n", id, path);
         for event in events {
-            let label = format!(
-                "{} {}",
-                event.get("ts").and_then(Value::as_str).unwrap_or(""),
-                event.get("type").and_then(Value::as_str).unwrap_or("")
-            )
-            .trim()
-            .to_string();
+            let label = heading(event);
             let data = format!("{:#}", event["data"]);
             out.push_str(&format!("## {}\n\n```json\n{}\n```\n\n", label, data));
         }
@@ -51,14 +57,7 @@ pub(crate) fn render_session_export(session: &Value, format: &str) -> Result<Str
     if format == "html" {
         let mut sections = String::new();
         for event in events {
-            let label = html_escape(
-                format!(
-                    "{} {}",
-                    event.get("ts").and_then(Value::as_str).unwrap_or(""),
-                    event.get("type").and_then(Value::as_str).unwrap_or("")
-                )
-                .trim(),
-            );
+            let label = html_escape(&heading(event));
             let body = html_escape(&format!("{:#}", event["data"]));
             sections.push_str(&format!(
                 "<section class=\"event\"><h2>{}</h2><pre>{}</pre></section>\n",

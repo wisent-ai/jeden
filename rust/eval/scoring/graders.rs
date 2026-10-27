@@ -84,7 +84,9 @@ pub fn grade(
         }
         GraderSpecV1::FileAbsent { path, .. } => {
             let file = workspace.join(safe_relative(path)?);
-            let passed = !file.exists();
+            // A file that cannot be examined fails the grader with its cause:
+            // read as absent, an unreadable path passed "is absent".
+            let passed = !crate::tool_runtime::runtime_ops::platform::presence::present(&file)?;
             evidence(
                 spec,
                 passed,

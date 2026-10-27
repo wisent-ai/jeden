@@ -24,29 +24,17 @@ impl AgentSession {
         // Close admission immediately. A previous cleanup failure is not success:
         // each caller must complete these idempotent cleanup operations itself.
         self.inner.disposed.store(true, Ordering::Release);
-        for cancel in self
-            .inner
-            .active
-            .lock()
-            .map_err(|error| format!("cannot cancel session requests during disposal: {error}"))?
-            .values()
-        {
+        // Disposal clears, cancels and releases whole values, so a holder that
+        // panicked earlier does not leave a session that can never be
+        // disposed: each lock is taken back, the conversation included, since
+        // releasing it does not read what a panicking turn left in it.
+        for cancel in crate::panicked::held(&self.inner.active).values() {
             cancel.store(true, Ordering::Release);
         }
         crate::tool_runtime::runtime_ops::announce_cancellation();
-        self.inner
-            .subscribers
-            .lock()
-            .map_err(|error| {
-                format!("cannot clear session subscriptions during disposal: {error}")
-            })?
-            .clear();
-        *self.inner.interactions.write().map_err(|error| {
-            format!("cannot clear session interaction handler during disposal: {error}")
-        })? = None;
-        *self.inner.conversation.lock().map_err(|error| {
-            format!("cannot release session conversation during disposal: {error}")
-        })? = None;
+        crate::panicked::held(&self.inner.subscribers).clear();
+        *crate::panicked::written(&self.inner.interactions) = None;
+        *crate::panicked::held(&self.inner.conversation) = None;
         Ok(())
     }
 }

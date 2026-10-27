@@ -11,7 +11,7 @@ mod tool_images;
 
 pub(crate) use recorder::now_stamp;
 pub(in crate::agent) use recorder::SessionRecorder;
-pub(crate) use routing::model_router_config;
+pub(crate) use routing::{model_router_config, selected_model, selected_service_tier};
 pub(in crate::agent) use routing::{
     append_usage_event, env_usize, memory_guidance_for_prompt, usage_cost,
 };

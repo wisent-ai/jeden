@@ -18,7 +18,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         })?;
 
         match request.method.as_str() {
-            "health/readiness" | "readiness" => Ok(json!({
+            "health/readiness" => Ok(json!({
                 "state": format!("{:?}", self.service.readiness()).to_lowercase(),
                 "version": env!("JEDEN_VERSION"),
             })),
@@ -113,7 +113,12 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                         .iter()
                         .map(|session| session.wire_value())
                         .collect::<Vec<_>>(),
-                    "skipped": listing.skipped,
+                    "skipped": listing.unreadable.len(),
+                    "unreadable": listing
+                        .unreadable
+                        .iter()
+                        .map(|unreadable| unreadable.wire_value())
+                        .collect::<Vec<_>>(),
                 }))
             }
             "session/open" => {
@@ -197,7 +202,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     .answer_ask(&connection.identity, ask_id, text)
                     .map_err(service_error)
             }
-            method @ ("token/status" | "token/list" | "token/add" | "token/remove") => {
+            // Every token method, the sign-in steps included, passes the same
+            // credential-manager gate, as the stdio server routes them.
+            method if method.starts_with("token/") => {
                 credential::request(connection, method, &request.params)
             }
             _ => Err(protocol_error("method_not_found", "unknown session method")),

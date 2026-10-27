@@ -27,8 +27,14 @@ pub struct WelesClient {
     pub(super) correlation: Arc<std::sync::atomic::AtomicU64>,
 }
 
+/// The billing endpoint the environment states; one that is not text is
+/// refused at startup with its name.
 fn platform_billing_endpoint() -> Option<String> {
-    std::env::var(PLATFORM_BILLING_URL_ENV).ok()
+    match std::env::var(PLATFORM_BILLING_URL_ENV) {
+        Ok(endpoint) => Some(endpoint),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(error) => panic!("{PLATFORM_BILLING_URL_ENV} cannot be read: {error}"),
+    }
 }
 
 fn platform_billing_token() -> SecretRef {
@@ -68,7 +74,7 @@ impl WelesClient {
             endpoint,
             authorization,
             transport,
-            correlation: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            correlation: Arc::new(std::sync::atomic::AtomicU64::new(crate::tally::FIRST)),
         }
     }
 
@@ -95,16 +101,18 @@ impl WelesClient {
         &self,
         setup: &super::billing::HostedPaymentSetup,
     ) -> Result<(), WelesError> {
-        let hosted = url::Url::parse(&setup.hosted_url)
-            .map_err(|_| WelesError::InvalidResponse("hosted setup URL is invalid".into()))?;
+        let hosted = url::Url::parse(&setup.hosted_url).map_err(|error| {
+            WelesError::InvalidResponse(format!("hosted setup URL is invalid: {error}"))
+        })?;
         if hosted.scheme() != "https" || hosted.host_str().is_none() {
             return Err(WelesError::InvalidResponse(
                 "hosted setup URL must use HTTPS".into(),
             ));
         }
         let hosted_origin = hosted.origin().ascii_serialization();
-        let endpoint = url::Url::parse(self.endpoint()?)
-            .map_err(|_| WelesError::InvalidResponse("Weles endpoint URL is invalid".into()))?;
+        let endpoint = url::Url::parse(self.endpoint()?).map_err(|error| {
+            WelesError::InvalidResponse(format!("Weles endpoint URL is invalid: {error}"))
+        })?;
         let endpoint_origin = endpoint.origin().ascii_serialization();
         // An allowlist that is not text is refused by name: read as empty it
         // refused every other origin as "not allowlisted" without saying the
@@ -134,17 +142,14 @@ impl WelesClient {
     }
 }
 
+/// RFC 3986's unreserved characters stay as they are; every other byte of a
+/// path segment is percent-encoded.
+const SEGMENT: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
+    .remove(b'-')
+    .remove(b'.')
+    .remove(b'_')
+    .remove(b'~');
+
 fn encode_path_segment(value: &str) -> String {
-    const HEX: &[u8; 16] = b"0123456789ABCDEF";
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push('%');
-            encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-            encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-        }
-    }
-    encoded
+    percent_encoding::utf8_percent_encode(value, SEGMENT).to_string()
 }

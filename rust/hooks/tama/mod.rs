@@ -28,10 +28,13 @@ pub use events::{describe_source, load_event_hooks, normalize_outcome};
 
 /// jeden's own block signal: a `PreToolUse` hook that exits with this code
 /// refuses the tool, and `normalize_outcome` maps a Tama failure onto it.
+/// The code is the one the hook protocol Tama's catalog is written against
+/// declares a blocking refusal:
+/// https://docs.anthropic.com/en/docs/claude-code/hooks#simple%3A-exit-code
 pub(crate) const BLOCK_EXIT: i32 = 2;
 /// An outcome that carries no verdict of its own: a hook that exits with it
 /// passed.
-pub(crate) const PASS_EXIT: i32 = 0;
+pub(crate) const PASS_EXIT: i32 = libc::EXIT_SUCCESS;
 
 /// One registry hook resolved for a jeden event: the jeden-shaped `Hook`
 /// (matcher + command) plus the entry's blocking flag.
@@ -143,7 +146,7 @@ fn tool_matcher(tool: &str) -> String {
         "any" => "^.+$",
         "bash" => "^(run_command|run_process)$",
         "read" => "^(read|read_file|read_binary_file|read_archive|read_document)$",
-        "edit" => "^(edit|edit_file|apply_patch)$",
+        "edit" => "^(edit|edit_file|apply_patch|move_file|delete_file)$",
         "write" => "^(write|write_file)$",
         "multiedit" => "^(edit|apply_patch)$",
         "notebook" => "^read_document$",

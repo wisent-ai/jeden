@@ -31,23 +31,17 @@ pub(super) fn run(
             .into_iter()
             .map(|(source, started, handle)| match handle.join() {
                 Ok(outcome) => outcome,
-                Err(payload) => {
-                    let cause = if let Some(message) = payload.downcast_ref::<String>() {
-                        message.as_str()
-                    } else if let Some(message) = payload.downcast_ref::<&str>() {
-                        message
-                    } else {
-                        "non-text panic payload"
-                    };
-                    SourceOutcome {
-                        hits: Vec::new(),
-                        status: SourceStatus::unavailable(
-                            source,
-                            format!("source execution panicked before answering: {cause}"),
-                            started,
+                Err(payload) => SourceOutcome {
+                    hits: Vec::new(),
+                    status: SourceStatus::unavailable(
+                        source,
+                        format!(
+                            "source execution panicked before answering: {}",
+                            crate::panicked::message(&*payload)
                         ),
-                    }
-                }
+                        started,
+                    ),
+                },
             })
             .collect()
     })

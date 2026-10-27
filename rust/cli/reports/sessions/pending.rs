@@ -4,13 +4,14 @@
 //! line cap.
 
 use super::ledger::append_ledger_entry_unlocked;
-use super::{parse_transcript, LedgerEntry, LEDGER_APPEND_LOCK, NEXT_ENTRY_ID};
+use super::{parse_transcript, LedgerEntry, LEDGER_APPEND_LOCK};
+// The append lock guards `()`; see ledger.rs.
+use crate::panicked::held;
 use crate::cli::reports::sessions::ledger::append_ledger_entry;
 use serde_json::json;
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone)]
 pub(crate) struct PendingActionCreate {
@@ -53,11 +54,7 @@ pub(crate) fn create_pending_action(
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
     let now = now_epoch_seconds()?;
-    let id = format!(
-        "pending-{}-{:016x}",
-        now,
-        NEXT_ENTRY_ID.fetch_add(1, Ordering::Relaxed)
-    );
+    let id = format!("pending-{}", uuid::Uuid::new_v4());
     let dir = artifact_dir.join("pending-actions");
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let payload_path = dir.join(format!("{}.payload", id));
@@ -114,9 +111,7 @@ pub(crate) fn claim_pending_action(
 ) -> Result<PendingActionClaim, String> {
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     let ledger = parse_transcript(session_dir)?;
     if pending_terminal(&ledger.entries, id) {
         return Err(format!("pending action is already resolved: {id}"));
@@ -182,9 +177,7 @@ pub(crate) fn claim_pending_action(
 
 pub(crate) fn complete_pending_action(artifact_dir: &Path, id: &str) -> Result<(), String> {
     let session_dir = pending_session_dir(artifact_dir)?;
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     let ledger = parse_transcript(session_dir)?;
     if pending_resolved(&ledger.entries, id) {
         return Err(format!("pending action is already resolved: {id}"));
@@ -213,9 +206,7 @@ pub(crate) fn discard_pending_action(
 ) -> Result<(), String> {
     operation_ready(operation)?;
     let session_dir = pending_session_dir(artifact_dir)?;
-    let _guard = LEDGER_APPEND_LOCK
-        .lock()
-        .map_err(|_| "session ledger append lock poisoned")?;
+    let _guard = held(&LEDGER_APPEND_LOCK);
     let ledger = parse_transcript(session_dir)?;
     if pending_terminal(&ledger.entries, id) {
         return Err(format!("pending action is already resolved: {id}"));

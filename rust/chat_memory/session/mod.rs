@@ -40,13 +40,13 @@ fn chat_of(settings: &Settings, cwd: &Path, session_dir: &Path) -> Result<Chat, 
     }
 }
 
-/// The background builder and the turn share one chat's tree and view.
+/// The background builder and the turn share one chat's tree and view. The
+/// lock guards no value, so a builder that panicked leaves nothing broken:
+/// refused instead, its poison refused the memory of every later turn.
 static BUSY: Mutex<()> = Mutex::new(());
 
-fn busy() -> Result<MutexGuard<'static, ()>, String> {
-    BUSY.lock().map_err(|_| {
-        "the chat memory was poisoned by a panic in its background builder".to_string()
-    })
+fn busy() -> MutexGuard<'static, ()> {
+    crate::panicked::held(&BUSY)
 }
 
 /// What a turn is told about the view, before it.
@@ -111,7 +111,7 @@ impl ChatMemory {
     /// (`/rewind`): the log keeps everything said, a note names what was
     /// taken back, and what is said from here on follows the note.
     pub fn replaced(&mut self, messages: &[Value]) -> Result<(), String> {
-        let _guard = busy()?;
+        let _guard = busy();
         let kept = own(messages).count();
         note_rewind(&self.chat.dir, &self.session_dir, &mut self.taken, kept)
     }
@@ -125,11 +125,11 @@ impl ChatMemory {
             return Ok(());
         };
         let chat = chat_of(&settings, cwd, session_dir)?;
-        if !Log::at(&chat.dir).dir().exists() {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(Log::at(&chat.dir).dir())? {
             return Ok(());
         }
         let _owner = own_chat(&chat)?;
-        let _guard = busy()?;
+        let _guard = busy();
         let mut taken = load_taken(session_dir, &chat.dir)?;
         note_rewind(&chat.dir, session_dir, &mut taken, own(after).count())
     }
@@ -137,7 +137,7 @@ impl ChatMemory {
     /// Append the conversation's messages the log does not hold yet, word
     /// for word, flushed before the call answers.
     pub fn sync(&mut self, messages: &[Value]) -> Result<(), String> {
-        let _guard = busy()?;
+        let _guard = busy();
         let log = Log::at(&self.chat.dir);
         let mine: Vec<&Value> = own(messages).collect();
         // A history cut back by a path that did not say so still has its next
@@ -165,7 +165,7 @@ impl ChatMemory {
     /// itself from the user's last message on. The view is grown, merged
     /// when it passed its size, and saved first.
     pub fn outbound(&self, messages: &[Value]) -> Result<Vec<Value>, String> {
-        let _guard = busy()?;
+        let _guard = busy();
         let mine: Vec<&Value> = own(messages).collect();
         let logged = Log::at(&self.chat.dir).read()?;
         // The turn starts at the user's last message; a conversation with
@@ -233,7 +233,7 @@ impl ChatMemory {
 /// line of each logged message the view does not cover, shown the view, and
 /// the parent of every sibling pair in the view.
 pub fn build_ahead(dir: &Path, summarize: &Summarize) -> Result<(), String> {
-    let _guard = busy()?;
+    let _guard = busy();
     let fitting = fitting(summarize)?;
     let logged = Log::at(dir).read()?;
     let mut tree = Tree::open(dir)?;

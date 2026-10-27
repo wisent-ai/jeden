@@ -4,9 +4,10 @@
 use super::protocol::{Envelope, RequestEnvelope, RequestMeta};
 use serde_json::{json, Value};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::{mpsc, oneshot, Notify};
+use uuid::Uuid;
 
 const CANCEL_METHOD: &str = "request.cancel";
 
@@ -15,6 +16,7 @@ mod inner;
 mod stream;
 
 pub use errors::{ClientError, SessionTransport, TransportError};
+use crate::panicked::held;
 use inner::{reader_loop, ClientInner, EventSubscriber};
 pub use stream::EventStream;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -35,15 +37,13 @@ impl SessionClient {
             subscribers: Mutex::new(HashMap::new()),
             cursors: Mutex::new(HashMap::new()),
             reader: Mutex::new(None),
-            next_request_id: AtomicU64::new(1),
-            next_subscriber_id: AtomicU64::new(1),
             disposed: AtomicBool::new(false),
             terminated: AtomicBool::new(false),
             terminated_notify: Notify::new(),
         });
         let reader_inner = Arc::clone(&inner);
         let reader = tokio::spawn(async move { reader_loop(reader_inner).await });
-        *inner.reader.lock().unwrap_or_else(|lock| lock.into_inner()) = Some(reader);
+        *held(&inner.reader) = Some(reader);
         Self { inner }
     }
 
@@ -64,11 +64,7 @@ impl SessionClient {
         let id = request.id.clone();
         let (sender, receiver) = oneshot::channel();
         {
-            let mut pending = self
-                .inner
-                .pending
-                .lock()
-                .unwrap_or_else(|lock| lock.into_inner());
+            let mut pending = held(&self.inner.pending);
             if self.is_disposed() {
                 return Err(ClientError::Disposed);
             }
@@ -85,7 +81,12 @@ impl SessionClient {
             return Err(error);
         }
 
-        receiver.await.unwrap_or(Err(ClientError::Disposed))
+        // The answer, or the client's end: a client terminated before this
+        // request was answered drops its sender, and the request is disposed.
+        match receiver.await {
+            Ok(answer) => answer,
+            Err(_client_terminated) => Err(ClientError::Disposed),
+        }
     }
 
     /// Builds a request from explicit caller metadata and awaits its result.
@@ -155,31 +156,21 @@ impl SessionClient {
     }
 
     pub fn last_cursor(&self, session_id: &str) -> Option<String> {
-        self.inner
-            .cursors
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner())
-            .get(session_id)
-            .cloned()
+        held(&self.inner.cursors).get(session_id).cloned()
     }
 
     /// Subscribes to ordered events received after this call.
     pub fn events(&self) -> EventStream {
         let (events_sender, events_receiver) = mpsc::unbounded_channel();
         let (terminal_sender, terminal_receiver) = oneshot::channel();
-        let id = self
-            .inner
-            .next_subscriber_id
-            .fetch_add(1, Ordering::Relaxed);
+        let id = Uuid::new_v4();
 
-        let mut subscribers = self
-            .inner
-            .subscribers
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner());
+        let mut subscribers = held(&self.inner.subscribers);
         if self.is_disposed() {
             drop(subscribers);
-            let _ = terminal_sender.send(ClientError::Disposed);
+            // The receiver is held below and handed to the caller, so this
+            // send has a receiver; its result carries nothing to act on.
+            let _delivered = terminal_sender.send(ClientError::Disposed);
         } else {
             subscribers.insert(
                 id,
@@ -212,21 +203,22 @@ impl SessionClient {
         self.inner.terminate(ClientError::Disposed);
     }
 
+    /// Stop the reader task. It is aborted, so its cancellation is the expected
+    /// end; a reader that panicked instead carries that panic to the caller.
     async fn stop_reader(&self) {
-        let reader = self
-            .inner
-            .reader
-            .lock()
-            .unwrap_or_else(|lock| lock.into_inner())
-            .take();
+        let reader = held(&self.inner.reader).take();
         if let Some(reader) = reader {
             reader.abort();
-            let _ = reader.await;
+            if let Err(error) = reader.await {
+                if error.is_panic() {
+                    std::panic::resume_unwind(error.into_panic());
+                }
+            }
         }
     }
 
+    /// A correlation id no other request of any client carries.
     fn next_id(&self, operation: &str) -> String {
-        let sequence = self.inner.next_request_id.fetch_add(1, Ordering::Relaxed);
-        format!("sdk-{operation}-{sequence}")
+        format!("sdk-{operation}-{}", Uuid::new_v4())
     }
 }

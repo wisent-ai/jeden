@@ -14,6 +14,27 @@ pub fn chat_completion(
     max_tokens: Option<usize>,
     tools: &[Value],
 ) -> Result<Completion, String> {
+    let observation = crate::agent::observations::ObservedCall::begin(
+        config.session_id.as_deref(),
+        None,
+        crate::agent::observations::OperationKind::Model,
+        "model",
+        json!({ "model": config.model, "endpointOrigin": config.endpoint_origin,
+            "messages": messages, "maxTokens": max_tokens, "tools": tools, "stream": false }),
+    )?;
+    let result = complete_buffered(config, messages, max_tokens, tools);
+    observation.finish(
+        result,
+        |completion| json!({ "status": "completed", "output": { "content": completion.content } }),
+    )
+}
+
+fn complete_buffered(
+    config: &ChatConfig,
+    messages: Vec<Value>,
+    max_tokens: Option<usize>,
+    tools: &[Value],
+) -> Result<Completion, String> {
     if let Some(cause) = crate::agent::credential::direct_refusal() {
         return Err(cause.to_owned());
     }
@@ -76,34 +97,36 @@ fn post(
     leased: Option<&lease::SessionLease>,
     max_tokens: Option<usize>,
 ) -> Result<Result<Completion, String>, String> {
+    let route = config.request_route()?;
     let signed = agent_headers(body_text, &config.agent_id, &config.secret)?;
     let client = crate::net::blocking_builder().build().map_err(|error| {
-        config.endpoint_failure(
+        route.failure(
+            config,
             "create HTTP client",
             crate::control_plane::transport::describe_reqwest(error),
         )
     })?;
     let reservation =
         crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
-    let mut store = if !config.via_brama && config.bearer_token.is_empty() {
+    let mut store = if !config.via_brama && route.bearer.is_empty() {
         crate::agent::credential::tokens::Store::open_existing()?
     } else {
         None
     };
     let mut tried = Vec::new();
     let mut selected = match &mut store {
-        Some(store) => store.next(&config.url, &tried)?,
+        Some(store) => store.next(&route.endpoint, &tried)?,
         None => None,
     };
     loop {
         let bearer = match &selected {
             Some(token) => token.secret.as_str(),
-            None => &config.bearer_token,
+            None => &route.bearer,
         };
         let mut request = client
             .post(format!(
                 "{}/v1/chat/completions",
-                config.url.trim_end_matches('/')
+                route.endpoint.trim_end_matches('/')
             ))
             .header("content-type", "application/json");
         if !bearer.is_empty() {
@@ -121,7 +144,8 @@ fn post(
             .body(body_text.to_string())
             .send()
             .map_err(|error| {
-                config.endpoint_failure(
+                route.failure(
+                    config,
                     "POST model request",
                     crate::control_plane::transport::describe_reqwest(error),
                 )
@@ -139,12 +163,14 @@ fn post(
                         } else {
                             std::borrow::Cow::Owned(text.replace(bearer, "[REDACTED]"))
                         };
-                    config.endpoint_failure(
+                    route.failure(
+                        config,
                         "POST model request",
                         format!("HTTP {}: {body}", status.as_u16()),
                     )
                 }
-                Err(error) => config.endpoint_failure(
+                Err(error) => route.failure(
+                    config,
                     "POST model request",
                     format!(
                         "HTTP {}: read model refusal body failed: {error}",
@@ -163,7 +189,7 @@ fn post(
                 if let (Some(token), Some(store)) = (&selected, &mut store) {
                     store.failure(&token.id, &token.secret, "POST model request", &refusal)?;
                     tried.push(token.id.clone());
-                    if let Some(next) = store.next(&config.url, &tried)? {
+                    if let Some(next) = store.next(&route.endpoint, &tried)? {
                         selected = Some(next);
                         continue;
                     }
@@ -178,8 +204,7 @@ fn post(
                 Err(refusal)
             };
         }
-        let text =
-            text.map_err(|error| config.endpoint_failure("read model response body", error))?;
+        let text = text.map_err(|error| route.failure(config, "read model response body", error))?;
         let safe: std::borrow::Cow<'_, str> = if bearer.is_empty() || !text.contains(bearer) {
             std::borrow::Cow::Borrowed(text.as_str())
         } else {

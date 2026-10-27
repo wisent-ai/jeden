@@ -15,9 +15,10 @@ impl<B: SessionBackend> SessionService<B> {
             replay,
             executor,
             sessions: Mutex::new(HashMap::new()),
+            unrecorded: Mutex::new(HashMap::new()),
             instance: instance_stamp(),
-            next_session: AtomicU64::new(1),
-            next_request: AtomicU64::new(1),
+            next_session: AtomicU64::new(crate::tally::FIRST),
+            next_request: AtomicU64::new(crate::tally::FIRST),
         }
     }
 
@@ -26,7 +27,7 @@ impl<B: SessionBackend> SessionService<B> {
         let id = format!(
             "session-{}-{}",
             self.instance,
-            self.next_session.fetch_add(1, Ordering::Relaxed)
+            crate::tally::draw(&self.next_session)
         );
         let path = match self.backend.create(&caller.tenant, &id) {
             Ok(path) => path,
@@ -35,9 +36,8 @@ impl<B: SessionBackend> SessionService<B> {
                 return Err(ServiceError::Runtime(error));
             }
         };
-        self.sessions
-            .lock()
-            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?
+        // Whole-step inserts and clones: a panicking holder leaves a state.
+        crate::panicked::held(&self.sessions)
             .insert(
                 id.clone(),
                 SessionEntry {
@@ -58,7 +58,7 @@ impl<B: SessionBackend> SessionService<B> {
     ) -> Result<SessionListing, ServiceError> {
         let held = self.held_sessions()?;
         let mut sessions = Vec::new();
-        let mut skipped = 0usize;
+        let mut unreadable = Vec::new();
         if caller.workspaces().is_empty() {
             for (id, entry) in held.iter() {
                 if entry.tenant != caller.tenant {
@@ -66,7 +66,10 @@ impl<B: SessionBackend> SessionService<B> {
                 }
                 match self.summarize(id, &entry.path, true) {
                     Ok(summary) => sessions.push(summary),
-                    Err(()) => skipped += 1,
+                    Err(cause) => unreadable.push(UnreadableSession {
+                        session_id: id.clone(),
+                        cause,
+                    }),
                 }
             }
         } else {
@@ -85,8 +88,11 @@ impl<B: SessionBackend> SessionService<B> {
                 let id = entry.file_name().to_string_lossy().into_owned();
                 let cwd = match session_state(&dir) {
                     Ok(state) => state.cwd,
-                    Err(_) => {
-                        skipped += 1;
+                    Err(cause) => {
+                        unreadable.push(UnreadableSession {
+                            session_id: id,
+                            cause,
+                        });
                         continue;
                     }
                 };
@@ -95,25 +101,33 @@ impl<B: SessionBackend> SessionService<B> {
                 }
                 match self.summarize(&id, &dir, held.contains_key(&id)) {
                     Ok(summary) => sessions.push(summary),
-                    Err(()) => skipped += 1,
+                    Err(cause) => unreadable.push(UnreadableSession {
+                        session_id: id,
+                        cause,
+                    }),
                 }
             }
         }
         // Newest first; `startedAt` is a string of epoch seconds, so it is
-        // compared numerically and anything unparseable sorts last.
+        // compared numerically and a value that is not a number sorts last.
         sessions.sort_by(|left, right| {
-            let rank = |value: &str| value.parse::<u64>().ok();
-            match (rank(&right.started_at), rank(&left.started_at)) {
-                (Some(right), Some(left)) => right.cmp(&left),
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (None, None) => std::cmp::Ordering::Equal,
+            match (
+                right.started_at.parse::<u64>(),
+                left.started_at.parse::<u64>(),
+            ) {
+                (Ok(right), Ok(left)) => right.cmp(&left),
+                (Ok(_), Err(_unparsed)) => std::cmp::Ordering::Greater,
+                (Err(_unparsed), Ok(_)) => std::cmp::Ordering::Less,
+                (Err(_right), Err(_left)) => std::cmp::Ordering::Equal,
             }
         });
         if let Some(limit) = limit {
             sessions.truncate(limit);
         }
-        Ok(SessionListing { sessions, skipped })
+        Ok(SessionListing {
+            sessions,
+            unreadable,
+        })
     }
 
     /// Resume one of the host's own sessions and register it under its own host
@@ -133,7 +147,7 @@ impl<B: SessionBackend> SessionService<B> {
             // quota unit.
             return self
                 .summarize(session_id, &entry.path, true)
-                .map_err(|()| unreadable_session(session_id));
+                .map_err(|cause| unreadable_session(session_id, &cause));
         }
         self.tenants.register_session(&caller.tenant)?;
         let path = match self.backend.open(&caller.tenant, session_id, &dir) {
@@ -145,19 +159,17 @@ impl<B: SessionBackend> SessionService<B> {
         };
         let summary = match self.summarize(session_id, &path, true) {
             Ok(summary) => summary,
-            Err(()) => {
+            Err(cause) => {
                 self.tenants.release_session(&caller.tenant);
-                return Err(unreadable_session(session_id));
+                return Err(unreadable_session(session_id, &cause));
             }
         };
         // Registered under the HOST session id, in the very map
         // `authorize_session` consults, so a following `session/prompt` reaches
         // the ledger the terminal wrote: the backend session behind this id was
-        // resumed in place by `AgentSession::resume_in_place`
-        // (rust/sdk/session.rs:135) and keeps appending to `path`.
-        self.sessions
-            .lock()
-            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?
+        // resumed in place by `AgentSession::resume_in_place` and keeps
+        // appending to `path`.
+        crate::panicked::held(&self.sessions)
             .insert(
                 session_id.to_owned(),
                 SessionEntry {
@@ -185,7 +197,7 @@ impl<B: SessionBackend> SessionService<B> {
         let mut turns = self
             .backend
             .turns(&dir)
-            .map_err(|_| unreadable_session(session_id))?;
+            .map_err(|cause| unreadable_session(session_id, &cause))?;
         let truncated = limit.is_some_and(|limit| turns.len() > limit);
         if let Some(limit) = limit {
             if truncated {
@@ -197,17 +209,13 @@ impl<B: SessionBackend> SessionService<B> {
     }
 
     fn held_sessions(&self) -> Result<HashMap<String, SessionEntry>, ServiceError> {
-        self.sessions
-            .lock()
-            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))
-            .map(|sessions| sessions.clone())
+        Ok(crate::panicked::held(&self.sessions).clone())
     }
 
-    /// `Err(())` means the ledger could not be read; callers either skip the row
-    /// or turn it into a typed refusal.
-    fn summarize(&self, session_id: &str, dir: &Path, open: bool) -> Result<SessionSummary, ()> {
-        let state = session_state(dir).map_err(|_| ())?;
-        let turns = self.backend.turns(dir).map_err(|_| ())?;
+    /// The listing row of one session, or why its ledger could not be read.
+    fn summarize(&self, session_id: &str, dir: &Path, open: bool) -> Result<SessionSummary, String> {
+        let state = session_state(dir)?;
+        let turns = self.backend.turns(dir)?;
         Ok(SessionSummary {
             session_id: session_id.to_owned(),
             path: dir.to_path_buf(),
@@ -244,7 +252,9 @@ impl<B: SessionBackend> SessionService<B> {
         if !dir.join("state.json").is_file() {
             return Err(ServiceError::AccessDenied);
         }
-        let state = session_state(&dir).map_err(|_| ServiceError::AccessDenied)?;
+        // A caller not yet shown to own the session learns nothing more about
+        // it than one it does not own: the same denial as an absent session.
+        let state = session_state(&dir).map_err(|_unreadable| ServiceError::AccessDenied)?;
         if !caller.grants_path(&state.cwd) {
             return Err(ServiceError::AccessDenied);
         }

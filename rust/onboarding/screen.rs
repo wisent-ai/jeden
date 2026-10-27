@@ -24,13 +24,19 @@ pub(super) fn current_screen(client: &Client) -> Result<&wisent_onboarding_clien
         .ok_or_else(|| "onboarding screen is unavailable".to_string())
 }
 
-pub(super) fn presentation_text(screen: &wisent_onboarding_client::Screen, key: &str) -> String {
+/// The text the onboarding service presents under `key` on `screen`; a
+/// screen that does not carry it is refused naming the screen and the key,
+/// never drawn as an empty line.
+pub(super) fn presentation_text(
+    screen: &wisent_onboarding_client::Screen,
+    key: &str,
+) -> Result<String, String> {
     screen
         .presentation
         .get(key)
         .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_string()
+        .map(str::to_string)
+        .ok_or_else(|| format!("onboarding screen {} presents no {key} text", screen.screen_id))
 }
 
 pub(super) fn picker_for(
@@ -53,8 +59,8 @@ pub(super) fn picker_for(
     }
 
     let screen = current_screen(client)?;
-    let title = presentation_text(screen, "title");
-    let body = presentation_text(screen, "body");
+    let title = presentation_text(screen, "title")?;
+    let body = presentation_text(screen, "body")?;
     let mut items = vec![PickerItem::action(body, "").disabled(true)];
     if let Some(notice) = notice {
         items.push(

@@ -2,30 +2,14 @@
 //! declare, in a real node process with the sources it was given.
 
 use serde_json::Value;
-use std::io::Read;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
-/// What the wait for the extension host reacts to: stdout progress, stdout
-/// closing (the host is done), and an announced cancellation.
-enum HostEvent {
-    Progress(u64, u64),
-    StdoutClosed,
-    Cancelled,
-}
-
+use super::host_stream::{drained, node_supports_typescript, read_stderr, read_stdout, HostEvent};
 use super::super::HOST;
 use std::env;
 use std::path::PathBuf;
-
-pub(super) fn node_supports_typescript(node: &str) -> bool {
-    Command::new(node)
-        .args(["--experimental-strip-types", "--eval", ""])
-        .output()
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
 
 // These parameters are the extension host's invocation contract: mode,
 // generation, env, sources, both authorization flags, and the borrowed
@@ -69,8 +53,15 @@ pub(crate) fn run_host(
         owned_context = crate::tool_runtime::runtime_ops::OperationContext::new(
             crate::tool_runtime::runtime_ops::CancellationToken::new(),
             crate::tool_runtime::runtime_ops::ArtifactSink::new(
-                artifact_dir.unwrap_or(cwd).to_path_buf(),
+                // Without an artifact directory, the host's artifacts are kept
+                // in the directory it runs in.
+                match artifact_dir {
+                    Some(directory) => directory,
+                    None => cwd,
+                }
+                .to_path_buf(),
             ),
+            cwd.to_path_buf(),
         )
         .with_execution_grant(grant);
         crate::tool_runtime::runtime_ops::untrusted_child(
@@ -129,7 +120,7 @@ pub(crate) fn run_host(
         }
     }
     let enable_ts =
-        envs.iter().any(|(_, value)| value.contains(".ts")) && node_supports_typescript(&node);
+        envs.iter().any(|(_, value)| value.contains(".ts")) && node_supports_typescript(&node)?;
     let mut command = Command::new(&node);
     command.env_clear();
     for key in &grant.process.environment {
@@ -147,13 +138,11 @@ pub(crate) fn run_host(
         .env("JEDEN_EXTENSION_CWD", &canonical_cwd)
         .env("JEDEN_EXTENSION_GENERATION", generation.to_string())
         .env(
-            "JEDEN_EXTENSION_ALLOW_WRITE",
-            if allow_write { "1" } else { "0" },
+            "JEDEN_EXTENSION_ABI_VERSION",
+            crate::hooks::extensions::ABI_VERSION.to_string(),
         )
-        .env(
-            "JEDEN_EXTENSION_ALLOW_COMMAND",
-            if allow_command { "1" } else { "0" },
-        )
+        .env("JEDEN_EXTENSION_ALLOW_WRITE", allow_write.to_string())
+        .env("JEDEN_EXTENSION_ALLOW_COMMAND", allow_command.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(dir) = operation
@@ -168,38 +157,13 @@ pub(crate) fn run_host(
     let mut child = command
         .spawn()
         .map_err(|error| format!("extension host failed to start: {error}"))?;
-    let mut stdout = child.stdout.take().ok_or("extension host missing stdout")?;
-    let mut stderr = child.stderr.take().ok_or("extension host missing stderr")?;
+    let stdout = child.stdout.take().ok_or("extension host missing stdout")?;
+    let stderr = child.stderr.take().ok_or("extension host missing stderr")?;
     let (events_tx, events_rx) = mpsc::channel();
-    let stdout_events = events_tx.clone();
-    let stdout_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let mut buffer = [0u8; 8192];
-        let mut total = 0u64;
-        loop {
-            let count = stdout.read(&mut buffer).unwrap_or_default();
-            if count == 0 {
-                break;
-            }
-            total = total.saturating_add(count as u64);
-            bytes.extend_from_slice(&buffer[..count]);
-            let _ = stdout_events.send(HostEvent::Progress(count as u64, total));
-        }
-        let _ = stdout_events.send(HostEvent::StdoutClosed);
-        bytes
-    });
-    let stderr_reader = std::thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let mut buffer = [0u8; 8192];
-        loop {
-            let count = stderr.read(&mut buffer).unwrap_or_default();
-            if count == 0 {
-                break;
-            }
-            bytes.extend_from_slice(&buffer[..count]);
-        }
-        bytes
-    });
+    // Each stream is drained whole; a read that fails is a failure of the run,
+    // never the end of the host's answer.
+    let stdout_reader = read_stdout(stdout, events_tx.clone());
+    let stderr_reader = read_stderr(stderr);
     if operation.is_some() {
         let wake = events_tx.clone();
         crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {
@@ -217,9 +181,19 @@ pub(crate) fn run_host(
                     child.id()
                 ));
             }
-            let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
+            // The readers end when the killed host's pipes close; what they
+            // read belongs to a cancelled run and is not waited for.
+            let process = child.id();
+            if let Err(error) = stado_wait::blocking(
+                stado_wait::Kind::Process,
+                format!("killed extension host process {process} to end"),
+                &node,
+                || child.wait(),
+            ) {
+                return Err(format!(
+                    "extension operation cancelled; its killed host process {process} could not be reaped: {error}"
+                ));
+            }
             return Err("extension operation cancelled".into());
         }
         match events_rx.recv() {
@@ -233,12 +207,21 @@ pub(crate) fn run_host(
                 }
             }
             Ok(HostEvent::Cancelled) => {}
-            Ok(HostEvent::StdoutClosed) | Err(_) => break,
+            Ok(HostEvent::StdoutClosed) => break,
+            // Every reader has ended and dropped its sender: nothing more comes.
+            Err(_readers_ended) => break,
         }
     }
-    let status = child.wait().map_err(|error| error.to_string())?;
-    let stdout = stdout_reader.join().unwrap_or_default();
-    let stderr = stderr_reader.join().unwrap_or_default();
+    let process = child.id();
+    let status = stado_wait::blocking(
+        stado_wait::Kind::Process,
+        format!("extension host process {process} to end"),
+        &node,
+        || child.wait(),
+    )
+    .map_err(|error| format!("extension host process {process} could not be awaited: {error}"))?;
+    let stdout = drained(stdout_reader, "stdout")?;
+    let stderr = drained(stderr_reader, "stderr")?;
     if let Some(context) = operation {
         let mut output = crate::tool_runtime::runtime_ops::BoundedOutput::new(
             "extension-host",
@@ -263,11 +246,13 @@ pub(crate) fn run_host(
     let value: Value = serde_json::from_str(line)
         .map_err(|error| format!("invalid extension host frame: {error}"))?;
     if !status.success() || value.get("ok").and_then(Value::as_bool) == Some(false) {
-        return Err(value
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| stderr.trim())
-            .to_string());
+        return Err(match value.get("error").and_then(Value::as_str) {
+            Some(said) => said.to_string(),
+            None => format!(
+                "the extension host failed ({status}) without saying why; its stderr: {}",
+                stderr.trim()
+            ),
+        });
     }
     Ok(value)
 }

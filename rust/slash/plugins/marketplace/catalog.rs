@@ -24,12 +24,9 @@ pub(super) fn handle_catalog(
     context: &SlashContext<'_>,
 ) -> Result<String, String> {
     if verb == "installed" {
-        let mut installed = merged_installed_values(context.cwd);
+        let mut installed = merged_installed_values(context.cwd)?;
         installed.sort_by(|a, b| {
-            a.get("id")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .cmp(b.get("id").and_then(Value::as_str).unwrap_or(""))
+            a.get("id").and_then(Value::as_str).cmp(&b.get("id").and_then(Value::as_str))
         });
         return Ok(if installed.is_empty() {
             "No plugins installed.".into()
@@ -87,25 +84,31 @@ pub(super) fn handle_catalog(
         let mut errors = Vec::new();
         for (name, source) in sources {
             let cache = marketplace_cache_dir(&name);
-            if !cache.exists() {
-                if let Err(error) = fetch_marketplace(context.cwd, &name, &source) {
-                    errors.push(format!("- {name}: {error}"));
-                    continue;
-                }
-            }
-            let catalog = match read_marketplace_catalog(&cache) {
-                Ok(catalog) => catalog,
+            // A cache that cannot be examined is reported for this source,
+            // never fetched over as if it were absent.
+            let cached = match crate::tool_runtime::runtime_ops::platform::presence::present(&cache) {
+                Ok(cached) => cached,
                 Err(error) => {
                     errors.push(format!("- {name}: {error}"));
                     continue;
                 }
             };
-            let mut plugins = catalog_plugins(&catalog);
+            if !cached {
+                if let Err(error) = fetch_marketplace(context.cwd, &name, &source) {
+                    errors.push(format!("- {name}: {error}"));
+                    continue;
+                }
+            }
+            let catalog = read_marketplace_catalog(&cache);
+            let mut plugins = match catalog.and_then(|catalog| catalog_plugins(&catalog)) {
+                Ok(plugins) => plugins,
+                Err(error) => {
+                    errors.push(format!("- {name}: {error}"));
+                    continue;
+                }
+            };
             plugins.sort_by(|a, b| {
-                a.get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
+                a.get("name").and_then(Value::as_str).cmp(&b.get("name").and_then(Value::as_str))
             });
             for plugin in plugins {
                 let desc = match plugin.get("description").and_then(Value::as_str) {
@@ -150,9 +153,9 @@ pub(super) fn handle_catalog(
         for (name, source) in sources {
             match fetch_marketplace(context.cwd, &name, &source)
                 .and_then(|cache| read_marketplace_catalog(&cache))
+                .and_then(|catalog| catalog_plugins(&catalog))
             {
-                Ok(catalog) => {
-                    let plugins = catalog_plugins(&catalog);
+                Ok(plugins) => {
                     counts.push(plugins.len());
                     update_source_plugins(context.cwd, &name, &plugins)?;
                     updated.push(name);
@@ -169,7 +172,7 @@ pub(super) fn handle_catalog(
         return Ok(out.join("\n"));
     }
     if verb == "install" {
-        let (force, scope, targets) = parse_marketplace_flags(rest);
+        let (force, scope, targets) = parse_marketplace_flags(rest)?;
         let scope = normalize_scope(scope)?;
         if targets.is_empty() {
             return Err(
@@ -185,7 +188,7 @@ pub(super) fn handle_catalog(
         return Ok(lines.join("\n"));
     }
     if verb == "upgrade" {
-        let (_force, scope, targets) = parse_marketplace_flags(rest);
+        let (_force, scope, targets) = parse_marketplace_flags(rest)?;
         let scoped = match scope.as_deref() {
             Some(s) => vec![normalize_scope(Some(s.to_string()))?],
             None => vec!["project".to_string(), "user".to_string()],
@@ -193,7 +196,7 @@ pub(super) fn handle_catalog(
         let mut ids: Vec<(String, String)> = Vec::new();
         if targets.is_empty() {
             for scope in &scoped {
-                for entry in installed_entries_for_scope(&registry_scope_dir(context.cwd, scope)) {
+                for entry in installed_entries_for_scope(&registry_scope_dir(context.cwd, scope))? {
                     if let Some(id) = entry.get("id").and_then(Value::as_str) {
                         ids.push((id.to_string(), scope.clone()));
                     }

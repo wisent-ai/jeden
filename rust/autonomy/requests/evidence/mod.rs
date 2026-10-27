@@ -6,13 +6,10 @@ use std::{
 };
 
 fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(cwd)
-        .args(args)
-        .stdin(Stdio::null())
-        .output()
-        .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
+    let mut command = Command::new("git");
+    command.arg("-C").arg(cwd).args(args).stdin(Stdio::null());
+    let output =
+        stado_wait::output(&mut command).map_err(|e| format!("git {}: {e}", args.join(" ")))?;
     if !output.status.success() {
         return Err(format!(
             "git {} in {}: exit {:?}: {}",
@@ -27,18 +24,27 @@ fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
+/// `owner/name` split into its two identifiers, or `None` when it is not
+/// exactly two of them.
+fn owner_name(identity: &str) -> Option<(&str, &str)> {
+    let (owner, name) = identity.split_once('/')?;
+    (identifier(owner) && identifier(name)).then_some((owner, name))
+}
+
+/// The `owner/name` an origin URL names: the path after the host, in an
+/// `https://host/owner/name` or `git@host:owner/name` address, without `.git`.
 pub(super) fn repository(cwd: &Path) -> Result<String, String> {
     let url = git(cwd, &["config", "--get", "remote.origin.url"])?;
-    let name = url
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("git@github.com:"))
-        .ok_or("pursuit source binding requires the canonical GitHub origin")?
-        .trim_end_matches(".git");
-    let parts = name.split('/').collect::<Vec<_>>();
-    if parts.len() != 2 || !parts.iter().all(|part| identifier(part)) {
-        return Err("invalid repository identity in origin".into());
+    let path = match url.split_once("://") {
+        Some((_, located)) => located.split_once('/').map(|(_, path)| path),
+        None => url.split_once(':').map(|(_, path)| path),
     }
-    Ok(name.to_owned())
+    .ok_or_else(|| format!("origin {url} names no repository path"))?;
+    let identity = path.trim_end_matches(".git");
+    if owner_name(identity).is_none() {
+        return Err(format!("origin {url} names no owner/name repository identity"));
+    }
+    Ok(identity.to_owned())
 }
 
 pub(super) fn snapshot(
@@ -60,36 +66,34 @@ pub(super) fn snapshot(
         repositories.push(owner);
     }
     let mut revisions = BTreeMap::new();
-    for name in repositories {
-        let parts = name.split('/').collect::<Vec<_>>();
-        if parts.len() != 2 || !parts.iter().all(|part| identifier(part)) {
-            return Err("request repository must be an owner/name identity".into());
-        }
+    for identity in repositories {
+        let (_, name) = owner_name(&identity)
+            .ok_or("request repository must be an owner/name identity")?;
         let cwd = root
-            .join(parts[1])
+            .join(name)
             .canonicalize()
-            .map_err(|e| format!("canonical checkout {name}: {e}"))?;
-        if cwd.parent() != Some(root) || repository(&cwd)? != name {
-            return Err(format!("{name} does not match its canonical checkout"));
+            .map_err(|e| format!("canonical checkout {identity}: {e}"))?;
+        if cwd.parent() != Some(root) || repository(&cwd)? != identity {
+            return Err(format!("{identity} does not match its canonical checkout"));
         }
         if git(&cwd, &["branch", "--show-current"])? != "main" {
-            return Err(format!("{name} is not on main; no branch was changed"));
+            return Err(format!("{identity} is not on main; no branch was changed"));
         }
-        if git(&cwd, &["worktree", "list", "--porcelain"])?
+        let listing = git(&cwd, &["worktree", "list", "--porcelain"])?;
+        let checkouts: Vec<&str> = listing
             .lines()
             .filter(|line| line.starts_with("worktree "))
-            .count()
-            != 1
-        {
-            return Err(format!("{name} has multiple checkouts; none was changed"));
+            .collect();
+        if !matches!(checkouts.as_slice(), [_]) {
+            return Err(format!("{identity} has multiple checkouts; none was changed"));
         }
         if require_clean && !git(&cwd, &["status", "--porcelain"])?.is_empty() {
             return Err(format!(
-                "{name} has uncommitted changes; the autonomous request did not adopt them"
+                "{identity} has uncommitted changes; the autonomous request did not adopt them"
             ));
         }
         let revision = git(&cwd, &["rev-parse", "--verify", "HEAD"])?;
-        if revisions.insert(name, revision).is_some() {
+        if revisions.insert(identity, revision).is_some() {
             return Err("duplicate repository in request scope".into());
         }
     }
@@ -105,9 +109,7 @@ pub(super) fn pushed(
         .parent()
         .ok_or("canonical checkout has no parent")?;
     for (repository, revision) in revisions {
-        let (_, name) = repository
-            .split_once('/')
-            .ok_or("invalid repository identity")?;
+        let (_, name) = owner_name(repository).ok_or("invalid repository identity")?;
         let remote = git(
             &root.join(name),
             &["ls-remote", "origin", "refs/heads/main"],

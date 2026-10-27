@@ -91,11 +91,14 @@ pub(crate) fn format_plugin(value: &Value) -> String {
     )
 }
 
-pub(crate) fn sorted_object_values(value: &Value) -> Vec<Value> {
-    let mut values = value
+/// The entries of a registry field (`sources`, `installed`) in plugin order.
+/// `plugin_registry` makes every such field an object; one that is not was
+/// not read through it and is refused, never listed as holding nothing.
+pub(crate) fn sorted_object_values(value: &Value) -> Result<Vec<Value>, String> {
+    let map = value
         .as_object()
-        .map(|map| map.values().cloned().collect::<Vec<_>>())
-        .unwrap_or_default();
+        .ok_or_else(|| format!("a plugin registry field must be an object, not {value}"))?;
+    let mut values = map.values().cloned().collect::<Vec<_>>();
     values.sort_by_key(format_plugin);
-    values
+    Ok(values)
 }

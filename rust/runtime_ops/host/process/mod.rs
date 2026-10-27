@@ -146,7 +146,18 @@ impl ProcessManager {
                         child.id()
                     ));
                 }
-                let _ = child.wait();
+                let process = child.id();
+                if let Err(reap) = stado_wait::blocking(
+                    stado_wait::Kind::Process,
+                    format!("the killed uncontained process {process} to end"),
+                    "this machine",
+                    || child.wait(),
+                ) {
+                    return Err(format!(
+                        "{error}; the killed uncontained process {process} could not be reaped: \
+                         {reap}"
+                    ));
+                }
                 return Err(error.to_string());
             }
         };
@@ -208,7 +219,7 @@ impl ProcessManager {
             drop(progress_tx);
             let stdin_result = stdin_writer
                 .join()
-                .map_err(|_| "managed process stdin writer panicked".to_string())?;
+                .map_err(|payload| crate::panicked::refusal("managed process stdin writer", &*payload))?;
             if let Err(error) = stdin_result {
                 if reason == TerminationReason::Completed {
                     return Err(format!("failed writing process stdin: {error}"));
@@ -216,10 +227,10 @@ impl ProcessManager {
             }
             let stdout = stdout_reader
                 .join()
-                .map_err(|_| "managed stdout reader panicked".to_string())??;
+                .map_err(|payload| crate::panicked::refusal("managed stdout reader", &*payload))??;
             let stderr = stderr_reader
                 .join()
-                .map_err(|_| "managed stderr reader panicked".to_string())??;
+                .map_err(|payload| crate::panicked::refusal("managed stderr reader", &*payload))??;
             drain_progress(context, &progress_rx);
             Ok(ManagedProcessResult {
                 status,

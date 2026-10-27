@@ -63,8 +63,8 @@ impl<'a> SnapshotBuilder<'a> {
         {
             let child = child
                 .map_err(|error| CasError::io("read snapshot directory entry", directory, error))?;
-            let name = child.file_name().into_string().map_err(|_| {
-                CasError::InvalidPath(format!("{} contains a non-UTF-8 name", directory.display()))
+            let name = child.file_name().into_string().map_err(|raw| {
+                CasError::InvalidPath(format!("{} contains a non-UTF-8 name {raw:?}", directory.display()))
             })?;
             validate_component(&name)?;
             let path = child.path();
@@ -211,26 +211,30 @@ pub(crate) fn load_tree(cas: &LocalCas, digest: Digest) -> Result<MerkleTree, Ca
     Ok(tree)
 }
 
-pub(crate) fn parse_tree(bytes: &[u8]) -> Option<MerkleTree> {
-    let tree: MerkleTree = serde_json::from_slice(bytes).ok()?;
-    (tree.schema == TREE_SCHEMA).then_some(tree)
-}
-
+/// Whether any of owner, group or others may execute the file.
 #[cfg(unix)]
 fn is_executable(metadata: &fs::Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    metadata.permissions().mode() & 0o111 != 0
+    let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
+    std::num::NonZeroU32::new(metadata.permissions().mode() & executable).is_some()
 }
 #[cfg(not(unix))]
 fn is_executable(_: &fs::Metadata) -> bool {
     false
 }
 
+/// A materialized file is readable by everyone and writable by its owner;
+/// an executable one is also executable by everyone.
 #[cfg(unix)]
 fn set_executable(file: &std::fs::File, executable: bool, path: &Path) -> Result<(), CasError> {
     use std::os::unix::fs::PermissionsExt;
-    let mode = if executable { 0o755 } else { 0o644 };
-    file.set_permissions(fs::Permissions::from_mode(mode))
+    let readable = libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH;
+    let mode = if executable {
+        readable | libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH
+    } else {
+        readable
+    };
+    file.set_permissions(fs::Permissions::from_mode(u32::from(mode)))
         .map_err(|error| CasError::io("set materialized permissions", path, error))
 }
 #[cfg(not(unix))]

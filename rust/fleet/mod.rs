@@ -31,15 +31,17 @@ static CLIENT: Mutex<ConnectionState> = Mutex::new(ConnectionState::Closed);
 static CONNECTION_CHANGED: Condvar = Condvar::new();
 
 /// A failed or panicking initializer must not leave its waiters stranded.
+/// The state is replaced whole, so a poisoned lock is taken back: skipped,
+/// the state stayed Opening and every waiter waited for good.
 struct Opening;
 
 impl Drop for Opening {
     fn drop(&mut self) {
-        if let Ok(mut slot) = CLIENT.lock() {
-            if matches!(*slot, ConnectionState::Opening) {
-                *slot = ConnectionState::Closed;
-            }
+        let mut slot = crate::panicked::held(&CLIENT);
+        if matches!(*slot, ConnectionState::Opening) {
+            *slot = ConnectionState::Closed;
         }
+        drop(slot);
         CONNECTION_CHANGED.notify_all();
     }
 }
@@ -58,9 +60,12 @@ const STAND_IN_FILE: &str = ".jeden/state.sqlite3";
 /// instead: moving state to another store silently would split it in two.
 fn stand_in() -> Result<(), String> {
     let path = crate::dirs_home().join(STAND_IN_FILE);
-    let directory = path
-        .parent()
-        .expect("the stand-in file sits in a directory");
+    let directory = path.parent().ok_or_else(|| {
+        failed(
+            "configure storage",
+            format!("{} has no parent directory", path.display()),
+        )
+    })?;
     std::fs::create_dir_all(directory).map_err(|error| {
         failed(
             "configure storage",
@@ -107,9 +112,7 @@ fn open() -> Result<Client, String> {
 fn client() -> Result<Arc<Client>, String> {
     cancellation::check()?;
     {
-        let slot = CLIENT
-            .lock()
-            .map_err(|_| failed("reading the connection", "its lock failed"))?;
+        let slot = crate::panicked::held(&CLIENT);
         if let ConnectionState::Ready(client) = &*slot {
             return Ok(Arc::clone(client));
         }
@@ -117,30 +120,27 @@ fn client() -> Result<Arc<Client>, String> {
     // Register before taking CLIENT: cancellation callbacks take that lock
     // to synchronize notification with the condvar's atomic unlock-and-wait.
     let _wake = cancellation::wake_when_cancelled(|| {
-        let _slot = CLIENT.lock();
+        let _slot = crate::panicked::held(&CLIENT);
         CONNECTION_CHANGED.notify_all();
     });
     loop {
         cancellation::check()?;
-        let mut slot = CLIENT
-            .lock()
-            .map_err(|_| failed("reading the connection", "its lock failed"))?;
+        let mut slot = crate::panicked::held(&CLIENT);
         match &*slot {
             ConnectionState::Ready(client) => return Ok(Arc::clone(client)),
             ConnectionState::Opening => {
                 cancellation::check()?;
-                drop(CONNECTION_CHANGED.wait(slot).map_err(|_| {
-                    failed("waiting for connection initialization", "its lock failed")
-                })?);
+                drop(match CONNECTION_CHANGED.wait(slot) {
+                    Ok(slot) => slot,
+                    Err(poisoned) => poisoned.into_inner(),
+                });
             }
             ConnectionState::Closed => {
                 *slot = ConnectionState::Opening;
                 drop(slot);
                 let _opening = Opening;
                 let client = Arc::new(open()?);
-                let mut slot = CLIENT
-                    .lock()
-                    .map_err(|_| failed("publishing the connection", "its lock failed"))?;
+                let mut slot = crate::panicked::held(&CLIENT);
                 *slot = ConnectionState::Ready(Arc::clone(&client));
                 drop(slot);
                 return Ok(client);

@@ -2,7 +2,6 @@
 
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 
 use crate::tool_runtime::shared::{count_input, jail_path, string_input};
@@ -15,25 +14,22 @@ use client::{await_response, ensure_open, file_uri, send, start, LspClient};
 use discovery::command_for;
 pub(super) use discovery::healthy_servers;
 
-static NEXT_REQUEST: AtomicU64 = AtomicU64::new(1);
 static SERVERS: LazyLock<Mutex<BTreeMap<String, LspClient>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
 pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    let action = string_input(input, "action").unwrap_or_else(|| "health".into());
+    // The schema requires the action; a call without one is refused, never
+    // answered as a health check it did not ask for.
+    let action = string_input(input, "action").ok_or(
+        "LSP requires action: health, diagnostics, definition, references, rename, codeActions or format",
+    )?;
     if action == "health" {
         let healthy = healthy_servers();
-        let servers = [
-            "rust-analyzer",
-            "pyright-langserver",
-            "typescript-language-server",
-        ]
-        .into_iter()
-        .map(|name| json!({"name":name,"healthy":healthy.iter().any(|item|item==name)}))
-        .collect::<Vec<_>>();
-        return Ok(
-            json!({"ok":true,"status":if healthy.is_empty(){"unavailable"}else{"healthy"},"servers":servers}),
-        );
+        return Ok(json!({
+            "ok": true,
+            "status": if healthy.is_empty() { "unavailable" } else { "healthy" },
+            "servers": healthy,
+        }));
     }
     let label = string_input(input, "path").ok_or("LSP action requires path")?;
     let path = jail_path(runtime.cwd, &label)?;
@@ -44,7 +40,7 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         program,
         args.join("\0")
     );
-    let mut servers = SERVERS.lock().map_err(|_| "LSP manager poisoned")?;
+    let mut servers = SERVERS.lock().map_err(|_poisoned| "LSP manager poisoned")?;
     if !servers.contains_key(&key) {
         servers.insert(key.clone(), start(runtime, &program, &args)?);
     }
@@ -94,12 +90,14 @@ pub(crate) fn lsp(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, Str
         }
         other => return Err(format!("unsupported LSP action: {other}")),
     };
-    let id = NEXT_REQUEST.fetch_add(1, Ordering::Relaxed);
+    // A fresh id per request: the answer is matched to it, and no counter
+    // has to be started anywhere.
+    let id = uuid::Uuid::new_v4().to_string();
     send(
         &mut client.stdin,
         &json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
     )?;
-    let result = await_response(runtime, client, id)?;
+    let result = await_response(runtime, client, &id)?;
     Ok(json!({"ok":true,"action":action,"path":label,"server":program,"result":result}))
 }
 

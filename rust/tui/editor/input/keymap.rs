@@ -173,40 +173,41 @@ impl EditorState {
     pub fn apply(&mut self, action: EditorAction) {
         use EditorAction::*;
         match action {
+            // With a selection, a move collapses it to its edge in that direction.
             MoveLeft => {
-                let target = self
-                    .selection()
-                    .map(|(start, _)| start)
-                    .unwrap_or_else(|| previous_boundary(&self.text, self.cursor));
+                let target = match self.selection() {
+                    Some((start, _)) => start,
+                    None => previous_boundary(&self.text, self.cursor),
+                };
                 self.move_to(target, false);
             }
             MoveRight => {
-                let target = self
-                    .selection()
-                    .map(|(_, end)| end)
-                    .unwrap_or_else(|| next_boundary(&self.text, self.cursor));
+                let target = match self.selection() {
+                    Some((_, end)) => end,
+                    None => next_boundary(&self.text, self.cursor),
+                };
                 self.move_to(target, false);
             }
             MoveWordLeft => {
-                let target = self
-                    .selection()
-                    .map(|(start, _)| start)
-                    .unwrap_or_else(|| word_left(&self.text, self.cursor));
+                let target = match self.selection() {
+                    Some((start, _)) => start,
+                    None => word_left(&self.text, self.cursor),
+                };
                 self.move_to(target, false);
             }
             MoveWordRight => {
-                let target = self
-                    .selection()
-                    .map(|(_, end)| end)
-                    .unwrap_or_else(|| word_right(&self.text, self.cursor));
+                let target = match self.selection() {
+                    Some((_, end)) => end,
+                    None => word_right(&self.text, self.cursor),
+                };
                 self.move_to(target, false);
             }
             MoveLineStart => self.move_to(line_start(&self.text, self.cursor), false),
             MoveLineEnd => self.move_to(line_end(&self.text, self.cursor), false),
-            MoveBufferStart => self.move_to(0, false),
+            MoveBufferStart => self.move_to_start(),
             MoveBufferEnd => self.move_to(self.text.len(), false),
-            MoveUp => self.move_vertical(-1),
-            MoveDown => self.move_vertical(1),
+            MoveUp => self.move_vertical(crate::tui::editor::Vertical::Up),
+            MoveDown => self.move_vertical(crate::tui::editor::Vertical::Down),
             SelectLeft => self.move_to(previous_boundary(&self.text, self.cursor), true),
             SelectRight => self.move_to(next_boundary(&self.text, self.cursor), true),
             SelectWordLeft => self.move_to(word_left(&self.text, self.cursor), true),

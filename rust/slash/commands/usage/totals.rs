@@ -84,8 +84,8 @@ impl Agg {
     }
 
     pub(crate) fn add(&mut self, event: &UsageEvent) {
-        // One call per event; `u64::from(true)` is the number-free unit increment.
-        self.calls += u64::from(true);
+        // One call per event.
+        self.calls += u64::from(crate::tally::STEP);
         self.input += event.input_tokens;
         self.output += event.output_tokens;
         self.cache_read += event.cache_read_tokens;

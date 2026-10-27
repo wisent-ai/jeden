@@ -22,6 +22,18 @@ A context line such as `@./extra.md` imports another file under the same context
 
 File-based custom commands load from project and user `.jeden/commands/` directories. Native extensions load from project and user `.jeden/extensions/` directories. Plugin and marketplace state lives under `~/.jeden/plugins/`.
 
+A native extension module exports its extension as `default`, `extension`,
+`activate`, `tool` or `tools` (looked for in that order). What it declares is
+refused, and the extension marked unhealthy with the cause, rather than
+completed: a tool states its input at most once (`parameters`, `input` or
+`schema`; none means it takes no input), a command its prompt at most once
+(`prompt`, `template` or `body`), a capability its `kind` and `version` as
+strings, a provider its `loginMethods` as a list of `device_code`, `paste` or
+`api_key`. `exec(command, args, options)` takes `args` as a list of strings
+(`[]` for none) and answers the command's whole stdout and stderr. The host
+reads every setting from the variables Jeden starts it with and refuses to run
+without them.
+
 `jeden rpc` publishes executable file-based commands as `quickReplies` in both
 the `ready` frame and the `capabilities` response. Each entry carries its
 capability ID, label, slash prompt, and discovery source; native clients use
@@ -68,7 +80,17 @@ A conversation compacts on its own only at a token count the operator states.
 compaction is `/compact` alone. A context limit stated without its reserve is
 refused by name (`JEDEN_CONTEXT_LIMIT is <n> but JEDEN_COMPACTION_RESERVE is not
 set`), and so is a reserve that leaves nothing of the limit: Jeden does not pick
-a share of the window for you.
+a share of the window for you. The interactive session refuses to start, and
+`/context` refuses to answer, while `JEDEN_CONTEXT_LIMIT` is set to anything
+but a whole number above zero, naming the value it holds.
+
+The status line's route segment is the service tier a model call would carry,
+chosen in the same order (`JEDEN_SERVICE_TIER`, then `MODEL_SERVICE_TIER`,
+then the fast mode tier); with none stated it shows no route. Its branch and
+`dirty` mark come from one `git status --porcelain --branch`, run when the
+working directory or the conversation changes rather than on every keypress,
+so a change made outside Jeden shows after the next turn. A git that cannot
+run, or fails inside a work tree, puts its cause where the branch would be.
 
 Before compacting, Jeden can replace old tool results with a one-line marker.
 That step runs only when all three of its bounds are stated:
@@ -111,7 +133,11 @@ operator's OptChat design lays it out:
   start and a session it resumes stays in its own chat; a `JEDEN_CHAT` that
   is no chat name is still refused. A session imported from another harness
   (`jeden import`) has no chat yet: the first run that continues it starts
-  one, and the whole conversation it carries comes into that chat.
+  one, and the whole conversation it carries comes into that chat. The import
+  reports the transcript's title as `null` when the transcript states none,
+  and refuses a transcript it cannot read, or whose message lacks a role or
+  carries content that is neither text nor a list of parts, naming the file,
+  the record's byte offset and what is missing.
 - Only the agent's own conversation writes to its chat: the one that keeps
   the task's completion, or a `--model-only` run. An intake or acceptance
   inspection and a Pursuit stage are the harness's machinery and keep their

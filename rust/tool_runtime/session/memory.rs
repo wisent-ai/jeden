@@ -6,52 +6,56 @@ use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let store = MemoryStore::open()?;
-    let op = string_input(input, "op").unwrap_or_else(|| "recall".into());
-    let scope = scope_from_value(input.get("scope"), runtime.cwd);
+    let op = string_input(input, "op").ok_or(
+        "memory requires op, one of remember, list, recall, context, forget or stats",
+    )?;
+    let scope = scope_from_value(input.get("scope"), runtime.cwd)?;
     match op.as_str() {
         "remember" => {
             if !runtime.allow_write {
                 return Err("memory remember requires --allow-write".into());
             }
             let text = string_input(input, "text").ok_or("memory remember requires text")?;
-            let tags: Vec<String> = input
-                .get("tags")
-                .and_then(Value::as_array)
-                .map(|items| {
-                    items
-                        .iter()
-                        .filter_map(Value::as_str)
-                        .map(str::to_string)
-                        .collect()
-                })
-                .unwrap_or_default();
-            let source = input
-                .get("source")
-                .cloned()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or(MemorySource {
+            let kind = string_input(input, "kind")
+                .ok_or("memory remember requires kind, what the note is (such as note or decision)")?;
+            // How sure the note is, between 0 and 1 as the store keeps it: the
+            // caller states it; no certainty is assumed for it.
+            let confidence = input.get("confidence").and_then(Value::as_f64).ok_or(
+                "memory remember requires confidence, how sure the note is, from 0 to 1",
+            )?;
+            // No tags is a note without tags; a tag that is not text is refused.
+            let tags: Vec<String> = match input.get("tags") {
+                None | Some(Value::Null) => Vec::new(),
+                Some(Value::Array(items)) => items
+                    .iter()
+                    .map(|item| {
+                        item.as_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| format!("memory remember tags must be text, not {item}"))
+                    })
+                    .collect::<Result<_, String>>()?,
+                Some(other) => return Err(format!("memory remember tags must be a list, not {other}")),
+            };
+            // A note the caller does not attribute is recorded as written by
+            // this tool; a source that is not one is refused with its cause.
+            let source = match input.get("source") {
+                None | Some(Value::Null) => MemorySource {
                     origin: "rust_memory_tool".into(),
                     session_id: None,
                     entry_id: None,
-                });
-            let entry = store.remember(
-                &string_input(input, "kind").unwrap_or_else(|| "note".into()),
-                &scope,
-                &text,
-                &tags,
-                &source,
-                input
-                    .get("confidence")
-                    .and_then(Value::as_f64)
-                    .unwrap_or(0.5),
-            )?;
+                },
+                Some(value) => serde_json::from_value(value.clone())
+                    .map_err(|error| format!("memory remember source is not a memory source: {error}"))?,
+            };
+            let entry = store.remember(&kind, &scope, &text, &tags, &source, confidence)?;
             Ok(json!({"entry":entry,"backend":"fleet-postgres"}))
         }
         "list" => {
             Ok(json!({"entries":store.list(count_input(input, "limit", "memory list")? as usize)?}))
         }
         "recall" => {
-            let query = string_input(input, "query").unwrap_or_default();
+            let query = string_input(input, "query")
+                .ok_or("memory recall requires query, the text the notes are recalled for")?;
             let hits = store.recall(
                 &FtsBackend,
                 &scope,

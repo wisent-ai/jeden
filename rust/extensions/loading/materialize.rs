@@ -22,36 +22,24 @@ pub(super) fn materialize_commands(
     if commands.is_empty() {
         return Ok(None);
     }
-    let root = cwd.join(".jeden/runtime/extensions");
-    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-    let stage = root.join(format!(
-        "commands-{generation}.stage-{}",
-        std::process::id()
-    ));
-    if stage.exists() {
-        fs::remove_dir_all(&stage).map_err(|error| error.to_string())?;
-    }
-    fs::create_dir_all(&stage).map_err(|error| error.to_string())?;
-    for command in commands {
-        let file = stage.join(format!("{}.md", command.name));
-        let contents = if command.description.trim().is_empty() {
-            command.prompt.clone()
-        } else {
-            format!(
-                "---\ndescription: {}\n---\n{}",
-                serde_json::Value::String(command.description.replace('\n', " ")),
-                command.prompt
-            )
-        };
-        fs::write(file, contents).map_err(|error| error.to_string())?;
-    }
-    let final_dir = root.join(format!("commands-{generation}"));
-    if final_dir.exists() {
-        fs::remove_dir_all(&final_dir).map_err(|error| error.to_string())?;
-    }
-    fs::rename(&stage, &final_dir).map_err(|error| error.to_string())?;
-    Ok(Some(final_dir))
+    let files = commands
+        .iter()
+        .map(|command| {
+            let contents = if command.description.trim().is_empty() {
+                command.prompt.clone()
+            } else {
+                format!(
+                    "---\ndescription: {}\n---\n{}",
+                    serde_json::Value::String(command.description.replace('\n', " ")),
+                    command.prompt
+                )
+            };
+            (format!("{}.md", command.name), contents.into_bytes())
+        })
+        .collect();
+    publish(cwd, "commands", generation, files).map(Some)
 }
+
 pub(super) fn materialize_agents(
     cwd: &Path,
     generation: u64,
@@ -60,24 +48,65 @@ pub(super) fn materialize_agents(
     if agents.is_empty() {
         return Ok(None);
     }
+    let files = agents
+        .values()
+        .map(|agent| {
+            serde_json::to_vec_pretty(&agent.value)
+                .map(|bytes| (format!("{}.json", agent.id), bytes))
+                .map_err(|error| format!("agent {} cannot be encoded as JSON: {error}", agent.id))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    publish(cwd, "agents", generation, files).map(Some)
+}
+
+/// Write `files` into the directory `<kind>-<generation>` under the runtime
+/// extensions directory. They are staged in a directory of this process
+/// beside it and renamed into place, so a reader never sees a generation
+/// half written; every failed step is refused naming its path.
+fn publish(
+    cwd: &Path,
+    kind: &str,
+    generation: u64,
+    files: Vec<(String, Vec<u8>)>,
+) -> Result<PathBuf, String> {
     let root = cwd.join(".jeden/runtime/extensions");
-    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
-    let stage = root.join(format!("agents-{generation}.stage-{}", std::process::id()));
-    if stage.exists() {
-        fs::remove_dir_all(&stage).map_err(|error| error.to_string())?;
+    created(&root)?;
+    let stage = root.join(format!("{kind}-{generation}.stage-{}", std::process::id()));
+    cleared(&stage)?;
+    created(&stage)?;
+    for (name, bytes) in files {
+        let file = stage.join(name);
+        fs::write(&file, bytes)
+            .map_err(|error| format!("{} cannot be written: {error}", file.display()))?;
     }
-    fs::create_dir_all(&stage).map_err(|error| error.to_string())?;
-    for agent in agents.values() {
-        let file = stage.join(format!("{}.json", agent.id));
-        let bytes = serde_json::to_vec_pretty(&agent.value).map_err(|error| error.to_string())?;
-        fs::write(file, bytes).map_err(|error| error.to_string())?;
+    let final_dir = root.join(format!("{kind}-{generation}"));
+    cleared(&final_dir)?;
+    fs::rename(&stage, &final_dir).map_err(|error| {
+        format!(
+            "{} cannot be moved into place as {}: {error}",
+            stage.display(),
+            final_dir.display()
+        )
+    })?;
+    Ok(final_dir)
+}
+
+fn created(directory: &Path) -> Result<(), String> {
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("{} cannot be created: {error}", directory.display()))
+}
+
+/// Remove `directory` and what it holds; one that is not there is already
+/// cleared.
+fn cleared(directory: &Path) -> Result<(), String> {
+    match fs::remove_dir_all(directory) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "{} cannot be removed: {error}",
+            directory.display()
+        )),
     }
-    let final_dir = root.join(format!("agents-{generation}"));
-    if final_dir.exists() {
-        fs::remove_dir_all(&final_dir).map_err(|error| error.to_string())?;
-    }
-    fs::rename(&stage, &final_dir).map_err(|error| error.to_string())?;
-    Ok(Some(final_dir))
 }
 
 pub(in crate::hooks::extensions) fn build_registry(
@@ -85,7 +114,8 @@ pub(in crate::hooks::extensions) fn build_registry(
     sources: SourceSet,
     generation: u64,
 ) -> Result<Registry, String> {
-    let files = serde_json::to_string(&sources.modules).map_err(|error| error.to_string())?;
+    let files = serde_json::to_string(&sources.modules)
+        .map_err(|error| format!("the extension module list cannot be encoded as JSON: {error}"))?;
     let response = run_host(
         cwd,
         "discover",
@@ -100,13 +130,12 @@ pub(in crate::hooks::extensions) fn build_registry(
     if response.get("abiVersion").and_then(Value::as_u64) != Some(ABI_VERSION as u64) {
         return Err("extension host ABI mismatch".into());
     }
-    let mut extensions: Vec<HostExtension> = serde_json::from_value(
-        response
-            .get("extensions")
-            .cloned()
-            .unwrap_or_else(|| json!([])),
-    )
-    .map_err(|error| format!("invalid extension descriptors: {error}"))?;
+    let declared = response
+        .get("extensions")
+        .cloned()
+        .ok_or("the extension host answered discover without an extensions list")?;
+    let mut extensions: Vec<HostExtension> = serde_json::from_value(declared)
+        .map_err(|error| format!("invalid extension descriptors: {error}"))?;
     let source_set: BTreeSet<PathBuf> = sources.modules.iter().cloned().collect();
     extensions.retain(|extension| source_set.contains(&extension.source));
     for extension in &mut extensions {
@@ -114,7 +143,9 @@ pub(in crate::hooks::extensions) fn build_registry(
             .module_precedence
             .get(&extension.source)
             .copied()
-            .unwrap_or_default();
+            .ok_or_else(|| {
+                format!("extension module {} has no precedence in its source set", extension.source.display())
+            })?;
     }
     extensions.sort_by(|left, right| {
         right
@@ -151,11 +182,11 @@ pub(in crate::hooks::extensions) fn build_registry(
         for command in &extension.commands {
             commands.insert(command.name.clone(), command.clone());
         }
-        let mut event_indices = BTreeMap::<String, usize>::new();
-        for hook in &mut extension.hooks {
-            let index = event_indices.entry(hook.event.clone()).or_default();
-            hook.index = *index;
-            *index += 1;
+        // A hook's index is how many hooks of its event this extension
+        // declares before it.
+        let events: Vec<String> = extension.hooks.iter().map(|hook| hook.event.clone()).collect();
+        for (position, hook) in extension.hooks.iter_mut().enumerate() {
+            hook.index = events[..position].iter().filter(|event| **event == hook.event).count();
         }
         hooks.extend(extension.hooks.clone());
     }

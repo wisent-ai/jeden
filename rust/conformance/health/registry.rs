@@ -67,6 +67,15 @@ pub(super) fn keymap_probe(cwd: &Path) -> HealthProbe {
         "conflicts": descriptor.metadata.get("conflicts"),
         "contextsMutuallyExclusive": descriptor.metadata.get("contextsMutuallyExclusive"),
     }));
+    // The descriptor's own detail is the cause; one it leaves out is said as
+    // left out, never replaced by a sentence nobody observed.
+    let detail = match descriptor.health.detail.as_deref() {
+        Some(detail) => detail.to_string(),
+        None => format!(
+            "the tui-keymap descriptor reports {:?} without saying why",
+            descriptor.health.state
+        ),
+    };
     match descriptor.health.state {
         HealthState::Healthy => HealthProbe::healthy(
             "tui-keymap",
@@ -74,25 +83,10 @@ pub(super) fn keymap_probe(cwd: &Path) -> HealthProbe {
             "namespaced key bindings have no active-context conflicts",
             evidence,
         ),
-        HealthState::Degraded => HealthProbe::degraded(
-            "tui-keymap",
-            started,
-            descriptor
-                .health
-                .detail
-                .as_deref()
-                .unwrap_or("TUI keymap conflicts detected"),
-            evidence,
-        ),
-        HealthState::Unavailable | HealthState::Disabled => HealthProbe::unavailable(
-            "tui-keymap",
-            started,
-            descriptor
-                .health
-                .detail
-                .as_deref()
-                .unwrap_or("TUI keymap diagnostics unavailable"),
-        ),
+        HealthState::Degraded => HealthProbe::degraded("tui-keymap", started, &detail, evidence),
+        HealthState::Unavailable | HealthState::Disabled => {
+            HealthProbe::unavailable("tui-keymap", started, &detail)
+        }
     }
 }
 

@@ -85,15 +85,14 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     );
     for (server, connection) in &manager.servers {
         let ready = matches!(connection.state, ConnectionState::Ready);
-        let health = if ready {
-            CapabilityHealth::healthy()
-        } else {
-            CapabilityHealth::unavailable(
-                connection
-                    .last_error
-                    .clone()
-                    .unwrap_or_else(|| format!("MCP server is {}", connection.state.as_str())),
-            )
+        // A server that is not ready says why when it recorded an error, and
+        // otherwise the state it stands in, which is then the whole cause.
+        let health = match (ready, connection.failures.last().cloned()) {
+            (true, _) => CapabilityHealth::healthy(),
+            (false, Some(error)) => CapabilityHealth::unavailable(error),
+            (false, None) => {
+                CapabilityHealth::unavailable(format!("MCP server is {}", connection.state.as_str()))
+            }
         };
         out.push(
             CapabilityDescriptor::new(
@@ -122,16 +121,28 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
                 continue;
             };
             let native_name = crate::tools::native_mcp_tool_name(server, remote_name);
-            let description = tool
-                .get("description")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| format!("MCP tool {remote_name} from {server}"));
+            // MCP makes a tool's description optional; one the server leaves
+            // out is named by the tool and its server, never left blank.
+            let description = match tool.get("description").and_then(Value::as_str) {
+                Some(description) => description.to_string(),
+                None => format!("MCP tool {remote_name} from {server}"),
+            };
+            // tools/list is validated to give every tool an object input
+            // schema; one without it is a tool nobody can call correctly.
+            let (input, tool_health) = match tool.get("inputSchema") {
+                Some(schema) => (schema.clone(), health.clone()),
+                None => (
+                    Value::Null,
+                    CapabilityHealth::unavailable(format!(
+                        "MCP tool {remote_name} from {server} declares no inputSchema"
+                    )),
+                ),
+            };
             out.push(CapabilityDescriptor::new(
                 format!("tool/{native_name}"), CapabilityKind::Tool, format!("mcp:{server}"), native_name.clone(), description,
                 FunctionTarget::McpTool { native_name: native_name.clone(), server: server.clone(), remote_name: remote_name.into() },
             ).operation("execute").dependency(format!("mcp/{server}")).policy(CapabilityPolicy::Sandboxed)
-             .health(health.clone()).executable(native_name).metadata(json!({"input": tool.get("inputSchema").cloned().unwrap_or_else(|| json!({"type":"object"}))})));
+             .health(tool_health).executable(native_name).metadata(json!({"input": input})));
         }
     }
     out

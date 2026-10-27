@@ -2,7 +2,7 @@ use base64::{engine::general_purpose, Engine as _};
 use rusqlite::{types::ValueRef as SqlValueRef, Connection};
 use serde_json::{json, Value};
 
-use crate::tool_runtime::shared::{count_input, jail_path, string_input, u64_input};
+use crate::tool_runtime::shared::{amount_input, count_input, jail_path, string_input};
 use crate::tool_runtime::ToolRuntime;
 
 fn sql_json_value(value: SqlValueRef<'_>) -> Value {
@@ -49,7 +49,7 @@ fn sqlite_identifier(name: &str) -> Result<String, String> {
 pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("read_sqlite requires path")?;
     let file = jail_path(runtime.cwd, &path)?;
-    let offset = u64_input(input, "offset", 0);
+    let offset = amount_input(input, "offset", "read_sqlite")?.0;
     let conn = Connection::open_with_flags(&file, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
         .map_err(|e| e.to_string())?;
     if let Some(query) = string_input(input, "query") {
@@ -70,48 +70,58 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             json!({"path": path, "query": query, "rows": rows, "limit": limit, "offset": offset}),
         );
     }
-    let table = string_input(input, "table");
-    if table.is_none() {
-        let mut tables = run_sql_rows(&conn, "SELECT name, type FROM sqlite_schema WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name")?;
-        for table in &mut tables {
-            if table.get("type").and_then(Value::as_str) == Some("table") {
-                if let Some(name) = table.get("name").and_then(Value::as_str) {
-                    let count_rows = run_sql_rows(
-                        &conn,
-                        &format!("SELECT count(*) AS count FROM {}", sqlite_identifier(name)?),
-                    )?;
-                    table["rows"] = count_rows
-                        .first()
-                        .and_then(|row| row.get("count"))
-                        .cloned()
-                        .unwrap_or(Value::Null);
+    let table_name = match string_input(input, "table") {
+        Some(table_name) => table_name,
+        None => {
+            let mut tables = run_sql_rows(&conn, "SELECT name, type FROM sqlite_schema WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' ORDER BY name")?;
+            for table in &mut tables {
+                if table.get("type").and_then(Value::as_str) == Some("table") {
+                    if let Some(name) = table.get("name").and_then(Value::as_str) {
+                        let rows: i64 = conn
+                            .query_row(
+                                &format!("SELECT count(*) AS count FROM {}", sqlite_identifier(name)?),
+                                [],
+                                |row| row.get("count"),
+                            )
+                            .map_err(|error| format!("cannot count the rows of {name}: {error}"))?;
+                        table["rows"] = json!(rows);
+                    }
                 }
             }
+            return Ok(json!({"path": path, "tables": tables}));
         }
-        return Ok(json!({"path": path, "tables": tables}));
-    }
-    let table_name = table.unwrap();
+    };
     let table_sql = sqlite_identifier(&table_name)?;
     let schema = run_sql_rows(&conn, &format!("PRAGMA table_info({table_sql})"))?;
     if let Some(key) = string_input(input, "key") {
+        // `pk` is a column's place in the primary key, counted from one; a
+        // column outside the key has none.
         let primary_keys = schema
             .iter()
-            .filter(|column| column.get("pk").and_then(Value::as_i64).unwrap_or(0) > 0)
+            .filter(|column| {
+                column
+                    .get("pk")
+                    .and_then(Value::as_i64)
+                    .is_some_and(i64::is_positive)
+            })
             .collect::<Vec<_>>();
-        if primary_keys.len() != 1 {
-            return Err(format!(
-                "table has no single-column primary key: {table_name}"
-            ));
-        }
-        let pk = primary_keys[0]
-            .get("name")
-            .and_then(Value::as_str)
-            .ok_or("primary key has no name")?;
+        let pk = match primary_keys.as_slice() {
+            [only] => only
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or("primary key has no name")?,
+            _ => {
+                return Err(format!(
+                    "table has no single-column primary key: {table_name}"
+                ))
+            }
+        };
         let escaped_key = key.replace('\'', "''");
+        // The key is the table's primary key, so at most one row answers.
         let rows = run_sql_rows(
             &conn,
             &format!(
-                "SELECT * FROM {table_sql} WHERE {} = '{escaped_key}' LIMIT 1",
+                "SELECT * FROM {table_sql} WHERE {} = '{escaped_key}'",
                 sqlite_identifier(pk)?
             ),
         )?;
@@ -128,9 +138,7 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     }
     let limit = count_input(input, "limit", "read_sqlite reading a table's rows")?;
     clauses.push(format!("LIMIT {limit}"));
-    if offset > 0 {
-        clauses.push(format!("OFFSET {offset}"));
-    }
+    clauses.push(format!("OFFSET {offset}"));
     let rows = run_sql_rows(
         &conn,
         &format!("SELECT * FROM {table_sql} {}", clauses.join(" ")),

@@ -64,7 +64,10 @@ pub(crate) fn handle_advisor(
         "dump" => {
             let Some(review) = &state.advisor.last_review else { return Err("No advisor notes are available yet. Enable /advisor and complete an agent turn first.".into()); };
             if rest.trim().eq_ignore_ascii_case("raw") { return serde_json::to_string_pretty(review).map_err(|e| e.to_string()); }
-            Ok(review.get("text").and_then(Value::as_str).unwrap_or("Advisor review is empty.").to_string())
+            match review.get("text").and_then(Value::as_str) {
+                Some(text) => Ok(text.to_string()),
+                None => Err("the last advisor review carries no text; /advisor dump raw shows it whole".into()),
+            }
         },
         "configure" => {
             let config_text = rest.trim();

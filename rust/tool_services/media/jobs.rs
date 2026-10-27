@@ -19,7 +19,10 @@ impl MediaService {
         let prompt = nonempty(input.get("prompt"), "prompt")?;
         let size = input.get("size").and_then(Value::as_str);
         dimensions(size)?;
-        let model = optional_string(input, "model").unwrap_or_else(|| self.image_model.clone());
+        let model = match optional_string(input, "model") {
+            Some(chosen) => chosen,
+            None => self.image_model.clone(),
+        };
         let bytes = self
             .brama
             .generate_image(&model, &prompt, size, &meta("image"))
@@ -43,11 +46,21 @@ impl MediaService {
         let voice = optional_string(input, "voice")
             .or_else(|| optional_string(input, "voice_id"))
             .ok_or_else(|| ServiceError::InvalidInput("tts requires voice".into()))?;
-        let format = optional_string(input, "format").unwrap_or_else(|| "mp3".into());
+        // A request that names no format is spoken as mp3, the first format
+        // the tool's contract lists.
+        let format = match optional_string(input, "format") {
+            Some(format) => format,
+            None => "mp3".to_string(),
+        };
         if !matches!(format.as_str(), "mp3" | "wav" | "opus" | "aac" | "flac") {
-            return Err(ServiceError::InvalidInput("unsupported TTS format".into()));
+            return Err(ServiceError::InvalidInput(format!(
+                "TTS format {format} is not one of mp3, wav, opus, aac, flac"
+            )));
         }
-        let model = optional_string(input, "model").unwrap_or_else(|| self.tts_model.clone());
+        let model = match optional_string(input, "model") {
+            Some(chosen) => chosen,
+            None => self.tts_model.clone(),
+        };
         let (bytes, mime_type) = self
             .brama
             .speak(&model, &text, &voice, &format, &meta("speech"))

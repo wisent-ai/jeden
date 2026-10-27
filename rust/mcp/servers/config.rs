@@ -25,7 +25,9 @@ pub fn load_config(cwd: &Path) -> Result<Value, String> {
         cwd.join(".jeden/mcp.json"),
     ] {
         let mut source = read_config_file(&path)?;
-        let root = source.as_object_mut().expect("validated MCP object");
+        let Some(root) = source.as_object_mut() else {
+            return Err(format!("{} does not hold a JSON object", path.display()));
+        };
         if let Some(Value::Object(declared)) = root.remove("mcpServers") {
             servers.extend(declared);
         }

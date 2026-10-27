@@ -1,8 +1,6 @@
 //! Reading custom slash commands off disk, in each of the three shapes a
-//! provider writes them.
-//!
-//! Split out of `cli/commands/mod.rs`, which had grown past the module line
-//! cap; which directories are consulted, and in what order, stays there.
+//! provider writes them; which directories are consulted, and in what
+//! order, is `cli/commands/mod.rs`'s.
 
 use std::collections::BTreeSet;
 use std::fs;
@@ -55,13 +53,26 @@ fn md_files(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         }
         paths.sort();
         for path in paths {
-            let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
-            if name.starts_with('.') {
+            if path.file_name().is_some_and(|name| name.as_encoded_bytes().starts_with(b".")) {
                 continue;
             }
-            if recursive && path.is_dir() {
-                stack.push(path);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
+            if recursive {
+                // An entry that cannot be examined is said, like one that
+                // cannot be listed: read as a file, a folder of commands
+                // behind it was never walked.
+                match fs::metadata(&path) {
+                    Ok(metadata) if metadata.is_dir() => {
+                        stack.push(path);
+                        continue;
+                    }
+                    Ok(_file) => {}
+                    Err(error) => {
+                        eprintln!("jeden: slash commands under {} were not loaded: {error}", path.display());
+                        continue;
+                    }
+                }
+            }
+            if path.extension().and_then(|e| e.to_str()) == Some("md") {
                 out.push(path);
             }
         }
@@ -116,14 +127,20 @@ pub(super) fn add_frontmatter_name_dir(
     source: &str,
 ) {
     for path in md_files(&dir, false) {
-        let name = fs::read_to_string(&path)
-            .ok()
-            .and_then(|text| frontmatter_field(&text, "name"))
-            .or_else(|| {
-                path.file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(ToString::to_string)
-            });
+        // A command whose file cannot be read cannot run: it is said with
+        // its cause and left out, never listed under its file name alone.
+        let text = match fs::read_to_string(&path) {
+            Ok(text) => text,
+            Err(error) => {
+                eprintln!("jeden: slash command {} was not loaded: {error}", path.display());
+                continue;
+            }
+        };
+        let name = frontmatter_field(&text, "name").or_else(|| {
+            path.file_stem()
+                .and_then(|s| s.to_str())
+                .map(ToString::to_string)
+        });
         let Some(name) = name else { continue };
         push_discovered_command(out, seen, name, path, source);
     }

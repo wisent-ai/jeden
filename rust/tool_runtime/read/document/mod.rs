@@ -14,7 +14,7 @@ use std::fs;
 
 use super::PDF_TYPE;
 use crate::tool_runtime::shared::{
-    count_input, jail_path, line_window, mime_type_of, sha256_hex, string_input,
+    count_input, jail_path, mime_type_of, selected_lines, sha256_hex, string_input, LineWindow,
 };
 use crate::tool_runtime::ToolRuntime;
 
@@ -63,12 +63,31 @@ pub(super) fn readable_text_for_document(bytes: &[u8]) -> Result<String, String>
         return Ok(readable_text_from_feed(&raw));
     }
     if delimited_by(&raw, TAB) {
-        return Ok(readable_text_from_delimited(&raw, TAB));
+        return readable_text_from_delimited(&raw, TAB);
     }
     if delimited_by(&raw, COMMA) {
-        return Ok(readable_text_from_delimited(&raw, COMMA));
+        return readable_text_from_delimited(&raw, COMMA);
     }
     Ok(raw)
+}
+
+/// The text a reader answers — the selected lines, or the whole text when no
+/// range was asked — cut to `max_bytes`, and whether the cut dropped any.
+pub(super) fn answered_text(
+    readable: &str,
+    window: Option<&LineWindow>,
+    max_bytes: usize,
+) -> (String, bool) {
+    let selected = match window {
+        Some(window) => window.text.as_str(),
+        None => readable,
+    };
+    let output_bytes = selected.as_bytes();
+    let slice = &output_bytes[..output_bytes.len().min(max_bytes)];
+    (
+        String::from_utf8_lossy(slice).into_owned(),
+        output_bytes.len() > slice.len(),
+    )
 }
 
 pub(crate) fn read_document(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -77,15 +96,10 @@ pub(crate) fn read_document(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let file = jail_path(runtime.cwd, &path)?;
     let bytes = fs::read(&file).map_err(|e| e.to_string())?;
     let readable = readable_text_for_document(&bytes)?;
-    let selected = if let Some(range) = string_input(input, "range") {
-        line_window(&readable, &range)?
-    } else {
-        (readable.clone(), 0, 0, Vec::new())
-    };
-    let output_bytes = selected.0.as_bytes();
-    let slice = &output_bytes[..output_bytes.len().min(max_bytes)];
+    let window = selected_lines(&readable, string_input(input, "range"))?;
+    let (text, truncated) = answered_text(&readable, window.as_ref(), max_bytes);
     Ok(
-        json!({"path": path, "bytes": readable.len(), "truncated": output_bytes.len() > slice.len(), "mimeType": mime_type_of(&bytes), "text": String::from_utf8_lossy(slice), "startLine": if selected.3.is_empty() { Value::Null } else { json!(selected.1) }, "endLine": if selected.3.is_empty() { Value::Null } else { json!(selected.2) }, "ranges": if selected.3.is_empty() { Value::Null } else { json!(selected.3) }, "sha256": sha256_hex(&bytes)}),
+        json!({"path": path, "bytes": readable.len(), "truncated": truncated, "mimeType": mime_type_of(&bytes), "text": text, "startLine": window.as_ref().map(|window| window.start_line), "endLine": window.as_ref().map(|window| window.end_line), "ranges": window.as_ref().map(|window| &window.ranges), "sha256": sha256_hex(&bytes)}),
     )
 }
 
@@ -100,25 +114,22 @@ pub(crate) fn fetch_readable_url(
     let max_bytes = count_input(input, "maxBytes", "fetch_readable_url")? as usize;
     let client = crate::net::blocking_builder()
         .build()
-        .map_err(|e| e.to_string())?;
-    let response = client.get(&url).send().map_err(|e| e.to_string())?;
-    let status = response.status().as_u16();
-    let ok = (200..300).contains(&status);
+        .map_err(|error| format!("fetch_readable_url: the HTTP client cannot be built: {}", crate::control_plane::transport::describe_reqwest(error)))?;
+    let response = stado_wait::request_blocking(client.get(&url))
+        .map_err(|error| format!("fetch_readable_url {url}: {error}"))?;
+    let status = response.status();
+    // A header that is not visible text is answered as its bytes read lossily.
     let content_type = response
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|value| value.to_str().ok())
-        .map(ToString::to_string);
-    let bytes = response.bytes().map_err(|e| e.to_string())?;
+        .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("fetch_readable_url {url}: the body could not be read: {error}"))?;
     let readable = readable_text_for_document(&bytes)?;
-    let selected = if let Some(range) = string_input(input, "range") {
-        line_window(&readable, &range)?
-    } else {
-        (readable.clone(), 0, 0, Vec::new())
-    };
-    let output_bytes = selected.0.as_bytes();
-    let slice = &output_bytes[..output_bytes.len().min(max_bytes)];
+    let window = selected_lines(&readable, string_input(input, "range"))?;
+    let (text, truncated) = answered_text(&readable, window.as_ref(), max_bytes);
     Ok(
-        json!({"url": url, "status": status, "ok": ok, "contentType": content_type, "bytes": readable.len(), "sha256": sha256_hex(&bytes), "truncated": output_bytes.len() > slice.len(), "text": String::from_utf8_lossy(slice), "startLine": if selected.3.is_empty() { Value::Null } else { json!(selected.1) }, "endLine": if selected.3.is_empty() { Value::Null } else { json!(selected.2) }, "ranges": if selected.3.is_empty() { Value::Null } else { json!(selected.3) }}),
+        json!({"url": url, "status": status.as_u16(), "ok": status.is_success(), "contentType": content_type, "bytes": readable.len(), "sha256": sha256_hex(&bytes), "truncated": truncated, "text": text, "startLine": window.as_ref().map(|window| window.start_line), "endLine": window.as_ref().map(|window| window.end_line), "ranges": window.as_ref().map(|window| &window.ranges)}),
     )
 }

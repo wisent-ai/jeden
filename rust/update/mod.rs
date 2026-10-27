@@ -1,8 +1,7 @@
+mod channel;
 pub mod manifest;
 pub mod transaction;
 
-use base64::Engine;
-use ed25519_dalek::VerifyingKey;
 use semver::Version;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -13,10 +12,7 @@ use std::process::{Command, Stdio};
 use manifest::{ReleaseManifestV2, TrustRoot};
 use transaction::{read_installed_state, InstallPaths};
 
-const CANARY_RELEASE_KEY_ID: &str = "jeden-canary-2026-07-13";
-const CANARY_RELEASE_PUBLIC_KEY: &str = "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=";
-const STABLE_RELEASE_KEY_ID: &str = "jeden-stable-2026-07-13";
-const STABLE_RELEASE_PUBLIC_KEY: &str = "78wFp2XYBVMWv/MfkvTlQ3TqWjyHMgJWKA9KK4e9wsA=";
+pub use channel::{embedded_trust_roots, Channel};
 
 pub struct UpdateRequest {
     pub manifest_location: String,
@@ -29,40 +25,10 @@ pub struct UpdateRequest {
     pub failpoint: Option<String>,
 }
 
-pub fn embedded_trust_roots() -> Result<Vec<TrustRoot>, String> {
-    let canary = (CANARY_RELEASE_KEY_ID, CANARY_RELEASE_PUBLIC_KEY);
-    let stable = (STABLE_RELEASE_KEY_ID, STABLE_RELEASE_PUBLIC_KEY);
-    [("canary", canary), ("stable", stable)]
-        .into_iter()
-        .map(|(channel, (key_id, encoded))| {
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(encoded)
-                .map_err(|_| "embedded trust root is invalid base64")?;
-            let bytes: [u8; 32] = bytes
-                .try_into()
-                .map_err(|_| "embedded trust root is not 32 bytes")?;
-            let key = VerifyingKey::from_bytes(&bytes)
-                .map_err(|_| "embedded trust root is not a valid Ed25519 key")?;
-            Ok(TrustRoot {
-                channel: channel.into(),
-                key_id: key_id.into(),
-                key,
-            })
-        })
-        .collect()
-}
-
-pub fn native_target_triple() -> Result<String, String> {
-    let triple = match (std::env::consts::ARCH, std::env::consts::OS) {
-        ("aarch64", "macos") => "aarch64-apple-darwin",
-        ("x86_64", "macos") => "x86_64-apple-darwin",
-        ("aarch64", "linux") => "aarch64-unknown-linux-gnu",
-        ("x86_64", "linux") => "x86_64-unknown-linux-gnu",
-        ("x86_64", "windows") => "x86_64-pc-windows-msvc",
-        ("aarch64", "windows") => "aarch64-pc-windows-msvc",
-        (arch, os) => return Err(format!("self-update target is unsupported for {arch}-{os}")),
-    };
-    Ok(triple.into())
+/// The target triple this binary was compiled for, which its updates are
+/// released for; the build script stamps Cargo's own `TARGET`.
+pub fn native_target_triple() -> String {
+    env!("JEDEN_TARGET_TRIPLE").to_string()
 }
 
 mod fetch;
@@ -75,17 +41,25 @@ fn verify_evidence(
     artifact_sha256: &str,
     kind: &str,
 ) -> Result<(), String> {
-    let (location, expected) = reference
+    let (location, stated) = reference
         .rsplit_once("#sha256=")
         .ok_or_else(|| format!("{kind} reference must be digest-bound with #sha256=<hex>"))?;
-    if expected.len() != 64 || !expected.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-        return Err(format!("{kind} reference has invalid SHA-256"));
-    }
-    let bytes = fetch(&resolve(base, location), None)?;
-    let actual = hex::encode(Sha256::digest(&bytes));
-    if actual != expected.to_ascii_lowercase() {
+    let expected = hex::decode(stated)
+        .map_err(|error| format!("{kind} reference's SHA-256 {stated:?} is not hex: {error}"))?;
+    let size = <Sha256 as Digest>::output_size();
+    if expected.len() != size {
         return Err(format!(
-            "{kind} digest mismatch: expected {expected}, got {actual}"
+            "{kind} reference's SHA-256 {stated:?} holds {} bytes, not a SHA-256 digest's {size}",
+            expected.len()
+        ));
+    }
+    let bytes = fetch(&resolve(base, location)?, None)?;
+    let actual = Sha256::digest(&bytes);
+    if actual.as_slice() != expected.as_slice() {
+        return Err(format!(
+            "{kind} digest mismatch: expected {}, got {}",
+            hex::encode(&expected),
+            hex::encode(actual)
         ));
     }
     let value: Value =
@@ -160,7 +134,7 @@ fn extract_release_executable(archive: &[u8], target_triple: &str) -> Result<Vec
         let path = entry
             .path()
             .map_err(|error| format!("invalid release archive path: {error}"))?;
-        if path.components().count() != 1 || path.to_str() != Some(expected_name) {
+        if path.to_str() != Some(expected_name) {
             return Err(format!(
                 "release archive must contain only root-level {expected_name}"
             ));
@@ -208,26 +182,13 @@ pub fn run_health(binary: &Path, cwd: &Path) -> Result<(), String> {
     }
 }
 
-/// The release channels an update follows.
-#[derive(Clone, Copy)]
-enum Channel {
-    Canary,
-    Stable,
-}
-
-impl Channel {
-    fn named(name: &str) -> Option<Self> {
-        match name {
-            "canary" => Some(Self::Canary),
-            "stable" => Some(Self::Stable),
-            _ => None,
-        }
-    }
-}
-
 pub fn execute(request: UpdateRequest) -> Result<ReleaseManifestV2, String> {
     if Channel::named(&request.channel).is_none() {
-        return Err("update channel must be canary or stable".into());
+        return Err(format!(
+            "update channel {:?} is none of {}",
+            request.channel,
+            Channel::names().join(", ")
+        ));
     }
     let paths = InstallPaths::new(request.target)?;
     transaction::recover_exclusive(&paths)?;
@@ -246,7 +207,7 @@ pub fn execute(request: UpdateRequest) -> Result<ReleaseManifestV2, String> {
         request.now,
     )?;
     let artifact = fetch(
-        &resolve(&request.manifest_location, &manifest.artifact_url),
+        &resolve(&request.manifest_location, &manifest.artifact_url)?,
         Some(manifest.size),
     )?;
     manifest::verify_artifact(&manifest, &artifact)?;

@@ -1,4 +1,5 @@
 mod context;
+mod hillclimb;
 mod dispatch;
 mod hosting;
 mod lease;
@@ -18,7 +19,6 @@ use super::{
     MtlsConfig, ReloadableTlsAcceptor, ReplayStore, SessionService, TenantDirectory, TenantError,
     TenantGuard, TenantLimits, WisentIdentityAuthority,
 };
-use rand::RngCore;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -50,7 +50,7 @@ impl JsonWriter {
         }
     }
     pub(crate) fn send(&self, value: &Value) -> Result<(), String> {
-        let mut writer = self.inner.lock().map_err(|_| "output lock poisoned")?;
+        let mut writer = self.inner.lock().map_err(|_poisoned| "output lock poisoned")?;
         serde_json::to_writer(&mut *writer, value).map_err(|error| error.to_string())?;
         writer.write_all(b"\n").map_err(|error| error.to_string())?;
         writer.flush().map_err(|error| error.to_string())
@@ -68,6 +68,7 @@ pub(super) struct WireRequest {
 pub(super) struct ServerState {
     pub(super) sessions: Mutex<HashMap<String, AgentSession>>,
     context_requests: context::Requests,
+    hillclimb_requests: hillclimb::Requests,
     pub(super) bridge: Arc<RpcInteractionBridge>,
     pub(super) writer: JsonWriter,
     next_session: AtomicU64,
@@ -109,6 +110,7 @@ where
     let state = Arc::new(ServerState {
         sessions: Mutex::new(HashMap::new()),
         context_requests: context::Requests::default(),
+        hillclimb_requests: hillclimb::Requests::default(),
         bridge,
         writer: writer.clone(),
         next_session: AtomicU64::new(crate::tally::FIRST),
@@ -121,117 +123,135 @@ where
             .ok_or("RPC protocol declaration has no version")?.parse::<u64>()
             .map_err(|error| format!("RPC protocol version is not a number: {error}"))?,
         "capabilities": AgentSession::capabilities(),
-        "quickReplies": quick_replies()
+        "hillclimb": { "run": true, "cancel": true, "active": true, "ledgerOverride": true },
+        "quickReplies": quick_replies()?
     }))?;
 
     let inbox = parking::inbox(input, park.as_ref())?;
     let activity = parking::Activity::new();
     let mut workers = Vec::new();
-    while !state.shutting_down.load(Ordering::Acquire) {
-        let frame = match inbox.recv() {
-            Ok(parking::Inbound::Frame(Ok(frame))) => frame,
-            Ok(parking::Inbound::Frame(Err(error))) => {
-                writer.send(&error_response(Value::Null, "malformed_frame", &error))?;
-                continue;
-            }
-            Ok(parking::Inbound::Check) => {
-                let notice = park
-                    .as_ref()
-                    .and_then(|policy| parking::park_notice(&state, &activity, policy));
-                if let Some(notice) = notice {
-                    eprintln!(
-                        "jeden rpc parked ({}): nothing ran for {} s",
-                        notice["reason"]
-                            .as_str()
-                            .ok_or("park notice missing reason")?,
-                        notice["quietSeconds"]
-                    );
-                    writer.send(&notice)?;
-                    break;
+    let dispatch_result = (|| -> Result<(), String> {
+        while !state.shutting_down.load(Ordering::Acquire) {
+            let frame = match inbox.recv() {
+                Ok(parking::Inbound::Frame(Ok(frame))) => frame,
+                Ok(parking::Inbound::Frame(Err(error))) => {
+                    writer.send(&error_response(Value::Null, "malformed_frame", &error))?;
+                    continue;
                 }
-                continue;
-            }
-            Ok(parking::Inbound::Closed) | Err(_) => break,
-        };
-        activity.touch();
-        let request = match serde_json::from_slice::<WireRequest>(&frame) {
-            Ok(request) => request,
-            Err(error) => {
-                writer.send(&error_response(
-                    Value::Null,
-                    "malformed_json",
-                    &error.to_string(),
-                ))?;
-                continue;
-            }
-        };
-        if matches!(
-            request.method.as_str(),
-            "session/prompt" | "session/completion/continue"
-        ) {
-            let worker_state = state.clone();
-            let in_flight = activity.begin();
-            workers.push(thread::spawn(move || {
-                let _in_flight = in_flight;
-                handle_prompt(worker_state, request)
-            }));
-        } else if matches!(
-            request.method.as_str(),
-            "context/recommend" | "context/sources"
-        ) {
-            let Some(context_request) = context::begin(&state, &request)? else {
-                continue;
+                Ok(parking::Inbound::Check) => {
+                    let notice = park
+                        .as_ref()
+                        .and_then(|policy| parking::park_notice(&state, &activity, policy));
+                    if let Some(notice) = notice {
+                        eprintln!(
+                            "jeden rpc parked ({}): nothing ran for {} s",
+                            notice["reason"]
+                                .as_str()
+                                .ok_or("park notice missing reason")?,
+                            notice["quietSeconds"]
+                        );
+                        writer.send(&notice)?;
+                        break;
+                    }
+                    continue;
+                }
+                // Every sender is gone: the input reader has ended.
+                Ok(parking::Inbound::Closed) | Err(std::sync::mpsc::RecvError) => break,
             };
-            let worker_state = state.clone();
-            let in_flight = activity.begin();
-            workers.push(thread::spawn(move || {
-                let _in_flight = in_flight;
-                let result = match request.method.as_str() {
-                    "context/recommend" => context::recommend(&worker_state, &request),
-                    "context/sources" => context::sources(&worker_state, &request),
-                    other => Err((
-                        "method_not_found",
-                        format!("unknown context method: {other}"),
-                    )),
+            activity.touch();
+            let request = match serde_json::from_slice::<WireRequest>(&frame) {
+                Ok(request) => request,
+                Err(error) => {
+                    writer.send(&error_response(
+                        Value::Null,
+                        "malformed_json",
+                        &error.to_string(),
+                    ))?;
+                    continue;
+                }
+            };
+            if matches!(
+                request.method.as_str(),
+                "session/prompt" | "session/completion/continue"
+            ) {
+                let worker_state = state.clone();
+                let in_flight = activity.begin();
+                workers.push(thread::spawn(move || {
+                    let _in_flight = in_flight;
+                    handle_prompt(worker_state, request)
+                }));
+            } else if request.method == "hillclimb/run" {
+                if let Some(worker) = hillclimb::start(&state, request, activity.begin())? {
+                    workers.push(worker);
+                }
+            } else if matches!(
+                request.method.as_str(),
+                "context/recommend" | "context/sources"
+            ) {
+                let Some(context_request) = context::begin(&state, &request)? else {
+                    continue;
                 };
-                let response = match result {
-                    Ok(value) => success_response(request.id, value),
-                    Err((code, detail)) => error_response(request.id, code, &detail),
-                };
-                // Reuse of the id must not race this worker's teardown.
-                drop(context_request);
-                worker_state.writer.send(&response)
-            }));
-        } else if let Err(error) = handle_request(&state, request) {
-            writer.send(&error)?;
+                let worker_state = state.clone();
+                let in_flight = activity.begin();
+                workers.push(thread::spawn(move || {
+                    let _in_flight = in_flight;
+                    let result = match request.method.as_str() {
+                        "context/recommend" => context::recommend(&worker_state, &request),
+                        "context/sources" => context::sources(&worker_state, &request),
+                        other => Err((
+                            "method_not_found",
+                            format!("unknown context method: {other}"),
+                        )),
+                    };
+                    let response = match result {
+                        Ok(value) => success_response(request.id, value),
+                        Err((code, detail)) => error_response(request.id, code, &detail),
+                    };
+                    // Reuse of the id must not race this worker's teardown.
+                    drop(context_request);
+                    worker_state.writer.send(&response)
+                }));
+            } else if let Err(error) = handle_request(&state, request) {
+                writer.send(&error)?;
+            }
         }
-    }
+        Ok(())
+    })();
 
     state.shutting_down.store(true, Ordering::Release);
-    let sessions = state
-        .sessions
-        .lock()
-        .map_err(|_| "sessions lock poisoned")?
-        .drain()
-        .map(|(_, session)| session)
-        .collect::<Vec<_>>();
-    for session in &sessions {
-        let active = session.status()?;
-        for request_id in active {
-            session.abort(&request_id).map_err(|error| {
-                format!("cannot cancel active RPC request {request_id} during shutdown: {error}")
-            })?;
+    state.hillclimb_requests.cancel_all();
+    state.context_requests.cancel_all();
+    let mut failures = Vec::new();
+    if let Err(error) = dispatch_result {
+        failures.push(format!("RPC dispatch failed: {error}"));
+    }
+    let sessions = crate::panicked::held(&state.sessions).drain().collect::<Vec<_>>();
+    for (session_id, session) in &sessions {
+        match session.status() {
+            Ok(active) => {
+                for request_id in active {
+                    if let Err(error) = session.abort(&request_id) {
+                        failures.push(format!("cannot cancel RPC session {session_id} request {request_id}: {error}"));
+                    }
+                }
+            }
+            Err(error) => failures.push(format!("cannot read active requests of RPC session {session_id}: {error}")),
         }
     }
-    state.bridge.cancel_all()?;
-    state.context_requests.cancel_all();
+    if let Err(error) = state.bridge.cancel_all() {
+        failures.push(format!("cannot cancel RPC interactions: {error}"));
+    }
     for worker in workers {
-        worker
-            .join()
-            .map_err(|_| "prompt worker panicked".to_string())??;
+        match worker.join() {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => failures.push(format!("RPC worker failed: {error}")),
+            Err(payload) => failures.push(crate::panicked::refusal("an RPC worker", &*payload)),
+        }
     }
-    for session in sessions {
-        session.dispose()?;
+    for (session_id, session) in sessions {
+        if let Err(error) = session.dispose() {
+            failures.push(format!("cannot dispose RPC session {session_id}: {error}"));
+        }
     }
-    Ok(())
+    if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
 }

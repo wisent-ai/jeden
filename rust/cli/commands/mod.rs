@@ -43,8 +43,10 @@ fn command_provider_enabled(cwd: &Path, key: &str, default: bool) -> bool {
 }
 
 /// Discover file-based custom slash commands in provider precedence order.
-/// The first discovered command name wins across providers.
-pub(crate) fn discover_file_commands(cwd: &Path) -> Vec<DiscoveredCommand> {
+/// The first discovered command name wins across providers. Installed
+/// plugins whose registry cannot be read are refused, never left out: their
+/// commands would vanish, or another provider's same name would answer.
+pub(crate) fn discover_file_commands(cwd: &Path) -> Result<Vec<DiscoveredCommand>, String> {
     let mut out = Vec::new();
     let mut seen = std::collections::BTreeSet::new();
     add_flat_command_dir(
@@ -59,7 +61,7 @@ pub(crate) fn discover_file_commands(cwd: &Path) -> Vec<DiscoveredCommand> {
         dirs_home().join(".jeden/commands"),
         "Jeden User",
     );
-    for dir in slash::installed_plugin_command_dirs(cwd) {
+    for dir in slash::installed_plugin_command_dirs(cwd)? {
         add_flat_command_dir(&mut out, &mut seen, dir, "Installed Plugin");
     }
     if command_provider_enabled(cwd, "enableClaudeUser", true) {
@@ -106,45 +108,29 @@ pub(crate) fn discover_file_commands(cwd: &Path) -> Vec<DiscoveredCommand> {
             "OpenCode Project",
         );
     }
-    out
+    Ok(out)
 }
 
-/// Resolve a file-based custom command `<name>` to its template body (frontmatter
-/// stripped). Returns None if no provider contributes a matching command.
-/// Callers run [`readable_file_command`] first, so a declared command whose
-/// file cannot be read is refused rather than taken for no command.
-pub(crate) fn find_file_command(cwd: &Path, name: &str) -> Option<String> {
+/// Resolve a file-based custom command `<name>` to its template body
+/// (frontmatter stripped): none when no provider declares it, refused naming
+/// the file and the cause when a provider declares it but its file cannot be
+/// read. Taken for no command, `/name` went to the model as a literal prompt.
+pub(crate) fn find_file_command(cwd: &Path, name: &str) -> Result<Option<String>, String> {
     let safe = name.trim().trim_start_matches('/');
     if !valid_file_command_name(safe) {
-        return None;
+        return Ok(None);
     }
-    discover_file_commands(cwd)
+    let Some(command) = discover_file_commands(cwd)?
         .into_iter()
         .find(|command| command.name == safe)
-        .and_then(|command| fs::read_to_string(command.path).ok())
-        .map(|text| expand::strip_frontmatter(&text))
-}
-
-/// Refuse a custom command a provider declares whose file cannot be read,
-/// naming the file and the cause: taken for no command, `/name` went to the
-/// model as a literal prompt. A name no provider declares is not refused.
-pub(crate) fn readable_file_command(cwd: &Path, name: &str) -> Result<(), String> {
-    let safe = name.trim().trim_start_matches('/');
-    if !valid_file_command_name(safe) {
-        return Ok(());
-    }
-    match discover_file_commands(cwd)
-        .into_iter()
-        .find(|command| command.name == safe)
-    {
-        Some(command) => fs::read_to_string(&command.path)
-            .map(drop)
-            .map_err(|error| {
-                format!(
-                    "custom command /{safe} is declared by {} but cannot be read: {error}",
-                    command.path.display()
-                )
-            }),
-        None => Ok(()),
-    }
+    else {
+        return Ok(None);
+    };
+    let text = fs::read_to_string(&command.path).map_err(|error| {
+        format!(
+            "custom command /{safe} is declared by {} but cannot be read: {error}",
+            command.path.display()
+        )
+    })?;
+    Ok(Some(expand::strip_frontmatter(&text)))
 }

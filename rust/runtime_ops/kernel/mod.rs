@@ -2,19 +2,22 @@
 //! happens to it when the scope goes away.
 
 use super::{ArtifactSink, CancellationToken, OperationContext, OutputCapture};
-use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex};
+use std::sync::Arc;
 
 mod bootstrap;
+mod frame;
+mod output;
 mod process;
 
+mod control;
+mod launch;
+mod registry;
 use crate::tool_runtime::runtime_ops::security::ExecutionGrant;
 use process::KernelProcess;
+use super::session::PersistentProcess;
 
-static KERNELS: LazyLock<Mutex<HashMap<KernelKey, KernelProcess>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum KernelLanguage {
@@ -98,40 +101,47 @@ pub fn evaluate(
     }
     let key = KernelKey {
         scope: scope.to_path_buf(),
-        cwd: canonical_cwd.clone(),
+        cwd: canonical_cwd,
         language,
     };
-    let mut kernels = KERNELS
-        .lock()
-        .map_err(|_| "kernel registry lock poisoned")?;
+    let slot = registry::slot(key)?;
+    let mut owned = slot.acquire(context)?;
+    registry::check_current(&slot)?;
     if reset {
-        if let Some(mut old) = kernels.remove(&key) {
-            old.terminate();
+        if let Some(mut old) = owned.take() { old.retire(true); }
+    }
+    if let Some(existing) = owned.as_mut() {
+        match existing.alive() {
+            Ok(true) => {}
+            Ok(false) => {
+                let mut old = owned.take().expect("checked kernel disappeared while its lease was held");
+                old.retire(false);
+            }
+            Err(cause) => {
+                let mut old = owned.take().expect("unreadable kernel disappeared while its lease was held");
+                old.retire(false);
+                return Err(cause);
+            }
         }
     }
-    let mut kernel = if let Some(mut existing) = kernels.remove(&key) {
-        if existing.alive() {
-            existing
-        } else {
-            existing.terminate();
-            KernelProcess::spawn(language, &canonical_cwd, grant)?
-        }
-    } else {
-        KernelProcess::spawn(language, &canonical_cwd, grant)?
-    };
-    let outcome = kernel.evaluate(context, code, reset);
-    match outcome {
-        Ok((result, healthy)) => {
-            if healthy {
-                kernels.insert(key, kernel);
-            } else {
-                kernel.terminate();
-            }
+    if owned.is_none() {
+        let mut kernel = KernelProcess::spawn(language, &slot.key.cwd, grant)?;
+        kernel.registered = Some(Arc::clone(&slot.key));
+        registry::register(&slot, &kernel.control)?;
+        *owned = Some(kernel);
+    }
+    let kernel = owned.as_mut().expect("initialized kernel disappeared while its lease was held");
+    match kernel.evaluate(context, code, reset) {
+        Ok((result, true)) => Ok(result),
+        Ok((result, false)) => {
+            let mut kernel = owned.take().expect("executed kernel disappeared while its lease was held");
+            kernel.retire(result.cancelled);
             Ok(result)
         }
-        Err(error) => {
-            kernel.terminate();
-            Err(error)
+        Err(cause) => {
+            let mut kernel = owned.take().expect("failed kernel disappeared while its lease was held");
+            kernel.retire(context.cancellation().is_cancelled());
+            Err(cause)
         }
     }
 }
@@ -143,38 +153,33 @@ pub fn probe(language: KernelLanguage, cwd: &Path) -> Result<(), String> {
         OperationContext::new(
             CancellationToken::new(),
             ArtifactSink::new(std::env::temp_dir()),
+            cwd.to_path_buf(),
         )
         .execution_grant(),
     )?;
     let artifacts = std::env::temp_dir().join("jeden-kernel-probe-artifacts");
-    let context = OperationContext::new(CancellationToken::new(), ArtifactSink::new(artifacts));
-    let result = kernel.evaluate(&context, "1", true);
-    kernel.terminate();
+    let context = OperationContext::new(
+        CancellationToken::new(),
+        ArtifactSink::new(artifacts),
+        cwd.to_path_buf(),
+    );
+    // An empty list is an expression every kernel language evaluates the
+    // same way, so its success shows the kernel runs code at all.
+    let result = kernel.evaluate(&context, "[]", true);
+    kernel.retire(false);
     let (result, _) = result?;
     if result.ok {
-        Ok(())
-    } else {
-        Err(result
-            .error
-            .unwrap_or_else(|| format!("{} kernel probe failed", language.label())))
+        return Ok(());
+    }
+    match result.error {
+        Some(error) => Err(error),
+        None => Err(format!(
+            "the {} kernel did not evaluate its probe and reported no error",
+            language.label()
+        )),
     }
 }
 
 pub fn teardown_scope(scope: &Path) {
-    // Teardown must end the scope's kernels even after a panic poisoned
-    // the registry, or they outlive the scope; the guard is recovered.
-    let mut kernels = match KERNELS.lock() {
-        Ok(kernels) => kernels,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    let keys: Vec<_> = kernels
-        .keys()
-        .filter(|key| key.scope == scope)
-        .cloned()
-        .collect();
-    for key in keys {
-        if let Some(mut kernel) = kernels.remove(&key) {
-            kernel.terminate();
-        }
-    }
+    registry::teardown(scope);
 }

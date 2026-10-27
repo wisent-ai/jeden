@@ -43,7 +43,7 @@ pub(super) fn quote(
     meta: &RequestMeta,
 ) -> Result<billing::Quote, WelesError> {
     let body = serde_json::to_value(request)
-        .map_err(|_| WelesError::InvalidRequest("quote request encoding failed"))?;
+        .map_err(|error| WelesError::RequestRefused { what: "quote request encoding failed", cause: error.to_string() })?;
     let quote: billing::Quote = client.request_v2(
         reqwest::Method::POST,
         "/subscription-quotes",

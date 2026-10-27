@@ -2,7 +2,6 @@
 
 use parking_lot::Mutex;
 use serde_json::Value;
-use std::env;
 use std::io::IsTerminal;
 use std::sync::Arc;
 
@@ -14,10 +13,10 @@ use crate::cli::sessions::session_conversation_turns;
 use crate::{agent, hooks, tui, Args};
 
 mod commands;
-mod status;
+pub(crate) mod status;
 mod turn;
 
-use status::{git_prompt_status, service_tier_prompt};
+use status::{service_tier_prompt, GitWatch};
 use turn::run_turn;
 
 fn input_accepts_attachments(input: &str) -> bool {
@@ -63,22 +62,8 @@ fn model_attachments(
 
 pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let config = load_config(&args.cwd);
-    let model = (if let Some(model) = args.model.clone() {
-        Some(model)
-    } else if let Some(model) = config.model {
-        Some(model)
-    } else {
-        match env::var("JEDEN_MODEL") {
-            Ok(model) => Some(model),
-            Err(env::VarError::NotPresent) => match env::var("MODEL") {
-                Ok(model) => Some(model),
-                Err(env::VarError::NotPresent) => None,
-                Err(error) => return Err(format!("MODEL cannot be read: {error}")),
-            },
-            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
-        }
-    })
-    .filter(|model| !model.trim().is_empty());
+    // The unrelated `MODEL` variable is no route Jeden reads.
+    let model = crate::agent::selected_model(args.model.as_deref(), config.model.as_deref())?;
     let initial_model_picker = if model.is_none() {
         // Keep /setup reachable when a direct route variable is unreadable;
         // its picker reports the refusal without treating Brama as selected.
@@ -108,11 +93,15 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     // A named session that is not there is refused before a new one is
     // recorded, so a mistyped id leaves no empty session behind.
     let resumed = agent::resumed_session(args);
-    if let Some(session_path) = resumed.as_ref().filter(|path| !path.exists()) {
-        return Err(format!(
-            "--resume-session names no session: {} does not exist",
-            session_path.display()
-        ));
+    if let Some(session_path) = &resumed {
+        // One that cannot be examined is refused with its cause, never
+        // called missing.
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(session_path)? {
+            return Err(format!(
+                "--resume-session names no session: {} does not exist",
+                session_path.display()
+            ));
+        }
     }
     let mut initial_conversation = agent::Conversation::new(&args.cwd)?;
     if let Some(session_path) = &resumed {
@@ -140,7 +129,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     }
     let conversation = Arc::new(Mutex::new(initial_conversation));
     let pending_relaunch = Arc::new(Mutex::new(None));
-    let context_limit = status::context_limit();
+    let context_limit = status::context_limit()?;
 
     // Shared working directory keeps /move changes synchronized across subsequent
     // turns, the status line, git prompt, and file-command resolution.
@@ -148,11 +137,12 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     let status_model = Arc::clone(&session_model);
     let status_conv = Arc::clone(&conversation);
     let status_cwd = Arc::clone(&session_cwd);
+    let mut git_watch = GitWatch::default();
     let status = move || {
         let cwd = status_cwd.lock().clone();
-        let (branch, dirty_count) = git_prompt_status(&cwd);
         // try_lock: never block the frame on an in-flight turn.
         let tokens = status_conv.try_lock().map(|c| c.approx_tokens());
+        let git = git_watch.current(&cwd, tokens);
         // Token counts (used/limit) are shown directly; no scaling constant.
         let context_limit_label = match (tokens, context_limit) {
             (Some(tokens), Some(limit)) => Some(format!("{}/{} tok", tokens, limit)),
@@ -176,8 +166,8 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
                 None => "not selected".into(),
             },
             service_tier: service_tier_prompt(&cwd),
-            branch,
-            dirty_count,
+            branch: git.branch,
+            dirty_count: git.dirty_count,
             context_percent: None,
             context_limit: context_limit_label,
             cost: None,

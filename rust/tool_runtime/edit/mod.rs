@@ -2,17 +2,41 @@ use serde_json::{json, Value};
 use std::fs;
 
 use super::shared::{
-    bool_input, jail_write_path, sha256_hex, simple_diff, string_input, verify_expected_sha,
+    container_path, flag_input, jail_write_path, sha256_hex, simple_diff, string_input,
+    verify_expected_sha, ARCHIVE_SUFFIXES, DATABASE_SUFFIXES,
 };
 use super::ToolRuntime;
 
 mod lines;
+mod notebook;
 mod storage;
+mod subjects;
 mod visual_apply;
 mod visual_parse;
 
 pub(crate) use storage::{write_archive, write_sqlite};
+pub(crate) use subjects::policy_subjects;
 pub(crate) use visual_apply::visual_edit;
+
+/// The refusal for one filesystem step of an edit, naming what was being done
+/// to which path: the tool's caller sees which write failed, not a bare
+/// operating-system message.
+fn io_failed(
+    action: &'static str,
+    path: &std::path::Path,
+) -> impl FnOnce(std::io::Error) -> String + '_ {
+    move |error| format!("cannot {action} {}: {error}", path.display())
+}
+
+/// A file the edit reads as text that is not UTF-8, named.
+fn not_text(path: &std::path::Path) -> impl FnOnce(std::string::FromUtf8Error) -> String + '_ {
+    move |error| {
+        format!(
+            "{} is not UTF-8 text, so it cannot be edited as text: {error}",
+            path.display()
+        )
+    }
+}
 
 #[derive(Clone)]
 struct VisualPatchOp {
@@ -31,102 +55,22 @@ struct VisualPatchSection {
     move_to: Option<String>,
 }
 
-fn notebook_bytes(file: &std::path::Path, content: &str) -> Result<Vec<u8>, String> {
-    if file.extension().and_then(|value| value.to_str()) != Some("ipynb")
-        || !content.starts_with("# %% [")
-    {
-        return Ok(content.as_bytes().to_vec());
-    }
-    let mut parsed = match fs::read(file) {
-        Ok(bytes) => serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            json!({"cells":[],"metadata":{},"nbformat":4,"nbformat_minor":5})
-        }
-        Err(error) => return Err(format!("{} cannot be read: {error}", file.display())),
-    };
-    let mut cells = Vec::<(String, String)>::new();
-    let mut kind = None::<String>;
-    let mut source = String::new();
-    for line in content.split_inclusive('\n') {
-        let trimmed = line.trim_end_matches(['\r', '\n']);
-        if let Some(rest) = trimmed.strip_prefix("# %% [") {
-            if let Some((next_kind, suffix)) = rest.split_once("] cell:") {
-                suffix
-                    .parse::<usize>()
-                    .map_err(|_| format!("invalid notebook cell marker: {trimmed}"))?;
-                if let Some(previous) = kind.replace(next_kind.to_string()) {
-                    cells.push((
-                        previous,
-                        std::mem::take(&mut source)
-                            .trim_end_matches('\n')
-                            .to_string(),
-                    ));
-                }
-                continue;
-            }
-        }
-        if kind.is_none() {
-            return Err("notebook content must begin with a cell marker".into());
-        }
-        source.push_str(line);
-    }
-    if let Some(previous) = kind {
-        cells.push((previous, source.trim_end_matches('\n').to_string()));
-    }
-    let existing = parsed
-        .get("cells")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let rebuilt = cells
-        .into_iter()
-        .enumerate()
-        .map(|(index, (kind, source))| {
-            let mut cell = existing
-                .get(index)
-                .cloned()
-                .unwrap_or_else(|| json!({"metadata":{}}));
-            let object = cell
-                .as_object_mut()
-                .ok_or("notebook cell must be an object")?;
-            object.insert("cell_type".into(), json!(kind));
-            object.insert(
-                "source".into(),
-                json!(source
-                    .split_inclusive('\n')
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()),
-            );
-            if object.get("cell_type").and_then(Value::as_str) == Some("code") {
-                object.entry("outputs").or_insert_with(|| json!([]));
-                object.entry("execution_count").or_insert(Value::Null);
-            }
-            Ok(cell)
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    parsed
-        .as_object_mut()
-        .ok_or("notebook root must be an object")?
-        .insert("cells".into(), json!(rebuilt));
-    serde_json::to_vec_pretty(&parsed).map_err(|error| error.to_string())
-}
-
 pub(crate) fn write_any(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let path = string_input(input, "path").ok_or("write requires path")?;
-    let lower = path.to_ascii_lowercase();
-    for suffix in [".tar.gz:", ".tgz:", ".tar:", ".zip:"] {
-        if let Some(index) = lower.find(suffix) {
-            let split = index + suffix.len() - 1;
-            let mut routed = input.clone();
-            let object = routed
-                .as_object_mut()
-                .ok_or("write input must be an object")?;
-            object.insert("path".into(), json!(&path[..split]));
-            object.insert("entry".into(), json!(&path[split + 1..]));
-            return write_archive(runtime, &routed);
-        }
+    if let Some((archive, entry)) = container_path(&path, ARCHIVE_SUFFIXES) {
+        let mut routed = input.clone();
+        let object = routed
+            .as_object_mut()
+            .ok_or("write input must be an object")?;
+        object.insert("path".into(), json!(archive));
+        object.insert("entry".into(), json!(entry));
+        // Writing an entry's content is upserting it.
+        object.insert("action".into(), json!("upsert"));
+        return write_archive(runtime, &routed);
     }
-    if (lower.ends_with(".sqlite") || lower.ends_with(".db")) && input.get("table").is_some() {
+    let lower = path.to_ascii_lowercase();
+    if DATABASE_SUFFIXES.iter().any(|suffix| lower.ends_with(suffix)) && input.get("table").is_some()
+    {
         return write_sqlite(runtime, input);
     }
     write_file(runtime, input)
@@ -156,10 +100,10 @@ pub(crate) fn write_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         Err(error) => return Err(format!("{path} cannot be read: {error}")),
     }
     if let Some(parent) = file.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent).map_err(io_failed("create directory", parent))?;
     }
-    let bytes = notebook_bytes(&file, &content)?;
-    fs::write(&file, &bytes).map_err(|e| e.to_string())?;
+    let bytes = notebook::notebook_bytes(&file, &content)?;
+    fs::write(&file, &bytes).map_err(io_failed("write", &file))?;
     Ok(json!({"ok": true, "path": path, "bytes": bytes.len(), "sha256": sha256_hex(&bytes)}))
 }
 
@@ -172,15 +116,25 @@ pub(crate) fn apply_patch_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
         string_input(input, "expectedSha256").ok_or("apply_patch requires expectedSha256")?;
     let file = jail_write_path(runtime.cwd, &path)?;
     let current_bytes = verify_expected_sha(&path, &file, &expected)?;
-    let current = String::from_utf8(current_bytes).map_err(|e| e.to_string())?;
-    let replacements = input
-        .get("replacements")
-        .and_then(Value::as_array)
+    let current = String::from_utf8(current_bytes).map_err(not_text(&file))?;
+    let replacements = input.get("replacements").ok_or("replacements are required")?;
+    let next = replaced(&current, replacements)?;
+    fs::write(&file, next.as_bytes()).map_err(io_failed("write", &file))?;
+    Ok(
+        json!({"ok": true, "path": path, "sha256": sha256_hex(next.as_bytes()), "diff": simple_diff(&path, &current, &next), "replacements": replacements.as_array().map(Vec::len), "bytes": next.len()}),
+    )
+}
+
+/// `current` with each exact, single-occurrence replacement applied in order;
+/// the tool and its policy hooks read the same result.
+fn replaced(current: &str, replacements: &Value) -> Result<String, String> {
+    let replacements = replacements
+        .as_array()
         .ok_or("replacements are required")?;
     if replacements.is_empty() {
         return Err("replacements are required".into());
     }
-    let mut next = current.clone();
+    let mut next = current.to_owned();
     for replacement in replacements {
         let old = replacement
             .get("old")
@@ -199,10 +153,7 @@ pub(crate) fn apply_patch_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
         }
         next = format!("{}{}{}", &next[..first], new, &next[first + old.len()..]);
     }
-    fs::write(&file, next.as_bytes()).map_err(|e| e.to_string())?;
-    Ok(
-        json!({"ok": true, "path": path, "sha256": sha256_hex(next.as_bytes()), "diff": simple_diff(&path, &current, &next), "replacements": replacements.len(), "bytes": next.len()}),
-    )
+    Ok(next)
 }
 
 pub(crate) fn edit_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -214,11 +165,14 @@ pub(crate) fn edit_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
         string_input(input, "expectedSha256").ok_or("edit_file requires expectedSha256")?;
     let file = jail_write_path(runtime.cwd, &path)?;
     let current_bytes = verify_expected_sha(&path, &file, &expected)?;
-    let current = String::from_utf8(current_bytes).map_err(|e| e.to_string())?;
+    let current = String::from_utf8(current_bytes).map_err(not_text(&file))?;
     let ops = input.get("ops").ok_or("ops are required")?;
+    let op_count = ops
+        .as_array()
+        .map(Vec::len)
+        .ok_or_else(|| format!("edit_file ops must be a list, not {ops}"))?;
     let next = lines::apply_line_edit_ops(&current, ops)?;
-    fs::write(&file, next.as_bytes()).map_err(|e| e.to_string())?;
-    let op_count = ops.as_array().map(Vec::len).unwrap_or(0);
+    fs::write(&file, next.as_bytes()).map_err(io_failed("write", &file))?;
     Ok(
         json!({"ok": true, "path": path, "sha256": sha256_hex(next.as_bytes()), "diff": simple_diff(&path, &current, &next), "ops": op_count, "bytes": next.len()}),
     )
@@ -233,7 +187,7 @@ pub(crate) fn delete_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         string_input(input, "expectedSha256").ok_or("delete_file requires expectedSha256")?;
     let file = jail_write_path(runtime.cwd, &path)?;
     let bytes = verify_expected_sha(&path, &file, &expected)?;
-    fs::remove_file(&file).map_err(|e| e.to_string())?;
+    fs::remove_file(&file).map_err(io_failed("delete", &file))?;
     Ok(
         json!({"ok": true, "path": path, "deleted": true, "previousSha256": sha256_hex(&bytes), "previousBytes": bytes.len()}),
     )
@@ -247,17 +201,21 @@ pub(crate) fn move_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     let to = string_input(input, "to").ok_or("move_file requires to")?;
     let expected =
         string_input(input, "expectedSha256").ok_or("move_file requires expectedSha256")?;
-    let overwrite = bool_input(input, "overwrite", false);
+    let overwrite = flag_input(input, "overwrite", "move_file")?;
     let from_file = jail_write_path(runtime.cwd, &from)?;
     let to_file = jail_write_path(runtime.cwd, &to)?;
     let bytes = verify_expected_sha(&from, &from_file, &expected)?;
-    if to_file.exists() && !overwrite {
+    // A destination that cannot be examined is refused: read as absent, the
+    // move replaced it without overwrite being given.
+    if !overwrite && crate::tool_runtime::runtime_ops::platform::presence::present(&to_file)? {
         return Err(format!("destination exists: {to}"));
     }
     if let Some(parent) = to_file.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent).map_err(io_failed("create directory", parent))?;
     }
-    fs::rename(&from_file, &to_file).map_err(|e| e.to_string())?;
+    fs::rename(&from_file, &to_file).map_err(|error| {
+        format!("cannot move {} to {}: {error}", from_file.display(), to_file.display())
+    })?;
     Ok(
         json!({"ok": true, "from": from, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}),
     )

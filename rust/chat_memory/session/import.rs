@@ -58,7 +58,7 @@ pub fn import(name: &str, source: &str, cwd: &Path) -> Result<Value, String> {
     })?;
     let _owner = own_chat(&chat)?;
     chat::record(&chat, cwd)?;
-    let _guard = busy()?;
+    let _guard = busy();
     let mut imports = read_imports(&chat.dir)?;
     if let Some(earlier) = imports.iter().find(|earlier| earlier.session == session) {
         return Err(format!(
@@ -106,12 +106,9 @@ pub fn import(name: &str, source: &str, cwd: &Path) -> Result<Value, String> {
         date,
     });
     let path = imports_path(&chat.dir);
-    let staged = chat.dir.join("imports.json.staged");
     let text = serde_json::to_string_pretty(&imports)
         .map_err(|error| format!("the chat's imports cannot be encoded: {error}"))?;
-    std::fs::write(&staged, text + "\n")
-        .and_then(|()| std::fs::rename(&staged, &path))
-        .map_err(|error| format!("{} cannot be written: {error}", path.display()))?;
+    crate::tool_runtime::runtime_ops::durable::replace(&path, (text + "\n").as_bytes())?;
     Ok(json!({
         "chat": chat.name,
         "directory": chat.dir,

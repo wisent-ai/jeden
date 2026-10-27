@@ -49,7 +49,8 @@ where
     let mut note = String::from("working…");
     let mut streamed = String::new();
     let mut reasoning = String::new();
-    let mut frame = 0usize;
+    // The spinner's animation frame, counted from the first.
+    let mut frame = crate::tally::ORIGIN;
     let mut tools_used: Vec<String> = Vec::new();
     let record_tool = |message: &str, tools: &mut Vec<String>| {
         if let Some(tool) = message.strip_prefix("tool: ") {
@@ -101,7 +102,11 @@ where
                 {
                     return false;
                 }
-                answer.recv().unwrap_or(false)
+                // A view that is gone can no longer approve, so the tool is refused.
+                match answer.recv() {
+                    Ok(decision) => decision,
+                    Err(_closed) => false,
+                }
             };
             let ask_user = move |question: &str, options: &[String]| -> Result<String, String> {
                 let (reply, answer) = mpsc::channel::<Result<String, String>>();
@@ -111,10 +116,10 @@ where
                         options: options.to_vec(),
                         reply,
                     })
-                    .map_err(|_| "Question channel closed".to_string())?;
+                    .map_err(|closed| format!("Question channel closed: {closed}"))?;
                 answer
                     .recv()
-                    .unwrap_or_else(|_| Err("Question channel closed".into()))
+                    .map_err(|closed| format!("Question channel closed: {closed}"))?
             };
             let ctx = TurnCtx {
                 cancel: worker_cancel,
@@ -137,7 +142,9 @@ where
                 let mut pending_approval: Option<(String, String, mpsc::Sender<bool>)> = None;
                 let mut pending_question: Option<PendingQuestion> = None;
                 let mut blocks = Vec::new();
-                while let Some(message) = pending.take().or_else(|| rx.try_recv().ok()) {
+                // An empty channel has nothing now; `read_or_message` reports a closed one.
+                let next = |rx: &mut futures::channel::mpsc::UnboundedReceiver<TurnMsg>| match rx.try_recv() { Ok(m) => Some(m), Err(_empty) => None };
+                while let Some(message) = pending.take().or_else(|| next(&mut rx)) {
                     match message {
                         TurnMsg::Note(m) => {
                             record_tool(&m, &mut tools_used);
@@ -208,20 +215,20 @@ where
                     &reasoning, &streamed, &note, frame, cancelling, columns, color,
                 );
                 let mut composer = busy_editor_lines(editor, queue, columns, color);
-                let cursor_rows_below = if composer.len() > 1 {
-                    place_editor_cursor(
-                        &mut composer[1..],
+                // The input's rows follow the composer's first line; none trail it.
+                let cursor_rows_below = match composer.split_first_mut() {
+                    Some((_, input_rows)) if !input_rows.is_empty() => place_editor_cursor(
+                        input_rows,
                         editor.text(),
                         editor.cursor(),
                         columns,
-                        0,
-                    )
-                } else {
-                    0
+                        crate::tally::ORIGIN,
+                    ),
+                    _ => crate::tally::ORIGIN,
                 };
                 live.extend(composer);
                 renderer.flush_with_cursor(&[], &live, cursor_rows_below)?;
-                frame = frame.wrapping_add(1);
+                frame = frame.wrapping_add(usize::from(crate::tally::STEP));
 
                 match input.read_or_message(&mut rx)? {
                     InputOrMessage::Message(Some(message)) => pending = Some(message),
@@ -278,9 +285,10 @@ where
         }
         // Drop queued reply senders before joining a worker blocked on approval.
         drop(rx);
-        let outcome = worker
-            .join()
-            .unwrap_or_else(|_| Err("Turn thread panicked.".into()));
+        let outcome = match worker.join() {
+            Ok(outcome) => outcome,
+            Err(_panic) => Err("Turn thread panicked.".into()),
+        };
         render_result?;
         Ok(outcome)
     })?;

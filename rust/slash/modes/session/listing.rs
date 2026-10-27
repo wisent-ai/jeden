@@ -39,14 +39,21 @@ fn first_user_task(session_dir: &Path) -> Result<Option<String>, String> {
 fn first_task_in(reader: impl BufRead, transcript: &Path) -> Result<Option<String>, String> {
     for line in reader.lines() {
         let line = line.map_err(|error| format!("{}: {error}", transcript.display()))?;
-        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-            continue;
+        // A line that is not JSON is a damaged transcript, shown as such in the
+        // picker with the line itself, never passed over on the way to the first task.
+        let value = serde_json::from_str::<serde_json::Value>(&line).map_err(|error| {
+            format!("{}: a line is not a transcript event ({error}): {line}", transcript.display())
+        })?;
+        // A V2 line carries its event under payload; a legacy line is the
+        // event itself.
+        let payload = match value.get("payload") {
+            Some(payload) => payload,
+            None => &value,
         };
-        let payload = value.get("payload").unwrap_or(&value);
         if payload.get("type").and_then(serde_json::Value::as_str) != Some("user") {
             continue;
         }
-        let Some(text) = user_text(payload) else {
+        let Some(text) = user_text(payload, transcript)? else {
             return Ok(None);
         };
         let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -58,14 +65,20 @@ fn first_task_in(reader: impl BufRead, transcript: &Path) -> Result<Option<Strin
 }
 
 /// The text a `user` event's data carries, read in the order its fields are
-/// declared.
-fn user_text(payload: &serde_json::Value) -> Option<String> {
-    let said = UserEventData::deserialize(payload.get("data")?).ok()?;
-    let text = [&said.task, &said.content, &said.text]
+/// declared; none when the event carries no data, and an error naming the
+/// transcript when its data is not the shape a user event has.
+fn user_text(payload: &serde_json::Value, transcript: &Path) -> Result<Option<String>, String> {
+    let Some(data) = payload.get("data") else {
+        return Ok(None);
+    };
+    let said = UserEventData::deserialize(data).map_err(|error| {
+        format!("{}: a user event's data is not a user event: {error}", transcript.display())
+    })?;
+    let found = [&said.task, &said.content, &said.text]
         .into_iter()
         .find_map(serde_json::Value::as_str)
         .map(str::to_string);
-    text
+    Ok(found)
 }
 
 /// The row for something the listing could not read: disabled, its cause in
@@ -104,8 +117,16 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
                 }
             };
             let path = entry.path();
-            if !path.is_dir() {
-                continue;
+            match std::fs::metadata(&path) {
+                Ok(metadata) if metadata.is_dir() => {}
+                Ok(_not_session) => continue,
+                Err(error) => {
+                    unreadable.push(unreadable_item(
+                        entry.file_name().to_string_lossy().to_string(),
+                        format!("{}: {error}", path.display()),
+                    ));
+                    continue;
+                }
             }
             let id = entry.file_name().to_string_lossy().to_string();
             let metadata = match crate::slash::common::read_json_value(&path.join("state.json")) {
@@ -115,41 +136,34 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
                     continue;
                 }
             };
-            let name = metadata
-                .get("name")
-                .and_then(serde_json::Value::as_str)
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or(&id)
-                .to_string();
-            let workspace = metadata
-                .get("cwd")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            let started = metadata
-                .get("startedAt")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("")
-                .to_string();
-            entries.push((path, id, name, workspace, started));
+            // A session nobody named is listed by its id; a workspace or a
+            // start it does not record is left out of its detail.
+            let text = |key: &str| {
+                metadata
+                    .get(key)
+                    .and_then(serde_json::Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .map(str::to_string)
+            };
+            let name = match text("name") {
+                Some(name) => name,
+                None => id.clone(),
+            };
+            entries.push((path, id, name, text("cwd"), text("startedAt")));
         }
     }
     let mut items = Vec::new();
     for (path, id, name, workspace, started) in &entries {
-        let mut parts = vec![workspace.clone(), started.clone()];
-        if let Some(age) = relative_age(started) {
-            parts.push(age);
+        let mut parts: Vec<String> = workspace.iter().chain(started.iter()).cloned().collect();
+        if let Some(started) = started.as_deref() {
+            parts.push(relative_age(started));
         }
         match first_user_task(path) {
             Ok(Some(task)) => parts.push(task),
             Ok(None) => {}
             Err(cause) => parts.push(format!("transcript unreadable: {cause}")),
         }
-        let detail = parts
-            .into_iter()
-            .filter(|value| !value.is_empty())
-            .collect::<Vec<_>>()
-            .join(" · ");
+        let detail = parts.join(" · ");
         items.push(
             PickerItem::action(name.clone(), format!("/resume {}", id))
                 .detail(detail)
@@ -161,39 +175,25 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
     items
 }
 
-/// List every session directory under `session_root`, one per line. The prior
-/// "most recent N" display cap was an unconsented numeric literal and has been
-/// removed; all sessions are listed.
-pub(super) fn list_sessions(session_root: &Path) -> String {
-    let mut rows = Vec::new();
+/// List every session directory under `session_root`, one per line; every
+/// session is listed. A root or an entry that cannot be read is an error
+/// naming the root and the cause, so `/resume` does not answer success with
+/// a refusal in its text.
+pub(super) fn list_sessions(session_root: &Path) -> Result<String, String> {
+    let refused = |error: std::io::Error| format!("Sessions cannot be listed: {}: {error}", session_root.display());
     let entries = match fs::read_dir(session_root) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return "No sessions found.".into()
-        }
-        Err(error) => {
-            return format!(
-                "Sessions cannot be listed: {}: {error}",
-                session_root.display()
-            )
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok("No sessions found.".into()),
+        Err(error) => return Err(refused(error)),
     };
+    let mut rows = Vec::new();
     for entry in entries {
-        match entry {
-            Ok(entry) => rows.push(entry.file_name().to_string_lossy().to_string()),
-            Err(error) => {
-                return format!(
-                    "Sessions cannot be listed: {}: {error}",
-                    session_root.display()
-                )
-            }
-        }
+        rows.push(entry.map_err(&refused)?.file_name().to_string_lossy().to_string());
     }
     if rows.is_empty() {
-        "No sessions found.".into()
-    } else {
-        rows.join("\n")
+        return Ok("No sessions found.".into());
     }
+    Ok(rows.join("\n"))
 }
 
 pub(super) fn session_path(session_root: &Path, id_or_path: &str) -> PathBuf {

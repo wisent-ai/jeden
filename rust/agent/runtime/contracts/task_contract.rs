@@ -6,12 +6,31 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fmt::Write;
 
-/// Version two adds the time-to-completion clause: an estimate before any
+/// The clause each contract version added, oldest first; the version is
+/// their count. The time-to-completion clause is an estimate before any
 /// implementation, never revised, beside the measured time to verified
-/// completion. The seven report entries are unchanged.
-pub(crate) const VERSION: u32 = 2;
+/// completion. The `followOn` entry is the review of whether the change can be
+/// done better and the follow-on tasks it implies, each done, recorded with
+/// its cause, or still open; an open one keeps the turn working
+/// ([`DeliveryReport::open_follow_ons`]).
+const VERSION_CLAUSES: &[&str] = &[
+    "the delivery report",
+    "the time to completion",
+    "improvements and follow-on tasks",
+];
+pub(crate) const VERSION: u32 = VERSION_CLAUSES.len() as u32;
 pub(crate) const VIOLATION_EVENT: &str = "contract_violation";
-pub(crate) const REPAIR_INSTRUCTION: &str = "Return the complete final action with text and report. Report must contain functionality, diagnostics, cli, gui, documentation, tests, delivery. Each entry must have status (done, not_applicable, or blocked), a concrete nonempty explanation of how you fulfilled it or why it does not apply/is blocked, and an evidence array. Every done entry needs at least one nonempty evidence reference. Do not invent work or results, repeat completed work, or mark unfinished work done. A heading alone is not a report. The next invalid report ends this turn with a contract error, not success.";
+/// The ledger event a report with open follow-on tasks writes before the
+/// turn is sent back to do them.
+pub(crate) const FOLLOW_ON_EVENT: &str = "follow_on_tasks";
+pub(crate) const REPAIR_INSTRUCTION: &str = "Return the complete final action with text and report. Report must contain functionality, diagnostics, cli, gui, documentation, tests, delivery, followOn. Each entry must have status (done, not_applicable, or blocked), a concrete nonempty explanation of how you fulfilled it or why it does not apply/is blocked, and an evidence array. Every done entry needs at least one nonempty evidence reference. Every followOn evidence item starts with done:, recorded: or open:. Do not invent work or results, repeat completed work, or mark unfinished work done. A heading alone is not a report. The next invalid report ends this turn with a contract error, not success.";
+
+/// The prefixes a `followOn` evidence item starts with: an improvement or
+/// follow-on task done in this work, one recorded in the task register with
+/// the cause it cannot be done now, and one still to do.
+const FOLLOW_ON_DONE: &str = "done:";
+const FOLLOW_ON_RECORDED: &str = "recorded:";
+const FOLLOW_ON_OPEN: &str = "open:";
 
 struct Requirement {
     id: &'static str,
@@ -19,7 +38,7 @@ struct Requirement {
     pl: (&'static str, &'static str),
 }
 
-const REQUIREMENTS: [Requirement; 7] = [
+const REQUIREMENTS: &[Requirement] = &[
     Requirement {
         id: "functionality",
         en: ("Functionality", "Build or repair reusable product functionality at the source of the defect. Explain the changed behavior and why it works for subsequent inputs, not just this incident."),
@@ -55,6 +74,11 @@ const REQUIREMENTS: [Requirement; 7] = [
         en: ("Delivery", "Remove superseded paths, commit and push the change, and identify the delivered revision. Explain any actual external blocker without calling the task complete."),
         pl: ("Dostarczenie", "Usuń zastąpione ścieżki, zacommituj i wypchnij zmianę oraz podaj dostarczoną rewizję. Opisz rzeczywistą zewnętrzną blokadę, nie nazywając zadania ukończonym."),
     },
+    Requirement {
+        id: "followOn",
+        en: ("Improvements and follow-on tasks", "Before reporting, review the finished change: can it be done better (a faster path, fewer reads of a slow dependency, a clearer refusal, an actionable error code, a diagnostic that shows the cause at once, the feature the user reaches for next), and which tasks follow from it (the same defect elsewhere, the functionality that keeps it from returning, every surface, refusal, runbook entry, document and test the change touches, the work it unblocks). List each as evidence: done: <what and where> when it is done in this work, recorded: <register id and cause> when it truly cannot be done now, open: <task> when it is still to do. Jeden sends every open item back as work, so the turn ends only when nothing open is left."),
+        pl: ("Ulepszenia i kolejne zadania", "Przed raportem przejrzyj gotową zmianę: czy można ją zrobić lepiej (szybsza ścieżka, mniej odczytów wolnej zależności, czytelniejsza odmowa, kod błędu mówiący, co zrobić, diagnostyka pokazująca przyczynę od razu, funkcja, po którą użytkownik sięgnie następnie) i jakie zadania z niej wynikają (ta sama usterka gdzie indziej, funkcjonalność, która nie pozwoli jej wrócić, każdy interfejs, odmowa, wpis w runbooku, dokument i test, których dotyka zmiana, praca, którą odblokowuje). Wypisz każde jako dowód: done: <co i gdzie>, gdy jest zrobione w tej pracy, recorded: <identyfikator w rejestrze i przyczyna>, gdy naprawdę nie da się go zrobić teraz, open: <zadanie>, gdy jeszcze zostało. Jeden odsyła każde otwarte jako pracę, więc tura kończy się dopiero, gdy nic otwartego nie zostaje."),
+    },
 ];
 
 /// The one clause Jeden also measures instead of only stating: the intake
@@ -84,7 +108,7 @@ impl Requirement {
 /// the same delivery report as an interactive turn. Read-only Pursuit stages
 /// (planner, contract reviewer, acceptance reviewer) keep their own output
 /// contracts and are not listed here.
-pub(crate) const APPLIES_TO: [&str; 2] = ["interactive", "autonomous-execution"];
+pub(crate) const APPLIES_TO: &[&str] = &["interactive", "autonomous-execution"];
 
 fn scope_sentence(language: &UiLanguage) -> &'static str {
     if language.code() == "pl" {
@@ -108,7 +132,7 @@ pub(crate) fn section(language: &UiLanguage) -> String {
     });
     let (title, description) = TIME_TO_COMPLETION.prose(language);
     writeln!(text, "{title}: {description}").unwrap();
-    for requirement in &REQUIREMENTS {
+    for requirement in REQUIREMENTS {
         let (title, description) = requirement.prose(language);
         writeln!(text, "- {} ({title}): {description}", requirement.id).unwrap();
     }
@@ -130,7 +154,7 @@ pub(crate) fn snapshot(language: &UiLanguage) -> Value {
 }
 
 pub(crate) fn turn_instruction() -> &'static str {
-    "Task delivery contract v2 applies to this turn, including tasks completed without tools. Return {\"action\":\"final\",\"text\":\"your concise answer\",\"report\":{...}}. The report contains exactly functionality, diagnostics, cli, gui, documentation, tests, delivery. Each entry has {\"status\":\"done|not_applicable|blocked\",\"explanation\":\"how this requirement was fulfilled, or the concrete reason it does not apply/is blocked\",\"evidence\":[\"actual file, command, run, revision or other source reference\"]}. Use one of the three status values, not their combined spelling. A done entry requires evidence; other statuses may use an empty array. When a blocked entry waits on something only the user can supply (a secret, a credential, a decision, a value that exists in no file), its explanation names exactly what they must give and where it goes, in one sentence; the independent review records that ask on the task and the work waits for the user's answer instead of being asked to continue. Write explanations in the user's language. Do not put a second report in text: Jeden renders the report. Do not mark an applicable but unfinished requirement not_applicable. Tests for product changes must execute real full flows and retain results; no particular test runner is required. Do not fabricate tests, results or evidence. A report describes your work; its structural acceptance is not independent verification of your claims. The time to completion is not a report entry: Jeden recorded the estimate before execution and adds the measured time to your answer itself."
+    "Task delivery contract v3 applies to this turn, including tasks completed without tools. Return {\"action\":\"final\",\"text\":\"your concise answer\",\"report\":{...}}. The report contains exactly functionality, diagnostics, cli, gui, documentation, tests, delivery, followOn. Each entry has {\"status\":\"done|not_applicable|blocked\",\"explanation\":\"how this requirement was fulfilled, or the concrete reason it does not apply/is blocked\",\"evidence\":[\"actual file, command, run, revision or other source reference\"]}. Use one of the three status values, not their combined spelling. A done entry requires evidence; other statuses may use an empty array. followOn is the review of the finished change: every way it can be done better and every task that follows from it, each evidence item starting with done: (done in this work, with where), recorded: (the register id and the cause it cannot be done now) or open: (still to do); Jeden sends every open: item back to you as work, so do them before reporting. When a blocked entry waits on something only the user can supply (a secret, a credential, a decision, a value that exists in no file), its explanation names exactly what they must give and where it goes, in one sentence; the independent review records that ask on the task and the work waits for the user's answer instead of being asked to continue. Write explanations in the user's language. Do not put a second report in text: Jeden renders the report. Do not mark an applicable but unfinished requirement not_applicable. Tests for product changes must execute real full flows and retain results; no particular test runner is required. Do not fabricate tests, results or evidence. A report describes your work; its structural acceptance is not independent verification of your claims. The time to completion is not a report entry: Jeden recorded the estimate before execution and adds the measured time to your answer itself."
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -143,6 +167,8 @@ pub(crate) struct DeliveryReport {
     documentation: ReportEntry,
     tests: ReportEntry,
     delivery: ReportEntry,
+    #[serde(rename = "followOn")]
+    follow_on: ReportEntry,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -162,8 +188,8 @@ enum ReportStatus {
 }
 
 impl DeliveryReport {
-    fn entries(&self) -> [&ReportEntry; 7] {
-        [
+    fn entries(&self) -> Vec<&ReportEntry> {
+        vec![
             &self.functionality,
             &self.diagnostics,
             &self.cli,
@@ -171,6 +197,7 @@ impl DeliveryReport {
             &self.documentation,
             &self.tests,
             &self.delivery,
+            &self.follow_on,
         ]
     }
 
@@ -199,12 +226,34 @@ impl DeliveryReport {
                 ));
             }
         }
+        for item in &report.follow_on.evidence {
+            let item = item.trim();
+            if ![FOLLOW_ON_DONE, FOLLOW_ON_RECORDED, FOLLOW_ON_OPEN]
+                .iter()
+                .any(|prefix| item.starts_with(prefix))
+            {
+                return Err(format!(
+                    "report.followOn.evidence item {item:?} starts with none of {FOLLOW_ON_DONE}, {FOLLOW_ON_RECORDED} or {FOLLOW_ON_OPEN}: say whether it is done in this work, recorded with its cause, or still to do"
+                ));
+            }
+        }
         Ok(report)
+    }
+
+    /// The follow-on tasks the report lists as still to do, without their
+    /// prefix: work the turn goes back to instead of answering.
+    pub(crate) fn open_follow_ons(&self) -> Vec<String> {
+        self.follow_on
+            .evidence
+            .iter()
+            .filter_map(|item| item.trim().strip_prefix(FOLLOW_ON_OPEN))
+            .map(|task| task.trim().to_string())
+            .collect()
     }
 
     pub(crate) fn is_blocked(&self) -> bool {
         self.entries()
-            .iter()
+            .into_iter()
             .any(|entry| entry.status == ReportStatus::Blocked)
     }
 

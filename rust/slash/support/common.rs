@@ -80,10 +80,13 @@ pub(crate) fn write_json_value(path: &Path, value: &Value) -> Result<(), String>
         }
     }
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("{} cannot be created: {error}", parent.display()))?;
     }
-    let text = serde_json::to_string_pretty(value).map_err(|e| e.to_string())? + "\n";
-    fs::write(path, text).map_err(|e| e.to_string())
+    let text = serde_json::to_string_pretty(value)
+        .map_err(|error| format!("the value for {} cannot be encoded: {error}", path.display()))?
+        + "\n";
+    fs::write(path, text).map_err(|error| format!("{} cannot be written: {error}", path.display()))
 }
 
 /// The project configuration a slash command edits: absent is an empty
@@ -103,10 +106,14 @@ pub(crate) fn is_plain_object(value: &Value) -> bool {
     matches!(value, Value::Object(_))
 }
 
+/// The `file://` URL of `path`. Every caller passes a path joined onto the absolute
+/// working directory, and an absolute path always forms a file URL; a relative one is
+/// a caller's defect, stopped naming it rather than written as a URL that is not one.
 pub(crate) fn file_url(path: &Path) -> String {
-    Url::from_file_path(path)
-        .map(|url| url.to_string())
-        .unwrap_or_else(|_| format!("file://{}", path.display()))
+    match Url::from_file_path(path) {
+        Ok(url) => url.to_string(),
+        Err(()) => panic!("{} is not an absolute path, so it has no file URL", path.display()),
+    }
 }
 
 pub(crate) fn split_head(args: &str) -> (&str, &str) {
@@ -168,18 +175,29 @@ pub(crate) fn split_args(value: &str) -> Vec<String> {
     args
 }
 
-/// Parse a duration suffix into milliseconds. Only `ms` and `s` are supported;
-/// the factors are encapsulated by `Duration` so no bare numeric literal is
-/// needed. Larger units are intentionally omitted.
-pub(crate) fn parse_duration_ms(value: &str) -> Option<u64> {
+/// A duration written as a whole number followed by `ms` or `s`, in milliseconds.
+/// `Ok(None)` when `value` is not written that way; an amount too large to count is
+/// refused naming it. The factors are `Duration`'s own; larger units are omitted.
+pub(crate) fn parse_duration_ms(value: &str) -> Result<Option<u64>, String> {
     let lower = value.trim().to_ascii_lowercase();
-    let split = lower.find(|ch: char| !ch.is_ascii_digit())?;
-    let amount = lower[..split].parse::<u64>().ok()?;
-    match &lower[split..] {
-        "ms" => Some(amount),
-        "s" => Some(Duration::from_secs(amount).as_millis() as u64),
-        _ => None,
+    let Some(split) = lower.find(|ch: char| !ch.is_ascii_digit()) else {
+        return Ok(None);
+    };
+    let (digits, unit) = lower.split_at(split);
+    if digits.is_empty() {
+        return Ok(None);
     }
+    let amount = digits
+        .parse::<u64>()
+        .map_err(|error| format!("{value}: the amount cannot be counted: {error}"))?;
+    let duration = match unit {
+        "ms" => Duration::from_millis(amount),
+        "s" => Duration::from_secs(amount),
+        _ => return Ok(None),
+    };
+    u64::try_from(duration.as_millis())
+        .map(Some)
+        .map_err(|error| format!("{value} is longer than milliseconds can count: {error}"))
 }
 
 /// Resolve `target` against `cwd`: absolute paths are returned as-is, relative

@@ -97,7 +97,9 @@ pub(super) fn load_expanded(
     let mut expanded = String::new();
     for line in raw.split_inclusive('\n') {
         if let Some(import) = parse_import(line.trim_end_matches(['\r', '\n'])) {
-            let parent = canonical.parent().unwrap_or(jail);
+            let parent = canonical.parent().ok_or_else(|| {
+                format!("context file {} has no directory to import {import} from", canonical.display())
+            })?;
             let imported = parent.join(import);
             let content =
                 load_expanded(&imported, jail, budget, stack, provenance, Some(&canonical))?;

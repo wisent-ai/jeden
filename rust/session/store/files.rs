@@ -5,7 +5,6 @@
 
 use super::super::event::SessionEventV2;
 use super::TRANSCRIPT_FILE;
-use rand::{distributions::Alphanumeric, Rng};
 use serde_json::Value;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -122,15 +121,8 @@ pub(super) fn mirror_active_leaf(dir: &Path, active_leaf: Option<&str>) -> Resul
     let object = state
         .as_object_mut()
         .ok_or_else(|| format!("invalid {}: expected object", path.display()))?;
-    object.insert(
-        "activeLeaf".into(),
-        active_leaf.map_or(Value::Null, |id| Value::String(id.to_owned())),
-    );
-    let suffix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(12)
-        .map(char::from)
-        .collect();
+    object.insert("activeLeaf".into(), Value::from(active_leaf));
+    let suffix = uuid::Uuid::new_v4().simple();
     let temp = dir.join(format!(".state.json.active-leaf-{suffix}"));
     let mut file = OpenOptions::new()
         .write(true)
@@ -171,13 +163,10 @@ pub(super) fn mirror_active_leaf(dir: &Path, active_leaf: Option<&str>) -> Resul
     sync_directory(dir)
 }
 
+/// A new event id: its timestamp and a random UUID, so two events written in
+/// the same instant never share one.
 pub(super) fn fresh_event_id(timestamp: &str) -> String {
-    let suffix: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(12)
-        .map(char::from)
-        .collect();
-    format!("event-{timestamp}-{suffix}")
+    format!("event-{timestamp}-{}", uuid::Uuid::new_v4().simple())
 }
 
 #[cfg(unix)]

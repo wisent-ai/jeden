@@ -19,11 +19,34 @@ mod inspect;
 pub(crate) use inspect::inspect;
 pub(crate) const DEFAULT_WORKSPACE_KEY: &str = "workspace.defaultPath";
 
+/// The sealed sessions that name a workspace, and the session directories
+/// that could not be read, each with its cause.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct WorkspaceSessions {
     pub(crate) accepted: usize,
     pub(crate) rejected: usize,
+    pub(crate) rejections: Vec<String>,
+}
+
+impl WorkspaceSessions {
+    pub(crate) fn from_outcomes(accepted: &[PathBuf], rejections: Vec<String>) -> Self {
+        Self {
+            accepted: accepted.len(),
+            rejected: rejections.len(),
+            rejections,
+        }
+    }
+}
+
+/// What an adoption did with the one workspace it was given. A workspace that
+/// was only looked at was neither imported, nor found unchanged, nor in conflict.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkspaceImports {
+    pub(crate) imported: usize,
+    pub(crate) unchanged: usize,
+    pub(crate) conflicting: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -35,19 +58,17 @@ pub(crate) struct WorkspaceReport {
     pub(crate) repository_root: Option<PathBuf>,
     pub(crate) sessions: WorkspaceSessions,
     pub(crate) configuration: String,
-    pub(crate) imported: usize,
-    pub(crate) unchanged: usize,
-    pub(crate) conflicting: usize,
+    #[serde(flatten)]
+    pub(crate) imports: WorkspaceImports,
     pub(crate) rejected: usize,
 }
 
 impl WorkspaceReport {
     pub(crate) fn text(&self) -> String {
-        let repository = self
-            .repository_root
-            .as_ref()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|| "not in a Git repository".into());
+        let repository = match &self.repository_root {
+            Some(path) => path.display().to_string(),
+            None => "not in a Git repository".into(),
+        };
         format!(
             "Workspace: {}\nStatus: {}\nSource: {} ({})\nSessions: {} accepted, {} rejected\nConfiguration: {}\nResult: {} imported, {} unchanged, {} conflicting, {} rejected\nThe working tree and session ledgers were not copied or changed. Future Jeden tasks use this workspace unless --cwd is supplied.",
             self.workspace.display(),
@@ -57,22 +78,26 @@ impl WorkspaceReport {
             self.sessions.accepted,
             self.sessions.rejected,
             self.configuration,
-            self.imported,
-            self.unchanged,
-            self.conflicting,
+            self.imports.imported,
+            self.imports.unchanged,
+            self.imports.conflicting,
             self.rejected,
         )
     }
 
-    pub(crate) fn value(&self) -> Value {
-        serde_json::to_value(self).unwrap_or_else(|_| json!({"status": "invalid_response"}))
+    /// The report as JSON; a workspace path that is not UTF-8 cannot be one.
+    pub(crate) fn value(&self) -> Result<Value, String> {
+        serde_json::to_value(self).map_err(|error| {
+            format!(
+                "the report on workspace {} cannot be written as JSON: {error}",
+                self.workspace.display()
+            )
+        })
     }
 
-    /// A report for a workspace that was only looked at.
-    ///
-    /// The three result counters are zero by construction, not by tuning:
-    /// inspection reads a directory and imports nothing from it. Adoption is
-    /// the operation that moves sessions, and it fills them itself.
+    /// A report for a workspace that was only looked at: inspection reads a
+    /// directory and imports nothing from it. Adoption is the operation that
+    /// moves sessions, and it fills the imports itself.
     pub(crate) fn observed(
         status: &str,
         workspace: PathBuf,
@@ -89,9 +114,7 @@ impl WorkspaceReport {
             rejected: sessions.rejected,
             sessions,
             configuration,
-            imported: 0,
-            unchanged: 0,
-            conflicting: 0,
+            imports: WorkspaceImports::default(),
         }
     }
 }
@@ -140,7 +163,7 @@ pub(crate) fn adopt(path: &Path, base: &Path) -> Result<WorkspaceReport, String>
         .is_some_and(|current| Path::new(current) == report.workspace.as_path());
     if already_selected {
         report.status = "unchanged".into();
-        report.unchanged = 1;
+        report.imports.unchanged = usize::from(crate::tally::STEP);
         return Ok(report);
     }
     config_set_value(
@@ -149,7 +172,7 @@ pub(crate) fn adopt(path: &Path, base: &Path) -> Result<WorkspaceReport, String>
         json!(report.workspace.display().to_string()),
     )?;
     let config_path = write_user_config(&config)?;
-    report.imported = 1;
+    report.imports.imported = usize::from(crate::tally::STEP);
     report.configuration = format!(
         "{}; selected workspace persisted in {}",
         report.configuration,
@@ -174,11 +197,11 @@ pub(crate) fn forget() -> Result<Option<PathBuf>, String> {
 }
 
 pub(crate) fn command(args: &Args) -> Result<String, String> {
-    let verb = args
-        .positionals
-        .first()
-        .map(String::as_str)
-        .unwrap_or("status");
+    // Without a verb the command reports the adopted workspace's status.
+    let (verb, operands) = match args.positionals.split_first() {
+        Some((verb, operands)) => (verb.as_str(), operands),
+        None => ("status", &[][..]),
+    };
     let report = match verb {
         "status" => match status(&args.cwd)? {
             Some(report) => report,
@@ -191,17 +214,16 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
             }
         },
         "discover" => {
-            let path = args
-                .positionals
-                .get(1)
-                .map(PathBuf::from)
-                .unwrap_or_else(|| args.cwd.clone());
+            // Without a path, the working directory is the one looked at.
+            let path = match operands.first() {
+                Some(path) => PathBuf::from(path),
+                None => args.cwd.clone(),
+            };
             inspect(&path, &args.cwd, "discovered")?
         }
         "adopt" => {
-            let path = args
-                .positionals
-                .get(1)
+            let path = operands
+                .first()
                 .ok_or("Usage: jeden workspace adopt <path> [--json]")?;
             adopt(Path::new(path), &args.cwd)?
         }

@@ -7,7 +7,7 @@ use super::super::runtime_ops::{
     kernel::{self, KernelLanguage},
     pty,
 };
-use super::super::shared::{bool_input, string_input};
+use super::super::shared::{flag_input, string_input};
 use super::super::ToolRuntime;
 use serde_json::{json, Value};
 
@@ -36,8 +36,8 @@ fn eval_with_language(
         return Err(format!("{tool} requires --allow-command"));
     }
     let code = string_input(input, "code").ok_or_else(|| format!("{tool} requires code"))?;
-    let reset = bool_input(input, "reset", false);
-    let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
+    let reset = flag_input(input, "reset", tool)?;
+    let scope = kernel_scope(runtime);
     let result = kernel::evaluate(
         &runtime.operation,
         scope,
@@ -80,8 +80,8 @@ pub(crate) fn pty_session(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let command = string_input(input, "input")
         .or_else(|| string_input(input, "command"))
         .ok_or("pty_session requires input")?;
-    let reset = bool_input(input, "reset", false);
-    let scope = runtime.artifact_dir.unwrap_or(runtime.cwd);
+    let reset = flag_input(input, "reset", "pty_session")?;
+    let scope = kernel_scope(runtime);
     let result = pty::execute(&runtime.operation, scope, runtime.cwd, &command, reset)?;
     Ok(json!({
         "ok": result.ok,
@@ -115,8 +115,10 @@ pub(crate) fn pty_resize(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .get("rows")
         .and_then(Value::as_u64)
         .ok_or("pty_resize requires integer rows")?;
-    let cols = u16::try_from(cols_value).unwrap_or(u16::MAX);
-    let rows = u16::try_from(rows_value).unwrap_or(u16::MAX);
+    let cols = u16::try_from(cols_value)
+        .map_err(|error| format!("pty_resize cols {cols_value} is not a terminal width: {error}"))?;
+    let rows = u16::try_from(rows_value)
+        .map_err(|error| format!("pty_resize rows {rows_value} is not a terminal height: {error}"))?;
     let session = pty::resize(&runtime.operation, &session_id, cols, rows)
         .map_err(|error| error.to_string())?;
     Ok(json!({
@@ -126,4 +128,14 @@ pub(crate) fn pty_resize(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         "rows": session.rows,
         "state": "live"
     }))
+}
+
+/// Where a run's persistent kernels and terminals live: its session's
+/// artifact directory, so they end with the session, or the working
+/// directory for a run that has no session.
+fn kernel_scope<'a>(runtime: &ToolRuntime<'a>) -> &'a std::path::Path {
+    match runtime.artifact_dir {
+        Some(artifacts) => artifacts,
+        None => runtime.cwd,
+    }
 }

@@ -11,6 +11,14 @@ pub(super) fn read_mode_state(cwd: &Path) -> Result<Value, String> {
     crate::slash::state::read_mode_state_value(cwd)
 }
 
+/// The mode state's fields to change. `read_mode_state` refuses a state that
+/// is not an object, so this refusal names a state replaced in between.
+pub(super) fn mode_state_fields(state: &mut Value) -> Result<&mut serde_json::Map<String, Value>, String> {
+    state
+        .as_object_mut()
+        .ok_or_else(|| "the mode state is not a JSON object; nothing was changed".to_string())
+}
+
 pub(super) fn write_mode_state(cwd: &Path, state: &Value) -> Result<(), String> {
     let path = mode_state_path(cwd);
     if let Some(parent) = path.parent() {
@@ -43,14 +51,22 @@ pub(super) fn command_session(args: &Args) -> Result<PathBuf, String> {
     if let Some(named) = resumed_session(args) {
         return Ok(named);
     }
-    read_mode_state(&args.cwd)?
+    let Some(last) = read_mode_state(&args.cwd)?
         .pointer("/lastSessionPath")
         .and_then(Value::as_str)
         .map(PathBuf::from)
-        .filter(|path| path.exists())
-        .ok_or_else(|| {
-            "No prior session found. Run a task first, or name one with --resume-session.".into()
-        })
+    else {
+        return Err("No prior session found. Run a task first, or name one with --resume-session.".into());
+    };
+    // A recorded last session that is gone, or cannot be examined, is said
+    // as that: both read as "no prior session" and hid where it had been.
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&last)? {
+        return Err(format!(
+            "The last session {} is gone. Run a task first, or name one with --resume-session.",
+            last.display()
+        ));
+    }
+    Ok(last)
 }
 
 pub(super) fn apply_mode_instructions(cwd: &Path, task: &str) -> Result<String, String> {
@@ -208,7 +224,7 @@ fn disable_loop(cwd: &Path, state: &mut Value) -> Result<(), String> {
 
 pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<(), String> {
     let mut state = read_mode_state(cwd)?;
-    let map = state.as_object_mut().expect("mode state object");
+    let map = mode_state_fields(&mut state)?;
     if ok {
         map.insert("lastTask".into(), json!(task));
         map.insert("lastFailedTask".into(), json!(""));
@@ -220,10 +236,7 @@ pub(crate) fn update_task_outcome(cwd: &Path, task: &str, ok: bool) -> Result<()
 
 pub(crate) fn update_last_session_path(cwd: &Path, path: &Path) -> Result<(), String> {
     let mut state = read_mode_state(cwd)?;
-    state
-        .as_object_mut()
-        .expect("mode state object")
-        .insert("lastSessionPath".into(), json!(path));
+    mode_state_fields(&mut state)?.insert("lastSessionPath".into(), json!(path));
     write_mode_state(cwd, &state)
 }
 
@@ -242,7 +255,7 @@ pub(crate) fn record_branch(cwd: &Path, title: &str, path: &Path) -> Result<Stri
         })?;
     let created_at = now_stamp()?;
     let mut state = read_mode_state(cwd)?;
-    let map = state.as_object_mut().expect("mode state object");
+    let map = mode_state_fields(&mut state)?;
     let roadmap_item = map
         .get("activeRoadmapItem")
         .and_then(Value::as_str)

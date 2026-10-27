@@ -20,13 +20,15 @@ fn sql_value(value: &Value) -> Result<SqlValue, String> {
     match value {
         Value::Null => Ok(SqlValue::Null),
         Value::Bool(value) => Ok(SqlValue::Integer(i64::from(*value))),
-        Value::Number(value) if value.is_i64() => {
-            Ok(SqlValue::Integer(value.as_i64().unwrap_or_default()))
-        }
-        Value::Number(value) => value
-            .as_f64()
-            .map(SqlValue::Real)
-            .ok_or("invalid SQLite number".into()),
+        // A JSON number is bound as an integer when it is one and as a real
+        // otherwise; one that is neither is refused.
+        Value::Number(number) => match number.as_i64() {
+            Some(integer) => Ok(SqlValue::Integer(integer)),
+            None => number
+                .as_f64()
+                .map(SqlValue::Real)
+                .ok_or_else(|| format!("{number} is a number SQLite cannot bind")),
+        },
         Value::String(value) => Ok(SqlValue::Text(value.clone())),
         other => Ok(SqlValue::Text(other.to_string())),
     }

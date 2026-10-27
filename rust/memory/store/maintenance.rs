@@ -20,7 +20,7 @@ impl MemoryStore {
         })?;
         Ok(json!({
             "backend": "fleet-postgres-fts",
-            "operation": "reindex",
+            "operation": REINDEX_JOB,
             "index": "memories_search",
             "memoryRows": memory_rows,
         }))
@@ -38,7 +38,7 @@ impl MemoryStore {
         })?;
         let queue = self.queue_status()?;
         let embedding = embeddings::health(None)?;
-        let healthy = queue.failed == 0;
+        let healthy = !queue.failed.is_positive();
         Ok(json!({
             "service": "memory",
             "healthy": healthy,

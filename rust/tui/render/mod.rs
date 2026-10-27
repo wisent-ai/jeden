@@ -11,7 +11,8 @@ mod prompt;
 // `tui::qr`.
 pub mod qr;
 
-use crate::tui::render::panels::boxes::input_prefix_width;
+use crate::tui::render::panels::boxes::{input_prefix_width, INPUT_PREFIX};
+use std::num::NonZeroUsize;
 use crate::tui::text::clamp_visible;
 use crate::tui::text::visible_len;
 pub(crate) use panels::{boxed, boxed_split, welcome_panel};
@@ -40,7 +41,7 @@ pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Ve
     });
     let safe = sanitize_terminal_text(&message.text);
     let rows = safe.split('\n').map(str::to_string).collect::<Vec<_>>();
-    boxed(&title, &rows, width.max(1), color)
+    boxed(&title, &rows, width.max(usize::from(crate::tally::STEP)), color)
         .into_iter()
         .map(|line| paint(&line, role_color(message.role), color))
         .collect()
@@ -53,34 +54,37 @@ pub(super) fn place_editor_cursor(
     width: usize,
     trailing_rows: usize,
 ) -> usize {
-    let rendered_input_rows = lines.len().saturating_sub(trailing_rows + 1);
-    let prefix_width = input_prefix_width(width.max(1));
-    let content_width = width.saturating_sub(prefix_width).max(1);
+    let one = usize::from(crate::tally::STEP);
+    let rendered_input_rows = lines.len().saturating_sub(trailing_rows + one);
+    let prefix_width = input_prefix_width(width.max(one));
+    let content_width = width.saturating_sub(prefix_width).max(one);
     let safe_prefix = sanitize_terminal_text(&input[..cursor.min(input.len())]);
-    let mut cursor_row = 0usize;
-    let mut cursor_column = 0usize;
-    for logical in safe_prefix.split('\n') {
-        if cursor_row > 0 || cursor_column > 0 {
-            cursor_row += 1;
+    // Rows and columns count from the input's first row and column.
+    let mut cursor_row = crate::tally::ORIGIN;
+    let mut cursor_column = crate::tally::ORIGIN;
+    for (index, logical) in safe_prefix.split('\n').enumerate() {
+        // Every logical line after the first starts a row of its own.
+        if index != crate::tally::ORIGIN {
+            cursor_row += one;
         }
-        let logical_width = visible_len(logical);
-        if logical_width == 0 {
-            cursor_column = 0;
-        } else {
-            cursor_row += (logical_width - 1) / content_width;
-            cursor_column = ((logical_width - 1) % content_width) + 1;
+        match NonZeroUsize::new(visible_len(logical)) {
+            None => cursor_column = crate::tally::ORIGIN,
+            Some(logical_width) => {
+                let last = logical_width.get() - one;
+                cursor_row += last / content_width;
+                cursor_column = last % content_width + one;
+            }
         }
     }
-    let up = trailing_rows + rendered_input_rows.saturating_sub(cursor_row + 1);
+    let up = trailing_rows + rendered_input_rows.saturating_sub(cursor_row + one);
     let Some(last) = lines.last_mut() else {
-        return 0;
+        return crate::tally::ORIGIN;
     };
-    if up > 0 {
+    if let Some(up) = NonZeroUsize::new(up) {
         last.push_str(&format!("\x1b[{up}A"));
     }
     last.push('\r');
-    let column = cursor_column + prefix_width;
-    if column > 0 {
+    if let Some(column) = NonZeroUsize::new(cursor_column + prefix_width) {
         last.push_str(&format!("\x1b[{column}C"));
     }
     up
@@ -92,13 +96,13 @@ pub(super) fn attachment_lines(tray: &AttachmentTray, width: usize, color: bool)
     }
     let heading = clamp_visible(
         &format!("Attachments ({})", tray.items().len()),
-        width.max(1),
+        width.max(usize::from(crate::tally::STEP)),
     );
     let mut lines = vec![paint(&heading, "bold", color)];
     for attachment in tray.items() {
         lines.push(clamp_visible(
             &format!("  {}", sanitize_terminal_text(&attachment.fallback_label())),
-            width.max(1),
+            width.max(usize::from(crate::tally::STEP)),
         ));
     }
     lines
@@ -110,9 +114,14 @@ pub(super) fn busy_editor_lines(
     width: usize,
     color: bool,
 ) -> Vec<String> {
-    let width = width.max(1);
+    let one = usize::from(crate::tally::STEP);
+    let width = width.max(one);
     let prefix_width = input_prefix_width(width);
-    let content_width = width.saturating_sub(prefix_width).max(1);
+    let content_width = width.saturating_sub(prefix_width).max(one);
+    // The first row carries as much of the prefix as fits; the rows after it
+    // are indented as far.
+    let first_prefix: String = INPUT_PREFIX.chars().take(prefix_width).collect();
+    let indent = " ".repeat(prefix_width);
     let label = if queue.is_empty() {
         "Follow-up".to_string()
     } else {
@@ -128,31 +137,13 @@ pub(super) fn busy_editor_lines(
     let mut first = true;
     for logical in safe.split('\n') {
         for part in wrap_line(logical, content_width) {
-            let prefix = if first && prefix_width == 2 {
-                "> "
-            } else if first && prefix_width == 1 {
-                ">"
-            } else if first {
-                ""
-            } else if prefix_width == 2 {
-                "  "
-            } else if prefix_width == 1 {
-                " "
-            } else {
-                ""
-            };
+            let prefix = if first { &first_prefix } else { &indent };
             lines.push(format!("{prefix}{part}"));
             first = false;
         }
     }
     if first {
-        lines.push(if prefix_width == 2 {
-            "> ".into()
-        } else if prefix_width == 1 {
-            ">".into()
-        } else {
-            String::new()
-        });
+        lines.push(first_prefix);
     }
     lines
 }
@@ -172,8 +163,10 @@ pub(super) fn frame_lines(options: &FrameOptions) -> Vec<String> {
         options.color,
         options.slash_selection,
     );
-    let reserved = prompt.len() + slash_hints.len() + 1;
-    let available_rows = options.rows.saturating_sub(reserved).max(4);
+    // The frame leaves the terminal's last row clear, so a newline written
+    // after it never scrolls the frame away.
+    let reserved = prompt.len() + slash_hints.len() + usize::from(crate::tally::STEP);
+    let available_rows = options.rows.saturating_sub(reserved);
     let message_lines: Vec<String> = options
         .messages
         .iter()

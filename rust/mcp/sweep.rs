@@ -3,65 +3,49 @@
 //!
 //! Split out of `mcp/mod.rs`, which had grown past the module line cap.
 
-use super::connection::ServerConnection;
+use super::connection::{listed, ServerConnection};
 use super::servers::{configured_server, configured_servers};
 use super::{managers, session_key, with_connection};
-use crate::mcp::client::McpClient;
 use crate::mcp::connection::ConnectionState;
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
-use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::{Arc, Mutex};
 use std::thread;
 
 /// One handshake per server: its name, the connection, and how the handshake
 /// went.
 type Handshakes = Vec<(String, ServerConnection, Result<(), String>)>;
 
+/// Every pending server's handshake, each on its own thread: a handshake waits
+/// on a child process, so one server's slow start never delays another's.
 fn connect_parallel(
     pending: Vec<(String, ServerConnection)>,
     cwd: &Path,
     force: bool,
 ) -> Result<Handshakes, String> {
-    if pending.is_empty() {
-        return Ok(Vec::new());
-    }
-    let worker_count = pending
-        .len()
-        .min(thread::available_parallelism().map_or(1, usize::from))
-        .min(8);
-    let queue = Arc::new(Mutex::new(VecDeque::from(pending)));
     thread::scope(|scope| {
-        let handles = (0..worker_count)
-            .map(|_| {
-                let queue = Arc::clone(&queue);
-                scope.spawn(move || {
-                    let mut completed = Vec::new();
-                    loop {
-                        let item = queue
-                            .lock()
-                            .map_err(|_| "MCP startup queue lock is poisoned".to_string())?
-                            .pop_front();
-                        let Some((name, mut connection)) = item else {
-                            break;
-                        };
-                        let result = connection.connect(cwd, force);
-                        completed.push((name, connection, result));
-                    }
-                    Ok::<_, String>(completed)
-                })
+        let handles = pending
+            .into_iter()
+            .map(|(name, mut connection)| {
+                let server = name.clone();
+                let handle = scope.spawn(move || {
+                    let result = connection.connect(cwd, force);
+                    (name, connection, result)
+                });
+                (server, handle)
             })
             .collect::<Vec<_>>();
-        let mut completed = Vec::new();
-        for handle in handles {
-            completed.extend(
-                handle
-                    .join()
-                    .map_err(|_| "MCP startup worker panicked".to_string())??,
-            );
-        }
-        Ok(completed)
+        handles
+            .into_iter()
+            .map(|(server, handle)| {
+                handle.join().map_err(|panic| {
+                    crate::panicked::refusal(
+                        &format!("the startup worker of MCP server {server}"),
+                        &*panic,
+                    )
+                })
+            })
+            .collect()
     })
 }
 
@@ -95,11 +79,10 @@ pub fn live_tools(cwd: &Path) -> Result<Vec<(String, Value)>, String> {
             .servers
             .iter_mut()
             .filter_map(|(name, connection)| {
-                let alive = connection
-                    .client
-                    .as_mut()
-                    .map(McpClient::is_alive)
-                    .unwrap_or(false);
+                let alive = match connection.client.as_mut() {
+                    Some(client) => client.is_alive(),
+                    None => false,
+                };
                 (!alive).then(|| name.clone())
             })
             .collect::<Vec<_>>();
@@ -166,7 +149,7 @@ pub fn refresh_all(cwd: &Path) -> Result<Value, String> {
         .servers
         .retain(|name, _| configured_names.contains(name));
     for (name, connection, result) in results {
-        status.insert(name.clone(), match result { Ok(()) => json!({"state": "ready", "tools": connection.tools.get("tools").and_then(Value::as_array).map_or(0, Vec::len)}), Err(error) => json!({"state": connection.state.as_str(), "error": error}) });
+        status.insert(name.clone(), match result { Ok(()) => json!({"state": "ready", "tools": listed(&connection.tools, "tools")}), Err(error) => json!({"state": connection.state.as_str(), "error": error}) });
         manager.servers.insert(name, connection);
     }
     crate::capability::invalidate();
@@ -178,11 +161,11 @@ pub fn reconnect(cwd: &Path, server_name: &str) -> Result<Value, String> {
     with_connection(cwd, server_name, |connection| {
         connection.disconnect();
         connection.config = config;
-        connection.failures = 0;
+        connection.failures.clear();
         connection.connect(cwd, true)?;
         crate::capability::invalidate();
         Ok(
-            json!({"server": server_name, "state": connection.state.as_str(), "tools": connection.tools.get("tools").and_then(Value::as_array).map_or(0, Vec::len)}),
+            json!({"server": server_name, "state": connection.state.as_str(), "tools": listed(&connection.tools, "tools")}),
         )
     })
 }

@@ -27,6 +27,9 @@ pub(super) enum EntryCommand {
         written: String,
         tried: Vec<PathBuf>,
     },
+    /// A registration whose executable could not be examined, with why: never
+    /// read as absent, which would run a later candidate in its place.
+    Unexamined { written: String, reason: String },
 }
 
 pub(super) fn entry_command(
@@ -42,11 +45,12 @@ pub(super) fn entry_command(
     if written.is_empty() {
         return None;
     }
-    let Some(program) = shell_words::split(written)
-        .ok()
-        .and_then(|tokens| tokens.into_iter().next())
-    else {
-        return Some(EntryCommand::Runnable(written.to_string()));
+    // A command line the shell-word reader cannot split, or one with no word,
+    // is handed to `sh` as written; `sh` then says what is wrong with it.
+    let program = match shell_words::split(written).map(|tokens| tokens.into_iter().next()) {
+        Ok(Some(program)) => program,
+        Ok(None) => return Some(EntryCommand::Runnable(written.to_string())),
+        Err(_shell_reports_it) => return Some(EntryCommand::Runnable(written.to_string())),
     };
     let path = Path::new(&program);
     // A bare name is a PATH lookup (`python3`, `node`, `cat`), which this
@@ -55,17 +59,25 @@ pub(super) fn entry_command(
         return Some(EntryCommand::Runnable(written.to_string()));
     }
     if path.is_absolute() {
-        return Some(if path.is_file() {
-            EntryCommand::Runnable(written.to_string())
-        } else {
-            EntryCommand::Missing {
+        return Some(match std::fs::metadata(path) {
+            Ok(metadata) if metadata.is_file() => EntryCommand::Runnable(written.to_string()),
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => EntryCommand::Unexamined {
+                written: written.to_string(),
+                reason: format!("{} cannot be examined: {error}", path.display()),
+            },
+            _absent_or_not_file => EntryCommand::Missing {
                 written: written.to_string(),
                 tried: vec![path.to_path_buf()],
-            }
+            },
         });
     }
-    let directory = registry.parent().unwrap_or(Path::new("."));
-    let mut tried = Vec::with_capacity(3);
+    // A relative program is looked for beside the registry that names it; a
+    // registry named by a bare file name lives in the working directory.
+    let directory = match registry.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _working_directory => Path::new("."),
+    };
+    let mut tried = Vec::new();
     if let Some(source) = catalog_source(catalog, entry) {
         tried.push(source);
     }
@@ -73,13 +85,24 @@ pub(super) fn entry_command(
     if let Some(name) = path.file_name() {
         tried.push(directory.join(name));
     }
-    match tried.iter().find(|candidate| candidate.is_file()) {
-        Some(found) => Some(EntryCommand::Runnable(replace_program(written, found))),
-        None => Some(EntryCommand::Missing {
-            written: written.to_string(),
-            tried,
-        }),
+    for candidate in &tried {
+        match std::fs::metadata(candidate) {
+            Ok(metadata) if metadata.is_file() => {
+                return Some(EntryCommand::Runnable(replace_program(written, candidate)))
+            }
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                return Some(EntryCommand::Unexamined {
+                    written: written.to_string(),
+                    reason: format!("{} cannot be examined: {error}", candidate.display()),
+                })
+            }
+            _absent_or_not_file => {}
+        }
     }
+    Some(EntryCommand::Missing {
+        written: written.to_string(),
+        tried,
+    })
 }
 
 /// The absolute `source` the catalog records for this entry's id, when it has
@@ -102,11 +125,13 @@ fn catalog_source(catalog: &Value, entry: &Value) -> Option<PathBuf> {
 fn replace_program(written: &str, program: &Path) -> String {
     let quoted = shell_words::quote(&program.to_string_lossy()).into_owned();
     match shell_words::split(written) {
-        Ok(tokens) if tokens.len() > 1 => {
-            let rest = shell_words::join(tokens[1..].iter().map(String::as_str));
-            format!("{quoted} {rest}")
-        }
-        _ => quoted,
+        Ok(tokens) => match tokens.split_first() {
+            Some((_program, rest)) if !rest.is_empty() => {
+                format!("{quoted} {}", shell_words::join(rest.iter().map(String::as_str)))
+            }
+            _no_arguments => quoted,
+        },
+        Err(_unsplittable) => quoted,
     }
 }
 

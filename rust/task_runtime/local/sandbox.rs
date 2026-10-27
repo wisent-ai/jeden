@@ -25,20 +25,28 @@ impl TaskSandboxHealth {
 // knows how to enforce; `health()` calls them from its `target_os = "macos"` arm
 // only. Without the attribute they are dead code on Linux and Windows, where the
 // gate compiles with `-D warnings` and refused the build.
+/// The installed sandbox helper: JEDEN_TASK_SANDBOX_HELPER, else beside the
+/// Jeden executable. An executable that cannot be located, or a candidate
+/// that cannot be examined, is the error naming it: passed over, an
+/// installed helper read as missing, or a later candidate was enforced.
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn helper_candidates() -> Vec<PathBuf> {
+fn installed_helper() -> Result<Option<PathBuf>, String> {
     let mut candidates = Vec::new();
     if let Some(configured) = env::var_os("JEDEN_TASK_SANDBOX_HELPER") {
         candidates.push(PathBuf::from(configured));
     }
-    if let Ok(executable) = env::current_exe() {
-        if let Some(directory) = executable.parent() {
-            candidates.push(directory.join("jeden-sandbox-helper"));
-            candidates.push(directory.join("../jeden-sandbox-helper"));
-            candidates.push(directory.join("../libexec/jeden-sandbox-helper"));
+    let executable = env::current_exe().map_err(|error| format!("the Jeden executable cannot be located: {error}"))?;
+    if let Some(directory) = executable.parent() {
+        for relative in ["jeden-sandbox-helper", "../jeden-sandbox-helper", "../libexec/jeden-sandbox-helper"] {
+            candidates.push(directory.join(relative));
         }
     }
-    candidates
+    for candidate in candidates {
+        if crate::tool_runtime::runtime_ops::platform::presence::present(&candidate)? && candidate.is_file() {
+            return Ok(Some(candidate));
+        }
+    }
+    Ok(None)
 }
 
 /// Health checks fail closed: the verifier's own verdict is the answer, and
@@ -48,6 +56,7 @@ fn helper_candidates() -> Vec<PathBuf> {
 fn health_output(command: &mut Command) -> Result<std::process::Output, String> {
     use std::io::Read;
 
+    let program = PathBuf::from(command.get_program());
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let stderr = child.stderr.take();
     let reader = std::thread::spawn(move || {
@@ -57,13 +66,17 @@ fn health_output(command: &mut Command) -> Result<std::process::Output, String> 
         }
         Ok::<_, std::io::Error>(bytes)
     });
-    let status = child
-        .wait()
-        .map_err(|error| format!("cannot wait for health check: {error}"))?;
+    let status = stado_wait::blocking(
+        stado_wait::Kind::Process,
+        "sandbox health check",
+        program.display(),
+        || child.wait(),
+    )
+    .map_err(|error| format!("cannot wait for health check {}: {error}", program.display()))?;
     let stderr = reader
         .join()
-        .map_err(|_| "health check stderr reader failed")?
-        .map_err(|error| error.to_string())?;
+        .map_err(|panic| crate::panicked::refusal("the health check stderr reader", &*panic))?
+        .map_err(|error| format!("the health check stderr of {} cannot be read: {error}", program.display()))?;
     Ok(std::process::Output {
         status,
         stdout: Vec::new(),
@@ -152,13 +165,17 @@ pub(crate) fn health() -> TaskSandboxHealth {
         } else {
             "linux-landlock-helper"
         };
-        let Some(helper) = helper_candidates().into_iter().find(|path| path.is_file()) else {
-            return TaskSandboxHealth {
-                enforced: false,
-                backend,
-                detail: "jeden-sandbox-helper is not installed beside the Jeden executable; install it from the same release archive or set JEDEN_TASK_SANDBOX_HELPER".into(),
-                helper: None,
-            };
+        let helper = match installed_helper() {
+            Ok(Some(helper)) => helper,
+            Ok(None) => {
+                return TaskSandboxHealth {
+                    enforced: false,
+                    backend,
+                    detail: "jeden-sandbox-helper is not installed beside the Jeden executable; install it from the same release archive or set JEDEN_TASK_SANDBOX_HELPER".into(),
+                    helper: None,
+                }
+            }
+            Err(detail) => return TaskSandboxHealth { enforced: false, backend, detail, helper: None },
         };
         #[cfg(target_os = "macos")]
         if let Err(error) = signed(&helper) {
@@ -189,14 +206,23 @@ pub(crate) fn health() -> TaskSandboxHealth {
     }
 }
 
-fn add_existing(roots: &mut Vec<PathBuf>, path: impl Into<PathBuf>) {
+/// Add `path` to `roots` as the kernel names it, which is how the helper
+/// matches what a task touches. A path this platform does not have is left
+/// out; one whose real location cannot be read is refused naming it, rather
+/// than handed to the helper under a name its checks would not match.
+fn add_existing(roots: &mut Vec<PathBuf>, path: impl Into<PathBuf>) -> Result<(), String> {
     let path = path.into();
-    if path.exists() {
-        roots.push(path.canonicalize().unwrap_or(path));
+    match path.canonicalize() {
+        Ok(real) => roots.push(real),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!("sandbox root {} cannot be resolved: {error}", path.display()));
+        }
     }
+    Ok(())
 }
 
-fn task_read_roots(program: &Path, requested: &[PathBuf]) -> Vec<PathBuf> {
+fn task_read_roots(program: &Path, requested: &[PathBuf]) -> Result<Vec<PathBuf>, String> {
     let mut roots = Vec::new();
     for path in [
         "/Applications",
@@ -219,22 +245,22 @@ fn task_read_roots(program: &Path, requested: &[PathBuf]) -> Vec<PathBuf> {
         "/tmp",
         "/var",
     ] {
-        add_existing(&mut roots, path);
+        add_existing(&mut roots, path)?;
     }
     if let Some(parent) = program.parent() {
-        add_existing(&mut roots, parent);
+        add_existing(&mut roots, parent)?;
     }
     if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
         for relative in [".jeden", ".cargo", ".rustup", ".nvm", ".local", ".config"] {
-            add_existing(&mut roots, home.join(relative));
+            add_existing(&mut roots, home.join(relative))?;
         }
     }
     for root in requested {
-        add_existing(&mut roots, root);
+        add_existing(&mut roots, root)?;
     }
     roots.sort();
     roots.dedup();
-    roots
+    Ok(roots)
 }
 
 pub(crate) fn command(
@@ -250,12 +276,12 @@ pub(crate) fn command(
         .helper
         .ok_or_else(|| "sandbox health was enforced without a helper path".to_string())?;
     let mut command = Command::new(helper);
-    for root in task_read_roots(program, read_roots) {
+    for root in task_read_roots(program, read_roots)? {
         command.arg("--read").arg(root);
     }
     let mut canonical_write_roots = Vec::new();
     for root in write_roots {
-        add_existing(&mut canonical_write_roots, root);
+        add_existing(&mut canonical_write_roots, root)?;
     }
     canonical_write_roots.sort();
     canonical_write_roots.dedup();

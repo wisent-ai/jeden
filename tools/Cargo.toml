@@ -16,6 +16,8 @@ name = "jeden-tools"
 path = "src/main.rs"
 
 [dependencies]
+# The fleet's one versioning rule, the rule alone (no surface parser).
+autoversion = { git = "https://github.com/lbartoszcze/AutoVersion.git", rev = "f7dde3c1461a292d72d8f956fc815f01a4ee4dca", default-features = false }
 base64 = "0.22"
 regex = "1"
 serde_json = "1"

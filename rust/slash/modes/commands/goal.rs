@@ -22,16 +22,12 @@ pub(crate) fn format_goal_status(goal: &GoalState) -> String {
     } else {
         "disabled"
     };
-    let budget = goal
-        .budget
-        .map(|v| {
-            if v.fract() == f64::default() {
-                format!("{}", v as i64)
-            } else {
-                v.to_string()
-            }
-        })
-        .unwrap_or_else(|| "off".into());
+    // `f64`'s Display writes a whole budget without a fraction (`5`, not
+    // `5.0`); no budget set means the goal runs without one, shown as `off`.
+    let budget = match goal.budget {
+        Some(v) => v.to_string(),
+        None => "off".to_string(),
+    };
     format!(
         "Goal mode: {}\nObjective: {}\nBudget: {}\nAuto lifecycle (oko): {}",
         state, goal.objective, budget, auto
@@ -82,21 +78,18 @@ pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, S
                 state.goal.budget = None;
                 return Ok("Goal budget disabled.".into());
             }
-            let parsed = budget
-                .parse::<f64>()
-                .map_err(|_| "Usage: /goal budget <positive-number|off>".to_string())?;
-            if !parsed.is_finite() || parsed <= f64::default() {
-                return Err("Usage: /goal budget <positive-number|off>".into());
+            let parsed = budget.parse::<f64>().map_err(|error| {
+                format!("Usage: /goal budget <positive-number|off> ({budget:?} is no number: {error})")
+            })?;
+            // A normal, positive number: zero, negatives, infinities, NaN
+            // and subnormal fractions are no budget.
+            if !(parsed.is_normal() && parsed.is_sign_positive()) {
+                return Err(format!(
+                    "Usage: /goal budget <positive-number|off> ({budget:?} is not a positive number)"
+                ));
             }
             state.goal.budget = Some(parsed);
-            Ok(format!(
-                "Goal budget set to {}.",
-                if parsed.fract() == f64::default() {
-                    format!("{}", parsed as i64)
-                } else {
-                    parsed.to_string()
-                }
-            ))
+            Ok(format!("Goal budget set to {parsed}."))
         }
         "auto" => match rest.trim().to_ascii_lowercase().as_str() {
             "on" => {

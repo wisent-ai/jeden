@@ -4,7 +4,9 @@
 //! Split out of `tool_runtime/exec/search.rs`, which had grown past the module
 //! line cap.
 
-use crate::tool_runtime::shared::{bool_input, jail_path, machine_parallelism, string_input};
+use crate::tool_runtime::shared::{
+    flag_input, jail_path, machine_parallelism, optional_bool_input, string_input,
+};
 use crate::tool_runtime::ToolRuntime;
 use ignore::{WalkBuilder, WalkState};
 use serde_json::Value;
@@ -19,25 +21,34 @@ pub(super) fn check(runtime: &ToolRuntime<'_>) -> Result<(), String> {
     Ok(())
 }
 
+/// `file` as the search reports it: relative to the working directory, or
+/// its full path when it lies outside it (a root given as an absolute path
+/// the jail admits), so a hit is never shown under a path it does not have.
 pub(super) fn rel_path(cwd: &Path, file: &Path) -> String {
-    file.strip_prefix(cwd)
-        .unwrap_or(file)
-        .to_string_lossy()
-        .replace('\\', "/")
+    let shown = match file.strip_prefix(cwd) {
+        Ok(relative) => relative,
+        Err(_outside) => file,
+    };
+    shown.to_string_lossy().replace('\\', "/")
 }
 
+/// The directories a search walks: each of `paths`, else `path`, else the
+/// workspace root. A `paths` entry that is not a string is refused by name.
 pub(super) fn roots(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Vec<PathBuf>, String> {
     if let Some(paths) = input.get("paths").and_then(Value::as_array) {
         return paths
             .iter()
-            .filter_map(Value::as_str)
-            .map(|path| jail_path(runtime.cwd, path))
+            .map(|path| match path.as_str() {
+                Some(path) => jail_path(runtime.cwd, path),
+                None => Err(format!("search paths must be strings, not {path}")),
+            })
             .collect();
     }
-    Ok(vec![jail_path(
-        runtime.cwd,
-        &string_input(input, "path").unwrap_or_else(|| ".".into()),
-    )?])
+    let root = match string_input(input, "path") {
+        Some(path) => jail_path(runtime.cwd, &path)?,
+        None => jail_path(runtime.cwd, ".")?,
+    };
+    Ok(vec![root])
 }
 
 pub(super) fn discover(
@@ -46,18 +57,19 @@ pub(super) fn discover(
     include_dirs: bool,
 ) -> Result<Vec<(PathBuf, bool)>, String> {
     check(runtime)?;
-    let hidden = bool_input(input, "hidden", false);
-    let gitignore = bool_input(input, "gitignore", true);
+    let hidden = flag_input(input, "hidden", "search")?;
+    // Ignore files are honoured unless the caller turns them off.
+    let gitignore = optional_bool_input(input, "gitignore", "search")? != Some(false);
     let output = Arc::new(Mutex::new(Vec::<(PathBuf, bool)>::new()));
     let workers = machine_parallelism("search")?;
     let error = Arc::new(Mutex::new(None::<String>));
     for root in roots(runtime, input)? {
         let metadata = fs::metadata(&root).map_err(|value| value.to_string())?;
         if metadata.is_file() {
-            output
-                .lock()
-                .map_err(|_| "search result lock poisoned")?
-                .push((root, false));
+            // Results and the first walk error change by one push or one set,
+            // so a worker that panicked left them whole; skipped on poison, a
+            // search answered without the files it had found.
+            crate::panicked::held(&output).push((root, false));
             continue;
         }
         let mut builder = WalkBuilder::new(&root);
@@ -96,10 +108,9 @@ pub(super) fn discover(
                 let entry = match entry {
                     Ok(entry) => entry,
                     Err(value) => {
-                        if let Ok(mut slot) = error.lock() {
-                            if slot.is_none() {
-                                *slot = Some(value.to_string());
-                            }
+                        let mut slot = crate::panicked::held(&error);
+                        if slot.is_none() {
+                            *slot = Some(value.to_string());
                         }
                         return WalkState::Continue;
                     }
@@ -111,25 +122,20 @@ pub(super) fn discover(
                 if !include_dirs && is_dir {
                     return WalkState::Continue;
                 }
-                if let Ok(mut values) = output.lock() {
-                    values.push((entry.into_path(), is_dir));
-                }
+                crate::panicked::held(&output).push((entry.into_path(), is_dir));
                 WalkState::Continue
             })
         });
         check(runtime)?;
     }
-    if let Some(error) = error
-        .lock()
-        .map_err(|_| "search error lock poisoned")?
-        .take()
-    {
+    if let Some(error) = crate::panicked::held(&error).take() {
         return Err(error);
     }
-    let mut values = Arc::try_unwrap(output)
-        .map_err(|_| "search workers still active")?
-        .into_inner()
-        .map_err(|_| "search result lock poisoned")?;
+    let output = Arc::try_unwrap(output).map_err(|_shared| "search workers still active")?;
+    let mut values = match output.into_inner() {
+        Ok(values) => values,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     values.sort_by(|left, right| left.0.cmp(&right.0));
     values.dedup_by(|left, right| left.0 == right.0);
     Ok(values)

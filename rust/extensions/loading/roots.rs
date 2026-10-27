@@ -3,49 +3,39 @@
 //! extension directory, the configured roots, and the installed plugins.
 
 use serde_json::Value;
-use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::super::{InstalledPluginRoot, SourceSet};
-use super::{config_value, declarative_paths, hash_path_tree, read_json, scan_modules};
+use super::{config_value, declarative_paths, hash_path_tree, scan_modules};
 use crate::hooks::extensions::loading::package_entries;
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::time::SystemTime;
 
+/// The installed plugins of the working directory's scope and the user's,
+/// read from the installed-package registry every plugin reader shares
+/// (`slash::installed_entries_for_scope`): its record says where each
+/// package is and which version, and the scope's toggle whether it is
+/// enabled. A record that misses its id, version or path is refused
+/// naming it, never loaded under a made-up one.
 pub(super) fn installed_plugin_roots(cwd: &Path) -> Result<Vec<InstalledPluginRoot>, String> {
-    // The user scope is JEDEN_PLUGINS_HOME when declared, else the one home
-    // lookup; read as the working directory, the project registry was loaded
-    // twice and the user's installed plugins not at all.
-    let home = match env::var_os("JEDEN_PLUGINS_HOME") {
-        Some(declared) => PathBuf::from(declared),
-        None => crate::slash::common::dirs_home(),
-    };
     let mut roots = Vec::new();
-    for scope in [cwd.to_path_buf(), home] {
-        let registry = read_json(&scope.join(".jeden/plugins.json"))?;
-        let Some(installed) = registry.get("installed").and_then(Value::as_object) else {
-            continue;
-        };
-        for (registry_id, value) in installed {
-            let Some(path) = value.get("path").and_then(Value::as_str) else {
-                continue;
+    for scope in [cwd.to_path_buf(), crate::slash::plugins_home()] {
+        for entry in crate::slash::installed_entries_for_scope(&scope)? {
+            let field = |name: &str| {
+                entry.get(name).and_then(Value::as_str).map(str::to_string).ok_or_else(|| {
+                    format!(
+                        "an installed plugin of {} records no {name}, so it cannot be loaded: {entry}",
+                        scope.display()
+                    )
+                })
             };
             roots.push(InstalledPluginRoot {
-                id: value
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or(registry_id)
-                    .to_string(),
-                version: value
-                    .get("version")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unversioned")
-                    .to_string(),
-                path: PathBuf::from(path),
-                enabled: value.get("enabled").and_then(Value::as_bool) != Some(false),
+                id: field("id")?,
+                version: field("version")?,
+                path: PathBuf::from(field("path")?),
+                enabled: entry.get("enabled").and_then(Value::as_bool) != Some(false),
             });
         }
     }
@@ -78,17 +68,13 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     declarative.extend(declarative_paths(&cwd.join(".jeden"), project_rank));
     roots.push(cwd.join(".jeden/tools"));
     let configured_extensions = config_value(cwd, "extensions")?;
-    if let Some(configured) = configured_extensions.as_array() {
-        for value in configured {
-            if let Some(path) = value.as_str() {
-                let path = PathBuf::from(path);
-                roots.push(if path.is_absolute() {
-                    path
-                } else {
-                    cwd.join(path)
-                });
-            }
-        }
+    for path in crate::cli::config::config_texts(&configured_extensions, "extensions")? {
+        let path = PathBuf::from(path);
+        roots.push(if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        });
     }
     for (index, plugin) in installed_plugins.iter().enumerate() {
         if !plugin.enabled {
@@ -106,11 +92,8 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     modules.sort();
     modules.dedup();
     let disabled_extensions = config_value(cwd, "disabledExtensions")?;
-    let disabled: BTreeSet<String> = disabled_extensions
-        .as_array()
+    let disabled: BTreeSet<String> = crate::cli::config::config_texts(&disabled_extensions, "disabledExtensions")?
         .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
         .map(str::to_string)
         .collect();
     modules.retain(|path| {
@@ -135,13 +118,13 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     let mut hasher = DefaultHasher::new();
     for path in &modules {
         path.hash(&mut hasher);
-        if let Ok(metadata) = fs::metadata(path) {
-            metadata.len().hash(&mut hasher);
-            metadata
-                .modified()
-                .unwrap_or(SystemTime::UNIX_EPOCH)
-                .hash(&mut hasher);
-        }
+        let metadata = fs::metadata(path)
+            .map_err(|error| format!("extension module {} cannot be examined: {error}", path.display()))?;
+        metadata.len().hash(&mut hasher);
+        let modified = metadata.modified().map_err(|error| {
+            format!("extension module {} has no readable modification time: {error}", path.display())
+        })?;
+        modified.hash(&mut hasher);
     }
     for plugin in &installed_plugins {
         plugin.id.hash(&mut hasher);

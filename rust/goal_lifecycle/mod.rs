@@ -158,7 +158,10 @@ pub(crate) fn spawn_turn_classification(
         // the event would show a goal the session does not hold.
         match decision.action {
             LifecycleAction::StartGoal => {
-                let title = resolved_goal.expect("startGoal always resolves a title");
+                let Some(title) = resolved_goal else {
+                    eprintln!("jeden: a goal start resolved no title, so no goal is started");
+                    return;
+                };
                 if state.goal.auto {
                     let objective = title.clone();
                     let saved = crate::slash::mutate_mode_state(&cwd, move |state| {

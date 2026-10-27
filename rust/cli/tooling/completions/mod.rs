@@ -46,19 +46,14 @@ mod render;
 use model::collect_model;
 
 pub(crate) fn completions_command(args: &Args) -> Result<String, String> {
-    let shell = args
-        .positionals
-        .first()
-        .map(String::as_str)
-        .unwrap_or_default();
+    let Some(shell) = args.positionals.first() else {
+        return Err("no shell given: usage: jeden completions <bash|zsh|fish>".to_string());
+    };
     let model = collect_model();
-    match shell {
+    match shell.as_str() {
         "bash" => Ok(model.render_bash()),
         "zsh" => Ok(model.render_zsh()),
         "fish" => Ok(model.render_fish()),
-        other => Err(format!(
-            "unknown shell '{}': usage: jeden completions <bash|zsh|fish>",
-            if other.is_empty() { "<missing>" } else { other }
-        )),
+        other => Err(format!("unknown shell '{other}': usage: jeden completions <bash|zsh|fish>")),
     }
 }

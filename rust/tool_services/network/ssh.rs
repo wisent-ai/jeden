@@ -6,8 +6,8 @@ use super::types::{
 use crate::tool_runtime::runtime_ops::OperationContext;
 use parking_lot::Mutex;
 use serde_json::{json, Value};
-use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use url::Url;
 
@@ -35,9 +35,49 @@ struct Host {
     port: Option<u16>,
     identity: Option<String>,
 }
+
+/// One configured host alias: its connection, or why its entry cannot be one.
+fn configured_host(value: &Value) -> Result<Host, String> {
+    if let Some(target) = value.as_str() {
+        return Ok(Host {
+            target: target.into(),
+            port: None,
+            identity: None,
+        });
+    }
+    let target = value
+        .get("host")
+        .and_then(Value::as_str)
+        .ok_or("the entry is neither a target string nor an object with a host")?;
+    let port = match value.get("port") {
+        None => None,
+        Some(port) => {
+            let number = port
+                .as_u64()
+                .ok_or_else(|| format!("port {port} is not a whole number"))?;
+            Some(u16::try_from(number).map_err(|error| format!("port {number} is not a TCP port: {error}"))?)
+        }
+    };
+    let identity = match (value.get("identity"), value.get("key")) {
+        (Some(_), Some(_)) => return Err("the entry names its identity twice, as identity and as key".into()),
+        (Some(stated), None) | (None, Some(stated)) => Some(
+            stated
+                .as_str()
+                .ok_or_else(|| format!("identity {stated} is not a path"))?
+                .to_owned(),
+        ),
+        (None, None) => None,
+    };
+    let target = match value.get("user").and_then(Value::as_str) {
+        Some(user) => format!("{user}@{target}"),
+        None => target.into(),
+    };
+    Ok(Host { target, port, identity })
+}
+
 pub(crate) struct SshService {
     cwd: PathBuf,
-    hosts: BTreeMap<String, Host>,
+    hosts: BTreeMap<String, Result<Host, String>>,
     connected: Mutex<BTreeSet<String>>,
 }
 impl SshService {
@@ -49,36 +89,7 @@ impl SshService {
             .and_then(Value::as_object)
         {
             for (alias, value) in values {
-                let host = if let Some(target) = value.as_str() {
-                    Some(Host {
-                        target: target.into(),
-                        port: None,
-                        identity: None,
-                    })
-                } else {
-                    value
-                        .get("host")
-                        .and_then(Value::as_str)
-                        .map(|target| Host {
-                            target: if let Some(user) = value.get("user").and_then(Value::as_str) {
-                                format!("{user}@{target}")
-                            } else {
-                                target.into()
-                            },
-                            port: value
-                                .get("port")
-                                .and_then(Value::as_u64)
-                                .and_then(|v| u16::try_from(v).ok()),
-                            identity: value
-                                .get("identity")
-                                .or_else(|| value.get("key"))
-                                .and_then(Value::as_str)
-                                .map(str::to_owned),
-                        })
-                };
-                if let Some(host) = host {
-                    hosts.insert(alias.clone(), host);
-                }
+                hosts.insert(alias.clone(), configured_host(value));
             }
         }
         Self {
@@ -116,23 +127,25 @@ impl SshService {
         }
         let uri = nonempty(input.get("uri"), "uri")?;
         let (alias, path) = parse_uri(&uri)?;
-        let host = self
-            .hosts
-            .get(&alias)
-            .ok_or_else(|| ServiceError::Unavailable {
-                service: "ssh",
-                detail: format!("host alias {alias} is not configured"),
-            })?
-            .clone();
-        let network_host = host
-            .target
-            .rsplit_once('@')
-            .map(|(_, value)| value)
-            .unwrap_or(&host.target);
+        let host = match self.hosts.get(&alias) {
+            Some(Ok(host)) => host.clone(),
+            Some(Err(cause)) => {
+                return Err(ServiceError::InvalidInput(format!(
+                    "host alias {alias} is configured wrongly: {cause}"
+                )))
+            }
+            None => {
+                return Err(ServiceError::Unavailable {
+                    service: "ssh",
+                    detail: format!("host alias {alias} is not configured"),
+                })
+            }
+        };
+        let (network_host, port) = self.endpoint(&host, context)?;
         crate::tool_runtime::runtime_ops::network::authorize_endpoint(
             context.execution_grant(),
-            network_host,
-            host.port.unwrap_or(22),
+            &network_host,
+            port,
         )
         .map_err(|error| ServiceError::PermissionDenied(error.to_string()))?;
         let common = self.ensure_connection(&alias, &host, context)?;
@@ -177,19 +190,53 @@ impl SshService {
             &json!({"ok":true,"uri":uri,"output":output,"connectionReused":true}),
         )
     }
+
+    /// The host name and port ssh itself would connect to for `host`, as
+    /// `ssh -G` resolves them from the stated port and the user's ssh
+    /// configuration.
+    fn endpoint(&self, host: &Host, context: &OperationContext<'_>) -> ServiceResult<(String, u16)> {
+        let mut args = vec!["-G".to_owned()];
+        if let Some(port) = host.port {
+            args.extend(["-p".to_owned(), port.to_string()]);
+        }
+        args.push(host.target.clone());
+        let resolved = process::run("ssh", context, &self.cwd, "ssh", &args, None)?;
+        let setting = |name: &str| {
+            resolved.lines().find_map(|line| {
+                line.split_once(' ')
+                    .filter(|(key, _)| *key == name)
+                    .map(|(_, value)| value.trim().to_owned())
+            })
+        };
+        let unresolved = |what: &str| ServiceError::Protocol {
+            service: "ssh",
+            detail: format!("ssh -G {} named no {what}: {resolved}", host.target),
+        };
+        let hostname = setting("hostname").ok_or_else(|| unresolved("hostname"))?;
+        let port = setting("port")
+            .ok_or_else(|| unresolved("port"))?
+            .parse::<u16>()
+            .map_err(|error| ServiceError::Protocol {
+                service: "ssh",
+                detail: format!("ssh -G {} named a port that is not one: {error}", host.target),
+            })?;
+        Ok((hostname, port))
+    }
+
     fn ensure_connection(
         &self,
         alias: &str,
         host: &Host,
         context: &OperationContext<'_>,
     ) -> ServiceResult<Vec<String>> {
-        let digest = hex::encode(Sha256::digest(
-            format!("{}:{}", self.cwd.display(), alias).as_bytes(),
-        ));
+        // One control socket per workspace and alias, named by a short hash so
+        // its path stays within the length a Unix socket path may have.
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        (self.cwd.as_path(), alias).hash(&mut hasher);
         let socket = context
             .artifacts()
             .root()
-            .join(format!("ssh-control-{}", &digest[..16]));
+            .join(format!("ssh-control-{:x}", hasher.finish()));
         let mut args = vec![
             "-o".into(),
             "ControlMaster=auto".into(),

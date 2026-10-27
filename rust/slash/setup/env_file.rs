@@ -52,16 +52,18 @@ pub(crate) fn brama_router_configured(_cwd: &Path) -> bool {
 
 /// Prefill for an INPUT row, read from the nearest `.env.example` in the
 /// working directory or one of its ancestors, so subdirectories of a
-/// repository work too.
+/// repository work too. A candidate that cannot be examined is refused
+/// naming it: skipped, a farther `.env.example` prefilled the row instead.
 pub(super) fn example_prefill(cwd: &Path, key: &str) -> Result<Option<String>, String> {
-    match cwd
-        .ancestors()
-        .map(|dir| dir.join(".env.example"))
-        .find(|candidate| candidate.is_file())
-    {
-        Some(candidate) => env_file_value(&candidate, key),
-        None => Ok(None),
+    for candidate in cwd.ancestors().map(|dir| dir.join(".env.example")) {
+        match std::fs::metadata(&candidate) {
+            Ok(metadata) if metadata.is_file() => return env_file_value(&candidate, key),
+            Ok(_not_file) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("{} cannot be examined: {error}", candidate.display())),
+        }
     }
+    Ok(None)
 }
 
 /// Append or update `updates` in `~/.jeden/.env`, preserving every unrelated

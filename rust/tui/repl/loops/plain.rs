@@ -29,7 +29,10 @@ where
     let mut stdout = io::stdout();
     loop {
         let mut input = String::new();
-        if io::stdin().read_line(&mut input)? == 0 {
+        io::stdin().read_line(&mut input)?;
+        // A read that added nothing to the fresh line is the end of input; a
+        // blank line still carries its newline.
+        if input.is_empty() {
             break;
         }
         let prompt = input.trim_end_matches(['\r', '\n']);
@@ -70,10 +73,11 @@ pub(super) fn attachment_command(
     tray: &mut AttachmentTray,
 ) -> Option<Result<String, String>> {
     let trimmed = input.trim();
-    let (command, rest) = trimmed
-        .split_once(char::is_whitespace)
-        .unwrap_or((trimmed, ""));
-    let rest = rest.trim();
+    // A command alone takes no argument.
+    let (command, rest) = match trimmed.split_once(char::is_whitespace) {
+        Some((command, rest)) => (command, rest.trim()),
+        None => (trimmed, ""),
+    };
     match command {
         "/attach" => Some(
             tray.add_file(cwd, rest)
@@ -117,11 +121,15 @@ pub(super) fn attachment_command(
                     .map(|item| item.id)
                     .ok_or_else(|| "No pending attachments to detach.".to_string())
             } else {
-                rest.strip_prefix('#')
-                    .unwrap_or(rest)
+                // An attachment id may be written with its `#`, as listed.
+                let digits = match rest.strip_prefix('#') {
+                    Some(digits) => digits,
+                    None => rest,
+                };
+                digits
                     .parse::<u64>()
                     .map(crate::tui::AttachmentId)
-                    .map_err(|_| "Usage: /detach [id|all]".to_string())
+                    .map_err(|error| format!("Usage: /detach [id|all] ({rest:?} is no attachment id: {error})"))
             };
             id.and_then(|id| {
                 tray.remove(id)
@@ -144,6 +152,10 @@ impl BracketedPasteGuard {
 
 impl Drop for BracketedPasteGuard {
     fn drop(&mut self) {
-        let _ = crossterm::execute!(io::stdout(), DisableBracketedPaste);
+        if let Err(error) = crossterm::execute!(io::stdout(), DisableBracketedPaste) {
+            eprintln!(
+                "jeden: the terminal still pastes in bracketed mode ({error}); run `printf '\\e[?2004l'` to end it"
+            );
+        }
     }
 }

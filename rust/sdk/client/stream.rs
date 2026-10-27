@@ -14,7 +14,7 @@ use tokio_stream::{wrappers::UnboundedReceiverStream, Stream};
 
 /// Ordered event stream associated with one client subscription.
 pub struct EventStream {
-    pub(super) id: u64,
+    pub(super) id: uuid::Uuid,
     pub(super) owner: Weak<ClientInner>,
     pub(super) events: UnboundedReceiverStream<Result<EventEnvelope, ClientError>>,
     pub(super) terminal: oneshot::Receiver<ClientError>,
@@ -37,7 +37,9 @@ impl Stream for EventStream {
             self.terminated = true;
             return match result {
                 Ok(error) => Poll::Ready(Some(Err(error))),
-                Err(_) => Poll::Ready(None),
+                // The client was dropped without terminating, so no error will come:
+                // the stream simply ends.
+                Err(_client_dropped) => Poll::Ready(None),
             };
         }
         Poll::Pending
@@ -47,11 +49,7 @@ impl Stream for EventStream {
 impl Drop for EventStream {
     fn drop(&mut self) {
         if let Some(owner) = self.owner.upgrade() {
-            owner
-                .subscribers
-                .lock()
-                .unwrap_or_else(|lock| lock.into_inner())
-                .remove(&self.id);
+            crate::panicked::held(&owner.subscribers).remove(&self.id);
         }
     }
 }

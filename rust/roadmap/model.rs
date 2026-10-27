@@ -147,13 +147,15 @@ pub struct RoadmapGraphEdge {
     pub to: String,
 }
 
+/// What `roadmap check` found. A roadmap that could not be loaded has no
+/// schema, revision or items to report; they are null beside its errors.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckReport {
     pub ok: bool,
-    pub schema_version: u32,
-    pub revision: u64,
-    pub item_count: usize,
+    pub schema_version: Option<u32>,
+    pub revision: Option<u64>,
+    pub item_count: Option<usize>,
     pub errors: Vec<String>,
 }
 

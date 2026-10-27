@@ -4,7 +4,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::AtomicU64;
 use std::sync::Mutex;
 
 // Relative to this file's directory, rust/cli/reports/sessions/. The file
@@ -15,7 +14,6 @@ pub(crate) mod ledger_v2;
 use ledger_v2::SessionEventV2;
 
 static LEDGER_APPEND_LOCK: Mutex<()> = Mutex::new(());
-static NEXT_ENTRY_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(crate) const SESSION_LEDGER_VERSION: u32 = ledger_v2::SESSION_EVENT_SCHEMA_VERSION;
 
@@ -45,7 +43,8 @@ pub(crate) use export::{
     artifact_command, export_session_command, list_artifacts_command, render_session_export,
 };
 pub(crate) use ledger::{
-    append_checkpoint_entry, append_ledger_entry, append_rewind_entry, session_active_leaf,
+    append_checkpoint_entry, append_ledger_entry, append_observation, append_rewind_entry,
+    session_active_leaf,
 };
 pub(crate) use pending::{
     claim_pending_action, complete_pending_action, create_pending_action, discard_pending_action,
@@ -139,29 +138,64 @@ pub(crate) fn resume_command(args: &Args) -> Result<String, String> {
     ))
 }
 
-/// Text-only transcript of a recorded session — user prompts and final answers
-/// only, with tool calls/results and images stripped. Mirrors the external
-/// `recall_conversation.sh` extraction, exposed so the agent `recall_conversation`
-/// tool can reload a session's readable history into context.
+/// Text-only projection of recorded messages. Text-bearing multipart content
+/// stays readable; non-text parts remain available through the full export.
 pub(crate) fn recall_conversation_text(id_or_path: &str) -> Result<String, String> {
     let dir = recorded_session_dir(id_or_path)?;
-    let turns = session_conversation_turns(&dir)?;
-    if turns.is_empty() {
-        return Ok(String::new());
+    let mut body = String::new();
+    for (index, turn) in session_conversation_turns(&dir)?.iter().enumerate() {
+        let role = turn.get("role").and_then(Value::as_str).ok_or_else(|| {
+            format!(
+                "cannot recall {}: message {index} has no string role; observed {turn}",
+                dir.display()
+            )
+        })?;
+        let content = turn.get("content").ok_or_else(|| {
+            format!(
+                "cannot recall {}: message {index} has no content; observed {turn}",
+                dir.display()
+            )
+        })?;
+        let mut heading_written = false;
+        let mut append = |text: &str| {
+            if heading_written {
+                body.push('\n');
+            } else {
+                if !body.is_empty() {
+                    body.push_str("\n\n");
+                }
+                body.push('[');
+                body.extend(role.chars().map(|character| character.to_ascii_uppercase()));
+                body.push_str("]\n");
+                heading_written = true;
+            }
+            body.push_str(text);
+        };
+        match content {
+            Value::String(text) => append(text),
+            Value::Array(parts) => {
+                for (part_index, part) in parts.iter().enumerate() {
+                    if !part.is_object() {
+                        return Err(format!("cannot recall {}: message {index} part {part_index} is not a content object; observed {part}", dir.display()));
+                    }
+                    if let Some(value) = part.get("text") {
+                        let text = value.as_str().ok_or_else(|| {
+                            format!("cannot recall {}: message {index} part {part_index} has non-string text; observed {part}", dir.display())
+                        })?;
+                        append(text);
+                    } else if part.get("type").and_then(Value::as_str) == Some("text") {
+                        return Err(format!("cannot recall {}: message {index} part {part_index} declares text but records none; observed {part}", dir.display()));
+                    }
+                }
+            }
+            other => {
+                return Err(format!(
+                    "cannot recall {}: message {index} has unsupported content; observed {other}",
+                    dir.display()
+                ))
+            }
+        }
     }
-    let body = turns
-        .iter()
-        .map(|turn| {
-            let role = turn
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_ascii_uppercase();
-            let content = turn.get("content").and_then(Value::as_str).unwrap_or("");
-            format!("[{}]\n{}", role, content)
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
     Ok(body)
 }
 
@@ -186,11 +220,17 @@ pub(crate) fn read_session_value(id_or_path: &str) -> Result<Value, String> {
         }
     };
     let ledger = parse_transcript(&dir)?;
-    let id = dir
-        .file_name()
-        .map(|v| v.to_string_lossy().to_string())
-        .unwrap_or_else(|| id_or_path.to_string());
-    let events = ledger.events.iter().map(export_event).collect::<Vec<_>>();
+    let name = dir.file_name().ok_or_else(|| {
+        format!("cannot export session at {dir:?}: its directory has no file name")
+    })?;
+    let id = name.to_str().ok_or_else(|| {
+        format!("cannot export session at {dir:?}: its directory identity {name:?} is not UTF-8")
+    })?;
+    let events = ledger
+        .events
+        .iter()
+        .map(export_event)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(json!({
         "id": id,
         "path": dir,

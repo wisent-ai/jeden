@@ -45,6 +45,6 @@ impl MigrationTrait for Tables {
             .get_connection()
             .execute_unprepared(self.schema)
             .await
-            .map(|_| ())
+            .map(|_execution| ())
     }
 }

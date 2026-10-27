@@ -1,7 +1,7 @@
 //! `jeden stats` — local usage/quota/session snapshot as text, `--json`, or a
 //! self-contained local web dashboard (`--serve [--port N]`). Without
 //! `--port` the operating system assigns a free port and the command prints
-//! the address it bound. The dashboard binds 127.0.0.1 only, serves a single
+//! the address it bound. The dashboard binds the loopback address only, serves a single
 //! HTML page plus a `/api/stats` JSON endpoint, with explicit snapshot refresh.
 
 mod dashboard;
@@ -58,7 +58,7 @@ fn usage_file_totals(path: &Path) -> Value {
 /// A token count as the text output prints it: a whole number.
 fn whole(value: &Value) -> String {
     match value.as_f64() {
-        Some(number) => format!("{number:.0}"),
+        Some(number) => number.round().to_string(),
         None => value.to_string(),
     }
 }
@@ -81,11 +81,12 @@ fn quota_json() -> Value {
                                     "state": bucket.state,
                                     "remaining": bucket.remaining,
                                     "limit": bucket.limit,
-                                    "percentFree": match (bucket.remaining, bucket.limit) {
-                                        (Some(remaining), Some(limit)) if limit > 0 => {
-                                            Some(percent_free(remaining, limit))
+                                    // A share of a limit of nothing is no share.
+                                    "percentFree": match (bucket.remaining, bucket.limit.and_then(std::num::NonZeroU64::new)) {
+                                        (Some(remaining), Some(limit)) => {
+                                            Some(percent_free(remaining, limit.get()))
                                         }
-                                        _ => None,
+                                        _no_share => None,
                                     },
                                     "resetsAtMs": bucket.resets_at_ms,
                                 })
@@ -123,8 +124,10 @@ fn sessions_json() -> Value {
             }
         };
         let path = entry.path();
-        if !path.is_dir() {
-            continue;
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_dir() => {}
+            Ok(_not_session) => continue,
+            Err(error) => return json!({"error": format!("cannot examine {}: {error}", path.display())}),
         }
         let modified = match entry.metadata().and_then(|meta| meta.modified()) {
             Ok(modified) => modified,
@@ -160,11 +163,7 @@ pub(crate) fn stats_json(cwd: &Path) -> Value {
 
 fn stats_text(cwd: &Path) -> String {
     let stats = stats_json(cwd);
-    let mut lines = vec![format!(
-        "jeden {} · {}",
-        stats["version"].as_str().unwrap_or(""),
-        stats["cwd"].as_str().unwrap_or("")
-    )];
+    let mut lines = vec![format!("jeden {} · {}", crate::JEDEN_VERSION, cwd.display())];
     for (scope, usage) in stats["usage"].as_object().into_iter().flatten() {
         if let Some(error) = usage.get("error").and_then(Value::as_str) {
             lines.push(format!("usage ({scope}) unreadable: {error}"));
@@ -180,6 +179,12 @@ fn stats_text(cwd: &Path) -> String {
     if stats["quota"]["available"].as_bool() == Some(true) {
         for provider in stats["quota"]["providers"].as_array().into_iter().flatten() {
             for entry in provider["entries"].as_array().into_iter().flatten() {
+                // An entry the quota report left unnamed is said as that,
+                // rather than printed as a line with blank names.
+                let (Some(name), Some(label)) = (provider["provider"].as_str(), entry["label"].as_str()) else {
+                    lines.push(format!("quota entry unreadable: the quota report names no provider or no label for {entry}"));
+                    continue;
+                };
                 let amount = match entry.get("error").and_then(Value::as_str) {
                     Some(error) => format!("unavailable: {error}"),
                     None => format!(
@@ -187,11 +192,7 @@ fn stats_text(cwd: &Path) -> String {
                         entry["state"], entry["remaining"], entry["limit"], entry["percentFree"]
                     ),
                 };
-                lines.push(format!(
-                    "quota {} · {}: {amount}",
-                    provider["provider"].as_str().unwrap_or(""),
-                    entry["label"].as_str().unwrap_or("")
-                ));
+                lines.push(format!("quota {name} · {label}: {amount}"));
             }
         }
     } else {
@@ -214,23 +215,16 @@ fn stats_text(cwd: &Path) -> String {
 pub(crate) fn stats_command(args: &Args) -> Result<String, String> {
     let flag = |name: &str| args.positionals.iter().any(|part| part == name);
     if flag("--serve") {
-        let named = args
-            .positionals
-            .iter()
-            .position(|part| part == "--port")
-            .map(|index| args.positionals.get(index + 1));
+        // The word after `--port` is the port; `--port` as the last word
+        // names none and is refused.
+        let mut words = args.positionals.iter();
+        let named = words.by_ref().find(|part| *part == "--port").map(|_flag| words.next());
         let port = match named {
             None => None,
-            Some(value) => Some(
-                value
-                    .and_then(|value| value.parse::<u16>().ok())
-                    .ok_or_else(|| {
-                        format!(
-                    "jeden stats --serve --port takes a port number from 0 to 65535, not {}",
-                    value.map_or("nothing", String::as_str)
-                )
-                    })?,
-            ),
+            Some(None) => return Err("jeden stats --serve --port takes a port number, and none followed it".into()),
+            Some(Some(value)) => Some(value.parse::<u16>().map_err(|error| {
+                format!("jeden stats --serve --port takes a port number, not {value}: {error}")
+            })?),
         };
         return serve(&args.cwd, port);
     }

@@ -100,16 +100,13 @@ pub(super) fn load_taken(session_dir: &Path, chat: &Path) -> Result<Vec<u64>, St
 
 pub(super) fn save_taken(session_dir: &Path, chat: &Path, taken: &[u64]) -> Result<(), String> {
     let path = record_path(session_dir);
-    let staged = session_dir.join("chat-memory.json.staged");
     let record = SessionRecord {
         chat: chat.to_path_buf(),
         taken: taken.to_vec(),
     };
     let text = serde_json::to_string(&record)
         .map_err(|error| format!("the session's chat record cannot be encoded: {error}"))?;
-    std::fs::write(&staged, text)
-        .and_then(|()| std::fs::rename(&staged, &path))
-        .map_err(|error| format!("{} cannot be written: {error}", path.display()))
+    crate::tool_runtime::runtime_ops::durable::replace(&path, text.as_bytes())
 }
 
 /// Hold the chat for this process: one process writes a chat. A chat

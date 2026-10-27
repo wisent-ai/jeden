@@ -1,12 +1,6 @@
 //! Turning one tool call into scheduler work: the `task`, `job` and `irc`
 //! tools, and the synchronous `delegate` path that spawns a child and waits
 //! for its output.
-//!
-//! Split out of `task_runtime/mod.rs` because the operator's rule keeps every
-//! source file at three hundred lines or fewer, and the write guard refuses
-//! every edit to a file above that — including the field rename this split
-//! made possible. It lives in its own folder because `task_runtime/` is
-//! already at the five-files-per-folder limit the same guard enforces.
 
 use super::scheduler::{BatchTask, SpawnRequest, TaskScheduler};
 use super::types::TaskError;
@@ -31,17 +25,33 @@ pub fn execute_delegate(
         request.agent = "default".into();
     }
     if request.parent_job.is_none() {
-        request.parent_job = std::env::var("JEDEN_TASK_JOB")
-            .ok()
-            .filter(|value| !value.is_empty());
+        request.parent_job = running_job()?;
     }
     let job = scheduler.spawn(request)?;
     let job = scheduler.poll(&job.id)?;
     let stdout = bounded_text(&job.stdout, scheduler.limits.max_output_bytes)?;
     let stderr = bounded_text(&job.stderr, scheduler.limits.max_output_bytes)?;
-    let delegated =
-        serde_json::from_str::<Value>(stdout.trim()).unwrap_or(Value::String(stdout.clone()));
+    // The delegated answer is the child's JSON when it printed JSON, and its
+    // printed text when it printed text; readers take either.
+    let delegated = match serde_json::from_str::<Value>(stdout.trim()) {
+        Ok(answer) => answer,
+        Err(_text) => Value::String(stdout.clone()),
+    };
     Ok(json!({"job":job,"stdout":stdout,"stderr":stderr,"delegated":delegated}))
+}
+
+/// The job this process runs as, from the `JEDEN_TASK_JOB` the scheduler
+/// gives a child it starts: none outside a job, and a value that is not
+/// Unicode refused naming the variable rather than read as no job.
+fn running_job() -> Result<Option<String>, TaskError> {
+    match std::env::var("JEDEN_TASK_JOB") {
+        Ok(job) if job.is_empty() => Ok(None),
+        Ok(job) => Ok(Some(job)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(std::env::VarError::NotUnicode(raw)) => Err(TaskError::Invalid(format!(
+            "JEDEN_TASK_JOB is {raw:?}, which is not Unicode, so the parent job cannot be named"
+        ))),
+    }
 }
 
 pub(super) fn execute_task(scheduler: &TaskScheduler, input: &Value) -> Result<Value, TaskError> {
@@ -51,11 +61,15 @@ pub(super) fn execute_task(scheduler: &TaskScheduler, input: &Value) -> Result<V
     }
     let mut request: SpawnRequest = serde_json::from_value(input.clone())?;
     if request.parent_job.is_none() {
-        request.parent_job = std::env::var("JEDEN_TASK_JOB")
-            .ok()
-            .filter(|value| !value.is_empty());
+        request.parent_job = running_job()?;
     }
-    let wait = input.get("wait").and_then(Value::as_bool).unwrap_or(false);
+    let wait = match input.get("wait") {
+        None => false,
+        Some(Value::Bool(wait)) => *wait,
+        Some(other) => {
+            return Err(TaskError::Invalid(format!("task wait is true or false; got {other}")));
+        }
+    };
     let job = scheduler.spawn(request)?;
     if wait {
         Ok(json!(scheduler.poll(&job.id)?))
@@ -122,13 +136,21 @@ pub(super) fn execute_irc(scheduler: &TaskScheduler, input: &Value) -> Result<Va
     }
 }
 
+/// The text of the child's output file at `path`, at most `max` bytes of it
+/// (the declared `maxOutputBytes`); a longer file is cut there and the text
+/// says so, naming the file and its size.
 fn bounded_text(path: &Path, max: u64) -> Result<String, TaskError> {
-    let file = fs::File::open(path)?;
     use std::io::Read;
+    let file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
     let mut bytes = Vec::new();
-    file.take(max.saturating_add(1)).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > max {
-        bytes.truncate(max as usize);
+    file.take(max).read_to_end(&mut bytes)?;
+    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    if size > max {
+        text.push_str(&format!(
+            "\n[cut at maxOutputBytes {max} of the {size} bytes in {}]",
+            path.display()
+        ));
     }
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(text)
 }

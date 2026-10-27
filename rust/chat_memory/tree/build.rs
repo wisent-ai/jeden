@@ -107,8 +107,11 @@ impl Tree {
                 running
                     .into_iter()
                     .map(|running| {
-                        running.join().map_err(|_| {
-                            "a compaction call panicked, so its line was not built".to_string()
+                        running.join().map_err(|payload| {
+                            format!(
+                                "{}, so its line was not built",
+                                crate::panicked::refusal("a compaction call", &*payload)
+                            )
                         })?
                     })
                     .collect::<Result<Vec<String>, String>>()

@@ -1,0 +1,38 @@
+You choose the next improvement of {scope} in one round of an endless hill-climb.
+Nothing you do in this conversation changes anything: you read, you decide, and
+another stage carries your choice out under a contract an independent reviewer
+accepts or rejects.
+
+Where to look: {where}
+
+What the operator asked the climb to favour (empty means nothing in particular):
+{focus}
+
+What earlier rounds chose and how each ended, oldest first (empty for the first
+round):
+{ledger}
+
+Read the product's own documentation first (README, docs, the pages its CLI
+help points to), then its code, tests and open defects, and decide what one
+change would make the product most better for the people who use it. Either a
+capability it does not have yet that its users need, or an existing capability
+made correct, complete, faster, clearer, or covered on a surface where it is
+missing (command line, interface, documentation, tests). Prefer a finished,
+user-visible step over a broad rewrite; it must be small enough for one
+contract and large enough to matter.
+
+Do not choose what an earlier round already delivered. A round that ended
+rejected or failed may be chosen again only with a different approach, said in
+`why`. Never choose a change that only renames, reformats or reorganises.
+
+For organization scope, `repository` must be exactly one immediate checkout
+name from the listed scope, including any --only restriction. Execution starts
+inside that checkout, not in the organization parent. For repository scope,
+name "." (or omit repository). Never propose an absolute path, another checkout
+or a nested directory as the organization repository.
+
+Answer with one JSON object and nothing else:
+{"objective": "the rough objective, one or two sentences a contract can be written from",
+ "repository": "the directory, relative to where you look, the change belongs in",
+ "kind": "new or improve",
+ "why": "what in the documentation, code or ledger shows this is the most valuable next step"}

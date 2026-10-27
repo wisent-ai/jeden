@@ -8,7 +8,19 @@ use super::event;
 use super::prompt_context;
 use super::run::fire_event;
 
+/// The name the shared section form is judged under by policy hooks that
+/// read a call's kind: an anchored edit of the files it names.
+const SECTION_TOOL: &str = "edit";
+
 /// Fire `PreToolUse` for `tool`; returns `Some(reason)` if a hook blocks it.
+///
+/// A file-changing tool whose request does not itself carry the complete file
+/// it leaves (Jeden's anchored edit, a line or replacement edit, a move or a
+/// removal) is presented once per file in the shared section form, planned
+/// from the same reading the tool executes: `tool_name` and `tool_input` carry
+/// that section, while `tool` and `input` keep the request as the model sent
+/// it. A request that cannot be planned is refused with its cause instead of
+/// being handed to hooks that could not read it.
 pub fn pretool_block(
     cwd: &Path,
     tool: &str,
@@ -16,13 +28,38 @@ pub fn pretool_block(
     allow_project: bool,
     transcript_path: &Path,
 ) -> Option<String> {
+    let subjects = match crate::tool_runtime::policy_subjects(cwd, tool, input) {
+        Ok(Some(subjects)) => subjects,
+        Ok(None) => {
+            return pretool_subject(cwd, tool, tool, input, input, allow_project, transcript_path)
+        }
+        Err(cause) => {
+            return Some(format!(
+                "PreToolUse hooks cannot be shown the files {tool} would leave: {cause}"
+            ))
+        }
+    };
+    subjects.iter().find_map(|subject| {
+        pretool_subject(cwd, tool, SECTION_TOOL, input, subject, allow_project, transcript_path)
+    })
+}
+
+fn pretool_subject(
+    cwd: &Path,
+    tool: &str,
+    judged_as: &str,
+    input: &Value,
+    subject: &Value,
+    allow_project: bool,
+    transcript_path: &Path,
+) -> Option<String> {
     let payload = json!({
         "event": event::PRE_TOOL_USE,
         "hook_event_name": event::PRE_TOOL_USE,
         "tool": tool,
-        "tool_name": tool,
+        "tool_name": judged_as,
         "input": input,
-        "tool_input": input,
+        "tool_input": subject,
         "cwd": cwd,
         "transcript_path": transcript_path,
     });

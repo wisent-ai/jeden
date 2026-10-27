@@ -29,45 +29,34 @@ pub(super) fn display_row(label: impl Into<String>) -> PickerItem {
     item
 }
 
-/// Compact 20-cell bar: `█` cells for the used share, `░` for the free share.
-fn quota_bar(remaining: u64, limit: u64) -> String {
-    const CELLS: u128 = 20;
-    let free =
-        ((u128::from(remaining) * CELLS + u128::from(limit) / 2) / u128::from(limit)) as usize;
-    let free = free.min(CELLS as usize);
-    format!("{}{}", "█".repeat(CELLS as usize - free), "░".repeat(free))
-}
-
-/// ` · resets in <duration>` when the bucket reports a reset timestamp.
+/// ` · resets in <duration>` when the bucket reports a reset timestamp,
+/// counted to the minute.
 fn reset_suffix(now: u64, resets_at_ms: Option<u64>) -> String {
     let Some(reset) = resets_at_ms else {
         return String::new();
     };
-    let delta = reset.saturating_sub(now);
-    if delta == 0 {
+    let Some(ahead) = std::num::NonZeroU64::new(reset.saturating_sub(now)) else {
         return " · resets soon".into();
-    }
-    let minutes = (delta / 60_000).max(1);
-    let text = if minutes >= 1_440 {
-        format!("{}d{}h", minutes / 1_440, minutes % 1_440 / 60)
-    } else if minutes >= 60 {
-        format!("{}h", minutes / 60)
-    } else {
-        format!("{minutes}m")
     };
-    format!(" · resets in {text}")
+    let counted = i64::try_from(ahead.get()).map_err(|error| error.to_string()).and_then(|millis| {
+        jiff::SignedDuration::from_millis(millis)
+            .round(jiff::Unit::Minute)
+            .map_err(|error| error.to_string())
+    });
+    match counted {
+        Ok(duration) if duration.is_zero() => " · resets soon".into(),
+        Ok(duration) => format!(" · resets in {duration:#}"),
+        Err(error) => format!(" · reset time cannot be counted: {error}"),
+    }
 }
 
 /// Badge (percent free) and amount text for one bucket; buckets without a
-/// limit render `unmetered` instead of a bar.
+/// limit render `unmetered`.
 fn bucket_amount(bucket: &QuotaBucket) -> (Option<String>, String) {
-    match (bucket.remaining, bucket.limit) {
-        (Some(remaining), Some(limit)) if limit > 0 => (
-            Some(format!("{}%", percent_free(remaining, limit))),
-            format!(
-                "{} {remaining}/{limit} remaining",
-                quota_bar(remaining, limit)
-            ),
+    match (bucket.remaining, bucket.limit.and_then(std::num::NonZeroU64::new)) {
+        (Some(remaining), Some(limit)) => (
+            Some(format!("{}%", percent_free(remaining, limit.get()))),
+            format!("{remaining}/{limit} remaining"),
         ),
         (Some(remaining), _) => (None, format!("unmetered · {remaining} remaining")),
         (None, Some(limit)) => (None, format!("limit {limit}")),
@@ -136,17 +125,14 @@ pub(super) fn quota_rows() -> Vec<PickerItem> {
     for (provider, mut rows) in groups {
         // Most constrained subscription first; unreported amounts sort last.
         rows.sort_by(|left, right| {
-            left.remaining
-                .unwrap_or(u64::MAX)
-                .cmp(&right.remaining.unwrap_or(u64::MAX))
-                .then_with(|| left.label.cmp(&right.label))
+            (left.remaining.is_none(), left.remaining, &left.label)
+                .cmp(&(right.remaining.is_none(), right.remaining, &right.label))
         });
         let exhausted = rows.iter().any(|row| row.exhausted);
         let mut header = display_row(format!("── {provider} ({}) ──", rows.len()));
-        header.badge = Some(if exhausted {
-            "✖".into()
-        } else {
-            "✔".into()
+        header.badge = Some(match exhausted {
+            true => "✖".into(),
+            false => "✔".into(),
         });
         items.push(header);
         items.extend(rows.into_iter().map(|row| {

@@ -1,8 +1,5 @@
 //! Finding a language server that is actually installed, and picking the
 //! right one for the file being asked about.
-//!
-//! Split out of `tool_runtime/language/lsp.rs`, which had grown past the
-//! module line cap.
 
 use crate::tool_runtime::shared::string_input;
 use serde_json::Value;
@@ -15,27 +12,34 @@ pub(super) fn executable_exists(name: &str) -> bool {
         return Path::new(name).is_file();
     }
     env::var_os("PATH")
-        .map(|paths| env::split_paths(&paths).any(|path| path.join(name).is_file()))
-        .unwrap_or(false)
+        .is_some_and(|paths| env::split_paths(&paths).any(|path| path.join(name).is_file()))
 }
 /// Whether a language server on `PATH` answers `--version`. The program's own
-/// exit is the verdict; a slow machine is not a missing server.
+/// exit is the verdict; a slow machine is not a missing server. A probe that
+/// cannot be started or waited for counts as no answer and says why.
 fn probe_server(name: &str) -> bool {
     if !executable_exists(name) {
         return false;
     }
-    let Ok(mut child) = Command::new(name)
+    let mut child = match Command::new(name)
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-    else {
-        return false;
+    {
+        Ok(child) => child,
+        Err(error) => {
+            eprintln!("jeden: language server {name} could not be started for its probe: {error}");
+            return false;
+        }
     };
-    match child.wait() {
+    match stado_wait::blocking(stado_wait::Kind::Process, format!("{name} --version"), name, || child.wait()) {
         Ok(status) => status.success(),
-        Err(_) => false,
+        Err(error) => {
+            eprintln!("jeden: the probe of language server {name} could not be waited for: {error}");
+            false
+        }
     }
 }
 
@@ -68,10 +72,15 @@ impl Language {
         Language::JavascriptReact,
     ];
 
-    /// The language of `path`, named by its extension.
+    /// The language of `path`, named by its extension; none for a file in
+    /// a language Jeden starts no server for, which is all the parse of the
+    /// extension can refuse.
     fn of(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?;
-        serde_json::from_value(Value::String(extension.to_owned())).ok()
+        match serde_json::from_value(Value::String(extension.to_owned())) {
+            Ok(language) => Some(language),
+            Err(_another_language) => None,
+        }
     }
 
     /// The server program that reads this language and the arguments it
@@ -116,17 +125,20 @@ fn inferred_server(path: &Path) -> Option<(String, Vec<String>)> {
 
 pub(super) fn command_for(input: &Value, path: &Path) -> Result<(String, Vec<String>), String> {
     if let Some(program) = string_input(input, "server") {
-        let args = input
-            .get("serverArgs")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .collect()
-            })
-            .unwrap_or_default();
+        // No serverArgs is a server started without arguments; an argument
+        // that is not text is refused rather than dropped from the command.
+        let args = match input.get("serverArgs") {
+            None => Vec::new(),
+            Some(Value::Array(items)) => items
+                .iter()
+                .map(|item| {
+                    item.as_str()
+                        .map(ToOwned::to_owned)
+                        .ok_or_else(|| format!("serverArgs holds {item}, which is not text"))
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+            Some(other) => return Err(format!("serverArgs is {other}, not a list of arguments")),
+        };
         return Ok((program, args));
     }
     inferred_server(path)

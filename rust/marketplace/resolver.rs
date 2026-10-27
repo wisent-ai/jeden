@@ -15,25 +15,30 @@ fn candidates<'a>(
     releases: &'a [PluginReleaseV1],
     platform: &str,
 ) -> Result<Vec<&'a PluginReleaseV1>, String> {
-    let requirements = state.constraints.get(id).cloned().unwrap_or_default();
-    let features = state
-        .requested_features
-        .get(id)
-        .cloned()
-        .unwrap_or_default();
-    let mut matches = releases
-        .iter()
-        .filter(|release| release.id == id)
-        .filter_map(|release| {
-            let version = Version::parse(&release.version).ok()?;
-            (requirements
-                .iter()
-                .all(|requirement| requirement.matches(&version))
-                && features.is_subset(&release.features)
-                && (release.platforms.is_empty() || release.platforms.contains(platform)))
-            .then_some((version, release))
-        })
-        .collect::<Vec<_>>();
+    // A package nothing constrains or asks features of has no requirement.
+    let requirements: &[VersionReq] = match state.constraints.get(id) {
+        Some(requirements) => requirements,
+        None => &[],
+    };
+    let no_features = BTreeSet::new();
+    let features = match state.requested_features.get(id) {
+        Some(features) => features,
+        None => &no_features,
+    };
+    // A release whose version does not parse is a defect of the catalogue,
+    // refused naming it rather than left out of the choice unsaid.
+    let mut matches = Vec::new();
+    for release in releases.iter().filter(|release| release.id == id) {
+        let version = Version::parse(&release.version).map_err(|error| {
+            format!("release {id} {} is not a semantic version: {error}", release.version)
+        })?;
+        if requirements.iter().all(|requirement| requirement.matches(&version))
+            && features.is_subset(&release.features)
+            && (release.platforms.is_empty() || release.platforms.contains(platform))
+        {
+            matches.push((version, release));
+        }
+    }
     matches.sort_by(|(a, _), (b, _)| b.cmp(a));
     if matches.is_empty() {
         return Err(format!(

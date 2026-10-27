@@ -73,20 +73,18 @@ pub(super) fn read_disk_cache(key: &str) -> Option<(ModelCatalog, Option<String>
 /// every start paid for the catalogue again with nobody knowing why.
 pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&str>) {
     let path = disk_cache_path(key);
-    let written = (|| -> std::io::Result<()> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let payload = serde_json::json!({
-            "fetchedAtMs": crate::clock::unix_millis()?,
-            "etag": etag,
-            "catalog": catalog,
+    let written = crate::clock::unix_millis()
+        .map_err(|error| format!("the time it was fetched cannot be read: {error}"))
+        .and_then(|fetched_at_ms| {
+            let payload = serde_json::json!({
+                "fetchedAtMs": fetched_at_ms,
+                "etag": etag,
+                "catalog": catalog,
+            });
+            // The shared durable replace stages each write in a file of its
+            // own, so concurrent jeden processes never rename a mix of two.
+            crate::tool_runtime::runtime_ops::durable::replace(&path, payload.to_string().as_bytes())
         });
-        // tmp + rename keeps the entry atomic for concurrent jeden processes.
-        let tmp = path.with_extension("json.tmp");
-        std::fs::write(&tmp, payload.to_string())?;
-        std::fs::rename(&tmp, &path)
-    })();
     if let Err(error) = written {
         eprintln!(
             "jeden: the model catalogue is not kept at {}: {error}",
@@ -95,15 +93,18 @@ pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&
     }
 }
 
-pub(super) fn catalog_cache_key(endpoint: &str, bearer: Option<&str>) -> String {
+/// The cache key of one catalog answer: the endpoint, the bearer it was asked
+/// with and the agent that signed it. Credentials that cannot be read are refused,
+/// since a key built without them would share another caller's answer.
+pub(super) fn catalog_cache_key(endpoint: &str, bearer: Option<&str>) -> Result<String, String> {
     use sha2::Digest;
     let bearer_scope = match bearer {
         Some(token) => hex::encode(sha2::Sha256::digest(token.as_bytes())),
         None => "anonymous".to_string(),
     };
-    let agent_scope = match caller_credentials() {
+    let agent_scope = match caller_credentials()? {
         Some((agent_id, _)) => agent_id,
         None => "unsigned".to_string(),
     };
-    format!("{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}")
+    Ok(format!("{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}"))
 }

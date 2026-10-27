@@ -66,18 +66,24 @@ impl McpClient {
                 if let Some(value) = response.headers().get(MCP_SESSION_ID) {
                     let value = value
                         .to_str()
-                        .map_err(|_| "invalid MCP session id header")?;
+                        .map_err(|error| format!("invalid MCP session id header: {error}"))?;
                     transport.session_id = Some(value.to_string());
                 }
-                if response.status().as_u16() == 202 || response.content_length() == Some(0) {
+                // A notification the server accepted carries no messages.
+                if response.status() == reqwest::StatusCode::ACCEPTED {
                     return Ok(Vec::new());
                 }
-                let content_type = response
-                    .headers()
-                    .get(CONTENT_TYPE)
-                    .and_then(|value| value.to_str().ok())
-                    .unwrap_or("")
-                    .to_string();
+                // An answer that declares no content type is read as JSON; one
+                // whose declaration is not text is refused naming the cause.
+                let content_type = match response.headers().get(CONTENT_TYPE) {
+                    None => None,
+                    Some(value) => Some(
+                        value
+                            .to_str()
+                            .map_err(|error| format!("invalid MCP content type header: {error}"))?
+                            .to_string(),
+                    ),
+                };
                 // The server the operator configured answers as much as the
                 // call produced; it is read to its end.
                 let mut body = Vec::new();
@@ -85,25 +91,30 @@ impl McpClient {
                 response
                     .read_to_end(&mut body)
                     .map_err(|error| format!("MCP HTTP read failed: {error}"))?;
-                if content_type.starts_with("text/event-stream") {
-                    let text = std::str::from_utf8(&body)
-                        .map_err(|error| format!("invalid MCP event stream UTF-8: {error}"))?;
-                    let mut messages = Vec::new();
-                    for line in text.lines() {
-                        if let Some(data) = line.strip_prefix("data:") {
-                            messages.push(
-                                serde_json::from_str(data.trim())
-                                    .map_err(|error| format!("invalid MCP event data: {error}"))?,
-                            );
+                if body.is_empty() {
+                    return Ok(Vec::new());
+                }
+                match content_type.as_deref() {
+                    Some(declared) if declared.starts_with("text/event-stream") => {
+                        let text = std::str::from_utf8(&body).map_err(|error| {
+                            format!("invalid MCP event stream UTF-8: {error}")
+                        })?;
+                        let mut messages = Vec::new();
+                        for line in text.lines() {
+                            if let Some(data) = line.strip_prefix("data:") {
+                                messages.push(serde_json::from_str(data.trim()).map_err(
+                                    |error| format!("invalid MCP event data: {error}"),
+                                )?);
+                            }
                         }
+                        Ok(messages)
                     }
-                    Ok(messages)
-                } else if content_type.starts_with("application/json") || content_type.is_empty() {
-                    Ok(vec![serde_json::from_slice(&body).map_err(|error| {
+                    Some(declared) if !declared.starts_with("application/json") => {
+                        Err(format!("unsupported MCP HTTP content type: {declared}"))
+                    }
+                    Some(_) | None => Ok(vec![serde_json::from_slice(&body).map_err(|error| {
                         format!("invalid MCP HTTP JSON: {error}")
-                    })?])
-                } else {
-                    Err(format!("unsupported MCP HTTP content type: {content_type}"))
+                    })?]),
                 }
             }
         }

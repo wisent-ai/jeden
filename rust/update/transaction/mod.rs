@@ -14,6 +14,8 @@ pub struct InstallPaths {
     pub journal: PathBuf,
     pub lock: PathBuf,
     pub state: PathBuf,
+    /// The target's directory, found once when the paths were built.
+    directory: PathBuf,
 }
 
 impl InstallPaths {
@@ -34,11 +36,12 @@ impl InstallPaths {
             journal: parent.join(format!(".{name}.jeden-update.journal.json")),
             lock: parent.join(format!(".{name}.jeden-update.lock")),
             state: parent.join(format!(".{name}.jeden-update-state.json")),
+            directory: parent,
         })
     }
 
     fn parent(&self) -> &Path {
-        self.target.parent().expect("validated update target")
+        &self.directory
     }
 }
 
@@ -53,10 +56,12 @@ enum Phase {
     Committed,
 }
 
+/// The update journal. Its fields are its format: unknown fields are refused,
+/// so a journal another release wrote in another shape is refused naming
+/// the field rather than acted on.
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Journal {
-    schema_version: u32,
     phase: Phase,
     from_version: String,
     to_version: String,
@@ -67,7 +72,6 @@ struct Journal {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct InstalledState {
-    pub schema_version: u32,
     pub version: String,
     pub artifact_sha256: String,
 }
@@ -79,6 +83,7 @@ mod recover;
 use disk::{durable_json, make_executable, sync_dir};
 use lock::UpdateLock;
 pub use recover::recover;
+use crate::tool_runtime::runtime_ops::platform::presence::present;
 use recover::rollback;
 
 fn journal(
@@ -92,7 +97,6 @@ fn journal(
     durable_json(
         &paths.journal,
         &Journal {
-            schema_version: 1,
             phase,
             from_version: from_version.into(),
             to_version: to_version.into(),
@@ -142,18 +146,20 @@ where
     let _lock = UpdateLock::acquire(paths)?;
     recover(paths)?;
     let reject_staged = |error: String| -> Result<(), String> {
-        if paths.stage.exists() {
-            fs::remove_file(&paths.stage)
-                .map_err(|cleanup| format!("{error}; remove rejected stage: {cleanup}"))?;
+        if present(&paths.stage)? {
+            fs::remove_file(&paths.stage).map_err(|cleanup| {
+                format!("{error}; remove rejected stage {}: {cleanup}", paths.stage.display())
+            })?;
         }
-        if paths.journal.exists() {
-            fs::remove_file(&paths.journal)
-                .map_err(|cleanup| format!("{error}; remove rejected journal: {cleanup}"))?;
+        if present(&paths.journal)? {
+            fs::remove_file(&paths.journal).map_err(|cleanup| {
+                format!("{error}; remove rejected journal {}: {cleanup}", paths.journal.display())
+            })?;
         }
         sync_dir(paths.parent())?;
         Err(error)
     };
-    if paths.stage.exists() || paths.backup.exists() {
+    if present(&paths.stage)? || present(&paths.backup)? {
         return Err("orphan updater files remain after recovery".into());
     }
     let previous_state = read_installed_state(paths)?;
@@ -173,7 +179,7 @@ where
         .map_err(|error| format!("stage update: {error}"))?;
     stage
         .write_all(artifact)
-        .and_then(|_| stage.sync_all())
+        .and_then(|()| stage.sync_all())
         .map_err(|error| format!("fsync staged update: {error}"))?;
     drop(stage);
     make_executable(&paths.stage)?;
@@ -190,11 +196,10 @@ where
     // rejected with its cause, where it was read as absent, skipped its
     // health check and its backup, and the update replaced it with nothing
     // to roll back to.
-    let installed =
-        match crate::tool_runtime::runtime_ops::platform::presence::present(&paths.target) {
-            Ok(installed) => installed,
-            Err(cause) => return reject_staged(format!("pre-update check failed: {cause}")),
-        };
+    let installed = match present(&paths.target) {
+        Ok(installed) => installed,
+        Err(cause) => return reject_staged(format!("pre-update check failed: {cause}")),
+    };
     if installed {
         if let Err(error) = health(&paths.target, paths.parent()) {
             return reject_staged(format!("pre-update health failed: {error}"));
@@ -240,7 +245,10 @@ where
     if let Err(error) = health(&paths.target, paths.parent()) {
         rollback(paths)?;
         fs::remove_file(&paths.journal).map_err(|remove| {
-            format!("{error}; rollback succeeded but journal cleanup failed: {remove}")
+            format!(
+                "{error}; rollback succeeded but journal cleanup of {} failed: {remove}",
+                paths.journal.display()
+            )
         })?;
         sync_dir(paths.parent())?;
         return Err(format!(
@@ -250,7 +258,6 @@ where
     durable_json(
         &paths.state,
         &InstalledState {
-            schema_version: 1,
             version: to_version.into(),
             artifact_sha256: artifact_sha256.into(),
         },
@@ -264,12 +271,14 @@ where
         artifact_sha256,
         &previous_state,
     )?;
-    if paths.backup.exists() {
-        fs::remove_file(&paths.backup)
-            .map_err(|error| format!("remove last-known-good after commit: {error}"))?;
+    if present(&paths.backup)? {
+        fs::remove_file(&paths.backup).map_err(|error| {
+            format!("remove last-known-good {} after commit: {error}", paths.backup.display())
+        })?;
     }
-    fs::remove_file(&paths.journal)
-        .map_err(|error| format!("remove committed journal: {error}"))?;
+    fs::remove_file(&paths.journal).map_err(|error| {
+        format!("remove committed journal {}: {error}", paths.journal.display())
+    })?;
     sync_dir(paths.parent())?;
     Ok(())
 }

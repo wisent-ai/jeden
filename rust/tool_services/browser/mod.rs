@@ -10,12 +10,10 @@ use parking_lot::Mutex;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-#[cfg(unix)]
-unsafe extern "C" {
-    fn kill(pid: i32, signal: i32) -> i32;
-}
+/// The session a browser call names when its input names none, as the
+/// browser tools' schema documents the `session` field.
+const UNNAMED_SESSION: &str = "default";
 
 // The bridge is one node script kept in two files; they run as one program.
 const EMBEDDED_BRIDGE: &str = concat!(
@@ -77,8 +75,7 @@ pub(crate) struct BrowserService {
     profile: Option<String>,
     cwd: PathBuf,
     sessions: Mutex<BTreeMap<String, String>>,
-    browser_pids: Mutex<BTreeSet<u32>>,
-    next_session: AtomicU64,
+    browser_pids: Mutex<BTreeSet<i32>>,
 }
 
 impl BrowserService {
@@ -95,7 +92,6 @@ impl BrowserService {
             cwd: cwd.to_path_buf(),
             sessions: Mutex::new(BTreeMap::new()),
             browser_pids: Mutex::new(BTreeSet::new()),
-            next_session: AtomicU64::new(1),
         }
     }
     pub(crate) fn health(&self) -> HealthDescriptor {
@@ -125,21 +121,14 @@ impl BrowserService {
         }
     }
     fn session(&self, input: &Value) -> String {
-        let key = input
-            .get("session")
-            .and_then(Value::as_str)
-            .filter(|v| !v.is_empty())
-            .unwrap_or("default");
+        let key = match input.get("session").and_then(Value::as_str).filter(|v| !v.is_empty()) {
+            Some(key) => key,
+            None => UNNAMED_SESSION,
+        };
         let mut sessions = self.sessions.lock();
         sessions
             .entry(key.to_string())
-            .or_insert_with(|| {
-                format!(
-                    "jeden-browser-{}-{}",
-                    std::process::id(),
-                    self.next_session.fetch_add(1, Ordering::Relaxed)
-                )
-            })
+            .or_insert_with(|| format!("jeden-browser-{}", uuid::Uuid::new_v4()))
             .clone()
     }
     pub(crate) fn execute(
@@ -167,26 +156,29 @@ impl BrowserService {
         };
         let session = self.session(input);
         let request = json!({ "session": session, "tool": tool, "action": action, "input": input });
-        let mut args = vec!["--session".into(), session.clone()];
-        let program = if let Some(bridge) = self.bridge.as_deref() {
-            bridge
-        } else {
-            args.splice(
-                0..0,
-                [
+        let (program, mut args): (&str, Vec<String>) = match self.bridge.as_deref() {
+            Some(bridge) => (bridge, Vec::new()),
+            None => (
+                "node",
+                vec![
                     "--input-type=module".into(),
                     "--eval".into(),
                     EMBEDDED_BRIDGE.into(),
                     "--".into(),
                 ],
-            );
+            ),
+        };
+        args.push("--session".into());
+        args.push(session.clone());
+        if self.bridge.is_none() {
+            let Some(chrome) = &self.chrome else {
+                return Err(ServiceError::Unavailable {
+                    service: "browser",
+                    detail: "the embedded browser bridge was asked to run with no Chrome executable discovered".into(),
+                });
+            };
             args.push("--chrome".into());
-            args.push(
-                self.chrome
-                    .as_ref()
-                    .expect("healthy embedded browser backend")
-                    .clone(),
-            );
+            args.push(chrome.clone());
             if self.visible == Ok(true) {
                 args.push("--visible".into());
             }
@@ -194,8 +186,7 @@ impl BrowserService {
                 args.push("--user-data-dir".into());
                 args.push(profile.clone());
             }
-            "node"
-        };
+        }
         let response = process::run_json(
             "browser",
             context,
@@ -211,9 +202,13 @@ impl BrowserService {
         )?;
         if self.bridge.is_none() {
             if let Some(pid) = response.get("browserPid").and_then(Value::as_u64) {
-                if let Ok(pid) = u32::try_from(pid) {
-                    self.browser_pids.lock().insert(pid);
-                }
+                // A browser this service cannot name as a process is one it
+                // could never end: refused rather than left untracked.
+                let pid = i32::try_from(pid).map_err(|error| ServiceError::Protocol {
+                    service: "browser",
+                    detail: format!("the bridge named browser process {pid}, which is no process id: {error}"),
+                })?;
+                self.browser_pids.lock().insert(pid);
             }
         }
         if response.get("ok").and_then(Value::as_bool) == Some(false) {
@@ -272,9 +267,15 @@ impl Drop for BrowserService {
     fn drop(&mut self) {
         #[cfg(unix)]
         for pid in self.browser_pids.get_mut().iter().copied() {
-            unsafe {
-                let _ = kill(pid as i32, 9);
+            // SAFETY: kill(2) takes plain integers and touches no memory; it
+            // answers a negative value when the signal was not sent.
+            if !unsafe { libc::kill(pid, libc::SIGKILL) }.is_negative() {
+                continue;
             }
+            eprintln!(
+                "jeden: the browser process {pid} this service started could not be ended: {}",
+                std::io::Error::last_os_error()
+            );
         }
     }
 }

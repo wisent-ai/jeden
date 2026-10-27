@@ -77,10 +77,7 @@ pub(super) fn slash_command_path(path: &Path) -> String {
 }
 
 pub(crate) fn handle_dump(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
-    Ok(slash_session_text(&slash_session_value(
-        context,
-        args.trim(),
-    )?))
+    slash_session_text(&slash_session_value(context, args.trim())?)
 }
 
 pub(crate) fn handle_export(args: &str, context: &SlashContext<'_>) -> Result<String, String> {

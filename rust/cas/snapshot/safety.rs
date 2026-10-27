@@ -14,7 +14,14 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), CasError> {
     if path.as_os_str().is_empty() {
         return Err(CasError::InvalidPath("empty destination".into()));
     }
-    if let Ok(metadata) = fs::symlink_metadata(path) {
+    // A destination that cannot be examined is refused: read as absent, the
+    // snapshot was materialized into a path whose contents were never seen.
+    let existing = match fs::symlink_metadata(path) {
+        Ok(metadata) => Some(metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(CasError::io("inspect materialization destination", path, error)),
+    };
+    if let Some(metadata) = existing {
         if !metadata.file_type().is_dir() {
             return Err(CasError::UnsupportedEntry(path.to_path_buf()));
         }

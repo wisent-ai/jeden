@@ -27,6 +27,66 @@ pub fn chat_completion_streaming(
     on_reasoning: &mut dyn FnMut(&str),
     cancelled: &dyn Fn() -> bool,
 ) -> Result<StreamingCompletion, StreamFailure> {
+    let refused = |message| stream_failure(StreamErrorClass::Permanent, message, Vec::new(), false);
+    let observation = crate::agent::observations::ObservedCall::begin(
+        config.session_id.as_deref(),
+        None,
+        crate::agent::observations::OperationKind::Model,
+        "model",
+        json!({ "model": config.model, "endpointOrigin": config.endpoint_origin,
+            "messages": messages, "maxTokens": max_tokens, "tools": tools, "stream": true }),
+    )
+    .map_err(refused)?;
+    let mut received = String::new();
+    let mut visible = false;
+    let mut observed_delta = |piece: &str| {
+        received.push_str(piece);
+        let shown = on_delta(piece);
+        visible |= shown;
+        shown
+    };
+    let result = complete_streamed(
+        config,
+        messages,
+        max_tokens,
+        tools,
+        &mut observed_delta,
+        on_reasoning,
+        cancelled,
+    );
+    let outcome = match &result {
+        Ok(served) => json!({ "status": "completed", "output": {
+            "content": served.completion.content, "route": served.route, "routeResults": served.route_results } }),
+        Err(failure) => json!({ "status": "failed", "cause": failure.message,
+            "class": failure.class, "routeResults": failure.route_results, "receivedText": received }),
+    };
+    if let Err(cause) = observation.record_result(outcome) {
+        return Err(match result {
+            Ok(served) => stream_failure(
+                StreamErrorClass::Permanent,
+                cause,
+                served.route_results,
+                visible,
+            ),
+            Err(mut failure) => {
+                failure.message = format!("{}; {cause}", failure.message);
+                failure
+            }
+        });
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+fn complete_streamed(
+    config: &ChatConfig,
+    messages: Vec<Value>,
+    max_tokens: Option<usize>,
+    tools: &[Value],
+    on_delta: &mut dyn FnMut(&str) -> bool,
+    on_reasoning: &mut dyn FnMut(&str),
+    cancelled: &dyn Fn() -> bool,
+) -> Result<StreamingCompletion, StreamFailure> {
     if let Some(cause) = crate::agent::credential::direct_refusal() {
         return Err(stream_failure(
             StreamErrorClass::Permanent,

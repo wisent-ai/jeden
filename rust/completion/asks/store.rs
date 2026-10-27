@@ -86,9 +86,11 @@ pub(crate) fn update<T>(
     lock.lock()
         .map_err(|error| format!("cannot lock the operator ask register: {error}"))?;
     regular_file_or_absent(&file)?;
-    let mut register = match fs::read(&file) {
-        Ok(bytes) => parse(&file, &bytes)?,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => adopt()?,
+    // A register adopted now is written for the first time at the first
+    // revision; one read from disk advances past the revision it holds.
+    let (mut register, adopted) = match fs::read(&file) {
+        Ok(bytes) => (parse(&file, &bytes)?, false),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => (adopt()?, true),
         Err(error) => {
             return Err(format!(
                 "cannot read the operator ask register {}: {error}",
@@ -97,10 +99,12 @@ pub(crate) fn update<T>(
         }
     };
     let output = change(&mut register)?;
-    register.revision = register
-        .revision
-        .checked_add(u64::from(true))
-        .ok_or("operator ask register revision overflow")?;
+    if !adopted {
+        register.revision = register
+            .revision
+            .checked_add(u64::from(crate::tally::STEP))
+            .ok_or("operator ask register revision overflow")?;
+    }
     write_atomic(&file, &register)?;
     Ok((output, register))
 }
@@ -111,7 +115,7 @@ pub(crate) fn update<T>(
 fn adopt() -> Result<AskRegister, String> {
     let mut register = AskRegister {
         schema_version: SCHEMA_VERSION,
-        revision: 0,
+        revision: crate::tally::FIRST,
         asks: Vec::new(),
     };
     let root = crate::session_root();
@@ -151,7 +155,14 @@ fn adopt() -> Result<AskRegister, String> {
                 .iter()
                 .find(|item| item.id == task.request_id)
                 .map(|item| item.cwd.clone())
-                .unwrap_or_default();
+                .ok_or_else(|| {
+                    format!(
+                        "{} holds task {} whose request {} is not recorded, so its ask has no workspace",
+                        path.display(),
+                        task.id,
+                        task.request_id
+                    )
+                })?;
             let occurrence = AskOccurrence {
                 asked_at: request.asked_at.clone(),
                 source: AskSource::Review,

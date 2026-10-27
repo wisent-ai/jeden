@@ -7,7 +7,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-pub const COORDINATOR_STORE_SCHEMA_VERSION: u32 = 1;
+/// The first schema of the coordinator store, the one this build reads and writes.
+pub const COORDINATOR_STORE_SCHEMA_VERSION: u32 = crate::tally::FIRST as u32;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,7 +79,7 @@ impl Default for CoordinatorState {
     fn default() -> Self {
         Self {
             schema_version: COORDINATOR_STORE_SCHEMA_VERSION,
-            coordinator_epoch: 1,
+            coordinator_epoch: crate::tally::FIRST,
             workers: BTreeMap::new(),
             jobs: BTreeMap::new(),
         }
@@ -93,7 +94,9 @@ pub struct CoordinatorStore {
 impl CoordinatorStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, ProtocolError> {
         let root = root.as_ref();
-        fs::create_dir_all(root).map_err(storage)?;
+        fs::create_dir_all(root).map_err(|error| {
+            ProtocolError::Storage(format!("create coordinator directory {}: {error}", root.display()))
+        })?;
         let path = root.join("coordinator-v1.json");
         // Only a state that does not exist starts fresh: one that could not
         // be stat'ed did too, and the epoch and leases restarted from zero.
@@ -117,7 +120,19 @@ impl CoordinatorStore {
                 state.schema_version
             )));
         }
-        state.coordinator_epoch = state.coordinator_epoch.saturating_add(1);
+        // The epoch fences a restarted coordinator from the leases of the one
+        // before it, so it must grow on every open; one that cannot grow is
+        // refused instead of reused.
+        state.coordinator_epoch = state
+            .coordinator_epoch
+            .checked_add(u64::from(crate::tally::STEP))
+            .ok_or_else(|| {
+                ProtocolError::Storage(format!(
+                    "coordinator state {} is at the last epoch {}; it cannot fence another start",
+                    path.display(),
+                    state.coordinator_epoch
+                ))
+            })?;
         let store = Self {
             path,
             state: Arc::new(Mutex::new(state)),
@@ -147,7 +162,7 @@ impl CoordinatorStore {
         let state = self
             .state
             .lock()
-            .map_err(|_| ProtocolError::Storage("coordinator store lock poisoned".into()))?;
+            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
         f(&state)
     }
     pub(crate) fn transact<T>(
@@ -157,7 +172,7 @@ impl CoordinatorStore {
         let mut state = self
             .state
             .lock()
-            .map_err(|_| ProtocolError::Storage("coordinator store lock poisoned".into()))?;
+            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
         let mut next = state.clone();
         let output = f(&mut next)?;
         write_atomic(&self.path, &next)?;
@@ -168,35 +183,18 @@ impl CoordinatorStore {
         let state = self
             .state
             .lock()
-            .map_err(|_| ProtocolError::Storage("coordinator store lock poisoned".into()))?;
+            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
         write_atomic(&self.path, &state)
     }
 }
 
+/// The coordinator state over `path` through the shared durable replace. The
+/// staging file was named by the process id, so two coordinators of one
+/// process wrote into one staging file.
 fn write_atomic(path: &Path, value: &CoordinatorState) -> Result<(), ProtocolError> {
-    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
-    let bytes =
-        serde_json::to_vec_pretty(value).map_err(|e| ProtocolError::Storage(e.to_string()))?;
-    {
-        use std::io::Write;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
-            .write(true)
-            .open(&temporary)
-            .map_err(storage)?;
-        file.write_all(&bytes).map_err(storage)?;
-        file.write_all(b"\n").map_err(storage)?;
-        file.sync_all().map_err(storage)?;
-    }
-    fs::rename(&temporary, path).map_err(storage)?;
-    if let Some(parent) = path.parent() {
-        fs::File::open(parent)
-            .and_then(|file| file.sync_all())
-            .map_err(storage)?;
-    }
-    Ok(())
-}
-fn storage(error: std::io::Error) -> ProtocolError {
-    ProtocolError::Storage(error.to_string())
+    let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| {
+        ProtocolError::Storage(format!("encode coordinator state {}: {error}", path.display()))
+    })?;
+    bytes.push(b'\n');
+    crate::tool_runtime::runtime_ops::durable::replace(path, &bytes).map_err(ProtocolError::Storage)
 }

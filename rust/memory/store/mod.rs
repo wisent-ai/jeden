@@ -1,16 +1,19 @@
 use super::*;
 use crate::fleet::{run_db, sql};
-use entities::{managed_skill, memory, workflow};
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{
-    ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
-};
+use crate::tally::ORIGIN;
+use entities::memory;
+use sea_orm::{ConnectionTrait, EntityTrait};
 use sha2::{Digest, Sha256};
 pub(super) mod entities;
 mod maintenance;
 mod recall;
 mod writes;
+
+/// A compaction summary is the model's condensation of a conversation, not a
+/// belief anyone stated with a confidence, so it is kept at the bottom of the
+/// confidence range the memory schema declares: every memory whose confidence
+/// was stated ranks ahead of it.
+const UNVOUCHED: f64 = ORIGIN as f64;
 
 /// Jeden's memory, kept in the fleet database `jeden` so every host and
 /// session of the operator reads and writes the same memories.
@@ -67,35 +70,9 @@ impl MemoryStore {
         }
         Ok(out)
     }
-    pub fn consolidate(
-        &self,
-        scope: &MemoryScope,
-        model: &dyn Consolidator,
-        max_chars: usize,
-    ) -> Result<MemoryRecord, String> {
-        let candidates = self
-            .recall(&FtsBackend, scope, "", usize::MAX)?
-            .into_iter()
-            .map(|h| h.record)
-            .collect::<Vec<_>>();
-        if candidates.len() < 2 {
-            return Err("consolidation requires at least two memories".into());
-        }
-        let text = redacted(&model.consolidate(&candidates, max_chars)?);
-        let source = MemorySource {
-            origin: "model_consolidation".into(),
-            session_id: None,
-            entry_id: None,
-        };
-        self.remember(
-            "summary",
-            scope,
-            &text,
-            &["consolidated".into()],
-            &source,
-            0.7,
-        )
-    }
+
+    /// Keeps a conversation's compaction summary as a summary memory of
+    /// `scope`, unvouched (see [`UNVOUCHED`]).
     pub fn persist_model_consolidation(
         &self,
         scope: &MemoryScope,
@@ -106,87 +83,8 @@ impl MemoryStore {
             session_id: None,
             entry_id: None,
         };
-        let tags: [String; 2] = ["consolidated".into(), "model-assisted".into()];
-        self.remember("summary", scope, summary, &tags, &source, 0.85)
-    }
-
-    pub fn record_workflow(
-        &self,
-        fingerprint: &str,
-        description: &str,
-        session_id: &str,
-        verified: bool,
-    ) -> Result<Option<String>, String> {
-        let fingerprint = fingerprint.to_owned();
-        let description = redacted(description);
-        let session_id = session_id.to_owned();
-        let now = now_ms()?;
-        run_db(move |db| async move {
-            let tx = db.begin().await.map_err(sql)?;
-            let prior = workflow::Entity::find_by_id(fingerprint.clone())
-                .lock_exclusive()
-                .one(&tx)
-                .await
-                .map_err(sql)?;
-            let (mut sessions, occurrences, was_verified) = prior
-                .map(|row| {
-                    let sessions = serde_json::from_str::<Vec<String>>(&row.sessions_json);
-                    (sessions.unwrap_or_default(), row.occurrences, row.verified)
-                })
-                .unwrap_or((Vec::new(), 0, false));
-            if !sessions.iter().any(|s| *s == session_id) {
-                sessions.push(session_id)
-            }
-            let occurrences = occurrences + 1;
-            let verified = was_verified || verified;
-            workflow::Entity::insert(workflow::ActiveModel {
-                fingerprint: Set(fingerprint.clone()),
-                description: Set(description.clone()),
-                sessions_json: Set(serde_json::to_string(&sessions).map_err(|e| e.to_string())?),
-                occurrences: Set(occurrences),
-                verified: Set(verified),
-                updated_at: Set(now),
-            })
-            .on_conflict(
-                OnConflict::column(workflow::Column::Fingerprint)
-                    .update_columns([
-                        workflow::Column::Description,
-                        workflow::Column::SessionsJson,
-                        workflow::Column::Occurrences,
-                        workflow::Column::Verified,
-                        workflow::Column::UpdatedAt,
-                    ])
-                    .to_owned(),
-            )
-            .exec_without_returning(&tx)
-            .await
-            .map_err(sql)?;
-            let skill = if occurrences >= 3 && verified {
-                let id = format!(
-                    "skill_{}",
-                    &hex::encode(Sha256::digest(fingerprint.as_bytes()))[..24]
-                );
-                managed_skill::Entity::insert(managed_skill::ActiveModel {
-                    id: Set(id.clone()),
-                    workflow_fingerprint: Set(fingerprint),
-                    body: Set(format!("# Managed workflow\n\n{description}")),
-                    created_at: Set(now),
-                })
-                .on_conflict(
-                    OnConflict::column(managed_skill::Column::Id)
-                        .do_nothing()
-                        .to_owned(),
-                )
-                .exec_without_returning(&tx)
-                .await
-                .map_err(sql)?;
-                Some(id)
-            } else {
-                None
-            };
-            tx.commit().await.map_err(sql)?;
-            Ok(skill)
-        })
+        let tags = ["consolidated".to_string(), "model-assisted".to_string()];
+        self.remember("summary", scope, summary, &tags, &source, UNVOUCHED)
     }
 }
 pub(super) async fn load_record(
@@ -238,11 +136,13 @@ pub(super) fn record(row: memory::Model) -> Result<MemoryRecord, String> {
         tombstone: row.tombstone,
     })
 }
+/// The key a memory is revised under: its kind, scope and text, each
+/// followed by a NUL byte so no two different tuples hash alike.
 pub(super) fn logical_key(kind: &str, scope: &MemoryScope, text: &str) -> String {
     let mut hash = Sha256::new();
     for part in [kind, scope.kind.as_str(), scope.id.as_str(), text] {
         hash.update(part.as_bytes());
-        hash.update([0])
+        hash.update(b"\0")
     }
     format!("auto:{}", hex::encode(hash.finalize()))
 }

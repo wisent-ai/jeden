@@ -4,8 +4,13 @@
 //! cap.
 
 use super::{TenantError, TenantId, TenantLimits, TenantPrincipal, Usage};
+// Every holder changes the usage map by whole steps (one counter step or one
+// insert), so a panicking holder leaves a state: the map is taken back, not
+// refused, or one panic would deny every tenant for the life of the process.
+use crate::panicked::held;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -25,12 +30,9 @@ impl Drop for ActiveRequestPermit {
     fn drop(&mut self) {
         // Admission recovers a poisoned usage map, so the release must too:
         // a permit that is never given back holds the tenant's slot forever.
-        let mut usage = match self.usage.lock() {
-            Ok(usage) => usage,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut usage = held(&self.usage);
         let entry = usage.entry(self.tenant.clone()).or_default();
-        entry.active_requests = entry.active_requests.saturating_sub(1);
+        entry.active_requests = entry.active_requests.saturating_sub(NonZeroUsize::MIN.get());
     }
 }
 
@@ -74,17 +76,14 @@ impl TenantGuard {
     }
 
     pub fn reserve_request(&self, tenant: &TenantId) -> Result<ActiveRequestPermit, TenantError> {
-        let mut usage = self
-            .usage
-            .lock()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+        let mut usage = held(&self.usage);
         let entry = usage.entry(tenant.clone()).or_default();
         if entry.active_requests >= self.limits.max_active_requests {
             return Err(TenantError::QuotaExceeded {
                 quota: "activeRequests",
             });
         }
-        entry.active_requests += 1;
+        entry.active_requests += NonZeroUsize::MIN.get();
         Ok(ActiveRequestPermit {
             tenant: tenant.clone(),
             usage: self.usage.clone(),
@@ -92,35 +91,24 @@ impl TenantGuard {
     }
 
     pub fn register_session(&self, tenant: &TenantId) -> Result<(), TenantError> {
-        let mut usage = self
-            .usage
-            .lock()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+        let mut usage = held(&self.usage);
         let entry = usage.entry(tenant.clone()).or_default();
         if entry.sessions >= self.limits.max_sessions {
             return Err(TenantError::QuotaExceeded { quota: "sessions" });
         }
-        entry.sessions += 1;
+        entry.sessions += NonZeroUsize::MIN.get();
         Ok(())
     }
 
-    /// Gives back the session unit `register_session` took. A panic elsewhere
-    /// cannot break a counter, so a poisoned lock is recovered rather than
-    /// leaving the unit held and the tenant over its quota for good.
+    /// Gives back the session unit `register_session` took.
     pub fn release_session(&self, tenant: &TenantId) {
-        let mut usage = match self.usage.lock() {
-            Ok(usage) => usage,
-            Err(poisoned) => poisoned.into_inner(),
-        };
+        let mut usage = held(&self.usage);
         let entry = usage.entry(tenant.clone()).or_default();
-        entry.sessions = entry.sessions.saturating_sub(1);
+        entry.sessions = entry.sessions.saturating_sub(NonZeroUsize::MIN.get());
     }
 
     pub fn account_bytes(&self, tenant: &TenantId, delta: u64) -> Result<(), TenantError> {
-        let mut usage = self
-            .usage
-            .lock()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+        let mut usage = held(&self.usage);
         let entry = usage.entry(tenant.clone()).or_default();
         let updated = entry
             .stored_bytes

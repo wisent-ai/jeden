@@ -118,22 +118,9 @@ fn run_session_command(
 /// the next turn's apply_mode_instructions injects (and clears) the force
 /// directive. Backs the combined `/force <tool> <prompt>` form.
 pub(crate) fn arm_force_tool(cwd: &Path, tool: &str) -> Result<(), String> {
-    let names: Vec<String> = crate::tools::list_tools(cwd)
-        .into_iter()
-        .map(|t| t.name)
-        .collect();
-    if !names.is_empty() && !names.iter().any(|n| n == tool) {
-        return Err(format!(
-            "Unknown or unavailable tool: {}. Visible tools: {}",
-            tool,
-            names.iter().cloned().collect::<Vec<_>>().join(", ")
-        ));
-    }
+    crate::slash::forceable(cwd, tool)?;
     let mut state = read_mode_state(cwd)?;
-    state
-        .as_object_mut()
-        .expect("mode state object")
-        .insert("force".into(), json!({ "tool": tool, "prompt": "" }));
+    mode_state_fields(&mut state)?.insert("force".into(), json!({ "tool": tool, "prompt": "" }));
     write_mode_state(cwd, &state)
 }
 
@@ -187,8 +174,7 @@ pub(crate) fn run_command_with(args: &Args, hooks: &mut RunHooks) -> Result<Stri
                 text + "\n"
             });
         } else {
-            crate::cli::commands::readable_file_command(&args.cwd, &command)?;
-            if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest) {
+            if let Some(expanded) = crate::resolve_file_command(&args.cwd, &command, &rest)? {
                 task = expanded;
             }
         }

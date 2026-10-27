@@ -49,6 +49,7 @@ fn status(json_output: bool) -> Result<String, String> {
     let stored = active_endpoint
         .is_some_and(|endpoint| tokens.iter().any(|token| token.endpoint == endpoint));
     let key_source = match &direct {
+        Some((_, Some(_))) if credential::standing_in().is_some() => "own-gateway",
         Some((_, Some(_))) => "environment",
         Some(_) if stored => "local-token-list",
         Some(_) => "none",
@@ -79,6 +80,10 @@ fn status(json_output: bool) -> Result<String, String> {
                     "signingCredential": secret.as_str(), "gatewayBearer": bearer.as_str(),
                     "keySource": bearer.as_str(), "selected": selected,
                     "signingRefusal": secret.refusal(), "bearerRefusal": bearer.refusal(),
+                    "ownGateway": {
+                        "grantsFile": credential::private_gateway::grants_file(),
+                        "state": credential::private_gateway::described(),
+                    },
                     "tokens": tokens,
                 })
             }
@@ -119,6 +124,10 @@ fn status(json_output: bool) -> Result<String, String> {
             if let Some(cause) = bearer.refusal() {
                 text.push_str(&format!("Bearer refusal: {cause}\n"));
             }
+            text.push_str(&format!(
+                "Jeden's own gateway: {}\n",
+                credential::private_gateway::described()
+            ));
             text
         }
     };
@@ -162,8 +171,21 @@ pub(crate) fn token_command(args: &Args) -> Result<String, String> {
             if args.json { Ok(json!({"removed": id}).to_string() + "\n") }
             else { Ok(format!("removed token {id}\n")) }
         }
+        [verb, provider, account_flag, account, reason_flag, reason]
+            if verb == "sign-in" && account_flag == "--account" && reason_flag == "--reason" =>
+        {
+            let verdict = credential::private_gateway::sign_in(provider, account, reason)?;
+            if args.json {
+                Ok(format!("{verdict}\n"))
+            } else {
+                Ok(format!(
+                    "signed {account}'s {provider} subscription into Jeden's own gateway ({}): {verdict}\n",
+                    credential::private_gateway::grants_file().display()
+                ))
+            }
+        }
         _ => Err(crate::cli::invocation::refusal::usage(
-            "usage: jeden token [status|list|add LABEL --endpoint URL|remove ID] [--json]; add reads the secret from stdin")),
+            "usage: jeden token [status|list|add LABEL --endpoint URL|remove ID|sign-in PROVIDER --account EMAIL --reason TEXT] [--json]; add reads the secret from stdin, sign-in the code the provider's page shows")),
     }
 }
 

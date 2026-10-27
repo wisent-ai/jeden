@@ -5,9 +5,8 @@ use crossterm::event::KeyEvent;
 pub const EDITOR_KEYMAP_NAMESPACE: &str = "editor";
 pub const EXTERNAL_EDITOR_ACTION_ID: &str = "editor.external";
 
-// d183a11 moved attachments.rs and text.rs from tui/ into editor/ without
-// declaring them here, so the compiler never read them; tui/mod.rs
-// re-exports both for the rest of the crate.
+// The attachment and text modules live under the editor and are declared
+// here; tui/mod.rs re-exports both for the rest of the crate.
 pub(crate) mod attachments;
 mod input;
 pub(crate) mod text;
@@ -26,6 +25,13 @@ struct Snapshot {
     text: String,
     cursor: usize,
     anchor: Option<usize>,
+}
+
+/// A move to the line above or below the cursor's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Vertical {
+    Up,
+    Down,
 }
 
 /// Where a change landed: the whole buffer, or the bytes from an offset.
@@ -71,9 +77,11 @@ impl Default for EditorState {
 
 impl EditorState {
     pub fn new(keymap: ActionKeyMap) -> Self {
+        let text = String::new();
         Self {
-            text: String::new(),
-            cursor: 0,
+            // An empty buffer's cursor stands at its end.
+            cursor: text.len(),
+            text,
             anchor: None,
             preferred_column: None,
             undo: Vec::new(),
@@ -109,7 +117,7 @@ impl EditorState {
 
     pub fn take(&mut self) -> String {
         let text = std::mem::take(&mut self.text);
-        self.cursor = 0;
+        self.cursor = self.text.len();
         self.anchor = None;
         self.preferred_column = None;
         self.history_index = None;
@@ -207,7 +215,11 @@ impl EditorState {
     }
 
     fn replace_selection(&mut self, value: &str) {
-        let (start, end) = self.selection().unwrap_or((self.cursor, self.cursor));
+        // Without a selection the value goes in at the cursor.
+        let (start, end) = match self.selection() {
+            Some(selected) => selected,
+            None => (self.cursor, self.cursor),
+        };
         self.splice(start, end, value, start + value.len());
         self.history_index = None;
     }
@@ -224,22 +236,36 @@ impl EditorState {
         self.preferred_column = None;
     }
 
-    fn move_vertical(&mut self, direction: isize) {
+    /// The cursor at the buffer's first character, or where it stands in an
+    /// empty buffer.
+    fn move_to_start(&mut self) {
+        let start = match self.text.char_indices().next() {
+            Some((first, _)) => first,
+            None => self.text.len(),
+        };
+        self.move_to(start, false);
+    }
+
+    fn move_vertical(&mut self, direction: Vertical) {
         let start = line_start(&self.text, self.cursor);
-        let column = self
-            .preferred_column
-            .unwrap_or_else(|| UnicodeWidthStr::width(&self.text[start..self.cursor]));
-        let target_start = if direction < 0 {
-            if start == 0 {
-                return;
+        // A run of vertical moves keeps the column the first one started from.
+        let column = match self.preferred_column {
+            Some(column) => column,
+            None => UnicodeWidthStr::width(&self.text[start..self.cursor]),
+        };
+        let line_break = '\n'.len_utf8();
+        let target_start = match direction {
+            Vertical::Up => match start.checked_sub(line_break) {
+                Some(previous_line_end) => line_start(&self.text, previous_line_end),
+                None => return,
+            },
+            Vertical::Down => {
+                let end = line_end(&self.text, self.cursor);
+                if end == self.text.len() {
+                    return;
+                }
+                end + line_break
             }
-            line_start(&self.text, start.saturating_sub(1))
-        } else {
-            let end = line_end(&self.text, self.cursor);
-            if end == self.text.len() {
-                return;
-            }
-            end + 1
         };
         let target_end = line_end(&self.text, target_start);
         self.cursor = byte_at_display_column(&self.text, target_start, target_end, column);

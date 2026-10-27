@@ -7,42 +7,43 @@
 use super::super::config_value_at;
 use super::table::SETTINGS_SCHEMA;
 use super::SettingSpec;
-use crate::cli::config::parse_config_literal;
 use serde_json::{json, Value};
 
 pub(super) fn setting_spec(key: &str) -> Option<&'static SettingSpec> {
     SETTINGS_SCHEMA.iter().find(|spec| spec.key == key)
 }
 
+/// A setting's default as the compiled schema states it; a default that is
+/// not JSON is a defect in the schema table, not in anyone's configuration.
 pub(crate) fn setting_default(spec: &SettingSpec) -> Value {
-    serde_json::from_str(spec.default_json).unwrap_or(Value::Null)
+    serde_json::from_str(spec.default_json)
+        .expect("every default in the compiled settings schema is JSON")
 }
 
+/// The value configured for the setting, or its default when none is.
 pub(super) fn effective_setting_value(config: &Value, spec: &SettingSpec) -> Value {
-    config_value_at(config, spec.key)
-        .cloned()
-        .unwrap_or_else(|| setting_default(spec))
+    match config_value_at(config, spec.key) {
+        Some(value) => value.clone(),
+        None => setting_default(spec),
+    }
 }
 
 pub(super) fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value, String> {
     let trimmed = raw.trim();
     match spec.typ {
-        "boolean" => match trimmed.to_ascii_lowercase().as_str() {
-            "true" | "yes" | "on" | "1" => Ok(json!(true)),
-            "false" | "no" | "off" | "0" => Ok(json!(false)),
-            _ => Err(format!(
-                "{} expects a boolean (true/false, yes/no, on/off, 1/0)",
-                spec.key
-            )),
-        },
+        "boolean" => trimmed
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .map(|value| json!(value))
+            .map_err(|error| format!("{} expects true or false: {error}", spec.key)),
         "number" if spec.key == "secrets.minLength" => trimmed
             .parse::<usize>()
             .map(|minimum| json!(minimum))
-            .map_err(|_| format!("{} expects a nonnegative whole byte length", spec.key)),
+            .map_err(|error| format!("{} expects a nonnegative whole byte length: {error}", spec.key)),
         "number" => {
             let number = trimmed
                 .parse::<f64>()
-                .map_err(|_| format!("{} expects a finite number", spec.key))?;
+                .map_err(|error| format!("{} expects a finite number: {error}", spec.key))?;
             if number.is_finite() {
                 Ok(json!(number))
             } else {
@@ -85,7 +86,12 @@ pub(super) fn parse_setting_value(spec: &SettingSpec, raw: &str) -> Result<Value
             Ok(value)
         }
         "string" => Ok(json!(trimmed)),
-        _ => Ok(parse_config_literal(trimmed)),
+        // A schema type this parser does not read is refused naming it, never
+        // guessed from the text as a boolean, number or JSON.
+        other => Err(format!(
+            "{} has the schema type {other}, which `jeden config set` cannot read",
+            spec.key
+        )),
     }
 }
 
@@ -97,9 +103,7 @@ pub(crate) fn setting_metadata(spec: &SettingSpec, value: Value) -> Value {
         "default": setting_default(spec),
     });
     if !spec.enum_values.is_empty() {
-        out.as_object_mut()
-            .expect("object")
-            .insert("enum".into(), json!(spec.enum_values));
+        out["enum"] = json!(spec.enum_values);
     }
     out
 }

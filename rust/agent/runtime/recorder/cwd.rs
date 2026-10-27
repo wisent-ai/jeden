@@ -1,7 +1,7 @@
 //! Moving a recorded session to another working directory (`/move`): the
-//! session's `state.json` is rewritten through a staged file.
+//! session's `state.json` is rewritten through the shared durable replace,
+//! keeping the state file's permissions.
 use super::*;
-use std::io::Write;
 
 impl SessionRecorder {
     pub(in crate::agent) fn set_cwd(&mut self, cwd: &Path) -> Result<(), String> {
@@ -42,56 +42,8 @@ impl SessionRecorder {
                 state_path.display()
             )
         })?;
-        let staging = self
-            .dir
-            .join(format!(".state-{}.new", uuid::Uuid::new_v4()));
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&staging)
-            .map_err(|error| {
-                format!(
-                    "cannot create session state staging file {}: {error}",
-                    staging.display()
-                )
-            })?;
-        let publish = (|| {
-            file.set_permissions(metadata.permissions())
-                .map_err(|error| {
-                    format!(
-                        "cannot preserve session state permissions {}: {error}",
-                        staging.display()
-                    )
-                })?;
-            file.write_all(&encoded).map_err(|error| {
-                format!(
-                    "cannot write session state staging file {}: {error}",
-                    staging.display()
-                )
-            })?;
-            file.sync_all().map_err(|error| {
-                format!(
-                    "cannot sync session state staging file {}: {error}",
-                    staging.display()
-                )
-            })?;
-            fs::rename(&staging, &state_path).map_err(|error| {
-                format!(
-                    "cannot publish session state {} as {}: {error}",
-                    staging.display(),
-                    state_path.display()
-                )
-            })
-        })();
-        if let Err(error) = publish {
-            return match fs::remove_file(&staging) {
-                Ok(()) => Err(error),
-                Err(cleanup) => Err(format!(
-                    "{error}; cannot remove staging file {}: {cleanup}",
-                    staging.display()
-                )),
-            };
-        }
+        crate::tool_runtime::runtime_ops::durable::replace_keeping_mode(&state_path, &encoded)
+            .map_err(|cause| format!("cannot publish session state: {cause}"))?;
         self.cwd = cwd.to_path_buf();
         Ok(())
     }

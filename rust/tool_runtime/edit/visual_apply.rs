@@ -1,74 +1,79 @@
+use regex::Regex;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
 use super::lines::apply_line_edit_ops;
 use super::visual_parse::parse_visual_edit_patch;
 use super::VisualPatchOp;
+use crate::tally::{ORIGIN, STEP};
 use crate::tool_runtime::shared::{
     jail_write_path, sha256_hex, simple_diff, snapshot_name, snapshot_tag, split_edit_lines,
     string_input,
 };
 use crate::tool_runtime::ToolRuntime;
 
+/// Line numbers count from one step past none.
+const FIRST_LINE: usize = STEP as usize;
+
+/// An ATX heading opener and its level, the run of `#` before the space:
+/// https://spec.commonmark.org/0.31.2/#atx-headings
+static HEADING: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^(#{1,6})\s").expect("the CommonMark heading pattern is valid"));
+
+fn heading_level(line: &str) -> Option<usize> {
+    HEADING
+        .captures(line)
+        .and_then(|found| found.get(FIRST_LINE))
+        .map(|level| level.as_str().len())
+}
+
+/// The lines a block anchored at `start_line` spans: a Markdown section up to
+/// the next heading of its level or higher, a braced block to its closing
+/// brace, or an indented block below a line ending in a colon.
 fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize), String> {
     let (lines, _) = split_edit_lines(content);
-    if start_line < 1 || start_line > lines.len() {
-        return Err("block start is past end of file".into());
+    if start_line < FIRST_LINE || start_line > lines.len() {
+        return Err(format!("block start {start_line} is outside the {}-line file", lines.len()));
     }
-    let line = &lines[start_line - 1];
-    if let Some(heading) = regex::Regex::new(r"^(#{1,6})\s")
-        .ok()
-        .and_then(|re| re.captures(line))
-    {
-        let level = heading.get(1).map(|m| m.as_str().len()).unwrap_or(1);
-        let heading_re = regex::Regex::new(r"^(#{1,6})\s").unwrap();
-        for (index, text) in lines.iter().enumerate().skip(start_line) {
-            if let Some(next) = heading_re.captures(text) {
-                if next.get(1).map(|m| m.as_str().len()).unwrap_or(7) <= level {
-                    return Ok((start_line, index));
-                }
-            }
-        }
-        return Ok((start_line, lines.len()));
+    let line = &lines[start_line - FIRST_LINE];
+    if let Some(level) = heading_level(line) {
+        let section = lines
+            .iter()
+            .skip(start_line)
+            .take_while(|text| !heading_level(text).is_some_and(|next| next <= level))
+            .count();
+        return Ok((start_line, start_line + section));
     }
     if line.contains('{') {
-        let mut balance = 0i64;
-        let mut opened = false;
-        for (idx, text) in lines.iter().enumerate().skip(start_line - 1) {
-            for ch in text.chars() {
-                if ch == '{' {
-                    balance += 1;
-                    opened = true;
-                }
-                if ch == '}' {
-                    balance -= 1;
-                }
-            }
-            if opened && balance <= 0 {
-                return Ok((start_line, idx + 1));
+        let mut opened = ORIGIN;
+        let mut closed = ORIGIN;
+        for (index, text) in lines.iter().enumerate().skip(start_line - FIRST_LINE) {
+            opened += text.matches('{').count();
+            closed += text.matches('}').count();
+            if closed >= opened {
+                return Ok((start_line, index + FIRST_LINE));
             }
         }
     }
     if line.trim_end().ends_with(':') {
-        let base_indent = line.chars().take_while(|ch| ch.is_whitespace()).count();
-        let mut end_line = start_line;
-        for (idx, text) in lines.iter().enumerate().skip(start_line) {
-            if text.trim().is_empty() {
-                end_line = idx + 1;
-                continue;
-            }
-            let indent = text.chars().take_while(|ch| ch.is_whitespace()).count();
-            if indent <= base_indent {
-                break;
-            }
-            end_line = idx + 1;
-        }
-        if end_line > start_line {
-            return Ok((start_line, end_line));
+        let indent = |text: &str| text.chars().take_while(|ch| ch.is_whitespace()).count();
+        let base = indent(line);
+        let body = lines
+            .iter()
+            .skip(start_line)
+            .take_while(|text| text.trim().is_empty() || indent(text) > base)
+            .count();
+        if body > ORIGIN {
+            return Ok((start_line, start_line + body));
         }
     }
     Err(format!("unsupported block anchor at line {start_line}"))
+}
+
+fn anchored_line(op: &VisualPatchOp, name: &str) -> Result<usize, String> {
+    op.line.ok_or_else(|| format!("{name} requires line"))
 }
 
 fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Value>, String> {
@@ -76,18 +81,21 @@ fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Va
     let mut out = Vec::new();
     for op in ops {
         match op.op.as_str() {
-            "insert_head" => out.push(json!({"op": "insert_before", "line": 1, "content": op.content})),
-            "insert_tail" => out.push(if lines.is_empty() { json!({"op": "insert_before", "line": 1, "content": op.content}) } else { json!({"op": "insert_after", "line": lines.len(), "content": op.content}) }),
+            "insert_head" => out.push(json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content})),
+            "insert_tail" => out.push(match lines.is_empty() {
+                true => json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content}),
+                false => json!({"op": "insert_after", "line": lines.len(), "content": op.content}),
+            }),
             "replace_block" => {
-                let (start, end) = visual_block_range(content, op.line.ok_or("replace_block requires line")?)?;
+                let (start, end) = visual_block_range(content, anchored_line(op, "replace_block")?)?;
                 out.push(json!({"op": "replace", "startLine": start, "endLine": end, "content": op.content}));
             }
             "delete_block" => {
-                let (start, end) = visual_block_range(content, op.line.ok_or("delete_block requires line")?)?;
+                let (start, end) = visual_block_range(content, anchored_line(op, "delete_block")?)?;
                 out.push(json!({"op": "delete", "startLine": start, "endLine": end}));
             }
             "insert_block_after" => {
-                let (_, end) = visual_block_range(content, op.line.ok_or("insert_block_after requires line")?)?;
+                let (_, end) = visual_block_range(content, anchored_line(op, "insert_block_after")?)?;
                 out.push(json!({"op": "insert_after", "line": end, "content": op.content}));
             }
             "replace" => out.push(json!({"op": "replace", "startLine": op.start_line, "endLine": op.end_line, "content": op.content})),
@@ -99,15 +107,16 @@ fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Va
     Ok(out)
 }
 
-struct PreparedVisualEdit {
-    file: PathBuf,
-    to_file: Option<PathBuf>,
-    path: String,
-    to_path: Option<String>,
-    before: String,
-    after: String,
-    ops: Vec<Value>,
-    remove: bool,
+/// One file section as the edit will leave it, before anything is written.
+pub(super) struct PreparedVisualEdit {
+    pub(super) file: PathBuf,
+    pub(super) to_file: Option<PathBuf>,
+    pub(super) path: String,
+    pub(super) to_path: Option<String>,
+    pub(super) before: String,
+    pub(super) after: String,
+    pub(super) ops: Vec<Value>,
+    pub(super) remove: bool,
 }
 
 pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -115,10 +124,44 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         return Err("edit requires --allow-write".into());
     }
     let patch = string_input(input, "patch").ok_or("edit requires patch")?;
-    let sections = parse_visual_edit_patch(&patch)?;
+    let prepared = plan_visual_edit(runtime.cwd, &patch)?;
+    commit(&prepared)?;
+    Ok(described(&prepared))
+}
+
+/// A move destination that already holds another file, or names a file the
+/// same patch also edits, refused naming it.
+fn checked_destination(
+    section_dest: &str,
+    to: &Path,
+    file: &Path,
+    sources: &std::collections::HashSet<PathBuf>,
+    destinations: &mut std::collections::HashSet<PathBuf>,
+) -> Result<(), String> {
+    if !destinations.insert(to.to_path_buf()) {
+        return Err(format!("duplicate move destination: {section_dest}"));
+    }
+    if sources.contains(to) && to != file {
+        return Err(format!("move destination is another patched source: {section_dest}"));
+    }
+    if to != file
+        && to
+            .try_exists()
+            .map_err(|cause| format!("cannot inspect move destination {section_dest}: {cause}"))?
+    {
+        return Err(format!("destination exists: {section_dest}"));
+    }
+    Ok(())
+}
+
+/// Every section checked against its snapshot and resolved to line operations
+/// in original coordinates, writing nothing. Execution and policy hooks share
+/// this one reading, so a hook judges exactly what the tool will write.
+pub(super) fn plan_visual_edit(cwd: &Path, patch: &str) -> Result<Vec<PreparedVisualEdit>, String> {
+    let sections = parse_visual_edit_patch(patch)?;
     let mut source_files = std::collections::HashSet::new();
     for section in &sections {
-        let source = jail_write_path(runtime.cwd, &section.path)?;
+        let source = jail_write_path(cwd, &section.path)?;
         if !source_files.insert(source) {
             return Err(format!("duplicate patch file section: {}", section.path));
         }
@@ -126,10 +169,10 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let mut destination_files = std::collections::HashSet::new();
     let mut prepared = Vec::new();
     for section in &sections {
-        let file = jail_write_path(runtime.cwd, &section.path)?;
-        let current_bytes = fs::read(&file).map_err(|e| e.to_string())?;
-        let current_hash = sha256_hex(&current_bytes);
-        let current_tag = snapshot_tag(&current_hash);
+        let file = jail_write_path(cwd, &section.path)?;
+        let current_bytes =
+            fs::read(&file).map_err(|cause| format!("cannot read {}: {cause}", file.display()))?;
+        let current_tag = snapshot_tag(&sha256_hex(&current_bytes));
         if current_tag != section.tag {
             return Err(format!(
                 "snapshot tag mismatch for {}: expected {}, got {}",
@@ -139,45 +182,26 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         let to_file = section
             .move_to
             .as_ref()
-            .map(|dest| jail_write_path(runtime.cwd, dest))
+            .map(|dest| jail_write_path(cwd, dest).map(|to| (dest, to)))
             .transpose()?;
-        if let Some(to) = &to_file {
-            if !destination_files.insert(to.clone()) {
-                return Err(format!(
-                    "duplicate move destination: {}",
-                    section.move_to.as_deref().unwrap_or("")
-                ));
-            }
-            if source_files.contains(to) && to != &file {
-                return Err(format!(
-                    "move destination is another patched source: {}",
-                    section.move_to.as_deref().unwrap_or("")
-                ));
-            }
-            if to != &file && to.exists() {
-                return Err(format!(
-                    "destination exists: {}",
-                    section.move_to.as_deref().unwrap_or("")
-                ));
-            }
+        if let Some((dest, to)) = &to_file {
+            checked_destination(dest, to, &file, &source_files, &mut destination_files)?;
         }
-        let before = String::from_utf8(current_bytes).map_err(|e| e.to_string())?;
-        let ops = if section.remove {
-            Vec::new()
-        } else {
-            visual_ops_for_content(&before, &section.ops)?
+        let before = String::from_utf8(current_bytes)
+            .map_err(|cause| format!("{} is not UTF-8 text: {cause}", file.display()))?;
+        let ops = match section.remove {
+            true => Vec::new(),
+            false => visual_ops_for_content(&before, &section.ops)?,
         };
-        let after = if section.remove {
-            String::new()
-        } else if ops.is_empty() {
-            before.clone()
-        } else {
-            apply_line_edit_ops(&before, &Value::Array(ops.clone()))?
+        let after = match (section.remove, ops.is_empty()) {
+            (true, _) => String::new(),
+            (false, true) => before.clone(),
+            (false, false) => apply_line_edit_ops(&before, &Value::Array(ops.clone()))?,
         };
         prepared.push(PreparedVisualEdit {
             file,
             to_path: section.move_to.clone(),
-            to_file,
+            to_file: to_file.map(|(_, to)| to),
             path: section.path.clone(),
             before,
             after,
@@ -185,30 +209,41 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             remove: section.remove,
         });
     }
-    for item in &prepared {
+    Ok(prepared)
+}
+
+fn commit(prepared: &[PreparedVisualEdit]) -> Result<(), String> {
+    for item in prepared {
         if item.remove {
-            fs::remove_file(&item.file).map_err(|e| e.to_string())?;
-        } else {
-            if !item.ops.is_empty() {
-                fs::write(&item.file, item.after.as_bytes()).map_err(|e| e.to_string())?;
+            fs::remove_file(&item.file)
+                .map_err(|cause| format!("cannot delete {}: {cause}", item.file.display()))?;
+            continue;
+        }
+        if !item.ops.is_empty() {
+            fs::write(&item.file, item.after.as_bytes())
+                .map_err(|cause| format!("cannot write {}: {cause}", item.file.display()))?;
+        }
+        if let Some(to_file) = &item.to_file {
+            if let Some(parent) = to_file.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|cause| format!("cannot create {}: {cause}", parent.display()))?;
             }
-            if let Some(to_file) = &item.to_file {
-                if let Some(parent) = to_file.parent() {
-                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
-                }
-                fs::rename(&item.file, to_file).map_err(|e| e.to_string())?;
-            }
+            fs::rename(&item.file, to_file).map_err(|cause| {
+                format!("cannot move {} to {}: {cause}", item.file.display(), to_file.display())
+            })?;
         }
     }
-    Ok(json!({"files": prepared.iter().map(|item| {
+    Ok(())
+}
+
+fn described(prepared: &[PreparedVisualEdit]) -> Value {
+    json!({"files": prepared.iter().map(|item| {
         let final_path = item.to_path.as_ref().unwrap_or(&item.path);
-        let next_hash = if item.remove { None } else { Some(sha256_hex(item.after.as_bytes())) };
-        let diff = if item.remove {
-            simple_diff(&item.path, &item.before, "")
-        } else if item.to_path.is_some() && item.ops.is_empty() {
-            format!("rename {} -> {}", item.path, final_path)
-        } else {
-            simple_diff(&item.path, &item.before, &item.after)
+        let next_hash = (!item.remove).then(|| sha256_hex(item.after.as_bytes()));
+        let diff = match (item.remove, item.to_path.is_some() && item.ops.is_empty()) {
+            (true, _) => simple_diff(&item.path, &item.before, ""),
+            (false, true) => format!("rename {} -> {}", item.path, final_path),
+            (false, false) => simple_diff(&item.path, &item.before, &item.after),
         };
         json!({
             "path": final_path,
@@ -222,5 +257,5 @@ pub(crate) fn visual_edit(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             "ops": item.ops.len(),
             "bytes": item.after.len()
         })
-    }).collect::<Vec<_>>()}))
+    }).collect::<Vec<_>>()})
 }

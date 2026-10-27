@@ -10,7 +10,6 @@ use super::registry::for_cwd;
 use super::shapes::CapabilityKind;
 use super::CapabilityDescriptor;
 use crate::capability::registry::ConflictDiagnostic;
-use std::collections::BTreeSet;
 
 pub fn slash_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     for_cwd(cwd)
@@ -47,13 +46,9 @@ pub fn is_builtin_slash(name: &str) -> bool {
 
 pub fn status_text(cwd: &Path) -> String {
     let snapshot = for_cwd(cwd);
-    let mut by_kind = BTreeMap::<CapabilityKind, (usize, usize)>::new();
+    let mut by_kind = BTreeMap::<CapabilityKind, Vec<&CapabilityDescriptor>>::new();
     for descriptor in snapshot.descriptors.iter() {
-        let counts = by_kind.entry(descriptor.kind).or_default();
-        counts.0 += 1;
-        if descriptor.health.is_executable() {
-            counts.1 += 1;
-        }
+        by_kind.entry(descriptor.kind).or_default().push(descriptor);
     }
     let mut lines = vec![format!(
         "Capability registry v{} generation {}: {} descriptors, {} diagnostics",
@@ -62,7 +57,9 @@ pub fn status_text(cwd: &Path) -> String {
         snapshot.descriptors.len(),
         snapshot.diagnostics.len()
     )];
-    for (kind, (total, available)) in by_kind {
+    for (kind, descriptors) in by_kind {
+        let total = descriptors.len();
+        let available = descriptors.iter().filter(|descriptor| descriptor.health.is_executable()).count();
         lines.push(format!("- {:?}: {available}/{total} available", kind));
     }
     for diagnostic in snapshot.diagnostics.iter() {
@@ -87,11 +84,11 @@ pub fn management_items(cwd: &Path) -> Vec<(String, String, String, Option<Strin
             } else {
                 format!("{:?}", descriptor.health.state).to_ascii_uppercase()
             };
-            let detail = descriptor
-                .health
-                .detail
-                .clone()
-                .unwrap_or_else(|| descriptor.ui.description.clone());
+            // A descriptor whose health names no detail shows what it is.
+            let detail = match &descriptor.health.detail {
+                Some(detail) => detail.clone(),
+                None => descriptor.ui.description.clone(),
+            };
             let action = (available && descriptor.ui.executable)
                 .then(|| descriptor.ui.action.clone())
                 .flatten();
@@ -107,24 +104,23 @@ pub fn management_items(cwd: &Path) -> Vec<(String, String, String, Option<Strin
 }
 
 pub fn diagnostics_for(candidates: Vec<CapabilityDescriptor>) -> Vec<ConflictDiagnostic> {
-    let mut seen = BTreeSet::<String>::new();
+    // The first source of an id wins; every later one is a conflict naming it.
     let mut winner = BTreeMap::<String, String>::new();
     let mut diagnostics = Vec::new();
     for descriptor in candidates {
-        if seen.insert(descriptor.id.clone()) {
-            winner.insert(descriptor.id, descriptor.source);
-        } else {
-            diagnostics.push(ConflictDiagnostic {
+        match winner.get(&descriptor.id) {
+            None => {
+                winner.insert(descriptor.id, descriptor.source);
+            }
+            Some(first) => diagnostics.push(ConflictDiagnostic {
                 id: descriptor.id.clone(),
-                winner_source: winner.get(&descriptor.id).cloned().unwrap_or_default(),
+                winner_source: first.clone(),
                 rejected_source: descriptor.source.clone(),
                 message: format!(
                     "duplicate capability id '{}': first source '{}' wins over '{}'",
-                    descriptor.id,
-                    winner.get(&descriptor.id).cloned().unwrap_or_default(),
-                    descriptor.source
+                    descriptor.id, first, descriptor.source
                 ),
-            });
+            }),
         }
     }
     diagnostics

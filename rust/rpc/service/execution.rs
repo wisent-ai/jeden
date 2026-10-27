@@ -93,7 +93,7 @@ impl<B: SessionBackend> SessionService<B> {
         let request_id = format!(
             "request-{}-{}",
             self.instance,
-            self.next_request.fetch_add(1, Ordering::Relaxed)
+            crate::tally::draw(&self.next_request)
         );
         match self.idempotency.begin(
             &caller.tenant,
@@ -102,7 +102,16 @@ impl<B: SessionBackend> SessionService<B> {
             &request_id,
         )? {
             IdempotencyDecision::Reattach { request_id } => {
-                return Ok(SubmitOutcome::Reattached { request_id })
+                // A request that finished without its result recorded is
+                // answered with the result this daemon kept, not reattached
+                // to a stream that already ended.
+                let kept = crate::panicked::held(&self.unrecorded)
+                    .get(&(caller.tenant.as_str().to_owned(), idempotency_key.to_owned()))
+                    .cloned();
+                return Ok(match kept {
+                    Some((request_id, result)) => SubmitOutcome::Completed { request_id, result },
+                    None => SubmitOutcome::Reattached { request_id },
+                });
             }
             IdempotencyDecision::Completed { request_id, result } => {
                 return Ok(SubmitOutcome::Completed { request_id, result })
@@ -144,11 +153,9 @@ impl<B: SessionBackend> SessionService<B> {
                 let described = kind.clone();
                 if let Err(error) = replay.append(
                     &event_tenant,
-                    SessionEventV1 {
+                    EventDraft {
                         session_id: event_session.clone(),
                         stream_id: stream_id.clone(),
-                        sequence: 0,
-                        event_id: String::new(),
                         request_id: event_request.clone(),
                         kind,
                         payload,
@@ -174,10 +181,14 @@ impl<B: SessionBackend> SessionService<B> {
             };
             if let Err(error) = service
                 .idempotency
-                .complete(&tenant, &key, &request_digest, cached)
+                .complete(&tenant, &key, &request_digest, cached.clone())
             {
                 eprintln!(
-                    "jeden rpc: request {request_id} in session {session_id} finished but its result could not be recorded: {error:?}"
+                    "jeden rpc: request {request_id} in session {session_id} finished but its result could not be recorded: {error:?}; a retry with the same key is answered from memory until this daemon stops"
+                );
+                crate::panicked::held(&service.unrecorded).insert(
+                    (tenant.as_str().to_owned(), key.clone()),
+                    (request_id.clone(), cached),
                 );
             }
         });
@@ -222,7 +233,7 @@ impl<B: SessionBackend> SessionService<B> {
     ) -> Result<Vec<Value>, ServiceError> {
         let cursor = match cursor {
             Some(token) => EventCursor::parse(token)?,
-            None => EventCursor(0),
+            None => EventCursor::default(),
         };
         self.replay(caller, session_id, request_id, cursor, limit)
             .map(|events| events.into_iter().map(|event| event.wire_value()).collect())
@@ -245,10 +256,7 @@ impl<B: SessionBackend> SessionService<B> {
         caller: &TenantPrincipal,
         session_id: &str,
     ) -> Result<(), ServiceError> {
-        let sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?;
+        let sessions = crate::panicked::held(&self.sessions);
         // An opened host session is registered in the same map under the same
         // host session id, so it authorizes exactly like a created one.
         match sessions.get(session_id) {

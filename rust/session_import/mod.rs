@@ -1,11 +1,12 @@
 mod replacement;
 mod source;
+mod storage;
 
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
+use storage::{modified, write_json};
 
 pub(crate) use source::Format;
 
@@ -39,7 +40,8 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
         return Err(crate::cli::invocation::refusal::usage(USAGE));
     }
     let result = import_paths(&paths, refresh)?;
-    serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
+    serde_json::to_string_pretty(&result)
+        .map_err(|error| format!("the import report cannot be written as JSON: {error}"))
 }
 
 /// Import does not stop the other harness or execute work. The desktop adopts
@@ -47,7 +49,9 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
 /// both can write.
 pub(crate) fn import_paths(paths: &[PathBuf], refresh: bool) -> Result<Value, String> {
     let root = crate::session_root();
-    fs::create_dir_all(&root).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&root).map_err(|error| {
+        format!("the session root {} cannot be created: {error}", root.display())
+    })?;
     let lock_path = root.with_extension("import.lock");
     let lock = OpenOptions::new()
         .create(true)
@@ -98,8 +102,12 @@ fn collect(path: &Path, sources: &mut Vec<PathBuf>) -> Result<(), String> {
         fs::metadata(path).map_err(|e| format!("cannot open source {}: {e}", path.display()))?;
     if metadata.is_dir() {
         let mut entries: Vec<PathBuf> = fs::read_dir(path)
-            .map_err(|e| e.to_string())?
-            .map(|entry| entry.map(|entry| entry.path()).map_err(|e| e.to_string()))
+            .map_err(|error| format!("cannot list source directory {}: {error}", path.display()))?
+            .map(|entry| {
+                entry.map(|entry| entry.path()).map_err(|error| {
+                    format!("an entry of {} cannot be read: {error}", path.display())
+                })
+            })
             .collect::<Result<_, _>>()?;
         entries.sort();
         for entry in entries {
@@ -131,7 +139,8 @@ fn collect(path: &Path, sources: &mut Vec<PathBuf>) -> Result<(), String> {
 fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool), String> {
     let source_path = fs::canonicalize(path)
         .map_err(|e| format!("cannot open source {}: {e}", path.display()))?;
-    let before = fs::metadata(&source_path).map_err(|e| e.to_string())?;
+    let before = fs::metadata(&source_path)
+        .map_err(|error| format!("cannot read source {}: {error}", source_path.display()))?;
     let source = source::read(&source_path)?;
     let format = source.format.name();
     let cwd =
@@ -149,12 +158,18 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
     let destination = root.join(&id);
     replacement::recover(root, &destination, &id)?;
     let manifest = destination.join("import.json");
-    if manifest.exists() {
+    // Each of these decides whether an import is replaced, refused or
+    // started over; a path that cannot be examined is refused with its cause,
+    // never read as absent.
+    let present = crate::tool_runtime::runtime_ops::platform::presence::present;
+    if present(&manifest)? {
         let result: Value =
-            serde_json::from_slice(&fs::read(&manifest).map_err(|e| e.to_string())?)
-                .map_err(|e| format!("invalid import receipt: {e}"))?;
+            serde_json::from_slice(&fs::read(&manifest).map_err(|error| {
+                format!("cannot read import receipt {}: {error}", manifest.display())
+            })?)
+            .map_err(|e| format!("invalid import receipt {}: {e}", manifest.display()))?;
         let unchanged = result["sourceBytes"].as_u64() == Some(before.len())
-            && result["sourceModified"].as_str() == Some(&modified(&before)?);
+            && result["sourceModified"].as_str() == Some(&modified(&source_path, &before)?);
         if unchanged && !refresh {
             return Ok((result, true));
         }
@@ -164,25 +179,60 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
             );
         }
         replacement::verify_unadopted(root, &destination, source.format)?;
-    } else if destination.exists() {
+    } else if present(&destination)? {
         return Err(format!(
             "incomplete migration at {}; source is intact",
             destination.display()
         ));
     }
     let staging = root.join(format!(".import-{id}"));
-    if staging.exists() {
-        fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
+    if present(&staging)? {
+        fs::remove_dir_all(&staging).map_err(|error| {
+            format!(
+                "the leftover import staging {} cannot be removed: {error}",
+                staging.display()
+            )
+        })?;
     }
-    fs::create_dir_all(staging.join("artifacts")).map_err(|e| e.to_string())?;
+    let artifacts = staging.join("artifacts");
     let result = (|| {
+        fs::create_dir_all(&artifacts).map_err(|error| {
+            format!(
+                "cannot create import artifacts directory {}: {error}",
+                artifacts.display()
+            )
+        })?;
         let provenance = staging.join(format!("artifacts/{format}-source.jsonl"));
-        fs::copy(&source_path, &provenance).map_err(|e| format!("source snapshot failed: {e}"))?;
+        fs::copy(&source_path, &provenance).map_err(|error| {
+            format!(
+                "cannot copy source {} to import snapshot {}: {error}",
+                source_path.display(),
+                provenance.display()
+            )
+        })?;
         File::open(&provenance)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
-        let after = fs::metadata(&source_path).map_err(|e| e.to_string())?;
-        if before.len() != after.len() || modified(&before)? != modified(&after)? {
+            .map_err(|error| {
+                format!(
+                    "cannot open import snapshot {} for synchronization: {error}",
+                    provenance.display()
+                )
+            })?
+            .sync_all()
+            .map_err(|error| {
+                format!(
+                    "cannot synchronize import snapshot {}: {error}",
+                    provenance.display()
+                )
+            })?;
+        let after = fs::metadata(&source_path).map_err(|error| {
+            format!(
+                "cannot inspect source {} after copying its snapshot: {error}",
+                source_path.display()
+            )
+        })?;
+        if before.len() != after.len()
+            || modified(&source_path, &before)? != modified(&source_path, &after)?
+        {
             return Err("source changed during import; stop its writer through its normal interface and retry".into());
         }
         let timestamp = crate::agent::now_stamp()
@@ -197,7 +247,7 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
             &staging,
             timestamp.clone(),
             "context_snapshot",
-            json!({"reason":format!("{format}-import"), "messages":source.messages}),
+            json!({"reason":format!("{format}-import"), "cwd":cwd, "messages":source.messages}),
         )?;
         for request in &source.pending {
             crate::completion::capture_request(&staging, &cwd, request)?;
@@ -205,48 +255,43 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
         let record = json!({"format":format,"sourceSession":source.id,"sourcePath":source_path,
             "sessionPath":destination,"cwd":cwd,"title":source.title,
             "interrupted":!source.pending.is_empty(),"sourceBytes":before.len(),
-            "sourceModified":modified(&before)?,"importedAt":timestamp});
+            "sourceModified":modified(&source_path, &before)?,"importedAt":timestamp});
         write_json(&staging.join("import.json"), &record)?;
         File::open(&staging)
-            .and_then(|f| f.sync_all())
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| {
+                format!(
+                    "cannot open import staging {} for synchronization: {error}",
+                    staging.display()
+                )
+            })?
+            .sync_all()
+            .map_err(|error| {
+                format!(
+                    "cannot synchronize import staging {}: {error}",
+                    staging.display()
+                )
+            })?;
         replacement::publish(root, &staging, &destination, &id, source.format)?;
         Ok((record, false))
     })();
-    if result.is_err() && staging.exists() {
-        fs::remove_dir_all(&staging)
-            .map_err(|e| format!("migration failed; staging cleanup also failed: {e}"))?;
-    }
-    result
-}
-
-fn modified(metadata: &fs::Metadata) -> Result<String, String> {
-    metadata
-        .modified()
-        .map_err(|e| e.to_string())?
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|v| v.as_nanos().to_string())
-        .map_err(|e| e.to_string())
-}
-fn write_json(path: &Path, value: &Value) -> Result<(), String> {
-    let mut file = File::create(path).map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut file, value).map_err(|e| e.to_string())?;
-    file.write_all(b"\n")
-        .and_then(|_| file.sync_all())
-        .map_err(|e| e.to_string())
+    result.map_err(|original| storage::rollback(&staging, original))
 }
 
 pub(crate) fn mark_adopted(source: &Path) -> Result<(), String> {
-    if !source.join("import.json").exists() {
+    // An import whose receipt cannot be examined is refused, not left
+    // unowned: read as absent, the session was adopted with no record, and
+    // a later --refresh replaced it.
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&source.join("import.json"))? {
         return Ok(());
     }
     let root = source.parent().ok_or("import has no parent directory")?;
+    let lock_path = root.with_extension("import.lock");
     let lock = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
-        .open(root.with_extension("import.lock"))
-        .map_err(|e| e.to_string())?;
+        .open(&lock_path)
+        .map_err(|error| format!("cannot open import lock {}: {error}", lock_path.display()))?;
     lock.lock()
         .map_err(|e| format!("cannot claim imported session: {e}"))?;
     File::create(source.join("adopted"))

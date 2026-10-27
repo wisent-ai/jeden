@@ -1,8 +1,6 @@
 //! The marketplace rows an operator sees when the command is opened without
-//! arguments.
-//!
-//! Split out of `slash/plugins/marketplace.rs`, which had grown past the
-//! module line cap.
+//! arguments. A field a source or plugin entry leaves out is named as left
+//! out, and an entry without a name is shown as such rather than skipped.
 
 use super::super::fetch::{catalog_plugins, read_marketplace_catalog};
 use super::super::marketplace_cache_dir;
@@ -11,6 +9,27 @@ use crate::slash::common::refusal_picker;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 use serde_json::Value;
+
+/// `field` of `entry`, or that the entry records none.
+fn stated(entry: &Value, field: &str) -> String {
+    match entry.get(field).and_then(Value::as_str) {
+        Some(text) => text.to_string(),
+        None => format!("no {field} recorded"),
+    }
+}
+
+fn name_of(entry: &Value) -> Option<&str> {
+    entry.get("name").and_then(Value::as_str)
+}
+
+/// A disabled row for an entry that cannot be offered, saying why.
+fn unnamed_row(what: &str, entry: &Value) -> PickerItem {
+    let mut row = PickerItem::action(format!("Unnamed {what}"), "")
+        .detail(format!("this {what} entry has no name, so it cannot be addressed: {entry}"))
+        .disabled(true);
+    row.command = None;
+    row
+}
 
 pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
@@ -25,21 +44,19 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
     let scoped_registries = [("project", project), ("user", user)];
     let mut items = Vec::new();
     for (source_scope, registry) in &scoped_registries {
-        let mut sources = sorted_object_values(&registry["sources"]);
-        sources.sort_by(|a, b| {
-            a.get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
-        });
+        let mut sources = match sorted_object_values(&registry["sources"]) {
+            Ok(sources) => sources,
+            Err(cause) => {
+                return refusal_picker("Marketplace", "Plugin registry cannot be read", cause)
+            }
+        };
+        sources.sort_by(|a, b| name_of(a).cmp(&name_of(b)));
         for source in sources {
-            let Some(name) = source.get("name").and_then(Value::as_str) else {
+            let Some(name) = name_of(&source) else {
+                items.push(unnamed_row(&format!("{source_scope} marketplace source"), &source));
                 continue;
             };
-            let location = source
-                .get("source")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown source");
+            let location = stated(&source, "source");
             let source_enabled = source.get("enabled").and_then(Value::as_bool) != Some(false);
             items.push(
                 PickerItem::action(
@@ -56,8 +73,9 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
                 ))
                 .badge("DISCOVER"),
             );
-            let mut plugins = match read_marketplace_catalog(&marketplace_cache_dir(name)) {
-                Ok(catalog) => catalog_plugins(&catalog),
+            let catalog = read_marketplace_catalog(&marketplace_cache_dir(name));
+            let mut plugins = match catalog.and_then(|catalog| catalog_plugins(&catalog)) {
+                Ok(plugins) => plugins,
                 Err(cause) => {
                     return refusal_picker(
                         "Marketplace",
@@ -66,25 +84,15 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
                     );
                 }
             };
-            plugins.sort_by(|a, b| {
-                a.get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .cmp(b.get("name").and_then(Value::as_str).unwrap_or(""))
-            });
+            plugins.sort_by(|a, b| name_of(a).cmp(&name_of(b)));
             for plugin in plugins {
-                let Some(plugin_name) = plugin.get("name").and_then(Value::as_str) else {
+                let Some(plugin_name) = name_of(&plugin) else {
+                    items.push(unnamed_row(&format!("plugin of {name}"), &plugin));
                     continue;
                 };
                 let id = format!("{plugin_name}@{name}");
-                let description = plugin
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let available_version = plugin
-                    .get("version")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unknown version");
+                let description = stated(&plugin, "description");
+                let available_version = stated(&plugin, "version");
                 let installed = scoped_registries
                     .iter()
                     .filter_map(|(scope, scoped)| {
@@ -108,10 +116,7 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
                 }
                 for (installed_scope, entry) in &installed {
                     let enabled = entry.get("enabled").and_then(Value::as_bool) != Some(false);
-                    let installed_version = entry
-                        .get("version")
-                        .and_then(Value::as_str)
-                        .unwrap_or("unknown version");
+                    let installed_version = stated(entry, "version");
                     items.push(
                         PickerItem::action(
                             format!("Upgrade {id} ({installed_scope})"),

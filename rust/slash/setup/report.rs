@@ -31,7 +31,11 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     };
     if let Some((endpoint, key)) = crate::agent::credential::direct_provider() {
         let credential = if key.is_some() {
-            "Provider key: JEDEN_MODEL_KEY from the process environment".to_string()
+            if crate::agent::credential::standing_in().is_some() {
+                "Provider key: the bearer of Jeden's own gateway (signed in with jeden token sign-in)".to_string()
+            } else {
+                "Provider key: JEDEN_MODEL_KEY from the process environment".to_string()
+            }
         } else {
             match crate::agent::credential::tokens::Store::open_existing() {
                 Ok(Some(store)) => match store.count_for(&endpoint) {

@@ -38,10 +38,7 @@ impl<B: SessionBackend> SessionService<B> {
     }
 
     fn held_ask_sessions(&self, caller: &TenantPrincipal) -> Result<Vec<String>, ServiceError> {
-        let sessions = self
-            .sessions
-            .lock()
-            .map_err(|_| ServiceError::Runtime("session registry lock poisoned".into()))?;
+        let sessions = crate::panicked::held(&self.sessions);
         Ok(sessions
             .values()
             .filter(|entry| entry.tenant == caller.tenant)

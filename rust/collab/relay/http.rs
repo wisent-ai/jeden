@@ -1,150 +1,124 @@
-//! Serving the relay over plain sockets, reading each request itself.
+//! Serving the relay over HTTP. `tiny_http` reads each request; this module
+//! bounds its body, checks the requested role and answers what the relay
+//! decided.
 //!
 //! Split out of `collab/relay.rs`, which had grown past the module line cap.
 
-use super::super::MAX_BLOB_BYTES;
+use std::num::NonZeroUsize;
 use super::{relay_response_authorized, RelayStore};
 use crate::collab::relay::auth::token_role;
+use reqwest::StatusCode;
 use serde_json::json;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Read;
+use std::sync::Arc;
+use tiny_http::{Header, Request, Response, Server};
+
+/// The variable that states how many bytes one relay request body may hold.
+const MAX_BLOB_BYTES_VARIABLE: &str = "JEDEN_RELAY_MAX_BLOB_BYTES";
+
+/// The largest request body the relay accepts, as its operator states it:
+/// refused by name when unset or not a positive whole number.
+fn stated_max_blob_bytes() -> Result<usize, String> {
+    let stated = std::env::var(MAX_BLOB_BYTES_VARIABLE).map_err(|error| {
+        format!("{MAX_BLOB_BYTES_VARIABLE} must state how many bytes one relay request may carry ({error})")
+    })?;
+    stated
+        .trim()
+        .parse::<NonZeroUsize>()
+        .map(NonZeroUsize::get)
+        .map_err(|error| format!("{MAX_BLOB_BYTES_VARIABLE} {stated:?} is not a positive whole number of bytes: {error}"))
+}
 
 pub fn serve(addr: &str) -> Result<(), String> {
-    let listener = TcpListener::bind(addr).map_err(|e| format!("bind {addr}: {e}"))?;
-    let bound = listener.local_addr().map_err(|e| e.to_string())?;
-    let store = std::sync::Arc::new(RelayStore::new());
+    let max_blob_bytes = stated_max_blob_bytes()?;
+    let server = Server::http(addr).map_err(|e| format!("bind {addr}: {e}"))?;
+    let bound = server.server_addr();
+    let store = Arc::new(RelayStore::new());
     println!(
-        "jeden relay listening on http://{bound} (durable {})",
+        "jeden relay listening on http://{bound} (durable {}, at most {max_blob_bytes} bytes a request)",
         store.location()
     );
-    for stream in listener.incoming() {
-        let stream = match stream {
-            Ok(stream) => stream,
-            Err(error) => {
-                eprintln!("jeden relay on {bound}: accepting a connection failed: {error}");
-                continue;
-            }
-        };
+    for request in server.incoming_requests() {
         let store = store.clone();
         std::thread::spawn(move || {
-            let peer = match stream.peer_addr() {
-                Ok(peer) => peer.to_string(),
-                Err(error) => format!("a peer whose address could not be read ({error})"),
+            let peer = match request.remote_addr() {
+                Some(peer) => peer.to_string(),
+                None => "a peer with no network address".to_owned(),
             };
-            if let Err(error) = handle_conn(stream, &store) {
+            if let Err(error) = handle(request, &store, max_blob_bytes) {
                 eprintln!("jeden relay request from {peer} failed: {error}");
             }
         });
     }
     Ok(())
 }
-pub(super) fn handle_conn(mut stream: TcpStream, store: &RelayStore) -> std::io::Result<()> {
-    let mut buf = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let header_end = loop {
-        if let Some(pos) = find_subsequence(&buf, b"\r\n\r\n") {
-            break pos + 4;
+
+/// The text of the request header `name`, when the request carries it.
+fn header_value(request: &Request, name: &'static str) -> Option<String> {
+    request
+        .headers()
+        .iter()
+        .find(|header| header.field.equiv(name))
+        .map(|header| header.value.as_str().to_owned())
+}
+
+fn handle(mut request: Request, store: &RelayStore, max_blob_bytes: usize) -> std::io::Result<()> {
+    // The operator's stated limit bounds every body; one whose length is not
+    // declared up front cannot be held to it.
+    let length = match request.body_length() {
+        Some(length) if length > max_blob_bytes => {
+            return answer(request, StatusCode::PAYLOAD_TOO_LARGE, json!({"ok": false, "error": format!("the body of {length} bytes is larger than the relay's {max_blob_bytes}")}).to_string());
         }
-        let n = stream.read(&mut chunk)?;
-        if n == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!(
-                    "the request ended after {} bytes, before the blank line that ends its header",
-                    buf.len()
-                ),
-            ));
-        }
-        buf.extend_from_slice(&chunk[..n]);
-        // The relay's declared request policy (MAX_BLOB_BYTES) bounds the
-        // header as it bounds the body; a header that outgrows it is refused
-        // as too large below, never parsed as if it were complete.
-        if buf.len() > MAX_BLOB_BYTES {
-            break buf.len();
+        Some(length) => length,
+        None => {
+            return answer(request, StatusCode::LENGTH_REQUIRED, json!({"ok": false, "error": "the request declares no content-length"}).to_string());
         }
     };
-    let header = String::from_utf8_lossy(&buf[..header_end.min(buf.len())]).to_string();
-    let (method, path, query) = parse_request_line(&header);
-    let length = parse_content_length(&header);
-    if length > MAX_BLOB_BYTES || find_subsequence(&buf[..header_end], b"\r\n\r\n").is_none() {
-        write_response(
-            &mut stream,
-            413,
-            &json!({"ok":false,"error":"payload too large"}).to_string(),
-        )?;
-        return Ok(());
-    }
-    while buf.len() < header_end + length {
-        let n = stream.read(&mut chunk)?;
-        if n == 0 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!(
-                    "{method} {path}: the request ended after {} of its {length} declared body bytes",
-                    buf.len() - header_end
-                ),
-            ));
-        }
-        buf.extend_from_slice(&chunk[..n])
-    }
-    let body = String::from_utf8_lossy(&buf[header_end.min(buf.len())..]).to_string();
-    let token = header_value(&header, "x-jeden-write-token");
-    let requested_role = header_value(&header, "x-jeden-role");
+    let mut body = String::with_capacity(length);
+    request.as_reader().read_to_string(&mut body)?;
+    let method = request.method().to_string();
+    let (path, query) = match request.url().split_once('?') {
+        Some((path, query)) => (path.to_owned(), query.to_owned()),
+        None => (request.url().to_owned(), String::new()),
+    };
+    let token = header_value(&request, "x-jeden-write-token");
+    let requested_role = header_value(&request, "x-jeden-role");
     let (status, response) = match (token.as_deref(), requested_role.as_deref()) {
         (Some(token), Some(role))
             if token_role(token).is_none()
                 || token_role(token) != crate::collab::CollabRole::named(role) =>
         {
             (
-                403,
-                json!({"ok":false,"error":"write token is not valid for requested role"})
-                    .to_string(),
+                StatusCode::FORBIDDEN.as_u16(),
+                json!({"ok":false,"error":"write token is not valid for requested role"}).to_string(),
             )
         }
         _ => relay_response_authorized(store, &method, &path, &query, &body, token.as_deref()),
     };
-    write_response(&mut stream, status, &response)
-}
-pub(super) fn write_response(
-    stream: &mut TcpStream,
-    status: u16,
-    body: &str,
-) -> std::io::Result<()> {
-    let reason = match status {
-        200 => "OK",
-        400 => "Bad Request",
-        403 => "Forbidden",
-        404 => "Not Found",
-        405 => "Method Not Allowed",
-        413 => "Payload Too Large",
-        429 => "Too Many Requests",
-        _ => "Error",
-    };
-    let response=format!("HTTP/1.1 {status} {reason}\r\ncontent-type: application/json\r\naccess-control-allow-origin: *\r\naccess-control-allow-headers: content-type,x-jeden-write-token,x-jeden-role\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",body.len(),body);
-    stream.write_all(response.as_bytes())?;
-    stream.flush()
-}
-pub(super) fn find_subsequence(h: &[u8], n: &[u8]) -> Option<usize> {
-    h.windows(n.len()).position(|w| w == n)
-}
-pub(super) fn parse_request_line(header: &str) -> (String, String, String) {
-    let mut p = header.lines().next().unwrap_or("").split_whitespace();
-    let method = p.next().unwrap_or("").to_string();
-    let target = p.next().unwrap_or("");
-    let (path, query) = target.split_once('?').unwrap_or((target, ""));
-    (method, path.to_string(), query.to_string())
-}
-pub(super) fn parse_content_length(header: &str) -> usize {
-    header_value(header, "content-length")
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_default()
+    respond(request, status, response)
 }
 
-fn header_value(header: &str, name: &str) -> Option<String> {
-    header.lines().find_map(|line| {
-        let (key, value) = line.split_once(':')?;
-        key.trim()
-            .eq_ignore_ascii_case(name)
-            .then(|| value.trim().to_string())
-    })
+fn answer(request: Request, status: StatusCode, body: String) -> std::io::Result<()> {
+    respond(request, status.as_u16(), body)
+}
+
+fn respond(request: Request, status: u16, body: String) -> std::io::Result<()> {
+    let header = |field: &str, value: &str| {
+        Header::from_bytes(field.as_bytes(), value.as_bytes()).map_err(|()| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("the relay response header {field}: {value} is not a valid HTTP header"),
+            )
+        })
+    };
+    request.respond(
+        Response::from_string(body)
+            .with_status_code(status)
+            .with_header(header("content-type", "application/json")?)
+            .with_header(header("access-control-allow-origin", "*")?)
+            .with_header(header(
+                "access-control-allow-headers",
+                "content-type,x-jeden-write-token,x-jeden-role",
+            )?),
+    )
 }

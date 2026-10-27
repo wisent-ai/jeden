@@ -5,15 +5,19 @@ use std::io::{BufRead, BufReader};
 
 pub(crate) fn spawn_openai_stream_adapter(
     config: &ChatConfig,
+    request_route: &super::super::transport::RequestRoute<'_>,
     body_text: String,
     lease_headers: Vec<(&'static str, String)>,
     sender: Sender<WireMessage>,
 ) -> Result<(), AttemptError> {
     let signed = agent_headers(&body_text, &config.agent_id, &config.secret)
         .map_err(AttemptError::permanent)?;
-    let url = format!("{}/v1/chat/completions", config.url.trim_end_matches('/'));
-    let endpoint = config.url.clone();
-    let bearer = config.bearer_token.clone();
+    let url = format!(
+        "{}/v1/chat/completions",
+        request_route.endpoint.trim_end_matches('/')
+    );
+    let endpoint = request_route.endpoint.to_string();
+    let bearer = request_route.bearer.to_string();
     let use_store = !config.via_brama && bearer.is_empty();
     std::thread::Builder::new()
         .name("model-stream-adapter".into())
@@ -28,7 +32,7 @@ pub(crate) fn spawn_openai_stream_adapter(
                 &lease_headers,
                 &sender,
             ) {
-                let _ = sender.send(WireMessage::Network(error));
+                let _unreceived = sender.send(WireMessage::Network(error));
             }
         })
         .map_err(|error| {
@@ -126,15 +130,15 @@ fn send_request(
                             content_type.map_err(|error| format!("{cause}; {error}"))?;
                         let retry_after =
                             retry_after.map_err(|error| format!("{cause}; {error}"))?;
-                        let _ = sender.send(WireMessage::Headers {
+                        let _unreceived = sender.send(WireMessage::Headers {
                             status: status.as_u16(),
                             content_type,
                             retry_after,
                         });
-                        let _ = sender.send(WireMessage::FullBody(Ok(body)));
+                        let _unreceived = sender.send(WireMessage::FullBody(Ok(body)));
                     }
                     Err(error) => {
-                        let _ = sender.send(WireMessage::Network(format!(
+                        let _unreceived = sender.send(WireMessage::Network(format!(
                             "HTTP {status}: read model refusal body failed: {}",
                             error.replace(failed.secret.as_str(), "[REDACTED]")
                         )));
@@ -167,7 +171,7 @@ fn send_request(
                     }
                 })
                 .map_err(crate::control_plane::transport::describe_reqwest);
-            let _ = sender.send(WireMessage::FullBody(result));
+            let _unreceived = sender.send(WireMessage::FullBody(result));
             return Ok(());
         }
         for line in BufReader::new(response).lines() {
@@ -184,7 +188,7 @@ fn send_request(
                 return Ok(());
             }
         }
-        let _ = sender.send(WireMessage::Eof);
+        let _unreceived = sender.send(WireMessage::Eof);
         return Ok(());
     }
 }

@@ -2,10 +2,14 @@
 //! the fields that must be present, and the shapes the meta, error and replay
 //! members take. This is the part that fails when the protocol changes
 //! without the contract in protocol/contract.json being told.
+//!
+//! A contract that does not name what a check compares against is itself an
+//! error: read as an empty name, the check passed against nothing.
 
 use super::documents::{object_with_properties, resolved, schema_with_property_const, Document};
 use serde_json::{Map, Value};
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
 
 pub(super) type Located<'a> = (usize, &'a Value);
 
@@ -16,6 +20,15 @@ fn names(value: &Value) -> Vec<String> {
         .flatten()
         .filter_map(|item| item.as_str().map(str::to_string))
         .collect()
+}
+
+/// The text `key` of the contract part `part`, or an error naming both.
+fn named<'a>(part: &'a Value, key: &str, where_: &str, errors: &mut Vec<String>) -> Option<&'a str> {
+    let text = part[key].as_str();
+    if text.is_none() {
+        errors.push(format!("contract: {where_} names no {key}"));
+    }
+    text
 }
 
 /// An object schema with `additionalProperties: false`, whose `required`
@@ -76,15 +89,17 @@ fn field_shapes(
     member: &Value,
     errors: &mut Vec<String>,
 ) {
+    // A non-empty string is the JSON Schema string of minLength 1.
+    let non_empty = NonZeroU64::MIN.get();
     for name in names(&member["nonEmpty"]) {
         let field = property(schema, &name);
         if field.is_null() && !names(&member["required"]).contains(&name) {
             continue;
         }
         let field = resolved(root, field);
-        if field["type"] != "string" || field["minLength"] != 1 {
+        if field["type"] != "string" || field["minLength"].as_u64() != Some(non_empty) {
             errors.push(format!(
-                "{label}.{name}: must be a string schema with minLength 1"
+                "{label}.{name}: must be a string schema with minLength {non_empty}"
             ));
         }
     }
@@ -100,10 +115,10 @@ fn field_shapes(
         if field["type"] != "integer"
             || !field["minimum"]
                 .as_i64()
-                .is_some_and(|minimum| minimum >= 0)
+                .is_some_and(|minimum| !minimum.is_negative())
         {
             errors.push(format!(
-                "{label}.{name}: must be an integer with a minimum of at least 0"
+                "{label}.{name}: must be an integer with a minimum that is not negative"
             ));
         }
     }
@@ -115,7 +130,8 @@ fn field_shapes(
 }
 
 /// A member object such as the request meta, reached through the envelope
-/// property the contract names.
+/// property the contract names; a contract member that names no property is
+/// an error, not a member silently left unchecked.
 fn member_object(
     documents: &[Document],
     envelope: Located<'_>,
@@ -123,9 +139,10 @@ fn member_object(
     label: &str,
     errors: &mut Vec<String>,
 ) -> Option<Value> {
-    let root = &documents[envelope.0].value;
-    let name = member["property"].as_str()?;
-    let schema = resolved(root, property(envelope.1, name));
+    let (index, envelope_schema) = envelope;
+    let root = &documents[index].value;
+    let name = named(member, "property", label, errors)?;
+    let schema = resolved(root, property(envelope_schema, name));
     exact_object(schema, label, member, errors);
     field_shapes(root, schema, label, member, errors);
     Some(schema.clone())
@@ -137,11 +154,14 @@ pub(super) fn schema_contract<'a>(
     errors: &mut Vec<String>,
 ) -> BTreeMap<String, Located<'a>> {
     let mut schemas = BTreeMap::new();
-    let protocol = contract["protocol"].as_str().unwrap_or_default();
-    let envelopes = contract["envelopes"]
-        .as_object()
-        .cloned()
-        .unwrap_or_else(Map::new);
+    let protocol = named(contract, "protocol", "the contract", errors);
+    let envelopes = match contract["envelopes"].as_object() {
+        Some(envelopes) => envelopes.clone(),
+        None => {
+            errors.push("contract: envelopes is not an object of envelope kinds".into());
+            Map::new()
+        }
+    };
     for (kind, member) in &envelopes {
         let Some(found) = schema_with_property_const(documents, "type", kind) else {
             errors.push(format!(
@@ -149,11 +169,12 @@ pub(super) fn schema_contract<'a>(
             ));
             continue;
         };
+        let (index, envelope_schema) = found;
         let label = format!("schema {kind} envelope");
-        exact_object(found.1, &label, member, errors);
+        exact_object(envelope_schema, &label, member, errors);
         field_shapes(
-            &documents[found.0].value,
-            found.1,
+            &documents[index].value,
+            envelope_schema,
             &format!("schema {kind}"),
             member,
             errors,
@@ -169,13 +190,13 @@ pub(super) fn schema_contract<'a>(
             "schema request.meta",
             errors,
         ) {
-            let constant = meta_contract["protocolConstant"]
-                .as_str()
-                .unwrap_or_default();
-            if meta["properties"][constant]["const"].as_str() != Some(protocol) {
-                errors.push(format!(
-                    "schema request.meta.{constant}: const must be {protocol:?}"
-                ));
+            let constant = named(meta_contract, "protocolConstant", "requestMeta", errors);
+            if let (Some(constant), Some(protocol)) = (constant, protocol) {
+                if meta["properties"][constant]["const"].as_str() != Some(protocol) {
+                    errors.push(format!(
+                        "schema request.meta.{constant}: const must be {protocol:?}"
+                    ));
+                }
             }
         }
     }
@@ -189,7 +210,9 @@ pub(super) fn schema_contract<'a>(
         );
     }
     let replay = &contract["replay"];
-    let method = replay["method"].as_str().unwrap_or_default();
+    let Some(method) = named(replay, "method", "replay", errors) else {
+        return schemas;
+    };
     if schema_with_property_const(documents, "method", method).is_none() {
         errors.push(format!(
             "schema: no request specialization with method const '{method}'"

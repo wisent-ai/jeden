@@ -133,7 +133,7 @@ pub(crate) fn parse_stream_events(payload: &str) -> Result<Vec<OpenAiStreamEvent
         return Err(format!("model stream error event: {error}"));
     }
     let mut events = Vec::new();
-    if let Some(usage) = usage_from_value(&chunk) {
+    if let Some(usage) = usage_from_value(&chunk)? {
         events.push(OpenAiStreamEvent::Usage(usage));
     }
     let choices = chunk

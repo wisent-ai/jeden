@@ -47,8 +47,7 @@ pub(crate) fn mcp_picker(context: &SlashContext<'_>) -> PickerSpec {
                 config
                     .get("mcpServers")
                     .and_then(Value::as_object)
-                    .map(|servers| servers.contains_key(name))
-                    .unwrap_or(false)
+                    .is_some_and(|servers| servers.contains_key(name))
             };
             let scope = if in_scope(&project) {
                 "project"
@@ -62,20 +61,19 @@ pub(crate) fn mcp_picker(context: &SlashContext<'_>) -> PickerSpec {
             } else {
                 "enabled"
             };
-            let transport = server.get("type").and_then(Value::as_str).unwrap_or(
-                if server.get("url").is_some() {
-                    "http"
-                } else {
-                    "stdio"
-                },
-            );
+            // The transport the entry declares; one it leaves undeclared is
+            // the client's to choose when it connects (a url means http), so
+            // the row says the entry is undeclared rather than guessing here.
+            let transport = match server.get("type").and_then(Value::as_str) {
+                Some(declared) => declared.to_string(),
+                None => "undeclared".to_string(),
+            };
             let badge = format!("{status} · {scope}");
             let disabled_in = |config: &Value| {
                 config
                     .get("disabledServers")
                     .and_then(Value::as_array)
-                    .map(|values| values.iter().any(|value| value.as_str() == Some(name)))
-                    .unwrap_or(false)
+                    .is_some_and(|values| values.iter().any(|value| value.as_str() == Some(name)))
             };
             let toggle_scope = if status == "disabled" && disabled_in(&project) {
                 "project"

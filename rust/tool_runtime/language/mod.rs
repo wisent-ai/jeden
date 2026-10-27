@@ -12,7 +12,7 @@ fn descriptors() -> Vec<DynamicToolDescriptor> {
         DynamicToolDescriptor {
             name: "ast_search".into(),
             description: "Tree-sitter structural query with captured source ranges; limit (required) is how many matches to answer".into(),
-            input: json!({"type":"object","required":["path","query"],"properties":{"path":{"type":"string"},"language":{"type":"string"},"query":{"type":"string"},"capture":{"type":"string"},"limit":{"type":"number"}}}),
+            input: json!({"type":"object","required":["path","query"],"properties":{"path":{"type":"string"},"language":{"type":"string","description":"The grammar to parse, by language name (rust, javascript, typescript, tsx, python) or by the file extension that names it (rs, js, jsx, ts, py); when omitted, the path's own extension names it"},"query":{"type":"string"},"capture":{"type":"string"},"limit":{"type":"number"}}}),
             healthy: true,
             health: "tree-sitter parsers loaded".into(),
         },

@@ -29,7 +29,7 @@ pub(crate) enum CommunicationMode {
 
 impl CommunicationMode {
     /// Every mode, in the order the settings schema advertises them.
-    pub(crate) const ALL: [Self; 3] = [Self::Normal, Self::Debug, Self::Quiet];
+    pub(crate) const ALL: &'static [Self] = &[Self::Normal, Self::Debug, Self::Quiet];
 
     /// The one place each mode's name is written.
     pub(crate) const fn as_str(self) -> &'static str {
@@ -43,7 +43,7 @@ impl CommunicationMode {
     /// The names, for the settings schema and for a refusal that lists
     /// them. This used to be a fourth copy of the three words, beside
     /// `as_str`, `parse` and the schema's own list.
-    pub(crate) const VALUES: [&'static str; 3] = [
+    pub(crate) const VALUES: &'static [&'static str] = &[
         Self::Normal.as_str(),
         Self::Debug.as_str(),
         Self::Quiet.as_str(),
@@ -51,16 +51,16 @@ impl CommunicationMode {
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         let wanted = value.trim().to_ascii_lowercase();
-        Self::ALL.into_iter().find(|mode| mode.as_str() == wanted)
+        Self::ALL.iter().copied().find(|mode| mode.as_str() == wanted)
     }
 }
 
 impl<'de> Deserialize<'de> for CommunicationMode {
-    /// A value the file cannot name falls back to the preset default instead of
-    /// discarding the whole configuration.
+    /// A mode the file names that is none of these is refused, naming the
+    /// value and the modes there are.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
-        Ok(Self::parse(&raw).unwrap_or_default())
+        Self::parse(&raw).ok_or_else(|| serde::de::Error::unknown_variant(&raw, Self::VALUES))
     }
 }
 
@@ -76,7 +76,7 @@ pub(crate) enum Visibility {
 
 impl Visibility {
     /// Every override, `auto` first because it is the default.
-    pub(crate) const ALL: [Self; 3] = [Self::Auto, Self::Show, Self::Hide];
+    pub(crate) const ALL: &'static [Self] = &[Self::Auto, Self::Show, Self::Hide];
 
     /// The one place each override's name is written.
     pub(crate) const fn as_str(self) -> &'static str {
@@ -87,7 +87,7 @@ impl Visibility {
         }
     }
 
-    pub(crate) const VALUES: [&'static str; 3] = [
+    pub(crate) const VALUES: &'static [&'static str] = &[
         Self::Auto.as_str(),
         Self::Show.as_str(),
         Self::Hide.as_str(),
@@ -95,7 +95,7 @@ impl Visibility {
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         let wanted = value.trim().to_ascii_lowercase();
-        Self::ALL.into_iter().find(|item| item.as_str() == wanted)
+        Self::ALL.iter().copied().find(|item| item.as_str() == wanted)
     }
     fn resolve(self, mode_default: bool) -> bool {
         match self {
@@ -107,9 +107,11 @@ impl Visibility {
 }
 
 impl<'de> Deserialize<'de> for Visibility {
+    /// An override that is none of these is refused, naming the value and the
+    /// overrides there are.
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         let raw = String::deserialize(deserializer)?;
-        Ok(Self::parse(&raw).unwrap_or_default())
+        Self::parse(&raw).ok_or_else(|| serde::de::Error::unknown_variant(&raw, Self::VALUES))
     }
 }
 

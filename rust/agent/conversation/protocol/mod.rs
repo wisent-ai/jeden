@@ -61,7 +61,8 @@ pub fn extract_json_object(text: &str) -> Result<&str, String> {
     let Some(start) = raw.find('{') else {
         return Err(non_json(raw));
     };
-    let mut depth = usize::default();
+    // The brackets opened and not yet closed; the object ends when none is left.
+    let mut open = Vec::new();
     let mut in_string = false;
     let mut escaped = false;
     for (offset, character) in raw[start..].char_indices() {
@@ -76,10 +77,10 @@ pub fn extract_json_object(text: &str) -> Result<&str, String> {
         }
         match character {
             '"' => in_string = true,
-            '{' | '[' => depth += usize::from(true),
+            '{' | '[' => open.push(character),
             '}' | ']' => {
-                depth = depth.saturating_sub(usize::from(true));
-                if depth == usize::default() {
+                open.pop();
+                if open.is_empty() {
                     return Ok(&raw[start..start + offset + character.len_utf8()]);
                 }
             }
@@ -90,7 +91,10 @@ pub fn extract_json_object(text: &str) -> Result<&str, String> {
     Err(if in_string {
         format!("{INCOMPLETE_ANSWER} after {bytes} bytes: a JSON string is never closed")
     } else {
-        format!("{INCOMPLETE_ANSWER} after {bytes} bytes: {depth} bracket(s) are never closed")
+        format!(
+            "{INCOMPLETE_ANSWER} after {bytes} bytes: {} bracket(s) are never closed",
+            open.len()
+        )
     })
 }
 
@@ -99,11 +103,12 @@ fn parse_tool_action(value: &Value) -> Result<ToolAction, String> {
         .get("tool")
         .and_then(Value::as_str)
         .ok_or("tool action requires tool")?;
-    let input = value
-        .get("input")
-        .filter(|v| v.is_object())
-        .cloned()
-        .unwrap_or_else(|| json!({}));
+    // A tool that takes no input is called with an empty object.
+    let input = match value.get("input") {
+        None => json!({}),
+        Some(input) if input.is_object() => input.clone(),
+        Some(other) => return Err(format!("tool action input must be an object, not {other}")),
+    };
     Ok(ToolAction {
         tool: tool.to_string(),
         input,
@@ -117,7 +122,11 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
     if !value.is_object() {
         return Err("action must be a JSON object".into());
     }
-    match value.get("action").and_then(Value::as_str).unwrap_or("") {
+    let action = value
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or("the answer names no action")?;
+    match action {
         "final" => {
             let text = value
                 .get("text")
@@ -161,9 +170,4 @@ pub fn parse_action(text: &str) -> Result<Action, String> {
         }
         other => Err(format!("unknown action: {other}")),
     }
-}
-
-#[allow(dead_code)]
-pub fn format_tool_result(result: &Value) -> String {
-    json!({"type": "tool_result", "result": result}).to_string()
 }

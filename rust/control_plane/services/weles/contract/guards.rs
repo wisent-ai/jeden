@@ -18,8 +18,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 pub(super) fn decode_v2<T: DeserializeOwned>(value: Value) -> Result<T, WelesError> {
-    serde_json::from_value(value).map_err(|_| {
-        WelesError::InvalidResponse("response did not match the bounded Weles v2 contract".into())
+    serde_json::from_value(value).map_err(|error| {
+        WelesError::InvalidResponse(format!(
+            "response did not match the bounded Weles v2 contract: {error}"
+        ))
     })
 }
 

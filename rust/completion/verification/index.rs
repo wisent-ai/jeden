@@ -54,13 +54,12 @@ impl EvidenceIndex {
 
     pub(super) fn observation(&self, reference: &EvidenceReference) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
-        let tool = receipt
-            .get("tool")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
         Ok(independent
             && receipt["failed"] == false
-            && crate::agent::is_verification_read_tool(tool))
+            && receipt
+                .get("tool")
+                .and_then(Value::as_str)
+                .is_some_and(crate::agent::is_verification_read_tool))
     }
 
     /// Where an accepted observation actually happened.
@@ -86,18 +85,27 @@ impl EvidenceIndex {
     }
 
     /// An execution failure recorded after the given unix stamp: the one
-    /// kind of failure that can follow an operator's answer.
+    /// kind of failure that can follow an operator's answer. A receipt or a
+    /// stamp that is not a unix stamp is refused naming it, never read as
+    /// before the answer.
     pub(super) fn failure_after(
         &self,
         reference: &EvidenceReference,
         stamp: &str,
     ) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
-        let after = receipt["timestamp"]
-            .as_str()
-            .and_then(|at| at.parse::<u64>().ok())
-            .zip(stamp.parse::<u64>().ok())
-            .is_some_and(|(at, since)| at >= since);
-        Ok(!independent && receipt["failed"] == true && after)
+        let recorded = receipt["timestamp"].as_str().ok_or_else(|| {
+            format!("tool evidence {} records no timestamp", reference.event_id)
+        })?;
+        let at = recorded.parse::<u64>().map_err(|error| {
+            format!(
+                "tool evidence {} timestamp {recorded} is not a unix stamp: {error}",
+                reference.event_id
+            )
+        })?;
+        let since = stamp
+            .parse::<u64>()
+            .map_err(|error| format!("the answer stamp {stamp} is not a unix stamp: {error}"))?;
+        Ok(!independent && receipt["failed"] == true && at >= since)
     }
 }

@@ -143,12 +143,25 @@ pub enum WelesError {
     },
     InvalidResponse(String),
     InvalidRequest(&'static str),
+    /// A request refused before it was sent, with the reason the check or
+    /// encoder gave, so the refusal says why and not only what.
+    RequestRefused {
+        what: &'static str,
+        cause: String,
+    },
     UnknownProvider(String),
     UnavailableProvider {
         provider: String,
         reason: String,
     },
     Cancelled,
+    /// The caller cancelled, but Weles did not take the cancel of
+    /// `operation`: the sign-in may still be running on the deployment, so
+    /// it is not reported as cancelled.
+    CancelRefused {
+        operation: String,
+        cause: String,
+    },
     RateLimited {
         retry_after_ms: Option<u64>,
     },
@@ -173,11 +186,18 @@ impl std::fmt::Display for WelesError {
             Self::Http { status, message } => write!(f, "Weles returned HTTP {status}: {message}"),
             Self::InvalidResponse(e) => write!(f, "invalid Weles response: {e}"),
             Self::InvalidRequest(message) => write!(f, "invalid Weles request: {message}"),
+            Self::RequestRefused { what, cause } => {
+                write!(f, "invalid Weles request: {what}: {cause}")
+            }
             Self::UnknownProvider(id) => write!(f, "provider `{id}` is not advertised by Weles"),
             Self::UnavailableProvider { provider, reason } => {
                 write!(f, "provider `{provider}` is unavailable: {reason}")
             }
             Self::Cancelled => f.write_str("Weles operation cancelled"),
+            Self::CancelRefused { operation, cause } => write!(
+                f,
+                "the Weles operation {operation} was asked to cancel and did not take it, so it may still be running: {cause}"
+            ),
             Self::RateLimited { retry_after_ms } => write!(
                 f,
                 "Weles rate limited the request; retry after {:?} ms",

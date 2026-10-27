@@ -92,8 +92,29 @@ pub(super) fn native_view_descriptors() -> Vec<CapabilityDescriptor> {
         .collect()
 }
 
+/// The file commands as capabilities. Commands that cannot be discovered
+/// (installed plugins whose registry cannot be read) are one unavailable
+/// service carrying the cause, as an extension discovery failure is, never
+/// an empty command list.
 pub(super) fn file_slash_descriptors(cwd: &std::path::Path) -> Vec<CapabilityDescriptor> {
-    crate::cli::commands::discover_file_commands(cwd)
+    let commands = match crate::cli::commands::discover_file_commands(cwd) {
+        Ok(commands) => commands,
+        Err(error) => {
+            return vec![CapabilityDescriptor::new(
+                "service/file-commands",
+                CapabilityKind::Service,
+                "jeden-core",
+                "File commands",
+                "Custom slash commands from command directories and installed plugins",
+                FunctionTarget::Service {
+                    name: "file-commands".into(),
+                },
+            )
+            .operation("discover")
+            .health(super::CapabilityHealth::unavailable(error))]
+        }
+    };
+    commands
         .into_iter()
         .map(|command| {
             CapabilityDescriptor::new(

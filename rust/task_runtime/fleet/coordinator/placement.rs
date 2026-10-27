@@ -1,9 +1,22 @@
+use std::cmp::Reverse;
+use std::num::NonZeroU32;
+
 use crate::task_runtime::protocol::{Job, PlacementConstraints, ProtocolError, Worker};
+
+/// How good a worker is for a job, compared field by field: a worker already
+/// holding the job's input first, then the one with more free slots, then the
+/// one running less.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct PlacementRank {
+    pub holds_input: bool,
+    pub free_slots: u32,
+    pub running: Reverse<u32>,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PlacementDecision {
     pub worker_id: String,
-    pub score: i64,
+    pub rank: PlacementRank,
     pub reasons: Vec<String>,
 }
 
@@ -15,7 +28,7 @@ pub fn select_worker<'a>(
     let mut rejected = Vec::new();
     for worker in workers {
         match hard_constraints(&job.constraints, worker) {
-            Ok(()) => eligible.push(score(job, worker)),
+            Ok(capacity) => eligible.push(ranked(job, worker, capacity)),
             Err(reasons) => rejected.push(format!(
                 "{}: {}",
                 worker.hello.worker_id,
@@ -25,8 +38,8 @@ pub fn select_worker<'a>(
     }
     eligible.sort_by(|left, right| {
         right
-            .score
-            .cmp(&left.score)
+            .rank
+            .cmp(&left.rank)
             .then_with(|| left.worker_id.cmp(&right.worker_id))
     });
     eligible.into_iter().next().ok_or_else(|| {
@@ -41,66 +54,43 @@ pub fn select_worker<'a>(
     })
 }
 
-fn hard_constraints(required: &PlacementConstraints, worker: &Worker) -> Result<(), Vec<String>> {
+/// The worker's declared capacity when it meets every hard constraint, or every
+/// constraint it misses. A worker that declares no parallel capacity takes no job.
+fn hard_constraints(
+    required: &PlacementConstraints,
+    worker: &Worker,
+) -> Result<NonZeroU32, Vec<String>> {
     let available = &worker.hello.descriptor;
     let mut reasons = Vec::new();
-    if required
-        .os
-        .as_ref()
-        .map(|v| v != &available.os)
-        .unwrap_or(false)
-    {
-        reasons.push(format!(
-            "os requires {:?}, has {}",
-            required.os, available.os
-        ));
+    if let Some(os) = required.os.as_ref().filter(|os| **os != available.os) {
+        reasons.push(format!("os requires {os}, has {}", available.os));
     }
-    if required
-        .arch
-        .as_ref()
-        .map(|v| v != &available.arch)
-        .unwrap_or(false)
-    {
-        reasons.push(format!(
-            "arch requires {:?}, has {}",
-            required.arch, available.arch
-        ));
+    if let Some(arch) = required.arch.as_ref().filter(|arch| **arch != available.arch) {
+        reasons.push(format!("arch requires {arch}, has {}", available.arch));
     }
     for capability in required.capabilities.difference(&available.capabilities) {
         reasons.push(format!("missing capability {capability}"));
     }
-    if required
+    if let Some(sandbox) = required
         .sandbox_profile
         .as_ref()
-        .map(|v| !available.sandbox_profiles.contains(v))
-        .unwrap_or(false)
+        .filter(|sandbox| !available.sandbox_profiles.contains(*sandbox))
     {
-        reasons.push(format!(
-            "missing sandbox {}",
-            required.sandbox_profile.as_deref().unwrap_or_default()
-        ));
+        reasons.push(format!("missing sandbox {sandbox}"));
     }
-    if required
+    if let Some(zone) = required
         .trust_zone
         .as_ref()
-        .map(|v| !available.trust_zones.contains(v))
-        .unwrap_or(false)
+        .filter(|zone| !available.trust_zones.contains(*zone))
     {
-        reasons.push(format!(
-            "wrong trust zone {}",
-            required.trust_zone.as_deref().unwrap_or_default()
-        ));
+        reasons.push(format!("wrong trust zone {zone}"));
     }
-    if required
+    if let Some(residency) = required
         .residency
         .as_ref()
-        .map(|v| !available.residencies.contains(v))
-        .unwrap_or(false)
+        .filter(|residency| !available.residencies.contains(*residency))
     {
-        reasons.push(format!(
-            "wrong residency {}",
-            required.residency.as_deref().unwrap_or_default()
-        ));
+        reasons.push(format!("wrong residency {residency}"));
     }
     if !available.resources.fits(&required.resources) {
         reasons.push("insufficient resources".into());
@@ -110,30 +100,37 @@ fn hard_constraints(required: &PlacementConstraints, worker: &Worker) -> Result<
             reasons.push(format!("label {key}={value} not present"));
         }
     }
-    let capacity = available.max_parallel.max(1);
-    if worker.running >= capacity {
-        reasons.push(format!("capacity exhausted {}/{capacity}", worker.running));
+    let capacity = NonZeroU32::new(available.max_parallel);
+    match capacity {
+        None => reasons.push("declares no parallel capacity (maxParallel)".into()),
+        Some(capacity) if worker.running >= capacity.get() => {
+            reasons.push(format!("capacity exhausted {}/{capacity}", worker.running));
+        }
+        Some(_) => {}
     }
-    if reasons.is_empty() {
-        Ok(())
-    } else {
-        Err(reasons)
+    match capacity {
+        Some(capacity) if reasons.is_empty() => Ok(capacity),
+        _ => Err(reasons),
     }
 }
 
-fn score(job: &Job, worker: &Worker) -> PlacementDecision {
-    let locality = usize::from(
-        worker
-            .hello
-            .descriptor
-            .cas_objects
-            .contains(&job.input_root),
-    ) as i64;
-    let capacity = worker.hello.descriptor.max_parallel.max(1) as i64;
-    let free = capacity.saturating_sub(worker.running as i64);
+fn ranked(job: &Job, worker: &Worker, capacity: NonZeroU32) -> PlacementDecision {
+    let holds_input = worker
+        .hello
+        .descriptor
+        .cas_objects
+        .contains(&job.input_root);
+    let free_slots = capacity.get().saturating_sub(worker.running);
     PlacementDecision {
         worker_id: worker.hello.worker_id.clone(),
-        score: locality * 1_000_000 + free * 1_000 - worker.running as i64,
-        reasons: vec![format!("locality={locality}"), format!("free={free}")],
+        rank: PlacementRank {
+            holds_input,
+            free_slots,
+            running: Reverse(worker.running),
+        },
+        reasons: vec![
+            format!("holds input={holds_input}"),
+            format!("free={free_slots}"),
+        ],
     }
 }

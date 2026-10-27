@@ -11,36 +11,52 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
+/// A declared byte budget and how much of it is still free.
+struct Limit {
+    declared: usize,
+    remaining: usize,
+}
+
 pub(super) struct Budget {
-    pub(super) max_bytes: Option<usize>,
-    pub(super) used_bytes: usize,
-    pub(super) warned_paths: BTreeSet<PathBuf>,
+    limit: Option<Limit>,
+    warned_paths: BTreeSet<PathBuf>,
     pub(super) warnings: Vec<String>,
 }
 
 impl Budget {
+    /// A budget of `max_bytes`, all of it free; none declared includes all.
+    pub(super) fn new(max_bytes: Option<usize>) -> Self {
+        Self {
+            limit: max_bytes.map(|declared| Limit {
+                declared,
+                remaining: declared,
+            }),
+            warned_paths: BTreeSet::new(),
+            warnings: Vec::new(),
+        }
+    }
+
     pub(super) fn include(&mut self, path: &Path, text: &str) -> String {
-        let Some(max_bytes) = self.max_bytes else {
+        let Some(limit) = self.limit.as_mut() else {
             return text.to_string();
         };
-        let remaining = max_bytes.saturating_sub(self.used_bytes);
         let included = match text
             .char_indices()
             .map(|(start, ch)| start + ch.len_utf8())
-            .take_while(|end| *end <= remaining)
+            .take_while(|end| *end <= limit.remaining)
             .last()
         {
             Some(end) => &text[..end],
             None => "",
         };
-        self.used_bytes = self.used_bytes.saturating_add(included.len());
+        limit.remaining -= included.len();
         if included.len() < text.len() && self.warned_paths.insert(path.to_path_buf()) {
             self.warnings.push(format!(
                 "context.maxBytes reached while reading {}: included {} of {} bytes (declared budget {} bytes)",
                 path.display(),
                 included.len(),
                 text.len(),
-                max_bytes
+                limit.declared
             ));
         }
         included.to_string()

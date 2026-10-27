@@ -87,17 +87,34 @@ impl RunHooks<'_> {
     // `ProgressSink` is a published `Arc` alias whose closure borrows this
     // turn's progress box, so the payload can never be `Send + Sync`.
     #[allow(clippy::arc_with_non_send_sync)]
-    pub(super) fn operation_context<'a>(&'a self, artifact_dir: &Path) -> OperationContext<'a> {
+    /// The operation a tool call of this turn runs as, rooted at `cwd`, the
+    /// directory the turn works in.
+    pub(super) fn operation_context<'a>(
+        &'a self,
+        cwd: &Path,
+        artifact_dir: &Path,
+    ) -> OperationContext<'a> {
         let progress = &self.progress;
-        OperationContext::new(
+        let context = OperationContext::new(
             CancellationToken::from_flag(Arc::clone(&self.cancel)),
             ArtifactSink::new(artifact_dir),
-        )
-        .with_progress(Arc::new(move |event| {
-            progress(&format!(
-                "{}: +{} bytes ({} total)",
-                event.stream, event.bytes, event.total_bytes
-            ));
-        }))
+            cwd.to_path_buf(),
+        );
+        let operation_id = context.operation_id().to_owned();
+        context
+            .with_identity(
+                operation_id,
+                artifact_dir
+                    .parent()
+                    .map(|session| session.to_string_lossy().into_owned()),
+                None,
+                None,
+            )
+            .with_progress(Arc::new(move |event| {
+                progress(&format!(
+                    "{}: +{} bytes ({} total)",
+                    event.stream, event.bytes, event.total_bytes
+                ));
+            }))
     }
 }

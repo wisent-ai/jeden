@@ -9,10 +9,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
 
-static NEXT_INTERACTION_ID: AtomicU64 = AtomicU64::new(1);
+/// Interaction and subscriber ids start at one, so none reads as unset.
+static NEXT_INTERACTION_ID: AtomicU64 = AtomicU64::new(NonZeroU64::MIN.get());
 
 struct SessionInner {
     options: SessionOptions,
@@ -57,20 +59,19 @@ impl EventSubscription {
 
 impl Drop for EventSubscription {
     fn drop(&mut self) {
+        // The subscriber and active maps change by one insert or remove at a
+        // time, so a holder that panicked left them whole: they are taken
+        // back, where a refusal (or a skipped removal) stranded every later
+        // event, subscription and abort of the session.
         if let Some(owner) = self.owner.upgrade() {
-            if let Ok(mut subscribers) = owner.subscribers.lock() {
-                subscribers.remove(&self.id);
-            }
+            crate::panicked::held(&owner.subscribers).remove(&self.id);
         }
     }
 }
 
 impl SessionInner {
     fn emit(&self, event: SessionEvent) -> Result<(), String> {
-        let mut subscribers = self
-            .subscribers
-            .lock()
-            .map_err(|_| "event subscription lock poisoned".to_string())?;
+        let mut subscribers = crate::panicked::held(&self.subscribers);
         let mut disconnected = Vec::new();
         for (id, subscriber) in subscribers.iter() {
             if subscriber.send(event.clone()).is_err() {
@@ -87,7 +88,7 @@ impl SessionInner {
         format!(
             "{}-{}",
             prefix,
-            NEXT_INTERACTION_ID.fetch_add(1, Ordering::Relaxed)
+            NEXT_INTERACTION_ID.fetch_add(NonZeroU64::MIN.get(), Ordering::Relaxed)
         )
     }
 }
@@ -107,7 +108,7 @@ impl AgentSession {
                 subscribers: Mutex::new(HashMap::new()),
                 active: Mutex::new(HashMap::new()),
                 interactions: RwLock::new(None),
-                next_subscriber: AtomicU64::new(1),
+                next_subscriber: AtomicU64::new(NonZeroU64::MIN.get()),
                 disposed: AtomicBool::new(false),
             }),
         }
@@ -140,14 +141,10 @@ impl AgentSession {
                 .inner
                 .conversation
                 .lock()
-                .map_err(|_| "conversation lock poisoned".to_string())?;
+                .map_err(|_poisoned| "conversation lock poisoned".to_string())?;
             let conversation = guard.as_mut().ok_or("session disposed")?;
             conversation.load_history(&session.inner.options.cwd, turns, &source)?;
-            *session
-                .inner
-                .session_path
-                .write()
-                .map_err(|_| "session path lock poisoned")? = conversation.session_path();
+            *crate::panicked::written(&session.inner.session_path) = conversation.session_path();
         }
         Ok(session)
     }
@@ -176,15 +173,11 @@ impl AgentSession {
     }
 
     pub fn subscribe(&self) -> Result<EventSubscription, String> {
-        let mut subscribers = self
-            .inner
-            .subscribers
-            .lock()
-            .map_err(|error| format!("cannot register session subscription: {error}"))?;
+        let mut subscribers = crate::panicked::held(&self.inner.subscribers);
         if self.inner.disposed.load(Ordering::Acquire) {
             return Err("session disposed".into());
         }
-        let id = self.inner.next_subscriber.fetch_add(1, Ordering::Relaxed);
+        let id = self.inner.next_subscriber.fetch_add(NonZeroU64::MIN.get(), Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         subscribers.insert(id, sender);
         Ok(EventSubscription {
@@ -198,11 +191,7 @@ impl AgentSession {
     /// dropped, so the reader's `recv` drains what is queued and then returns
     /// `RecvError`.
     pub fn end_subscription(&self, id: u64) -> Result<(), String> {
-        self.inner
-            .subscribers
-            .lock()
-            .map_err(|_| "event subscription lock poisoned".to_string())?
-            .remove(&id);
+        crate::panicked::held(&self.inner.subscribers).remove(&id);
         Ok(())
     }
 
@@ -210,11 +199,8 @@ impl AgentSession {
         &self,
         handler: Option<Arc<dyn InteractionHandler>>,
     ) -> Result<(), String> {
-        let mut interactions = self
-            .inner
-            .interactions
-            .write()
-            .map_err(|error| format!("cannot set session interaction handler: {error}"))?;
+        // Replaced whole: a writer that panicked left a handler, not a half.
+        let mut interactions = crate::panicked::written(&self.inner.interactions);
         if self.inner.disposed.load(Ordering::Acquire) {
             return Err("session disposed".into());
         }
@@ -238,11 +224,7 @@ impl AgentSession {
     }
 
     pub fn abort(&self, request_id: &str) -> Result<bool, String> {
-        let active = self
-            .inner
-            .active
-            .lock()
-            .map_err(|_| "active request lock poisoned")?;
+        let active = crate::panicked::held(&self.inner.active);
         if let Some(cancel) = active.get(request_id) {
             cancel.store(true, Ordering::Release);
             crate::tool_runtime::runtime_ops::announce_cancellation();
@@ -253,11 +235,7 @@ impl AgentSession {
     }
 
     pub fn status(&self) -> Result<Vec<String>, String> {
-        let active = self
-            .inner
-            .active
-            .lock()
-            .map_err(|_| "active request lock poisoned")?;
+        let active = crate::panicked::held(&self.inner.active);
         let mut request_ids = active.keys().cloned().collect::<Vec<_>>();
         request_ids.sort();
         Ok(request_ids)
@@ -266,14 +244,15 @@ impl AgentSession {
 
 impl Drop for AgentSession {
     fn drop(&mut self) {
-        if Arc::strong_count(&self.inner) == 1 {
-            let _ = self.dispose();
+        if Arc::strong_count(&self.inner) == NonZeroUsize::MIN.get() {
+            // The last handle is going: nobody is left to be told a failed dispose.
+            let _undisposed = self.dispose();
         }
     }
 }
 
 fn resolve_session_path(value: &Path) -> PathBuf {
-    if value.components().count() > 1 || value.is_absolute() {
+    if value.components().count() > NonZeroUsize::MIN.get() || value.is_absolute() {
         value.to_path_buf()
     } else {
         crate::session_root().join(value)

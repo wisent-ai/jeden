@@ -18,13 +18,19 @@ const SERVICE_ENVS: &[&str] = &[
     "JEDEN_TTS_MODEL",
 ];
 
+/// A key that changes whenever a config layer or a service variable changes. A layer's
+/// size and modification time enter it, or the kind of error that kept them from being
+/// read, so a layer that becomes unreadable changes the key too.
 pub(crate) fn fingerprint(cwd: &Path) -> u64 {
     let mut hash = std::collections::hash_map::DefaultHasher::new();
     for path in config_layer_paths(cwd) {
         path.hash(&mut hash);
-        if let Ok(metadata) = fs::metadata(&path) {
-            metadata.len().hash(&mut hash);
-            metadata.modified().ok().hash(&mut hash);
+        match fs::metadata(&path) {
+            Ok(metadata) => {
+                metadata.len().hash(&mut hash);
+                metadata.modified().map_err(|error| error.kind()).hash(&mut hash);
+            }
+            Err(error) => error.kind().hash(&mut hash),
         }
     }
     for name in SERVICE_ENVS {
@@ -34,35 +40,37 @@ pub(crate) fn fingerprint(cwd: &Path) -> u64 {
     hash.finish()
 }
 
+/// A service setting: the variable `env` when it holds text, else the string at `path`
+/// in the merged config; `None` when neither states one. A variable that is set but not
+/// Unicode cannot be used; that is said on stderr, naming it, before the config is read.
 pub(crate) fn string(config: &Value, path: &[&str], env: &str) -> Option<String> {
-    std::env::var(env)
-        .ok()
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| {
-            let mut value = config;
-            for key in path {
-                value = value.get(*key)?;
-            }
-            value
-                .as_str()
-                .map(str::to_owned)
-                .filter(|v| !v.trim().is_empty())
-        })
-}
-
-pub(crate) fn strings(config: &Value, path: &[&str]) -> Vec<String> {
+    match std::env::var(env) {
+        Ok(value) if !value.trim().is_empty() => return Some(value),
+        Ok(_) | Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            eprintln!("jeden: {env} is not Unicode; reading {} from the config", path.join("."));
+        }
+    }
     let mut value = config;
     for key in path {
-        let Some(next) = value.get(*key) else {
-            return Vec::new();
-        };
-        value = next;
+        value = value.get(*key)?;
     }
     value
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
+        .as_str()
         .map(str::to_owned)
-        .collect()
+        .filter(|v| !v.trim().is_empty())
+}
+
+/// The list of text at `path` in the merged config, read by the shared
+/// `config_texts`: none when the config states none, and a value in another
+/// shape refused naming the setting.
+pub(crate) fn strings(config: &Value, path: &[&str]) -> Result<Vec<String>, String> {
+    let setting = path.join(".");
+    match crate::cli::config::config_value_at(config, &setting) {
+        Some(value) => Ok(crate::cli::config::config_texts(value, &setting)?
+            .into_iter()
+            .map(str::to_owned)
+            .collect()),
+        None => Ok(Vec::new()),
+    }
 }

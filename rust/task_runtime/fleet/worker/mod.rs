@@ -87,11 +87,8 @@ impl WorkerRuntime {
         })
     }
     pub fn cancel(&self, job_id: &str, attempt: u32, fence: u64) -> Result<bool, ProtocolError> {
-        let mut cancellations = self
-            .cancellations
-            .lock()
-            .map_err(|_| ProtocolError::Transport("worker cancellation lock poisoned".into()))?;
-        Ok(cancellations.insert((job_id.into(), attempt, fence)))
+        // One insert per call: a holder that panicked left the set whole.
+        Ok(crate::panicked::held(&self.cancellations).insert((job_id.into(), attempt, fence)))
     }
     pub fn execute(&self, offer: WorkOffer) -> Result<WorkerRun, ProtocolError> {
         if offer.protocol.major != ProtocolVersion::V1.major
@@ -103,17 +100,17 @@ impl WorkerRuntime {
             });
         }
         let key = (offer.job.id.clone(), offer.attempt, offer.fencing_token);
-        let cancelled = || {
-            self.cancellations
-                .lock()
-                .map(|set| set.contains(&key))
-                .unwrap_or(true)
+        // A panic elsewhere poisons the lock but leaves the recorded
+        // cancellations intact, so they are read either way.
+        let cancelled = || match self.cancellations.lock() {
+            Ok(set) => set.contains(&key),
+            Err(poisoned) => poisoned.into_inner().contains(&key),
         };
         let mut events = Vec::new();
-        let mut sequence = 0_u64;
         macro_rules! event {
             ($phase:expr, $detail:expr) => {{
-                sequence = sequence.saturating_add(1);
+                // Events are numbered from the first in the order they occur.
+                let sequence = crate::tally::FIRST + events.len() as u64;
                 events.push(WorkerEvent {
                     job_id: offer.job.id.clone(),
                     attempt: offer.attempt,
@@ -135,8 +132,17 @@ impl WorkerRuntime {
             offer.attempt,
             offer.fencing_token
         ));
-        if run_root.exists() {
-            fs::remove_dir_all(&run_root).map_err(|e| ProtocolError::Storage(e.to_string()))?;
+        // A leftover run of this attempt is cleared; only one already gone
+        // counts as cleared, every other failure says the run root.
+        match fs::remove_dir_all(&run_root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(ProtocolError::Storage(format!(
+                    "the leftover run {} cannot be removed: {error}",
+                    run_root.display()
+                )))
+            }
         }
         let input = run_root.join("input");
         let output = run_root.join("output");

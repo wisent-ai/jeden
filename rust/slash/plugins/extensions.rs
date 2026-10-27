@@ -46,7 +46,12 @@ fn discovered_rows(
 }
 
 pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
-    let mut items = plugin_management_items(context.cwd);
+    let mut items = match plugin_management_items(context.cwd) {
+        Ok(items) => items,
+        Err(cause) => {
+            return refusal_picker("Extensions and plugins", "Plugin management cannot be listed", cause)
+        }
+    };
     for (scope, dir) in [
         ("project", context.cwd.to_path_buf()),
         ("user", plugins_home()),
@@ -61,8 +66,26 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
                 )
             }
         };
-        for source in sorted_object_values(&registry["sources"]) {
+        let sources = match sorted_object_values(&registry["sources"]) {
+            Ok(sources) => sources,
+            Err(cause) => {
+                return refusal_picker(
+                    "Extensions and plugins",
+                    "Plugin registry cannot be read",
+                    cause,
+                )
+            }
+        };
+        for source in sources {
+            // A source recorded without a name cannot be discovered from; it
+            // is shown as such, not left out of the list.
             let Some(name) = source.get("name").and_then(Value::as_str) else {
+                let mut row = PickerItem::action(format!("Unnamed {scope} marketplace source"), "")
+                    .detail(format!("the registry records it without a name: {source}"))
+                    .badge("SOURCE")
+                    .disabled(true);
+                row.command = None;
+                items.push(row);
                 continue;
             };
             let enabled = source.get("enabled").and_then(Value::as_bool) != Some(false);

@@ -1,4 +1,6 @@
 // Qualifies source isolation without a configured database: Jeden's own SQLite file stands in.
+// The same real CLI checks that a manifest repeating query words cannot outrank an instruction by
+// becoming its own title, while that manifest stays searchable under its file name.
 // Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_CONTEXT_LIMIT.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -28,7 +30,7 @@ const fixture = join(workspace, 'entry.rs');
 const fixtureText = `pub fn ${query}() {}`;
 writeFileSync(fixture, `${fixtureText}\n`);
 writeFileSync(join(workspace, '.jeden/config.json'), JSON.stringify({
-  context: { advisor: { roots: workspace, fileExtensions: 'rs' } },
+  context: { advisor: { roots: workspace, fileExtensions: 'rs,md,json' } },
 }));
 const journeyEnv = { ...process.env, HOME: home, JEDEN_DATABASE_URL: '' };
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -104,6 +106,36 @@ try {
   assert.equal(probedFiles?.available, true, JSON.stringify(inspection));
   assert.equal(probedMemory?.available, true, JSON.stringify(inspection));
   report.probe = inspection.sources;
+  const policy = join(workspace, 'policy.md');
+  const catalogue = join(workspace, 'catalogue.json');
+  const policyText = '# Masking declaration\nThe writer reads the chosen policy before writing events.\n';
+  const catalogueText = JSON.stringify([
+    { package: 'masking declaration tools' },
+    { package: 'masking declaration docs' },
+    { package: 'masking declaration examples' },
+  ]);
+  writeFileSync(policy, policyText);
+  writeFileSync(catalogue, catalogueText);
+  const ranked = await invoke(binary, ['context', 'recommend', 'masking declaration',
+    '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);
+  const ranking = JSON.parse(succeeds(ranked));
+  report.ranking = ranking;
+  persist();
+  assert.equal(ranking.sources.find(source => source.source === 'files')?.available, true,
+    JSON.stringify(ranking));
+  assert.ok(ranking.recommendations[0]?.locator.startsWith(`${policy}:`),
+    'a manifest repeating query words must not outrank the instruction by being its own title');
+  const content = await invoke(binary, ['context', 'recommend', 'examples',
+    '--limit', limit, '--source', 'files', '--json', '--cwd', workspace]);
+  const found = JSON.parse(succeeds(content));
+  report.contentSearch = found;
+  persist();
+  const manifestHit = found.recommendations[0];
+  assert.ok(manifestHit?.locator.startsWith(`${catalogue}:`), 'unstructured content must remain searchable');
+  assert.equal(manifestHit.title, 'catalogue.json');
+  assert.equal(manifestHit.snippet, catalogueText);
+  assert.equal(readFileSync(policy, 'utf8'), policyText, 'context advice changed the instruction');
+  assert.equal(readFileSync(catalogue, 'utf8'), catalogueText, 'context advice changed the manifest');
   report.verdict = 'passed';
 } catch (error) {
   report.error = String(error.stack || error);

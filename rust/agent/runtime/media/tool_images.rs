@@ -10,18 +10,27 @@ pub(super) fn attach(messages: &mut [Value]) -> Result<(), String> {
         let Some(content) = message.get_mut("content") else {
             continue;
         };
-        let text = match content {
-            Value::String(text) => Some(text.as_str()),
-            Value::Array(parts) => parts.iter().find_map(|part| {
-                (part.get("type").and_then(Value::as_str) == Some("text"))
-                    .then(|| part.get("text").and_then(Value::as_str))
-                    .flatten()
-            }),
-            _ => None,
+        // The text that may carry a tool result: the content itself, or its
+        // first text part, kept by position so that part is the one rewritten.
+        let (text, slot) = match &*content {
+            Value::String(text) => (text.as_str(), None),
+            Value::Array(parts) => {
+                let Some((index, text)) = parts.iter().enumerate().find_map(|(index, part)| {
+                    (part.get("type").and_then(Value::as_str) == Some("text"))
+                        .then(|| part.get("text").and_then(Value::as_str))
+                        .flatten()
+                        .map(|text| (index, text))
+                }) else {
+                    continue;
+                };
+                (text, Some(index))
+            }
+            _ => continue,
         };
-        let Some(text) = text.filter(|text| text.starts_with('{')) else {
+        // A user message that is not a JSON object is prose, not a tool result.
+        if !text.starts_with('{') {
             continue;
-        };
+        }
         let Ok(mut envelope) = serde_json::from_str::<Value>(text) else {
             continue;
         };
@@ -36,23 +45,17 @@ pub(super) fn attach(messages: &mut [Value]) -> Result<(), String> {
         if images.is_empty() {
             continue;
         }
-        let text = envelope.to_string();
-        match content {
-            Value::String(_) => {
-                let mut parts = Vec::with_capacity(images.len() + 1);
-                parts.push(json!({"type": "text", "text": text}));
+        let rewritten = envelope.to_string();
+        match (content, slot) {
+            (Value::Array(parts), Some(index)) => {
+                parts[index]["text"] = Value::String(rewritten);
+                parts.append(&mut images);
+            }
+            (content, _) => {
+                let mut parts = vec![json!({"type": "text", "text": rewritten})];
                 parts.append(&mut images);
                 *content = Value::Array(parts);
             }
-            Value::Array(parts) => {
-                let part = parts
-                    .iter_mut()
-                    .find(|part| part.get("type").and_then(Value::as_str) == Some("text"))
-                    .expect("text part was found above");
-                part["text"] = Value::String(text);
-                parts.append(&mut images);
-            }
-            _ => unreachable!("only text content was selected"),
         }
     }
     Ok(())
@@ -78,27 +81,30 @@ fn collect(result: &mut Value, images: &mut Vec<Value>) -> Result<(), String> {
                         "image/png" | "image/jpeg" | "image/gif" | "image/webp"
                     )
                 });
-            if let Some(mime) = mime.filter(|_| {
-                fields.contains_key("base64")
-                    && fields.contains_key("width")
-                    && fields.contains_key("height")
-            }) {
-                let path = fields
-                    .get("path")
-                    .and_then(Value::as_str)
-                    .unwrap_or("unnamed image");
+            let complete = fields.contains_key("base64")
+                && fields.contains_key("width")
+                && fields.contains_key("height");
+            if let Some(mime) = mime.filter(|_mime| complete) {
+                // The result is named by its path in a refusal; one without a
+                // path is said to have none.
+                let named = match fields.get("path").and_then(Value::as_str) {
+                    Some(path) => format!("`{path}`"),
+                    None => "with no path".to_string(),
+                };
                 if fields.get("truncated").and_then(Value::as_bool) == Some(true) {
-                    return Err(format!("image tool result `{path}` is truncated; incomplete image bytes cannot be sent to the model"));
+                    return Err(format!("image tool result {named} is truncated; incomplete image bytes cannot be sent to the model"));
                 }
+                // The prefix is written while the MIME type still borrows the
+                // fields, before the base64 content is taken out of them.
                 let prefix = format!("data:{mime};base64,");
-                let Some(Value::String(mut encoded)) = fields.remove("base64") else {
-                    return Err("image tool result base64 content is not a string".into());
+                let Some(Value::String(encoded)) = fields.remove("base64") else {
+                    return Err(format!("image tool result {named} base64 content is not a string"));
                 };
                 if encoded.is_empty() {
-                    return Err("image tool result has empty base64 content".into());
+                    return Err(format!("image tool result {named} has empty base64 content"));
                 }
-                encoded.insert_str(0, &prefix);
-                images.push(json!({"type": "image_url", "image_url": {"url": encoded}}));
+                let url = format!("{prefix}{encoded}");
+                images.push(json!({"type": "image_url", "image_url": {"url": url}}));
             } else {
                 for value in fields.values_mut() {
                     collect(value, images)?;

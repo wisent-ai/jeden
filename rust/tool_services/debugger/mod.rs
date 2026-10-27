@@ -5,6 +5,7 @@ use super::types::{
 use crate::tool_runtime::runtime_ops::OperationContext;
 use parking_lot::Mutex;
 use serde_json::Value;
+use std::collections::btree_map::Entry;
 use std::collections::BTreeMap;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -91,7 +92,7 @@ impl Drop for DapSession {
 
 pub(crate) struct DebuggerService {
     command: Option<String>,
-    args: Vec<String>,
+    args: Result<Vec<String>, String>,
     cwd: PathBuf,
     sessions: Mutex<BTreeMap<String, DapSession>>,
 }
@@ -109,6 +110,7 @@ impl DebuggerService {
         }
     }
     pub(crate) fn health(&self) -> HealthDescriptor {
+        if let Err(unread) = &self.args { return HealthDescriptor::unavailable("debugger", unread.clone()) }
         match self.command.as_deref() {
             Some(command) if command_exists(command) => {
                 HealthDescriptor::healthy("debugger", command)
@@ -124,13 +126,9 @@ impl DebuggerService {
         }
     }
     fn spawn(&self) -> ServiceResult<DapSession> {
-        let command = self
-            .command
-            .as_deref()
-            .ok_or_else(|| ServiceError::Unavailable {
-                service: "debugger",
-                detail: self.health().detail,
-            })?;
+        let unavailable = || ServiceError::Unavailable { service: "debugger", detail: self.health().detail };
+        let command = self.command.as_deref().ok_or_else(unavailable)?;
+        let args = self.args.as_ref().map_err(|_unread| unavailable())?;
         let stderr_log = self.cwd.join(".jeden/dap").join(format!(
             "{}.stderr.log",
             Path::new(command)
@@ -150,7 +148,7 @@ impl DebuggerService {
         }
         let stderr = std::fs::File::create(&stderr_log).map_err(log_failed)?;
         let mut child = Command::new(command)
-            .args(&self.args)
+            .args(args)
             .current_dir(&self.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -238,12 +236,10 @@ impl DebuggerService {
             return bounded_json(context, "debugger", &response);
         }
         let mut sessions = self.sessions.lock();
-        if !sessions.contains_key(&session_key) {
-            sessions.insert(session_key.clone(), self.spawn()?);
-        }
-        let session = sessions
-            .get_mut(&session_key)
-            .expect("inserted DAP session");
+        let session = match sessions.entry(session_key) {
+            Entry::Occupied(running) => running.into_mut(),
+            Entry::Vacant(absent) => absent.insert(self.spawn()?),
+        };
         if session
             .child
             .try_wait()

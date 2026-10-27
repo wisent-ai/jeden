@@ -20,39 +20,44 @@ const FALLBACK: &str = include_str!("first_use.json");
 
 type Client = JourneyClient<Box<dyn Transport>, FileStorage>;
 
+/// The refusal for one journey call that failed, naming the call.
+fn failed<E: std::fmt::Display>(call: &'static str) -> impl FnOnce(E) -> String {
+    move |error| format!("the onboarding journey could not {call}: {error}")
+}
+
 async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), String> {
     let mut client = start_client().await?;
     let mut notice = None;
-    let (verb, rest) = action
-        .trim()
-        .split_once(char::is_whitespace)
-        .map(|(verb, rest)| (verb, rest.trim()))
-        .unwrap_or((action.trim(), ""));
+    // A lone verb has no operand.
+    let (verb, rest) = match action.trim().split_once(char::is_whitespace) {
+        Some((verb, rest)) => (verb, rest.trim()),
+        None => (action.trim(), ""),
+    };
     match verb {
         "" | "show" => {}
         "next" => {
             client
                 .advance(&BTreeMap::new(), EVIDENCE_REVISION)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(failed("advance to the next step"))?;
         }
         "skip" => {
             if current_screen(&client)?.screen_kind == "source_selection" {
                 client
                     .advance(&BTreeMap::new(), EVIDENCE_REVISION)
                     .await
-                    .map_err(|error| error.to_string())?
+                    .map_err(failed("advance past the workspace step"))?
                     .ok_or_else(|| "onboarding workspace step could not advance".to_string())?;
             } else {
                 client
                     .skip(EVIDENCE_REVISION)
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(failed("skip the current step"))?;
                 while !current_screen(&client)?.transitions.is_empty() {
                     if client
                         .advance(&BTreeMap::new(), EVIDENCE_REVISION)
                         .await
-                        .map_err(|error| error.to_string())?
+                        .map_err(failed("advance past a skipped step"))?
                         .is_none()
                     {
                         break;
@@ -61,14 +66,14 @@ async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), Str
                 client
                     .resume(EVIDENCE_REVISION)
                     .await
-                    .map_err(|error| error.to_string())?;
+                    .map_err(failed("resume after skipping"))?;
             }
         }
         "reset" => {
             client
                 .reset(EVIDENCE_REVISION)
                 .await
-                .map_err(|error| error.to_string())?;
+                .map_err(failed("be reset"))?;
         }
         "adopt-workspace" => {
             let path = if rest.is_empty() {
@@ -81,7 +86,7 @@ async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), Str
             client
                 .advance(&evidence, EVIDENCE_REVISION)
                 .await
-                .map_err(|error| error.to_string())?
+                .map_err(failed("record the adopted workspace"))?
                 .ok_or_else(|| "onboarding workspace step could not advance".to_string())?;
             notice = Some(format!(
                 "{}: {} · {} existing session(s) accepted",
@@ -99,7 +104,7 @@ async fn apply(action: &str, cwd: &Path) -> Result<(Client, Option<String>), Str
     client
         .expose(EVIDENCE_REVISION)
         .await
-        .map_err(|error| error.to_string())?;
+        .map_err(failed("show its current step"))?;
     Ok((client, notice))
 }
 
@@ -115,7 +120,7 @@ pub(crate) fn initial_picker(cwd: &Path) -> Result<Option<PickerSpec>, String> {
         client
             .expose(EVIDENCE_REVISION)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(failed("show its current step"))?;
         picker_for(&client, cwd, None).map(Some)
     })
 }
@@ -144,7 +149,7 @@ pub(crate) fn observe_successful_turn() {
             if client
                 .advance(&BTreeMap::new(), EVIDENCE_REVISION)
                 .await
-                .map_err(|error| error.to_string())?
+                .map_err(failed("advance before recording the successful turn"))?
                 .is_none()
             {
                 return Ok(());
@@ -154,7 +159,7 @@ pub(crate) fn observe_successful_turn() {
         client
             .complete(&evidence, EVIDENCE_REVISION)
             .await
-            .map_err(|error| error.to_string())?;
+            .map_err(failed("record the successful turn"))?;
         Ok(())
     });
     if let Err(cause) = recorded {

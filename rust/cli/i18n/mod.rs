@@ -117,11 +117,12 @@ static STRINGS: &[(&str, &str, &str)] = &[
 ];
 
 /// Look up `key` for `lang`: hand-written rows first, then the generated
-/// overlay in `i18n::translations`, then the English row; a key missing even
-/// from English yields the key itself. Unknown languages (including `auto`)
-/// fall back to English. This never panics.
+/// overlay in `i18n::translations`, then the English row. Unknown languages
+/// (including `auto`) read English. Every key the code names has an English row;
+/// one without is a defect in this table, stopped naming the key rather than
+/// shown to the person as the key itself.
 pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
-    STRINGS
+    let row = STRINGS
         .iter()
         .find(|(row_lang, row_key, _)| *row_lang == lang && *row_key == key)
         .or_else(|| {
@@ -133,9 +134,11 @@ pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
             STRINGS
                 .iter()
                 .find(|(row_lang, row_key, _)| *row_lang == "en" && *row_key == key)
-        })
-        .map(|(_, _, text)| *text)
-        .unwrap_or(key)
+        });
+    match row {
+        Some((_, _, text)) => text,
+        None => panic!("i18n key {key:?} has no English row in cli/i18n STRINGS"),
+    }
 }
 
 /// Resolve the chrome language code for a workspace from `ui.language`.

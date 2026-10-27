@@ -2,7 +2,7 @@
 //! task scheduler and the memory store.
 use super::{elapsed, HealthProbe, ProbeState};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Instant;
 
 pub(super) fn control_plane_probe(
@@ -12,13 +12,23 @@ pub(super) fn control_plane_probe(
 ) -> HealthProbe {
     let started = Instant::now();
     if !health.available {
+        let evidence = match serde_json::to_value(&health) {
+            Ok(evidence) => evidence,
+            Err(error) => {
+                return HealthProbe::unavailable(
+                    subsystem,
+                    started,
+                    format!("{}; its health cannot be encoded as evidence: {error}", health.detail),
+                );
+            }
+        };
         return HealthProbe {
             subsystem,
             state: ProbeState::Unavailable,
             active: false,
             latency_ms: elapsed(started),
             detail: health.detail.clone(),
-            evidence: serde_json::to_value(health).ok(),
+            evidence: Some(evidence),
         };
     }
     match active() {
@@ -40,25 +50,32 @@ pub(super) fn mcp_probe(cwd: &Path) -> HealthProbe {
     }
 }
 
+/// The task scheduler over the store the task tools of a run without a
+/// session directory use (`task_runtime::default_store`), so the probe
+/// answers for the store delegation actually opens.
 pub(super) fn task_probe(cwd: &Path) -> HealthProbe {
     let started = Instant::now();
-    let store = std::env::var_os("JEDEN_TASK_STORE")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.join(".jeden/tasks"));
+    let store = crate::task_runtime::default_store(cwd, None);
     match crate::task_runtime::limits_from_config(cwd)
         .and_then(|limits| crate::task_runtime::TaskScheduler::open(cwd, &store, limits))
     {
         Ok(scheduler) => {
             let health = scheduler.health();
-            if health.healthy {
-                HealthProbe::healthy(
+            if !health.healthy {
+                return HealthProbe::unavailable("task", started, health.errors.join("; "));
+            }
+            match serde_json::to_value(&health) {
+                Ok(evidence) => HealthProbe::healthy(
                     "task",
                     started,
                     "scheduler store, recovery, and discovery succeeded",
-                    serde_json::to_value(health).ok(),
-                )
-            } else {
-                HealthProbe::unavailable("task", started, health.errors.join("; "))
+                    Some(evidence),
+                ),
+                Err(error) => HealthProbe::unavailable(
+                    "task",
+                    started,
+                    format!("the scheduler's health cannot be encoded as evidence: {error}"),
+                ),
             }
         }
         Err(error) => HealthProbe::unavailable("task", started, error.to_string()),

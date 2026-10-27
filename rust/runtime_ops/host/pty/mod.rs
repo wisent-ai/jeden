@@ -1,29 +1,24 @@
 use super::super::{OperationContext, OutputCapture};
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
-use std::path::{Path, PathBuf};
-use std::sync::{LazyLock, Mutex, MutexGuard};
-pub const MIN_PTY_COLS: u16 = 1;
-pub const MAX_PTY_COLS: u16 = 1_000;
-pub const MIN_PTY_ROWS: u16 = 1;
-pub const MAX_PTY_ROWS: u16 = 1_000;
+use std::path::Path;
+// Native winsize dimensions are unsigned shorts, not an application tuning cap:
+// https://man7.org/linux/man-pages/man2/TIOCSWINSZ.2const.html
+pub const MIN_PTY_COLS: u16 = std::num::NonZeroU16::MIN.get();
+pub const MAX_PTY_COLS: u16 = u16::MAX;
+pub const MIN_PTY_ROWS: u16 = std::num::NonZeroU16::MIN.get();
+pub const MAX_PTY_ROWS: u16 = u16::MAX;
+mod control;
 mod process;
+mod registry;
 
 use process::PtyProcess;
 
+// VT100 standard screen geometry. Source: https://vt100.net/docs/vt100-ug/chapter1.html
 pub(super) const DEFAULT_PTY_COLS: u16 = 80;
+// VT100 standard screen geometry. Source: https://vt100.net/docs/vt100-ug/chapter1.html
 pub(super) const DEFAULT_PTY_ROWS: u16 = 24;
 
-#[derive(Default)]
-struct PtyRegistry {
-    sessions: HashMap<PathBuf, PtyProcess>,
-    terminal: HashMap<String, PtySessionState>,
-    next_id: u64,
-}
-
-static SESSIONS: LazyLock<Mutex<PtyRegistry>> =
-    LazyLock::new(|| Mutex::new(PtyRegistry::default()));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtySessionState {
@@ -99,59 +94,54 @@ pub fn execute(
         ))
         .to_string());
     }
-    let key = scope.to_path_buf();
-    let mut registry = SESSIONS.lock().map_err(|_| "PTY registry lock poisoned")?;
+    let slot = registry::scope(scope)?;
+    let mut owned = slot.acquire(context)?;
+    registry::check_current(&slot)?;
     if reset {
-        if let Some(mut old) = registry.sessions.remove(&key) {
-            let id = old.metadata.session_id.clone();
-            old.terminate();
-            registry.terminal.insert(id, PtySessionState::Cancelled);
+        if let Some(old) = owned.take() {
+            registry::finish(&old.control, PtySessionState::Cancelled);
         }
     }
-    let mut session = if let Some(mut existing) = registry.sessions.remove(&key) {
-        if existing.alive() {
-            existing
-        } else {
-            let id = existing.metadata.session_id.clone();
-            existing.terminate();
-            registry.terminal.insert(id, PtySessionState::Ended);
-            spawn_registered(&mut registry, &canonical_cwd)?
+    if let Some(existing) = owned.as_mut() {
+        if !existing.alive()? {
+            let old = owned.take().expect("checked PTY process disappeared while scope was locked");
+            registry::finish(&old.control, PtySessionState::Ended);
         }
-    } else {
-        spawn_registered(&mut registry, &canonical_cwd)?
-    };
+    }
+    if owned.is_none() {
+        let mut session = PtyProcess::spawn(&canonical_cwd)?;
+        registry::register(&slot, &session.control)?;
+        if let Err(error) = session.initialize(Some(context)) {
+            registry::finish(&session.control, if context.cancellation().is_cancelled() {
+                PtySessionState::Cancelled
+            } else {
+                PtySessionState::Ended
+            });
+            return Err(error);
+        }
+        *owned = Some(session);
+    }
+    let session = owned.as_mut().expect("initialized PTY process disappeared while scope was locked");
     let result = session.execute(context, input, reset);
     match result {
-        Ok((result, healthy)) => {
-            if healthy {
-                registry.sessions.insert(key, session);
+        Ok((result, true)) => Ok(result),
+        Ok((result, false)) => {
+            let session = owned.take().expect("executed PTY process disappeared while scope was locked");
+            registry::finish(&session.control, if result.cancelled {
+                PtySessionState::Cancelled
             } else {
-                let id = session.metadata.session_id.clone();
-                session.terminate();
-                registry.terminal.insert(
-                    id,
-                    if result.cancelled {
-                        PtySessionState::Cancelled
-                    } else {
-                        PtySessionState::Ended
-                    },
-                );
-            }
+                PtySessionState::Ended
+            });
             Ok(result)
         }
         Err(error) => {
-            let id = session.metadata.session_id.clone();
-            session.terminate();
-            registry.terminal.insert(id, PtySessionState::Ended);
+            let session = owned.take().expect("failed PTY process disappeared while scope was locked");
+            registry::finish(&session.control, PtySessionState::Ended);
             Err(error)
         }
     }
 }
 
-fn spawn_registered(registry: &mut PtyRegistry, cwd: &Path) -> Result<PtyProcess, String> {
-    registry.next_id = registry.next_id.wrapping_add(1);
-    PtyProcess::spawn(cwd, registry.next_id)
-}
 pub fn resize(
     context: &OperationContext<'_>,
     session_id: &str,
@@ -161,44 +151,18 @@ pub fn resize(
     super::untrusted_child(context, format!("{}:pty-resize", context.operation_id()))
         .map_err(|error| PtyError::System(error.to_string()))?;
     validate_dimensions(cols, rows)?;
-    let mut registry = lock_registry_cancellable(context)?;
-    let scope = registry.sessions.iter().find_map(|(scope, session)| {
-        (session.metadata.session_id == session_id).then(|| scope.clone())
-    });
-    let Some(scope) = scope else {
-        return Err(match registry.terminal.get(session_id) {
-            Some(PtySessionState::Ended) => PtyError::SessionEnded {
-                session_id: session_id.into(),
-            },
-            Some(PtySessionState::Cancelled) => PtyError::SessionCancelled {
-                session_id: session_id.into(),
-            },
-            _ => PtyError::SessionNotFound {
-                session_id: session_id.into(),
-            },
-        });
-    };
-    let alive = registry
-        .sessions
-        .get_mut(&scope)
-        .is_some_and(PtyProcess::alive);
-    if !alive {
-        if let Some(mut session) = registry.sessions.remove(&scope) {
-            session.terminate();
+    let shared = registry::session(context, session_id)?;
+    let result = {
+        let mut control = control::lock(&shared).map_err(PtyError::System)?;
+        if context.cancellation().is_cancelled() {
+            return Err(PtyError::OperationCancelled);
         }
-        registry
-            .terminal
-            .insert(session_id.into(), PtySessionState::Ended);
-        return Err(PtyError::SessionEnded {
-            session_id: session_id.into(),
-        });
+        control.resize(cols, rows).map(|()| control.metadata.clone())
+    };
+    if matches!(&result, Err(PtyError::SessionEnded { .. })) {
+        registry::finish(&shared, PtySessionState::Ended);
     }
-    let session = registry
-        .sessions
-        .get_mut(&scope)
-        .expect("live PTY scope disappeared while registry was locked");
-    session.resize(cols, rows)?;
-    Ok(session.metadata.clone())
+    result
 }
 
 fn validate_dimensions(cols: u16, rows: u16) -> Result<(), PtyError> {
@@ -210,39 +174,13 @@ fn validate_dimensions(cols: u16, rows: u16) -> Result<(), PtyError> {
     Ok(())
 }
 
-/// The registry mutex is held only for map edits, so the call blocks on the
-/// lock itself; cancellation is honoured before the wait and once it returns.
-fn lock_registry_cancellable(
-    context: &OperationContext<'_>,
-) -> Result<MutexGuard<'static, PtyRegistry>, PtyError> {
-    if context.cancellation().is_cancelled() {
-        return Err(PtyError::OperationCancelled);
-    }
-    let registry = SESSIONS
-        .lock()
-        .map_err(|_| PtyError::System("PTY registry lock poisoned".into()))?;
-    if context.cancellation().is_cancelled() {
-        return Err(PtyError::OperationCancelled);
-    }
-    Ok(registry)
-}
 pub fn probe(cwd: &Path) -> Result<(), String> {
-    let mut session = PtyProcess::spawn(cwd, 0)?;
+    let mut session = PtyProcess::spawn(cwd)?;
+    let result = session.initialize(None);
     session.terminate();
-    Ok(())
+    result
 }
 
 pub fn teardown_scope(scope: &Path) {
-    // Teardown must end the scope's terminal even after a panic poisoned
-    // the registry, or its process outlives the scope; the guard is
-    // recovered.
-    let mut registry = match SESSIONS.lock() {
-        Ok(registry) => registry,
-        Err(poisoned) => poisoned.into_inner(),
-    };
-    if let Some(mut session) = registry.sessions.remove(scope) {
-        let id = session.metadata.session_id.clone();
-        session.terminate();
-        registry.terminal.insert(id, PtySessionState::Cancelled);
-    }
+    registry::teardown(scope);
 }

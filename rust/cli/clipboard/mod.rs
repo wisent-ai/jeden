@@ -99,9 +99,9 @@ fn check_command(payload: &str, json: bool) -> Result<String, String> {
             payload.len()
         ));
     }
-    let first = found.lines().next().unwrap_or("").trim();
-    Err(format!(
-        "the clipboard no longer holds the payload: {reader} reads {} bytes beginning {first:?}. Copy it again.",
-        found.len()
-    ))
+    let holds_now = match found.lines().next() {
+        Some(first) => format!("{} bytes beginning {:?}", found.len(), first.trim()),
+        None => format!("{} bytes and no line", found.len()),
+    };
+    Err(format!("the clipboard no longer holds the payload: {reader} reads {holds_now}. Copy it again."))
 }

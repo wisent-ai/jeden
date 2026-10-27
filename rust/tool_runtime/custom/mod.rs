@@ -1,6 +1,6 @@
 use serde_json::Value;
 
-use crate::tool_runtime::shared::{object_input, string_input};
+use crate::tool_runtime::shared::{arguments_input, string_input};
 use crate::tool_runtime::ToolRuntime;
 
 mod runtime;
@@ -12,7 +12,7 @@ fn secure_mcp(runtime: &ToolRuntime<'_>) -> Result<(), String> {
         &runtime.operation,
         format!("{}:mcp", runtime.operation.operation_id()),
     )
-    .map(|_| ())
+    .map(|_child| ())
     .map_err(|error| error.to_string())
 }
 
@@ -24,9 +24,13 @@ pub(crate) fn mcp_native_tool(
     if let Err(error) = secure_mcp(runtime) {
         return Some(Err(error));
     }
-    crate::tools::native_mcp_tool_target(runtime.cwd, tool).map(|(server, native_tool)| {
-        crate::mcp::call_tool(runtime.cwd, &server, &native_tool, input.clone())
-    })
+    match crate::tools::native_mcp_tool_target(runtime.cwd, tool) {
+        Ok(Some((server, native_tool))) => {
+            Some(crate::mcp::call_tool(runtime.cwd, &server, &native_tool, input.clone()))
+        }
+        Ok(None) => None,
+        Err(error) => Some(Err(format!("MCP tool {tool} cannot be resolved: {error}"))),
+    }
 }
 
 fn mcp_server(input: &Value) -> Result<String, String> {
@@ -47,7 +51,8 @@ pub(crate) fn mcp_call_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let tool = string_input(input, "tool")
         .filter(|tool| !tool.is_empty())
         .ok_or_else(|| "tool is required".to_string())?;
-    crate::mcp::call_tool(runtime.cwd, &server, &tool, object_input(input, "args"))
+    let arguments = arguments_input(input, "args", "mcp_call_tool")?;
+    crate::mcp::call_tool(runtime.cwd, &server, &tool, arguments)
 }
 
 pub(crate) fn mcp_list_resources(
@@ -80,5 +85,6 @@ pub(crate) fn mcp_get_prompt(runtime: &ToolRuntime<'_>, input: &Value) -> Result
     let name = string_input(input, "name")
         .filter(|name| !name.is_empty())
         .ok_or_else(|| "name is required".to_string())?;
-    crate::mcp::get_prompt(runtime.cwd, &server, &name, object_input(input, "args"))
+    let arguments = arguments_input(input, "args", "mcp_get_prompt")?;
+    crate::mcp::get_prompt(runtime.cwd, &server, &name, arguments)
 }

@@ -9,7 +9,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 use store::Store;
 pub(crate) use store::SCHEMA;
 
-const SCHEMA_VERSION: u32 = 1;
+/// Requests and responses are in their first schema.
+const SCHEMA_VERSION: u32 = crate::tally::FIRST as u32;
 
 #[derive(Clone, Debug)]
 pub(crate) enum Mode {
@@ -73,9 +74,7 @@ struct ExecutionOptions {
 fn emit(value: &impl Serialize, json: bool) -> Result<String, String> {
     let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
     if json {
-        return serde_json::to_string_pretty(&value)
-            .map(|v| v + "\n")
-            .map_err(|e| e.to_string());
+        return serde_json::to_string_pretty(&value).map(|v| v + "\n").map_err(|e| e.to_string());
     }
     let Some(fields) = value.as_object() else {
         return Ok(format!("{value}\n"));
@@ -96,9 +95,7 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
         Mode::State(id) => return emit(&Store::existing(id)?.saved()?, args.json),
         Mode::Resume(id) => {
             let store = Store::existing(id)?;
-            let request = store
-                .get::<Request>("request")?
-                .ok_or("stored request payload is missing")?;
+            let request = store.get::<Request>("request")?.ok_or("stored request payload is missing")?;
             (store, request, true)
         }
         Mode::Submit(path) => {
@@ -117,22 +114,26 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
     let Some(_claim) = store.claim()? else {
         return emit(&store.response()?, args.json);
     };
-    let mut response = store.get::<Response>("response")?.unwrap_or(Response {
-        schema_version: SCHEMA_VERSION,
-        request_id: request.request_id.clone(),
-        initiative_id: request.initiative_id.clone(),
-        state: State::Running,
-        run_id: None,
-        run_directory: store.directory.join("runs"),
-        contract: None,
-        verdict: None,
-        receipt: None,
-        source_revision: None,
-        source_revisions: BTreeMap::new(),
-        spent_usd: None,
-        evidence_refs: request.evidence_refs.clone(),
-        error: None,
-    });
+    // A request claimed for the first time has no response yet; it starts running.
+    let mut response = match store.get::<Response>("response")? {
+        Some(response) => response,
+        None => Response {
+            schema_version: SCHEMA_VERSION,
+            request_id: request.request_id.clone(),
+            initiative_id: request.initiative_id.clone(),
+            state: State::Running,
+            run_id: None,
+            run_directory: store.directory.join("runs"),
+            contract: None,
+            verdict: None,
+            receipt: None,
+            source_revision: None,
+            source_revisions: BTreeMap::new(),
+            spent_usd: None,
+            evidence_refs: request.evidence_refs.clone(),
+            error: None,
+        },
+    };
     if response.state == State::Succeeded
         || response.state == State::Failed
         || response.state == State::Indeterminate

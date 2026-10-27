@@ -45,7 +45,9 @@ impl Coordinator {
             })?;
             worker.last_heartbeat = now;
             let job = current_job_mut(state.jobs.get_mut(job_id), worker_id, attempt, fence, now)?;
-            let lease = job.lease.as_mut().expect("validated lease");
+            let Some(lease) = job.lease.as_mut() else {
+                return Err(ProtocolError::LeaseLost(format!("job {job_id} has no active lease")));
+            };
             lease.heartbeat_at = now;
             lease.expires_at = now.saturating_add(self.lease_ms);
             Ok(lease.expires_at)
@@ -75,14 +77,18 @@ impl Coordinator {
                     event.sequence
                 )));
             }
-            let next = job
+            // An attempt's events are numbered from the first, each one after
+            // the last recorded.
+            let next = match job
                 .events
                 .keys()
                 .filter(|(attempt, _)| *attempt == event.attempt)
                 .map(|(_, sequence)| *sequence)
                 .max()
-                .unwrap_or(0)
-                .saturating_add(1);
+            {
+                Some(last) => last.saturating_add(u64::from(crate::tally::STEP)),
+                None => crate::tally::FIRST,
+            };
             if event.sequence != next {
                 return Err(ProtocolError::Conflict(format!(
                     "event sequence gap: expected {next}, got {}",
@@ -163,7 +169,7 @@ impl Coordinator {
                 attempt.updated_at = now;
             }
             if let Some(worker) = state.workers.get_mut(worker_id) {
-                worker.running = worker.running.saturating_sub(1);
+                worker.running = worker.running.saturating_sub(u32::from(crate::tally::STEP));
             }
             Ok(output)
         })

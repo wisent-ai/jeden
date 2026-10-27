@@ -34,10 +34,10 @@ impl WelesBillingBackend {
 }
 impl BillingBackend for WelesBillingBackend {
     fn payment_method_setup(&self, account_id: &str) -> Result<PaymentMethodSetup, BillingError> {
-        let return_url = std::env::var("WELES_PAYMENT_RETURN_URL").map_err(|_| {
-            BillingError::Backend(
-                "WELES_PAYMENT_RETURN_URL must be configured to an HTTPS URL".into(),
-            )
+        let return_url = std::env::var("WELES_PAYMENT_RETURN_URL").map_err(|error| {
+            BillingError::Backend(format!(
+                "WELES_PAYMENT_RETURN_URL must be configured to an HTTPS URL: {error}"
+            ))
         })?;
         let request = PaymentMethodSetupRequest {
             account_id: account_id.into(),

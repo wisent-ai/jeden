@@ -267,21 +267,16 @@ pub(crate) fn execute(session: &Path, input: &Value) -> Result<Value, String> {
 }
 
 fn summary(state: &CompletionState) -> Value {
-    let mut phases: Vec<Value> = Vec::new();
+    // Tasks grouped by phase in first-seen order, typed until written out.
+    let mut grouped: Vec<(&str, Vec<_>)> = Vec::new();
     for task in &state.tasks {
-        let index = match phases.iter().position(|phase| phase["phase"] == task.phase) {
-            Some(index) => index,
-            None => {
-                let index = phases.len();
-                phases.push(json!({"phase": task.phase, "items": []}));
-                index
-            }
-        };
-        phases[index]["items"]
-            .as_array_mut()
-            .expect("phase items")
-            .push(serde_json::to_value(task).expect("task serializes"));
+        match grouped.iter_mut().find(|(phase, _)| *phase == task.phase) {
+            Some((_, items)) => items.push(task),
+            None => grouped.push((task.phase.as_str(), vec![task])),
+        }
     }
+    let phases: Vec<Value> =
+        grouped.into_iter().map(|(phase, items)| json!({"phase": phase, "items": items})).collect();
     let mut output = snapshot_value(state);
     output["phases"] = json!(phases);
     output["items"] = json!(state.tasks);

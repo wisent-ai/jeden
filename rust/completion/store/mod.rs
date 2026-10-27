@@ -3,10 +3,7 @@ mod workspace;
 pub(crate) use workspace::migrate as migrate_workspace;
 
 use super::model::*;
-#[cfg(unix)]
-use std::fs::File;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub(crate) const STATE_FILE: &str = "completion.json";
@@ -104,45 +101,15 @@ pub(crate) fn update<T>(
     Ok((output, state))
 }
 
-/// Writes `value` as pretty JSON beside `path` and renames it into place, so a
+/// Writes `value` as pretty JSON through the shared durable replace
+/// (a private staged file beside `path`, synced and renamed over it), so a
 /// reader sees the previous document or the new one, never a torn write.
 pub(crate) fn write_atomic<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), String> {
     regular_file_or_absent(path)?;
-    let parent = path
-        .parent()
-        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
-    let staging = parent.join(format!(".completion-{}.new", uuid::Uuid::new_v4()));
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        // Readable and writable by its owner only, as POSIX names the bits.
-        options.mode(u32::from(libc::S_IRUSR | libc::S_IWUSR));
-    }
-    let result: Result<(), String> = (|| {
-        let mut file = options.open(&staging).map_err(|error| error.to_string())?;
-        serde_json::to_writer_pretty(&mut file, value).map_err(|error| error.to_string())?;
-        file.write_all(b"\n").map_err(|error| error.to_string())?;
-        file.sync_all().map_err(|error| error.to_string())?;
-        fs::rename(&staging, path).map_err(|error| error.to_string())?;
-        #[cfg(unix)]
-        File::open(parent)
-            .and_then(|directory| directory.sync_all())
-            .map_err(|error| error.to_string())?;
-        Ok(())
-    })();
-    let Err(error) = result else {
-        return Ok(());
-    };
-    let refused = format!("cannot persist {}: {error}", path.display());
-    match fs::remove_file(&staging) {
-        Err(left) if left.kind() != std::io::ErrorKind::NotFound => Err(format!(
-            "{refused}; {} is left behind: {left}",
-            staging.display()
-        )),
-        _ => Err(refused),
-    }
+    let mut bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| format!("{} cannot be written as JSON: {error}", path.display()))?;
+    bytes.push(b'\n');
+    crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
 }
 
 pub(crate) fn inherit(source: &Path, destination: &Path) -> Result<CompletionState, String> {

@@ -181,7 +181,7 @@ pub(super) fn load_agent(path: &Path, precedence: usize) -> Result<Agent, String
 }
 
 pub(super) fn capability_from_result<T>(
-    kind: &'static str,
+    kind: crate::capability::CapabilityKind,
     path: &Path,
     result: &Result<T, String>,
     id: String,

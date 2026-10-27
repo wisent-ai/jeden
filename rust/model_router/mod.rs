@@ -130,25 +130,17 @@ impl StreamingCompletion {
             .iter()
             .filter(|result| matches!(result, RouteResult::RetryScheduled { .. }))
             .count() as u32;
-        let attempt = retries.saturating_add(1);
+        let mut served = crate::routing::ServedRouteEvidence::initial(
+            decision.decision_id.clone(),
+            decision.selected_route.clone(),
+        );
+        served.attempt = served.attempt.saturating_add(retries);
+        served.retry = retries > 0;
         if self.route.model != decision.selected_route {
-            crate::routing::ServedRouteEvidence::initial(
-                decision.decision_id.clone(),
-                decision.selected_route.clone(),
-            )
-            .fallback(self.route.model.clone(), attempt)
-        } else if retries > 0 {
-            crate::routing::ServedRouteEvidence::initial(
-                decision.decision_id.clone(),
-                decision.selected_route.clone(),
-            )
-            .retry(attempt)
-        } else {
-            crate::routing::ServedRouteEvidence::initial(
-                decision.decision_id.clone(),
-                decision.selected_route.clone(),
-            )
+            served.served_route = self.route.model.clone();
+            served.fallback = true;
         }
+        served
     }
 }
 
@@ -159,6 +151,9 @@ pub struct ChatConfig {
     pub endpoint_origin: String,
     pub endpoint_via_stado: bool,
     pub bearer_token: String,
+    /// This route belongs to the private gateway this process owns. Resolve
+    /// its current endpoint and bearer for each request, not from this snapshot.
+    pub own_gateway: bool,
     pub agent_id: String,
     pub secret: String,
     pub model: String,

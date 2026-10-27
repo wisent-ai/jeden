@@ -7,37 +7,24 @@ impl SessionBackend for AgentSessionFacade {
             .join("workspaces")
             .join(session_id);
         std::fs::create_dir_all(&cwd).map_err(|error| error.to_string())?;
-        let session = AgentSession::new(SessionOptions {
-            cwd,
-            ..SessionOptions::default()
-        })?;
+        let session = AgentSession::new(SessionOptions::at(cwd))?;
         let path = session.session_path()?;
-        self.sessions
-            .lock()
-            .map_err(|_| "agent session lock poisoned".to_string())?
+        crate::panicked::held(&self.sessions)
             .insert((tenant.as_str().to_owned(), session_id.to_owned()), session);
         Ok(path)
     }
 
     fn open(&self, tenant: &TenantId, session_id: &str, dir: &Path) -> Result<PathBuf, String> {
-        // `AgentSession::resume_in_place` (rust/sdk/session.rs:135) replays the
-        // ledger at `dir` and keeps its recorder pointed at that same directory,
-        // so every later turn appends to the ledger the operator's own terminal
-        // wrote. Plain `AgentSession::resume` (rust/sdk/session.rs:112) would
-        // seed a fresh session directory instead, which is a fork, not a
-        // continuation. The session's own recorded `cwd` is reused as the
-        // working directory so tools resolve exactly as they did on the host.
-        let session = AgentSession::resume_in_place(
-            SessionOptions {
-                cwd: session_cwd(dir)?,
-                ..SessionOptions::default()
-            },
-            dir,
-        )?;
+        // `AgentSession::resume_in_place` replays the ledger at `dir` and keeps
+        // its recorder pointed at that same directory, so every later turn
+        // appends to the ledger the operator's own terminal wrote. Plain
+        // `AgentSession::resume` would seed a fresh session directory instead,
+        // which is a fork, not a continuation. The session's own recorded `cwd`
+        // is reused as the working directory so tools resolve exactly as they
+        // did on the host.
+        let session = AgentSession::resume_in_place(SessionOptions::at(session_cwd(dir)?), dir)?;
         let path = session.session_path()?;
-        self.sessions
-            .lock()
-            .map_err(|_| "agent session lock poisoned".to_string())?
+        crate::panicked::held(&self.sessions)
             .insert((tenant.as_str().to_owned(), session_id.to_owned()), session);
         Ok(path)
     }
@@ -89,9 +76,10 @@ impl SessionBackend for AgentSessionFacade {
         }
         forwarder
             .join()
-            .map_err(|_| "session event forwarder panicked".to_string())?;
-        result.map(|result| {
-            serde_json::to_value(result).unwrap_or_else(|_| json!({"requestId": request_id}))
+            .map_err(|payload| crate::panicked::refusal("the session event forwarder", &*payload))?;
+        let result = result?;
+        serde_json::to_value(result).map_err(|error| {
+            format!("request {request_id} finished, but its result cannot be written as JSON: {error}")
         })
     }
 

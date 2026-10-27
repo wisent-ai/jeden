@@ -3,9 +3,6 @@ use sha2::{Digest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-
-static ARTIFACT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug)]
 pub struct OutputLimits {
@@ -52,19 +49,21 @@ impl ArtifactSink {
                 GrantError::Expired,
             ));
         }
-        let canonical = self.root.canonicalize().or_else(|_| {
-            let parent = self.root.parent().ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::PermissionDenied,
-                    "artifact root has no parent",
-                )
-            })?;
-            Ok::<PathBuf, io::Error>(parent.canonicalize()?.join(
-                self.root.file_name().ok_or_else(|| {
+        // An artifact root not made yet is judged by the directory it will be
+        // made in.
+        let canonical = match self.root.canonicalize() {
+            Ok(canonical) => canonical,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                let parent = self.root.parent().ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::PermissionDenied, "artifact root has no parent")
+                })?;
+                let name = self.root.file_name().ok_or_else(|| {
                     io::Error::new(io::ErrorKind::PermissionDenied, "artifact root has no name")
-                })?,
-            ))
-        })?;
+                })?;
+                parent.canonicalize()?.join(name)
+            }
+            Err(error) => return Err(error),
+        };
         if !grant
             .filesystem
             .write_roots
@@ -82,8 +81,10 @@ impl ArtifactSink {
         Ok(())
     }
 
-    fn maximum_bytes(&self) -> u64 {
-        self.grant.as_ref().map_or(u64::MAX, |grant| {
+    /// The most bytes one artifact may hold: the grant's file limits, or no
+    /// limit for an operation run under none.
+    fn maximum_bytes(&self) -> Option<u64> {
+        self.grant.as_ref().map(|grant| {
             grant
                 .filesystem
                 .max_file_bytes
@@ -94,16 +95,10 @@ impl ArtifactSink {
     fn create_output(&self, stream: &str) -> io::Result<(PathBuf, File)> {
         self.authorize_root()?;
         fs::create_dir_all(&self.root)?;
-        loop {
-            let sequence = ARTIFACT_SEQUENCE.fetch_add(1, Ordering::Relaxed);
-            let name = format!("operation-{}-{sequence}-{stream}.log", std::process::id());
-            let path = self.root.join(name);
-            match OpenOptions::new().write(true).create_new(true).open(&path) {
-                Ok(file) => return Ok((path, file)),
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(error),
-            }
-        }
+        let name = format!("operation-{}-{stream}.log", uuid::Uuid::new_v4());
+        let path = self.root.join(name);
+        let file = OpenOptions::new().write(true).create_new(true).open(&path)?;
+        Ok((path, file))
     }
 }
 
@@ -124,7 +119,7 @@ impl OutputCapture {
             text: String::new(),
             head: String::new(),
             tail: String::new(),
-            total_bytes: 0,
+            total_bytes: crate::tally::ORIGIN as u64,
             truncated: false,
             artifact: None,
             sha256: hex::encode(Sha256::digest([])),
@@ -157,7 +152,7 @@ impl BoundedOutput {
             artifacts,
             head: Vec::new(),
             tail: Vec::new(),
-            total_bytes: 0,
+            total_bytes: crate::tally::ORIGIN as u64,
             digest: Sha256::new(),
             spill: None,
         }
@@ -167,14 +162,14 @@ impl BoundedOutput {
         if bytes.is_empty() {
             return Ok(());
         }
-        if self.total_bytes.saturating_add(bytes.len() as u64) > self.artifacts.maximum_bytes() {
+        let grown = self.total_bytes.saturating_add(bytes.len() as u64);
+        if self.artifacts.maximum_bytes().is_some_and(|maximum| grown > maximum) {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "artifact output exceeds execution grant file limit",
             ));
         }
-        let previous_total = self.total_bytes;
-        self.total_bytes = self.total_bytes.saturating_add(bytes.len() as u64);
+        self.total_bytes = grown;
         self.digest.update(bytes);
         let Some(limits) = self.limits else {
             self.head.extend_from_slice(bytes);
@@ -186,10 +181,9 @@ impl BoundedOutput {
             file.write_all(&self.tail)?;
             self.spill = Some((path, file));
         }
+        // The bytes held inline were copied when the spill started; each
+        // chunk after that is appended.
         if let Some((_, file)) = self.spill.as_mut() {
-            if previous_total > 0 && previous_total <= limits.inline_bytes() as u64 {
-                // Existing bounded bytes were copied when spill started; only append this chunk.
-            }
             file.write_all(bytes)?;
         }
 
@@ -197,25 +191,10 @@ impl BoundedOutput {
         let head_take = head_remaining.min(bytes.len());
         self.head.extend_from_slice(&bytes[..head_take]);
 
-        if limits.tail_bytes > 0 {
-            let tail_input = &bytes[head_take..];
-            if tail_input.len() >= limits.tail_bytes {
-                self.tail.clear();
-                self.tail
-                    .extend_from_slice(&tail_input[tail_input.len() - limits.tail_bytes..]);
-            } else if !tail_input.is_empty() {
-                let overflow = self
-                    .tail
-                    .len()
-                    .saturating_add(tail_input.len())
-                    .saturating_sub(limits.tail_bytes);
-                if overflow > 0 {
-                    self.tail.copy_within(overflow.., 0);
-                    self.tail.truncate(self.tail.len() - overflow);
-                }
-                self.tail.extend_from_slice(tail_input);
-            }
-        }
+        // The tail keeps the last `tail_bytes` of what the head did not take.
+        self.tail.extend_from_slice(&bytes[head_take..]);
+        let excess = self.tail.len().saturating_sub(limits.tail_bytes);
+        self.tail.drain(..excess);
         Ok(())
     }
 

@@ -73,11 +73,14 @@ fn resolve_ground_truth(advisor: &AdvisorConfig) -> (String, String) {
         );
     }
     for name in ["WISENT_GROUND_TRUTH_API", "GROUND_TRUTH_API"] {
-        if let Ok(value) = std::env::var(name) {
-            let value = value.trim();
-            if !value.is_empty() {
-                return (value.trim_end_matches('/').to_string(), name.to_string());
+        match std::env::var(name) {
+            Ok(value) if !value.trim().is_empty() => {
+                return (value.trim().trim_end_matches('/').to_string(), name.to_string());
             }
+            Ok(_blank) | Err(std::env::VarError::NotPresent) => {}
+            // A value that is not text is said as the source, never passed
+            // over for the next variable or read as unset.
+            Err(error) => return (String::new(), format!("{name} cannot be read: {error}")),
         }
     }
     (String::new(), "unset".to_string())
@@ -189,7 +192,18 @@ fn parse_roots(raw: &str, cwd: &Path) -> Vec<DocRoot> {
         } else {
             cwd.join(expanded)
         };
-        let path = path.canonicalize().unwrap_or(path);
+        // A root resolves to its real path, so two spellings of one directory
+        // are one root. A root not created yet holds no documents and stays
+        // as declared; one that cannot be resolved for another reason is
+        // said with its cause, and the walk then names what it cannot read.
+        let path = match path.canonicalize() {
+            Ok(real) => real,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => path,
+            Err(error) => {
+                eprintln!("jeden: context root {} cannot be resolved: {error}", path.display());
+                path
+            }
+        };
         if roots.iter().any(|root| root.path == path) {
             continue;
         }

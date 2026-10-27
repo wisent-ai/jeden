@@ -1,46 +1,40 @@
 //! Reading the options a roadmap command was given, and refusing what it
 //! cannot act on.
-//!
-//! Split out of `roadmap/mod.rs`, which had grown past the module line cap.
 
 use super::super::model::RoadmapError;
 use super::super::store::RoadmapStore;
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-#[derive(Default)]
 pub(super) struct ParsedOptions {
     values: BTreeMap<String, Vec<String>>,
     pub(super) positionals: Vec<String>,
 }
 
 impl ParsedOptions {
+    /// `--name value` and `--name=value` pairs, each name keeping every
+    /// value given, and every other word as a positional.
     pub(super) fn parse(args: &[String]) -> Result<Self, RoadmapError> {
-        let mut parsed = Self::default();
-        let mut index = 0;
-        while index < args.len() {
-            let token = &args[index];
-            if let Some(name) = token.strip_prefix("--") {
-                let (name, inline) = name
-                    .split_once('=')
-                    .map(|(name, value)| (name.to_string(), Some(value.to_string())))
-                    .unwrap_or_else(|| (name.to_string(), None));
-                let value = match inline {
-                    Some(value) => value,
-                    None => {
-                        index += 1;
-                        args.get(index).cloned().ok_or_else(|| {
-                            RoadmapError::Usage(format!("--{name} requires a value"))
-                        })?
-                    }
-                };
-                parsed.values.entry(name).or_default().push(value);
-            } else {
-                parsed.positionals.push(token.clone());
-            }
-            index += 1;
+        let mut values: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut positionals = Vec::new();
+        let mut tokens = args.iter();
+        while let Some(token) = tokens.next() {
+            let Some(flag) = token.strip_prefix("--") else {
+                positionals.push(token.clone());
+                continue;
+            };
+            let (name, value) = match flag.split_once('=') {
+                Some((name, value)) => (name.to_string(), value.to_string()),
+                None => {
+                    let value = tokens.next().cloned().ok_or_else(|| {
+                        RoadmapError::Usage(format!("--{flag} requires a value"))
+                    })?;
+                    (flag.to_string(), value)
+                }
+            };
+            values.entry(name).or_default().push(value);
         }
-        Ok(parsed)
+        Ok(Self { values, positionals })
     }
 
     pub(super) fn one(&self, name: &str) -> Option<&str> {
@@ -50,8 +44,12 @@ impl ParsedOptions {
             .map(String::as_str)
     }
 
+    /// Every value given for `name`; an option never given has none.
     pub(super) fn many(&self, name: &str) -> Vec<String> {
-        self.values.get(name).cloned().unwrap_or_default()
+        match self.values.get(name) {
+            Some(values) => values.clone(),
+            None => Vec::new(),
+        }
     }
 }
 
@@ -62,7 +60,7 @@ pub(super) fn expected_revision(
     match options.one("revision") {
         Some(value) => value
             .parse::<u64>()
-            .map_err(|_| RoadmapError::Usage(format!("invalid --revision value: {value}"))),
+            .map_err(|error| RoadmapError::Usage(format!("invalid --revision value {value}: {error}"))),
         None => Ok(store.load()?.revision),
     }
 }

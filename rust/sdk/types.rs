@@ -3,27 +3,23 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default, rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "StatedSessionOptions")]
 pub struct SessionOptions {
     pub cwd: PathBuf,
-    #[serde(default)]
     pub model: Option<String>,
-    #[serde(default)]
     pub max_tokens: Option<u32>,
-    #[serde(default)]
     pub max_steps: Option<u32>,
-    #[serde(default)]
     pub allow_write: bool,
-    #[serde(default)]
     pub allow_command: bool,
-    #[serde(default)]
     pub auto_approve: bool,
 }
 
-impl Default for SessionOptions {
-    fn default() -> Self {
+impl SessionOptions {
+    /// A session working in `cwd` with no model override, no limits beyond the
+    /// configured ones, and no write, command or auto-approval grant.
+    pub fn at(cwd: PathBuf) -> Self {
         Self {
-            cwd: std::env::current_dir().unwrap_or_default(),
+            cwd,
             model: None,
             max_tokens: None,
             max_steps: None,
@@ -31,6 +27,50 @@ impl Default for SessionOptions {
             allow_command: false,
             auto_approve: false,
         }
+    }
+}
+
+/// Session options as a client states them. An unstated `cwd` is the
+/// directory the serving process runs in, the one its client started it in;
+/// when that directory cannot be read the options are refused with its cause
+/// rather than handed an empty path.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StatedSessionOptions {
+    cwd: Option<PathBuf>,
+    #[serde(default)]
+    model: Option<String>,
+    #[serde(default)]
+    max_tokens: Option<u32>,
+    #[serde(default)]
+    max_steps: Option<u32>,
+    #[serde(default)]
+    allow_write: bool,
+    #[serde(default)]
+    allow_command: bool,
+    #[serde(default)]
+    auto_approve: bool,
+}
+
+impl TryFrom<StatedSessionOptions> for SessionOptions {
+    type Error = String;
+
+    fn try_from(stated: StatedSessionOptions) -> Result<Self, Self::Error> {
+        let cwd = match stated.cwd {
+            Some(cwd) => cwd,
+            None => std::env::current_dir().map_err(|error| {
+                format!("the session states no cwd and this process's working directory cannot be read ({error}); state options.cwd")
+            })?,
+        };
+        Ok(Self {
+            cwd,
+            model: stated.model,
+            max_tokens: stated.max_tokens,
+            max_steps: stated.max_steps,
+            allow_write: stated.allow_write,
+            allow_command: stated.allow_command,
+            auto_approve: stated.auto_approve,
+        })
     }
 }
 
@@ -122,7 +162,8 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Capabilities {
-    pub protocol_version: u32,
+    /// The session protocol this runtime speaks, `meta.protocolVersion` on the wire.
+    pub protocol_version: String,
     pub prompt: bool,
     pub abort: bool,
     pub resume: bool,
@@ -135,7 +176,7 @@ pub struct Capabilities {
 impl Capabilities {
     pub(crate) fn current() -> Self {
         Self {
-            protocol_version: 1,
+            protocol_version: super::protocol::PROTOCOL_VERSION.to_owned(),
             prompt: true,
             abort: true,
             resume: true,

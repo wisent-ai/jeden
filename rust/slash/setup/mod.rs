@@ -23,7 +23,10 @@ pub(crate) use steps::{handle_text, run_interactive};
 const BRAMA_URL_KEY: &str = "BRAMA_URL";
 const AGENT_ID_KEY: &str = "WISENT_APP_AGENT_ID";
 const AGENT_SECRET_KEY: &str = "WISENT_APP_AGENT_AUTH_SECRET";
-const DEFAULT_AGENT_ID: &str = "wisent-app";
+/// The agent Brama routes for and Weles logs in for when neither
+/// WISENT_APP_AGENT_ID nor the configuration names one, as /setup offers it
+/// and Jeden's overview documents it. Routing, /setup and /login read it here.
+pub(crate) const DEFAULT_AGENT_ID: &str = "wisent-app";
 
 struct SetupState {
     brama_url: Option<String>,
@@ -42,19 +45,10 @@ struct SetupState {
 
 fn setup_state(context: &SlashContext<'_>) -> SetupState {
     let config = load_config(context.cwd);
-    let mut model_error = None;
-    let model = match context.model.map(str::to_string).or(config.model.clone()) {
-        Some(model) => Some(model),
-        None => match std::env::var("JEDEN_MODEL") {
-            Ok(model) => Some(model),
-            Err(std::env::VarError::NotPresent) => None,
-            Err(error) => {
-                model_error = Some(format!("JEDEN_MODEL cannot be read: {error}"));
-                None
-            }
-        },
-    }
-    .filter(|value| !value.trim().is_empty());
+    let (model, model_error) = match crate::agent::selected_model(context.model, config.model.as_deref()) {
+        Ok(model) => (model, None),
+        Err(cause) => (None, Some(cause)),
+    };
     let theme = config.ui.theme.clone();
     let (workspace, workspace_error) = match crate::cli::workspace::status(context.cwd) {
         Ok(Some(report)) => (Some(report.workspace), None),

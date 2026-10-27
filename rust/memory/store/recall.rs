@@ -90,7 +90,6 @@ impl MemoryStore {
         let backend = HybridBackend {
             provider: None,
             as_of: Some(as_of),
-            half_life_ms: 30.0 * 24.0 * 60.0 * 60.0 * 1_000.0,
         };
         self.recall(&backend, scope, query, limit)
     }
@@ -153,7 +152,7 @@ impl MemoryStore {
                 event_kind: Set("conflict-resolved".into()),
                 payload_json: Set(payload),
                 state: Set("pending".into()),
-                attempts: Set(0),
+                attempts: Set(crate::tally::ORIGIN as i64),
                 available_at: Set(now),
                 lease_owner: Set(None),
                 lease_until: Set(None),

@@ -15,20 +15,15 @@ use crate::context::advisor;
 
 const INVALID: &str = "invalid_params";
 
-/// The workspace an RPC request reads from: its `cwd`, or this server's own
-/// working directory when the request names none. A `cwd` that is not a
-/// string, or a server whose own directory cannot be read, is refused with the
-/// cause instead of reading from an empty path.
+/// The workspace an RPC request reads from: its `cwd`. A request that names
+/// none is refused: this server's own working directory is wherever its
+/// client launched it, not the project the client is showing, so answering
+/// from it read another project's configuration and lease register.
 pub(super) fn cwd(params: &Value) -> Result<PathBuf, (&'static str, String)> {
     match params.get("cwd") {
-        Some(Value::String(path)) => Ok(PathBuf::from(path)),
-        Some(other) => Err((INVALID, format!("cwd must be a path string; got {other}"))),
-        None => std::env::current_dir().map_err(|error| {
-            (
-                "internal_error",
-                format!("the request names no cwd and this server's working directory cannot be read: {error}"),
-            )
-        }),
+        Some(Value::String(path)) if !path.is_empty() => Ok(PathBuf::from(path)),
+        Some(other) => Err((INVALID, format!("cwd must be a non-empty path string; got {other}"))),
+        None => Err((INVALID, "the request names no cwd, the workspace it reads from".to_string())),
     }
 }
 

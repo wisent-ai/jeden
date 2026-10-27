@@ -51,29 +51,46 @@ fn clipboard_readers() -> Vec<(&'static str, Vec<&'static str>)> {
     }
 }
 
+/// What a command that answered with a failure said: its stderr, or its exit
+/// status when it wrote none.
+fn refused(command: &str, output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        format!("{command} exited with {}", output.status)
+    } else {
+        format!("{command}: {stderr}")
+    }
+}
+
+/// Every clipboard command tried and what each answered, so a refusal names
+/// the one that is missing as well as the one that failed.
+fn none_answered(what: &str, attempts: &[String]) -> String {
+    if attempts.is_empty() {
+        format!("no clipboard {what} exists for {}", env::consts::OS)
+    } else {
+        format!("no clipboard {what} answered: {}", attempts.join("; "))
+    }
+}
+
 /// What the clipboard holds right now, and which command answered.
 pub(crate) fn read_clipboard() -> Result<(String, String), String> {
-    let mut last_error = "no clipboard reader was attempted".to_string();
+    let mut attempts = Vec::new();
     for (command, args) in clipboard_readers() {
-        match Command::new(command).args(args).output() {
+        let read = stado_wait::blocking(stado_wait::Kind::Process, "the clipboard reader", command, || {
+            Command::new(command).args(&args).output()
+        });
+        match read {
             Ok(output) if output.status.success() => {
                 return Ok((
                     String::from_utf8_lossy(&output.stdout).to_string(),
                     command.to_string(),
                 ))
             }
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                last_error = if stderr.is_empty() {
-                    format!("{command} exited with {}", output.status)
-                } else {
-                    stderr
-                };
-            }
-            Err(error) => last_error = error.to_string(),
+            Ok(output) => attempts.push(refused(command, &output)),
+            Err(error) => attempts.push(format!("{command}: {error}")),
         }
     }
-    Err(last_error)
+    Err(none_answered("reader", &attempts))
 }
 
 /// Whether a writer keeps the trailing newline is the writer's business; the
@@ -84,7 +101,7 @@ pub(crate) fn same_payload(left: &str, right: &str) -> bool {
 }
 
 pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
-    let mut last_error = "no clipboard command was attempted".to_string();
+    let mut attempts = Vec::new();
     for (command, args) in clipboard_candidates() {
         match Command::new(command)
             .args(args)
@@ -96,32 +113,29 @@ pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
             Ok(mut child) => {
                 if let Some(stdin) = child.stdin.as_mut() {
                     if let Err(error) = stdin.write_all(payload.as_bytes()) {
-                        last_error = match child.kill() {
-                            Ok(()) => error.to_string(),
-                            Err(kill) => format!("{error}; {command} could not be stopped: {kill}"),
-                        };
+                        attempts.push(match child.kill() {
+                            Ok(()) => format!("{command}: {error}"),
+                            Err(kill) => {
+                                format!("{command}: {error}; it could not be stopped: {kill}")
+                            }
+                        });
                         continue;
                     }
                 }
-                match child.wait_with_output() {
+                match stado_wait::blocking(stado_wait::Kind::Process, "the clipboard writer", command, || {
+                    child.wait_with_output()
+                }) {
                     Ok(output) if output.status.success() => {
                         return verified(command, payload).map(|_reader| command.to_string())
                     }
-                    Ok(output) => {
-                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                        last_error = if stderr.is_empty() {
-                            format!("{command} exited with {}", output.status)
-                        } else {
-                            stderr
-                        };
-                    }
-                    Err(error) => last_error = error.to_string(),
+                    Ok(output) => attempts.push(refused(command, &output)),
+                    Err(error) => attempts.push(format!("{command}: {error}")),
                 }
             }
-            Err(error) => last_error = error.to_string(),
+            Err(error) => attempts.push(format!("{command} cannot be started: {error}")),
         }
     }
-    Err(last_error)
+    Err(none_answered("writer", &attempts))
 }
 
 /// A writer that exits zero can still leave the clipboard untouched, and the
@@ -141,11 +155,11 @@ fn verified(command: &str, payload: &str) -> Result<String, String> {
     if same_payload(&found, payload) {
         return Ok(reader);
     }
-    let first = found.lines().next().unwrap_or("").trim();
-    Err(format!(
-        "{command} exited zero but {reader} reads {} bytes that are not the payload: it begins {first:?}. Nothing was handed over.",
-        found.len()
-    ))
+    let holds = match found.lines().next() {
+        Some(first) => format!("{} bytes that are not the payload: it begins {:?}", found.len(), first.trim()),
+        None => format!("{} bytes and no line, which is not the payload", found.len()),
+    };
+    Err(format!("{command} exited zero but {reader} reads {holds}. Nothing was handed over."))
 }
 
 pub(super) fn build_copy_picker() -> PickerSpec {

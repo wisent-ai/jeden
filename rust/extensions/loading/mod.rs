@@ -10,14 +10,26 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use super::DeclarativeCapability;
-use std::time::SystemTime;
 
 pub(crate) mod host;
+mod host_stream;
 pub(crate) mod materialize;
 pub(crate) mod roots;
 
+/// The key a working directory's registry is kept under: the directory
+/// resolved. One that cannot be resolved is keyed as written and the cause
+/// is said; the source scan that follows refuses what it cannot read.
 pub(super) fn canonical_key(cwd: &Path) -> PathBuf {
-    fs::canonicalize(cwd).unwrap_or_else(|_| cwd.to_path_buf())
+    match fs::canonicalize(cwd) {
+        Ok(resolved) => resolved,
+        Err(unresolved) => {
+            eprintln!(
+                "jeden: the extension registry of {} is keyed as written, since it cannot be resolved: {unresolved}",
+                cwd.display()
+            );
+            cwd.to_path_buf()
+        }
+    }
 }
 
 /// The module formats the extension host loads, named by file extension.
@@ -77,8 +89,12 @@ pub(super) fn package_entries(root: &Path) -> Result<Vec<PathBuf>, String> {
 /// The extension modules under `root`: a module file itself, a package's
 /// declared entries, an `index` module, or every module file in it (and, with
 /// `recursive_children`, in its child directories). A root that does not
-/// exist holds none; one that cannot be listed is refused naming it.
+/// exist holds none; one that cannot be examined or listed is refused naming
+/// it, never read as a root without extensions.
 pub(crate) fn scan_modules(root: &Path, recursive_children: bool) -> Result<Vec<PathBuf>, String> {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(root)? {
+        return Ok(Vec::new());
+    }
     if module_file(root) {
         return Ok(vec![root.to_path_buf()]);
     }
@@ -115,8 +131,8 @@ pub(crate) fn scan_modules(root: &Path, recursive_children: bool) -> Result<Vec<
 
 /// What a root may declare besides modules. Each kind is a directory of
 /// files under the root, except hooks, which is one manifest.
-#[derive(Clone, Copy)]
-enum DeclarativeKind {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum DeclarativeKind {
     Commands,
     Hooks,
     Skills,
@@ -133,13 +149,31 @@ impl DeclarativeKind {
         DeclarativeKind::Rules,
     ];
 
-    fn name(self) -> &'static str {
+    pub(crate) fn name(self) -> &'static str {
         match self {
             DeclarativeKind::Commands => "commands",
             DeclarativeKind::Hooks => "hooks",
             DeclarativeKind::Skills => "skills",
             DeclarativeKind::Agents => "agents",
             DeclarativeKind::Rules => "rules",
+        }
+    }
+
+    /// The kind `name` spells, read back through [`DeclarativeKind::name`].
+    pub(crate) fn named(name: &str) -> Option<DeclarativeKind> {
+        Self::EVERY.iter().copied().find(|kind| kind.name() == name)
+    }
+
+    /// The capability each definition of this kind is listed as, for the
+    /// kinds the declarative runtime loads; none for those the registry
+    /// carries itself.
+    pub(crate) fn capability(self) -> Option<crate::capability::CapabilityKind> {
+        use crate::capability::CapabilityKind;
+        match self {
+            DeclarativeKind::Skills => Some(CapabilityKind::Skill),
+            DeclarativeKind::Agents => Some(CapabilityKind::Agent),
+            DeclarativeKind::Rules => Some(CapabilityKind::Rule),
+            DeclarativeKind::Commands | DeclarativeKind::Hooks => None,
         }
     }
 
@@ -170,7 +204,7 @@ impl DeclarativeKind {
                 }
             }
             _ => fs::read_dir(path)
-                .map(|_| ())
+                .map(drop)
                 .map_err(|error| error.to_string()),
         }
     }
@@ -198,42 +232,37 @@ pub(super) fn declarative_paths(root: &Path, precedence: usize) -> Vec<Declarati
     }
     values
 }
+/// Hash what is under `path`: names, sizes and modification times. What
+/// cannot be read is hashed as its error's kind, so a tree that turns
+/// readable or unreadable changes the fingerprint as well.
 pub(super) fn hash_path_tree(path: &Path, hasher: &mut DefaultHasher) {
     path.hash(hasher);
-    let Ok(metadata) = fs::metadata(path) else {
-        return;
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) => return error.kind().hash(hasher),
     };
     metadata.len().hash(hasher);
-    metadata
-        .modified()
-        .unwrap_or(SystemTime::UNIX_EPOCH)
-        .hash(hasher);
+    match metadata.modified() {
+        Ok(modified) => modified.hash(hasher),
+        Err(error) => error.kind().hash(hasher),
+    }
     if metadata.is_dir() {
-        let Ok(entries) = fs::read_dir(path) else {
-            return;
+        let entries = match fs::read_dir(path) {
+            Ok(entries) => entries,
+            Err(error) => return error.kind().hash(hasher),
         };
-        let mut children = entries
-            .flatten()
-            .map(|entry| entry.path())
-            .collect::<Vec<_>>();
+        let mut children = Vec::new();
+        for entry in entries {
+            match entry {
+                Ok(entry) => children.push(entry.path()),
+                Err(error) => error.kind().hash(hasher),
+            }
+        }
         children.sort();
         for child in children {
             hash_path_tree(&child, hasher);
         }
     }
-}
-
-/// A JSON file the loader reads, such as a plugin registry: a file that does
-/// not exist is `Value::Null`; one that cannot be read or does not parse is
-/// refused naming the file, never read as empty.
-pub(super) fn read_json(path: &Path) -> Result<Value, String> {
-    let text = match fs::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Value::Null),
-        Err(error) => return Err(format!("{} cannot be read: {error}", path.display())),
-    };
-    serde_json::from_str(&text)
-        .map_err(|error| format!("{} is not valid JSON: {error}", path.display()))
 }
 
 /// `key` as the configuration layers that apply here declare it, a later

@@ -100,20 +100,15 @@ impl View {
         }
     }
 
-    /// Save the view, replaced whole through a file beside it.
+    /// Save the view, replaced whole through the shared durable replace: a
+    /// staged file of this write's own, synced and renamed over it. One
+    /// fixed staging name let two processes saving at once interleave on it.
     pub fn save(&self, dir: &Path) -> Result<(), String> {
         let path = path(dir);
-        let staged = dir.join("view.json.staged");
         let text = serde_json::to_string(self)
             .map_err(|error| format!("the chat memory view cannot be encoded: {error}"))?;
-        fs::write(&staged, text)
-            .and_then(|()| fs::rename(&staged, &path))
-            .map_err(|error| {
-                format!(
-                    "the chat memory view {} cannot be written: {error}",
-                    path.display()
-                )
-            })
+        crate::tool_runtime::runtime_ops::durable::replace(&path, text.as_bytes())
+            .map_err(|cause| format!("the chat memory view cannot be saved: {cause}"))
     }
 
     /// How many messages the view covers: its nodes cover the chat from its

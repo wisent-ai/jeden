@@ -29,15 +29,24 @@ pub(super) fn wait_owned_process(
         wake.send(ProcessEvent::Cancelled).is_ok()
     });
     let exit_tx = events_tx.clone();
+    let pid = child.id();
     thread::scope(|scope| -> Result<(ExitStatus, TerminationReason), String> {
         scope.spawn(move || {
-            let _ = exit_tx.send(ProcessEvent::Exited(child.wait()));
+            let exited = stado_wait::blocking(
+                stado_wait::Kind::Process,
+                "a managed command to exit",
+                format!("process {pid}"),
+                || child.wait(),
+            );
+            // The waiter below has returned when no one receives the exit.
+            let _unreceived = exit_tx.send(ProcessEvent::Exited(exited));
         });
         let mut reason = TerminationReason::Completed;
-        let mut escalation = 0u8;
+        // The first cancellation terminates the tree; any later one kills it.
+        let mut next_signal = ProcessSignal::Terminate;
         if context.cancellation().is_cancelled() {
             reason = TerminationReason::Cancelled;
-            escalation = escalate(process_tree, escalation)?;
+            next_signal = escalate(process_tree, next_signal)?;
         }
         loop {
             match events.recv() {
@@ -56,26 +65,26 @@ pub(super) fn wait_owned_process(
                 Ok(ProcessEvent::Cancelled) => {
                     if context.cancellation().is_cancelled() {
                         reason = TerminationReason::Cancelled;
-                        escalation = escalate(process_tree, escalation)?;
+                        next_signal = escalate(process_tree, next_signal)?;
                     }
                 }
-                Err(_) => return Err("managed process event channel closed".into()),
+                Err(closed) => {
+                    return Err(format!("managed process event channel closed: {closed}"))
+                }
             }
         }
     })
 }
 
-/// Terminate on the first cancellation, kill on any later one.
-fn escalate(process_tree: &mut dyn ProcessTree, escalation: u8) -> Result<u8, String> {
-    let signal = if escalation == 0 {
-        ProcessSignal::Terminate
-    } else {
-        ProcessSignal::Kill
-    };
+/// Send `signal` to the tree; whatever is sent, a later cancellation kills.
+fn escalate(
+    process_tree: &mut dyn ProcessTree,
+    signal: ProcessSignal,
+) -> Result<ProcessSignal, String> {
     process_tree
         .signal(signal)
         .map_err(|error| error.to_string())?;
-    Ok(escalation.saturating_add(1))
+    Ok(ProcessSignal::Kill)
 }
 
 /// Descendants left behind by a finished command are killed with it. A group

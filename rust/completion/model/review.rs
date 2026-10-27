@@ -172,13 +172,15 @@ pub(crate) struct RequestReview {
 /// the answer it stopped on, whole.
 ///
 /// A finished run can end on `invalid acceptance review: missing field
-/// \`taskId\` at line 1 column 2408`, and finding out what the verifier
+/// \`taskId\` at line <n> column <m>`, and finding out what the verifier
 /// actually wrote then means reading the retained inspection session by
 /// hand. The column is only useful beside the text it points into.
 pub(crate) fn unreadable(kind: &str, answer: &str, error: &serde_json::Error) -> String {
-    let line = answer
-        .lines()
-        .nth(error.line().saturating_sub(1))
-        .unwrap_or(answer);
-    format!("invalid {kind}: {error}; the answer reads: {line}")
+    // serde counts lines from one, so the line it stopped on is the last of
+    // the first `line` lines; a position on no line (line zero) quotes the
+    // whole answer.
+    match answer.lines().take(error.line()).last() {
+        Some(line) => format!("invalid {kind}: {error}; the answer reads: {line}"),
+        None => format!("invalid {kind}: {error}; the answer reads: {answer}"),
+    }
 }

@@ -13,8 +13,7 @@ const DOLLAR_POSITIONALS: &[&str] = &["$1", "$2", "$3", "$4", "$5", "$6", "$7", 
 pub(crate) fn strip_frontmatter(text: &str) -> String {
     let trimmed = text.trim_start_matches("\u{feff}");
     if let Some(rest) = trimmed.strip_prefix("---\n") {
-        if let Some(end) = rest.find("\n---") {
-            let after = &rest[end + "\n---".len()..];
+        if let Some((_, after)) = rest.split_once("\n---") {
             return after.trim_start_matches('\n').to_string();
         }
     }
@@ -48,128 +47,159 @@ fn parse_command_args(args: &str) -> Vec<String> {
     out
 }
 
-fn replace_arg_slices(template: &str, positionals: &[String]) -> (String, bool) {
+/// The whole number `raw` writes. Text that is not digits names no position,
+/// so the placeholder holding it is none and stays as written; digits too
+/// large to be a position are refused naming the placeholder.
+fn whole_number(raw: &str, placeholder: &str) -> Result<Option<usize>, String> {
+    let digits = raw.trim();
+    if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
+        return Ok(None);
+    }
+    digits
+        .parse::<usize>()
+        .map(Some)
+        .map_err(|error| format!("the command template's placeholder {placeholder} names no argument position: {error}"))
+}
+
+/// The positional argument at zero-based `index`; a placeholder for an
+/// argument the invocation did not give expands to nothing, as in a shell.
+fn positional(positionals: &[String], index: usize) -> String {
+    match positionals.get(index) {
+        Some(value) => value.clone(),
+        None => String::new(),
+    }
+}
+
+/// The arguments from position `start` on, counted from one as `$1` is (a
+/// position before the first reads from the first), at most `length` of them
+/// when a length is given.
+fn argument_slice(positionals: &[String], start: usize, length: Option<usize>) -> String {
+    let from_start = positionals
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| positionals[..=*index].len() >= start)
+        .map(|(_, value)| value.as_str());
+    let taken: Vec<&str> = match length {
+        Some(length) => from_start.take(length).collect(),
+        None => from_start.collect(),
+    };
+    taken.join(" ")
+}
+
+fn replace_arg_slices(template: &str, positionals: &[String]) -> Result<(String, bool), String> {
     let mut out = String::new();
     let mut rest = template;
     let mut used = false;
-    let one = usize::from(true);
-    while let Some(start) = rest.find("$@[") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + "$@[".len()..];
-        let Some(end) = after.find(']') else {
-            out.push_str(&rest[start..]);
-            return (out, used);
-        };
-        let spec = &after[..end];
-        let replacement = if let Some((raw_start, raw_len)) = spec.split_once(':') {
-            let start = raw_start.trim().parse::<usize>().ok();
-            let len = raw_len.trim().parse::<usize>().ok();
-            start.zip(len).map(|(start, len)| {
-                let from = start.saturating_sub(one).min(positionals.len());
-                let to = from.saturating_add(len).min(positionals.len());
-                positionals[from..to].join(" ")
-            })
-        } else {
-            spec.trim().parse::<usize>().ok().map(|start| {
-                let from = start.saturating_sub(one).min(positionals.len());
-                positionals[from..].join(" ")
-            })
-        };
-        if let Some(value) = replacement {
-            out.push_str(&value);
-            used = true;
-        } else {
+    while let Some((before, after)) = rest.split_once("$@[") {
+        out.push_str(before);
+        let Some((spec, remaining)) = after.split_once(']') else {
             out.push_str("$@[");
-            out.push_str(spec);
-            out.push(']');
+            out.push_str(after);
+            return Ok((out, used));
+        };
+        let placeholder = format!("$@[{spec}]");
+        // A spec that is not `start` or `start:length` in whole numbers is no
+        // slice: it stays in the prompt as written.
+        let replacement = match spec.split_once(':') {
+            Some((raw_start, raw_length)) => match (
+                whole_number(raw_start, &placeholder)?,
+                whole_number(raw_length, &placeholder)?,
+            ) {
+                (Some(start), Some(length)) => Some(argument_slice(positionals, start, Some(length))),
+                _ => None,
+            },
+            None => whole_number(spec, &placeholder)?.map(|start| argument_slice(positionals, start, None)),
+        };
+        match replacement {
+            Some(value) => {
+                out.push_str(&value);
+                used = true;
+            }
+            None => out.push_str(&placeholder),
         }
-        rest = &after[end + "]".len()..];
+        rest = remaining;
     }
     out.push_str(rest);
-    (out, used)
+    Ok((out, used))
 }
 
 fn render_prompt_variables(
     template: &str,
     raw_args: &str,
     positionals: &[String],
-) -> (String, bool) {
+) -> Result<(String, bool), String> {
     let mut out = String::new();
     let mut rest = template;
     let mut used = false;
-    while let Some(start) = rest.find("{{") {
-        out.push_str(&rest[..start]);
-        let after = &rest[start + "{{".len()..];
-        let Some(end) = after.find("}}") else {
-            out.push_str(&rest[start..]);
-            return (out, used);
+    while let Some((before, after)) = rest.split_once("{{") {
+        out.push_str(before);
+        let Some((written, remaining)) = after.split_once("}}") else {
+            out.push_str("{{");
+            out.push_str(after);
+            return Ok((out, used));
         };
-        let expr = after[..end].trim();
+        let placeholder = format!("{{{{{written}}}}}");
+        let expr = written.trim();
         let value = match expr {
             // The command-file convention's own name (Claude Code commands:
             // `$ARGUMENTS`); the lowercase second spelling is gone.
             "ARGUMENTS" => Some(raw_args.to_string()),
             "args" => Some(positionals.join(" ")),
             _ => {
-                if let Some(index) = expr
-                    .strip_prefix("args.")
-                    .and_then(|raw| raw.parse::<usize>().ok())
-                {
-                    Some(positionals.get(index).cloned().unwrap_or_default())
-                } else if let Some(raw) = expr
-                    .strip_prefix("args[")
-                    .and_then(|raw| raw.strip_suffix(']'))
-                {
-                    raw.parse::<usize>()
-                        .ok()
-                        .map(|index| positionals.get(index).cloned().unwrap_or_default())
-                } else {
-                    None
-                }
+                let index = match (expr.strip_prefix("args."), expr.strip_prefix("args[").and_then(|raw| raw.strip_suffix(']'))) {
+                    (Some(raw), _) | (None, Some(raw)) => whole_number(raw, &placeholder)?,
+                    (None, None) => None,
+                };
+                index.map(|index| positional(positionals, index))
             }
         };
-        if let Some(value) = value {
-            out.push_str(&value);
-            used = true;
-        } else {
-            out.push_str("{{");
-            out.push_str(&after[..end]);
-            out.push_str("}}");
+        match value {
+            Some(value) => {
+                out.push_str(&value);
+                used = true;
+            }
+            None => out.push_str(&placeholder),
         }
-        rest = &after[end + "}}".len()..];
+        rest = remaining;
     }
     out.push_str(rest);
-    (out, used)
+    Ok((out, used))
 }
 
 /// Expand a command template with args: `$ARGUMENTS`/`$@` = all args, `$1..$9` =
 /// positionals. If the template uses no placeholder and args exist, they are
 /// appended so a bare-body command still receives its arguments.
-pub(crate) fn expand_file_command(template: &str, args: &str) -> String {
+pub(crate) fn expand_file_command(template: &str, args: &str) -> Result<String, String> {
     let args = args.trim();
     let positionals = parse_command_args(args);
-    let (mut out, used_slice) = replace_arg_slices(template, &positionals);
+    let (mut out, used_slice) = replace_arg_slices(template, &positionals)?;
     let used_dollar_placeholder = used_slice
         || out.contains("$ARGUMENTS")
         || out.contains("$@")
         || DOLLAR_POSITIONALS.iter().any(|token| out.contains(token));
     out = out.replace("$ARGUMENTS", args).replace("$@", args);
     for (index, token) in DOLLAR_POSITIONALS.iter().enumerate() {
-        out = out.replace(
-            token,
-            positionals.get(index).map(String::as_str).unwrap_or(""),
-        );
+        out = out.replace(token, &positional(&positionals, index));
     }
-    let (rendered, used_prompt_variable) = render_prompt_variables(&out, args, &positionals);
+    let (rendered, used_prompt_variable) = render_prompt_variables(&out, args, &positionals)?;
     out = rendered;
     if !(used_dollar_placeholder || used_prompt_variable) && !args.is_empty() {
         out = format!("{}\n\n{}", out.trim_end(), args);
     }
-    out
+    Ok(out)
 }
 
-/// A file command resolved to its runnable prompt, or None. Public so both the
-/// CLI run path and the interactive handler share one discovery.
-pub(crate) fn resolve_file_command(cwd: &Path, command: &str, args: &str) -> Option<String> {
-    find_file_command(cwd, command).map(|template| expand_file_command(&template, args))
+/// A file command resolved to its runnable prompt, or none when no provider
+/// declares it; a declared command whose file cannot be read, or whose
+/// template names no argument position, is refused naming it. The CLI run
+/// path and the interactive handler share this one discovery.
+pub(crate) fn resolve_file_command(
+    cwd: &Path,
+    command: &str,
+    args: &str,
+) -> Result<Option<String>, String> {
+    match find_file_command(cwd, command)? {
+        Some(template) => expand_file_command(&template, args).map(Some),
+        None => Ok(None),
+    }
 }

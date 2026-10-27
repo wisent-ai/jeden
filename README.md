@@ -51,6 +51,28 @@ Brama retains its own account leases and routing; a direct provider requires
 neither a Brama signature nor a gateway lease. `/setup` and `jeden doctor`
 report the active route and observed catalog refusal.
 
+When Brama is not routed to Jeden, Jeden holds no credential for it, or Brama
+refuses or does not answer the catalog read, Jeden does not stop: the first
+provider in its token list stands in, and with none there, Jeden starts its own
+standalone Brama (`brama serve --port 0 --local-credentials-stdin`) on the
+subscription grants it keeps in `~/.jeden/brama/grants.json`, an owner-only
+file that gateway reads at start and writes back after every renewal, so a
+rotated refresh token is kept. That gateway runs for the one command that
+needed it, under `~/.jeden/brama`, with a bearer Jeden makes for it; standard
+error says which stood in and why. With neither, the run refuses naming
+Brama's cause, the empty token list and the absent grants file.
+
+The private gateway holds its ownership lock until its child has stopped and
+been reaped. A stop failure keeps that ownership and reports the process and
+cause rather than letting another process renew the same subscriptions.
+
+Buffered calls and streaming attempts resolve the private gateway's current
+address and bearer together before dispatch, even when their model configuration
+was built before the previous child ended. Explicit providers retain precedence
+over stand-ins, and stored-provider keys still rotate per request. Transport
+errors identify the selected request endpoint; an in-flight request is not
+replayed if the gateway exits after dispatch.
+
 Durable memory, pursuit request state and collab-relay rooms require an explicit
 `JEDEN_DATABASE_URL`, with `JEDEN_DATABASE_CA_FILE` for a server database. A
 SQLite file is local to its host; hosts share a server database when they use
@@ -73,6 +95,16 @@ executable on macOS; see the [signing contract](https://stado.wisent.com/docs/si
 
 - `jeden run` handles a concrete task; `jeden pursue` integrates Pursuit's
   outcome contract and independent review with Jeden's model conversations.
+- `jeden hillclimb --allow-write --allow-command [--scope organization] ["focus"]`
+  improves a repository, or every repository under the directory, without end:
+  each round a read-only conversation reads the product and the ledger of
+  earlier rounds and chooses the next improvement, `pursue` carries it to an
+  independently accepted or failed verdict, and the round is appended to the
+  ledger before the next one chooses. Organization rounds execute inside the chosen checkout, checked against `--only`; they never execute in the parent directory. `--rounds n` bounds it; `/hillclimb` shows the ledger. See the [hillclimb command](https://jeden.wisent.com/docs/cli/hillclimb).
+  `jeden hillclimb --status [--ledger path] --cwd path --json` reads history without model calls or mutation grants. Relative ledger paths resolve against that workspace. Native `hillclimb/run`, `hillclimb/cancel`, `hillclimb/active` and `hillclimb/status` back Desktop's workspace-bound controls, explicit grants, live progress, cooperative stop and final ledger readback. A cancellation acknowledgement is not completion; history is not worker liveness.
+  One process owns a ledger's `.lock` sidecar for the invocation; contenders are refused before choosing a round. Exit releases ownership, not the sidecar file. `JEDEN_BIN=… JEDEN_TEST_SOURCE_REVISION=… node tests/hillclimb/climb.mjs` covers real contention, release, and accepted repository/organization rounds with source and binary provenance.
+  `JEDEN_BIN=… JEDEN_TEST_SOURCE_REVISION=… node tests/hillclimb/status.mjs` covers real RPC/CLI read-only boundaries and malformed persisted history. Add `JEDEN_TEST_MODEL=…` and run `node tests/hillclimb/control.mjs` for actual model-backed native execution, cancellation, EOF cleanup and subsequent accepted CLI work. Reports retain source/binary identity and raw frames beneath `.build`; neither source changes nor protocol capability declarations establish a passing journey or qualify Desktop's rendered screen.
+  Model-backed journeys additionally require an exclusively reserved canonical `JEDEN_TEST_REPOSITORY`, its matching `JEDEN_TEST_REPOSITORY_ORIGIN`, and an isolated prepared Brama `JEDEN_TEST_HOME` inside this checkout's ignored `.build`. The target is a clean sibling checkout on main tracking exactly the shared `tests/hillclimb/fixtures/README.md` and `greet.mjs` templates. Tests run serially, retain generated changes, then restore that fixture for reuse; they never create nested repositories, use the operator's home or rewind a changed commit, branch or origin.
 - The interactive terminal has searchable management pickers and slash
   commands. `jeden todo list --json` reads retained work;
   `jeden todo continue --allow-write` continues with an explicit grant.
@@ -80,6 +112,13 @@ executable on macOS; see the [signing contract](https://stado.wisent.com/docs/si
   expose the same session protocol to automation and editors.
 - Tools stay within the workspace jail and execution grants. File mutations
   return visual diffs; oversized results become referenced session artifacts.
+- Persistent interpreter evaluations require a framed completion. A closed
+  protocol stream from a still-running kernel is a named refusal with its PID
+  and unfinished-frame byte count, never an unbounded wait for its exit.
+  Interpreter exit diagnostics retain final stderr; failed status reads and
+  stop operations retain their actual causes.
+  Interrupted terminal-shell readiness refuses startup instead of waiting again;
+  terminal cleanup does not wait after a failed kill.
 
 Sessions and artifacts live under `~/.jeden/sessions/` unless
 `JEDEN_SESSION_ROOT` is set. A task's completion state retains original

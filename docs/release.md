@@ -7,7 +7,7 @@ The recipe stages `bin/jeden` and the Darwin sandbox helper where applicable. St
 Release builders receive locked private Git crates as the immutable
 `private-cargo-sources` input, without GitHub credentials or sibling checkouts.
 After changing those package names, versions or revisions, run
-`stado release catalog pin-input . --name private-cargo-sources --source . --revision HEAD --cargo --json`
+`stado release catalog input pin . --name private-cargo-sources --source . --revision HEAD --cargo --json`
 from the committed checkout, then commit the updated `.wisent-release.json`.
 Stado vendors, publishes and pins the input through one shared operation;
 changing only Jeden's version does not invalidate it. See
@@ -30,7 +30,7 @@ or input does not replace successful artifacts or change the lockfile.
 Reports and command logs are archived under `evidence/release-tests`.
 This check does not qualify signing, sandbox execution or a model-backed task.
 
-The version gate (`.github/workflows/version-check.yml`) compares the public command vocabulary with `released-surface.json` using the same tool: `jeden-tools surface` reads the dispatcher and the compiled slash catalogue, `jeden-tools versioning decide` is the Rust port of the fleet's AutoVersion rule, and `jeden-tools versioning baseline` regenerates the baseline from the newest published release.
+The version gate (`.github/workflows/version-check.yml`) compares the public command vocabulary with `released-surface.json` using the same tool: `jeden-tools surface` reads the dispatcher and the compiled slash catalogue, `jeden-tools versioning decide` answers with the fleet's AutoVersion rule itself (the `autoversion` crate at a pinned revision, held to the rule's shared fixtures), and `jeden-tools versioning baseline` regenerates the baseline from the newest published release.
 
 Jeden is a command-line package, not a fleet service. Publication therefore does not start a daemon or claim a host has installed the package. A consumer must install `bin/jeden` and `bin/jeden-sandbox-helper` from the same Darwin archive and keep them together; installing only the primary executable leaves sandboxed runs unavailable.
 

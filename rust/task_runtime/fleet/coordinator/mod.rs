@@ -55,8 +55,7 @@ impl Coordinator {
                 .filter(|job| {
                     job.lease
                         .as_ref()
-                        .map(|lease| lease.worker_id == hello.worker_id)
-                        .unwrap_or(false)
+                        .is_some_and(|lease| lease.worker_id == hello.worker_id)
                         && !job.phase.terminal()
                 })
                 .count() as u32;
@@ -97,7 +96,7 @@ impl Coordinator {
                 lease: None,
                 outcome: None,
                 events: Default::default(),
-                next_fencing_token: 1,
+                next_fencing_token: crate::tally::FIRST,
                 cancel_requested_at: None,
                 diagnostics: Vec::new(),
             };
@@ -128,13 +127,14 @@ impl Coordinator {
                     "job {job_id} is not pending"
                 )));
             }
-            let number = job
-                .attempts
-                .last()
-                .map(|attempt| attempt.number.saturating_add(1))
-                .unwrap_or(1);
-            let fence = job.next_fencing_token.max(1);
-            job.next_fencing_token = fence.saturating_add(1);
+            // Attempts and fences count from the first; each offer takes the next.
+            let step = crate::tally::STEP;
+            let number = match job.attempts.last() {
+                Some(attempt) => attempt.number.saturating_add(u32::from(step)),
+                None => crate::tally::FIRST as u32,
+            };
+            let fence = job.next_fencing_token.max(crate::tally::FIRST);
+            job.next_fencing_token = fence.saturating_add(u64::from(step));
             let expires_at = now.saturating_add(self.lease_ms);
             job.attempts.push(Attempt {
                 job_id: job_id.into(),
@@ -154,7 +154,7 @@ impl Coordinator {
                 heartbeat_at: now,
             });
             job.phase = JobPhase::Assigned;
-            worker.running = worker.running.saturating_add(1);
+            worker.running = worker.running.saturating_add(u32::from(step));
             Ok(WorkOffer {
                 protocol: worker.negotiated,
                 job: job.job.clone(),
@@ -177,7 +177,9 @@ fn current_job_mut<'a>(
     now: u64,
 ) -> Result<&'a mut JobState, ProtocolError> {
     let job = current_job_mut_allow_cancelling(job, worker_id, attempt, fence)?;
-    let lease = job.lease.as_ref().expect("validated lease");
+    let Some(lease) = job.lease.as_ref() else {
+        return Err(ProtocolError::LeaseLost(format!("job {} has no active lease", job.job.id)));
+    };
     if lease.expires_at <= now {
         return Err(ProtocolError::LeaseLost(format!(
             "lease for {} expired",

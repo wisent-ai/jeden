@@ -23,22 +23,19 @@ fn tool_values(context: &SlashContext<'_>) -> Vec<Value> {
 
 pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String> {
     let all = tool_values(context);
-    let memory_health = crate::memory::MemoryStore::open()
-        .and_then(|store| store.health())
-        .unwrap_or_else(|error| {
-            json!({
-                "service": "memory",
-                "healthy": false,
-                "backend": "fleet-postgres-fts",
-                "location": "fleet database jeden",
-                "error": error,
-            })
-        });
+    // Memory that cannot be opened or checked is reported unhealthy with its cause.
+    let memory_health = match crate::memory::MemoryStore::open().and_then(|store| store.health()) {
+        Ok(health) => health,
+        Err(error) => json!({
+            "service": "memory",
+            "healthy": false,
+            "backend": "fleet-postgres-fts",
+            "location": "fleet database jeden",
+            "error": error,
+        }),
+    };
     let ok = context.cwd.is_dir()
-        && memory_health
-            .get("healthy")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
+        && memory_health.get("healthy").and_then(Value::as_bool) == Some(true);
     let report = json!({
         "ok": ok,
         "cwd": context.cwd,
@@ -94,13 +91,17 @@ pub(crate) fn stats_picker(context: &SlashContext<'_>) -> PickerSpec {
 /// changelog for this package (no bundled CHANGELOG file exists).
 pub(crate) fn handle_changelog() -> Result<String, String> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["log", "-20", "--pretty=format:%h  %ad  %s", "--date=short"])
-        .current_dir(&root)
-        .output()
-        .map_err(|e| format!("git log failed: {e}"))?;
+        .current_dir(&root);
+    let output = stado_wait::output(&mut command).map_err(|e| format!("git log failed: {e}"))?;
     if !output.status.success() {
-        return Ok("No git history available for a changelog in this source tree.".into());
+        return Err(format!(
+            "the changelog is this build's git history in {}, and git could not read it: {}",
+            root.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     let log = String::from_utf8_lossy(&output.stdout).trim().to_string();
     if log.is_empty() {

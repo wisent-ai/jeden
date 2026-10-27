@@ -94,7 +94,7 @@ impl Conversation {
             .messages
             .first()
             .filter(|first| first.get("role").and_then(Value::as_str) == Some("system"))
-            .map(|_| system_prompt_checked(cwd).map(|prompt| json!(prompt)))
+            .map(|_system_message| system_prompt_checked(cwd).map(|prompt| json!(prompt)))
             .transpose()?;
         self.recorder.set_cwd(cwd)?;
         if let Some(prompt) = prompt {

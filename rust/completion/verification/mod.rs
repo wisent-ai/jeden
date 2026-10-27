@@ -93,7 +93,7 @@ pub(crate) fn apply_review(
                 .tasks
                 .iter()
                 .find(|task| Some(task.id.as_str()) == verdict.task_id.as_deref())
-                .expect("task set validated above");
+                .ok_or_else(|| format!("review names task {:?}, which is not open here", verdict.task_id))?;
             if verdict.explanation.trim().is_empty()
                 || verdict.criteria.len() != task.criteria.len()
             {
@@ -193,7 +193,7 @@ pub(crate) fn apply_review(
                 .tasks
                 .iter_mut()
                 .find(|task| Some(task.id.as_str()) == verdict.task_id.as_deref())
-                .expect("task set validated above");
+                .ok_or_else(|| format!("review names task {:?}, which is not open here", verdict.task_id))?;
             task.reason = Some(verdict.explanation.clone());
             task.status = match verdict.status {
                 ReviewStatus::Done => TaskStatus::Done,
@@ -223,7 +223,7 @@ pub(crate) fn apply_review(
                 .requests
                 .iter_mut()
                 .find(|request| request.id == verdict.request_id)
-                .expect("request set validated above");
+                .ok_or_else(|| format!("review names request {}, which is not unresolved here", verdict.request_id))?;
             request.coverage_verified = verdict.covered
                 && state
                     .tasks

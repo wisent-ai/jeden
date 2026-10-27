@@ -5,13 +5,13 @@ mod registry;
 
 use super::daemon::{BoundedExecutor, Readiness, SubmitError};
 use super::idempotency::{IdempotencyDecision, IdempotencyError, IdempotencyStore};
-use super::replay::{EventCursor, ReplayError, ReplayStore, SessionEventV1};
+use super::replay::{EventCursor, EventDraft, ReplayError, ReplayStore, SessionEventV1};
 use super::tenant::{TenantError, TenantGuard, TenantId, TenantPrincipal};
 use crate::sdk::{AgentSession, PromptRequest, SessionEventKind, SessionOptions};
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
@@ -103,9 +103,7 @@ impl AgentSessionFacade {
     }
 
     fn session(&self, tenant: &TenantId, session_id: &str) -> Result<AgentSession, String> {
-        self.sessions
-            .lock()
-            .map_err(|_| "agent session lock poisoned".to_string())?
+        crate::panicked::held(&self.sessions)
             .get(&(tenant.as_str().to_owned(), session_id.to_owned()))
             .cloned()
             .ok_or_else(|| "access denied".to_string())
@@ -143,12 +141,25 @@ impl SessionSummary {
     }
 }
 
-/// `skipped` counts session directories whose `state.json` could not be read,
-/// so an unreadable session is reported rather than silently dropped.
+/// One session directory that could not be listed, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnreadableSession {
+    pub session_id: String,
+    pub cause: String,
+}
+
+impl UnreadableSession {
+    pub fn wire_value(&self) -> Value {
+        json!({ "sessionId": self.session_id, "cause": self.cause })
+    }
+}
+
+/// `unreadable` names every session directory whose ledger could not be read,
+/// with the cause, so an unreadable session is reported rather than dropped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionListing {
     pub sessions: Vec<SessionSummary>,
-    pub skipped: usize,
+    pub unreadable: Vec<UnreadableSession>,
 }
 
 pub struct SessionService<B: SessionBackend> {
@@ -158,6 +169,12 @@ pub struct SessionService<B: SessionBackend> {
     replay: ReplayStore,
     executor: Arc<BoundedExecutor>,
     sessions: Mutex<HashMap<String, SessionEntry>>,
+    /// The result of every request that finished while its idempotency record
+    /// could not be completed, by tenant and idempotency key, with the request
+    /// it answers. The record stays active on disk, so without this a client
+    /// retrying the key is reattached to a request that already ended and
+    /// waits on it; with it the retry is answered the result that was kept.
+    unrecorded: Mutex<HashMap<(String, String), (String, Value)>>,
     /// Both counters are process-local while the replay and idempotency stores on
     /// disk are durable, so a restarted daemon would hand out `session-1` and
     /// `request-1` again and its first prompt would land on a stream that already
@@ -207,8 +224,8 @@ fn session_cwd(dir: &Path) -> Result<PathBuf, String> {
     session_state(dir).map(|state| state.cwd)
 }
 
-fn unreadable_session(session_id: &str) -> ServiceError {
-    ServiceError::Runtime(format!("session {session_id} ledger is unreadable"))
+fn unreadable_session(session_id: &str, cause: &str) -> ServiceError {
+    ServiceError::Runtime(format!("session {session_id} ledger is unreadable: {cause}"))
 }
 
 fn map_event(event: SessionEventKind) -> (String, Value, bool) {

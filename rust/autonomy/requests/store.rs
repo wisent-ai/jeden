@@ -74,15 +74,16 @@ pub(super) fn identifier(id: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
+/// Where pursuit state lives: `JEDEN_PURSUIT_STATE_ROOT` when stated, else
+/// `pursuit` beside the user configuration.
 fn root() -> Result<PathBuf, String> {
-    let root = std::env::var_os("JEDEN_PURSUIT_STATE_ROOT")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            crate::user_config_path()
-                .parent()
-                .expect("user config has a parent")
-                .join("pursuit")
-        });
+    let root = match std::env::var_os("JEDEN_PURSUIT_STATE_ROOT") {
+        Some(stated) => PathBuf::from(stated),
+        None => match crate::user_config_path().parent() {
+            Some(directory) => directory.join("pursuit"),
+            None => return Err("the user configuration path has no directory to keep pursuit state beside".into()),
+        },
+    };
     if !root.is_absolute() {
         return Err("Jeden pursuit state root must be absolute".into());
     }
@@ -104,13 +105,13 @@ impl Store {
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
+            builder.mode(u32::from(libc::S_IRWXU));
         }
         builder
             .create(&directory)
             .map_err(|e| format!("create request state: {e}"))?;
         if fs::symlink_metadata(&directory)
-            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("inspect request state {}: {e}", directory.display()))?
             .file_type()
             .is_symlink()
         {
@@ -120,7 +121,8 @@ impl Store {
             directory,
             id: request.request_id.clone(),
         };
-        let encoded = serde_json::to_string(request).map_err(|e| e.to_string())?;
+        let encoded = serde_json::to_string(request)
+            .map_err(|e| format!("encode request {}: {e}", request.request_id))?;
         let (id, data) = (store.id.clone(), encoded.clone());
         let existing: String = run_db(move |db| async move {
             value::Entity::insert(value::ActiveModel {
@@ -179,6 +181,7 @@ impl Store {
         })
     }
     pub fn get<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>, String> {
+        let key_name = key.to_owned();
         let key = (self.id.clone(), key.to_owned());
         let text = run_db(move |db| async move {
             Ok(value::Entity::find_by_id(key)
@@ -187,14 +190,15 @@ impl Store {
                 .map_err(sql)?
                 .map(|row| row.data))
         })?;
-        text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
+        text.map(|text| serde_json::from_str(&text).map_err(|e| self.unreadable(&key_name, e)))
             .transpose()
     }
     pub fn set(&self, key: &str, value: &impl Serialize) -> Result<(), String> {
         let row = value::ActiveModel {
             request: Set(self.id.clone()),
             key: Set(key.to_owned()),
-            data: Set(serde_json::to_string(value).map_err(|e| e.to_string())?),
+            data: Set(serde_json::to_string(value)
+                .map_err(|e| format!("encode {key} of request {}: {e}", self.id))?),
         };
         run_db(move |db| async move {
             value::Entity::insert(row)
@@ -218,14 +222,16 @@ impl Store {
                 .map_err(sql)?
                 .map(|row| row.data))
         })?;
-        text.map(|text| serde_json::from_str(&text).map_err(|e| e.to_string()))
+        let stage = format!("stage {position}");
+        text.map(|text| serde_json::from_str(&text).map_err(|e| self.unreadable(&stage, e)))
             .transpose()
     }
     pub fn record_stage(&self, position: usize, value: &impl Serialize) -> Result<(), String> {
         let row = stage::ActiveModel {
             request: Set(self.id.clone()),
             position: Set(position as i64),
-            data: Set(serde_json::to_string(value).map_err(|e| e.to_string())?),
+            data: Set(serde_json::to_string(value)
+                .map_err(|e| format!("encode stage {position} of request {}: {e}", self.id))?),
         };
         run_db(move |db| async move {
             stage::Entity::insert(row)
@@ -244,6 +250,9 @@ impl Store {
     pub fn id(&self) -> &str {
         &self.id
     }
+    fn unreadable(&self, key: &str, error: serde_json::Error) -> String {
+        format!("request {} holds {key} that cannot be read: {error}", self.id)
+    }
     /// Every value stored for this request, by key, as `pursue --state` shows.
     pub fn saved(&self) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {
         let id = self.id.clone();
@@ -256,15 +265,14 @@ impl Store {
                 .map_err(sql)
         })?;
         rows.into_iter()
-            .map(|row| {
-                serde_json::from_str(&row.data)
-                    .map(|value| (row.key, value))
-                    .map_err(|e| e.to_string())
+            .map(|row| match serde_json::from_str(&row.data) {
+                Ok(value) => Ok((row.key, value)),
+                Err(error) => Err(self.unreadable(&row.key, error)),
             })
             .collect()
     }
+    /// The request's owner lock, or `None` while another process holds it.
     pub fn claim(&self) -> Result<Option<Claim>, String> {
-        use std::os::unix::io::AsRawFd;
         // A request resumed on another host has no local directory yet.
         fs::create_dir_all(&self.directory).map_err(|e| format!("claim pursuit request: {e}"))?;
         let file = fs::OpenOptions::new()
@@ -273,14 +281,10 @@ impl Store {
             .write(true)
             .open(self.directory.join("owner.lock"))
             .map_err(|e| format!("claim pursuit request: {e}"))?;
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            return Ok(Some(Claim { _file: file }));
-        }
-        let error = std::io::Error::last_os_error();
-        if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
-            Ok(None)
-        } else {
-            Err(format!("claim pursuit request: {error}"))
+        match file.try_lock() {
+            Ok(()) => Ok(Some(Claim { _file: file })),
+            Err(fs::TryLockError::WouldBlock) => Ok(None),
+            Err(fs::TryLockError::Error(error)) => Err(format!("claim pursuit request: {error}")),
         }
     }
     pub fn response(&self) -> Result<Response, String> {

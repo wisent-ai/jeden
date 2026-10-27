@@ -19,11 +19,7 @@ pub(crate) fn validate_tools(value: &Value) -> Result<(), String> {
         {
             return Err("MCP tool.name must be a non-empty string".into());
         }
-        if !tool
-            .get("inputSchema")
-            .map(Value::is_object)
-            .unwrap_or(false)
-        {
+        if !tool.get("inputSchema").is_some_and(Value::is_object) {
             return Err("MCP tool.inputSchema must be an object".into());
         }
     }

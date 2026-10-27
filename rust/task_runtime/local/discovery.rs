@@ -15,9 +15,15 @@ pub(crate) enum DefinitionFormat {
 }
 
 impl DefinitionFormat {
+    /// The format `path`'s extension names, or none for a file that is not
+    /// an agent definition: its extension names no variant above, which is
+    /// all the parse of the extension can refuse.
     pub(crate) fn of(path: &Path) -> Option<Self> {
         let extension = path.extension()?.to_str()?;
-        serde_json::from_value(serde_json::Value::String(extension.to_owned())).ok()
+        match serde_json::from_value(serde_json::Value::String(extension.to_owned())) {
+            Ok(format) => Some(format),
+            Err(_another_kind_of_file) => None,
+        }
     }
 
     /// `text` read in this format as `T`, refused with the parser's cause.
@@ -56,9 +62,10 @@ fn roots(cwd: &Path) -> Result<Vec<PathBuf>, TaskError> {
 }
 
 /// Every definition file under `root`. A root that does not exist holds
-/// none; a directory that cannot be listed is refused naming it.
+/// none; one that cannot be examined, or a directory that cannot be listed,
+/// is refused naming it.
 fn collect(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), TaskError> {
-    if !root.exists() {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(root).map_err(TaskError::Io)? {
         return Ok(());
     }
     if root.is_file() {

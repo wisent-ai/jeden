@@ -23,38 +23,38 @@ impl Format {
     pub(crate) const SUPPORTED: &'static str = "omp";
 }
 
+/// The record OMP rewrites in place at the top of a transcript; the session
+/// header follows it.
+const TITLE_RECORD: &str = "title";
+
 /// Which harness wrote this file, read from its content and never from its
-/// name: an OMP transcript is JSONL with one `{"type":"session"}` header that
-/// carries the session id and its workspace. A file that is none of the
-/// formats answers `Ok(None)`, which a directory scan skips and an explicit
-/// path refuses; a file that cannot be read is an `Err` naming it and the
-/// cause, never "not a transcript".
+/// name: an OMP transcript is JSONL whose first record other than the title
+/// OMP keeps at the top is the `{"type":"session"}` header carrying the
+/// session id and its workspace. A file that is none of the formats answers
+/// `Ok(None)`, which a directory scan skips and an explicit path refuses; a
+/// file that cannot be read is an `Err` naming it and the cause, never "not
+/// a transcript".
 pub(crate) fn detect(path: &Path) -> Result<Option<Format>, String> {
     let unreadable = |e: std::io::Error| format!("{}: cannot be read: {e}", path.display());
     let file = File::open(path).map_err(unreadable)?;
-    let mut reader = BufReader::new(file);
-    let mut line = String::new();
-    // OMP rewrites a fixed-width `title` record at the top of the file and
-    // keeps the `session` header right after it, so the header is within the
-    // first few records; a file whose first records are not JSON is not ours.
-    for _ in 0..8 {
-        line.clear();
-        match reader.read_line(&mut line) {
-            Ok(0) => return Ok(None),
-            Ok(_) => {}
+    for line in BufReader::new(file).lines() {
+        let line = match line {
+            Ok(line) => line,
             // Bytes that are not UTF-8 are not a transcript of ours.
             Err(e) if e.kind() == std::io::ErrorKind::InvalidData => return Ok(None),
             Err(e) => return Err(unreadable(e)),
-        }
+        };
         if line.trim().is_empty() {
             continue;
         }
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             return Ok(None);
         };
-        if value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string() {
-            return Ok(Some(Format::Omp));
+        if value["type"] == TITLE_RECORD {
+            continue;
         }
+        let header = value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string();
+        return Ok(header.then_some(Format::Omp));
     }
     Ok(None)
 }
@@ -62,7 +62,8 @@ pub(crate) fn detect(path: &Path) -> Result<Option<Format>, String> {
 pub(super) struct Source {
     pub format: Format,
     pub id: String,
-    pub title: String,
+    /// The title the transcript states, or none when it states none.
+    pub title: Option<String>,
     pub cwd: String,
     pub messages: Vec<Value>,
     pub pending: Vec<String>,
@@ -82,29 +83,33 @@ pub(super) fn read(path: &Path) -> Result<Source, String> {
 }
 
 fn read_omp(path: &Path) -> Result<Source, String> {
-    let file = File::open(path).map_err(|e| e.to_string())?;
+    let at = |e: std::io::Error| format!("{}: {e}", path.display());
+    let file = File::open(path).map_err(at)?;
     let mut reader = BufReader::new(file);
     let mut line = String::new();
     let mut nodes = HashMap::new();
     let mut leaf = None;
     let mut header = None;
-    let mut title = String::new();
+    let mut title = None;
     loop {
-        let offset = reader.stream_position().map_err(|e| e.to_string())?;
+        let offset = reader.stream_position().map_err(at)?;
         line.clear();
-        if reader.read_line(&mut line).map_err(|e| e.to_string())? == 0 {
+        reader.read_line(&mut line).map_err(at)?;
+        // A read that adds nothing is the end of the file; a blank line
+        // still carries its line break.
+        if line.is_empty() {
             break;
         }
         if line.trim().is_empty() {
             continue;
         }
         let value: Value = serde_json::from_str(&line)
-            .map_err(|e| format!("invalid source record at byte {offset}: {e}"))?;
+            .map_err(|e| format!("{}: invalid source record at byte {offset}: {e}", path.display()))?;
         match value["type"].as_str() {
             Some("session") => header = Some(value.clone()),
-            Some("title") | Some("title_change") => {
+            Some(TITLE_RECORD) | Some("title_change") => {
                 if let Some(text) = value["title"].as_str() {
-                    title = text.to_string();
+                    title = Some(text.to_string());
                 }
             }
             _ => {}
@@ -126,9 +131,9 @@ fn read_omp(path: &Path) -> Result<Source, String> {
         .as_str()
         .ok_or("OMP header has no cwd")?
         .to_string();
-    if title.is_empty() {
-        title = header["title"].as_str().unwrap_or(&id).to_string();
-    }
+    // A title record wins over the header's own; a transcript with neither
+    // has no title, and the import says so rather than calling it by its id.
+    let title = title.or_else(|| header["title"].as_str().map(str::to_string));
     let mut chain = Vec::new();
     let mut seen = HashSet::new();
     while let Some(id) = leaf {
@@ -151,34 +156,33 @@ fn read_omp(path: &Path) -> Result<Source, String> {
     };
     let mut message_offsets = HashMap::new();
     for offset in chain.into_iter().rev() {
-        reader
-            .seek(SeekFrom::Start(offset))
-            .map_err(|e| e.to_string())?;
+        reader.seek(SeekFrom::Start(offset)).map_err(at)?;
         line.clear();
-        reader.read_line(&mut line).map_err(|e| e.to_string())?;
-        let value: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+        reader.read_line(&mut line).map_err(at)?;
+        let value: Value = serde_json::from_str(&line)
+            .map_err(|e| format!("{}: invalid source record at byte {offset}: {e}", path.display()))?;
         if let Some(id) = value["id"].as_str() {
             message_offsets.insert(id.to_owned(), source.messages.len());
         }
         match value["type"].as_str() {
             Some("compaction") => {
                 if let Some(summary) = value["summary"].as_str() {
-                    let retained = value["firstKeptEntryId"]
-                        .as_str()
-                        .map(|id| {
-                            message_offsets.get(id).copied().ok_or_else(|| {
-                                format!("compaction references missing kept entry {id}")
-                            })
-                        })
-                        .transpose()?
-                        .unwrap_or(source.messages.len());
+                    // The kept tail starts at the entry the compaction names;
+                    // one that names none summarises everything before it.
+                    let retained = match value["firstKeptEntryId"].as_str() {
+                        Some(kept) => message_offsets.get(kept).copied().ok_or_else(|| {
+                            format!("compaction references missing kept entry {kept}")
+                        })?,
+                        None => source.messages.len(),
+                    };
                     let kept = source.messages.split_off(retained);
                     source.messages = vec![json!({"role":"system", "content":summary,
                         "_jedenNeedsBaseSystem":true})];
+                    let shift = source.messages.len();
                     source.messages.extend(kept);
                     message_offsets.retain(|_, offset| {
                         if *offset >= retained {
-                            *offset = *offset - retained + 1;
+                            *offset = *offset - retained + shift;
                             true
                         } else {
                             false
@@ -186,40 +190,54 @@ fn read_omp(path: &Path) -> Result<Source, String> {
                     });
                 }
             }
-            Some("message") => project_message(&mut source, &value["message"]),
+            Some("message") => project_message(&mut source, &value["message"])
+                .map_err(|e| format!("{}: record at byte {offset}: {e}", path.display()))?,
             _ => {}
         }
     }
     Ok(source)
 }
 
-fn project_message(source: &mut Source, message: &Value) {
-    let role = message["role"].as_str().unwrap_or("");
-    let content = &message["content"];
-    let mut text = content.as_str().unwrap_or("").to_string();
+/// The text a message carries: its content when that is text, or its text
+/// parts and recorded tool calls joined, refused when it is neither.
+fn message_text(content: &Value) -> Result<(String, bool), String> {
+    if let Some(text) = content.as_str() {
+        return Ok((text.to_string(), false));
+    }
+    let parts = content
+        .as_array()
+        .ok_or_else(|| format!("message content is neither text nor a list of parts: {content}"))?;
+    let mut text = String::new();
     let mut has_tools = false;
-    if let Some(parts) = content.as_array() {
-        for part in parts {
-            match part["type"].as_str() {
-                Some("text") => {
-                    if let Some(value) = part["text"].as_str() {
-                        if !text.is_empty() {
-                            text.push('\n');
-                        }
-                        text.push_str(value);
-                    }
+    for part in parts {
+        match part["type"].as_str() {
+            Some("text") => {
+                let value = part["text"]
+                    .as_str()
+                    .ok_or_else(|| format!("a text part carries no text: {part}"))?;
+                if !text.is_empty() {
+                    text.push('\n');
                 }
-                Some("toolCall") => {
-                    has_tools = true;
-                    text.push_str(&format!(
-                        "\nRecorded tool call (not an instruction to replay): {} {}",
-                        part["name"], part["arguments"]
-                    ));
-                }
-                _ => {}
+                text.push_str(value);
             }
+            Some("toolCall") => {
+                has_tools = true;
+                text.push_str(&format!(
+                    "\nRecorded tool call (not an instruction to replay): {} {}",
+                    part["name"], part["arguments"]
+                ));
+            }
+            _ => {}
         }
     }
+    Ok((text, has_tools))
+}
+
+fn project_message(source: &mut Source, message: &Value) -> Result<(), String> {
+    let role = message["role"]
+        .as_str()
+        .ok_or_else(|| format!("message has no role: {message}"))?;
+    let (mut text, has_tools) = message_text(&message["content"])?;
     if role == "user" && !text.trim().is_empty() {
         source.pending.push(text.clone());
     } else if role == "assistant"
@@ -231,7 +249,7 @@ fn project_message(source: &mut Source, message: &Value) {
         source.pending.clear();
     }
     if text.is_empty() {
-        return;
+        return Ok(());
     }
     let projected_role = if role == "assistant" {
         "assistant"
@@ -247,4 +265,5 @@ fn project_message(source: &mut Source, message: &Value) {
     source
         .messages
         .push(json!({"role":projected_role, "content":text}));
+    Ok(())
 }

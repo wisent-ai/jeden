@@ -23,12 +23,20 @@ pub struct MigrationJournal {
     pub stage: JournalStage,
 }
 
+/// The journal of the store at `target`: a hidden file beside it named
+/// after it, byte for byte, so two stores never share one; a target that
+/// names no file (a directory path ending in `..` or a root) keeps its
+/// journal inside itself.
 pub fn journal_path(target: &Path) -> PathBuf {
-    let name = target
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("store");
-    target.with_file_name(format!(".{name}.migration-journal.json"))
+    match target.file_name() {
+        Some(name) => {
+            let mut journal = std::ffi::OsString::from(".");
+            journal.push(name);
+            journal.push(".migration-journal.json");
+            target.with_file_name(journal)
+        }
+        None => target.join(".migration-journal.json"),
+    }
 }
 
 pub fn write_durable(path: &Path, journal: &MigrationJournal) -> Result<(), String> {
@@ -63,8 +71,15 @@ pub fn read(path: &Path) -> Result<Option<MigrationJournal>, String> {
         .map_err(|error| format!("corrupt migration journal {}: {error}", path.display()))
 }
 
+/// Make the entry of `path` in its directory durable. A bare relative file
+/// name lives in the working directory, whose name is `.`; a path with no
+/// directory at all (a root) is refused, since nothing holds its entry.
 pub fn sync_parent(path: &Path) -> Result<(), String> {
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = match path.parent() {
+        Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
+        Some(parent) => parent,
+        None => return Err(format!("{} has no directory whose entry could be synced", path.display())),
+    };
     let directory = fs::File::open(parent)
         .map_err(|error| format!("open directory {}: {error}", parent.display()))?;
     directory

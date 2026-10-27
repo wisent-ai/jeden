@@ -37,7 +37,6 @@ pub(super) enum Transport {
 
 pub(crate) struct McpClient {
     pub(super) transport: Transport,
-    pub(super) next_id: u64,
     pub(super) notifications: VecDeque<Value>,
     /// The exchange itself failed (write, read, HTTP status, size or queue
     /// limit), as opposed to the server answering with an error. The
@@ -59,13 +58,13 @@ impl McpClient {
         let object = server
             .as_object()
             .ok_or("MCP server config must be an object")?;
-        let transport_name = string_field(server, "type").unwrap_or_else(|| {
-            if object.contains_key("url") {
-                "http"
-            } else {
-                "stdio"
-            }
-        });
+        // An entry with no type is read the way MCP configurations write
+        // it: a url names an HTTP server, a command a stdio one.
+        let transport_name = match (string_field(server, "type"), object.contains_key("url")) {
+            (Some(named), _) => named,
+            (None, true) => "http",
+            (None, false) => "stdio",
+        };
         let transport = match transport_name {
             "stdio" => Transport::Stdio(Self::start_stdio(server, cwd)?),
             "http" | "streamable-http" => Transport::Http(Self::start_http(server)?),
@@ -77,18 +76,15 @@ impl McpClient {
         };
         Ok(Self {
             transport,
-            next_id: 1,
             notifications: VecDeque::new(),
             transport_failed: false,
         })
     }
 
     pub(super) fn request(&mut self, method: &str, params: Value) -> Result<Value, String> {
-        let id = self.next_id;
-        self.next_id = self
-            .next_id
-            .checked_add(1)
-            .ok_or("MCP request id exhausted")?;
+        // JSON-RPC asks only that an id tell its request from the others in
+        // flight; a random one needs no counter that can run out.
+        let id = uuid::Uuid::new_v4().as_u64_pair().0;
         let message = json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params});
         loop {
             let messages = self.exchange(&message)?;
@@ -107,11 +103,7 @@ impl McpClient {
                     continue;
                 }
                 if let Some(error) = response.get("error") {
-                    return Err(error
-                        .get("message")
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_else(|| error.to_string()));
+                    return Err(format!("MCP {method} was answered with an error: {error}"));
                 }
                 return response
                     .get("result")
@@ -159,10 +151,7 @@ impl McpClient {
                 .get("protocolVersion")
                 .and_then(Value::as_str)
                 .is_none()
-            || !init
-                .get("capabilities")
-                .map(Value::is_object)
-                .unwrap_or(false)
+            || !init.get("capabilities").is_some_and(Value::is_object)
         {
             return Err("MCP initialize result has invalid schema".into());
         }
@@ -214,22 +203,31 @@ impl McpClient {
         match &mut self.transport {
             Transport::Stdio(transport) => {
                 drop(transport.child.stdin.take());
+                let pid = transport.child.id();
                 if matches!(transport.child.try_wait(), Ok(None)) {
                     if let Err(error) = transport.child.kill() {
-                        let pid = transport.child.id();
                         eprintln!("jeden: MCP server process {pid} cannot be killed: {error}");
                     }
                 }
-                let _ = transport.child.wait();
+                let child = &mut transport.child;
+                if let Err(error) = stado_wait::blocking(
+                    stado_wait::Kind::Process,
+                    format!("MCP server process {pid} to end"),
+                    "this machine",
+                    || child.wait(),
+                ) {
+                    eprintln!("jeden: MCP server process {pid} could not be awaited: {error}");
+                }
             }
             Transport::Http(transport) => {
                 if let Some(session_id) = transport.session_id.take() {
-                    let ended = transport
-                        .client
-                        .delete(&transport.url)
-                        .header(MCP_SESSION_ID, &session_id)
-                        .send()
-                        .and_then(|response| response.error_for_status());
+                    let request = transport.client.delete(&transport.url).header(MCP_SESSION_ID, &session_id);
+                    let ended = stado_wait::blocking(
+                        stado_wait::Kind::Network,
+                        format!("DELETE MCP session {session_id}"),
+                        &transport.url,
+                        || request.send().and_then(|response| response.error_for_status()),
+                    );
                     if let Err(error) = ended {
                         eprintln!(
                             "jeden: MCP session {session_id} at {} was not ended: {error}",

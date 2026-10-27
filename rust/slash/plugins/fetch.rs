@@ -66,30 +66,46 @@ fn expand_local_path(cwd: &Path, source: &str) -> PathBuf {
     }
 }
 
-/// Recursively copy `src` into `dst` (skipping any `.git` directory).
+/// Recursively copy `src` into `dst` (skipping any `.git` directory). Every
+/// failure names the path it was copying, so a refused plugin copy says which
+/// file stopped it.
 pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
-    fs::create_dir_all(dst).map_err(|e| e.to_string())?;
-    for entry in fs::read_dir(src).map_err(|e| e.to_string())? {
-        let entry = entry.map_err(|e| e.to_string())?;
+    let copy_file = |from: &Path, to: &Path| {
+        fs::copy(from, to).map(drop).map_err(|error| {
+            format!("{} cannot be copied to {}: {error}", from.display(), to.display())
+        })
+    };
+    fs::create_dir_all(dst)
+        .map_err(|error| format!("{} cannot be created: {error}", dst.display()))?;
+    let entries = fs::read_dir(src)
+        .map_err(|error| format!("{} cannot be listed: {error}", src.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|error| format!("an entry of {} cannot be read: {error}", src.display()))?;
         let name = entry.file_name();
         if name == ".git" {
             continue;
         }
         let from = entry.path();
         let to = dst.join(&name);
-        let file_type = entry.file_type().map_err(|e| e.to_string())?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("the type of {} cannot be read: {error}", from.display()))?;
         if file_type.is_dir() {
             copy_dir_recursive(&from, &to)?;
         } else if file_type.is_symlink() {
             match fs::metadata(&from) {
                 Ok(meta) if meta.is_dir() => copy_dir_recursive(&from, &to)?,
-                Ok(_) => {
-                    fs::copy(&from, &to).map_err(|e| e.to_string())?;
+                Ok(_) => copy_file(&from, &to)?,
+                Err(error) => {
+                    return Err(format!(
+                        "{} is a symbolic link whose target cannot be read, so the plugin cannot be copied whole: {error}",
+                        from.display()
+                    ))
                 }
-                Err(_) => {} // dangling symlink: skip
             }
         } else {
-            fs::copy(&from, &to).map_err(|e| e.to_string())?;
+            copy_file(&from, &to)?;
         }
     }
     Ok(())
@@ -105,9 +121,8 @@ pub(crate) fn run_git(args: &[&str], cwd: Option<&Path>) -> Result<String, Strin
     if let Some(dir) = cwd {
         command.current_dir(dir);
     }
-    let output = command
-        .output()
-        .map_err(|e| format!("git failed to start: {e}"))?;
+    let output =
+        stado_wait::output(&mut command).map_err(|e| format!("git failed to start: {e}"))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -128,11 +143,10 @@ pub(crate) fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
             return Err(format!("Unsafe git ref rejected: {git_ref}"));
         }
     }
-    if dest.exists() {
-        fs::remove_dir_all(dest).map_err(|e| e.to_string())?;
-    }
+    clear_cache(dest)?;
     if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("{} cannot be created: {error}", parent.display()))?;
     }
     let dest_str = dest.to_string_lossy().to_string();
     let mut args: Vec<&str> = vec!["clone", "--depth", "1"];
@@ -142,7 +156,7 @@ pub(crate) fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
     }
     args.push(url);
     args.push(&dest_str);
-    run_git(&args, None).map(|_| ())
+    run_git(&args, None).map(|_clone_output| ())
 }
 
 /// Fetch one HTTP(S) text body.
@@ -153,13 +167,28 @@ pub(crate) fn git_clone(url: &str, git_ref: Option<&str>, dest: &Path) -> Result
 fn http_get_text(url: &str) -> Result<String, String> {
     let client = crate::net::blocking_builder()
         .build()
-        .map_err(|e| e.to_string())?;
-    let response = client.get(url).send().map_err(|e| e.to_string())?;
+        .map_err(|error| format!("the HTTP client for GET {url} cannot be built: {error}"))?;
+    let response = client
+        .get(url)
+        .send()
+        .map_err(|error| format!("GET {url} could not be sent: {error}"))?;
     let status = response.status();
     if !status.is_success() {
         return Err(format!("GET {url} failed: {status}"));
     }
-    response.text().map_err(|e| e.to_string())
+    response.text().map_err(|error| {
+        format!("GET {url} answered {status} with a body that cannot be read: {error}")
+    })
+}
+
+/// Clear a marketplace's cache directory before it is fetched again.
+fn clear_cache(dest: &Path) -> Result<(), String> {
+    if dest.exists() {
+        fs::remove_dir_all(dest).map_err(|error| {
+            format!("the marketplace cache {} cannot be cleared: {error}", dest.display())
+        })?;
+    }
+    Ok(())
 }
 
 /// Fetch (or re-fetch) a marketplace source into its cache dir and return it.
@@ -177,21 +206,21 @@ pub(crate) fn fetch_marketplace(cwd: &Path, name: &str, source: &str) -> Result<
                     src.display()
                 ));
             }
-            if dest.exists() {
-                fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
-            }
+            clear_cache(&dest)?;
             copy_dir_recursive(&src, &dest)?;
         }
         FetchKind::JsonUrl => {
             let body = http_get_text(source)?;
             serde_json::from_str::<Value>(&body)
-                .map_err(|e| format!("catalog is not valid JSON: {e}"))?;
-            if dest.exists() {
-                fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
-            }
-            fs::create_dir_all(dest.join(".jeden-plugin")).map_err(|e| e.to_string())?;
-            fs::write(dest.join(".jeden-plugin/marketplace.json"), body)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| format!("the catalog at {source} is not valid JSON: {e}"))?;
+            clear_cache(&dest)?;
+            let manifest_dir = dest.join(".jeden-plugin");
+            fs::create_dir_all(&manifest_dir).map_err(|error| {
+                format!("{} cannot be created: {error}", manifest_dir.display())
+            })?;
+            let manifest = manifest_dir.join("marketplace.json");
+            fs::write(&manifest, body)
+                .map_err(|error| format!("{} cannot be written: {error}", manifest.display()))?;
         }
         FetchKind::Github => {
             let (repo, git_ref) = split_ref(source);
@@ -229,10 +258,11 @@ pub(crate) fn read_marketplace_catalog(cache_dir: &Path) -> Result<Value, String
     ))
 }
 
-pub(crate) fn catalog_plugins(catalog: &Value) -> Vec<Value> {
+/// The plugins a marketplace catalogue lists, or why it lists none.
+pub(crate) fn catalog_plugins(catalog: &Value) -> Result<Vec<Value>, String> {
     catalog
         .get("plugins")
         .and_then(Value::as_array)
         .cloned()
-        .unwrap_or_default()
+        .ok_or_else(|| "the marketplace catalogue holds no `plugins` list".to_string())
 }

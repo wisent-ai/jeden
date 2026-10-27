@@ -40,9 +40,13 @@ function definition(schema, name) {
   if (found.additionalProperties !== false) {
     throw new Error(`$defs/${name} allows extra properties; the SDK rejects them`);
   }
-  const allowed = Object.keys(found.properties ?? {});
-  if (allowed.length === 0) throw new Error(`$defs/${name} declares no properties`);
-  return { allowed, required: found.required ?? [] };
+  if (!found.properties) throw new Error(`$defs/${name} declares no properties`);
+  const allowed = Object.keys(found.properties);
+  if (!allowed.length) throw new Error(`$defs/${name} declares no properties`);
+  // JSON Schema reads an absent `required` as no required fields.
+  const required = [];
+  if (found.required) required.push(...found.required);
+  return { allowed, required };
 }
 
 function literal(values) {
@@ -86,19 +90,12 @@ const current = (() => {
 })();
 
 if (check) {
-  if (current === rendered) {
-    console.log(`${outputLabel} matches ${schemaPath}`);
-    process.exit(0);
+  if (current === null) throw new Error(`${outputLabel} is missing; run npm run generate:protocol`);
+  if (current !== rendered) {
+    throw new Error(`${outputLabel} no longer matches the envelope schema; run npm run generate:protocol`);
   }
-  console.error(
-    current === null
-      ? `${outputLabel} is missing; run npm run generate:protocol`
-      : `${outputLabel} no longer matches the envelope schema; run npm run generate:protocol`,
-  );
-  process.exit(1);
-}
-
-if (current === rendered) {
+  console.log(`${outputLabel} matches ${schemaPath}`);
+} else if (current === rendered) {
   console.log(`${outputLabel} already current`);
 } else {
   writeFileSync(outputPath, rendered);

@@ -6,31 +6,35 @@ use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QuerySelect};
 use serde::Serialize;
 use std::collections::HashMap;
 
-const DEFAULT_HALF_LIFE_MS: f64 = 30.0 * 24.0 * 60.0 * 60.0 * 1_000.0;
+/// Reciprocal rank fusion's k, as its authors fixed it: Cormack, Clarke and
+/// Büttcher, "Reciprocal Rank Fusion outperforms Condorcet and individual Rank
+/// Learning Methods", SIGIR 2009, <https://dl.acm.org/doi/10.1145/1571941.1572114>.
+const RRF_K: f64 = 60.0;
+/// The rank that paper gives the first item of an ordering: r(d) counts from
+/// one, <https://dl.acm.org/doi/10.1145/1571941.1572114>.
+const RRF_FIRST_RANK: f64 = 1.0;
 
+/// Where a recalled memory stands in each ordering the recall fuses, first at
+/// 0. No ordering is weighted against another, so none of these is a score.
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ScoreComponents {
-    pub lexical: f64,
-    pub semantic: f64,
-    pub confidence: f64,
-    pub temporal: f64,
-}
-
-impl Default for ScoreComponents {
-    fn default() -> Self {
-        Self {
-            lexical: 0.0,
-            semantic: 0.0,
-            confidence: 0.0,
-            temporal: 0.0,
-        }
-    }
+    /// Among the memories matching the query's words, by full-text rank;
+    /// absent when the query has no words or the memory came by meaning only.
+    pub lexical_position: Option<usize>,
+    /// Among the memories with an embedding, by closeness to the query's;
+    /// absent when no embedding was asked or this memory has none.
+    pub semantic_position: Option<usize>,
+    /// By the confidence the memory was written with, highest first.
+    pub confidence_position: usize,
+    /// By when the memory was last updated, newest first.
+    pub recency_position: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct RankedCandidate {
     pub id: String,
+    /// The reciprocal rank fusion of the candidate's positions.
     pub score: f64,
     pub components: ScoreComponents,
 }
@@ -57,21 +61,13 @@ impl SemanticBackend for FtsBackend {
         query: &str,
         limit: usize,
     ) -> Result<Vec<RankedCandidate>, String> {
-        rank(
-            scope,
-            query,
-            limit,
-            crate::memory::now_ms()?,
-            DEFAULT_HALF_LIFE_MS,
-            None,
-        )
+        rank(scope, query, limit, crate::memory::now_ms()?, None)
     }
 }
 
 pub struct HybridBackend<'a> {
     pub provider: Option<&'a dyn EmbeddingProvider>,
     pub as_of: Option<i64>,
-    pub half_life_ms: f64,
 }
 
 impl<'a> HybridBackend<'a> {
@@ -79,7 +75,6 @@ impl<'a> HybridBackend<'a> {
         Self {
             provider,
             as_of: None,
-            half_life_ms: DEFAULT_HALF_LIFE_MS,
         }
     }
 }
@@ -113,14 +108,7 @@ impl SemanticBackend for HybridBackend<'_> {
             Some(stated) => stated,
             None => crate::memory::now_ms()?,
         };
-        rank(
-            scope,
-            query,
-            limit,
-            as_of,
-            self.half_life_ms,
-            semantic.as_deref(),
-        )
+        rank(scope, query, limit, as_of, semantic.as_deref())
     }
 }
 
@@ -158,28 +146,53 @@ fn visible(scope: &MemoryScope, as_of: i64) -> Condition {
         )
 }
 
+/// Ids by their value, highest first; ties go by id, so a recall repeats.
+fn descending(scored: impl Iterator<Item = (String, f64)>) -> Vec<String> {
+    let mut scored: Vec<(String, f64)> = scored.collect();
+    scored.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    scored.into_iter().map(|(id, _)| id).collect()
+}
+
+/// Each id's position in `ordered`, first at 0.
+fn positions(ordered: Vec<String>) -> HashMap<String, usize> {
+    ordered
+        .into_iter()
+        .enumerate()
+        .map(|(position, id)| (id, position))
+        .collect()
+}
+
+/// What one ordering adds to a memory's fused score: the reciprocal of k plus
+/// the memory's rank in that ordering.
+fn fused(position: usize) -> f64 {
+    (RRF_K + RRF_FIRST_RANK + position as f64).recip()
+}
+
+/// The memories visible in `scope` at `as_of`, ordered by the reciprocal rank
+/// fusion of four orderings: full-text rank, closeness of meaning (when an
+/// embedding was asked), confidence and recency. Fusing ranks rather than
+/// adding scores needs no weight between them and no decay rate, so none is
+/// stated here.
 fn rank(
     scope: &MemoryScope,
     query: &str,
     limit: usize,
     as_of: i64,
-    half_life_ms: f64,
     semantic: Option<&[(String, f64)]>,
 ) -> Result<Vec<RankedCandidate>, String> {
-    let semantic = semantic
-        .unwrap_or(&[])
-        .iter()
-        .cloned()
-        .collect::<HashMap<_, _>>();
+    let semantic: HashMap<String, f64> = match semantic {
+        Some(scores) => scores.iter().cloned().collect(),
+        None => HashMap::new(),
+    };
     let (scope, terms) = (scope.clone(), tsquery(query));
     let semantic_ids = semantic.keys().cloned().collect::<Vec<_>>();
-    // id -> (lexical, confidence, updated_at)
-    let rows: HashMap<String, (f64, f64, i64)> = run_db(move |db| async move {
+    // id -> (full-text rank when the query has words, confidence, updated_at)
+    let rows: HashMap<String, (Option<f64>, f64, i64)> = run_db(move |db| async move {
         let lexical_score = if terms.is_empty() {
-            Expr::cust("1.0::float8")
+            Expr::cust("NULL::float8")
         } else {
             Expr::cust_with_values(
-                "ts_rank(search, to_tsquery('simple', $1), 32)::float8",
+                "ts_rank(search, to_tsquery('simple', $1))::float8",
                 [terms.clone()],
             )
         };
@@ -198,7 +211,7 @@ fn rank(
         }
         let mut rows = HashMap::new();
         for (id, score, confidence, updated_at) in lexical
-            .into_tuple::<(String, f64, f64, i64)>()
+            .into_tuple::<(String, Option<f64>, f64, i64)>()
             .all(&db)
             .await
             .map_err(sql)?
@@ -218,33 +231,45 @@ fn rank(
                 .await
                 .map_err(sql)?
             {
-                rows.entry(id).or_insert((0.0, confidence, updated_at));
+                rows.entry(id).or_insert((None, confidence, updated_at));
             }
         }
         Ok(rows)
     })?;
+    let lexical = positions(descending(
+        rows.iter()
+            .filter_map(|(id, (lexical, _, _))| lexical.map(|score| (id.clone(), score))),
+    ));
+    let semantic = positions(descending(
+        rows.keys()
+            .filter_map(|id| semantic.get(id).map(|score| (id.clone(), *score))),
+    ));
+    let confidence = positions(descending(
+        rows.iter()
+            .map(|(id, (_, confidence, _))| (id.clone(), *confidence)),
+    ));
+    let recency = positions(descending(
+        rows.iter()
+            .map(|(id, (_, _, updated_at))| (id.clone(), *updated_at as f64)),
+    ));
     let mut ranked = Vec::new();
-    for (id, (lexical, confidence, updated_at)) in rows {
-        let age = as_of.saturating_sub(updated_at).max(0) as f64;
-        let temporal = if half_life_ms > 0.0 {
-            2.0_f64.powf(-age / half_life_ms)
-        } else {
-            1.0
-        };
+    for id in rows.into_keys() {
         let components = ScoreComponents {
-            lexical,
-            semantic: semantic.get(&id).copied().unwrap_or(0.0).max(0.0),
-            confidence: confidence.clamp(0.0, 1.0),
-            temporal,
+            lexical_position: lexical.get(&id).copied(),
+            semantic_position: semantic.get(&id).copied(),
+            confidence_position: confidence[&id],
+            recency_position: recency[&id],
         };
-        let score = if semantic.is_empty() {
-            0.65 * components.lexical + 0.20 * components.confidence + 0.15 * components.temporal
-        } else {
-            0.40 * components.lexical
-                + 0.35 * components.semantic
-                + 0.15 * components.confidence
-                + 0.10 * components.temporal
-        };
+        let score = [
+            components.lexical_position,
+            components.semantic_position,
+            Some(components.confidence_position),
+            Some(components.recency_position),
+        ]
+        .into_iter()
+        .flatten()
+        .map(fused)
+        .sum();
         ranked.push(RankedCandidate {
             id,
             score,
@@ -254,45 +279,4 @@ fn rank(
     ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then_with(|| a.id.cmp(&b.id)));
     ranked.truncate(limit);
     Ok(ranked)
-}
-
-pub fn recall_at_k(ranked: &[String], relevant: &[String], k: usize) -> f64 {
-    if relevant.is_empty() {
-        return 0.0;
-    }
-    ranked
-        .iter()
-        .take(k)
-        .filter(|id| relevant.contains(id))
-        .count() as f64
-        / relevant.len() as f64
-}
-
-pub fn mean_reciprocal_rank(ranked: &[String], relevant: &[String]) -> f64 {
-    ranked
-        .iter()
-        .position(|id| relevant.contains(id))
-        .map(|index| 1.0 / (index + 1) as f64)
-        .unwrap_or(0.0)
-}
-
-pub fn ndcg_at_k(ranked: &[String], relevance: &HashMap<String, f64>, k: usize) -> f64 {
-    fn dcg(values: impl Iterator<Item = f64>) -> f64 {
-        values
-            .enumerate()
-            .map(|(i, rel)| (2.0_f64.powf(rel) - 1.0) / ((i + 2) as f64).log2())
-            .sum()
-    }
-    let actual = dcg(ranked
-        .iter()
-        .take(k)
-        .map(|id| relevance.get(id).copied().unwrap_or(0.0)));
-    let mut ideal = relevance.values().copied().collect::<Vec<_>>();
-    ideal.sort_by(|a, b| b.total_cmp(a));
-    let best = dcg(ideal.into_iter().take(k));
-    if best == 0.0 {
-        0.0
-    } else {
-        actual / best
-    }
 }

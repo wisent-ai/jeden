@@ -13,6 +13,35 @@ mod prompt;
 mod step;
 mod tools;
 
+/// The steps a turn has begun, and when each began. A step's number is how many
+/// have begun, so the first step is the first without a counter to seed, and the
+/// step budget is the most that may begin.
+struct Steps {
+    began: Vec<std::time::Instant>,
+    limit: Option<u32>,
+}
+
+impl Steps {
+    /// Begin the next step: its number, or `None` when the budget is spent.
+    fn begin(&mut self) -> Option<u32> {
+        self.began.push(std::time::Instant::now());
+        let number = match u32::try_from(self.began.len()) {
+            Ok(number) => number,
+            Err(_past_any_budget) => return None,
+        };
+        if self.limit.is_some_and(|limit| number > limit) {
+            self.began.pop();
+            return None;
+        }
+        Some(number)
+    }
+
+    /// Whether the step under way is the turn's first.
+    fn first(&self) -> bool {
+        matches!(self.began.as_slice(), [_])
+    }
+}
+
 impl Conversation {
     pub(crate) fn run_turn(
         &mut self,
@@ -61,13 +90,13 @@ impl Conversation {
                     .is_some_and(crate::agent::is_verification_read_tool)
             });
         }
-        let step_max_label = args
-            .max_steps
-            .map(|m| m.to_string())
-            .unwrap_or_else(|| "unbounded".to_string());
-        let mut step_iter: Box<dyn Iterator<Item = u32>> = match args.max_steps {
-            Some(max) => Box::new(u32::from(true)..=max),
-            None => Box::new(u32::from(true)..),
+        let step_max_label = match args.max_steps {
+            Some(max) => max.to_string(),
+            None => "unbounded".to_string(),
+        };
+        let mut steps = Steps {
+            began: Vec::new(),
+            limit: args.max_steps,
         };
         let mut repairs = answer::AnswerRepairs::new();
         // A `Stop` hook reads the finished answer and may refuse it. Streaming
@@ -84,7 +113,7 @@ impl Conversation {
         // advances only once an answer has been read. Recovery proceeds only
         // after changing the route, compacting history or repairing an answer;
         // an unrecoverable failure ends the turn with its original cause.
-        let mut current = step_iter.next();
+        let mut current = steps.begin();
         'steps: while let Some(step) = current {
             if tracks_completion {
                 self.refresh_completion_context(hooks)?;
@@ -95,8 +124,8 @@ impl Conversation {
             hooks.note(&format!("thinking (step {}/{})", step, step_max_label));
             // The chat memory replaces compaction: with it on, history is
             // never cut, and the view a step sends keeps its size by itself.
-            if step > u32::from(true) && self.memory.is_none() {
-                let _ = self.maybe_auto_compact(args, hooks, "threshold", true)?;
+            if !steps.first() && self.memory.is_none() {
+                self.maybe_auto_compact(args, hooks, "threshold", true)?;
             }
             if !args.model_only {
                 self.restore_session_context(args)?;
@@ -125,7 +154,7 @@ impl Conversation {
                     continue 'steps;
                 }
             };
-            current = step_iter.next();
+            current = steps.begin();
             let content = self.record_step(args, step, streaming, &mut prepared)?;
             self.build_memory_ahead()?;
             if args.model_only {

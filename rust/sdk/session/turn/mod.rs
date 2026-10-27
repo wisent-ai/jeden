@@ -18,11 +18,7 @@ impl AgentSession {
         }
         let cancel = Arc::new(AtomicBool::new(false));
         {
-            let mut active = self
-                .inner
-                .active
-                .lock()
-                .map_err(|_| "active request lock poisoned")?;
+            let mut active = crate::panicked::held(&self.inner.active);
             if self.inner.disposed.load(Ordering::Acquire) {
                 return Err("session disposed".into());
             }
@@ -44,7 +40,7 @@ impl AgentSession {
             .inner
             .conversation
             .lock()
-            .map_err(|_| "conversation lock poisoned".to_string())?;
+            .map_err(|_poisoned| "conversation lock poisoned".to_string())?;
         let conversation = conversation_guard.as_mut().ok_or("session disposed")?;
         let args = args_from_options(
             &self.inner.options,
@@ -88,9 +84,8 @@ impl AgentSession {
                         message: policy.note(message).to_string(),
                     },
                 }) {
-                    if let Ok(mut slot) = progress_error.lock() {
-                        *slot = Some(error);
-                    }
+                    // A skipped slot lost the error that should fail the prompt.
+                    *crate::panicked::held(&progress_error) = Some(error);
                 }
             }),
             stream: Box::new(move |text| {
@@ -105,9 +100,7 @@ impl AgentSession {
                     request_id: stream_id.clone(),
                     event: SessionEventKind::TextDelta { text },
                 }) {
-                    if let Ok(mut slot) = stream_error.lock() {
-                        *slot = Some(error);
-                    }
+                    *crate::panicked::held(&stream_error) = Some(error);
                 }
             }),
             trace: Box::new(move |event| {
@@ -116,9 +109,9 @@ impl AgentSession {
                         if let Some(path) =
                             state.get("sessionPath").and_then(serde_json::Value::as_str)
                         {
-                            if let Ok(mut current) = trace_inner.session_path.write() {
-                                *current = PathBuf::from(path);
-                            }
+                            // A path is replaced whole, so a writer that panicked
+                            // left a path; the new one is still recorded.
+                            *crate::panicked::written(&trace_inner.session_path) = PathBuf::from(path);
                         }
                         SessionEventKind::Completion {
                             state: state.clone(),
@@ -148,7 +141,7 @@ impl AgentSession {
                 };
                 // Best-effort like goal events: a hidden-by-default trace never
                 // fails the prompt it decorates.
-                let _ = trace_inner.emit(SessionEvent {
+                let _unobserved = trace_inner.emit(SessionEvent {
                     request_id: trace_id.clone(),
                     event,
                 });
@@ -163,11 +156,8 @@ impl AgentSession {
                         options: options.to_vec(),
                     },
                 })?;
-                let handler = ask_inner
-                    .interactions
-                    .read()
-                    .map_err(|_| "interaction handler lock poisoned")?
-                    .clone();
+                // The handler is replaced whole: a writer that panicked left one.
+                let handler = crate::panicked::read_held(&ask_inner.interactions).clone();
                 handler
                     .ok_or("elicitation requires an interaction handler")?
                     .elicit(ElicitationRequest {
@@ -187,20 +177,12 @@ impl AgentSession {
                         detail: detail.to_string(),
                     },
                 }) {
-                    if let Ok(mut slot) = approve_error.lock() {
-                        *slot = Some(error);
-                    }
+                    *crate::panicked::held(&approve_error) = Some(error);
                     return false;
                 }
-                let result = approve_inner
-                    .interactions
-                    .read()
-                    .map_err(|_| "interaction handler lock poisoned".to_string())
-                    .and_then(|guard| {
-                        guard
-                            .clone()
-                            .ok_or_else(|| "approval requires an interaction handler".to_string())
-                    })
+                let result = crate::panicked::read_held(&approve_inner.interactions)
+                    .clone()
+                    .ok_or_else(|| "approval requires an interaction handler".to_string())
                     .and_then(|handler| {
                         handler.approve(ApprovalRequest {
                             token,
@@ -212,9 +194,7 @@ impl AgentSession {
                 match result {
                     Ok(approved) => approved,
                     Err(error) => {
-                        if let Ok(mut slot) = approve_error.lock() {
-                            *slot = Some(error);
-                        }
+                        *crate::panicked::held(&approve_error) = Some(error);
                         false
                     }
                 }
@@ -222,7 +202,7 @@ impl AgentSession {
             goal_event: Some(Arc::new(move |text: &str, status: &str| {
                 // Best-effort: a background goal-lifecycle event never fails
                 // or outlives the prompt's error handling.
-                let _ = goal_inner.emit(SessionEvent {
+                let _unobserved = goal_inner.emit(SessionEvent {
                     request_id: goal_id.clone(),
                     event: SessionEventKind::Goal {
                         text: text.to_string(),
@@ -232,20 +212,9 @@ impl AgentSession {
             })),
         };
         let result = commands::run(conversation, &args, &request.prompt, continuing, &mut hooks);
-        let result = match self.inner.session_path.write() {
-            Ok(mut path) => {
-                *path = conversation.session_path();
-                result
-            }
-            Err(error) => {
-                let cause =
-                    format!("cannot retain session path after request {request_id}: {error}");
-                Err(match result {
-                    Ok(_) => cause,
-                    Err(initiating) => format!("{initiating}; {cause}"),
-                })
-            }
-        };
+        // The path is replaced whole: a writer that panicked left a path, and
+        // the request's own answer is not turned into a lock refusal.
+        *crate::panicked::written(&self.inner.session_path) = conversation.session_path();
         let text = result?;
         // The filter holds the last unterminated line back until it knows the
         // line is not a fence; the turn is over, so let it out.
@@ -257,11 +226,7 @@ impl AgentSession {
                 })?;
             }
         }
-        if let Some(error) = event_error
-            .lock()
-            .map_err(|_| "event error lock poisoned")?
-            .take()
-        {
+        if let Some(error) = crate::panicked::held(&event_error).take() {
             return Err(error);
         }
         let text = policy.answer(text);

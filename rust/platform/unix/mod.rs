@@ -1,3 +1,10 @@
+//! Process groups, PTYs and desktop opening on Unix, through libc's own
+//! functions and constants. Signal numbers, fcntl commands, open flags and the
+//! TIOCSWINSZ request were written here by hand as numbers: they differ
+//! between platforms (O_NONBLOCK is 0x4 on macOS and 0o4000 on Linux, so the
+//! hand-written 4 left a Linux PTY master blocking), and libc is the
+//! declaration of each for the platform being built.
+
 use super::*;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -15,43 +22,66 @@ impl UnixPlatform {
     }
 }
 
+/// The C return value `rc` as a result: libc functions answer a negative
+/// value on failure and leave the cause in errno.
+fn checked(rc: libc::c_int) -> io::Result<libc::c_int> {
+    if rc.is_negative() {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(rc)
+    }
+}
+
+/// The process group a spawned child leads: its own pid, as `pid_t`.
+fn group_of(child: &Child) -> Result<libc::pid_t, PlatformError> {
+    libc::pid_t::try_from(child.id()).map_err(|error| {
+        PlatformError::Process(format!(
+            "process {} has no pid_t process group: {error}",
+            child.id()
+        ))
+    })
+}
+
+/// Send `signal` to every process of `group`. A group that is already gone
+/// (ESRCH) has nothing left to signal, which is what the signal was for.
+fn signal_group(group: libc::pid_t, signal: ProcessSignal) -> Result<(), PlatformError> {
+    let number = match signal {
+        ProcessSignal::Interrupt => libc::SIGINT,
+        ProcessSignal::Terminate => libc::SIGTERM,
+        ProcessSignal::Kill => libc::SIGKILL,
+    };
+    match checked(unsafe { libc::kill(-group, number) }) {
+        Ok(_signalled) => Ok(()),
+        Err(error) if error.raw_os_error() == Some(libc::ESRCH) => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 struct UnixProcessTree {
-    group: i32,
+    group: libc::pid_t,
 }
 impl ProcessTree for UnixProcessTree {
     fn signal(&mut self, signal: ProcessSignal) -> Result<(), PlatformError> {
-        let number = match signal {
-            ProcessSignal::Interrupt => 2,
-            ProcessSignal::Terminate => 15,
-            ProcessSignal::Kill => 9,
-        };
-        let rc = unsafe { kill(-self.group, number) };
-        if rc < 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(3) {
-                return Err(error.into());
-            }
-        }
-        Ok(())
+        signal_group(self.group, signal)
     }
 }
 
 impl ProcessPlatform for UnixPlatform {
     fn configure_command(&self, command: &mut Command) -> Result<(), PlatformError> {
         unsafe {
+            // The child leads a process group named by its own pid, so the
+            // whole tree it starts can be signalled as one.
             command.pre_exec(|| {
-                if setpgid(0, 0) == 0 {
-                    Ok(())
-                } else {
-                    Err(io::Error::last_os_error())
-                }
+                let own = libc::getpid();
+                checked(libc::setpgid(own, own))?;
+                Ok(())
             });
         }
         Ok(())
     }
     fn attach_process_tree(&self, child: &Child) -> Result<Box<dyn ProcessTree>, PlatformError> {
         Ok(Box::new(UnixProcessTree {
-            group: child.id() as i32,
+            group: group_of(child)?,
         }))
     }
     fn pipe_reader(
@@ -66,7 +96,7 @@ struct UnixPtySession {
     child: Child,
     master: File,
     slave: File,
-    group: i32,
+    group: libc::pid_t,
 }
 impl PtySession for UnixPtySession {
     fn process_id(&self) -> u32 {
@@ -75,27 +105,22 @@ impl PtySession for UnixPtySession {
     fn write_all(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.master
             .write_all(bytes)
-            .and_then(|_| self.master.flush())
+            .and_then(|()| self.master.flush())
     }
     fn take_output(&mut self) -> Result<Box<dyn Read + Send>, PlatformError> {
         // The master was opened non-blocking for the old polling reads; the
         // reader thread blocks on it instead.
         let fd = duplicate(self.master_fd())?;
-        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
-        if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) } < 0 {
-            let error = io::Error::last_os_error();
+        if let Err(error) = set_blocking(fd, true) {
             unsafe { libc::close(fd) };
-            return Err(error.into());
+            return Err(error);
         }
         Ok(Box::new(unsafe { File::from_raw_fd(fd) }))
     }
     fn resize(&mut self, cols: u16, rows: u16) -> Result<(), PlatformError> {
         set_window_size(self.master_fd(), cols, rows)?;
         set_window_size(self.slave_fd(), cols, rows)?;
-        let rc = unsafe { kill(-self.group, SIGWINCH) };
-        if rc < 0 {
-            return Err(io::Error::last_os_error().into());
-        }
+        checked(unsafe { libc::kill(-self.group, libc::SIGWINCH) })?;
         Ok(())
     }
     fn alive(&mut self) -> Result<bool, PlatformError> {
@@ -105,19 +130,7 @@ impl PtySession for UnixPtySession {
         Ok(self.child.try_wait()?)
     }
     fn signal(&mut self, signal: ProcessSignal) -> Result<(), PlatformError> {
-        let number = match signal {
-            ProcessSignal::Interrupt => 2,
-            ProcessSignal::Terminate => 15,
-            ProcessSignal::Kill => 9,
-        };
-        let rc = unsafe { kill(-self.group, number) };
-        if rc < 0 {
-            let error = io::Error::last_os_error();
-            if error.raw_os_error() != Some(3) {
-                return Err(error.into());
-            }
-        }
-        Ok(())
+        signal_group(self.group, signal)
     }
 }
 impl UnixPtySession {
@@ -131,9 +144,24 @@ impl UnixPtySession {
     }
 }
 impl Drop for UnixPtySession {
+    /// End the shell and reap it. A drop has no caller to refuse to, so a
+    /// signal or reap that fails is said on stderr instead of being dropped,
+    /// and the reap says what it waits for while it waits.
     fn drop(&mut self) {
-        let _ = self.signal(ProcessSignal::Kill);
-        let _ = self.child.wait();
+        let pid = self.child.id();
+        if let Err(error) = self.signal(ProcessSignal::Kill) {
+            eprintln!("jeden: the PTY shell {pid} could not be killed: {error}");
+            return;
+        }
+        let reaped = stado_wait::blocking(
+            stado_wait::Kind::Process,
+            format!("the PTY shell {pid} to end"),
+            "this machine",
+            || self.child.wait(),
+        );
+        if let Err(error) = reaped {
+            eprintln!("jeden: the PTY shell {pid} could not be reaped: {error}");
+        }
     }
 }
 
@@ -144,26 +172,25 @@ impl PtyPlatform for UnixPlatform {
         cols: u16,
         rows: u16,
     ) -> Result<Box<dyn PtySession>, PlatformError> {
-        let mut master = -1;
-        let mut slave = -1;
-        if unsafe {
-            openpty(
+        // openpty writes both descriptors before they are read.
+        let (mut master, mut slave): (libc::c_int, libc::c_int) = Default::default();
+        // macOS declares the termios and winsize arguments mutable and Linux
+        // const; a null mutable pointer is accepted by both.
+        checked(unsafe {
+            libc::openpty(
                 &mut master,
                 &mut slave,
                 std::ptr::null_mut(),
-                std::ptr::null(),
-                std::ptr::null(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
             )
-        } < 0
-        {
-            return Err(io::Error::last_os_error().into());
-        }
+        })?;
         if let Err(error) =
-            set_window_size(master, cols, rows).and_then(|_| set_window_size(slave, cols, rows))
+            set_window_size(master, cols, rows).and_then(|()| set_window_size(slave, cols, rows))
         {
             unsafe {
-                close(master);
-                close(slave);
+                libc::close(master);
+                libc::close(slave);
             }
             return Err(error);
         }
@@ -178,18 +205,15 @@ impl PtyPlatform for UnixPlatform {
                 .stdout(Stdio::from_raw_fd(stdout_fd))
                 .stderr(Stdio::from_raw_fd(stderr_fd));
             command.pre_exec(|| {
-                if setsid() < 0 {
-                    Err(io::Error::last_os_error())
-                } else {
-                    Ok(())
-                }
+                checked(libc::setsid())?;
+                Ok(())
             });
         }
         let child = command.spawn()?;
-        let group = child.id() as i32;
+        let group = group_of(&child)?;
         let master_file = unsafe { File::from_raw_fd(master) };
         let slave_file = unsafe { File::from_raw_fd(slave) };
-        set_nonblocking(master)?;
+        set_blocking(master, false)?;
         Ok(Box::new(UnixPtySession {
             child,
             master: master_file,
@@ -226,62 +250,26 @@ impl DesktopPlatform for UnixPlatform {
 }
 
 fn duplicate(fd: RawFd) -> Result<RawFd, PlatformError> {
-    let value = unsafe { dup(fd) };
-    if value < 0 {
-        Err(io::Error::last_os_error().into())
-    } else {
-        Ok(value)
-    }
+    Ok(checked(unsafe { libc::dup(fd) })?)
 }
-fn set_nonblocking(fd: RawFd) -> Result<(), PlatformError> {
-    let flags = unsafe { fcntl(fd, 3, 0) };
-    if flags < 0 {
-        return Err(io::Error::last_os_error().into());
-    }
-    if unsafe { fcntl(fd, 4, flags | 4) } < 0 {
-        return Err(io::Error::last_os_error().into());
-    }
+
+/// Clear (`blocking`) or set O_NONBLOCK on `fd`, keeping its other flags.
+fn set_blocking(fd: RawFd, blocking: bool) -> Result<(), PlatformError> {
+    let flags = checked(unsafe { libc::fcntl(fd, libc::F_GETFL) })?;
+    let next = if blocking {
+        flags & !libc::O_NONBLOCK
+    } else {
+        flags | libc::O_NONBLOCK
+    };
+    checked(unsafe { libc::fcntl(fd, libc::F_SETFL, next) })?;
     Ok(())
 }
+
 fn set_window_size(fd: RawFd, cols: u16, rows: u16) -> Result<(), PlatformError> {
-    let size = Winsize {
-        rows,
-        cols,
-        xpixel: 0,
-        ypixel: 0,
-    };
-    if unsafe { ioctl(fd, TIOCSWINSZ, &size) } < 0 {
-        Err(io::Error::last_os_error().into())
-    } else {
-        Ok(())
-    }
-}
-#[repr(C)]
-struct Winsize {
-    rows: u16,
-    cols: u16,
-    xpixel: u16,
-    ypixel: u16,
-}
-#[cfg(target_os = "macos")]
-const TIOCSWINSZ: u64 = 0x8008_7467;
-#[cfg(target_os = "linux")]
-const TIOCSWINSZ: u64 = 0x5414;
-const SIGWINCH: i32 = 28;
-#[cfg_attr(target_os = "linux", link(name = "util"))]
-extern "C" {
-    fn openpty(
-        master: *mut i32,
-        slave: *mut i32,
-        name: *mut i8,
-        termios: *const std::ffi::c_void,
-        winsize: *const std::ffi::c_void,
-    ) -> i32;
-    fn dup(fd: i32) -> i32;
-    fn close(fd: i32) -> i32;
-    fn setsid() -> i32;
-    fn setpgid(pid: i32, pgid: i32) -> i32;
-    fn kill(pid: i32, signal: i32) -> i32;
-    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
-    fn ioctl(fd: i32, request: u64, ...) -> i32;
+    // The pixel size is left unknown, as a terminal that reports none does.
+    let mut size: libc::winsize = unsafe { std::mem::zeroed() };
+    size.ws_row = rows;
+    size.ws_col = cols;
+    checked(unsafe { libc::ioctl(fd, libc::TIOCSWINSZ, &size) })?;
+    Ok(())
 }

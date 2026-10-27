@@ -39,11 +39,9 @@ const SET: libc::c_ulong = 1;
 /// prctl(PR_SET_NO_NEW_PRIVS) takes 0 in every argument after the first
 /// (https://man7.org/linux/man-pages/man2/PR_SET_NO_NEW_PRIVS.2const.html).
 const UNUSED: libc::c_ulong = 0;
-
 // Filesystem rights, in the order the ABI introduced them. The ruleset handles every right the
 // running kernel knows and no more: asking for one a kernel does not implement is refused
 // outright, which would turn a working confinement into no confinement at all.
-
 /// `LANDLOCK_ACCESS_FS_EXECUTE`
 /// (https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/tree/include/uapi/linux/landlock.h).
 const EXECUTE: u64 = 1 << 0;
@@ -75,7 +73,6 @@ const TRUNCATE_ABI: i32 = 3;
 /// The ABI version that added `LANDLOCK_ACCESS_FS_IOCTL_DEV`
 /// (https://docs.kernel.org/userspace-api/landlock.html).
 const IOCTL_DEV_ABI: i32 = 5;
-
 #[repr(C)]
 struct RulesetAttr {
     handled_access_fs: u64,

@@ -50,13 +50,14 @@ pub(crate) fn append_with_parent(
     let session_id = read_session_id(dir)?;
     let parent_id =
         explicit_parent.or_else(|| ledger.events.last().map(|event| event.event_id.clone()));
-    let sequence = ledger.events.len() as u64 + 1;
+    // Events are numbered from the first; this one follows every recorded one.
+    let sequence = crate::tally::FIRST + ledger.events.len() as u64;
     let event_id = fresh_event_id(&timestamp);
-    let correlation_id = ledger
-        .events
-        .last()
-        .map(|event| event.correlation_id.clone())
-        .unwrap_or_else(|| event_id.clone());
+    // An event continues the last one's correlation; the first one opens it.
+    let correlation_id = match ledger.events.last() {
+        Some(event) => event.correlation_id.clone(),
+        None => event_id.clone(),
+    };
     let mut event = SessionEventV2 {
         event_id: event_id.clone(),
         session_id,
@@ -68,7 +69,8 @@ pub(crate) fn append_with_parent(
         schema_version: SESSION_EVENT_SCHEMA_VERSION,
         payload,
         outbox: OutboxConsumer::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .map(|consumer| OutboxItem::pending(consumer, &event_id))
             .collect(),
         checksum: String::new(),
@@ -76,7 +78,7 @@ pub(crate) fn append_with_parent(
     event.seal()?;
     validate_next(
         &dir.join(TRANSCRIPT_FILE),
-        ledger.events.len() + 1,
+        ledger.events.len() + usize::from(crate::tally::STEP),
         &ledger.events,
         &event,
         &event.session_id,
@@ -113,12 +115,13 @@ pub(crate) fn read_events(dir: &Path) -> Result<ReadEvents, String> {
     let mut recovered_truncated_tail = false;
     let mut contained_legacy = false;
 
-    for (index, raw) in chunks.into_iter().take(logical_len).enumerate() {
-        let line_number = index + 1;
+    // Transcript lines are numbered from the first, as editors show them.
+    let numbered = (usize::from(crate::tally::STEP)..).zip(chunks.into_iter().take(logical_len));
+    for (line_number, raw) in numbered {
         let recoverable_tail = !terminated && line_number == logical_len;
         let value: Value = match serde_json::from_slice(raw) {
             Ok(value) => value,
-            Err(_) if recoverable_tail => {
+            Err(_cut) if recoverable_tail => {
                 recovered_truncated_tail = true;
                 break;
             }

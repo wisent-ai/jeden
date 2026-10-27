@@ -172,55 +172,60 @@ pub(crate) fn map_session_event(event: SessionEventKind, streamed: &mut bool) ->
 }
 
 /// Status is normally free text. Structured canonical status payloads are translated into the
-/// richer ACP variants; unknown/free-text status remains a thought chunk rather than being lost.
+/// richer ACP variants; unknown/free-text status remains a thought chunk rather than being lost,
+/// and so does a structured status missing a field its variant needs (a tool call's id or
+/// title, a plan entry's content): it is passed on whole instead of given an invented id that
+/// would merge it with every other such call.
 fn map_status(message: String) -> SessionUpdate {
     let Ok(value) = serde_json::from_str::<Value>(&message) else {
         return SessionUpdate::AgentThoughtChunk(ContentChunk::new(message.into()));
     };
+    match structured_status(&value) {
+        Some(update) => update,
+        None => SessionUpdate::AgentThoughtChunk(ContentChunk::new(message.into())),
+    }
+}
+
+/// The ACP variant of a structured status, or none when it is not one or
+/// lacks a field the variant needs.
+fn structured_status(value: &Value) -> Option<SessionUpdate> {
     match value.get("kind").and_then(Value::as_str) {
         Some("toolCall") => {
-            let id = string(&value, "toolCallId", "tool");
-            let title = string(&value, "title", "Tool call");
-            let mut call = ToolCall::new(id, title);
+            let mut call = ToolCall::new(text(value, "toolCallId")?, text(value, "title")?);
             if let Some(input) = value.get("input") {
                 call = call.raw_input(input.clone());
             }
-            SessionUpdate::ToolCall(call.status(tool_status(value.get("status"))))
+            Some(SessionUpdate::ToolCall(call.status(tool_status(value.get("status")))))
         }
         Some("toolUpdate") | Some("toolResult") => {
-            let id = string(&value, "toolCallId", "tool");
+            let id = text(value, "toolCallId")?;
             let mut fields = ToolCallUpdateFields::new().status(tool_status(value.get("status")));
             if let Some(output) = value.get("output") {
                 fields = fields.raw_output(output.clone());
             }
-            SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(id, fields))
+            Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(id, fields)))
         }
         Some("plan") => {
             let entries = value
                 .get("entries")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+                .and_then(Value::as_array)?
+                .iter()
                 .map(|entry| {
-                    PlanEntry::new(
-                        string(entry, "content", "Task"),
+                    Some(PlanEntry::new(
+                        text(entry, "content")?,
                         plan_priority(entry.get("priority")),
                         plan_status(entry.get("status")),
-                    )
+                    ))
                 })
-                .collect();
-            SessionUpdate::Plan(Plan::new(entries))
+                .collect::<Option<Vec<_>>>()?;
+            Some(SessionUpdate::Plan(Plan::new(entries)))
         }
-        _ => SessionUpdate::AgentThoughtChunk(ContentChunk::new(message.into())),
+        _ => None,
     }
 }
 
-fn string(value: &Value, key: &str, fallback: &str) -> String {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .unwrap_or(fallback)
-        .to_owned()
+fn text(value: &Value, key: &str) -> Option<String> {
+    value.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
 fn tool_status(value: Option<&Value>) -> ToolCallStatus {

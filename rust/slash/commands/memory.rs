@@ -10,21 +10,21 @@ use crate::tui::{PickerItem, PickerSpec};
 const MEMORY_USAGE: &str =
     "Usage: /memory [view [query]|stats|queue [status|run LIMIT LEASE_MS|drain LIMIT LEASE_MS]|enqueue [reindex]|rebuild|clear]";
 
+/// A count `health` reports under `field`; one it does not report is
+/// refused naming the field rather than shown as zero.
+fn health_count(health: &Value, field: &str) -> Result<i64, String> {
+    health
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or_else(|| format!("memory health reports no {field} count: {health}"))
+}
+
 pub(crate) fn memory_picker() -> Result<PickerSpec, String> {
     let store = MemoryStore::open()?;
     let health = store.health()?;
-    let count = health
-        .get("activeMemories")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let pending = health
-        .get("pendingJobs")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
-    let failed = health
-        .get("failedJobs")
-        .and_then(Value::as_i64)
-        .unwrap_or_default();
+    let count = health_count(&health, "activeMemories")?;
+    let pending = health_count(&health, "pendingJobs")?;
+    let failed = health_count(&health, "failedJobs")?;
     Ok(PickerSpec::new(
         "Durable memory",
         vec![
@@ -45,19 +45,20 @@ pub(crate) fn memory_picker() -> Result<PickerSpec, String> {
             PickerItem::action("Clear durable memory", "/memory clear")
                 .detail("Delete stored memory revisions; queued work is retained")
                 .badge("destructive")
-                .disabled(count == 0),
+                .disabled(!count.is_positive()),
         ],
     ))
 }
 
 pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
     let argv = split_args(args);
-    let (verb, rest) = argv
-        .split_first()
-        .map(|(value, tail)| (value.as_str(), tail))
-        .unwrap_or(("view", &[][..]));
+    // `/memory` alone is `/memory view`, as MEMORY_USAGE writes it.
+    let (verb, rest) = match argv.split_first() {
+        Some((value, tail)) => (value.as_str(), tail),
+        None => ("view", &[][..]),
+    };
     let store = MemoryStore::open()?;
-    let scope = scope_from_value(None, context.cwd);
+    let scope = scope_from_value(None, context.cwd)?;
     // Each subcommand answers to the one name MEMORY_USAGE declares; the
     // undocumented second spellings (diagnose, health, reset, list, jobs and
     // an immediate reindex) are gone, so the usage line is the whole grammar.
@@ -72,7 +73,12 @@ pub(crate) fn handle_memory(args: &str, context: &SlashContext<'_>) -> Result<St
         )),
         "view" => {
             let query = rest.join(" ");
-            let hits = store.recall(&FtsBackend, &scope, &query, 200)?;
+            // Every matching record: the limit is the active records counted
+            // now, so nothing that matches is cut off.
+            let active = health_count(&store.health()?, "activeMemories")?;
+            let every = usize::try_from(active)
+                .map_err(|error| format!("memory health counts {active} active memories: {error}"))?;
+            let hits = store.recall(&FtsBackend, &scope, &query, every)?;
             if hits.is_empty() {
                 return Ok("No matching active memory records.".into());
             }
@@ -113,7 +119,7 @@ fn enqueue_maintenance(
     }
     let id = store.enqueue(
         REINDEX_JOB,
-        &json!({"requestedBy":"slash","scope":scope,"operation":"reindex"}),
+        &json!({"requestedBy":"slash","scope":scope,"operation":REINDEX_JOB}),
     )?;
     Ok(format!(
         "Enqueued durable full-text reindex job {id}. Inspect it with /memory queue; execute queued work with /memory queue run LIMIT LEASE_MS."
@@ -140,7 +146,7 @@ fn handle_queue(store: &MemoryStore, args: &[String]) -> Result<String, String> 
         return serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string());
     };
     let verb: QueueVerb = serde_json::from_value(Value::String(action.clone()))
-        .map_err(|_| format!("unknown memory queue action {action:?}; {QUEUE_USAGE}"))?;
+        .map_err(|error| format!("unknown memory queue action {action:?} ({error}); {QUEUE_USAGE}"))?;
     match (verb, inputs) {
         (QueueVerb::Status, []) => {
             serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string())
@@ -158,18 +164,20 @@ fn handle_queue(store: &MemoryStore, args: &[String]) -> Result<String, String> 
                 ));
             }
             let worker = format!("slash-memory-{}", std::process::id());
-            let mut processed = 0;
-            while processed < limit.get() {
+            let mut processed = Vec::new();
+            for () in std::iter::repeat_n((), limit.get()) {
                 match store.process_one(&worker, lease_ms.get()) {
-                    Ok(true) => processed += 1,
+                    Ok(true) => processed.push(()),
                     Ok(false) => break,
                     Err(error) => {
                         return Err(format!(
-                            "Memory queue processing failed after {processed} completed job(s): {error}. Inspect /memory queue for retry state."
+                            "Memory queue processing failed after {} completed job(s): {error}. Inspect /memory queue for retry state.",
+                            processed.len()
                         ));
                     }
                 }
             }
+            let processed = processed.len();
             let status = store.queue_status()?;
             Ok(format!(
                 "Processed {processed} memory job(s); {} pending, {} failed.",

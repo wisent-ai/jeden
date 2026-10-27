@@ -26,6 +26,10 @@ path = "rust/bin/jeden-reference-benchmark.rs"
 name = "jeden-sandbox-helper"
 path = "rust/bin/jeden-sandbox-helper.rs"
 
+[[test]]
+name = "tracking-api"
+path = "tests/tracking/api.rs"
+
 
 [dependencies]
 # By git rev, not by sibling path: a path dependency outside this repository
@@ -38,8 +42,14 @@ base64 = "0.22"
 arc-swap = { version = "1", features = ["serde"] }
 aes-gcm = "0.10"
 crossterm = { version = "0.28", features = ["event-stream"] }
+# Theme colors written as CSS colors (`#rrggbb`, names) in theme.json.
+csscolorparser = "0.6"
+# Delimited tables (CSV, TSV) read by read_document as a spreadsheet reads them.
+csv = "1"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 hex = "0.4"
+# RSS, Atom and JSON Feed documents read by their structure in read_document.
+feed-rs = "2"
 flate2 = "1"
 futures = "0.3"
 hmac = "0.12"
@@ -61,6 +71,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 rust_decimal = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
 semver = { version = "1", features = ["serde"] }
+# The collaboration relay's HTTP server: requests are read and answered by it.
+tiny_http = "0.12"
 tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "sync", "time", "macros"] }
 tokio-stream = "0.1"
 tokio-rustls = "0.26"
@@ -69,9 +81,13 @@ serde_yaml = "0.9"
 sha2 = "0.10"
 shell-words = "1"
 url = "2"
+# Weles path segments encoded to the URI standard's unreserved set.
+percent-encoding = "2"
 unicode-segmentation = "1.12"
 uuid = { version = "1", features = ["v4", "serde"] }
 unicode-width = "0.2"
+# Instants and spans: reading a stated instant and how long ago it was.
+jiff = "0.2"
 
 tree-sitter = "0.25"
 tree-sitter-javascript = "0.23"
@@ -84,3 +100,7 @@ ignore = "0.4"
 
 [target."cfg(unix)".dependencies]
 libc = "0.2"
+
+[build-dependencies]
+# The build script's git calls say on stderr what they wait for, like every other wait.
+stado-wait = { git = "https://github.com/wisent-ai/stado", package = "stado-wait", default-features = false }

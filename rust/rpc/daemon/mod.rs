@@ -1,8 +1,10 @@
 mod connection;
 mod dispatch;
+mod executor;
 mod member;
 use connection::reject_overloaded;
 use dispatch::*;
+pub use executor::{BoundedExecutor, Readiness, SubmitError};
 
 use super::identity::{IdentityRefusal, WisentIdentityAuthority};
 use super::service::{ServiceError, SessionBackend, SessionService, SubmitOutcome};
@@ -11,217 +13,38 @@ use super::tls::{ReloadableTlsAcceptor, TlsPeer};
 use super::transport::{AuthenticatedConnection, ErrorV1, ReconnectTokens, RequestEnvelopeV1};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{watch, Semaphore};
 use tokio::task::JoinSet;
 
-use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Condvar, Mutex};
-use std::thread::{self, JoinHandle};
+use std::sync::Arc;
 use std::time::Duration;
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
-const STARTING: u8 = 0;
-const READY: u8 = 1;
-const DRAINING: u8 = 2;
-const STOPPED: u8 = 3;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Readiness {
-    Starting,
-    Ready,
-    Draining,
-    Stopped,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SubmitError {
-    NotReady,
-    Backpressure,
-}
-
-struct ExecutorInner {
-    state: AtomicU8,
-    queued_and_running: AtomicUsize,
-    sender: Mutex<Option<mpsc::SyncSender<Job>>>,
-    idle: Condvar,
-    idle_lock: Mutex<()>,
-}
-
-pub struct BoundedExecutor {
-    inner: Arc<ExecutorInner>,
-    workers: Mutex<Vec<JoinHandle<()>>>,
-}
-
-impl BoundedExecutor {
-    pub fn new(worker_count: usize, queue_capacity: usize) -> Result<Self, String> {
-        if worker_count == 0 || queue_capacity == 0 {
-            return Err("worker_count and queue_capacity must be non-zero".into());
-        }
-        let (sender, receiver) = mpsc::sync_channel::<Job>(queue_capacity);
-        let receiver = Arc::new(Mutex::new(receiver));
-        let inner = Arc::new(ExecutorInner {
-            state: AtomicU8::new(STARTING),
-            queued_and_running: AtomicUsize::new(0),
-            sender: Mutex::new(Some(sender)),
-            idle: Condvar::new(),
-            idle_lock: Mutex::new(()),
-        });
-        let mut workers = Vec::with_capacity(worker_count);
-        for index in 0..worker_count {
-            let receiver = receiver.clone();
-            let worker_inner = inner.clone();
-            workers.push(
-                thread::Builder::new()
-                    .name(format!("jeden-session-{}", index))
-                    .spawn(move || loop {
-                        let job = match receiver.lock() {
-                            Ok(receiver) => receiver.recv(),
-                            Err(_) => break,
-                        };
-                        match job {
-                            Ok(job) => {
-                                job();
-                                if worker_inner
-                                    .queued_and_running
-                                    .fetch_sub(1, Ordering::AcqRel)
-                                    == 1
-                                {
-                                    worker_inner.idle.notify_all();
-                                }
-                            }
-                            Err(_) => break,
-                        }
-                    })
-                    .map_err(|error| error.to_string())?,
-            );
-        }
-        inner.state.store(READY, Ordering::Release);
-        Ok(Self {
-            inner,
-            workers: Mutex::new(workers),
-        })
-    }
-
-    pub fn readiness(&self) -> Readiness {
-        match self.inner.state.load(Ordering::Acquire) {
-            STARTING => Readiness::Starting,
-            READY => Readiness::Ready,
-            DRAINING => Readiness::Draining,
-            _ => Readiness::Stopped,
-        }
-    }
-
-    pub fn submit(&self, job: impl FnOnce() + Send + 'static) -> Result<(), SubmitError> {
-        if self.inner.state.load(Ordering::Acquire) != READY {
-            return Err(SubmitError::NotReady);
-        }
-        self.inner.queued_and_running.fetch_add(1, Ordering::AcqRel);
-        let result = self
-            .inner
-            .sender
-            .lock()
-            .ok()
-            .and_then(|sender| sender.as_ref().cloned())
-            .ok_or(SubmitError::NotReady)
-            .and_then(|sender| {
-                sender.try_send(Box::new(job)).map_err(|error| match error {
-                    mpsc::TrySendError::Full(_) => SubmitError::Backpressure,
-                    mpsc::TrySendError::Disconnected(_) => SubmitError::NotReady,
-                })
-            });
-        if result.is_err() {
-            self.inner.queued_and_running.fetch_sub(1, Ordering::AcqRel);
-        }
-        result
-    }
-
-    /// Stop accepting work and wait for what is already running. A shutdown
-    /// that abandons an operation mid-write is the failure this avoids, so
-    /// the wait ends when the last operation ends.
-    pub fn drain(&self) -> Result<(), String> {
-        let prior =
-            self.inner
-                .state
-                .compare_exchange(READY, DRAINING, Ordering::AcqRel, Ordering::Acquire);
-        if prior.is_err() && self.inner.state.load(Ordering::Acquire) != DRAINING {
-            return Ok(());
-        }
-        let mut guard = self
-            .inner
-            .idle_lock
-            .lock()
-            .map_err(|_| "executor idle lock poisoned")?;
-        while self.inner.queued_and_running.load(Ordering::Acquire) != 0 {
-            guard = self
-                .inner
-                .idle
-                .wait(guard)
-                .map_err(|_| "executor idle lock poisoned")?;
-        }
-        self.inner
-            .sender
-            .lock()
-            .map_err(|_| "executor sender lock poisoned")?
-            .take();
-        let workers = std::mem::take(
-            &mut *self
-                .workers
-                .lock()
-                .map_err(|_| "executor workers lock poisoned")?,
-        );
-        for worker in workers {
-            worker.join().map_err(|_| "executor worker panicked")?;
-        }
-        self.inner.state.store(STOPPED, Ordering::Release);
-        Ok(())
-    }
-}
-
-impl Drop for BoundedExecutor {
-    fn drop(&mut self) {
-        self.inner.state.store(DRAINING, Ordering::Release);
-        // The sender is only ever taken whole, so a poisoned lock is recovered:
-        // a sender left in place would keep every worker waiting and the
-        // joins below would never return.
-        match self.inner.sender.lock() {
-            Ok(mut sender) => drop(sender.take()),
-            Err(poisoned) => drop(poisoned.into_inner().take()),
-        }
-        let workers = match self.workers.get_mut() {
-            Ok(workers) => workers,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        for worker in workers.drain(..) {
-            // drain() refuses a panicked worker; a drop has no caller to
-            // refuse to, so the panic is said instead of lost.
-            if worker.join().is_err() {
-                eprintln!("jeden daemon: an executor worker panicked before shutdown");
-            }
-        }
-        self.inner.state.store(STOPPED, Ordering::Release);
-    }
-}
-
+/// The bounds a headless daemon keeps, each named by the host's declaration;
+/// none is compiled in. Built only through [`HeadlessConfig::new`], so a
+/// frame or connection bound is never zero.
 #[derive(Debug, Clone)]
 pub struct HeadlessConfig {
-    pub max_frame_bytes: usize,
-    pub max_connections: usize,
-    pub reconnect_key: Vec<u8>,
-    pub reconnect_ttl: Duration,
+    pub(in crate::rpc::daemon) max_frame_bytes: usize,
+    pub(in crate::rpc::daemon) max_connections: usize,
+    pub(in crate::rpc::daemon) reconnect_key: Vec<u8>,
+    pub(in crate::rpc::daemon) reconnect_ttl: Duration,
 }
 
-impl Default for HeadlessConfig {
-    fn default() -> Self {
+impl HeadlessConfig {
+    pub fn new(
+        max_frame_bytes: NonZeroUsize,
+        max_connections: NonZeroUsize,
+        reconnect_key: Vec<u8>,
+        reconnect_ttl: Duration,
+    ) -> Self {
         Self {
-            max_frame_bytes: 1024 * 1024,
-            max_connections: 128,
-            // No key: a daemon built from the default refuses to start
-            // ("reconnect key must contain at least 32 bytes") instead of
-            // signing reconnect tokens with a known all-zero key.
-            reconnect_key: Vec::new(),
-            reconnect_ttl: Duration::from_secs(300),
+            max_frame_bytes: max_frame_bytes.get(),
+            max_connections: max_connections.get(),
+            reconnect_key,
+            reconnect_ttl,
         }
     }
 }
@@ -242,11 +65,8 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         service: Arc<SessionService<B>>,
         config: HeadlessConfig,
     ) -> Result<Self, String> {
-        if config.max_frame_bytes == 0 || config.max_connections == 0 {
-            return Err("max_frame_bytes and max_connections must be non-zero".into());
-        }
         let reconnect = ReconnectTokens::new(config.reconnect_key.clone())
-            .map_err(|_| "reconnect key must contain at least 32 bytes")?;
+            .map_err(|error| format!("the reconnect key cannot sign reconnect tokens: {error:?}"))?;
         Ok(Self {
             tls,
             directory,
@@ -287,7 +107,12 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                     connections.spawn(async move {
                         let _permit = match permit {
                             Ok(permit) => permit,
-                            Err(_) => { reject_overloaded(stream).await; return; }
+                            // Every admitted connection holds a permit: none
+                            // is left, so this one is answered as overloaded.
+                            Err(tokio::sync::TryAcquireError::NoPermits | tokio::sync::TryAcquireError::Closed) => {
+                                reject_overloaded(stream).await;
+                                return;
+                            }
                         };
                         daemon.serve_said(stream).await;
                     });

@@ -43,7 +43,7 @@ fn collab_verb(verb: &str) -> Result<CollabVerb, String> {
         return Ok(CollabVerb::Status);
     }
     serde_json::from_value(Value::String(verb.to_string()))
-        .map_err(|_| format!("unknown /collab verb `{verb}`. {COLLAB_USAGE}"))
+        .map_err(|error| format!("unknown /collab verb `{verb}` ({error}). {COLLAB_USAGE}"))
 }
 
 pub(crate) fn handle_collab(args: &str, context: &SlashContext<'_>) -> Result<String, String> {
@@ -106,15 +106,14 @@ fn collab_start(
     let target = rest.trim();
     if is_network_relay(target) {
         let parsed = crate::collab::parse_relay_url(target)?;
-        let (room, key) = if parsed.room.is_empty() {
-            crate::collab::new_room_and_key()
-        } else {
-            (
-                parsed.room.clone(),
+        let (room, key) = match parsed.room {
+            None => (crate::collab::new_room(), crate::collab::new_key()),
+            Some(room) => (
+                room,
                 parsed
                     .key
                     .ok_or("HTTP relay start URL with a room must include #key=<k>")?,
-            )
+            ),
         };
         let write_token = match parsed.write_token {
             Some(token) => token,
@@ -130,7 +129,7 @@ fn collab_start(
         )?;
         // The cursor is where the relay says this room's log now ends, the
         // host's own start event included.
-        let (_, cursor) = crate::collab::relay_get(&parsed.base, &room, 0)?;
+        let (_, cursor) = crate::collab::relay_get(&parsed.base, &room)?;
         let key_text = crate::collab::encode_key(&key);
         let (full, view) = (
             crate::collab::CollabRole::Full.name(),
@@ -144,11 +143,9 @@ fn collab_start(
             "{}/room/{}#key={}&write={}&role={full}",
             parsed.base, room, key_text, write_token
         );
-        let qr_block = |url: &str| {
-            crate::qr::render(url)
-                .into_iter()
-                .map(|qr| format!("\n{qr}"))
-                .collect::<String>()
+        let qr_block = |url: &str| match crate::qr::render(url) {
+            Ok(qr) => format!("\n{qr}"),
+            Err(cause) => format!("\n(No QR code for this link: {cause}; open it as text.)"),
         };
         return Ok(format!(
             "Collab started on durable E2EE relay {}.\nView URL: {}{}\nFull write URL: {}{}\nThe encryption key and separately revocable write token stay in URL fragments and are never sent by browser navigation.",
@@ -176,13 +173,13 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
     let joined = now_text()?;
     if is_network_relay(target) {
         let parsed = crate::collab::parse_relay_url(target)?;
-        if parsed.room.is_empty() {
-            return Err("Join URL must include /room/<id>#key=<k>".into());
-        }
+        let room = parsed
+            .room
+            .ok_or("Join URL must include /room/<id>#key=<k>")?;
         let key = parsed
             .key
             .ok_or("Join URL must include the #key=<k> fragment")?;
-        let (blobs, cursor) = crate::collab::relay_get(&parsed.base, &parsed.room, 0)?;
+        let (blobs, cursor) = crate::collab::relay_get(&parsed.base, &room)?;
         if blobs.is_empty() {
             return Err("No events in that relay room yet — check the room id.".into());
         }
@@ -196,7 +193,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
         if let Some(token) = parsed.write_token.as_deref() {
             post_collab_http(
                 &parsed.base,
-                &parsed.room,
+                &room,
                 &key,
                 token,
                 "guest-join",
@@ -204,15 +201,15 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
             )?;
         }
         let role = parsed.role.name();
-        state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": parsed.room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": joined, "cwd": context.cwd });
+        state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": joined, "cwd": context.cwd });
         save_collab_state(context.cwd, &state)?;
         return Ok(format!(
             "Joined HTTP collab relay {} room {} as {}. Replayed {} encrypted frame(s); cursor {}.",
             parsed.base,
-            parsed.room,
+            room,
             role,
             frames.len(),
-            cursor
+            json!(cursor)
         ));
     }
     let relay = collab_path(context.cwd, target)?;

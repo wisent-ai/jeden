@@ -29,7 +29,8 @@ pub(super) fn migrate_legacy_value(
     let (id, parent_id, timestamp, kind, data) = if value.get("version").is_some() {
         let legacy: LegacyLedgerEntry =
             serde_json::from_value(value).map_err(|e| format!("invalid V1 ledger entry: {e}"))?;
-        if legacy.version != 1 {
+        // The first ledger format is the only versioned legacy one there is.
+        if u64::from(legacy.version) != crate::tally::FIRST {
             return Err(format!(
                 "unsupported legacy ledger version {}",
                 legacy.version
@@ -66,9 +67,11 @@ pub(super) fn migrate_legacy_value(
         )
     };
     let payload = SessionPayloadV2::from_legacy(&kind, data)?;
-    let correlation_id = previous
-        .map(|event| event.correlation_id.clone())
-        .unwrap_or_else(|| id.clone());
+    // An event continues its predecessor's correlation; the first one opens it.
+    let correlation_id = match previous {
+        Some(event) => event.correlation_id.clone(),
+        None => id.clone(),
+    };
     let mut event = SessionEventV2 {
         event_id: id.clone(),
         session_id: session_id.to_owned(),
@@ -80,7 +83,8 @@ pub(super) fn migrate_legacy_value(
         schema_version: SESSION_EVENT_SCHEMA_VERSION,
         payload,
         outbox: OutboxConsumer::ALL
-            .into_iter()
+            .iter()
+            .copied()
             .map(|consumer| OutboxItem::pending(consumer, &id))
             .collect(),
         checksum: String::new(),

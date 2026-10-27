@@ -53,24 +53,6 @@ entity!(job, "memory_jobs", {
     pub updated_at: i64,
 });
 
-entity!(workflow, "memory_workflows", {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub fingerprint: String,
-    pub description: String,
-    pub sessions_json: String,
-    pub occurrences: i64,
-    pub verified: bool,
-    pub updated_at: i64,
-});
-
-entity!(managed_skill, "memory_managed_skills", {
-    #[sea_orm(primary_key, auto_increment = false)]
-    pub id: String,
-    pub workflow_fingerprint: String,
-    pub body: String,
-    pub created_at: i64,
-});
-
 entity!(edge, "memory_edges", {
     #[sea_orm(primary_key, auto_increment = false)]
     pub from_id: String,

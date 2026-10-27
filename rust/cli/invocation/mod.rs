@@ -35,10 +35,12 @@ pub(crate) fn usage() -> String {
         "  jeden pursue --status REQUEST_ID [--json]\n",
         "  jeden pursue --state REQUEST_ID [--json]\n",
         "  jeden pursue --resume-run REQUEST_ID [--json]\n",
+        "  jeden hillclimb [focus] [--scope repository|organization [--only repo]...] [--rounds n] [--ledger path] --allow-write --allow-command [--json] [--cwd path] [--model name] — improve a repository or every repository of an organization round after round: choose the next improvement, pursue it, record it, choose again\n",
+        "  jeden hillclimb --status [--ledger path] [--json] [--cwd path] — read recorded rounds without starting a climb or granting writes\n",
         "  jeden todo [list|add|pause|resume|cancel|defect|answer|continue] [--session id] [--revision n --reason text|--text answer] [--json]\n",
         "  jeden asks [list|show|answer] [ask-id] [--text answer] [--json] — everything Jeden asked of you, in every session, and what you answered\n",
         "  jeden rpc              serve newline-delimited JSON RPC on stdio\n",
-        "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> [revoked-serials.txt]\n",
+        "  jeden headless <addr> <server-cert.pem> <server-key.pem> <client-ca.pem> <identity-map.json> <limits.json> [revoked-serials.txt]\n",
         "  jeden acp              serve ACP on stdio\n",
         "  jeden relay serve <addr>  run the encrypted collaboration-room relay on <addr>\n",
         "  jeden sessions [limit] [--json]\n",
@@ -78,6 +80,7 @@ pub(crate) fn usage() -> String {
         "  /plan [on|off|status]  control plan mode\n",
         "  /goal [set|done|drop|auto on|off]  control goal mode; auto lets the lifecycle model (Brama alias JEDEN_LIFECYCLE_MODEL_ALIAS) start/finish goals\n",
         "  /loop [on|off|status]  control continuation loop\n",
+        "  /hillclimb             what the hill-climb of this workspace has chosen and how each round ended\n",
         "  /todo [list|add|pause|resume|cancel|continue]  manage retained session work\n",
         "  /roadmap              open the native roadmap picker\n",
         "  /memory [stats|view|enqueue|rebuild|clear]\n",
@@ -208,7 +211,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
         ..Default::default()
     };
     while let Some(arg) = rest.next() {
-        let pursuit = pursuit_mode(&arg).filter(|_| args.command == Command::Pursue);
+        let pursuit = pursuit_mode(&arg).filter(|_mode| args.command == Command::Pursue);
         if let Some(mode) = pursuit {
             if args.pursuit_request.is_some() {
                 return Err(
@@ -232,7 +235,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                     rest.next()
                         .ok_or("--max-tokens requires a value")?
                         .parse()
-                        .map_err(|_| "--max-tokens must be an integer")?,
+                        .map_err(|error| format!("--max-tokens must be an integer: {error}"))?,
                 )
             }
             "--max-steps" => {
@@ -240,7 +243,7 @@ pub(crate) fn parse_args(argv: Vec<String>) -> Result<Args, String> {
                     rest.next()
                         .ok_or("--max-steps requires a value")?
                         .parse()
-                        .map_err(|_| "--max-steps must be an integer")?,
+                        .map_err(|error| format!("--max-steps must be an integer: {error}"))?,
                 )
             }
             "--allow-write" => args.allow_write = true,

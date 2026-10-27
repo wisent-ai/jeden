@@ -64,23 +64,29 @@ pub(crate) fn update_source_plugins(
     name: &str,
     plugins: &[Value],
 ) -> Result<(), String> {
-    let summary: Vec<Value> = plugins
+    // A catalogue plugin is named; its description and version are its own
+    // to state, kept as null when it states none.
+    let summary = plugins
         .iter()
-        .map(|p| {
-            json!({
-                "name": p.get("name").and_then(Value::as_str).unwrap_or(""),
-                "description": p.get("description").and_then(Value::as_str).unwrap_or(""),
-                "version": p.get("version").and_then(Value::as_str).unwrap_or(""),
-            })
+        .enumerate()
+        .map(|(at, p)| {
+            let name = p
+                .get("name")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("the {name} catalogue lists plugin #{at} without a name: {p}"))?;
+            Ok(json!({
+                "name": name,
+                "description": p.get("description").and_then(Value::as_str),
+                "version": p.get("version").and_then(Value::as_str),
+            }))
         })
-        .collect();
+        .collect::<Result<Vec<Value>, String>>()?;
     for dir in [cwd.to_path_buf(), plugins_home()] {
         let mut registry = plugin_registry(&dir)?;
         let has = registry
             .get("sources")
             .and_then(Value::as_object)
-            .map(|s| s.contains_key(name))
-            .unwrap_or(false);
+            .is_some_and(|s| s.contains_key(name));
         if !has {
             continue;
         }
@@ -100,19 +106,19 @@ pub(crate) fn update_source_plugins(
 
 /// Merge only verified active records. Legacy `installed` entries are inventory,
 /// never executable capability state.
-pub(crate) fn merged_installed_values(cwd: &Path) -> Vec<Value> {
+pub(crate) fn merged_installed_values(cwd: &Path) -> Result<Vec<Value>, String> {
     let mut map = std::collections::BTreeMap::<String, Value>::new();
-    for entry in installed_entries_for_scope(&plugins_home()) {
+    for entry in installed_entries_for_scope(&plugins_home())? {
         if let Some(id) = entry.get("id").and_then(Value::as_str).map(str::to_string) {
             map.insert(id, entry);
         }
     }
-    for entry in installed_entries_for_scope(cwd) {
+    for entry in installed_entries_for_scope(cwd)? {
         if let Some(id) = entry.get("id").and_then(Value::as_str).map(str::to_string) {
             map.insert(id, entry);
         }
     }
-    map.into_values().collect()
+    Ok(map.into_values().collect())
 }
 
 pub(crate) fn split_plugin_id(id: &str) -> Result<(String, String), String> {
@@ -125,8 +131,9 @@ pub(crate) fn split_plugin_id(id: &str) -> Result<(String, String), String> {
 }
 
 /// Parse `install`/`upgrade` flags: `--force`, `--scope <user|project>`, and the
-/// remaining positional targets.
-pub(crate) fn parse_marketplace_flags(argv: &[String]) -> (bool, Option<String>, Vec<String>) {
+/// remaining positional targets. `--scope` without a value is refused, never
+/// read as no scope.
+pub(crate) fn parse_marketplace_flags(argv: &[String]) -> Result<(bool, Option<String>, Vec<String>), String> {
     let mut force = false;
     let mut scope = None;
     let mut rest = Vec::new();
@@ -134,14 +141,17 @@ pub(crate) fn parse_marketplace_flags(argv: &[String]) -> (bool, Option<String>,
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--force" | "-f" => force = true,
-            "--scope" => scope = it.next().cloned(),
+            "--scope" => match it.next() {
+                Some(named) => scope = Some(named.clone()),
+                None => return Err("--scope takes user or project".into()),
+            },
             s if s.starts_with("--scope=") => {
                 scope = Some(s.trim_start_matches("--scope=").to_string())
             }
             other => rest.push(other.to_string()),
         }
     }
-    (force, scope, rest)
+    Ok((force, scope, rest))
 }
 
 pub(crate) fn normalize_scope(scope: Option<String>) -> Result<String, String> {
@@ -156,12 +166,20 @@ pub(crate) fn production_service(scope_dir: &Path) -> MarketplaceService {
     MarketplaceService::new(scope_dir.join(".jeden/plugins/v2"))
 }
 
-pub(crate) fn installed_entries_for_scope(dir: &Path) -> Vec<Value> {
-    production_service(dir)
+/// The active packages of the scope at `dir`; a package registry that
+/// cannot be read is refused naming the scope, never read as none installed.
+/// A package is enabled unless `/plugins disable` turned it off: the toggle
+/// is kept in the scope's plugin registry, which is read here too, so a
+/// disabled plugin's commands and hooks are not loaded.
+pub(crate) fn installed_entries_for_scope(dir: &Path) -> Result<Vec<Value>, String> {
+    let active = production_service(dir)
         .active_packages()
-        .unwrap_or_default()
+        .map_err(|cause| format!("the installed plugins of {} cannot be read: {cause}", dir.display()))?;
+    let toggles = plugin_registry(dir)?;
+    Ok(active
         .into_iter()
         .map(|record| {
+            let enabled = toggles["installed"][record.id.as_str()]["enabled"] != json!(false);
             json!({
                 "id": record.id,
                 "name": record.id,
@@ -169,39 +187,42 @@ pub(crate) fn installed_entries_for_scope(dir: &Path) -> Vec<Value> {
                 "path": record.path,
                 "source": record.trust,
                 "state": "active",
-                "enabled": true,
+                "enabled": enabled,
                 "generation": record.generation,
             })
         })
-        .collect()
+        .collect())
 }
 
 /// Command directories contributed by ENABLED installed plugins, across project
 /// then user scope. Appended after the project/user `.jeden/commands` dirs so
 /// local commands win.
-pub(crate) fn installed_plugin_command_dirs(cwd: &Path) -> Vec<PathBuf> {
+pub(crate) fn installed_plugin_command_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
     let mut dirs = Vec::new();
     for dir in [cwd.to_path_buf(), plugins_home()] {
-        for entry in installed_entries_for_scope(&dir) {
+        for entry in installed_entries_for_scope(&dir)? {
             if entry.get("enabled").and_then(Value::as_bool) == Some(false) {
                 continue;
             }
             if let Some(path) = entry.get("path").and_then(Value::as_str) {
                 let commands = Path::new(path).join("commands");
-                if commands.is_dir() && !dirs.contains(&commands) {
+                // A plugin's commands directory that cannot be examined is
+                // refused: read as absent, its commands vanished from the list.
+                if crate::tool_runtime::runtime_ops::platform::presence::present(&commands)?
+                    && commands.is_dir()
+                    && !dirs.contains(&commands)
+                {
                     dirs.push(commands);
                 }
             }
         }
     }
-    if let Ok(extension_dirs) = crate::hooks::extension_command_dirs(cwd) {
-        for dir in extension_dirs {
-            if !dirs.contains(&dir) {
-                dirs.push(dir);
-            }
+    for dir in crate::hooks::extension_command_dirs(cwd)? {
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
         }
     }
-    dirs
+    Ok(dirs)
 }
 
 /// Parsed `hooks.json` configs from ENABLED installed plugins, each one or the
@@ -218,7 +239,16 @@ pub(crate) fn installed_plugin_hook_configs(
         if !include {
             continue;
         }
-        for entry in installed_entries_for_scope(&dir) {
+        let entries = match installed_entries_for_scope(&dir) {
+            Ok(entries) => entries,
+            Err(cause) => {
+                // The scope's plugins declare hooks this run cannot read:
+                // answered as a config failure, never as no hooks.
+                configs.push(Err(cause));
+                continue;
+            }
+        };
+        for entry in entries {
             if entry.get("enabled").and_then(Value::as_bool) == Some(false) {
                 continue;
             }

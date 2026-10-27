@@ -41,9 +41,11 @@ pub(crate) fn interactive_view(
 ) -> Option<Result<CommandOutcome, String>> {
     let _capabilities = crate::capability::for_cwd(cwd);
     let trimmed = input.trim();
-    let (command, args) = trimmed
-        .split_once(char::is_whitespace)
-        .unwrap_or((trimmed, ""));
+    // A command alone has no arguments.
+    let (command, args) = match trimmed.split_once(char::is_whitespace) {
+        Some((command, args)) => (command, args),
+        None => (trimmed, ""),
+    };
     if command == "/onboarding" {
         return Some(crate::onboarding::interactive(args.trim(), cwd));
     }
@@ -55,10 +57,19 @@ pub(crate) fn interactive_view(
     }
     if let Some(view) = crate::capability::view_descriptor(cwd, command) {
         if !view.health.is_executable() || !view.ui.executable {
-            let detail = view
-                .health
-                .detail
-                .unwrap_or_else(|| "Capability backend unavailable".into());
+            // The capability's own detail is the cause; a view the capability
+            // offers as not executable here, or a health without a detail, is
+            // said as such rather than as a stock sentence.
+            let detail = match view.health.detail.clone() {
+                Some(detail) => detail,
+                None if !view.ui.executable => {
+                    format!("{} is not offered as a view here", view.ui.label)
+                }
+                None => format!(
+                    "the {} capability reports {:?} without saying why",
+                    view.ui.label, view.health.state
+                ),
+            };
             let lang = lang_code(cwd);
             return Some(Ok(CommandOutcome::Picker(PickerSpec::new(
                 format!("{} unavailable", view.ui.label),

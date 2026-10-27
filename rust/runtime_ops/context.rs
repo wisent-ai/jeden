@@ -19,11 +19,13 @@ static CANCELLATION_WAKES: Mutex<Vec<CancellationWake>> = Mutex::new(Vec::new())
 
 /// Every place that sets a cancellation flag calls this after setting it, so
 /// the waits registered with `wake_on_cancellation` re-check their own flag
-/// instead of polling it on a clock.
+/// instead of polling it on a clock. A panic elsewhere poisons the list but
+/// leaves the registered wakes intact, so they run either way.
 pub fn announce_cancellation() {
-    let mut wakes = CANCELLATION_WAKES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let mut wakes = match CANCELLATION_WAKES.lock() {
+        Ok(wakes) => wakes,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     wakes.retain(|wake| wake());
 }
 
@@ -31,10 +33,11 @@ pub fn announce_cancellation() {
 /// false. A blocking wait sends itself a message from `wake` and, when woken,
 /// checks whether its own flag is the one that was set.
 pub fn wake_on_cancellation(wake: impl Fn() -> bool + Send + 'static) {
-    CANCELLATION_WAKES
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push(Box::new(wake));
+    let mut wakes = match CANCELLATION_WAKES.lock() {
+        Ok(wakes) => wakes,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    wakes.push(Box::new(wake));
 }
 
 #[derive(Clone, Debug, Default)]
@@ -145,14 +148,14 @@ impl std::fmt::Debug for OperationContext<'_> {
 }
 
 impl<'a> OperationContext<'a> {
-    pub fn new(cancellation: CancellationToken, artifacts: ArtifactSink) -> Self {
-        static NEXT_OPERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
-        let operation_id = format!(
-            "op-{}-{}",
-            std::process::id(),
-            NEXT_OPERATION.fetch_add(1, Ordering::Relaxed)
-        );
-        let root = std::env::current_dir().unwrap_or_else(|_| artifacts.root().to_path_buf());
+    /// An operation of the trusted host confined to `root`, the directory its
+    /// caller works in.
+    pub fn new(
+        cancellation: CancellationToken,
+        artifacts: ArtifactSink,
+        root: std::path::PathBuf,
+    ) -> Self {
+        let operation_id = format!("op-{}", uuid::Uuid::new_v4());
         Self {
             operation_id,
             session_id: None,

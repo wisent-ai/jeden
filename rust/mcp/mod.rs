@@ -50,8 +50,13 @@ impl McpManager {
 static MANAGERS: LazyLock<Mutex<BTreeMap<PathBuf, McpManager>>> =
     LazyLock::new(|| Mutex::new(BTreeMap::new()));
 
+/// The key a workspace's MCP servers are held under: its canonical path, or
+/// the path as named when it cannot be resolved.
 pub(super) fn session_key(cwd: &Path) -> PathBuf {
-    cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf())
+    match cwd.canonicalize() {
+        Ok(canonical) => canonical,
+        Err(_unresolved) => cwd.to_path_buf(),
+    }
 }
 
 pub(super) fn managers() -> Result<MutexGuard<'static, BTreeMap<PathBuf, McpManager>>, String> {
@@ -172,11 +177,11 @@ pub fn manager_status(cwd: &Path) -> Result<Value, String> {
     manager.sync_config(cwd)?;
     Ok(Value::Object(manager.servers.iter().map(|(name, connection)| (name.clone(), json!({
         "state": connection.state.as_str(),
-        "failures": connection.failures,
-        "lastError": connection.last_error,
-        "tools": connection.tools.get("tools").and_then(Value::as_array).map_or(0, Vec::len),
-        "resources": connection.resources.get("resources").and_then(Value::as_array).map_or(0, Vec::len),
-        "prompts": connection.prompts.get("prompts").and_then(Value::as_array).map_or(0, Vec::len),
+        "failures": connection.failures.len(),
+        "lastError": connection.failures.last(),
+        "tools": connection::listed(&connection.tools, "tools"),
+        "resources": connection::listed(&connection.resources, "resources"),
+        "prompts": connection::listed(&connection.prompts, "prompts"),
     }))).collect()))
 }
 

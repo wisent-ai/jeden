@@ -99,31 +99,36 @@ impl ServiceHub {
     }
 }
 
-/// One hub per working directory, tagged with the config fingerprint it was
-/// built from so a config edit retires the cached entry.
+/// One hub per working directory this process works in, tagged with the
+/// config fingerprint it was built from so a config edit retires the cached
+/// entry. There is one entry per directory used; no count of directories is
+/// declared anywhere, so none is assumed.
 type HubCache = Mutex<BTreeMap<PathBuf, (u64, Arc<ServiceHub>)>>;
 
 static HUBS: LazyLock<HubCache> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
-fn canonical(cwd: &Path) -> PathBuf {
-    cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf())
-}
-fn hub(cwd: &Path) -> Arc<ServiceHub> {
-    let cwd = canonical(cwd);
+
+/// The hub of `cwd`. A directory that cannot be resolved is refused with its
+/// cause, never served under the path as written, which named a second hub
+/// for the same directory.
+fn hub(cwd: &Path) -> Result<Arc<ServiceHub>, String> {
+    let cwd = cwd.canonicalize().map_err(|error| {
+        format!("the working directory {} cannot be resolved: {error}", cwd.display())
+    })?;
     let fingerprint = config::fingerprint(&cwd);
     let mut hubs = HUBS.lock();
     if let Some((cached, hub)) = hubs.get(&cwd) {
         if *cached == fingerprint {
-            return hub.clone();
-        }
-    }
-    if hubs.len() >= 32 && !hubs.contains_key(&cwd) {
-        if let Some(oldest) = hubs.keys().next().cloned() {
-            hubs.remove(&oldest);
+            return Ok(hub.clone());
         }
     }
     let service = Arc::new(ServiceHub::discover(&cwd));
     hubs.insert(cwd, (fingerprint, service.clone()));
-    service
+    Ok(service)
+}
+
+/// The input every service tool declares: an object its service reads.
+fn service_input() -> Value {
+    json!({"type":"object","additionalProperties":true})
 }
 
 fn tool_specs() -> impl Iterator<Item = (&'static str, &'static str)> {
@@ -141,8 +146,8 @@ fn tool_specs() -> impl Iterator<Item = (&'static str, &'static str)> {
 /// never judged against "." as if it were the directory the session works in.
 fn dynamic_descriptors() -> Vec<DynamicToolDescriptor> {
     let services = std::env::current_dir()
-        .map(|cwd| hub(&cwd))
-        .map_err(|error| format!("the working directory cannot be read: {error}"));
+        .map_err(|error| format!("the working directory cannot be read: {error}"))
+        .and_then(|cwd| hub(&cwd));
     tool_specs()
         .map(|(name, description)| {
             let (healthy, health) = match &services {
@@ -155,7 +160,7 @@ fn dynamic_descriptors() -> Vec<DynamicToolDescriptor> {
             DynamicToolDescriptor {
                 name: name.into(),
                 description: description.into(),
-                input: json!({"type":"object","additionalProperties":true}),
+                input: service_input(),
                 healthy,
                 health,
             }
@@ -170,7 +175,7 @@ fn execute_dynamic(
     if !tool_specs().any(|(name, _)| name == tool) {
         return None;
     }
-    Some(hub(runtime.cwd).execute(runtime, tool, input))
+    Some(hub(runtime.cwd).and_then(|hub| hub.execute(runtime, tool, input)))
 }
 
 pub(crate) fn register_with_tool_runtime() -> Result<(), String> {
@@ -183,14 +188,33 @@ pub(crate) fn register_with_tool_runtime() -> Result<(), String> {
     Ok(())
 }
 
+/// Every service tool as a capability of `cwd`, each declaring its input. A
+/// directory whose hub is refused leaves every tool unavailable with that
+/// cause.
 pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
     let services = hub(cwd);
     tool_specs()
         .map(|(name, description)| {
-            let health = services.health(name);
-            let capability_health = match health.status {
-                HealthStatus::Healthy => CapabilityHealth::healthy(),
-                HealthStatus::Unavailable => CapabilityHealth::unavailable(health.detail.clone()),
+            let (capability_health, metadata, available) = match &services {
+                Ok(services) => {
+                    let health = services.health(name);
+                    let capability_health = match health.status {
+                        HealthStatus::Healthy => CapabilityHealth::healthy(),
+                        HealthStatus::Unavailable => {
+                            CapabilityHealth::unavailable(health.detail.clone())
+                        }
+                    };
+                    (
+                        capability_health,
+                        json!({"input": service_input(), "service": health.service, "backend": health.backend}),
+                        health.available(),
+                    )
+                }
+                Err(cause) => (
+                    CapabilityHealth::unavailable(cause.clone()),
+                    json!({"input": service_input()}),
+                    false,
+                ),
             };
             let policy = if matches!(
                 name,
@@ -217,8 +241,8 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
             .operation(name)
             .policy(policy)
             .health(capability_health)
-            .metadata(json!({"service":health.service,"backend":health.backend}));
-            if health.available() {
+            .metadata(metadata);
+            if available {
                 descriptor = descriptor.executable(name);
             }
             descriptor

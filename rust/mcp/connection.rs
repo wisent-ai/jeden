@@ -35,8 +35,9 @@ pub(super) struct ServerConnection {
     pub(super) config: Value,
     pub(super) client: Option<McpClient>,
     pub(super) state: ConnectionState,
-    pub(super) failures: u32,
-    pub(super) last_error: Option<String>,
+    /// Every failure since the connection was last ready, oldest first; the
+    /// last one is the error the server is reported with.
+    pub(super) failures: Vec<String>,
     pub(super) initialize: Value,
     pub(super) tools: Value,
     pub(super) resources: Value,
@@ -49,8 +50,7 @@ impl ServerConnection {
             config,
             client: None,
             state: ConnectionState::Disconnected,
-            failures: 0,
-            last_error: None,
+            failures: Vec::new(),
             initialize: Value::Null,
             tools: json!({"tools": []}),
             resources: json!({"resources": []}),
@@ -67,8 +67,7 @@ impl ServerConnection {
 
     pub(super) fn record_failure(&mut self, error: String) {
         self.disconnect();
-        self.failures = self.failures.saturating_add(1);
-        self.last_error = Some(error);
+        self.failures.push(error);
         self.state = ConnectionState::Failed;
     }
 
@@ -116,8 +115,7 @@ impl ServerConnection {
         match result {
             Ok(()) => {
                 self.state = ConnectionState::Ready;
-                self.failures = 0;
-                self.last_error = None;
+                self.failures.clear();
                 Ok(())
             }
             Err(error) => {
@@ -160,22 +158,23 @@ impl ServerConnection {
                 retry
             }
         }?;
-        let notifications = self
-            .client
-            .as_mut()
-            .map(McpClient::take_notifications)
-            .unwrap_or_default();
+        // A connection without a client has no notifications waiting.
+        let notifications = match self.client.as_mut() {
+            Some(client) => client.take_notifications(),
+            None => Vec::new(),
+        };
         self.process_notifications(cwd, notifications)?;
         Ok(result)
     }
 
     /// The client's process exited or its last exchange failed at the
-    /// transport; a server's own error answer is neither.
+    /// transport; a server's own error answer is neither. A connection with
+    /// no client has no transport to use, which is broken too.
     fn transport_broken(&mut self) -> bool {
-        self.client
-            .as_mut()
-            .map(|client| !client.is_alive() || client.transport_failed())
-            .unwrap_or(true)
+        match self.client.as_mut() {
+            Some(client) => !client.is_alive() || client.transport_failed(),
+            None => true,
+        }
     }
 
     pub(super) fn process_notifications(
@@ -227,5 +226,14 @@ impl ServerConnection {
 impl Drop for ServerConnection {
     fn drop(&mut self) {
         self.disconnect();
+    }
+}
+
+/// How many entries `listing` holds under `key`; null when the listing holds
+/// no such list, which is no count rather than none.
+pub(super) fn listed(listing: &Value, key: &str) -> Value {
+    match listing.get(key).and_then(Value::as_array) {
+        Some(entries) => json!(entries.len()),
+        None => Value::Null,
     }
 }

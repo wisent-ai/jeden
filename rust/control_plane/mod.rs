@@ -185,7 +185,7 @@ pub fn model_catalog(
         .into_iter()
         .map(|entry| (entry.id.clone(), entry))
         .collect::<BTreeMap<_, _>>();
-    for entry in crate::hooks::extension_model_entries(cwd) {
+    for entry in crate::hooks::extension_model_entries(cwd).map_err(brama::BramaError::Configuration)? {
         entries.insert(entry.id.clone(), entry);
     }
     catalog.models = entries.into_values().collect();
@@ -213,7 +213,7 @@ pub fn providers(
         .into_iter()
         .map(|entry| (entry.id.clone(), entry))
         .collect::<BTreeMap<_, _>>();
-    for entry in crate::hooks::extension_provider_entries(cwd) {
+    for entry in crate::hooks::extension_provider_entries(cwd).map_err(weles::WelesError::Configuration)? {
         entries.insert(entry.id.clone(), entry);
     }
     Ok(entries.into_values().collect())

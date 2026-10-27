@@ -171,12 +171,12 @@ pub(crate) fn put_waiting(ids: &[String]) -> Result<(), String> {
         }
         Ok(())
     })
-    .map(|_| ())
+    .map(|_oko_output| ())
 }
 
 /// Tell Oko the ask was answered in Jeden, so it stops asking; Oko's answer
 /// or refusal in one line.
 pub(crate) fn mirror_answer(oko_id: &str, text: &str) -> Result<String, String> {
     run(&["asks", "answer", oko_id, "--text", text, "--on", "jeden"])
-        .map(|_| format!("Oko ask {oko_id} answered"))
+        .map(|_oko_output| format!("Oko ask {oko_id} answered"))
 }

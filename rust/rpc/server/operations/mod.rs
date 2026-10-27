@@ -14,10 +14,12 @@ pub(super) fn create_session(
     params: Value,
     resume: bool,
 ) -> Result<Value, (&'static str, String)> {
-    let options_value = params
-        .get("options")
-        .cloned()
-        .unwrap_or_else(|| params.clone());
+    // A client states its options under `options`, or as the params themselves
+    // when it sends nothing else; both shapes are the documented request.
+    let options_value = match params.get("options") {
+        Some(options) => options.clone(),
+        None => params.clone(),
+    };
     let options: SessionOptions = serde_json::from_value(options_value)
         .map_err(|error| ("invalid_params", error.to_string()))?;
     let session = if resume {
@@ -29,18 +31,11 @@ pub(super) fn create_session(
     session
         .set_interaction_handler(Some(state.bridge.clone()))
         .map_err(|error| ("session_error", error))?;
-    let session_id = format!(
-        "session-{}",
-        state.next_session.fetch_add(1, Ordering::Relaxed)
-    );
+    let session_id = format!("session-{}", crate::tally::draw(&state.next_session));
     let session_path = session
         .session_path()
         .map_err(|error| ("session_error", error))?;
-    state
-        .sessions
-        .lock()
-        .map_err(|_| ("internal_error", "sessions lock poisoned".into()))?
-        .insert(session_id.clone(), session);
+    crate::panicked::held(&state.sessions).insert(session_id.clone(), session);
     Ok(json!({"sessionId": session_id, "sessionPath": session_path}))
 }
 
@@ -220,10 +215,7 @@ fn find_session(
 ) -> Result<AgentSession, (&'static str, String)> {
     let session_id =
         string_param(params, "sessionId").map_err(|error| ("invalid_params", error))?;
-    state
-        .sessions
-        .lock()
-        .map_err(|_| ("internal_error", "sessions lock poisoned".into()))?
+    crate::panicked::held(&state.sessions)
         .get(&session_id)
         .cloned()
         .ok_or_else(|| {

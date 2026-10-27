@@ -1,35 +1,33 @@
 //! The workspace requests a client can make, through the same product code
 //! the command line uses.
-//!
-//! Split out of `rpc/server/operations.rs`, which had grown past the module
-//! line cap.
 
 use super::wire::string_param;
 use serde_json::json;
 use serde_json::Value;
 use std::path::PathBuf;
 
+/// The working directory's workspace, or `{"status": "not_adopted"}` when
+/// none is adopted there, which is the whole answer for that case.
 pub(crate) fn workspace_status() -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
-    crate::cli::workspace::status(&cwd)
-        .map(|report| {
-            report
-                .map(|report| report.value())
-                .unwrap_or_else(|| json!({"status": "not_adopted"}))
-        })
-        .map_err(|error| ("invalid_workspace", error))
+    match crate::cli::workspace::status(&cwd).map_err(|error| ("invalid_workspace", error))? {
+        Some(report) => report.value().map_err(|error| ("storage", error)),
+        None => Ok(json!({"status": "not_adopted"})),
+    }
 }
 
+/// What a workspace at `path` would be, `path` being the working directory
+/// when the request names none; a `path` that is not text is refused.
 pub(crate) fn workspace_discover(params: &Value) -> Result<Value, (&'static str, String)> {
     let cwd = std::env::current_dir().map_err(|error| ("storage", error.to_string()))?;
-    let path = params
-        .get("path")
-        .and_then(Value::as_str)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| cwd.clone());
-    crate::cli::workspace::inspect(&path, &cwd, "discovered")
-        .map(|report| report.value())
-        .map_err(|error| ("invalid_workspace", error))
+    let path = match params.get("path") {
+        None => cwd.clone(),
+        Some(Value::String(path)) => PathBuf::from(path),
+        Some(other) => return Err(("invalid_request", format!("path is {other}, not a path"))),
+    };
+    let report = crate::cli::workspace::inspect(&path, &cwd, "discovered")
+        .map_err(|error| ("invalid_workspace", error))?;
+    report.value().map_err(|error| ("storage", error))
 }
 
 pub(crate) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, String)> {
@@ -37,9 +35,9 @@ pub(crate) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, St
     let path = string_param(params, "path")
         .map(PathBuf::from)
         .map_err(|error| ("invalid_request", error))?;
-    crate::cli::workspace::adopt(&path, &cwd)
-        .map(|report| report.value())
-        .map_err(|error| ("invalid_workspace", error))
+    let report = crate::cli::workspace::adopt(&path, &cwd)
+        .map_err(|error| ("invalid_workspace", error))?;
+    report.value().map_err(|error| ("storage", error))
 }
 
 /// `session/import` takes the same paths the CLI does: transcript files of

@@ -199,11 +199,13 @@ pub(crate) fn ui_language_codes() -> &'static [String] {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(transparent)]
-pub(crate) struct UiLanguage(String);
+pub(crate) struct UiLanguage {
+    code: String,
+}
 
 impl Default for UiLanguage {
     fn default() -> Self {
-        Self("auto".into())
+        Self { code: schema::UI_LANGUAGE_AUTO.into() }
     }
 }
 
@@ -211,16 +213,16 @@ impl UiLanguage {
     pub(super) fn parse(value: &str) -> Option<Self> {
         let value = value.trim().to_ascii_lowercase();
         if value == schema::UI_LANGUAGE_AUTO || ui_language_codes().contains(&value) {
-            Some(Self(value))
+            Some(Self { code: value })
         } else {
             None
         }
     }
     pub(crate) fn code(&self) -> &str {
-        &self.0
+        &self.code
     }
     pub(crate) fn is_auto(&self) -> bool {
-        self.0 == "auto"
+        self.code == schema::UI_LANGUAGE_AUTO
     }
 }
 
@@ -236,14 +238,21 @@ fn default_ui_theme() -> String {
     "auto".into()
 }
 
-/// The configured `ui.theme` value ("auto" when unset).
+/// The configured `ui.theme`, or the declared default when no layer sets
+/// it. A working directory that cannot be read is said on stderr, and the
+/// theme is then read from the user's own layers, which need none.
 pub(crate) fn ui_theme() -> String {
-    crate::cli::config::merged_config_value(&std::env::current_dir().unwrap_or_default())
-        .get("ui")
-        .and_then(|ui| ui.get("theme"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("auto")
-        .to_string()
+    let config = match std::env::current_dir() {
+        Ok(cwd) => crate::cli::config::merged_config_value(&cwd),
+        Err(error) => {
+            eprintln!("jeden: the working directory cannot be read ({error}); ui.theme is read from the user configuration only");
+            crate::cli::config::user_config_value()
+        }
+    };
+    match config.get("ui").and_then(|ui| ui.get("theme")).and_then(serde_json::Value::as_str) {
+        Some(theme) => theme.to_string(),
+        None => default_ui_theme(),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

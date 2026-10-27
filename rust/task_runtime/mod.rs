@@ -35,26 +35,25 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 
-static ATOMIC_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-pub const TASK_STORE_SCHEMA_VERSION: u32 = 2;
-
+/// Make sure the store's schema manifest stands at the version the built-in
+/// `task-store` migration plan migrates to: migrate one that exists, write
+/// one that does not. The version is the plan's, never a second copy here.
 pub(crate) fn ensure_store_schema(store: &Path) -> Result<(), TaskError> {
     let manifest = store.join("store-schema.json");
+    let plan =
+        crate::cli::config::migrations::builtin_document_plan("task-store").map_err(TaskError::Invalid)?;
     // A manifest that cannot be examined is refused: read as absent, a fresh
     // manifest was written over the store's recorded schema version.
     if crate::tool_runtime::runtime_ops::platform::presence::present(&manifest)
         .map_err(TaskError::Invalid)?
     {
-        let plan = crate::cli::config::migrations::builtin_document_plan("task-store")
-            .map_err(TaskError::Invalid)?;
         crate::cli::config::migrations::migrate_json(&manifest, &plan)
             .map_err(TaskError::Invalid)?;
     } else {
         crate::cli::config::migrations::write_json_atomic(
             &manifest,
-            &json!({"schemaVersion":TASK_STORE_SCHEMA_VERSION,"store":"task-store"}),
+            &json!({"schemaVersion": plan.to, "store": plan.store}),
         )
         .map_err(TaskError::Invalid)?;
     }
@@ -197,11 +196,14 @@ pub fn register_with_tool_runtime() -> Result<(), String> {
     })
 }
 
+/// Where the task store lives: beside the session's artifact directory when
+/// the run has one, so its jobs and mail stay with the session's files, and
+/// under the working directory's `.jeden` for a run that has none.
 pub fn default_store(cwd: &Path, artifact_dir: Option<&Path>) -> PathBuf {
-    artifact_dir
-        .and_then(Path::parent)
-        .map(|p| p.join("task-runtime"))
-        .unwrap_or_else(|| cwd.join(".jeden/task-runtime"))
+    match artifact_dir {
+        Some(artifacts) => artifacts.with_file_name("task-runtime"),
+        None => cwd.join(".jeden/task-runtime"),
+    }
 }
 
 pub fn execute_registered_tool(
@@ -225,15 +227,14 @@ pub fn execute_registered_tool(
     }
 }
 
-pub(crate) fn next_sequence() -> u64 {
-    ATOMIC_SEQUENCE.fetch_add(1, Ordering::Relaxed)
-}
+/// Write `value` to `path` whole: into a file of its own beside it, synced,
+/// then renamed over it. The scratch name carries a fresh UUID, so writers
+/// in this or another process never share one.
 pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), TaskError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let sequence = next_sequence();
-    let temporary = path.with_extension(format!("tmp-{}-{sequence}", std::process::id()));
+    let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
     let mut file = fs::OpenOptions::new()
         .create_new(true)
         .write(true)

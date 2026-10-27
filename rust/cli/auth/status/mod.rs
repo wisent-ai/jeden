@@ -33,12 +33,21 @@ fn item_slug(value: &str) -> String {
         .to_string()
 }
 
-pub(crate) fn agent_identity(cwd: &Path) -> String {
-    env::var("WISENT_APP_AGENT_ID")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
-        .or_else(|| load_config(cwd).agent_id)
-        .unwrap_or_else(|| "wisent-app".into())
+/// The agent Weles logs in for: WISENT_APP_AGENT_ID, then the configured
+/// agent id, then the declared default, the order routing reads it in. A
+/// variable that is not Unicode is refused, never read as unset.
+pub(crate) fn agent_identity(cwd: &Path) -> Result<String, String> {
+    match env::var("WISENT_APP_AGENT_ID") {
+        Ok(value) if !value.trim().is_empty() => return Ok(value),
+        Ok(_) | Err(env::VarError::NotPresent) => {}
+        Err(env::VarError::NotUnicode(_)) => {
+            return Err("WISENT_APP_AGENT_ID cannot be read: value is not Unicode".into())
+        }
+    }
+    Ok(match load_config(cwd).agent_id {
+        Some(configured) => configured,
+        None => crate::slash::setup::DEFAULT_AGENT_ID.to_string(),
+    })
 }
 
 pub(crate) fn format_auth_status(cwd: &Path) -> String {
@@ -47,7 +56,10 @@ pub(crate) fn format_auth_status(cwd: &Path) -> String {
     let mut lines = vec![
         "Jeden authentication status".to_string(),
         format!("Workspace: {}", cwd.display()),
-        format!("Agent: {}", agent_identity(cwd)),
+        match agent_identity(cwd) {
+            Ok(agent) => format!("Agent: {agent}"),
+            Err(cause) => format!("Agent: unreadable: {cause}"),
+        },
         format!(
             "Weles {}: {}",
             health.version,
@@ -148,8 +160,8 @@ pub(crate) fn provider_picker(cwd: &Path) -> Result<PickerSpec, String> {
     if !client.health().available {
         return Err(client.health().detail);
     }
-    let providers =
-        crate::control_plane::providers(cwd, &client).map_err(|error| error.to_string())?;
+    let providers = crate::control_plane::providers(cwd, &client)
+        .map_err(|error| format!("Weles could not list its login providers: {error}"))?;
     let items = providers
         .into_iter()
         .map(|provider| {
@@ -163,9 +175,10 @@ pub(crate) fn provider_picker(cwd: &Path) -> Result<PickerSpec, String> {
                 .detail(if provider.available {
                     format!("Weles: {methods}")
                 } else {
-                    provider
-                        .unavailable_reason
-                        .unwrap_or_else(|| "Unavailable".into())
+                    match provider.unavailable_reason {
+                        Some(reason) => reason,
+                        None => "Unavailable; Weles named no reason".into(),
+                    }
                 })
                 .badge(if provider.available {
                     crate::cli::i18n::tr(&lang, "badge.available")
@@ -187,21 +200,22 @@ pub(crate) fn start_login_with_bridge(
     let provider = route_key(args).ok_or("Usage: /login <provider advertised by Weles>")?;
     let client = WelesClient::from_env();
     let advertised = crate::control_plane::providers(cwd, &client)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("Weles could not list its login providers: {error}"))?
         .into_iter()
         .find(|entry| entry.id == provider)
         .ok_or_else(|| format!("provider `{provider}` is not registered"))?;
     let account = client
         .login_provider(
             &advertised,
-            &format!("jeden:{}", item_slug(&agent_identity(cwd))),
+            &format!("jeden:{}", item_slug(&agent_identity(cwd)?)),
             bridge,
             cancelled,
         )
-        .map_err(|error| error.to_string())?;
-    Ok(account
-        .map(|value| format!("Logged in to {} as {}.", value.provider, value.display_name))
-        .unwrap_or_else(|| format!("Logged in to {provider}.")))
+        .map_err(|error| format!("Weles could not log in to {provider}: {error}"))?;
+    Ok(match account {
+        Some(value) => format!("Logged in to {} as {}.", value.provider, value.display_name),
+        None => format!("Logged in to {provider}; Weles returned no account record for it."),
+    })
 }
 
 pub(crate) fn start_login(cwd: &Path, args: &str) -> Result<String, String> {
@@ -215,7 +229,7 @@ fn account_id(client: &WelesClient, selector: &str) -> Result<String, String> {
     let key = route_key(selector).ok_or("account id or provider is required")?;
     client
         .accounts(None)
-        .map_err(|error| error.to_string())?
+        .map_err(|error| format!("Weles could not list its accounts: {error}"))?
         .into_iter()
         .find(|account| account.id == key || account.provider == key)
         .map(|account| account.id)
@@ -227,7 +241,7 @@ pub(crate) fn refresh(args: &str) -> Result<String, String> {
     if args.trim().is_empty() {
         let refreshed = client
             .refresh_due(&ConsoleBridge, &|| false)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| format!("Weles could not refresh its expiring accounts: {error}"))?;
         return Ok(format!(
             "Refreshed {} expiring Weles account(s).",
             refreshed.len()
@@ -236,21 +250,22 @@ pub(crate) fn refresh(args: &str) -> Result<String, String> {
     let id = account_id(&client, args)?;
     let account = client
         .refresh(&id, &ConsoleBridge, &|| false)
-        .map_err(|error| error.to_string())?;
-    Ok(account
-        .map(|value| format!("Refreshed {} as {}.", value.provider, value.display_name))
-        .unwrap_or_else(|| format!("Refreshed Weles account {id}.")))
+        .map_err(|error| format!("Weles could not refresh account {id}: {error}"))?;
+    Ok(match account {
+        Some(value) => format!("Refreshed {} as {}.", value.provider, value.display_name),
+        None => format!("Refreshed Weles account {id}; Weles returned no account record for it."),
+    })
 }
 
 pub(crate) fn logout(cwd: &Path, args: &str) -> Result<String, String> {
     let client = WelesClient::from_env();
     let account_id = account_id(&client, args)
-        .map_err(|_| "Usage: /logout <account-id or provider>".to_string())?;
+        .map_err(|cause| format!("{cause}; usage: /logout <account-id or provider>"))?;
     client
         .logout(&account_id, &ConsoleBridge, &|| false)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| format!("Weles could not log out account {account_id}: {error}"))?;
     Ok(format!(
         "Logged out Weles account {account_id} for agent {}.",
-        agent_identity(cwd)
+        agent_identity(cwd)?
     ))
 }

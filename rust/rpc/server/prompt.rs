@@ -26,12 +26,12 @@ pub(super) fn handle_prompt(state: Arc<ServerState>, request: WireRequest) -> Re
 fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result<(), String> {
     let id = request.id.clone();
     let session_id = string_param(&request.params, "sessionId")?;
-    let request_id = request
-        .params
-        .get("requestId")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .unwrap_or_else(|| wire_id(&id));
+    // A prompt names its request by `requestId`; a client that names none
+    // has its JSON-RPC id stand as the request's name, the one id it sent.
+    let request_id = match request.params.get("requestId").and_then(Value::as_str) {
+        Some(named) => named.to_string(),
+        None => wire_id(&id),
+    };
     let continuing = request.method == "session/completion/continue";
     let prompt = if continuing {
         String::new()
@@ -45,10 +45,7 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
         .map(str::trim)
         .filter(|goal| !goal.is_empty())
         .map(str::to_string);
-    let session = state
-        .sessions
-        .lock()
-        .map_err(|_| "sessions lock poisoned")?
+    let session = crate::panicked::held(&state.sessions)
         .get(&session_id)
         .cloned()
         .ok_or_else(|| format!("unknown session: {}", session_id))?;
@@ -97,17 +94,10 @@ fn handle_prompt_inner(state: &Arc<ServerState>, request: WireRequest) -> Result
     forwarder
         .join()
         .map_err(|panic| {
-            let cause = if let Some(message) = panic.downcast_ref::<String>() {
-                message.clone()
-            } else if let Some(message) = panic.downcast_ref::<&str>() {
-                (*message).to_string()
-            } else {
-                format!(
-                    "event forwarder panicked with non-string payload {:?}",
-                    panic.as_ref().type_id()
-                )
-            };
-            completion_failure("joining event forwarder failed", cause)
+            completion_failure(
+                "joining event forwarder failed",
+                crate::panicked::refusal("the event forwarder", &*panic),
+            )
         })?
         .map_err(|error| completion_failure("forwarding session events failed", error))?;
     match result {

@@ -4,9 +4,17 @@
 //! Split out of `collab/relay.rs`, which had grown past the module line cap.
 
 use super::RelayStore;
-use crate::collab::MAX_BLOB_BYTES;
+use reqwest::StatusCode;
 use serde_json::json;
 use sha2::{Digest, Sha256};
+
+fn answered(status: StatusCode, body: serde_json::Value) -> (u16, String) {
+    (status.as_u16(), body.to_string())
+}
+
+fn refused(status: StatusCode, error: impl std::fmt::Display) -> (u16, String) {
+    answered(status, json!({"ok": false, "error": error.to_string()}))
+}
 
 pub(super) fn relay_response_authorized(
     store: &RelayStore,
@@ -18,65 +26,61 @@ pub(super) fn relay_response_authorized(
 ) -> (u16, String) {
     if method == "GET" && path == "/health" {
         return match store.health() {
-            Ok(v) => (200, v.to_string()),
-            Err(e) => (500, json!({"ok":false,"error":e}).to_string()),
+            Ok(health) => answered(StatusCode::OK, health),
+            Err(error) => refused(StatusCode::INTERNAL_SERVER_ERROR, error),
         };
     }
     let target = match path.strip_prefix("/room/") {
-        Some(r) if !r.is_empty() => r,
-        _ => return (404, json!({"ok":false,"error":"not found"}).to_string()),
+        Some(room) if !room.is_empty() => room,
+        _ => return refused(StatusCode::NOT_FOUND, format!("{path} names no room")),
     };
     if method == "PUT" {
         if let Some(room) = target.strip_suffix("/token") {
             return match token {
                 Some(old) => match store.rotate_token(room, old, body.trim()) {
-                    Ok(true) => (200, json!({"ok":true}).to_string()),
-                    Ok(false) => (403, json!({"ok":false,"error":"unauthorized"}).to_string()),
-                    Err(e) => (400, json!({"ok":false,"error":e}).to_string()),
+                    Ok(true) => answered(StatusCode::OK, json!({"ok": true})),
+                    Ok(false) => refused(StatusCode::FORBIDDEN, "unauthorized"),
+                    Err(error) => refused(StatusCode::BAD_REQUEST, error),
                 },
-                None => (
-                    403,
-                    json!({"ok":false,"error":"write token required"}).to_string(),
-                ),
+                None => refused(StatusCode::FORBIDDEN, "write token required"),
             };
         }
     }
     match method {
         "POST" => {
+            // The body's size was held to the relay's limit before it was read.
             let blob = body.trim();
             if blob.is_empty() {
-                return (400, json!({"ok":false,"error":"empty body"}).to_string());
-            }
-            if blob.len() > MAX_BLOB_BYTES {
-                return (
-                    413,
-                    json!({"ok":false,"error":"payload too large"}).to_string(),
-                );
+                return refused(StatusCode::BAD_REQUEST, "empty body");
             }
             match store.post_authorized(target, blob.to_string(), token) {
-                Ok(seq) => (200, json!({"ok":true,"seq":seq}).to_string()),
-                Err(e) => (403, json!({"ok":false,"error":e}).to_string()),
+                Ok(seq) => answered(StatusCode::OK, json!({"ok": true, "seq": seq})),
+                Err(error) => refused(StatusCode::FORBIDDEN, error),
             }
         }
-        "GET" => match store.get(target, parse_since(query)) {
-            Ok((events, next)) => (
-                200,
-                json!({"ok":true,"events":events,"next":next}).to_string(),
-            ),
-            Err(e) => (500, json!({"ok":false,"error":e}).to_string()),
+        "GET" => match parse_since(query) {
+            Err(error) => refused(StatusCode::BAD_REQUEST, error),
+            Ok(since) => match store.get(target, since) {
+                Ok((events, next)) => {
+                    answered(StatusCode::OK, json!({"ok": true, "events": events, "next": next}))
+                }
+                Err(error) => refused(StatusCode::INTERNAL_SERVER_ERROR, error),
+            },
         },
-        _ => (
-            405,
-            json!({"ok":false,"error":"method not allowed"}).to_string(),
-        ),
+        _ => refused(StatusCode::METHOD_NOT_ALLOWED, format!("{method} is not a relay method")),
     }
 }
-pub(super) fn parse_since(query: &str) -> usize {
-    query
-        .split('&')
-        .find_map(|p| p.strip_prefix("since="))
-        .and_then(|v| v.parse().ok())
-        .unwrap_or_default()
+
+/// The `since=` cursor of a read: none when the query states none, so the
+/// read starts at the room's first event; refused when it is not a number.
+pub(super) fn parse_since(query: &str) -> Result<Option<usize>, String> {
+    match query.split('&').find_map(|pair| pair.strip_prefix("since=")) {
+        None => Ok(None),
+        Some(since) => since
+            .parse()
+            .map(Some)
+            .map_err(|error| format!("since={since} is not an event sequence: {error}")),
+    }
 }
 
 /// The role a write token is bound to: the declared role its prefix names.

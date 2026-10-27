@@ -43,7 +43,7 @@ impl Conversation {
                 let runtime = crate::tool_runtime::ToolRuntime {
                     cwd: &args.cwd,
                     artifact_dir: Some(&artifact_dir),
-                    operation: hooks.operation_context(&artifact_dir),
+                    operation: hooks.operation_context(&args.cwd, &artifact_dir),
                     allow_write,
                     allow_command,
                     interactive: hooks.interactive,
@@ -77,18 +77,29 @@ fn push_stream_lines(lines: &mut Vec<String>, text: &str) {
     }
 }
 
+/// The lines a `!`/`$` escape prints for one tool result: what it wrote to
+/// stdout and stderr, and for a failed run why. A result that names neither
+/// success nor failure is printed whole, since nothing says how it ended.
 fn format_local_result(result: &Value) -> String {
     let mut lines = Vec::new();
-    push_stream_lines(
-        &mut lines,
-        result.get("stdout").and_then(Value::as_str).unwrap_or(""),
-    );
-    let stderr = result.get("stderr").and_then(Value::as_str).unwrap_or("");
-    if !stderr.trim().is_empty() {
+    if let Some(stdout) = result.get("stdout").and_then(Value::as_str) {
+        push_stream_lines(&mut lines, stdout);
+    }
+    if let Some(stderr) = result
+        .get("stderr")
+        .and_then(Value::as_str)
+        .filter(|stderr| !stderr.trim().is_empty())
+    {
         lines.push("stderr:".to_string());
         push_stream_lines(&mut lines, stderr);
     }
-    let ok = result.get("ok").and_then(Value::as_bool).unwrap_or(false);
+    let ok = match result.get("ok").and_then(Value::as_bool) {
+        Some(ok) => ok,
+        None => {
+            lines.push(format!("(the tool answered without saying whether it succeeded: {result})"));
+            return lines.join("\n");
+        }
+    };
     if !ok {
         if let Some(code) = result.get("code").and_then(Value::as_i64) {
             lines.push(format!("(exit code: {code})"));

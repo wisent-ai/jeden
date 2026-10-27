@@ -4,7 +4,7 @@
 
 use super::super::mapping::{map_session_event, prompt_text};
 use super::interaction::AcpInteraction;
-use super::{operation_expired, AcpState, NEXT_PROMPT};
+use super::{operation_expired, AcpState};
 use crate::sdk::PromptRequest as JedenPromptRequest;
 use crate::tool_runtime::runtime_ops::CancellationToken;
 use agent_client_protocol::schema::v1::*;
@@ -14,7 +14,7 @@ use agent_client_protocol::Responder;
 use futures::channel::oneshot;
 use futures::executor::block_on;
 use futures::future::{self, Either};
-use std::sync::atomic::Ordering;
+use uuid::Uuid;
 use std::sync::Arc;
 use std::thread;
 
@@ -28,26 +28,16 @@ impl AcpState {
         self.require_initialized()?;
         let session_id = request.session_id.0.to_string();
         let prompt = prompt_text(request.prompt)?;
-        let session = self
-            .sessions
-            .lock()
-            .map_err(|_| super::internal("ACP session lock poisoned"))?
+        let session = crate::panicked::held(&self.sessions)
             .get(&session_id)
             .cloned()
             .ok_or_else(|| {
                 agent_client_protocol::Error::resource_not_found(Some(session_id.clone()))
             })?;
         let subscription = session.subscribe().map_err(super::internal)?;
-        let request_id = format!(
-            "acp-{}-{}",
-            responder.id(),
-            NEXT_PROMPT.fetch_add(1, Ordering::Relaxed),
-        );
+        let request_id = format!("acp-{}-{}", responder.id(), Uuid::new_v4());
         {
-            let mut active = self
-                .active
-                .lock()
-                .map_err(|_| super::internal("ACP active prompt lock poisoned"))?;
+            let mut active = crate::panicked::held(&self.active);
             if active.contains_key(&session_id) {
                 return Err(super::invalid_params(
                     "a prompt is already active for this session",
@@ -58,10 +48,7 @@ impl AcpState {
 
         let cancellation = responder.cancellation();
         let operation_token = CancellationToken::new();
-        let input_supported = self
-            .client_capabilities
-            .lock()
-            .map_err(|_| super::internal("ACP capability lock poisoned"))?
+        let input_supported = crate::panicked::held(&self.client_capabilities)
             .elicitation
             .as_ref()
             .is_some_and(|capability| capability.form.is_some());
@@ -112,7 +99,9 @@ impl AcpState {
                     }
                     let mapped = map_session_event(event.event, &mut streamed);
                     if let Some(update) = mapped.update {
-                        let _ = forward_client.send_notification(SessionNotification::new(
+                        // A client that hung up misses an update; the prompt's own
+                        // answer still reaches it or fails on its own.
+                        let _undelivered = forward_client.send_notification(SessionNotification::new(
                             forward_session_id.clone(),
                             update,
                         ));
@@ -132,7 +121,7 @@ impl AcpState {
             // a handler not reset outlives the prompt unnoticed. The active
             // prompt is cleared through a poisoned lock, so a panic elsewhere
             // does not leave the session refusing every later prompt.
-            let _ = finished_tx.send(()); // the watcher may already be gone
+            let _unreceived = finished_tx.send(()); // the watcher may already be gone
             if let Err(cause) = session.end_subscription(subscription_id) {
                 eprintln!(
                     "jeden acp: the event subscription of {request_id} is not ended: {cause}"
@@ -147,27 +136,24 @@ impl AcpState {
             if let Err(cause) = session.set_interaction_handler(None) {
                 eprintln!("jeden acp: session {session_id} keeps its interaction handler: {cause}");
             }
-            match state.active.lock() {
-                Ok(mut active) => active.remove(&session_id),
-                Err(poisoned) => poisoned.into_inner().remove(&session_id),
-            };
+            crate::panicked::held(&state.active).remove(&session_id);
 
-            let aborted = state
-                .aborted
-                .lock()
-                .map(|mut aborted| aborted.remove(&request_id))
-                .unwrap_or_else(|poisoned| poisoned.into_inner().remove(&request_id));
-            if cancellation.is_cancelled() || operation_expired(&operation_token) || aborted {
-                let _ = responder.respond(PromptResponse::new(StopReason::Cancelled));
+            // The same entering rule as the active map above: each change is one
+            // insert or remove, so a poisoned lock holds a consistent set.
+            let aborted = crate::panicked::held(&state.aborted).remove(&request_id);
+            let delivered = if cancellation.is_cancelled()
+                || operation_expired(&operation_token)
+                || aborted
+            {
+                responder.respond(PromptResponse::new(StopReason::Cancelled))
             } else {
                 match result {
-                    Ok(_) => {
-                        let _ = responder.respond(PromptResponse::new(StopReason::EndTurn));
-                    }
-                    Err(error) => {
-                        let _ = responder.respond_with_error(super::internal(error));
-                    }
+                    Ok(_) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
+                    Err(error) => responder.respond_with_error(super::internal(error)),
                 }
+            };
+            if let Err(error) = delivered {
+                eprintln!("jeden acp: the answer to {request_id} could not be delivered: {error}");
             }
         });
         Ok(())
@@ -179,24 +165,18 @@ impl AcpState {
     ) -> agent_client_protocol::Result<()> {
         self.require_initialized()?;
         let id = session_id.0.to_string();
-        let session = self
-            .sessions
-            .lock()
-            .map_err(|_| super::internal("ACP session lock poisoned"))?
+        let session = crate::panicked::held(&self.sessions)
             .get(&id)
             .cloned();
-        let request_id = self
-            .active
-            .lock()
-            .map_err(|_| super::internal("ACP active prompt lock poisoned"))?
+        let request_id = crate::panicked::held(&self.active)
             .get(&id)
             .cloned();
         if let (Some(session), Some(request_id)) = (session, request_id) {
-            self.aborted
-                .lock()
-                .map_err(|_| super::internal("ACP aborted prompt lock poisoned"))?
+            crate::panicked::held(&self.aborted)
                 .insert(request_id.clone());
-            let _ = session.abort(&request_id).map_err(super::internal)?;
+            // Whether a request was still running to abort; the aborted set
+            // above already tells the prompt thread to answer Cancelled.
+            let _was_running = session.abort(&request_id).map_err(super::internal)?;
         }
         Ok(())
     }
@@ -208,15 +188,10 @@ impl AcpState {
         self.require_initialized()?;
         let id = session_id.0.to_string();
         self.cancel_session(session_id)?;
-        let session = self
-            .sessions
-            .lock()
-            .map_err(|_| super::internal("ACP session lock poisoned"))?
+        let session = crate::panicked::held(&self.sessions)
             .remove(&id)
             .ok_or_else(|| agent_client_protocol::Error::resource_not_found(Some(id.clone())))?;
-        self.active
-            .lock()
-            .map_err(|_| super::internal("ACP active prompt lock poisoned"))?
+        crate::panicked::held(&self.active)
             .remove(&id);
         session
             .set_interaction_handler(None)

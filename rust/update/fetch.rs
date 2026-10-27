@@ -7,10 +7,20 @@
 use serde_json::Value;
 use std::path::Path;
 
-fn github_auth_token(location: &str) -> Option<String> {
-    let url = reqwest::Url::parse(location).ok()?;
+/// The variables a GitHub token for Jeden's own releases is read from, in order.
+const TOKEN_VARIABLES: &[&str] = &["JEDEN_UPDATE_GITHUB_TOKEN", "GH_TOKEN"];
+
+/// The GitHub token to send to `location`: only to Jeden's own repository on
+/// github.com or its API, and only when a variable states one. A variable that
+/// is set but cannot be read is refused rather than passed over.
+fn github_auth_token(location: &str) -> Result<Option<String>, String> {
+    // A location that is not a URL is not GitHub's, so it is sent no token.
+    let url = match reqwest::Url::parse(location) {
+        Ok(url) => url,
+        Err(_not_github) => return Ok(None),
+    };
     if url.scheme() != "https" {
-        return None;
+        return Ok(None);
     }
     let path = url.path().to_ascii_lowercase();
     let authorized_path = match url.host_str() {
@@ -21,16 +31,16 @@ fn github_auth_token(location: &str) -> Option<String> {
         _ => false,
     };
     if !authorized_path {
-        return None;
+        return Ok(None);
     }
-    ["JEDEN_UPDATE_GITHUB_TOKEN", "GH_TOKEN"]
-        .into_iter()
-        .find_map(|name| {
-            std::env::var(name)
-                .ok()
-                .map(|value| value.trim().to_owned())
-                .filter(|value| !value.is_empty())
-        })
+    for name in TOKEN_VARIABLES {
+        match std::env::var(name) {
+            Ok(value) if !value.trim().is_empty() => return Ok(Some(value.trim().to_owned())),
+            Ok(_) | Err(std::env::VarError::NotPresent) => {}
+            Err(error) => return Err(format!("{name} cannot be read: {error}")),
+        }
+    }
+    Ok(None)
 }
 
 fn safe_github_segment(value: &str) -> bool {
@@ -40,25 +50,32 @@ fn safe_github_segment(value: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
 }
 
+/// The tag and asset name of a `github.com/wisent-ai/jeden/releases/download/<tag>/<asset>`
+/// location; `None` for any other location.
 fn github_release_asset_coordinates(location: &str) -> Option<(String, String)> {
-    let url = reqwest::Url::parse(location).ok()?;
+    let url = match reqwest::Url::parse(location) {
+        Ok(url) => url,
+        Err(_not_a_release_url) => return None,
+    };
     if url.scheme() != "https" || url.host_str() != Some("github.com") {
         return None;
     }
     let segments = url.path_segments()?.collect::<Vec<_>>();
-    if segments.len() != 6
-        || !segments[0].eq_ignore_ascii_case("wisent-ai")
-        || !segments[1].eq_ignore_ascii_case("jeden")
-        || segments[2] != "releases"
-        || segments[3] != "download"
-        || !safe_github_segment(segments[4])
-        || !safe_github_segment(segments[5])
-    {
-        return None;
+    match segments.as_slice() {
+        [owner, repository, "releases", "download", tag, asset]
+            if owner.eq_ignore_ascii_case("wisent-ai")
+                && repository.eq_ignore_ascii_case("jeden")
+                && safe_github_segment(tag)
+                && safe_github_segment(asset) =>
+        {
+            Some(((*tag).to_owned(), (*asset).to_owned()))
+        }
+        _ => None,
     }
-    Some((segments[4].to_owned(), segments[5].to_owned()))
 }
 
+/// The API address of `asset_name` in a release's metadata, when the metadata
+/// lists it under Jeden's own repository.
 fn github_asset_api_url(metadata: &Value, asset_name: &str) -> Option<String> {
     let raw = metadata
         .get("assets")?
@@ -67,22 +84,25 @@ fn github_asset_api_url(metadata: &Value, asset_name: &str) -> Option<String> {
         .find(|asset| asset.get("name").and_then(Value::as_str) == Some(asset_name))?
         .get("url")?
         .as_str()?;
-    let url = reqwest::Url::parse(raw).ok()?;
-    let segments = url.path_segments()?.collect::<Vec<_>>();
-    if url.scheme() != "https"
-        || url.host_str() != Some("api.github.com")
-        || segments.len() != 6
-        || segments[0] != "repos"
-        || !segments[1].eq_ignore_ascii_case("wisent-ai")
-        || !segments[2].eq_ignore_ascii_case("jeden")
-        || segments[3] != "releases"
-        || segments[4] != "assets"
-        || segments[5].is_empty()
-        || !segments[5].bytes().all(|byte| byte.is_ascii_digit())
-    {
+    let url = match reqwest::Url::parse(raw) {
+        Ok(url) => url,
+        Err(_not_an_asset_url) => return None,
+    };
+    if url.scheme() != "https" || url.host_str() != Some("api.github.com") {
         return None;
     }
-    Some(url.to_string())
+    let segments = url.path_segments()?.collect::<Vec<_>>();
+    match segments.as_slice() {
+        ["repos", owner, repository, "releases", "assets", id]
+            if owner.eq_ignore_ascii_case("wisent-ai")
+                && repository.eq_ignore_ascii_case("jeden")
+                && !id.is_empty()
+                && id.bytes().all(|byte| byte.is_ascii_digit()) =>
+        {
+            Some(url.to_string())
+        }
+        _ => None,
+    }
 }
 
 fn github_release_asset_request(
@@ -94,20 +114,23 @@ fn github_release_asset_request(
         return Ok(None);
     };
     let endpoint = format!("https://api.github.com/repos/wisent-ai/jeden/releases/tags/{tag}");
-    let response = client
-        .get(endpoint)
-        .bearer_auth(token)
-        .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-        .header(reqwest::header::USER_AGENT, "jeden-updater")
-        .send()
-        .map_err(|error| format!("resolve private GitHub release asset: {error}"))?;
+    let response = stado_wait::request_blocking(
+        client
+            .get(endpoint)
+            .bearer_auth(token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .header(reqwest::header::USER_AGENT, "jeden-updater"),
+    )
+    .map_err(|error| format!("resolve private GitHub release asset: {error}"))?;
     if !response.status().is_success() {
         return Err(format!(
             "resolve private GitHub release asset returned {}",
             response.status()
         ));
     }
-    let bytes = response.bytes().map_err(|error| error.to_string())?;
+    let bytes = response
+        .bytes()
+        .map_err(|error| format!("read private GitHub release metadata: {error}"))?;
     let metadata: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("invalid private GitHub release metadata: {error}"))?;
     let asset_url = github_asset_api_url(&metadata, &asset_name)
@@ -128,14 +151,17 @@ pub(super) fn fetch(location: &str, expected: Option<u64>) -> Result<Vec<u8>, St
     if location.starts_with("https://") {
         let client = crate::net::blocking_builder()
             .build()
-            .map_err(|error| error.to_string())?;
-        let mut request = client.get(location);
-        if let Some(token) = github_auth_token(location) {
-            request = github_release_asset_request(&client, location, &token)?
-                .unwrap_or_else(|| client.get(location).bearer_auth(token));
-        }
-        let response = request
-            .send()
+            .map_err(|error| format!("build the download client: {error}"))?;
+        // A token goes with the request only to Jeden's own repository; a
+        // release asset there is fetched through the API that serves private ones.
+        let request = match github_auth_token(location)? {
+            Some(token) => match github_release_asset_request(&client, location, &token)? {
+                Some(asset) => asset,
+                None => client.get(location).bearer_auth(token),
+            },
+            None => client.get(location),
+        };
+        let response = stado_wait::request_blocking(request)
             .map_err(|error| format!("download {location}: {error}"))?;
         if !response.status().is_success() {
             return Err(format!(
@@ -150,28 +176,45 @@ pub(super) fn fetch(location: &str, expected: Option<u64>) -> Result<Vec<u8>, St
                 ));
             }
         }
-        let bytes = response.bytes().map_err(|error| error.to_string())?;
+        let bytes = response
+            .bytes()
+            .map_err(|error| format!("read {location}: {error}"))?;
         return Ok(bytes.to_vec());
     }
-    let path = location.strip_prefix("file://").unwrap_or(location);
+    let path = local_path(location);
     std::fs::read(path).map_err(|error| format!("read {path}: {error}"))
 }
 
-pub(super) fn resolve(base: &str, reference: &str) -> String {
+/// A local location as a path: a `file://` URL's path, or the location itself.
+fn local_path(location: &str) -> &str {
+    match location.strip_prefix("file://") {
+        Some(path) => path,
+        None => location,
+    }
+}
+
+/// `reference` read against `base`, the location it was found in: an absolute
+/// reference stands as it is, a relative one is joined onto the base's URL or
+/// directory. A reference an https base cannot join is refused naming both.
+pub(super) fn resolve(base: &str, reference: &str) -> Result<String, String> {
     if reference.contains("://") || Path::new(reference).is_absolute() {
-        return reference.into();
+        return Ok(reference.into());
     }
     if base.starts_with("https://") {
-        return reqwest::Url::parse(base)
-            .ok()
-            .and_then(|url| url.join(reference).ok())
-            .map(|url| url.to_string())
-            .unwrap_or_else(|| reference.into());
+        let url = reqwest::Url::parse(base)
+            .map_err(|error| format!("{base} is not a URL to resolve {reference} against: {error}"))?;
+        return url
+            .join(reference)
+            .map(|joined| joined.to_string())
+            .map_err(|error| format!("{reference} cannot be joined onto {base}: {error}"));
     }
-    Path::new(base.strip_prefix("file://").unwrap_or(base))
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(reference)
-        .display()
-        .to_string()
+    let directory = match Path::new(local_path(base)).parent() {
+        Some(directory) => directory,
+        None => {
+            return Err(format!(
+                "{base} names no directory to resolve {reference} against"
+            ))
+        }
+    };
+    Ok(directory.join(reference).display().to_string())
 }

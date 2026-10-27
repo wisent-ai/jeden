@@ -15,16 +15,13 @@ use listing::{list_sessions, session_items, session_path};
 /// owns the role (`/model`, `/fast`, `/advisor`). Details report live state.
 pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
-    let model = context
-        .model
-        .map(str::to_string)
-        .or_else(|| crate::load_config(context.cwd).model)
-        .or_else(|| std::env::var("JEDEN_MODEL").ok())
-        .filter(|model| !model.trim().is_empty());
-    let model_detail = match &model {
-        Some(route) => format!("Current route: {route} · /model to change"),
-        None => "No model route selected · /model to choose".to_string(),
-    };
+    // An unreadable route is said, not shown as no route.
+    let model_detail =
+        match crate::agent::selected_model(context.model, crate::load_config(context.cwd).model.as_deref()) {
+            Ok(Some(route)) => format!("Current route: {route} · /model to change"),
+            Ok(None) => "No model route selected · /model to choose".to_string(),
+            Err(cause) => format!("The model route cannot be read: {cause} · /model to choose"),
+        };
     let tier = if state.fast.service_tier.trim().is_empty() {
         "priority"
     } else {
@@ -269,7 +266,7 @@ pub(crate) fn handle_lifecycle(
         },
         "/resume" => {
             let (id, _) = split_head(args);
-            if id.is_empty() { Some(Ok(list_sessions(context.session_root))) }
+            if id.is_empty() { Some(list_sessions(context.session_root)) }
             else {
                 let path = session_path(context.session_root, id);
                 match crate::tool_runtime::runtime_ops::platform::presence::present(&path) {
@@ -279,7 +276,10 @@ pub(crate) fn handle_lifecycle(
                 }
             }
         },
-        "/rename" => Some(Ok(format!("Session title set to: {}", if args.trim().is_empty() { "rust one-shot slash invocation" } else { args.trim() }))),
+        // A one-shot invocation holds no session to rename: answering 'title
+        // set' renamed nothing. The interactive /rename writes the session's
+        // state.json.
+        "/rename" => Some(Err("/rename renames the session of an interactive run; a one-shot slash invocation has no session to rename, so nothing was renamed".into())),
         "/move" => Some(Err("/move requires an active interactive session recorder; Rust one-shot slash commands cannot move a live recorder in this pass.".into())),
         _ => None,
     }

@@ -1,6 +1,6 @@
 //! Running things: a command, a package script, a delegated task.
 
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::ffi::OsString;
 use std::fs;
 
@@ -26,7 +26,7 @@ pub(crate) fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let mut managed = ManagedCommand::new("sh", runtime.cwd);
     managed.args = vec![OsString::from("-c"), OsString::from(&command)];
     let result = ProcessManager.run(&runtime.operation, managed)?;
-    Ok(process_result_json(result, json!({"command": command})))
+    Ok(process_result_json(result, Map::from_iter([("command".to_owned(), json!(command))])))
 }
 
 pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -34,37 +34,37 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         return Err("run_process requires --allow-command".into());
     }
     let command = string_input(input, "command").ok_or("run_process requires command")?;
-    let args = input
-        .get("args")
-        .and_then(Value::as_array)
-        .map(|values| {
-            values
-                .iter()
-                .map(|value| {
-                    value
-                        .as_str()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| value.to_string())
-                })
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+    // The schema declares args an array of strings and env an object of
+    // strings (null unsets one); any other value is refused by name, never
+    // turned into its JSON text and handed to the process.
+    let args = match input.get("args") {
+        None | Some(Value::Null) => Vec::new(),
+        Some(Value::Array(values)) => values
+            .iter()
+            .enumerate()
+            .map(|(at, value)| match value.as_str() {
+                Some(text) => Ok(text.to_string()),
+                None => Err(format!("run_process args[{at}] is {value}, not a string")),
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        Some(other) => return Err(format!("run_process args is {other}, not an array of strings")),
+    };
 
     let mut managed = ManagedCommand::new(&command, runtime.cwd);
     managed.args = args.iter().map(OsString::from).collect();
     managed.stdin = string_input(input, "stdin").map(String::into_bytes);
-    if let Some(env) = input.get("env").and_then(Value::as_object) {
+    let env = match input.get("env") {
+        None | Some(Value::Null) => None,
+        Some(Value::Object(env)) => Some(env),
+        Some(other) => return Err(format!("run_process env is {other}, not an object of strings")),
+    };
+    if let Some(env) = env {
         managed.env.reserve(env.len());
         for (key, value) in env {
-            let value = if value.is_null() {
-                None
-            } else {
-                Some(OsString::from(
-                    value
-                        .as_str()
-                        .map(ToString::to_string)
-                        .unwrap_or_else(|| value.to_string()),
-                ))
+            let value = match value {
+                Value::Null => None,
+                Value::String(text) => Some(OsString::from(text)),
+                other => return Err(format!("run_process env.{key} is {other}, not a string or null")),
             };
             managed.env.push((OsString::from(key), value));
         }
@@ -72,16 +72,15 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let result = ProcessManager.run(&runtime.operation, managed)?;
     Ok(process_result_json(
         result,
-        json!({"command": command, "args": args}),
+        Map::from_iter([("command".to_owned(), json!(command)), ("args".to_owned(), json!(args))]),
     ))
 }
 
-pub(super) fn process_result_json(result: ManagedProcessResult, mut base: Value) -> Value {
+/// `object` (what was run) with the process's outcome beside it. It is a JSON
+/// object by type, so no caller can hand one the outcome cannot join.
+pub(super) fn process_result_json(result: ManagedProcessResult, mut object: Map<String, Value>) -> Value {
     let cancelled = result.reason == TerminationReason::Cancelled;
     let completed = result.reason == TerminationReason::Completed;
-    let object = base
-        .as_object_mut()
-        .expect("process result base must be an object");
     object.insert("ok".into(), json!(completed && result.status.success()));
     object.insert("cancelled".into(), json!(cancelled));
     object.insert("code".into(), json!(result.status.code()));
@@ -93,11 +92,7 @@ pub(super) fn process_result_json(result: ManagedProcessResult, mut base: Value)
     object.insert("stdoutTruncated".into(), json!(result.stdout.truncated));
     object.insert(
         "stdoutArtifact".into(),
-        result
-            .stdout
-            .artifact
-            .map(|path| json!(path.display().to_string()))
-            .unwrap_or(Value::Null),
+        json!(result.stdout.artifact.map(|path| path.display().to_string())),
     );
     object.insert("stdoutSha256".into(), json!(result.stdout.sha256));
     object.insert("stderrHead".into(), json!(result.stderr.head));
@@ -106,26 +101,24 @@ pub(super) fn process_result_json(result: ManagedProcessResult, mut base: Value)
     object.insert("stderrTruncated".into(), json!(result.stderr.truncated));
     object.insert(
         "stderrArtifact".into(),
-        result
-            .stderr
-            .artifact
-            .map(|path| json!(path.display().to_string()))
-            .unwrap_or(Value::Null),
+        json!(result.stderr.artifact.map(|path| path.display().to_string())),
     );
     object.insert("stderrSha256".into(), json!(result.stderr.sha256));
-    base
+    Value::Object(object)
 }
 
 pub(crate) fn list_package_scripts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
     let file = runtime.cwd.join("package.json");
-    let raw = fs::read_to_string(&file).map_err(|e| e.to_string())?;
-    let parsed: Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    let raw = fs::read_to_string(&file).map_err(|e| format!("{} cannot be read: {e}", file.display()))?;
+    let parsed: Value =
+        serde_json::from_str(&raw).map_err(|e| format!("{} is not JSON: {e}", file.display()))?;
     let mut scripts = serde_json::Map::new();
     if let Some(raw_scripts) = parsed.get("scripts").and_then(Value::as_object) {
         for (name, value) in raw_scripts {
-            if let Some(script) = value.as_str() {
-                scripts.insert(name.clone(), json!(script));
-            }
+            let Some(script) = value.as_str() else {
+                return Err(format!("{} declares script {name} as {value}, not a command string", file.display()));
+            };
+            scripts.insert(name.clone(), json!(script));
         }
     }
     Ok(Value::Object(scripts))

@@ -147,16 +147,16 @@ impl TaskScheduler {
                     );
                     let stdout_result = match stdout_reader.join() {
                         Ok(result) => result,
-                        Err(panic) => Err(TaskError::Process(format!(
-                            "stdout capture panicked: {}",
-                            panic_cause(&*panic)
+                        Err(panic) => Err(TaskError::Process(crate::panicked::refusal(
+                            "stdout capture",
+                            &*panic,
                         ))),
                     };
                     let stderr_result = match stderr_reader.join() {
                         Ok(result) => result,
-                        Err(panic) => Err(TaskError::Process(format!(
-                            "stderr capture panicked: {}",
-                            panic_cause(&*panic)
+                        Err(panic) => Err(TaskError::Process(crate::panicked::refusal(
+                            "stderr capture",
+                            &*panic,
                         ))),
                     };
                     (status, stdout_result, stderr_result)
@@ -285,16 +285,4 @@ fn released(slot: &std::path::Path, error: TaskError) -> TaskError {
         }
     }
     error
-}
-
-/// What a panicking capture thread said, when it said it as text.
-fn panic_cause(payload: &(dyn std::any::Any + Send)) -> String {
-    match (
-        payload.downcast_ref::<&str>(),
-        payload.downcast_ref::<String>(),
-    ) {
-        (Some(text), _) => (*text).to_string(),
-        (None, Some(text)) => text.clone(),
-        (None, None) => "its panic carried no text".to_string(),
-    }
 }

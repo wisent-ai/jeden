@@ -65,14 +65,16 @@ fn validate_project_config(workspace: &Path) -> Result<String, String> {
     Ok(format!("accepted existing {}", path.display()))
 }
 
+/// Every sealed session whose recorded `cwd` lies in `workspace`, and every
+/// session directory that could not be read, named with its cause.
 fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
-    let mut accepted = 0;
-    let mut rejected = 0;
+    let mut accepted = Vec::new();
+    let mut rejections = Vec::new();
     let root = session_root();
     let entries = match fs::read_dir(&root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(WorkspaceSessions { accepted, rejected })
+            return Ok(WorkspaceSessions::from_outcomes(&accepted, rejections))
         }
         Err(error) => {
             return Err(format!(
@@ -84,14 +86,20 @@ fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
-            Err(_) => {
-                rejected += 1;
+            Err(error) => {
+                rejections.push(format!("an entry of {}: {error}", root.display()));
                 continue;
             }
         };
         let state_path = entry.path().join("state.json");
-        if !state_path.is_file() {
-            continue;
+        match fs::metadata(&state_path) {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_not_file) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                rejections.push(format!("{}: {error}", state_path.display()));
+                continue;
+            }
         }
         let state = match fs::read(&state_path)
             .map_err(|error| error.to_string())
@@ -99,24 +107,27 @@ fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
                 serde_json::from_slice::<Value>(&bytes).map_err(|error| error.to_string())
             }) {
             Ok(value) => value,
-            Err(_) => {
-                rejected += 1;
+            Err(cause) => {
+                rejections.push(format!("{}: {cause}", state_path.display()));
                 continue;
             }
         };
         let Some(cwd) = state.get("cwd").and_then(Value::as_str) else {
-            rejected += 1;
+            rejections.push(format!("{} records no cwd", state_path.display()));
             continue;
         };
-        let Ok(cwd) = Path::new(cwd).canonicalize() else {
-            rejected += 1;
-            continue;
+        let cwd = match Path::new(cwd).canonicalize() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                rejections.push(format!("{} records cwd {cwd}, which cannot be resolved: {error}", state_path.display()));
+                continue;
+            }
         };
         if cwd.starts_with(workspace) {
-            accepted += 1;
+            accepted.push(entry.path());
         }
     }
-    Ok(WorkspaceSessions { accepted, rejected })
+    Ok(WorkspaceSessions::from_outcomes(&accepted, rejections))
 }
 
 pub(crate) fn inspect(path: &Path, base: &Path, status: &str) -> Result<WorkspaceReport, String> {

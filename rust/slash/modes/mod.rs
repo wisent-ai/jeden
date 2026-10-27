@@ -1,8 +1,6 @@
 //! The standing shape of a session: what it is working on, how it loops, how
 //! fast it answers, and what it may force.
 
-use std::env;
-
 use crate::slash::common::{parse_duration_ms, split_head};
 use crate::slash::state::{ForceState, LoopState, ModeState};
 use crate::slash::SlashContext;
@@ -36,13 +34,16 @@ fn format_loop_status(loop_state: &LoopState) -> String {
     }
 }
 
+/// The model this session routes to, chosen by the selector routing itself
+/// uses (`crate::agent::selected_model`). With none selected the answer says
+/// so: a made-up `default` named a model nothing would run, and the unrelated
+/// `MODEL` variable named one routing never reads.
 pub(crate) fn current_model_route(context: &SlashContext<'_>) -> String {
-    context
-        .model
-        .map(ToString::to_string)
-        .or_else(|| env::var("JEDEN_MODEL").ok())
-        .or_else(|| env::var("MODEL").ok())
-        .unwrap_or_else(|| "default".into())
+    match crate::agent::selected_model(context.model, crate::load_config(context.cwd).model.as_deref()) {
+        Ok(Some(model)) => model,
+        Ok(None) => "no model selected (choose one with /model)".into(),
+        Err(cause) => format!("unreadable: {cause}"),
+    }
 }
 
 pub(crate) fn handle_plan(args: &str, state: &mut ModeState) -> Result<String, String> {
@@ -126,7 +127,7 @@ pub(crate) fn handle_loop(args: &str, state: &mut ModeState) -> Result<String, S
     // refused rather than read as time zero or wrapped.
     let until = match count {
         Some(_) => None,
-        None => match parse_duration_ms(head) {
+        None => match parse_duration_ms(head).map_err(|error| format!("/loop {error}"))? {
             Some(duration) => {
                 let now = crate::clock::unix_millis()
                     .map_err(|error| format!("/loop {head}: {error}"))?;
@@ -200,19 +201,7 @@ pub(crate) fn handle_force(
     if tool.is_empty() {
         return Err("Usage: /force <tool-name> [prompt]".into());
     }
-    let names = tools::list_tools(context.cwd)
-        .into_iter()
-        .map(|tool| tool.name)
-        .collect::<Vec<_>>();
-    if !names.is_empty() && !names.iter().any(|name| name == tool) {
-        // The prior visible-tools preview cap was an unconsented numeric literal;
-        // list every visible tool instead.
-        return Err(format!(
-            "Unknown or unavailable tool: {}. Visible tools: {}",
-            tool,
-            names.join(", ")
-        ));
-    }
+    forceable(context.cwd, tool)?;
     state.force = Some(ForceState {
         tool: tool.to_string(),
         prompt: String::new(),
@@ -221,6 +210,25 @@ pub(crate) fn handle_force(
         "The next agent turn will be instructed to use {} first.",
         tool
     ))
+}
+
+/// Whether `tool` is one the next turn can call: a visible tool. An empty
+/// visible set makes every tool unavailable, never every tool acceptable.
+/// Every visible tool is listed in the refusal.
+pub(crate) fn forceable(cwd: &std::path::Path, tool: &str) -> Result<(), String> {
+    let names = tools::list_tools(cwd)
+        .into_iter()
+        .map(|tool| tool.name)
+        .collect::<Vec<_>>();
+    if names.iter().any(|name| name == tool) {
+        return Ok(());
+    }
+    let visible = if names.is_empty() {
+        "none".to_string()
+    } else {
+        names.join(", ")
+    };
+    Err(format!("Unknown or unavailable tool: {tool}. Visible tools: {visible}"))
 }
 
 pub(crate) fn handle_branching(

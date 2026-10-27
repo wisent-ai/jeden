@@ -5,7 +5,7 @@
 //! Split out of `mcp/client.rs`, which had grown past the module line cap.
 
 use serde_json::Value;
-use std::io::Read;
+use std::io::{BufRead, BufReader, Read};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
@@ -15,10 +15,10 @@ pub(super) fn encode_message(message: &Value) -> Result<Vec<u8>, String> {
     Ok(body)
 }
 
+/// One line as a message; a line of whitespace alone carries none.
 pub(super) fn parse_json_line(line: &[u8]) -> Result<Option<Value>, String> {
-    let line = line.strip_suffix(b"\n").unwrap_or(line);
-    let line = line.strip_suffix(b"\r").unwrap_or(line);
-    if line.iter().all(u8::is_ascii_whitespace) {
+    let line = line.trim_ascii();
+    if line.is_empty() {
         return Ok(None);
     }
     serde_json::from_slice(line)
@@ -26,54 +26,38 @@ pub(super) fn parse_json_line(line: &[u8]) -> Result<Option<Value>, String> {
         .map_err(|error| format!("invalid newline-delimited MCP JSON: {error}"))
 }
 
-pub(super) fn read_messages(
-    mut stdout: impl Read + Send + 'static,
-) -> Receiver<Result<Value, String>> {
+pub(super) fn read_messages(stdout: impl Read + Send + 'static) -> Receiver<Result<Value, String>> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let mut pending = Vec::new();
-        let mut scanned = 0;
-        let mut chunk = [0u8; 8192];
+        let mut reader = BufReader::new(stdout);
         loop {
-            match stdout.read(&mut chunk) {
-                Ok(0) => {
-                    if !pending.iter().all(u8::is_ascii_whitespace) {
-                        let _ = tx.send(Err(
-                            "MCP stdio closed with an unterminated JSON message".into()
-                        ));
-                    }
-                    return;
+            let mut line = Vec::new();
+            if let Err(error) = reader.read_until(b'\n', &mut line) {
+                // The reader's last word; a client that stopped listening needs none.
+                let _unreceived = tx.send(Err(format!("MCP stdio read failed: {error}")));
+                return;
+            }
+            // Nothing read is the server closing its output.
+            if line.is_empty() {
+                return;
+            }
+            if line.last() != Some(&b'\n') {
+                if !line.trim_ascii().is_empty() {
+                    let _unreceived = tx.send(Err(
+                        "MCP stdio closed with an unterminated JSON message".into()
+                    ));
                 }
-                Ok(count) => {
-                    pending.extend_from_slice(&chunk[..count]);
-                    loop {
-                        let Some(end) = pending[scanned..]
-                            .iter()
-                            .position(|byte| *byte == b'\n')
-                            .map(|offset| scanned + offset)
-                        else {
-                            scanned = pending.len();
-                            break;
-                        };
-                        let parsed = parse_json_line(&pending[..=end]);
-                        pending.drain(..=end);
-                        scanned = 0;
-                        match parsed {
-                            Ok(Some(message)) => {
-                                if tx.send(Ok(message)).is_err() {
-                                    return;
-                                }
-                            }
-                            Ok(None) => {}
-                            Err(error) => {
-                                let _ = tx.send(Err(error));
-                                return;
-                            }
-                        }
+                return;
+            }
+            match parse_json_line(&line) {
+                Ok(Some(message)) => {
+                    if tx.send(Ok(message)).is_err() {
+                        return;
                     }
                 }
+                Ok(None) => {}
                 Err(error) => {
-                    let _ = tx.send(Err(format!("MCP stdio read failed: {error}")));
+                    let _unreceived = tx.send(Err(error));
                     return;
                 }
             }
@@ -82,21 +66,18 @@ pub(super) fn read_messages(
     rx
 }
 
+/// Everything the server writes to stderr, and why reading it stopped when
+/// it stopped before the server closed it.
 pub(super) fn drain_stderr(mut stderr: impl Read + Send + 'static) -> Receiver<String> {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut buffer = Vec::new();
-        let mut chunk = [0u8; 4096];
-        loop {
-            match stderr.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(count) => {
-                    buffer.extend_from_slice(&chunk[..count]);
-                }
-                Err(_) => break,
-            }
+        let ended = stderr.read_to_end(&mut buffer);
+        let mut text = String::from_utf8_lossy(&buffer).into_owned();
+        if let Err(error) = ended {
+            text.push_str(&format!("\n[the server's stderr could not be read further: {error}]"));
         }
-        let _ = tx.send(String::from_utf8_lossy(&buffer).into_owned());
+        let _unreceived = tx.send(text);
     });
     rx
 }

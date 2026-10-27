@@ -33,10 +33,11 @@ static HELD: Mutex<Held> = Mutex::new(Held {
     leases: BTreeMap::new(),
 });
 
-fn held() -> Result<MutexGuard<'static, Held>, String> {
-    HELD.lock().map_err(|_| {
-        "the record of this process's leases was poisoned by a panic in another thread".to_string()
-    })
+/// The record of this process's leases. Each holder changes it by one
+/// insert, remove or replace, so a holder that panicked leaves a state:
+/// refused instead, one panic refused every later call its lease.
+fn held() -> MutexGuard<'static, Held> {
+    crate::panicked::held(&HELD)
 }
 
 /// The provider a route is leased on: `provider/model` names it.
@@ -68,13 +69,13 @@ pub(crate) fn for_route(config: &ChatConfig, route: &str) -> Result<Option<Sessi
     let Some(provider) = route_provider(route) else {
         return Ok(None);
     };
-    let known = held()?.limits.clone();
+    let known = held().limits.clone();
     let (limits, unstated) = match known {
         Some(limits) => limits,
         None => {
             let register = register(config)?;
             let limits = (register.limits, register.unstated);
-            held()?.limits = Some(limits.clone());
+            held().limits = Some(limits.clone());
             limits
         }
     };
@@ -87,11 +88,11 @@ pub(crate) fn for_route(config: &ChatConfig, route: &str) -> Result<Option<Sessi
         return Ok(None);
     }
     let key = (session_id.to_string(), provider.to_string());
-    if let Some((lease, _)) = held()?.leases.get(&key) {
+    if let Some((lease, _)) = held().leases.get(&key) {
         return Ok(Some(lease.clone()));
     }
     let taken = take(config, provider, session_id)?;
-    held()?
+    held()
         .leases
         .insert(key, (taken.lease.clone(), config.clone()));
     Ok(Some(taken.lease))
@@ -119,7 +120,7 @@ pub(crate) fn switch(
             lease.id
         )
     })?;
-    held()?.leases.remove(&key);
+    held().leases.remove(&key);
     let taken = take(config, &lease.provider, &lease.session_id).map_err(|error| {
         format!(
             "account {} of provider {} failed and Brama gave session {} no other: {error}",
@@ -128,7 +129,7 @@ pub(crate) fn switch(
             lease.session_id
         )
     })?;
-    held()?
+    held()
         .leases
         .insert(key, (taken.lease.clone(), config.clone()));
     if taken.lease.subscription_id == lease.subscription_id {
@@ -142,7 +143,7 @@ pub(crate) fn switch(
 /// nothing and asks Brama nothing.
 pub(crate) fn release_held(session_id: &str) -> Result<Vec<SessionLease>, String> {
     let taken: Vec<(SessionLease, ChatConfig)> = {
-        let mut record = held()?;
+        let mut record = held();
         let keys: Vec<(String, String)> = record
             .leases
             .keys()

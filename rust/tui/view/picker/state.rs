@@ -7,6 +7,9 @@ use super::super::{PickerEvent, PickerFocus, PickerState, INITIAL_SELECTION, SEL
 use super::PickerSpec;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
+/// The catch-all tab is the first, the position a selection starts at too.
+const CATCH_ALL_TAB: usize = INITIAL_SELECTION;
+
 impl PickerState {
     pub fn new(spec: PickerSpec) -> Self {
         let focus = if spec.tabs.is_empty() {
@@ -20,7 +23,7 @@ impl PickerState {
             spec,
             query: String::new(),
             selected: INITIAL_SELECTION,
-            active_tab: 0,
+            active_tab: CATCH_ALL_TAB,
             focus,
         };
         state.select_first_enabled();
@@ -35,8 +38,8 @@ impl PickerState {
             .enumerate()
             .filter(|(_, item)| {
                 // Tab browsing applies only while not searching; a query
-                // always scans every category. Tab 0 is the catch-all view.
-                if query.is_empty() && self.active_tab > 0 && item.tab != self.active_tab {
+                // always scans every category. The catch-all tab shows all.
+                if query.is_empty() && self.active_tab != CATCH_ALL_TAB && item.tab != self.active_tab {
                     return false;
                 }
                 if query.is_empty() {
@@ -47,8 +50,7 @@ impl PickerState {
                     || item
                         .badge
                         .as_deref()
-                        .map(|badge| badge.to_ascii_lowercase().contains(&query))
-                        .unwrap_or(false)
+                        .is_some_and(|badge| badge.to_ascii_lowercase().contains(&query))
             })
             .map(|(index, _)| index)
             .collect()
@@ -66,13 +68,14 @@ impl PickerState {
     fn skip_disabled(&self, position: usize, direction: isize) -> usize {
         let indices = self.filtered_indices();
         if indices.is_empty() {
-            return usize::MIN;
+            return INITIAL_SELECTION;
         }
         if indices.iter().all(|index| self.spec.items[*index].disabled) {
             return position.min(indices.len() - SELECTION_STEP);
         }
         let mut current = position.min(indices.len() - SELECTION_STEP);
-        for _ in usize::MIN..indices.len() {
+        // Each row is visited at most once before giving up.
+        for _ in &indices {
             if !self.spec.items[indices[current]].disabled {
                 return current;
             }
@@ -143,9 +146,10 @@ impl PickerState {
             }
             KeyCode::Up => {
                 let count = self.filtered_indices().len();
-                if count > usize::MIN {
+                // Above the first row the selection wraps to the last.
+                if let Some(last) = count.checked_sub(SELECTION_STEP) {
                     let previous = if self.selected == INITIAL_SELECTION {
-                        count - SELECTION_STEP
+                        last
                     } else {
                         self.selected - SELECTION_STEP
                     };
@@ -155,8 +159,8 @@ impl PickerState {
             }
             KeyCode::Down => {
                 let count = self.filtered_indices().len();
-                if count > usize::MIN {
-                    let next = (self.selected + SELECTION_STEP) % count;
+                // Below the last row the selection wraps to the first.
+                if let Some(next) = (self.selected + SELECTION_STEP).checked_rem(count) {
                     self.selected = self.skip_disabled(next, SELECTION_STEP as isize);
                 }
                 PickerEvent::Pending

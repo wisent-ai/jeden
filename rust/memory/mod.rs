@@ -13,10 +13,7 @@ use std::path::Path;
 
 pub use embeddings::{EmbeddingHealth, EmbeddingProvider};
 pub use outbox::{OutboxConsumer, OutboxEvent};
-pub use ranking::{
-    mean_reciprocal_rank, ndcg_at_k, recall_at_k, FtsBackend, HybridBackend, RankedCandidate,
-    ScoreComponents, SemanticBackend,
-};
+pub use ranking::{FtsBackend, HybridBackend, RankedCandidate, ScoreComponents, SemanticBackend};
 pub(crate) use schema::SCHEMA;
 pub use store::MemoryStore;
 
@@ -119,10 +116,6 @@ pub struct RecallProvenance {
     pub edges: Vec<MemoryEdge>,
 }
 
-pub trait Consolidator {
-    fn consolidate(&self, candidates: &[MemoryRecord], max_chars: usize) -> Result<String, String>;
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeasedJob {
@@ -163,43 +156,52 @@ pub struct MemoryQueueStatus {
     pub jobs: Vec<MemoryQueueJob>,
 }
 
-pub fn scope_from_value(value: Option<&Value>, cwd: &Path) -> MemoryScope {
+/// The scope a memory call reads and writes, from its `scope` argument. A call
+/// that names none, or names the repository, is about the repository at
+/// `cwd`; an object names a kind and an id, either of which may be left to
+/// that same reading; any other shape is refused naming it.
+pub fn scope_from_value(value: Option<&Value>, cwd: &Path) -> Result<MemoryScope, String> {
+    let repository = |id: String| MemoryScope {
+        kind: REPO_SCOPE.into(),
+        id,
+    };
     match value {
-        Some(Value::Object(m)) => {
-            let kind = m
-                .get("kind")
-                .and_then(Value::as_str)
-                .unwrap_or("repo")
-                .to_string();
-            let id = m
-                .get("id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| {
-                    if kind == "repo" {
-                        cwd.display().to_string()
-                    } else {
-                        kind.clone()
-                    }
-                });
-            MemoryScope { kind, id }
+        None | Some(Value::Null) => Ok(repository(cwd.display().to_string())),
+        Some(Value::String(kind)) if kind == REPO_SCOPE => Ok(repository(cwd.display().to_string())),
+        Some(Value::String(kind)) => Ok(MemoryScope {
+            kind: kind.clone(),
+            id: kind.clone(),
+        }),
+        Some(Value::Object(fields)) => {
+            let kind = fields.get("kind").and_then(Value::as_str);
+            let id = fields.get("id").and_then(Value::as_str);
+            Ok(match (kind, id) {
+                (None, None) => repository(cwd.display().to_string()),
+                (None, Some(id)) => repository(id.to_string()),
+                (Some(kind), None) if kind == REPO_SCOPE => repository(cwd.display().to_string()),
+                (Some(kind), None) => MemoryScope {
+                    kind: kind.to_string(),
+                    id: kind.to_string(),
+                },
+                (Some(kind), Some(id)) => MemoryScope {
+                    kind: kind.to_string(),
+                    id: id.to_string(),
+                },
+            })
         }
-        Some(Value::String(s)) if s != "repo" => MemoryScope {
-            kind: s.clone(),
-            id: s.clone(),
-        },
-        _ => MemoryScope {
-            kind: "repo".into(),
-            id: cwd.display().to_string(),
-        },
+        Some(other) => Err(format!(
+            "memory scope must be a kind name or an object with kind and id, not {other}"
+        )),
     }
 }
 
+/// The scope kind of the repository a call runs in.
+const REPO_SCOPE: &str = "repo";
+
+/// A new identifier under `prefix`: a random UUID, so ids minted anywhere do
+/// not collide.
 pub(super) fn stable_id(prefix: &str) -> String {
-    use rand::RngCore;
-    let mut bytes = [0u8; 16];
-    rand::thread_rng().fill_bytes(&mut bytes);
-    format!("{prefix}_{}", hex::encode(bytes))
+    format!("{prefix}_{}", uuid::Uuid::new_v4().simple())
 }
 /// Milliseconds since the Unix epoch as the store's column type, or why the
 /// clock has none to give.
@@ -226,8 +228,11 @@ pub(crate) fn redacted(value: &str) -> String {
         r"\bgh[pousr]_[A-Za-z0-9_]+\b",
         r"\b[spr]k_[a-z]+_[A-Za-z0-9]+\b",
     ] {
-        if let Ok(re) = regex::Regex::new(pattern) {
-            text = re.replace_all(&text, "[REDACTED]").into_owned()
+        // A pattern that does not compile fails closed: skipped, the
+        // credential it recognises was kept in memory unredacted.
+        match regex::Regex::new(pattern) {
+            Ok(re) => text = re.replace_all(&text, "[REDACTED]").into_owned(),
+            Err(error) => return format!("[REDACTED: the credential pattern {pattern} does not compile: {error}]"),
         }
     }
     text.split_whitespace().collect::<Vec<_>>().join(" ")

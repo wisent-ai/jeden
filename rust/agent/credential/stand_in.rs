@@ -2,16 +2,23 @@
 //! without the other Wisent products: when Brama is not routed here, this
 //! process holds no credential for it, or it refuses or does not answer
 //! Jeden's catalog read, model work goes to the OpenAI-compatible provider
-//! the operator keeps in Jeden's own token store (`jeden token add`), and
-//! standard error says which provider and why. With no stored provider the
-//! run refuses naming both Brama's cause and the empty store.
+//! the operator keeps in Jeden's own token store (`jeden token add`); with
+//! none there and subscription grants of Jeden's own (`private_gateway`), to
+//! the standalone Brama this process starts on those grants. Standard error
+//! says which and why. With neither the run refuses naming Brama's cause,
+//! the empty store and the absent grants.
 use std::sync::OnceLock;
 
 use crate::control_plane::brama::BramaError;
 
-/// The provider standing in for Brama in this process, and why.
+/// The stand-in this process took for Brama, and why Brama does not serve
+/// it. The route it serves is resolved when a caller asks, so Jeden's own
+/// gateway is started again when its child ended, never answered from a
+/// stale address.
 pub(crate) struct StandIn {
-    pub(crate) endpoint: String,
+    /// The endpoint of a stored OpenAI-compatible provider, whose key the
+    /// token store selects per request; none for Jeden's own gateway.
+    pub(crate) stored: Option<String>,
     pub(crate) cause: String,
 }
 
@@ -20,6 +27,63 @@ static ENGAGED: OnceLock<StandIn> = OnceLock::new();
 /// The stand-in this process already took, if it took one.
 pub(crate) fn engaged() -> Option<&'static StandIn> {
     ENGAGED.get()
+}
+
+/// The selected endpoint, credential and lifecycle source from one resolution.
+/// Only a gateway this process owns follows replacement children at dispatch.
+pub(crate) struct SelectedProvider {
+    pub(crate) endpoint: String,
+    pub(crate) key: Option<String>,
+    pub(crate) own_gateway: bool,
+}
+
+/// Select an explicit provider before an engaged stand-in, preserving the
+/// lifecycle source alongside the pair instead of comparing a later child.
+pub(crate) fn selected_provider() -> Option<SelectedProvider> {
+    let selected = super::direct_variables().and_then(|explicit| match explicit {
+        Some((endpoint, key)) => Ok(Some(SelectedProvider {
+            endpoint,
+            key,
+            own_gateway: false,
+        })),
+        None => selected_stand_in(),
+    });
+    match selected {
+        Ok(provider) => provider,
+        Err(cause) => {
+            // The Brama route this refusal feeds is resolved once per process
+            // (brama_route's LazyLock), so the first refusal is the one it says.
+            let _already_refused = super::DIRECT_REFUSED.set(cause);
+            None
+        }
+    }
+}
+
+/// The route the stand-in serves now: a stored provider's endpoint with no
+/// bearer, or Jeden's own gateway with the bearer it accepts (started again
+/// when its child ended, so no turn is sent to a dead address). None when
+/// no stand-in was engaged; refused when the gateway will not come up.
+fn selected_stand_in() -> Result<Option<SelectedProvider>, String> {
+    match ENGAGED.get() {
+        None => Ok(None),
+        Some(standing) => match &standing.stored {
+            Some(endpoint) => Ok(Some(SelectedProvider {
+                endpoint: endpoint.clone(),
+                key: None,
+                own_gateway: false,
+            })),
+            None => {
+                let gateway = super::private_gateway::start().map_err(|refused| {
+                    format!("Jeden's own gateway no longer serves this process: {refused}")
+                })?;
+                Ok(Some(SelectedProvider {
+                    endpoint: gateway.endpoint,
+                    key: Some(gateway.bearer),
+                    own_gateway: true,
+                }))
+            }
+        },
+    }
 }
 
 /// Why Brama cannot be asked at all from this process, before any request:
@@ -53,9 +117,10 @@ pub(crate) fn brama_not_serving(error: &BramaError) -> bool {
     )
 }
 
-/// Use the first provider Jeden's token store holds instead of Brama, because
-/// of `cause`, and say so once on standard error. Refused, naming `cause` and
-/// why no provider stands in, when the store holds none or cannot be read.
+/// Use the first provider Jeden's token store holds instead of Brama, else
+/// Jeden's own gateway on its subscription grants, because of `cause`, and
+/// say so once on standard error. Refused, naming `cause` and why nothing
+/// stands in, when neither is there or one cannot be read or started.
 pub(crate) fn engage(cause: &str) -> Result<&'static StandIn, String> {
     if let Some(engaged) = ENGAGED.get() {
         return Ok(engaged);
@@ -66,23 +131,40 @@ pub(crate) fn engage(cause: &str) -> Result<&'static StandIn, String> {
             None => Ok(Vec::new()),
         })
         .map(|rows| rows.into_iter().map(|row| row.endpoint).next());
-    let endpoint = match stored {
-        Ok(Some(endpoint)) => endpoint,
-        Ok(None) => {
-            return Err(format!(
-                "{cause}; no provider stands in for it: Jeden's token store holds no \
-                 OpenAI-compatible provider (`jeden token add <label> --endpoint <url>`, key on stdin)"
-            ))
+    let (stored, said) = match stored {
+        Ok(Some(endpoint)) => {
+            let said = format!("the OpenAI-compatible provider {endpoint} from Jeden's token store");
+            (Some(endpoint), said)
         }
+        Ok(None) => match super::private_gateway::holds_grants() {
+            Ok(true) => {
+                let gateway = super::private_gateway::start().map_err(|refused| {
+                    format!("{cause}; Jeden's own gateway on its subscription grants did not start: {refused}")
+                })?;
+                let said = format!(
+                    "Jeden's own gateway at {} on its subscription grants ({})",
+                    gateway.endpoint,
+                    super::private_gateway::grants_file().display()
+                );
+                (None, said)
+            }
+            Ok(false) => {
+                return Err(format!(
+                    "{cause}; no provider stands in for it: Jeden's token store holds no \
+                     OpenAI-compatible provider (`jeden token add <label> --endpoint <url>`, key on stdin) \
+                     and Jeden holds no subscription grant of its own ({}: \
+                     jeden token sign-in PROVIDER --account EMAIL --reason TEXT signs one in)",
+                    super::private_gateway::grants_file().display()
+                ))
+            }
+            Err(unreadable) => return Err(format!("{cause}; no provider stands in for it: {unreadable}")),
+        },
         Err(unreadable) => return Err(format!("{cause}; no provider stands in for it: {unreadable}")),
     };
     let engaged = ENGAGED.get_or_init(|| StandIn {
-        endpoint,
+        stored,
         cause: cause.to_owned(),
     });
-    eprintln!(
-        "jeden: {}; using the OpenAI-compatible provider {} from Jeden's token store instead",
-        engaged.cause, engaged.endpoint
-    );
+    eprintln!("jeden: {}; using {said} instead", engaged.cause);
     Ok(engaged)
 }

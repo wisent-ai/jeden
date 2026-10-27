@@ -1,8 +1,5 @@
 //! Reading the command line surface out of the product's own help text and
 //! slash registry.
-//!
-//! Split out of `cli/tooling/completions.rs`, which had grown past the module
-//! line cap.
 
 use super::{CommandSpec, CompletionModel, FlagSpec, SlashEntry};
 use crate::capability::builtin_slash_specs;
@@ -38,17 +35,16 @@ fn is_value_token(token: &str) -> bool {
 /// Collect `--long` flags from one usage line. Handles compact alternations
 /// such as `[--json|--summary|--serve]` and value placeholders after a flag.
 fn collect_flags(line: &str, flags: &mut Vec<FlagSpec>) {
-    let tokens: Vec<&str> = line.split_whitespace().collect();
-    for (index, token) in tokens.iter().enumerate() {
+    let mut tokens = line.split_whitespace().peekable();
+    while let Some(token) = tokens.next() {
         let cleaned = token.trim_matches(|c| matches!(c, '[' | ']'));
         if !cleaned.starts_with('-') {
             continue;
         }
-        let takes_value = !cleaned.contains('|')
-            && tokens
-                .get(index + 1)
-                .map(|next| is_value_token(next))
-                .unwrap_or(false);
+        // A flag takes a value when the token after it is a placeholder; an
+        // alternation of flags takes none.
+        let takes_value =
+            !cleaned.contains('|') && tokens.peek().is_some_and(|next| is_value_token(next));
         for part in cleaned.split('|') {
             if part.starts_with("--") {
                 push_flag(flags, part, takes_value);
@@ -64,16 +60,10 @@ fn collect_flags(line: &str, flags: &mut Vec<FlagSpec>) {
 /// `list path get set reset`.
 fn extract_actions(line: &str) -> Vec<String> {
     let mut actions = Vec::new();
-    let mut start = None;
-    let mut opener = '[';
-    for (index, ch) in line.char_indices() {
-        if matches!(ch, '[' | '<') {
-            start = Some(index + 1);
-            opener = ch;
-            break;
-        }
-    }
-    let Some(start) = start else { return actions };
+    let Some((at, opener)) = line.char_indices().find(|(_at, ch)| matches!(ch, '[' | '<')) else {
+        return actions;
+    };
+    let start = at + opener.len_utf8();
     let closer = if opener == '[' { ']' } else { '>' };
     let Some(end) = line[start..].find(closer).map(|i| start + i) else {
         return actions;
@@ -83,11 +73,10 @@ fn extract_actions(line: &str) -> Vec<String> {
         return actions;
     }
     for alternative in group.split('|') {
-        let word = alternative
-            .split_whitespace()
-            .next()
-            .unwrap_or("")
-            .trim_matches(|c| matches!(c, '[' | ']' | '<' | '>' | '"'));
+        let Some(first) = alternative.split_whitespace().next() else {
+            continue;
+        };
+        let word = first.trim_matches(|c| matches!(c, '[' | ']' | '<' | '>' | '"'));
         if !word.is_empty() && !word.starts_with('-') {
             push_word(&mut actions, word);
         }

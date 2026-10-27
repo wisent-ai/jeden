@@ -12,25 +12,43 @@ use sea_orm::{
 };
 use serde_json::json;
 
+use crate::tally::{FIRST, ORIGIN, STEP};
+
+/// A tombstone records a removal the user asked for, which is certain: the
+/// top of the confidence range the memory schema declares.
+const CERTAIN: f64 = STEP as f64;
+
+/// The revision that follows `prior`, or the first when there is none.
+fn next_revision(prior: Option<&MemoryRecord>) -> i64 {
+    match prior {
+        Some(record) => record.revision + i64::from(STEP),
+        None => FIRST as i64,
+    }
+}
+
 /// The live revision of `logical_key` in `scope`, locked for this write.
 async fn live_revision(
     tx: &DatabaseTransaction,
     scope: &MemoryScope,
     logical_key: &str,
 ) -> Result<Option<MemoryRecord>, String> {
-    memory::Entity::find()
-        .filter(memory::Column::ScopeKind.eq(scope.kind.clone()))
-        .filter(memory::Column::ScopeId.eq(scope.id.clone()))
-        .filter(memory::Column::LogicalKey.eq(logical_key.to_owned()))
-        .filter(memory::Column::ValidTo.is_null())
-        .order_by_desc(memory::Column::Revision)
-        .limit(1)
-        .lock_exclusive()
-        .one(tx)
-        .await
-        .map_err(sql)?
-        .map(record)
-        .transpose()
+    // The row lock waits for any other writer of this logical memory.
+    let live = stado_wait::until(
+        stado_wait::Kind::Database,
+        format!("the live revision of memory {logical_key}"),
+        "memory store",
+        memory::Entity::find()
+            .filter(memory::Column::ScopeKind.eq(scope.kind.clone()))
+            .filter(memory::Column::ScopeId.eq(scope.id.clone()))
+            .filter(memory::Column::LogicalKey.eq(logical_key.to_owned()))
+            .filter(memory::Column::ValidTo.is_null())
+            .order_by_desc(memory::Column::Revision)
+            .lock_exclusive()
+            .one(tx),
+    )
+    .await
+    .map_err(sql)?;
+    live.map(record).transpose()
 }
 
 /// Close `prior` at `at`; the next revision supersedes it.
@@ -94,11 +112,14 @@ impl MemoryStore {
             return Err("memory logical key is empty".into());
         }
         let now = now_ms()?;
-        let valid_from = valid_from.unwrap_or(now);
+        // A memory that names no start is valid from the moment it is written.
+        let valid_from = match valid_from {
+            Some(at) => at,
+            None => now,
+        };
         let (kind, scope) = (kind.to_owned(), scope.clone());
         let tags = serde_json::to_string(tags).map_err(|e| e.to_string())?;
         let source = serde_json::to_string(source).map_err(|e| e.to_string())?;
-        let confidence = confidence.clamp(0.0, 1.0);
         run_db(move |db| async move {
             let tx = db.begin().await.map_err(sql)?;
             let prior = live_revision(&tx, &scope, &logical_key).await?;
@@ -125,10 +146,7 @@ impl MemoryStore {
                 created_at: Set(now),
                 updated_at: Set(now),
                 logical_key: Set(logical_key),
-                revision: Set(prior
-                    .as_ref()
-                    .map(|record| record.revision + 1)
-                    .unwrap_or(1)),
+                revision: Set(next_revision(prior.as_ref())),
                 valid_from: Set(valid_from),
                 valid_to: Set(None),
                 supersedes: Set(prior.map(|record| record.id)),
@@ -144,7 +162,7 @@ impl MemoryStore {
                 event_kind: Set("memory-upserted".into()),
                 payload_json: Set(json!({"memoryId": id}).to_string()),
                 state: Set("pending".into()),
-                attempts: Set(0),
+                attempts: Set(ORIGIN as i64),
                 available_at: Set(now),
                 lease_owner: Set(None),
                 lease_until: Set(None),
@@ -173,7 +191,11 @@ impl MemoryStore {
         valid_from: Option<i64>,
     ) -> Result<MemoryRecord, String> {
         let now = now_ms()?;
-        let at = valid_from.unwrap_or(now);
+        // A removal that names no moment takes effect when it is written.
+        let at = match valid_from {
+            Some(at) => at,
+            None => now,
+        };
         let (scope, logical_key) = (scope.clone(), logical_key.to_owned());
         let source = serde_json::to_string(source).map_err(|e| e.to_string())?;
         run_db(move |db| async move {
@@ -182,6 +204,7 @@ impl MemoryStore {
                 .await?
                 .ok_or("active logical memory not found")?;
             supersede(&tx, &prior.id, at).await?;
+            let revision = next_revision(Some(&prior));
             let row = memory::ActiveModel {
                 id: Set(stable_id("mem")),
                 kind: Set(prior.kind),
@@ -190,12 +213,12 @@ impl MemoryStore {
                 text: Set(String::new()),
                 tags_json: Set("[]".into()),
                 source_json: Set(source),
-                confidence: Set(1.0),
+                confidence: Set(CERTAIN),
                 status: Set("active".into()),
                 created_at: Set(now),
                 updated_at: Set(now),
                 logical_key: Set(logical_key),
-                revision: Set(prior.revision + 1),
+                revision: Set(revision),
                 valid_from: Set(at),
                 valid_to: Set(None),
                 supersedes: Set(Some(prior.id)),

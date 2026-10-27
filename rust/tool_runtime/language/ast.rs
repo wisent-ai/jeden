@@ -27,14 +27,21 @@ enum Grammar {
     Python,
 }
 
-fn language(name: &str, path: &Path) -> Result<Language, String> {
-    let inferred = path
-        .extension()
-        .and_then(|value| value.to_str())
-        .unwrap_or("");
-    let named = if name.is_empty() { inferred } else { name };
-    let grammar = serde_json::from_value::<Grammar>(Value::String(named.into()))
-        .map_err(|_| format!("unsupported AST language: {named}"))?;
+/// The grammar the caller names, or the one the file's extension names when
+/// the caller names none; refused when neither names a supported grammar.
+fn language(name: Option<String>, path: &Path) -> Result<Language, String> {
+    let named = match name.filter(|name| !name.is_empty()) {
+        Some(name) => name,
+        None => path
+            .extension()
+            .and_then(|value| value.to_str())
+            .map(str::to_owned)
+            .ok_or_else(|| {
+                format!("{} has no extension that names its language; state language", path.display())
+            })?,
+    };
+    let grammar = serde_json::from_value::<Grammar>(Value::String(named.clone()))
+        .map_err(|error| format!("unsupported AST language {named}: {error}"))?;
     Ok(match grammar {
         Grammar::Rust => tree_sitter_rust::LANGUAGE.into(),
         Grammar::Javascript => tree_sitter_javascript::LANGUAGE.into(),
@@ -65,21 +72,24 @@ fn source(
         return Err(format!("AST input must be a file: {label}"));
     }
     let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-    std::str::from_utf8(&bytes).map_err(|_| "AST input is not UTF-8".to_string())?;
-    let language = language(&string_input(input, "language").unwrap_or_default(), &path)?;
+    std::str::from_utf8(&bytes).map_err(|error| format!("AST input is not UTF-8: {error}"))?;
+    let language = language(string_input(input, "language"), &path)?;
     Ok((label, path, bytes, language))
 }
 
+/// The capture the caller names, or the query's first capture.
 fn selected_capture(query: &Query, input: &Value) -> Result<u32, String> {
-    if let Some(name) = string_input(input, "capture") {
-        query
-            .capture_index_for_name(&name)
-            .ok_or_else(|| format!("query has no @{name} capture"))
-    } else if query.capture_names().is_empty() {
-        Err("AST query must contain at least one capture".into())
-    } else {
-        Ok(0)
-    }
+    let name = match string_input(input, "capture") {
+        Some(name) => name,
+        None => query
+            .capture_names()
+            .first()
+            .map(|name| name.to_string())
+            .ok_or("AST query must contain at least one capture")?,
+    };
+    query
+        .capture_index_for_name(&name)
+        .ok_or_else(|| format!("query has no @{name} capture"))
 }
 
 fn ranges(
@@ -110,8 +120,9 @@ fn ranges(
                     "kind": node.kind(),
                     "startByte": node.start_byte(),
                     "endByte": node.end_byte(),
-                    "start": {"line": start.row + 1, "column": start.column + 1},
-                    "end": {"line": end.row + 1, "column": end.column + 1},
+                    // Tree-sitter counts rows and columns from zero; people count from one.
+                    "start": {"line": start.row + usize::from(crate::tally::STEP), "column": start.column + usize::from(crate::tally::STEP)},
+                    "end": {"line": end.row + usize::from(crate::tally::STEP), "column": end.column + usize::from(crate::tally::STEP)},
                     "text": text,
                 }),
             ));
@@ -168,7 +179,8 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
         ));
     }
     let path = jail_write_path(runtime.cwd, &claim.target)?;
-    let current = fs::read(&path).map_err(|error| error.to_string())?;
+    let current = fs::read(&path)
+        .map_err(|error| format!("AST rewrite target {} cannot be read: {error}", claim.target))?;
     let current_sha = sha256_hex(&current);
     if current_sha != claim.expected_sha256 {
         return Err(format!(
@@ -176,18 +188,9 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
             claim.target, claim.expected_sha256, current_sha
         ));
     }
-    let parent = path.parent().ok_or("AST rewrite target has no parent")?;
-    let temp = parent.join(format!(".jeden-{}.tmp", claim.id));
-    fs::write(&temp, &claim.payload).map_err(|error| error.to_string())?;
-    fs::rename(&temp, &path).map_err(|error| {
-        let refused = error.to_string();
-        match fs::remove_file(&temp) {
-            Err(left) if left.kind() != std::io::ErrorKind::NotFound => {
-                format!("{refused}; {} is left behind: {left}", temp.display())
-            }
-            _ => refused,
-        }
-    })?;
+    // The rewritten source keeps the file's mode: a temp written beside it
+    // and renamed over it left an executable script without its x bits.
+    crate::tool_runtime::runtime_ops::durable::replace_keeping_mode(&path, &claim.payload)?;
     complete_pending_action(artifact_dir, &claim.id)?;
     Ok(
         json!({"ok":true,"pendingId":claim.id,"applied":true,"path":claim.target,"sha256":sha256_hex(&claim.payload)}),
@@ -195,14 +198,12 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
 }
 
 pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
-    match string_input(input, "action")
-        .unwrap_or_else(|| "preview".into())
-        .as_str()
-    {
-        "apply" => return resolve_pending(runtime, input, true),
-        "discard" => return resolve_pending(runtime, input, false),
-        "preview" => {}
-        other => return Err(format!("unsupported ast_rewrite action: {other}")),
+    // Without an action the rewrite is previewed.
+    match string_input(input, "action").as_deref() {
+        Some("apply") => return resolve_pending(runtime, input, true),
+        Some("discard") => return resolve_pending(runtime, input, false),
+        None | Some("preview") => {}
+        Some(other) => return Err(format!("unsupported ast_rewrite action: {other}")),
     }
     if runtime.operation.cancellation().is_cancelled() {
         return Err("AST rewrite cancelled".into());
@@ -219,8 +220,8 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     // file rewritten would leave the rest unchanged without a word.
     let (mut selected, _) = ranges(&bytes, &tree, &query, capture, None)?;
     selected.sort_by_key(|(start, end, _)| (*start, *end));
-    for pair in selected.windows(2) {
-        if pair[0].1 > pair[1].0 {
+    for (earlier, later) in selected.iter().zip(selected.iter().skip(usize::from(crate::tally::STEP))) {
+        if earlier.1 > later.0 {
             return Err("AST rewrite captures overlap".into());
         }
     }
@@ -230,9 +231,9 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         let text = replacement.replace("$TEXT", &original);
         rewritten.splice(*start..*end, text.bytes());
     }
-    let before = std::str::from_utf8(&bytes).map_err(|_| "AST input is not UTF-8")?;
-    let after =
-        std::str::from_utf8(&rewritten).map_err(|_| "AST replacement produced invalid UTF-8")?;
+    let before = std::str::from_utf8(&bytes).map_err(|error| format!("AST input is not UTF-8: {error}"))?;
+    let after = std::str::from_utf8(&rewritten)
+        .map_err(|error| format!("AST replacement produced invalid UTF-8: {error}"))?;
     let diff = simple_diff(&label, before, after);
     let expected_sha256 = sha256_hex(&bytes);
     let artifact_dir = runtime

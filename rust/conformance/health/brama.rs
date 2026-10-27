@@ -5,22 +5,11 @@ use serde_json::json;
 use std::path::Path;
 use std::time::Instant;
 
-/// The model this checkout would actually send, in the precedence
-/// `model_router_config` uses minus the `--model` flag no diagnostic has: the
-/// merged config first, then `JEDEN_MODEL`.
+/// The model this checkout would actually send, chosen by the selector
+/// routing uses, without the `--model` flag no diagnostic has.
 fn configured_model(cwd: &Path) -> Result<Option<String>, String> {
     let declared = crate::cli::config::load_config(cwd).model;
-    let model = match declared {
-        Some(model) => Some(model),
-        None => match std::env::var("JEDEN_MODEL") {
-            Ok(model) => Some(model),
-            Err(std::env::VarError::NotPresent) => None,
-            Err(error) => return Err(format!("JEDEN_MODEL cannot be read: {error}")),
-        },
-    };
-    Ok(model
-        .map(|model| model.trim().to_string())
-        .filter(|model| !model.is_empty()))
+    Ok(crate::agent::selected_model(None, declared.as_deref())?.map(|model| model.trim().to_string()))
 }
 
 /// Probe the selected model route rather than treating a responding service as

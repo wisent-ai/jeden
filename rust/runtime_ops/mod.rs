@@ -1,3 +1,7 @@
+/// Running a workspace command and capturing its output, shared by every
+/// platform's workspace isolation.
+#[path = "../platform/captured/mod.rs"]
+pub(crate) mod captured;
 pub(crate) mod context;
 #[path = "../durable/mod.rs"]
 pub mod durable;
@@ -9,6 +13,7 @@ pub mod platform;
 pub mod sandbox;
 pub mod secrets;
 pub mod security;
+pub(crate) mod session;
 
 pub use context::{
     announce_cancellation, wake_on_cancellation, CancellationToken, OperationContext,
@@ -48,7 +53,7 @@ impl SecureRuntime {
         if grant.is_expired() {
             return Err(GrantError::Expired);
         }
-        sandbox::require_enforced(grant).map(|_| ())
+        sandbox::require_enforced(grant).map(|_enforced| ())
     }
 }
 

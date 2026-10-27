@@ -10,28 +10,40 @@ use super::{
 use crate::control_plane::brama::BramaClient;
 use serde_json::{json, Value};
 
+/// The list `key` names in a Weles answer: the answer itself when it is a
+/// bare array, the array under `key` when it is an object carrying one; any
+/// other shape is refused naming what was answered.
+fn listed(value: Value, key: &str, path: &str) -> Result<Value, WelesError> {
+    match value {
+        Value::Array(_) => Ok(value),
+        Value::Object(mut object) => object.remove(key).ok_or_else(|| {
+            WelesError::InvalidResponse(format!("the answer to {path} carries no {key} list: {}", Value::Object(object)))
+        }),
+        other => Err(WelesError::InvalidResponse(format!(
+            "the answer to {path} is neither a list nor an object holding {key}: {other}"
+        ))),
+    }
+}
+
 impl WelesClient {
     pub fn providers(&self) -> Result<Vec<Provider>, WelesError> {
         let value = self.request(reqwest::Method::GET, "/providers", None)?;
-        let providers: Vec<Provider> =
-            serde_json::from_value(value.get("providers").cloned().unwrap_or(value))
-                .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
+        let providers: Vec<Provider> = serde_json::from_value(listed(value, "providers", "/providers")?)
+            .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
         Ok(providers)
     }
 
     pub fn accounts(&self, provider: Option<&str>) -> Result<Vec<Account>, WelesError> {
-        let path = provider
-            .map(|id| {
-                format!(
-                    "/accounts?provider={}",
-                    url::form_urlencoded::byte_serialize(id.as_bytes()).collect::<String>()
-                )
-            })
-            .unwrap_or_else(|| "/accounts".into());
+        let path = match provider {
+            Some(id) => format!(
+                "/accounts?provider={}",
+                url::form_urlencoded::byte_serialize(id.as_bytes()).collect::<String>()
+            ),
+            None => "/accounts".to_string(),
+        };
         let value = self.request(reqwest::Method::GET, &path, None)?;
-        let accounts: Vec<Account> =
-            serde_json::from_value(value.get("accounts").cloned().unwrap_or(value))
-                .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
+        let accounts: Vec<Account> = serde_json::from_value(listed(value, "accounts", &path)?)
+            .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
         Ok(accounts)
     }
 
@@ -58,13 +70,11 @@ impl WelesClient {
         cancelled: &dyn Fn() -> bool,
     ) -> Result<Option<Account>, WelesError> {
         if !provider.available {
-            return Err(WelesError::UnavailableProvider {
-                provider: provider.id.clone(),
-                reason: provider
-                    .unavailable_reason
-                    .clone()
-                    .unwrap_or_else(|| "provider disabled".into()),
-            });
+            let reason = match &provider.unavailable_reason {
+                Some(reason) => reason.clone(),
+                None => "Weles marks it unavailable and names no reason".to_string(),
+            };
+            return Err(WelesError::UnavailableProvider { provider: provider.id.clone(), reason });
         }
         self.run_operation(
             "/auth/login",
@@ -143,13 +153,16 @@ impl WelesClient {
         loop {
             if cancelled() {
                 // A cancel Weles did not take leaves the sign-in running on
-                // the deployment; that is said rather than taken as done.
+                // the deployment; that is the answer, never 'cancelled'.
                 if let Err(error) = self.request(
                     reqwest::Method::POST,
                     &format!("/operations/{operation_id}/cancel"),
                     Some(&json!({})),
                 ) {
-                    eprintln!("jeden: Weles operation {operation_id} may still be running: its cancel failed: {error}");
+                    return Err(WelesError::CancelRefused {
+                        operation: operation_id.to_string(),
+                        cause: error.to_string(),
+                    });
                 }
                 return Err(WelesError::Cancelled);
             }

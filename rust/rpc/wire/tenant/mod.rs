@@ -9,19 +9,23 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct PrincipalId(String);
+pub struct PrincipalId {
+    id: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct TenantId(String);
+pub struct TenantId {
+    id: String,
+}
 
 impl PrincipalId {
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.id
     }
 }
 impl TenantId {
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.id
     }
 }
 
@@ -131,12 +135,12 @@ impl TenantDirectory {
         let granted = grant_workspaces(workspaces)?;
         self.mappings
             .write()
-            .map_err(|_| TenantError::StorageUnavailable)?
+            .map_err(|_poisoned| TenantError::StorageUnavailable)?
             .insert(
                 san,
                 TenantPrincipal {
-                    principal: PrincipalId(principal),
-                    tenant: TenantId(tenant),
+                    principal: PrincipalId { id: principal },
+                    tenant: TenantId { id: tenant },
                     workspaces: granted,
                 },
             );
@@ -156,11 +160,11 @@ impl TenantDirectory {
         let workspaces = grant_workspaces(workspaces)?;
         self.organizations
             .write()
-            .map_err(|_| TenantError::StorageUnavailable)?
+            .map_err(|_poisoned| TenantError::StorageUnavailable)?
             .insert(
                 organization,
                 OrganizationGrant {
-                    tenant: TenantId(tenant),
+                    tenant: TenantId { id: tenant },
                     workspaces,
                 },
             );
@@ -171,7 +175,7 @@ impl TenantDirectory {
         let mappings = self
             .mappings
             .read()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+            .map_err(|_poisoned| TenantError::StorageUnavailable)?;
         peer.certificate
             .uri_sans
             .iter()
@@ -186,24 +190,27 @@ impl TenantDirectory {
         let organizations = self
             .organizations
             .read()
-            .map_err(|_| TenantError::StorageUnavailable)?;
+            .map_err(|_poisoned| TenantError::StorageUnavailable)?;
         let grant = organizations
             .get(&member.organization_id)
             .ok_or(TenantError::IdentityNotMapped)?;
         Ok(TenantPrincipal {
-            principal: PrincipalId(format!("wisent-user:{}", member.user_id)),
+            principal: PrincipalId {
+                id: format!("wisent-user:{}", member.user_id),
+            },
             tenant: grant.tenant.clone(),
             workspaces: grant.workspaces.clone(),
         })
     }
 
     /// True when at least one Wisent organization is mapped, so the listener
-    /// admits connections that present no client certificate.
+    /// admits connections that present no client certificate. A panic
+    /// elsewhere poisons the lock but leaves the mapped organizations intact.
     pub fn admits_wisent_members(&self) -> bool {
-        self.organizations
-            .read()
-            .map(|organizations| !organizations.is_empty())
-            .unwrap_or(false)
+        match self.organizations.read() {
+            Ok(organizations) => !organizations.is_empty(),
+            Err(poisoned) => !poisoned.into_inner().is_empty(),
+        }
     }
 }
 
@@ -240,9 +247,10 @@ fn grant_workspaces(workspaces: Vec<PathBuf>) -> Result<Vec<PathBuf>, TenantErro
     Ok(granted)
 }
 
+/// An identifier is nonempty and made only of ASCII letters, digits and the
+/// separators `-_.:/`.
 fn validate_id(value: String) -> Result<String, TenantError> {
     if value.is_empty()
-        || value.len() > 255
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/')
         })

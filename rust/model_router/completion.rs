@@ -72,59 +72,55 @@ pub(crate) fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, Strin
         };
         actions.push(json!({"tool": name, "input": input}));
     }
-    if actions.len() == 1 {
-        Ok(
-            json!({"action": "tool", "tool": actions[0]["tool"], "input": actions[0]["input"]})
-                .to_string(),
-        )
-    } else {
-        Ok(json!({"action": "tools", "tools": actions}).to_string())
+    match actions.as_slice() {
+        [only] => Ok(json!({"action": "tool", "tool": only["tool"], "input": only["input"]}).to_string()),
+        _ => Ok(json!({"action": "tools", "tools": &actions}).to_string()),
     }
 }
 
-/// Parse a full (non-streamed) completion body into an action string / content.
-pub(crate) fn value_number(value: &Value, paths: &[&str]) -> f64 {
-    paths
-        .iter()
-        .find_map(|path| value.pointer(path).and_then(Value::as_f64))
-        .unwrap_or(0.0)
-}
-
-pub(crate) fn usage_from_value(data: &Value) -> Option<CompletionUsage> {
-    let usage = data.get("usage")?;
-    let input_tokens = value_number(usage, &["/input_tokens", "/prompt_tokens", "/input"]);
-    let output_tokens = value_number(usage, &["/output_tokens", "/completion_tokens", "/output"]);
-    let cache_read_tokens = value_number(
-        usage,
-        &[
-            "/cache_read_tokens",
-            "/cacheRead",
-            "/prompt_tokens_details/cached_tokens",
-        ],
-    );
-    let cache_write_tokens = value_number(usage, &["/cache_write_tokens", "/cacheWrite"]);
-    let total_tokens = value_number(usage, &["/total_tokens", "/totalTokens", "/total"]);
-    let total_tokens = if total_tokens > 0.0 {
-        total_tokens
-    } else {
-        input_tokens + output_tokens + cache_read_tokens + cache_write_tokens
+/// The usage an OpenAI chat-completions answer states — the wire Brama and
+/// every endpoint Jeden asks answer on: `prompt_tokens` (its cached part
+/// included), `completion_tokens`, `total_tokens`, and that cached part as
+/// `prompt_tokens_details.cached_tokens` when the provider read one. A body
+/// without usage, or a stream chunk whose usage is null, states none; a usage
+/// missing a count is refused, never read as zero. This wire names no cache
+/// writes, so none are counted.
+pub(crate) fn usage_from_value(data: &Value) -> Result<Option<CompletionUsage>, String> {
+    let usage = match data.get("usage") {
+        None | Some(Value::Null) => return Ok(None),
+        Some(usage) => usage,
     };
-    if input_tokens == 0.0
-        && output_tokens == 0.0
-        && cache_read_tokens == 0.0
-        && cache_write_tokens == 0.0
-        && total_tokens == 0.0
-    {
-        None
-    } else {
-        Some(CompletionUsage {
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            cache_write_tokens,
-            total_tokens,
-        })
+    let count = |pointer: &str| {
+        usage
+            .pointer(pointer)
+            .and_then(Value::as_f64)
+            .ok_or_else(|| format!("model router usage states no {pointer}: {usage}"))
+    };
+    let prompt_tokens = count("/prompt_tokens")?;
+    let output_tokens = count("/completion_tokens")?;
+    let total_tokens = count("/total_tokens")?;
+    let none = crate::tally::ORIGIN as f64;
+    let cache_read_tokens = match usage.pointer("/prompt_tokens_details/cached_tokens") {
+        None | Some(Value::Null) => none,
+        Some(cached) => cached.as_f64().ok_or_else(|| {
+            format!("model router usage states cached_tokens that is not a count: {usage}")
+        })?,
+    };
+    // The cached tokens are a part of the prompt: priced once, at the cache
+    // rate, and not again inside the input.
+    let input_tokens = prompt_tokens - cache_read_tokens;
+    if input_tokens < none {
+        return Err(format!(
+            "model router usage states more cached tokens than prompt tokens: {usage}"
+        ));
     }
+    Ok(Some(CompletionUsage {
+        input_tokens,
+        output_tokens,
+        cache_read_tokens,
+        cache_write_tokens: none,
+        total_tokens,
+    }))
 }
 
 /// Terminal messages for a successful-but-empty router response; both are
@@ -136,30 +132,35 @@ pub(crate) const NO_MESSAGE_CONTENT: &str = "model router returned no message co
 pub(crate) fn parse_completion_response(text: &str) -> Result<Completion, String> {
     let data: Value =
         serde_json::from_str(text).map_err(|e| format!("invalid model router JSON: {e}"))?;
-    let usage = usage_from_value(&data);
-    let message = data.pointer("/choices/0/message").ok_or(NO_MESSAGE)?;
-    let finish_reason = data
-        .pointer("/choices/0/finish_reason")
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    if matches!(finish_reason, "length" | "max_tokens") {
+    let usage = usage_from_value(&data)?;
+    let choice = data
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .ok_or(NO_MESSAGE)?;
+    let message = choice.get("message").ok_or(NO_MESSAGE)?;
+    // `length` is the chat-completions reason for an answer cut at its token
+    // limit.
+    if choice.get("finish_reason").and_then(Value::as_str) == Some("length") {
         return Err("model response incomplete: length".into());
     }
-    let tool_calls = message
+    if let Some(tool_calls) = message
         .get("tool_calls")
         .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if !tool_calls.is_empty() {
+        .filter(|calls| !calls.is_empty())
+    {
         return Ok(Completion {
-            content: tool_calls_to_action(&tool_calls)?,
+            content: tool_calls_to_action(tool_calls)?,
             usage,
         });
     }
-    let content = message.get("content").and_then(Value::as_str).unwrap_or("");
-    if content.trim().is_empty() {
+    let Some(content) = message
+        .get("content")
+        .and_then(Value::as_str)
+        .filter(|content| !content.trim().is_empty())
+    else {
         return Err(NO_MESSAGE_CONTENT.into());
-    }
+    };
     Ok(Completion {
         content: content.to_string(),
         usage,

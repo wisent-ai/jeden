@@ -1,23 +1,31 @@
 use crate::agent::{Conversation, RunHooks};
 use crate::Args;
 use pursuit::{
-    collect_preference_evidence, pursue, PursuitConfig, Stage, StageResponse, StageRunner,
+    collect_preference_evidence, pursue, ProtocolError, PursuitConfig, RunOutcome, Stage, StageResponse,
+    StageRunner,
 };
 use serde_json::json;
+use std::borrow::BorrowMut;
 use std::env;
 use std::path::PathBuf;
 
 pub(crate) mod requests;
 
-struct JedenStageRunner {
+struct JedenStageRunner<H = RunHooks<'static>> {
     read_only_args: Args,
     execution_args: Args,
-    hooks: RunHooks<'static>,
+    hooks: H,
     conversations: StageConversations,
 }
 
 impl JedenStageRunner {
     fn new(args: &Args) -> Result<Self, String> {
+        Self::controlled(args, RunHooks::inert())
+    }
+}
+
+impl<H: BorrowMut<RunHooks<'static>>> JedenStageRunner<H> {
+    fn controlled(args: &Args, hooks: H) -> Result<Self, String> {
         let mut read_only_args = args.clone();
         read_only_args.command = crate::Command::Run;
         read_only_args.positionals.clear();
@@ -36,7 +44,7 @@ impl JedenStageRunner {
         Ok(Self {
             read_only_args,
             execution_args,
-            hooks: RunHooks::inert(),
+            hooks,
             conversations: StageConversations {
                 planner: Conversation::new_stage(&args.cwd)?,
                 executor: None,
@@ -60,15 +68,19 @@ impl JedenStageRunner {
     }
 }
 
-impl StageRunner for JedenStageRunner {
+impl<H: BorrowMut<RunHooks<'static>>> StageRunner for JedenStageRunner<H> {
     fn run(&mut self, stage: &Stage, prompt: &str) -> Result<StageResponse, String> {
+        let hooks = self.hooks.borrow_mut();
+        if hooks.cancelled() {
+            return Err("pursuit cancelled before the next stage could run".into());
+        }
         let args = if stage.read_only() {
             &self.read_only_args
         } else {
             &self.execution_args
         };
         let conversation = self.conversations.get(stage, &args.cwd)?;
-        let text = conversation.run_turn(args, prompt, &[], &mut self.hooks)?;
+        let text = conversation.run_turn(args, prompt, &[], hooks)?;
         Ok(StageResponse::new(text, Some(conversation.session_path())))
     }
 }
@@ -85,10 +97,11 @@ impl StageConversations {
         match stage {
             Stage::Distill | Stage::ContractRevision { .. } => Ok(&mut self.planner),
             Stage::Execute { .. } | Stage::Repair { .. } => {
-                if self.executor.is_none() {
-                    self.executor = Some(Conversation::new_stage(cwd)?);
-                }
-                Ok(self.executor.as_mut().expect("executor initialized"))
+                let executor = match self.executor.take() {
+                    Some(executor) => executor,
+                    None => Conversation::new_stage(cwd)?,
+                };
+                Ok(self.executor.insert(executor))
             }
             Stage::ContractReview { round } | Stage::AcceptanceReview { round } => {
                 let slot = if matches!(stage, Stage::ContractReview { .. }) {
@@ -96,10 +109,13 @@ impl StageConversations {
                 } else {
                     &mut self.acceptance_reviewer
                 };
-                if slot.as_ref().map(|(active, _)| active) != Some(round) {
-                    *slot = Some((*round, Conversation::new_stage(cwd)?));
-                }
-                Ok(&mut slot.as_mut().expect("reviewer initialized").1)
+                // A reviewer serves one round; a later round starts a fresh one.
+                let reviewer = match slot.take() {
+                    Some((active, reviewer)) if active == *round => reviewer,
+                    Some(_) | None => Conversation::new_stage(cwd)?,
+                };
+                let (_, reviewer) = slot.insert((*round, reviewer));
+                Ok(reviewer)
             }
         }
     }
@@ -113,23 +129,7 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     if objective.trim().is_empty() {
         return Err("pursue requires a rough objective".into());
     }
-
-    // Unset means the program on PATH; set to something that is not text is
-    // the operator's override unread, refused rather than silently replaced.
-    let transcript_lake = if args.allow_command || args.yolo {
-        Some(match env::var("TRANSCRIPT_LAKE_BIN") {
-            Ok(path) => PathBuf::from(path),
-            Err(env::VarError::NotPresent) => PathBuf::from("transcript-lake"),
-            Err(error) => return Err(format!("TRANSCRIPT_LAKE_BIN cannot be read: {error}")),
-        })
-    } else {
-        None
-    };
-    let preference_evidence =
-        collect_preference_evidence(&args.cwd, &objective, transcript_lake.as_deref());
-    let config = PursuitConfig::new(&args.cwd, objective, preference_evidence);
-    let mut runner = JedenStageRunner::new(args)?;
-    let outcome = pursue(config, &mut runner).map_err(|error| error.to_string())?;
+    let outcome = pursue_objective(args, objective, &mut RunHooks::inert()).map_err(|error| error.to_string())?;
 
     if args.json {
         return serde_json::to_string_pretty(&json!({
@@ -152,4 +152,33 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
         outcome.verdict_path.display(),
         outcome.receipt_path.display(),
     ))
+}
+
+/// Pursue `objective` in `args.cwd` with `args`' grants: the contract, the
+/// execution and the independent acceptance Pursuit runs, through Jeden's
+/// conversations. `hillclimb` runs one of these per round.
+pub(crate) fn pursue_objective(args: &Args, objective: String, hooks: &mut RunHooks<'static>) -> Result<RunOutcome, ProtocolError> {
+    let unstarted = |message: String| ProtocolError { message, receipt_path: None };
+    if hooks.cancelled() {
+        return Err(unstarted("pursuit cancelled before reading preference evidence".into()));
+    }
+    // Unset means the program on PATH; set to something that is not text is
+    // the operator's override unread, refused rather than silently replaced.
+    let transcript_lake = if args.allow_command || args.yolo {
+        Some(match env::var("TRANSCRIPT_LAKE_BIN") {
+            Ok(path) => PathBuf::from(path),
+            Err(env::VarError::NotPresent) => PathBuf::from("transcript-lake"),
+            Err(error) => return Err(unstarted(format!("TRANSCRIPT_LAKE_BIN cannot be read: {error}"))),
+        })
+    } else {
+        None
+    };
+    let preference_evidence =
+        collect_preference_evidence(&args.cwd, &objective, transcript_lake.as_deref());
+    if hooks.cancelled() {
+        return Err(unstarted("pursuit cancelled after reading preference evidence".into()));
+    }
+    let config = PursuitConfig::new(&args.cwd, objective, preference_evidence);
+    let mut runner = JedenStageRunner::controlled(args, hooks).map_err(unstarted)?;
+    pursue(config, &mut runner)
 }

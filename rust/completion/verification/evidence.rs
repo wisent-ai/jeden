@@ -11,11 +11,11 @@ pub(crate) fn failed(result: &Value) -> bool {
         || result
             .get("exitCode")
             .and_then(Value::as_i64)
-            .is_some_and(|code| code != i64::default())
+            .is_some_and(|code| code != i64::from(libc::EXIT_SUCCESS))
         || result
             .get("exit_code")
             .and_then(Value::as_i64)
-            .is_some_and(|code| code != i64::default())
+            .is_some_and(|code| code != i64::from(libc::EXIT_SUCCESS))
         || result
             .get("status")
             .and_then(Value::as_u64)
@@ -47,9 +47,26 @@ fn lineage_receipts(
                     .ok_or("evidence lineage has no parent session")?;
                 receipts.extend(lineage_receipts(Path::new(parent), visited)?);
             }
-            "tool_call" => input = data.get("input").cloned().unwrap_or(Value::Null),
+            // A call or result the ledger kept without its input or result is
+            // refused naming the event: read as null, a receipt would claim
+            // a call that took no input or a result that said nothing.
+            "tool_call" => {
+                input = data.get("input").cloned().ok_or_else(|| {
+                    format!(
+                        "evidence event {} of {} is a tool call without its input",
+                        event.event_id,
+                        session.display()
+                    )
+                })?
+            }
             "tool_result" => {
-                let result = data.get("result").cloned().unwrap_or(Value::Null);
+                let result = data.get("result").cloned().ok_or_else(|| {
+                    format!(
+                        "evidence event {} of {} is a tool result without its result",
+                        event.event_id,
+                        session.display()
+                    )
+                })?;
                 receipts.insert(
                     event.event_id.clone(),
                     json!({

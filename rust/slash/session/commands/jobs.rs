@@ -26,6 +26,15 @@ pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<Strin
         return Err("Usage: /tan <work>".into());
     }
     let scheduler = task_scheduler(context)?;
+    // The job this session runs inside, when it is one: a value that is not
+    // Unicode is refused, never read as no parent.
+    let parent_job = match std::env::var("JEDEN_TASK_JOB") {
+        Ok(value) if !value.is_empty() => Some(value),
+        Ok(_) | Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("JEDEN_TASK_JOB cannot be read: value is not Unicode".into())
+        }
+    };
     let job = scheduler
         .spawn(crate::task_runtime::SpawnRequest {
             task: task.into(),
@@ -35,16 +44,17 @@ pub(crate) fn handle_tan(args: &str, context: &SlashContext<'_>) -> Result<Strin
                 .filter(|model| !model.trim().is_empty())
                 .map(str::to_string),
             max_steps: None,
-            parent_job: std::env::var("JEDEN_TASK_JOB")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            parent_job,
             isolate: Some(true),
         })
         .map_err(|error| error.to_string())?;
+    let pid = match job.pid {
+        Some(pid) => pid.to_string(),
+        None => "none yet, queued".into(),
+    };
     Ok(format!(
-        "Started durable task job {}.\nPID: {}\nWorkspace: {} ({})\nSession: {}\nUse /jobs to poll it.",
+        "Started durable task job {}.\nPID: {pid}\nWorkspace: {} ({})\nSession: {}\nUse /jobs to poll it.",
         job.id,
-        job.pid.map(|pid| pid.to_string()).unwrap_or_else(|| "queued".into()),
         job.workspace.display(),
         job.isolation,
         job.session_path.display(),
@@ -88,17 +98,17 @@ pub(crate) fn jobs_picker(context: &SlashContext<'_>) -> PickerSpec {
     } else {
         jobs.into_iter()
             .map(|job| {
-                let id = job.get("id").and_then(Value::as_str).unwrap_or("job");
-                let recorded_status = job
-                    .get("status")
-                    .and_then(Value::as_str)
-                    .unwrap_or("not recorded");
-                let task = job.get("task").and_then(Value::as_str).unwrap_or("");
-                let pid = job
-                    .get("pid")
-                    .map(Value::to_string)
-                    .unwrap_or_else(|| "not recorded".into());
-                PickerItem::action(id, format!("/copy {task}"))
+                let field = |key: &str| match job.get(key) {
+                    Some(Value::String(text)) => text.clone(),
+                    Some(Value::Null) | None => "not recorded".to_string(),
+                    Some(other) => other.to_string(),
+                };
+                let (id, recorded_status, pid) = (field("id"), field("status"), field("pid"));
+                let task = match job.get("task").and_then(Value::as_str) {
+                    Some(task) => task.to_string(),
+                    None => String::new(),
+                };
+                PickerItem::action(&id, format!("/copy {task}"))
                     .detail(format!(
                         "{task} — recorded PID {pid}; Enter copies the task"
                     ))

@@ -7,6 +7,9 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 mod git;
+mod vocabulary;
+
+use vocabulary::{declared, ResourceAction, RunAction, SearchKind};
 
 pub(crate) const TOOLS: &[(&str, &str)] = &[
     (
@@ -186,137 +189,15 @@ impl GithubService {
         }
         self.run_gh(context, args)
     }
+    /// `gh` with `args`: its JSON answer when it printed JSON (the `--json`
+    /// forms), and its printed text under `output` when it printed text.
     fn run_gh(&self, context: &OperationContext<'_>, args: Vec<String>) -> ServiceResult<Value> {
         let output = process::run("github", context, &self.cwd, "gh", &args, None)?;
-        let value =
-            serde_json::from_str(&output).unwrap_or_else(|_| json!({"ok":true,"output":output}));
+        let value = match serde_json::from_str(&output) {
+            Ok(answer) => answer,
+            Err(_printed_text) => json!({"ok": true, "output": output}),
+        };
         bounded_json(context, "github", &value)
-    }
-}
-
-/// The value of a declared vocabulary spelled `named`, or a refusal that
-/// names `what` and every spelling it accepts.
-fn declared<T>(named: &str, what: &str) -> ServiceResult<T>
-where
-    T: serde::de::DeserializeOwned + Vocabulary,
-{
-    serde_json::from_value(Value::String(named.to_owned())).map_err(|_| {
-        ServiceError::InvalidInput(format!(
-            "{what} must be one of {}, not {named}",
-            T::choices()
-        ))
-    })
-}
-
-/// A closed vocabulary whose spellings are its serde names.
-trait Vocabulary: serde::Serialize + Sized + 'static {
-    const ALL: &'static [Self];
-    fn choices() -> String {
-        Self::ALL
-            .iter()
-            .filter_map(|value| match serde_json::to_value(value) {
-                Ok(Value::String(name)) => Some(name),
-                _ => None,
-            })
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
-}
-
-/// What `gh search` searches, spelled as its subcommand
-/// (https://cli.github.com/manual/gh_search), with the JSON fields asked of each.
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SearchKind {
-    Repos,
-    Code,
-    Issues,
-    Prs,
-    Commits,
-}
-
-impl Vocabulary for SearchKind {
-    const ALL: &'static [Self] = &[
-        SearchKind::Repos,
-        SearchKind::Code,
-        SearchKind::Issues,
-        SearchKind::Prs,
-        SearchKind::Commits,
-    ];
-}
-
-impl SearchKind {
-    fn fields(self) -> &'static str {
-        match self {
-            SearchKind::Repos => "fullName,description,url,visibility,updatedAt",
-            SearchKind::Code => "path,repository,url,sha",
-            SearchKind::Issues | SearchKind::Prs => "number,title,state,url,repository,updatedAt",
-            SearchKind::Commits => "sha,url,repository,commit",
-        }
-    }
-}
-
-/// What `gh issue` and `gh pr` are asked to do, spelled as their
-/// subcommands; the ones that change GitHub need write permission.
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum ResourceAction {
-    List,
-    View,
-    Create,
-    Edit,
-    Comment,
-    Close,
-    Reopen,
-    Merge,
-    Review,
-}
-
-impl Vocabulary for ResourceAction {
-    const ALL: &'static [Self] = &[
-        ResourceAction::List,
-        ResourceAction::View,
-        ResourceAction::Create,
-        ResourceAction::Edit,
-        ResourceAction::Comment,
-        ResourceAction::Close,
-        ResourceAction::Reopen,
-        ResourceAction::Merge,
-        ResourceAction::Review,
-    ];
-}
-
-impl ResourceAction {
-    fn writes(self) -> bool {
-        !matches!(self, ResourceAction::List | ResourceAction::View)
-    }
-}
-
-/// What `github_actions` does to workflow runs; the ones that start, rerun
-/// or cancel a run need write permission.
-#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum RunAction {
-    List,
-    View,
-    Dispatch,
-    Rerun,
-    Cancel,
-}
-
-impl Vocabulary for RunAction {
-    const ALL: &'static [Self] = &[
-        RunAction::List,
-        RunAction::View,
-        RunAction::Dispatch,
-        RunAction::Rerun,
-        RunAction::Cancel,
-    ];
-}
-
-impl RunAction {
-    fn writes(self) -> bool {
-        !matches!(self, RunAction::List | RunAction::View)
     }
 }
 fn append_gh_arguments(args: &mut Vec<String>, input: &Value) -> ServiceResult<()> {

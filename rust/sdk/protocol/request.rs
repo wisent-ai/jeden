@@ -131,12 +131,9 @@ impl RequestEnvelope {
             limit,
         };
         params.validate()?;
-        Self::new(
-            id,
-            SESSION_REPLAY_METHOD,
-            serde_json::to_value(params).expect("ReplayParams serialization cannot fail"),
-            meta,
-        )
+        let encoded = serde_json::to_value(params)
+            .map_err(|error| ValidationError::new("params", error.to_string()))?;
+        Self::new(id, SESSION_REPLAY_METHOD, encoded, meta)
     }
 
     pub fn validate(&self) -> Result<(), ValidationError> {

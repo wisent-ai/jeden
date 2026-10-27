@@ -2,15 +2,22 @@ use super::super::*;
 
 pub(in crate::agent) fn action_or_text(content: &str, inspection: bool) -> Result<Action, String> {
     match extract_json_object(content) {
-        Ok(object) => match parse_action(object) {
-            Err(_) if inspection && serde_json::from_str::<Value>(object).is_ok() => {
-                Ok(Action::Final {
-                    text: object.to_string(),
-                    report: None,
-                })
+        Ok(object) => {
+            if inspection {
+                let payload: Value = serde_json::from_str(object)
+                    .map_err(|cause| format!("cannot read inspection response JSON: {cause}"))?;
+                match payload.get("action").and_then(Value::as_str) {
+                    Some("tool" | "tools" | "final" | "message") => {}
+                    _ => {
+                        return Ok(Action::Final {
+                            text: object.to_owned(),
+                            report: None,
+                        })
+                    }
+                }
             }
-            result => result,
-        },
+            parse_action(object)
+        }
         Err(error) if error.starts_with(crate::protocol::NON_JSON_ANSWER) => Ok(Action::Final {
             text: content.to_string(),
             report: None,
@@ -20,10 +27,14 @@ pub(in crate::agent) fn action_or_text(content: &str, inspection: bool) -> Resul
 }
 
 pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
+    // Each variant written field by field, in the shape serde's tag gives
+    // it, so no encoding step can fail on the way to the transcript.
     match action {
-        Action::Final { .. } | Action::Message { .. } => {
-            serde_json::to_value(action).expect("serializable prose action")
+        Action::Final { text, report: Some(report) } => {
+            json!({ "action": "final", "text": text, "report": report })
         }
+        Action::Final { text, report: None } => json!({ "action": "final", "text": text }),
+        Action::Message { text } => json!({ "action": "message", "text": text }),
         Action::Tool { tool, input } => json!({ "action": "tool", "tool": tool, "input": input }),
         Action::Tools { tools } => {
             json!({ "action": "tools", "tools": tools.iter().map(tool_to_value).collect::<Vec<_>>() })
@@ -42,7 +53,7 @@ pub(in crate::agent) fn record_unexecuted_tool_action(
     result: &Value,
     hooks: &RunHooks<'_>,
 ) -> Result<(), String> {
-    recorder.record(
+    let request = recorder.record_entry(
         "tool_call",
         json!({ "step": step, "tool": action.tool, "input": action.input }),
     )?;
@@ -52,7 +63,7 @@ pub(in crate::agent) fn record_unexecuted_tool_action(
     });
     recorder.record(
         "tool_result",
-        json!({ "step": step, "tool": action.tool, "result": result }),
+        json!({ "step": step, "tool": action.tool, "result": result, "requestEvent": request.id }),
     )?;
     hooks.trace(&TraceEvent::ToolResult {
         tool: &action.tool,
@@ -70,7 +81,7 @@ pub(in crate::agent) fn run_tool_action(
     allow_write: bool,
     allow_command: bool,
 ) -> Result<Value, String> {
-    recorder.record(
+    let request = recorder.record_entry(
         "tool_call",
         json!({ "step": step, "tool": action.tool, "input": action.input }),
     )?;
@@ -82,7 +93,7 @@ pub(in crate::agent) fn run_tool_action(
     let runtime = crate::tool_runtime::ToolRuntime {
         cwd: &args.cwd,
         artifact_dir: Some(&artifact_dir),
-        operation: hooks.operation_context(&artifact_dir),
+        operation: hooks.operation_context(&args.cwd, &artifact_dir),
         allow_write,
         allow_command,
         interactive: hooks.interactive,
@@ -102,7 +113,7 @@ pub(in crate::agent) fn run_tool_action(
     };
     let receipt = recorder.record_entry(
         "tool_result",
-        json!({ "step": step, "tool": action.tool, "result": result }),
+        json!({ "step": step, "tool": action.tool, "result": result, "requestEvent": request.id }),
     )?;
     let reference = json!({
         "sessionPath": recorder.path(),

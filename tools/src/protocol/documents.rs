@@ -53,26 +53,24 @@ pub(super) fn load(directory: &Path, errors: &mut Vec<String>) -> Vec<Document> 
     documents
 }
 
-/// Every node of a JSON value, the value itself first.
+/// Every node of a JSON value, the value itself first, then breadth first.
 pub(super) fn walk(value: &Value) -> Vec<&Value> {
-    let mut nodes = vec![value];
-    let mut index = 0;
-    while index < nodes.len() {
-        let node = nodes[index];
+    let mut nodes = Vec::new();
+    let mut queue = std::collections::VecDeque::from([value]);
+    while let Some(node) = queue.pop_front() {
+        nodes.push(node);
         match node {
-            Value::Object(map) => nodes.extend(map.values()),
-            Value::Array(items) => nodes.extend(items.iter()),
+            Value::Object(map) => queue.extend(map.values()),
+            Value::Array(items) => queue.extend(items.iter()),
             _ => {}
         }
-        index += 1;
     }
     nodes
 }
 
-fn property_count(node: &Value) -> usize {
-    node["properties"]
-        .as_object()
-        .map_or(0, |properties| properties.len())
+/// How many properties a schema declares; none for one without properties.
+fn property_count(node: &Value) -> Option<usize> {
+    node["properties"].as_object().map(serde_json::Map::len)
 }
 
 /// The richest object schema whose `properties.<name>.const` equals
@@ -127,7 +125,9 @@ pub(super) fn resolved<'a>(root: &'a Value, schema: &'a Value) -> &'a Value {
         seen.push(reference);
         match pointer(root, reference) {
             Ok(target) => current = target,
-            Err(_) => return current,
+            // A reference that cannot be followed is where resolution stops,
+            // and the caller reads that `$ref` node as the schema it got.
+            Err(_unfollowable) => return current,
         }
     }
     current

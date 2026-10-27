@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 
 export function startRpc({ binary, cwd, env, report, redactFrame }) {
   const pending = new Map();
+  const observers = new Set();
   let processFailure;
   const command = { program: binary, args: ['rpc'], cwd, stderr: '', protocolErrors: [] };
   report.commands.push(command);
@@ -19,6 +20,8 @@ export function startRpc({ binary, cwd, env, report, redactFrame }) {
     processFailure = error;
     for (const request of pending.values()) request.reject(error);
     pending.clear();
+    for (const observer of observers) observer.reject(error);
+    observers.clear();
   }
   child.stderr.setEncoding('utf8');
   child.stderr.on('data', (text) => { command.stderr += text; });
@@ -36,11 +39,20 @@ export function startRpc({ binary, cwd, env, report, redactFrame }) {
     try {
       const frame = JSON.parse(line);
       recordFrame('response', frame);
+      for (const observer of observers) {
+        if (!observer.predicate(frame)) continue;
+        observers.delete(observer);
+        observer.resolve(frame);
+      }
       const request = pending.get(frame.id);
       if (!request) return;
       pending.delete(frame.id);
-      if (frame.error) request.reject(new Error(`${frame.error.code}: ${frame.error.message}`));
-      else request.resolve(frame.result);
+      if (frame.error) {
+        const error = new Error(`${frame.error.code}: ${frame.error.message}`);
+        error.code = frame.error.code;
+        error.data = frame.error.data;
+        request.reject(error);
+      } else request.resolve(frame.result);
     } catch (error) {
       command.protocolErrors.push({ line, cause: String(error) });
       fail(error);
@@ -64,6 +76,22 @@ export function startRpc({ binary, cwd, env, report, redactFrame }) {
   function rpc(method, params) {
     return request(method, params).response;
   }
+  // Observe actual nonterminal work, with the owned request's terminal result
+  // preventing a failed operation from leaving the observer waiting forever.
+  function observeFrame(predicate, response) {
+    return new Promise((resolve, reject) => {
+      const observer = { predicate, resolve, reject };
+      observers.add(observer);
+      response.then(
+        (result) => {
+          if (observers.delete(observer)) reject(new Error(
+            'The RPC request completed before its expected event was observed', { cause: result }));
+        },
+        (error) => { if (observers.delete(observer)) reject(error); },
+      );
+      if (processFailure && observers.delete(observer)) reject(processFailure);
+    });
+  }
   async function end() {
     if (child.exitCode === null && child.signalCode === null) child.stdin.end();
     await exited;
@@ -72,5 +100,5 @@ export function startRpc({ binary, cwd, env, report, redactFrame }) {
     }
     return command;
   }
-  return { rpc, request, end, command };
+  return { rpc, request, observeFrame, end, command };
 }
