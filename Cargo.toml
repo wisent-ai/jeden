@@ -30,6 +30,10 @@ path = "rust/bin/jeden-sandbox-helper.rs"
 name = "tracking-api"
 path = "tests/tracking/api.rs"
 
+[[test]]
+name = "network-egress"
+path = "tests/network/egress.rs"
+
 
 [dependencies]
 # By git rev, not by sibling path: a path dependency outside this repository
@@ -56,6 +60,8 @@ hmac = "0.12"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 rand = "0.8"
 reqwest = { version = "0.12", features = ["blocking", "json"] }
+# The URI schemes a network grant admits, as the HTTP stack declares them.
+http = "1"
 glob = "0.3"
 regex = "1"
 parking_lot = "0.12"
