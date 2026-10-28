@@ -118,32 +118,6 @@ pub struct StreamingCompletion {
     pub lease: Option<lease::SessionLease>,
 }
 
-impl StreamingCompletion {
-    /// Converts transport retry/failover results into evidence attributed to
-    /// the route that actually produced the completion.
-    pub fn served_route_evidence(
-        &self,
-        decision: &crate::routing::RouteDecisionV1,
-    ) -> crate::routing::ServedRouteEvidence {
-        let retries = self
-            .route_results
-            .iter()
-            .filter(|result| matches!(result, RouteResult::RetryScheduled { .. }))
-            .count() as u32;
-        let mut served = crate::routing::ServedRouteEvidence::initial(
-            decision.decision_id.clone(),
-            decision.selected_route.clone(),
-        );
-        served.attempt = served.attempt.saturating_add(retries);
-        served.retry = retries > 0;
-        if self.route.model != decision.selected_route {
-            served.served_route = self.route.model.clone();
-            served.fallback = true;
-        }
-        served
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct ChatConfig {
     pub url: String,

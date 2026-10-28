@@ -36,7 +36,6 @@ pub use agent::protocol;
 pub use tui::qr;
 pub mod report;
 pub mod roadmap;
-pub mod routing;
 pub mod rpc;
 pub mod sdk;
 mod session_import;
