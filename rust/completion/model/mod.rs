@@ -73,7 +73,7 @@ pub struct WorkTask {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CompletionEstimate {
-    pub minutes: u64,
+    pub minutes: std::num::NonZeroU64,
     pub recorded_at: String,
 }
 
@@ -218,16 +218,7 @@ impl CompletionState {
             {
                 return Err("completion state contains an empty or duplicate request".into());
             }
-            if request
-                .estimate
-                .as_ref()
-                .is_some_and(|estimate| estimate.minutes == 0)
-            {
-                return Err(format!(
-                    "request {} records a time-to-completion estimate of zero minutes",
-                    request.id
-                ));
-            }
+            crate::completion::timing::check(request)?;
             if request.completed_at.is_some() && !request.coverage_verified {
                 return Err(format!(
                     "request {} records a completion time but is not verified complete",

@@ -25,12 +25,14 @@ impl Conversation {
     ) -> Result<(), String> {
         loop {
             let state = completion::read_state(&self.recorder.path())?;
-            let Some(request) = state
+            // Every retained request is planned or paused: nothing is left to plan.
+            let request = match state
                 .requests
                 .iter()
                 .find(|request| !request.planned && !request.paused)
-            else {
-                return Ok(());
+            {
+                Some(request) => request,
+                None => return Ok(()),
             };
             let input = json!({
                 "request": request,
@@ -75,7 +77,7 @@ impl Conversation {
             {
                 hooks.note(&format!(
                     "time to completion estimated at {} before execution; Jeden measures the actual time to verified completion",
-                    completion::timing::duration(estimate.minutes.saturating_mul(60))
+                    completion::timing::duration(completion::timing::estimate_seconds(estimate)?)
                 ));
             }
             self.publish_completion(&planned, hooks)?;

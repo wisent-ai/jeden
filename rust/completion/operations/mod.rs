@@ -35,7 +35,7 @@ pub(crate) fn plan_request(
         }
         let minutes = plan
             .estimate_minutes
-            .filter(|minutes| *minutes > 0)
+            .and_then(std::num::NonZeroU64::new)
             .ok_or("completion intake must estimate the time to completion before execution: estimateMinutes is a whole number of minutes above zero")?;
         for cancellation in &plan.cancellations {
             if cancellation.quote.trim().is_empty() || !request.prompt.contains(&cancellation.quote)
