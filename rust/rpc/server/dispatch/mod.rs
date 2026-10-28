@@ -40,7 +40,7 @@ pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> 
         "workspace/discover" => workspace_discover(&request.params),
         "workspace/adopt" => workspace_adopt(&request.params),
         "session/import" => import_sessions(&request.params),
-        "session/open" | "session/load" => create_session(state, request.params, true),
+        "session/open" => create_session(state, request.params, true),
         "session/cancel" => abort_session(state, &request.params),
         "session/status" => session_status(state, &request.params),
         "session/completion/get" | "session/completion/control" | "session/completion/add" => {
