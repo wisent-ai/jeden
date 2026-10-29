@@ -1,7 +1,7 @@
 use super::control::{self, SharedControl};
 use super::process::PtyProcess;
-use crate::tool_runtime::runtime_ops::session::SessionSlot;
 use super::{OperationContext, PtyError, PtySessionState};
+use crate::tool_runtime::runtime_ops::session::SessionSlot;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
@@ -29,16 +29,19 @@ static SESSIONS: LazyLock<Mutex<PtyRegistry>> =
     LazyLock::new(|| Mutex::new(PtyRegistry::default()));
 
 pub(super) fn scope(key: &Path) -> Result<Arc<ScopeSlot>, String> {
-    let mut registry = SESSIONS.lock().map_err(|_| "PTY registry lock poisoned")?;
+    let mut registry = crate::panicked::held(&SESSIONS);
     if let Some(entry) = registry.scopes.get(key) {
         return Ok(Arc::clone(&entry.slot));
     }
     let key: Arc<Path> = Arc::from(key);
     let slot = ScopeSlot::new(Arc::clone(&key), "PTY scope");
-    registry.scopes.insert(key, ScopeEntry {
-        slot: Arc::clone(&slot),
-        active: None,
-    });
+    registry.scopes.insert(
+        key,
+        ScopeEntry {
+            slot: Arc::clone(&slot),
+            active: None,
+        },
+    );
     Ok(slot)
 }
 
@@ -53,7 +56,7 @@ fn require_current(registry: &PtyRegistry, slot: &Arc<ScopeSlot>) -> Result<(), 
 }
 
 pub(super) fn check_current(slot: &Arc<ScopeSlot>) -> Result<(), String> {
-    let registry = SESSIONS.lock().map_err(|_| "PTY registry lock poisoned")?;
+    let registry = crate::panicked::held(&SESSIONS);
     require_current(&registry, slot)
 }
 
@@ -64,21 +67,29 @@ pub(super) fn register(slot: &Arc<ScopeSlot>, shared: &SharedControl) -> Result<
         control.require_live().map_err(|error| error.to_string())?;
         control.metadata.session_id.clone()
     };
-    let mut registry = SESSIONS.lock().map_err(|_| "PTY registry lock poisoned")?;
+    let mut registry = crate::panicked::held(&SESSIONS);
     require_current(&registry, slot)?;
     if registry.live.contains_key(&id) || registry.terminal.contains_key(&id) {
         return Err(format!("PTY session '{id}' is already registered"));
     }
-    let entry = registry.scopes.get_mut(slot.key.as_ref())
+    let entry = registry
+        .scopes
+        .get_mut(slot.key.as_ref())
         .expect("checked PTY scope disappeared while registry was locked");
     if entry.active.is_some() {
-        return Err(format!("PTY scope '{}' already has a registered shell", slot.key.display()));
+        return Err(format!(
+            "PTY scope '{}' already has a registered shell",
+            slot.key.display()
+        ));
     }
     entry.active = Some(Arc::clone(shared));
-    registry.live.insert(id, LiveSession {
-        scope: Arc::clone(&slot.key),
-        control: Arc::clone(shared),
-    });
+    registry.live.insert(
+        id,
+        LiveSession {
+            scope: Arc::clone(&slot.key),
+            control: Arc::clone(shared),
+        },
+    );
     Ok(())
 }
 
@@ -89,8 +100,9 @@ pub(super) fn session(
     if context.cancellation().is_cancelled() {
         return Err(PtyError::OperationCancelled);
     }
-    let registry = SESSIONS.lock()
-        .map_err(|_| PtyError::System("PTY registry lock poisoned".into()))?;
+    // Every holder changes the registry by whole inserts and removals, so a
+    // panicking holder left a state, not a reason to refuse every later caller.
+    let registry = crate::panicked::held(&SESSIONS);
     if context.cancellation().is_cancelled() {
         return Err(PtyError::OperationCancelled);
     }
@@ -98,9 +110,15 @@ pub(super) fn session(
         return Ok(Arc::clone(&session.control));
     }
     Err(match registry.terminal.get(session_id) {
-        Some(PtySessionState::Ended) => PtyError::SessionEnded { session_id: session_id.into() },
-        Some(PtySessionState::Cancelled) => PtyError::SessionCancelled { session_id: session_id.into() },
-        _ => PtyError::SessionNotFound { session_id: session_id.into() },
+        Some(PtySessionState::Ended) => PtyError::SessionEnded {
+            session_id: session_id.into(),
+        },
+        Some(PtySessionState::Cancelled) => PtyError::SessionCancelled {
+            session_id: session_id.into(),
+        },
+        _ => PtyError::SessionNotFound {
+            session_id: session_id.into(),
+        },
     })
 }
 
@@ -108,7 +126,11 @@ impl PtyRegistry {
     fn retire(&mut self, id: String, state: PtySessionState) {
         if let Some(session) = self.live.remove(&id) {
             if let Some(entry) = self.scopes.get_mut(session.scope.as_ref()) {
-                if entry.active.as_ref().is_some_and(|active| Arc::ptr_eq(active, &session.control)) {
+                if entry
+                    .active
+                    .as_ref()
+                    .is_some_and(|active| Arc::ptr_eq(active, &session.control))
+                {
                     entry.active = None;
                 }
             }
