@@ -15,8 +15,15 @@ pub(crate) struct Report {
 
 impl Report {
     pub(super) fn new(ledger: PathBuf, rounds: Vec<Round>) -> Self {
-        let accepted = rounds.iter().filter(|round| round.ending == Ending::Accepted).count();
-        Self { ledger, rounds, accepted }
+        let accepted = rounds
+            .iter()
+            .filter(|round| round.ending == Ending::Accepted)
+            .count();
+        Self {
+            ledger,
+            rounds,
+            accepted,
+        }
     }
 }
 
@@ -33,8 +40,13 @@ pub(super) fn render(report: &Report) -> String {
             report.ledger.display()
         );
     }
-    format!("{}\n{} of {} rounds accepted; ledger {}",
-        ledger::digest(&report.rounds), report.accepted, report.rounds.len(), report.ledger.display())
+    format!(
+        "{}\n{} of {} rounds accepted; ledger {}",
+        ledger::digest(&report.rounds),
+        report.accepted,
+        report.rounds.len(),
+        report.ledger.display()
+    )
 }
 
 pub(crate) fn text(root: &Path, selected: Option<&Path>) -> Result<String, String> {
@@ -58,7 +70,9 @@ pub(super) fn command(args: &Args) -> Result<String, String> {
     }
     let report = read(&args.cwd, selected)?;
     if args.json {
-        serde_json::to_string_pretty(&report).map(|text| text + "\n").map_err(|error| error.to_string())
+        serde_json::to_string_pretty(&report)
+            .map(|text| text + "\n")
+            .map_err(|error| error.to_string())
     } else {
         Ok(render(&report) + "\n")
     }

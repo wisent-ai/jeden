@@ -14,7 +14,9 @@ use crate::agent::RunHooks;
 type Failure = (&'static str, String);
 
 pub(super) fn start(
-    state: &Arc<ServerState>, wire: WireRequest, in_flight: InFlight,
+    state: &Arc<ServerState>,
+    wire: WireRequest,
+    in_flight: InFlight,
 ) -> Result<Option<JoinHandle<Result<(), String>>>, String> {
     let (args, climb) = match parameters::parse(wire.params) {
         Ok(parameters) => parameters,
@@ -23,7 +25,10 @@ pub(super) fn start(
             return Ok(None);
         }
     };
-    let lease = match state.hillclimb_requests.begin(&wire.id, &args.cwd, climb.scope) {
+    let lease = match state
+        .hillclimb_requests
+        .begin(&wire.id, &args.cwd, climb.scope)
+    {
         Ok(lease) => lease,
         Err((code, detail)) => {
             state.writer.send(&error_response(wire.id, code, &detail))?;
@@ -76,8 +81,12 @@ pub(super) fn start(
 }
 
 pub(super) fn cancel(state: &ServerState, params: &Value) -> Result<Value, Failure> {
-    let id = params.get("requestId")
-        .ok_or_else(|| ("invalid_params", "hillclimb/cancel requires requestId".to_string()))?;
+    let id = params.get("requestId").ok_or_else(|| {
+        (
+            "invalid_params",
+            "hillclimb/cancel requires requestId".to_string(),
+        )
+    })?;
     state.hillclimb_requests.cancel(id)
 }
 
@@ -88,16 +97,31 @@ pub(super) fn active(state: &ServerState) -> Value {
 pub(super) fn status(params: &Value) -> Result<Value, Failure> {
     let cwd = match params.get("cwd").and_then(Value::as_str) {
         Some(cwd) if !cwd.trim().is_empty() => std::path::Path::new(cwd),
-        Some(_) | None => return Err(("invalid_params",
-            "hillclimb/status requires nonempty cwd, the workspace whose climb to read".into())),
+        Some(_) | None => {
+            return Err((
+                "invalid_params",
+                "hillclimb/status requires nonempty cwd, the workspace whose climb to read".into(),
+            ))
+        }
     };
     let ledger = match params.get("ledger") {
         None | Some(Value::Null) => None,
         Some(Value::String(path)) if !path.trim().is_empty() => Some(std::path::Path::new(path)),
-        Some(other) => return Err(("invalid_params",
-            format!("hillclimb/status ledger must be a nonempty path string when supplied; got {other}"))),
+        Some(other) => {
+            return Err((
+                "invalid_params",
+                format!(
+                "hillclimb/status ledger must be a nonempty path string when supplied; got {other}"
+            ),
+            ))
+        }
     };
-    let report = crate::hillclimb::status::read(cwd, ledger).map_err(|error| ("hillclimb_unreadable", error))?;
-    serde_json::to_value(report).map_err(|error| ("invalid_response",
-        format!("the hillclimb ledger response cannot be encoded: {error}")))
+    let report = crate::hillclimb::status::read(cwd, ledger)
+        .map_err(|error| ("hillclimb_unreadable", error))?;
+    serde_json::to_value(report).map_err(|error| {
+        (
+            "invalid_response",
+            format!("the hillclimb ledger response cannot be encoded: {error}"),
+        )
+    })
 }

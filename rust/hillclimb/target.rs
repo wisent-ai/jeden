@@ -7,11 +7,19 @@ use crate::Args;
 
 fn canonical(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize().map_err(|error| {
-        format!("hillclimb cannot resolve the proposed workspace {}: {error}", path.display())
+        format!(
+            "hillclimb cannot resolve the proposed workspace {}: {error}",
+            path.display()
+        )
     })
 }
 
-pub(super) fn arguments(args: &Args, scope: Scope, only: &[String], repository: Option<&str>) -> Result<Args, String> {
+pub(super) fn arguments(
+    args: &Args,
+    scope: Scope,
+    only: &[String],
+    repository: Option<&str>,
+) -> Result<Args, String> {
     let root = canonical(&args.cwd)?;
     let target = match scope {
         Scope::Repository => match repository {

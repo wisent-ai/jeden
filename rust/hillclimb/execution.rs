@@ -14,7 +14,11 @@ pub(crate) struct Outcome {
     pub(super) report: Report,
 }
 
-pub(crate) fn run(args: &Args, climb: Climb, hooks: &mut RunHooks<'static>) -> Result<Outcome, String> {
+pub(crate) fn run(
+    args: &Args,
+    climb: Climb,
+    hooks: &mut RunHooks<'static>,
+) -> Result<Outcome, String> {
     if !(args.allow_write && args.allow_command) {
         return Err(usage(
             "hillclimb changes the code it improves and runs its checks: it needs --allow-write and --allow-command, or --yolo",
@@ -22,7 +26,12 @@ pub(crate) fn run(args: &Args, climb: Climb, hooks: &mut RunHooks<'static>) -> R
     }
     let where_ = place(climb.scope, &args.cwd, &climb.only)?;
     let ledger_path = ledger::path(&args.cwd, climb.ledger.as_deref())?;
-    let cancelled = || format!("hillclimb cancelled; completed rounds remain in ledger {}", ledger_path.display());
+    let cancelled = || {
+        format!(
+            "hillclimb cancelled; completed rounds remain in ledger {}",
+            ledger_path.display()
+        )
+    };
     if hooks.cancelled() {
         return Err(cancelled());
     }
@@ -30,7 +39,9 @@ pub(crate) fn run(args: &Args, climb: Climb, hooks: &mut RunHooks<'static>) -> R
     let mut rounds = ledger::read(&ledger_path)?;
     let first_new = rounds.len();
     (hooks.progress)(&format!(
-        "hillclimb: {where_}; ledger {} ({} earlier rounds)", ledger_path.display(), rounds.len()
+        "hillclimb: {where_}; ledger {} ({} earlier rounds)",
+        ledger_path.display(),
+        rounds.len()
     ));
     while another(climb.rounds, rounds.len() - first_new) {
         if hooks.cancelled() {
@@ -39,9 +50,14 @@ pub(crate) fn run(args: &Args, climb: Climb, hooks: &mut RunHooks<'static>) -> R
         let number = rounds.len() as u64 + NonZeroU64::MIN.get();
         let ended = round(args, number, &where_, &climb, &rounds, hooks)?;
         ledger::append(&ledger_path, &ended)?;
-        (hooks.progress)(&format!("hillclimb {}", ledger::digest(std::slice::from_ref(&ended))));
+        (hooks.progress)(&format!(
+            "hillclimb {}",
+            ledger::digest(std::slice::from_ref(&ended))
+        ));
         let repeated = match (rounds.last(), &ended.error) {
-            (Some(previous), Some(error)) if previous.error.as_deref() == Some(error.as_str()) => Some(error.clone()),
+            (Some(previous), Some(error)) if previous.error.as_deref() == Some(error.as_str()) => {
+                Some(error.clone())
+            }
             _ => None,
         };
         rounds.push(ended);
@@ -57,5 +73,8 @@ pub(crate) fn run(args: &Args, climb: Climb, hooks: &mut RunHooks<'static>) -> R
     }
     // Reuse the existing allocation; only this invocation's rounds are returned.
     drop(rounds.drain(..first_new));
-    Ok(Outcome { scope: climb.scope, report: Report::new(ledger_path, rounds) })
+    Ok(Outcome {
+        scope: climb.scope,
+        report: Report::new(ledger_path, rounds),
+    })
 }

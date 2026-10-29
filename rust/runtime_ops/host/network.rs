@@ -135,7 +135,7 @@ const NON_GLOBAL_V4: &[(Ipv4Addr, u32)] = &[
     (Ipv4Addr::new(100, 64, 0, 0), 10), // shared address space: https://www.rfc-editor.org/rfc/rfc6598
     (Ipv4Addr::new(192, 0, 0, 0), 24), // IETF protocol assignments: https://www.rfc-editor.org/rfc/rfc6890
     (Ipv4Addr::new(192, 88, 99, 0), 24), // 6to4 relay anycast: https://www.rfc-editor.org/rfc/rfc7526
-    (Ipv4Addr::new(198, 18, 0, 0), 15), // benchmarking: https://www.rfc-editor.org/rfc/rfc2544
+    (Ipv4Addr::new(198, 18, 0, 0), 15),  // benchmarking: https://www.rfc-editor.org/rfc/rfc2544
     (Ipv4Addr::new(240, 0, 0, 0), 4), // reserved: https://www.rfc-editor.org/rfc/rfc1112#section-4
 ];
 

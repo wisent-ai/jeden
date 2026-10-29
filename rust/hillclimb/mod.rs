@@ -13,8 +13,8 @@
 
 pub(crate) mod execution;
 mod ledger;
-mod target;
 pub(crate) mod status;
+mod target;
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -51,13 +51,21 @@ pub(crate) struct Climb {
 }
 
 fn options(positionals: &[String]) -> Result<Climb, String> {
-    let mut climb =
-        Climb { scope: Scope::default(), rounds: None, ledger: None, focus: String::new(), only: Vec::new() };
+    let mut climb = Climb {
+        scope: Scope::default(),
+        rounds: None,
+        ledger: None,
+        focus: String::new(),
+        only: Vec::new(),
+    };
     let mut focus = Vec::new();
     let mut words = positionals.iter();
     while let Some(word) = words.next() {
         let mut value = |flag: &str| {
-            words.next().cloned().ok_or_else(|| usage(format!("hillclimb {flag} requires a value")))
+            words
+                .next()
+                .cloned()
+                .ok_or_else(|| usage(format!("hillclimb {flag} requires a value")))
         };
         match word.as_str() {
             "--scope" => {
@@ -88,7 +96,12 @@ fn options(positionals: &[String]) -> Result<Climb, String> {
 
 /// The repositories directly under `root`, by name: directories holding `.git`.
 fn repositories(root: &Path) -> Result<Vec<String>, String> {
-    let unreadable = |error: std::io::Error| format!("the organization directory {} cannot be read: {error}", root.display());
+    let unreadable = |error: std::io::Error| {
+        format!(
+            "the organization directory {} cannot be read: {error}",
+            root.display()
+        )
+    };
     let mut names = Vec::new();
     for entry in std::fs::read_dir(root).map_err(unreadable)? {
         let entry = entry.map_err(unreadable)?;
@@ -147,18 +160,31 @@ struct Proposal {
 fn proposal(answer: &str) -> Result<Proposal, String> {
     let object = match (answer.find('{'), answer.rfind('}')) {
         (Some(start), Some(end)) if start < end => &answer[start..=end],
-        _ => return Err(format!("the round's chooser answered no JSON object: {answer}")),
+        _ => {
+            return Err(format!(
+                "the round's chooser answered no JSON object: {answer}"
+            ))
+        }
     };
-    let proposal: Proposal = serde_json::from_str(object)
-        .map_err(|error| format!("the round's chooser answered a proposal that cannot be read ({error}): {object}"))?;
+    let proposal: Proposal = serde_json::from_str(object).map_err(|error| {
+        format!("the round's chooser answered a proposal that cannot be read ({error}): {object}")
+    })?;
     if proposal.objective.trim().is_empty() {
-        return Err(format!("the round's chooser proposed no objective: {object}"));
+        return Err(format!(
+            "the round's chooser proposed no objective: {object}"
+        ));
     }
     Ok(proposal)
 }
 
 /// Ask a fresh read-only conversation for the next improvement.
-fn choose(args: &Args, where_: &str, focus: &str, rounds: &[Round], hooks: &mut RunHooks<'static>) -> Result<Proposal, String> {
+fn choose(
+    args: &Args,
+    where_: &str,
+    focus: &str,
+    rounds: &[Round],
+    hooks: &mut RunHooks<'static>,
+) -> Result<Proposal, String> {
     let mut read_only = args.clone();
     read_only.command = crate::Command::Run;
     read_only.positionals.clear();
@@ -185,7 +211,14 @@ fn now() -> Result<u64, String> {
 }
 
 /// One round: choose, pursue, and say how it ended.
-fn round(args: &Args, number: u64, where_: &str, climb: &Climb, rounds: &[Round], hooks: &mut RunHooks<'static>) -> Result<Round, String> {
+fn round(
+    args: &Args,
+    number: u64,
+    where_: &str,
+    climb: &Climb,
+    rounds: &[Round],
+    hooks: &mut RunHooks<'static>,
+) -> Result<Round, String> {
     let started_at_ms = now()?;
     let chosen = choose(args, where_, &climb.focus, rounds, hooks)?;
     let selected = target::arguments(args, climb.scope, &climb.only, chosen.repository.as_deref())?;
@@ -199,7 +232,13 @@ fn round(args: &Args, number: u64, where_: &str, climb: &Climb, rounds: &[Round]
                 Some(outcome.receipt_path),
                 Some(outcome.run_directory),
             ),
-            Err(failure) => (Ending::Failed, None, Some(failure.message), failure.receipt_path, None),
+            Err(failure) => (
+                Ending::Failed,
+                None,
+                Some(failure.message),
+                failure.receipt_path,
+                None,
+            ),
         };
     Ok(Round {
         round: number,
@@ -239,4 +278,3 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     }
     Ok(status::render(&outcome.report) + "\n")
 }
-

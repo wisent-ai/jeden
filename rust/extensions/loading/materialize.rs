@@ -144,7 +144,10 @@ pub(in crate::hooks::extensions) fn build_registry(
             .get(&extension.source)
             .copied()
             .ok_or_else(|| {
-                format!("extension module {} has no precedence in its source set", extension.source.display())
+                format!(
+                    "extension module {} has no precedence in its source set",
+                    extension.source.display()
+                )
             })?;
     }
     extensions.sort_by(|left, right| {
@@ -184,9 +187,16 @@ pub(in crate::hooks::extensions) fn build_registry(
         }
         // A hook's index is how many hooks of its event this extension
         // declares before it.
-        let events: Vec<String> = extension.hooks.iter().map(|hook| hook.event.clone()).collect();
+        let events: Vec<String> = extension
+            .hooks
+            .iter()
+            .map(|hook| hook.event.clone())
+            .collect();
         for (position, hook) in extension.hooks.iter_mut().enumerate() {
-            hook.index = events[..position].iter().filter(|event| **event == hook.event).count();
+            hook.index = events[..position]
+                .iter()
+                .filter(|event| **event == hook.event)
+                .count();
         }
         hooks.extend(extension.hooks.clone());
     }

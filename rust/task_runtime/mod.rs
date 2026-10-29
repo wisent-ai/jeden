@@ -41,8 +41,8 @@ use std::path::{Path, PathBuf};
 /// one that does not. The version is the plan's, never a second copy here.
 pub(crate) fn ensure_store_schema(store: &Path) -> Result<(), TaskError> {
     let manifest = store.join("store-schema.json");
-    let plan =
-        crate::cli::config::migrations::builtin_document_plan("task-store").map_err(TaskError::Invalid)?;
+    let plan = crate::cli::config::migrations::builtin_document_plan("task-store")
+        .map_err(TaskError::Invalid)?;
     // A manifest that cannot be examined is refused: read as absent, a fresh
     // manifest was written over the store's recorded schema version.
     if crate::tool_runtime::runtime_ops::platform::presence::present(&manifest)

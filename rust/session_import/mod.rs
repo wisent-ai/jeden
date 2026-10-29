@@ -50,7 +50,10 @@ pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
 pub(crate) fn import_paths(paths: &[PathBuf], refresh: bool) -> Result<Value, String> {
     let root = crate::session_root();
     fs::create_dir_all(&root).map_err(|error| {
-        format!("the session root {} cannot be created: {error}", root.display())
+        format!(
+            "the session root {} cannot be created: {error}",
+            root.display()
+        )
     })?;
     let lock_path = root.with_extension("import.lock");
     let lock = OpenOptions::new()
@@ -163,11 +166,10 @@ fn import_source(root: &Path, path: &Path, refresh: bool) -> Result<(Value, bool
     // never read as absent.
     let present = crate::tool_runtime::runtime_ops::platform::presence::present;
     if present(&manifest)? {
-        let result: Value =
-            serde_json::from_slice(&fs::read(&manifest).map_err(|error| {
-                format!("cannot read import receipt {}: {error}", manifest.display())
-            })?)
-            .map_err(|e| format!("invalid import receipt {}: {e}", manifest.display()))?;
+        let result: Value = serde_json::from_slice(&fs::read(&manifest).map_err(|error| {
+            format!("cannot read import receipt {}: {error}", manifest.display())
+        })?)
+        .map_err(|e| format!("invalid import receipt {}: {e}", manifest.display()))?;
         let unchanged = result["sourceBytes"].as_u64() == Some(before.len())
             && result["sourceModified"].as_str() == Some(&modified(&source_path, &before)?);
         if unchanged && !refresh {
@@ -281,7 +283,8 @@ pub(crate) fn mark_adopted(source: &Path) -> Result<(), String> {
     // An import whose receipt cannot be examined is refused, not left
     // unowned: read as absent, the session was adopted with no record, and
     // a later --refresh replaced it.
-    if !crate::tool_runtime::runtime_ops::platform::presence::present(&source.join("import.json"))? {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&source.join("import.json"))?
+    {
         return Ok(());
     }
     let root = source.parent().ok_or("import has no parent directory")?;

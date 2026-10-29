@@ -32,10 +32,17 @@ struct Parameters {
 
 /// Adapt the protocol to native values, never to a shell or CLI argument string.
 pub(super) fn parse(value: Value) -> Result<(Args, Climb), Failure> {
-    let parameters: Parameters = serde_json::from_value(value)
-        .map_err(|error| ("invalid_params", format!("hillclimb/run parameters cannot be read: {error}")))?;
+    let parameters: Parameters = serde_json::from_value(value).map_err(|error| {
+        (
+            "invalid_params",
+            format!("hillclimb/run parameters cannot be read: {error}"),
+        )
+    })?;
     if parameters.cwd.trim().is_empty() {
-        return Err(("invalid_params", "hillclimb/run requires nonempty cwd, the workspace to improve".into()));
+        return Err((
+            "invalid_params",
+            "hillclimb/run requires nonempty cwd, the workspace to improve".into(),
+        ));
     }
     if !(parameters.allow_write && parameters.allow_command) {
         return Err(("permission_denied", "hillclimb/run changes code and runs its checks: it requires allowWrite=true and allowCommand=true".into()));

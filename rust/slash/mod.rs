@@ -16,8 +16,8 @@ pub(crate) mod setup;
 mod support;
 
 pub(crate) use commands::usage::totals as usage_ledger;
-pub(crate) use support::{common, state, validate};
 pub(crate) use modes::forceable;
+pub(crate) use support::{common, state, validate};
 
 pub(crate) use plugins::ops::{
     installed_entries_for_scope, installed_plugin_command_dirs, installed_plugin_hook_configs,
@@ -223,7 +223,9 @@ pub(crate) fn interactive_picker(
         // said as such rather than as a stock sentence.
         let detail = match view.health.detail.clone() {
             Some(detail) => detail,
-            None if !view.ui.executable => format!("{} is not offered as a view here", view.ui.label),
+            None if !view.ui.executable => {
+                format!("{} is not offered as a view here", view.ui.label)
+            }
             None => format!(
                 "the {} capability reports {:?} without saying why",
                 view.ui.label, view.health.state

@@ -1,6 +1,6 @@
 mod context;
-mod hillclimb;
 mod dispatch;
+mod hillclimb;
 mod hosting;
 mod lease;
 mod operations;
@@ -50,7 +50,10 @@ impl JsonWriter {
         }
     }
     pub(crate) fn send(&self, value: &Value) -> Result<(), String> {
-        let mut writer = self.inner.lock().map_err(|_poisoned| "output lock poisoned")?;
+        let mut writer = self
+            .inner
+            .lock()
+            .map_err(|_poisoned| "output lock poisoned")?;
         serde_json::to_writer(&mut *writer, value).map_err(|error| error.to_string())?;
         writer.write_all(b"\n").map_err(|error| error.to_string())?;
         writer.flush().map_err(|error| error.to_string())
@@ -225,17 +228,23 @@ where
     if let Err(error) = dispatch_result {
         failures.push(format!("RPC dispatch failed: {error}"));
     }
-    let sessions = crate::panicked::held(&state.sessions).drain().collect::<Vec<_>>();
+    let sessions = crate::panicked::held(&state.sessions)
+        .drain()
+        .collect::<Vec<_>>();
     for (session_id, session) in &sessions {
         match session.status() {
             Ok(active) => {
                 for request_id in active {
                     if let Err(error) = session.abort(&request_id) {
-                        failures.push(format!("cannot cancel RPC session {session_id} request {request_id}: {error}"));
+                        failures.push(format!(
+                            "cannot cancel RPC session {session_id} request {request_id}: {error}"
+                        ));
                     }
                 }
             }
-            Err(error) => failures.push(format!("cannot read active requests of RPC session {session_id}: {error}")),
+            Err(error) => failures.push(format!(
+                "cannot read active requests of RPC session {session_id}: {error}"
+            )),
         }
     }
     if let Err(error) = state.bridge.cancel_all() {
@@ -253,5 +262,9 @@ where
             failures.push(format!("cannot dispose RPC session {session_id}: {error}"));
         }
     }
-    if failures.is_empty() { Ok(()) } else { Err(failures.join("\n")) }
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("\n"))
+    }
 }
