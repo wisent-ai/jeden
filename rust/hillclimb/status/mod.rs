@@ -26,9 +26,21 @@ pub(crate) struct Report<'a> {
 
 impl Report<'static> {
     pub(super) fn new(ledger: PathBuf, rounds: Vec<Round>) -> Self {
-        let accepted = rounds.iter().filter(|round| round.ending == Ending::Accepted).count();
+        let accepted = rounds
+            .iter()
+            .filter(|round| round.ending == Ending::Accepted)
+            .count();
         let total = rounds.len();
-        Self { ledger, rounds, accepted, total, ending: None, round: None, repository: None, without_repository: false }
+        Self {
+            ledger,
+            rounds,
+            accepted,
+            total,
+            ending: None,
+            round: None,
+            repository: None,
+            without_repository: false,
+        }
     }
 }
 
@@ -51,10 +63,13 @@ pub(crate) fn read<'a>(
     ledger::visit(&path, |round| {
         let observed = std::iter::once(&round);
         history.total += observed.clone().count();
-        history.accepted += observed.filter(|round| round.ending == Ending::Accepted).count();
+        history.accepted += observed
+            .filter(|round| round.ending == Ending::Accepted)
+            .count();
         if ending.is_some_and(|selected| round.ending != selected)
             || number.is_some_and(|selected| round.round != selected)
-            || !repository.matches(round.repository.as_deref()) {
+            || !repository.matches(round.repository.as_deref())
+        {
             return;
         }
         if last.is_some_and(|limit| history.rounds.len() == limit.get()) {
@@ -62,8 +77,16 @@ pub(crate) fn read<'a>(
         }
         history.rounds.push_back(round);
     })?;
-    Ok(Report { ledger: path, rounds: history.rounds.into(), accepted: history.accepted, total: history.total,
-        ending, round: number, repository: repository.name(), without_repository: repository.is_missing() })
+    Ok(Report {
+        ledger: path,
+        rounds: history.rounds.into(),
+        accepted: history.accepted,
+        total: history.total,
+        ending,
+        round: number,
+        repository: repository.name(),
+        without_repository: repository.is_missing(),
+    })
 }
 
 struct ObservedSelection<'a, 's>(&'a Report<'s>);
@@ -81,7 +104,9 @@ impl std::fmt::Display for ObservedSelection<'_, '_> {
         })?;
         match self.0.repository {
             Some(name) => write!(formatter, ", recorded repository {name:?}"),
-            None if self.0.without_repository => formatter.write_str(", without a recorded repository identity"),
+            None if self.0.without_repository => {
+                formatter.write_str(", without a recorded repository identity")
+            }
             None => formatter.write_str(", all recorded repository identities"),
         }
     }
@@ -100,8 +125,15 @@ pub(super) fn render(report: &Report<'_>) -> String {
             ledger::PathLabel(&report.ledger), ObservedSelection(report)
         );
     }
-    format!("{}\nShowing {} selected of {} recorded rounds; {} accepted overall; {}; ledger {}",
-        ledger::digest(&report.rounds), report.rounds.len(), report.total, report.accepted, ObservedSelection(report), ledger::PathLabel(&report.ledger))
+    format!(
+        "{}\nShowing {} selected of {} recorded rounds; {} accepted overall; {}; ledger {}",
+        ledger::digest(&report.rounds),
+        report.rounds.len(),
+        report.total,
+        report.accepted,
+        ObservedSelection(report),
+        ledger::PathLabel(&report.ledger)
+    )
 }
 
 #[derive(Default)]
@@ -164,11 +196,25 @@ fn selection<'a>(words: impl IntoIterator<Item = &'a str>) -> Result<Selection<'
 }
 
 fn output(root: &Path, selected: Selection<'_>, json: bool) -> Result<String, String> {
-    let repository = RepositorySelection::new(selected.repository, selected.without_repository).map_err(usage)?;
-    let report = read(root, selected.ledger, selected.last, selected.ending, selected.round, repository)?;
+    let repository = RepositorySelection::new(selected.repository, selected.without_repository)
+        .map_err(usage)?;
+    let report = read(
+        root,
+        selected.ledger,
+        selected.last,
+        selected.ending,
+        selected.round,
+        repository,
+    )?;
     if json || selected.json {
-        serde_json::to_string_pretty(&report).map(|text| text + "\n").map_err(|error|
-            format!("the hill-climb history for ledger {:?} cannot be encoded as JSON: {error}", report.ledger))
+        serde_json::to_string_pretty(&report)
+            .map(|text| text + "\n")
+            .map_err(|error| {
+                format!(
+                    "the hill-climb history for ledger {:?} cannot be encoded as JSON: {error}",
+                    report.ledger
+                )
+            })
     } else {
         Ok(render(&report) + "\n")
     }
@@ -180,5 +226,9 @@ pub(crate) fn text(root: &Path, args: &str) -> Result<String, String> {
 }
 
 pub(super) fn command(args: &Args) -> Result<String, String> {
-    output(&args.cwd, selection(args.positionals.iter().map(String::as_str))?, args.json)
+    output(
+        &args.cwd,
+        selection(args.positionals.iter().map(String::as_str))?,
+        args.json,
+    )
 }

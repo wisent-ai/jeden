@@ -10,9 +10,12 @@ pub(super) fn is_repository(path: &Path) -> Result<bool, String> {
     let metadata = match path.metadata() {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(error) => return Err(format!(
-            "hillclimb cannot inspect repository directory {:?}: {error}", path.as_os_str()
-        )),
+        Err(error) => {
+            return Err(format!(
+                "hillclimb cannot inspect repository directory {:?}: {error}",
+                path.as_os_str()
+            ))
+        }
     };
     if !metadata.is_dir() {
         return Ok(false);
@@ -22,18 +25,27 @@ pub(super) fn is_repository(path: &Path) -> Result<bool, String> {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(format!(
-            "hillclimb cannot inspect repository marker {:?}: {error}", marker.as_os_str()
+            "hillclimb cannot inspect repository marker {:?}: {error}",
+            marker.as_os_str()
         )),
     }
 }
 
 fn canonical(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize().map_err(|error| {
-        format!("hillclimb cannot resolve the proposed workspace {}: {error}", path.display())
+        format!(
+            "hillclimb cannot resolve the proposed workspace {}: {error}",
+            path.display()
+        )
     })
 }
 
-pub(super) fn arguments(args: &Args, scope: Scope, only: &[String], repository: Option<&str>) -> Result<Args, String> {
+pub(super) fn arguments(
+    args: &Args,
+    scope: Scope,
+    only: &[String],
+    repository: Option<&str>,
+) -> Result<Args, String> {
     let root = canonical(&args.cwd)?;
     let target = match scope {
         Scope::Repository => match repository {

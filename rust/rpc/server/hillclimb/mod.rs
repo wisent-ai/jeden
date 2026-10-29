@@ -20,7 +20,9 @@ fn failed_response(id: Value, detail: &str, cancellation_requested: bool) -> Val
 }
 
 pub(super) fn start(
-    state: &Arc<ServerState>, wire: WireRequest, in_flight: InFlight,
+    state: &Arc<ServerState>,
+    wire: WireRequest,
+    in_flight: InFlight,
 ) -> Result<Option<JoinHandle<Result<(), String>>>, String> {
     let (args, climb) = match parameters::parse(wire.params) {
         Ok(parameters) => parameters,
@@ -29,7 +31,10 @@ pub(super) fn start(
             return Ok(None);
         }
     };
-    let lease = match state.hillclimb_requests.begin(&wire.id, &args.cwd, climb.scope) {
+    let lease = match state
+        .hillclimb_requests
+        .begin(&wire.id, &args.cwd, climb.scope)
+    {
         Ok(lease) => lease,
         Err((code, detail)) => {
             state.writer.send(&error_response(wire.id, code, &detail))?;
@@ -81,8 +86,12 @@ pub(super) fn start(
 }
 
 pub(super) fn cancel(state: &ServerState, params: &Value) -> Result<Value, Failure> {
-    let id = params.get("requestId")
-        .ok_or_else(|| ("invalid_params", "hillclimb/cancel requires requestId".to_string()))?;
+    let id = params.get("requestId").ok_or_else(|| {
+        (
+            "invalid_params",
+            "hillclimb/cancel requires requestId".to_string(),
+        )
+    })?;
     state.hillclimb_requests.cancel(id)
 }
 
@@ -93,8 +102,10 @@ pub(super) fn active(state: &ServerState) -> Value {
 pub(super) fn status(params: &Value) -> Result<Value, Failure> {
     let parameters = parameters::history(params)?;
     let repository = crate::hillclimb::status::RepositorySelection::new(
-        parameters.repository, parameters.without_repository,
-    ).map_err(|error| ("invalid_params", error))?;
+        parameters.repository,
+        parameters.without_repository,
+    )
+    .map_err(|error| ("invalid_params", error))?;
     let report = crate::hillclimb::status::read(
         std::path::Path::new(parameters.cwd),
         parameters.ledger.map(std::path::Path::new),
@@ -102,7 +113,15 @@ pub(super) fn status(params: &Value) -> Result<Value, Failure> {
         parameters.ending,
         parameters.round,
         repository,
-    ).map_err(|error| ("hillclimb_unreadable", error))?;
-    serde_json::to_value(&report).map_err(|error| ("invalid_response",
-        format!("the hillclimb response for ledger {:?} cannot be encoded as JSON: {error}", report.ledger)))
+    )
+    .map_err(|error| ("hillclimb_unreadable", error))?;
+    serde_json::to_value(&report).map_err(|error| {
+        (
+            "invalid_response",
+            format!(
+                "the hillclimb response for ledger {:?} cannot be encoded as JSON: {error}",
+                report.ledger
+            ),
+        )
+    })
 }

@@ -130,7 +130,8 @@ impl SessionRecorder {
     }
 
     pub(in crate::agent) fn record(&mut self, event_type: &str, data: Value) -> Result<(), String> {
-        self.record_entry(event_type, data).map(|_recorded_entry| ())
+        self.record_entry(event_type, data)
+            .map(|_recorded_entry| ())
     }
 
     pub(in crate::agent) fn record_entry(

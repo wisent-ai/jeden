@@ -201,7 +201,10 @@ pub(crate) fn reserve(
                 None => call.reserved.as_str(),
             };
             allocated += Decimal::from_str(counted).map_err(|e| {
-                format!("pursuit call {} records {counted:?}, not an amount: {e}", call.id)
+                format!(
+                    "pursuit call {} records {counted:?}, not an amount: {e}",
+                    call.id
+                )
             })?;
         }
         if allocated + upper > limit {

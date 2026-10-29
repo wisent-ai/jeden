@@ -58,9 +58,12 @@ pub(crate) struct Round {
 
 /// The selected ledger; relative overrides belong to the selected workspace.
 pub(crate) fn path(root: &Path, selected: Option<&Path>) -> Result<PathBuf, String> {
-    let canonical = root
-        .canonicalize()
-        .map_err(|error| format!("the hill-climb scope {} cannot be resolved: {error}", PathLabel(root)))?;
+    let canonical = root.canonicalize().map_err(|error| {
+        format!(
+            "the hill-climb scope {} cannot be resolved: {error}",
+            PathLabel(root)
+        )
+    })?;
     if let Some(selected) = selected {
         if selected.to_str().is_some_and(|path| path.trim().is_empty()) {
             return Err("the hill-climb ledger needs a file path, not a blank value".into());
@@ -69,7 +72,10 @@ pub(crate) fn path(root: &Path, selected: Option<&Path>) -> Result<PathBuf, Stri
     }
     match crate::user_config_path().parent() {
         Some(directory) => identity::path(directory, &canonical),
-        None => Err("the user configuration path has no directory to keep the hill-climb ledger beside".into()),
+        None => Err(
+            "the user configuration path has no directory to keep the hill-climb ledger beside"
+                .into(),
+        ),
     }
 }
 
@@ -83,15 +89,24 @@ pub(crate) fn claim(path: &Path) -> Result<File, String> {
     name.push(suffix);
     let lock = PathBuf::from(name);
     if let Some(directory) = lock.parent() {
-        std::fs::create_dir_all(directory)
-            .map_err(|error| format!("the hill-climb lock directory {} cannot be made: {error}", PathLabel(directory)))?;
+        std::fs::create_dir_all(directory).map_err(|error| {
+            format!(
+                "the hill-climb lock directory {} cannot be made: {error}",
+                PathLabel(directory)
+            )
+        })?;
     }
     let file = OpenOptions::new()
         .create(true)
         .truncate(false)
         .write(true)
         .open(&lock)
-        .map_err(|error| format!("the hill-climb lock {} cannot be opened: {error}", PathLabel(&lock)))?;
+        .map_err(|error| {
+            format!(
+                "the hill-climb lock {} cannot be opened: {error}",
+                PathLabel(&lock)
+            )
+        })?;
     match file.try_lock() {
         Ok(()) => Ok(file),
         Err(TryLockError::WouldBlock) => Err(format!(
@@ -118,7 +133,12 @@ pub(crate) fn visit(path: &Path, mut accept: impl FnMut(Round)) -> Result<(), St
     let file = match File::open(path) {
         Ok(file) => file,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(format!("the hill-climb ledger {} cannot be read: {error}", PathLabel(path))),
+        Err(error) => {
+            return Err(format!(
+                "the hill-climb ledger {} cannot be read: {error}",
+                PathLabel(path)
+            ))
+        }
     };
     let mut reader = BufReader::new(file);
     let mut line = String::new();
@@ -126,7 +146,10 @@ pub(crate) fn visit(path: &Path, mut accept: impl FnMut(Round)) -> Result<(), St
     for number in std::iter::once(()).count().. {
         line.clear();
         reader.read_line(&mut line).map_err(|error| {
-            format!("line {number} of the hill-climb ledger {} cannot be read: {error}", PathLabel(path))
+            format!(
+                "line {number} of the hill-climb ledger {} cannot be read: {error}",
+                PathLabel(path)
+            )
         })?;
         if line.is_empty() {
             break;
@@ -143,7 +166,10 @@ pub(crate) fn visit(path: &Path, mut accept: impl FnMut(Round)) -> Result<(), St
             continue;
         }
         let round = serde_json::from_str::<Round>(&line).map_err(|error| {
-            format!("line {number} of the hill-climb ledger {} is not a round: {error}", PathLabel(path))
+            format!(
+                "line {number} of the hill-climb ledger {} is not a round: {error}",
+                PathLabel(path)
+            )
         })?;
         accept(round);
     }
@@ -153,16 +179,31 @@ pub(crate) fn visit(path: &Path, mut accept: impl FnMut(Round)) -> Result<(), St
 /// `round` appended to the ledger at `path`, its directory made when missing.
 pub(crate) fn append(path: &Path, round: &Round) -> Result<(), String> {
     if let Some(directory) = path.parent() {
-        std::fs::create_dir_all(directory)
-            .map_err(|error| format!("the hill-climb ledger directory {} cannot be made: {error}", PathLabel(directory)))?;
+        std::fs::create_dir_all(directory).map_err(|error| {
+            format!(
+                "the hill-climb ledger directory {} cannot be made: {error}",
+                PathLabel(directory)
+            )
+        })?;
     }
-    let line = serde_json::to_string(round).map_err(|error| format!("round {} cannot be written: {error}", round.round))?;
+    let line = serde_json::to_string(round)
+        .map_err(|error| format!("round {} cannot be written: {error}", round.round))?;
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(path)
-        .map_err(|error| format!("the hill-climb ledger {} cannot be opened: {error}", PathLabel(path)))?;
-    writeln!(file, "{line}").map_err(|error| format!("the hill-climb ledger {} cannot be written: {error}", PathLabel(path)))
+        .map_err(|error| {
+            format!(
+                "the hill-climb ledger {} cannot be opened: {error}",
+                PathLabel(path)
+            )
+        })?;
+    writeln!(file, "{line}").map_err(|error| {
+        format!(
+            "the hill-climb ledger {} cannot be written: {error}",
+            PathLabel(path)
+        )
+    })
 }
 
 /// Borrowed history: status and progress format it into their existing message;

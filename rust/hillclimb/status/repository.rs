@@ -27,8 +27,13 @@ impl<'a> RepositorySelection<'a> {
     }
 
     pub(super) fn name(self) -> Option<&'a str> {
-        match self { Self::Named(name) => Some(name), Self::All | Self::Missing => None }
+        match self {
+            Self::Named(name) => Some(name),
+            Self::All | Self::Missing => None,
+        }
     }
 
-    pub(super) fn is_missing(self) -> bool { matches!(self, Self::Missing) }
+    pub(super) fn is_missing(self) -> bool {
+        matches!(self, Self::Missing)
+    }
 }

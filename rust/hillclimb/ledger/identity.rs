@@ -33,7 +33,9 @@ fn entry_exists(path: &Path) -> Result<bool, String> {
     match std::fs::symlink_metadata(path) {
         Ok(_) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(format!("the hill-climb ledger identity entry {path:?} cannot be inspected: {error}")),
+        Err(error) => Err(format!(
+            "the hill-climb ledger identity entry {path:?} cannot be inspected: {error}"
+        )),
     }
 }
 
@@ -45,7 +47,9 @@ fn key(canonical: &Path) -> Result<String, String> {
     #[cfg(unix)]
     {
         use std::os::unix::ffi::OsStrExt;
-        Ok(hex::encode(Sha256::digest(canonical.as_os_str().as_bytes())))
+        Ok(hex::encode(Sha256::digest(
+            canonical.as_os_str().as_bytes(),
+        )))
     }
     #[cfg(windows)]
     {

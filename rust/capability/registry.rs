@@ -170,7 +170,11 @@ pub fn refresh(cwd: &Path) -> Arc<CapabilitySnapshot> {
         .operation("refresh")
         .operation("status"),
     );
-    build_and_publish(cwd, previous.generation.saturating_add(GENERATION_STEP), candidates)
+    build_and_publish(
+        cwd,
+        previous.generation.saturating_add(GENERATION_STEP),
+        candidates,
+    )
 }
 
 fn build_and_publish(

@@ -34,11 +34,9 @@ fn format_price(value: f64) -> String {
 pub(super) fn price_detail(price: Option<&ModelPrice>) -> String {
     let free: f64 = Default::default();
     match price.map(|price| (price.input, price.output)) {
-        Some((Some(input), Some(output))) if input > free || output > free => format!(
-            " · ${}/{}█",
-            format_price(input),
-            format_price(output)
-        ),
+        Some((Some(input), Some(output))) if input > free || output > free => {
+            format!(" · ${}/{}█", format_price(input), format_price(output))
+        }
         Some((Some(_), Some(_))) => " · free│".into(),
         Some((None, Some(_))) => " · input not priced".into(),
         Some((Some(_), None)) => " · output not priced".into(),
