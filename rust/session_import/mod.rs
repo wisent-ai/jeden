@@ -1,3 +1,4 @@
+mod command;
 mod replacement;
 mod source;
 mod storage;
@@ -8,41 +9,8 @@ use std::fs::{self, File, OpenOptions};
 use std::path::{Path, PathBuf};
 use storage::{modified, write_json};
 
+pub(crate) use command::command;
 pub(crate) use source::Format;
-
-/// `jeden import <path>... [--refresh] [--json]`: each path is a transcript
-/// another harness wrote, or a directory to scan for them. Which harness is
-/// read from the file, never from the command. A one-format command with a
-/// plan file lived here once and was refused by the operator; this is the
-/// general surface that replaced it.
-pub(crate) fn command(args: &crate::Args) -> Result<String, String> {
-    const USAGE: &str = "Usage: jeden import <path>... [--refresh] [--json]";
-    if let Some(option) = args
-        .positionals
-        .iter()
-        .find(|argument| argument.starts_with('-') && *argument != "--refresh")
-    {
-        return Err(crate::cli::invocation::refusal::usage(format!(
-            "unknown option for jeden import: {option}\n{USAGE}"
-        )));
-    }
-    let refresh = args
-        .positionals
-        .iter()
-        .any(|argument| argument == "--refresh");
-    let paths: Vec<PathBuf> = args
-        .positionals
-        .iter()
-        .filter(|argument| *argument != "--refresh")
-        .map(PathBuf::from)
-        .collect();
-    if paths.is_empty() {
-        return Err(crate::cli::invocation::refusal::usage(USAGE));
-    }
-    let result = import_paths(&paths, refresh)?;
-    serde_json::to_string_pretty(&result)
-        .map_err(|error| format!("the import report cannot be written as JSON: {error}"))
-}
 
 /// Import does not stop the other harness or execute work. The desktop adopts
 /// these ledgers only after source ownership has been handed over, never while
