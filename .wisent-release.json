@@ -38,7 +38,10 @@
             "--bin",
             "jeden-quality-report"
           ],
-          "kind": "lint"
+          "kind": "lint",
+          "inputs": [
+            "private-cargo-sources"
+          ]
         },
         {
           "name": "native-stage",
@@ -48,6 +51,9 @@
             "JEDEN_TEST_SUCCESS_EXIT=0",
             "node",
             "tests/release/stage.mjs"
+          ],
+          "inputs": [
+            "private-cargo-sources"
           ]
         }
       ],
@@ -95,7 +101,10 @@
             "--bin",
             "jeden-quality-report"
           ],
-          "kind": "lint"
+          "kind": "lint",
+          "inputs": [
+            "private-cargo-sources"
+          ]
         },
         {
           "name": "native-stage",
@@ -105,6 +114,9 @@
             "JEDEN_TEST_SUCCESS_EXIT=0",
             "node",
             "tests/release/stage.mjs"
+          ],
+          "inputs": [
+            "private-cargo-sources"
           ]
         }
       ],
