@@ -11,7 +11,18 @@ use crate::capability::{
     FunctionTarget,
 };
 
+/// The extension host protocol version Jeden speaks.
+/// https://github.com/wisent-ai/jeden/blob/main/docs/extension-abi.md
 const ABI_VERSION: u32 = 1;
+
+/// `: <error>` after a status line when one was recorded, and nothing when
+/// none was: a healthy entry carries no error to print.
+fn said(error: Option<&String>) -> String {
+    match error {
+        Some(error) => format!(": {error}"),
+        None => String::new(),
+    }
+}
 
 const HOST: &str = include_str!("host.mjs");
 
@@ -180,11 +191,7 @@ pub fn status(cwd: &Path) -> Result<String, String> {
             extension.hooks.len(),
             extension.providers.len(),
             extension.models.len(),
-            extension
-                .error
-                .as_ref()
-                .map(|error| format!(": {error}"))
-                .unwrap_or_default()
+            said(extension.error.as_ref())
         ));
     }
     for plugin in &registry.installed_plugins {
@@ -221,11 +228,7 @@ pub fn status(cwd: &Path) -> Result<String, String> {
             } else {
                 "unhealthy"
             },
-            capability
-                .error
-                .as_ref()
-                .map(|error| format!(": {error}"))
-                .unwrap_or_default()
+            said(capability.error.as_ref())
         ));
     }
     for capability in &registry.declarative_runtime.capabilities {
@@ -241,11 +244,7 @@ pub fn status(cwd: &Path) -> Result<String, String> {
             } else {
                 "unhealthy"
             },
-            capability
-                .error
-                .as_ref()
-                .map(|error| format!(": {error}"))
-                .unwrap_or_default()
+            said(capability.error.as_ref())
         ));
     }
     Ok(lines.join("\n"))
