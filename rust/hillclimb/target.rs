@@ -5,21 +5,35 @@ use std::path::{Component, Path, PathBuf};
 use super::Scope;
 use crate::Args;
 
+/// Only observed absence means "not a repository"; inspection failures stay failures.
+pub(super) fn is_repository(path: &Path) -> Result<bool, String> {
+    let metadata = match path.metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!(
+            "hillclimb cannot inspect repository directory {:?}: {error}", path.as_os_str()
+        )),
+    };
+    if !metadata.is_dir() {
+        return Ok(false);
+    }
+    let marker = path.join(".git");
+    match marker.metadata() {
+        Ok(_) => Ok(true),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(format!(
+            "hillclimb cannot inspect repository marker {:?}: {error}", marker.as_os_str()
+        )),
+    }
+}
+
 fn canonical(path: &Path) -> Result<PathBuf, String> {
     path.canonicalize().map_err(|error| {
-        format!(
-            "hillclimb cannot resolve the proposed workspace {}: {error}",
-            path.display()
-        )
+        format!("hillclimb cannot resolve the proposed workspace {}: {error}", path.display())
     })
 }
 
-pub(super) fn arguments(
-    args: &Args,
-    scope: Scope,
-    only: &[String],
-    repository: Option<&str>,
-) -> Result<Args, String> {
+pub(super) fn arguments(args: &Args, scope: Scope, only: &[String], repository: Option<&str>) -> Result<Args, String> {
     let root = canonical(&args.cwd)?;
     let target = match scope {
         Scope::Repository => match repository {
@@ -48,8 +62,7 @@ pub(super) fn arguments(
             }
             if !only.is_empty() && !only.iter().any(|allowed| allowed == name) {
                 return Err(format!(
-                    "hillclimb chooser repository {name:?} is not admitted by --only; admitted repositories: {}",
-                    only.join(", ")
+                    "hillclimb chooser repository {name:?} is not admitted by --only; admitted repositories: {only:?}"
                 ));
             }
             let proposed = canonical(&root.join(name))?;
@@ -62,7 +75,7 @@ pub(super) fn arguments(
             proposed
         }
     };
-    if !target.is_dir() || !target.join(".git").exists() {
+    if !is_repository(&target)? {
         return Err(format!(
             "hillclimb chooser target {} is not a repository directory holding .git; no execution started",
             target.display()

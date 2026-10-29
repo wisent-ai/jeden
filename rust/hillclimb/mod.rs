@@ -13,8 +13,8 @@
 
 pub(crate) mod execution;
 mod ledger;
-pub(crate) mod status;
 mod target;
+pub(crate) mod status;
 
 use std::num::NonZeroU64;
 use std::path::{Path, PathBuf};
@@ -24,7 +24,8 @@ use serde::{Deserialize, Serialize};
 use crate::agent::{Conversation, RunHooks};
 use crate::cli::invocation::refusal::usage;
 use crate::Args;
-use ledger::{Ending, Round};
+pub(crate) use ledger::Ending;
+use ledger::Round;
 
 const PROMPT: &str = include_str!("prompt.txt");
 
@@ -51,21 +52,13 @@ pub(crate) struct Climb {
 }
 
 fn options(positionals: &[String]) -> Result<Climb, String> {
-    let mut climb = Climb {
-        scope: Scope::default(),
-        rounds: None,
-        ledger: None,
-        focus: String::new(),
-        only: Vec::new(),
-    };
+    let mut climb =
+        Climb { scope: Scope::default(), rounds: None, ledger: None, focus: String::new(), only: Vec::new() };
     let mut focus = Vec::new();
     let mut words = positionals.iter();
     while let Some(word) = words.next() {
         let mut value = |flag: &str| {
-            words
-                .next()
-                .cloned()
-                .ok_or_else(|| usage(format!("hillclimb {flag} requires a value")))
+            words.next().cloned().ok_or_else(|| usage(format!("hillclimb {flag} requires a value")))
         };
         match word.as_str() {
             "--scope" => {
@@ -94,19 +87,22 @@ fn options(positionals: &[String]) -> Result<Climb, String> {
     Ok(climb)
 }
 
-/// The repositories directly under `root`, by name: directories holding `.git`.
-fn repositories(root: &Path) -> Result<Vec<String>, String> {
-    let unreadable = |error: std::io::Error| {
-        format!(
-            "the organization directory {} cannot be read: {error}",
-            root.display()
-        )
-    };
+/// The admitted repositories directly under `root`, preserving their identities.
+fn repositories(root: &Path, only: &[String]) -> Result<Vec<String>, String> {
+    let unreadable = |error: std::io::Error| format!("the organization directory {:?} cannot be read: {error}", root.as_os_str());
     let mut names = Vec::new();
     for entry in std::fs::read_dir(root).map_err(unreadable)? {
         let entry = entry.map_err(unreadable)?;
-        if entry.path().join(".git").exists() {
-            names.push(entry.file_name().to_string_lossy().into_owned());
+        let name = entry.file_name();
+        if !only.is_empty() && !only.iter().any(|allowed| name == std::ffi::OsStr::new(allowed)) {
+            continue;
+        }
+        if target::is_repository(&entry.path())? {
+            let name = name.into_string().map_err(|name| format!(
+                "hillclimb cannot represent organization repository name {name:?} under {:?} as Unicode; no chooser or execution started",
+                root.as_os_str()
+            ))?;
+            names.push(name);
         }
     }
     names.sort();
@@ -122,18 +118,20 @@ fn place(scope: Scope, root: &Path, only: &[String]) -> Result<String, String> {
         Scope::Repository if !only.is_empty() => {
             Err(usage("hillclimb --only names repositories of an organization; give it with --scope organization"))
         }
-        Scope::Repository if root.join(".git").exists() => Ok(format!("the repository {}", root.display())),
-        Scope::Repository => Err(usage(format!(
-            "{} is not a repository (no .git); give --cwd a repository, or --scope organization for a directory of them",
-            root.display()
-        ))),
-        Scope::Organization => {
-            let mut names = repositories(root)?;
-            if let Some(missing) = only.iter().find(|name| !names.contains(name)) {
-                return Err(usage(format!("{} holds no repository {missing}; --only names repositories directly under it", root.display())));
+        Scope::Repository => {
+            if target::is_repository(root)? {
+                Ok(format!("the repository {}", root.display()))
+            } else {
+                Err(usage(format!(
+                    "{:?} is not a repository directory holding .git; give --cwd a repository, or --scope organization for a directory of them",
+                    root.as_os_str()
+                )))
             }
-            if !only.is_empty() {
-                names.retain(|name| only.contains(name));
+        }
+        Scope::Organization => {
+            let names = repositories(root, only)?;
+            if let Some(missing) = only.iter().find(|name| !names.contains(name)) {
+                return Err(usage(format!("{} holds no repository {missing:?}; --only names repositories directly under it", root.display())));
             }
             if names.is_empty() {
                 return Err(usage(format!(
@@ -142,7 +140,7 @@ fn place(scope: Scope, root: &Path, only: &[String]) -> Result<String, String> {
                 )));
             }
             let which = if only.is_empty() { "whose repositories are" } else { "only these of its repositories" };
-            Ok(format!("the organization at {}, {which}: {}", root.display(), names.join(", ")))
+            Ok(format!("the organization at {}, {which}: {names:?}", root.display()))
         }
     }
 }
@@ -160,31 +158,18 @@ struct Proposal {
 fn proposal(answer: &str) -> Result<Proposal, String> {
     let object = match (answer.find('{'), answer.rfind('}')) {
         (Some(start), Some(end)) if start < end => &answer[start..=end],
-        _ => {
-            return Err(format!(
-                "the round's chooser answered no JSON object: {answer}"
-            ))
-        }
+        _ => return Err(format!("the round's chooser answered no JSON object: {answer}")),
     };
-    let proposal: Proposal = serde_json::from_str(object).map_err(|error| {
-        format!("the round's chooser answered a proposal that cannot be read ({error}): {object}")
-    })?;
+    let proposal: Proposal = serde_json::from_str(object)
+        .map_err(|error| format!("the round's chooser answered a proposal that cannot be read ({error}): {object}"))?;
     if proposal.objective.trim().is_empty() {
-        return Err(format!(
-            "the round's chooser proposed no objective: {object}"
-        ));
+        return Err(format!("the round's chooser proposed no objective: {object}"));
     }
     Ok(proposal)
 }
 
 /// Ask a fresh read-only conversation for the next improvement.
-fn choose(
-    args: &Args,
-    where_: &str,
-    focus: &str,
-    rounds: &[Round],
-    hooks: &mut RunHooks<'static>,
-) -> Result<Proposal, String> {
+fn choose(args: &Args, where_: &str, focus: &str, rounds: &[Round], hooks: &mut RunHooks<'static>) -> Result<Proposal, String> {
     let mut read_only = args.clone();
     read_only.command = crate::Command::Run;
     read_only.positionals.clear();
@@ -197,7 +182,7 @@ fn choose(
         .replace("{scope}", where_)
         .replace("{where}", where_)
         .replace("{focus}", focus)
-        .replace("{ledger}", &ledger::digest(rounds));
+        .replace("{ledger}", &ledger::digest(rounds).to_string());
     let mut conversation = Conversation::new_stage(&args.cwd)?;
     let answer = conversation.run_turn(&read_only, &prompt, &[], hooks)?;
     if hooks.cancelled() {
@@ -211,14 +196,7 @@ fn now() -> Result<u64, String> {
 }
 
 /// One round: choose, pursue, and say how it ended.
-fn round(
-    args: &Args,
-    number: u64,
-    where_: &str,
-    climb: &Climb,
-    rounds: &[Round],
-    hooks: &mut RunHooks<'static>,
-) -> Result<Round, String> {
+fn round(args: &Args, number: u64, where_: &str, climb: &Climb, rounds: &[Round], hooks: &mut RunHooks<'static>) -> Result<Round, String> {
     let started_at_ms = now()?;
     let chosen = choose(args, where_, &climb.focus, rounds, hooks)?;
     let selected = target::arguments(args, climb.scope, &climb.only, chosen.repository.as_deref())?;
@@ -232,13 +210,7 @@ fn round(
                 Some(outcome.receipt_path),
                 Some(outcome.run_directory),
             ),
-            Err(failure) => (
-                Ending::Failed,
-                None,
-                Some(failure.message),
-                failure.receipt_path,
-                None,
-            ),
+            Err(failure) => (Ending::Failed, None, Some(failure.message), failure.receipt_path, None),
         };
     Ok(Round {
         round: number,
@@ -278,3 +250,4 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     }
     Ok(status::render(&outcome.report) + "\n")
 }
+
