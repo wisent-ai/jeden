@@ -30,7 +30,7 @@ fn grant(hosts: &[String]) -> (ExecutionGrant, u16) {
 /// Asserts that `address` is refused as a non-public destination.
 fn refused(address: IpAddr) {
     let host = address.to_string();
-    let (grant, port) = grant(&[host.clone()]);
+    let (grant, port) = grant(std::slice::from_ref(&host));
     match authorize_endpoint(&grant, &host, port) {
         Err(GrantError::NetworkDenied(reason)) => assert!(
             reason.contains("non-public address rejected"),
@@ -90,7 +90,7 @@ fn shared_address_space_is_refused_through_a_url() {
     // https://www.rfc-editor.org/rfc/rfc6598#section-7 : the first address of the shared address space block.
     let shared = Ipv4Addr::new(100, 64, 0, 1);
     let host = shared.to_string();
-    let (grant, _) = grant(&[host.clone()]);
+    let (grant, _) = grant(std::slice::from_ref(&host));
     let url = Url::parse(&format!("http://{host}/")).expect("an IPv4 host forms a URL");
     match authorize_url(&grant, &url) {
         Err(GrantError::NetworkDenied(reason)) => assert!(
