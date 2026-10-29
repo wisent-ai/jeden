@@ -35,7 +35,10 @@ fn heading_level(line: &str) -> Option<usize> {
 fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize), String> {
     let (lines, _) = split_edit_lines(content);
     if start_line < FIRST_LINE || start_line > lines.len() {
-        return Err(format!("block start {start_line} is outside the {}-line file", lines.len()));
+        return Err(format!(
+            "block start {start_line} is outside the {}-line file",
+            lines.len()
+        ));
     }
     let line = &lines[start_line - FIRST_LINE];
     if let Some(level) = heading_level(line) {
@@ -82,9 +85,10 @@ fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Va
     for op in ops {
         match op.op.as_str() {
             "insert_head" => out.push(json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content})),
-            "insert_tail" => out.push(match lines.is_empty() {
-                true => json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content}),
-                false => json!({"op": "insert_after", "line": lines.len(), "content": op.content}),
+            "insert_tail" => out.push(if lines.is_empty() {
+                json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content})
+            } else {
+                json!({"op": "insert_after", "line": lines.len(), "content": op.content})
             }),
             "replace_block" => {
                 let (start, end) = visual_block_range(content, anchored_line(op, "replace_block")?)?;
@@ -142,7 +146,9 @@ fn checked_destination(
         return Err(format!("duplicate move destination: {section_dest}"));
     }
     if sources.contains(to) && to != file {
-        return Err(format!("move destination is another patched source: {section_dest}"));
+        return Err(format!(
+            "move destination is another patched source: {section_dest}"
+        ));
     }
     if to != file
         && to
@@ -189,9 +195,10 @@ pub(super) fn plan_visual_edit(cwd: &Path, patch: &str) -> Result<Vec<PreparedVi
         }
         let before = String::from_utf8(current_bytes)
             .map_err(|cause| format!("{} is not UTF-8 text: {cause}", file.display()))?;
-        let ops = match section.remove {
-            true => Vec::new(),
-            false => visual_ops_for_content(&before, &section.ops)?,
+        let ops = if section.remove {
+            Vec::new()
+        } else {
+            visual_ops_for_content(&before, &section.ops)?
         };
         let after = match (section.remove, ops.is_empty()) {
             (true, _) => String::new(),
@@ -229,7 +236,11 @@ fn commit(prepared: &[PreparedVisualEdit]) -> Result<(), String> {
                     .map_err(|cause| format!("cannot create {}: {cause}", parent.display()))?;
             }
             fs::rename(&item.file, to_file).map_err(|cause| {
-                format!("cannot move {} to {}: {cause}", item.file.display(), to_file.display())
+                format!(
+                    "cannot move {} to {}: {cause}",
+                    item.file.display(),
+                    to_file.display()
+                )
             })?;
         }
     }

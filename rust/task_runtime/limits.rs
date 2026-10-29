@@ -26,13 +26,9 @@ fn checked(declared: Option<Value>) -> Result<TaskLimits, TaskError> {
         ("maxChildren", limits.max_children),
     ]
     .into_iter()
-    .filter(|(_, value)| std::num::NonZeroUsize::new(*value).is_none())
+    .filter(|(_, value)| *value == 0)
     .map(|(name, _)| name)
-    .chain(
-        std::num::NonZeroU64::new(limits.max_output_bytes)
-            .is_none()
-            .then_some("maxOutputBytes"),
-    )
+    .chain((limits.max_output_bytes == 0).then_some("maxOutputBytes"))
     .collect::<Vec<_>>();
     if !zero.is_empty() {
         return Err(TaskError::Invalid(format!(

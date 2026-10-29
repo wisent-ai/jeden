@@ -25,12 +25,16 @@ pub(super) fn lease() -> Result<std::fs::File, String> {
         return Ok(file);
     }
     let error = std::io::Error::last_os_error();
-    match error.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        true => Err(format!(
+    if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Err(format!(
             "another Jeden process on this machine runs its own gateway and owns the subscriptions' renewals ({} is held); sign in from it or close it first",
             path.display()
-        )),
-        false => Err(format!("{} cannot be locked for Jeden's own gateway: {error}", path.display())),
+        ))
+    } else {
+        Err(format!(
+            "{} cannot be locked for Jeden's own gateway: {error}",
+            path.display()
+        ))
     }
 }
 

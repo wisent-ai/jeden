@@ -165,7 +165,11 @@ pub(crate) fn picker_panel(
                 let item = &state.spec.items[index];
                 let selected = position == state.selected;
                 let marker = if selected { "›" } else { " " };
-                let row = item_row(item, marker, width.saturating_sub(visible_len(CATEGORY_MARKERS)));
+                let row = item_row(
+                    item,
+                    marker,
+                    width.saturating_sub(visible_len(CATEGORY_MARKERS)),
+                );
                 rows.push(styled_item(row, item.disabled, selected, color));
             }
         }
@@ -241,11 +245,12 @@ pub(crate) fn confirm_panel(state: &ConfirmState, width: usize, color: bool) -> 
     }
     rows.push(String::new());
     rows.push(format!("{cancel_marker} Cancel"));
-    let confirm_style = match state.confirmed {
-        true => "red",
-        false => "dim",
-    };
-    rows.push(paint(&format!("{confirm_marker} Confirm"), confirm_style, color));
+    let confirm_style = if state.confirmed { "red" } else { "dim" };
+    rows.push(paint(
+        &format!("{confirm_marker} Confirm"),
+        confirm_style,
+        color,
+    ));
     rows.push(paint("←→ choose  Enter confirm  Esc cancel", "dim", color));
     boxed(tr(&state.lang, "view.confirm.title"), &rows, width, color)
 }

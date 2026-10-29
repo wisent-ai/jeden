@@ -21,9 +21,9 @@ fn editor_variable(name: &str) -> Result<Option<String>, String> {
     match env::var(name) {
         Ok(value) => Ok(Some(value)),
         Err(env::VarError::NotPresent) => Ok(None),
-        Err(env::VarError::NotUnicode(value)) => {
-            Err(format!("{name} is not Unicode ({value:?}); state the editor command as text"))
-        }
+        Err(env::VarError::NotUnicode(value)) => Err(format!(
+            "{name} is not Unicode ({value:?}); state the editor command as text"
+        )),
     }
 }
 
@@ -59,7 +59,10 @@ impl ExternalEditorCommand {
     fn is_available(&self, cwd: &Path) -> bool {
         let program = Path::new(&self.program);
         // A program named with a directory is that file; a bare name is looked up on PATH.
-        if program.parent().is_some_and(|parent| !parent.as_os_str().is_empty()) {
+        if program
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty())
+        {
             let resolved = if program.is_absolute() {
                 program.to_path_buf()
             } else {
@@ -207,10 +210,7 @@ fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
     match path.metadata() {
-        Ok(metadata) => {
-            metadata.is_file()
-                && std::num::NonZeroU32::new(metadata.permissions().mode() & executable).is_some()
-        }
+        Ok(metadata) => metadata.is_file() && metadata.permissions().mode() & executable != 0,
         Err(_unreadable) => false,
     }
 }

@@ -97,9 +97,12 @@ fn workspace_name(cwd: &Path) -> Result<String, String> {
         })?
         .to_string_lossy()
         .chars()
-        .map(|character| match character.is_ascii_alphanumeric() || "-_".contains(character) {
-            true => character,
-            false => '-',
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || "-_".contains(character) {
+                character
+            } else {
+                '-'
+            }
         })
         .collect();
     let digest = hex::encode(Sha256::digest(canonical.as_os_str().as_encoded_bytes()));
@@ -263,9 +266,10 @@ pub fn written_now(dir: &Path) -> Result<bool, String> {
         return Ok(false);
     }
     let error = std::io::Error::last_os_error();
-    match error.raw_os_error() == Some(libc::EWOULDBLOCK) {
-        true => Ok(true),
-        false => Err(format!("{} cannot be examined: {error}", path.display())),
+    if error.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        Ok(true)
+    } else {
+        Err(format!("{} cannot be examined: {error}", path.display()))
     }
 }
 

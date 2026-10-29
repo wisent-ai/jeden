@@ -64,8 +64,9 @@ pub(crate) fn builtin_document_plan(store: &'static str) -> Result<MigrationPlan
 }
 
 pub(crate) fn object_preflight(value: &Value) -> Result<(), String> {
-    match value.is_object() {
-        true => Ok(()),
-        false => Err("store root must be an object".into()),
+    if value.is_object() {
+        Ok(())
+    } else {
+        Err("store root must be an object".into())
     }
 }

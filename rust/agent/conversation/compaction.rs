@@ -53,7 +53,7 @@ impl Conversation {
 
     /// Whether the live history holds no turn yet.
     fn is_empty_turn(&self) -> bool {
-        std::num::NonZeroUsize::new(self.turn_len()).is_none()
+        self.turn_len() == 0
     }
 
     /// Summarize the live history into a single compact system note and drop the

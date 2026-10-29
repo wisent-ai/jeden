@@ -29,7 +29,6 @@ pub(super) fn configure_resource_limits(
     command: &mut Command,
     limits: super::ResourceLimits,
 ) -> Result<(), String> {
-    use std::num::NonZeroU64;
     use std::os::unix::process::CommandExt;
     let named = [
         ("cpuSeconds", limits.cpu_seconds),
@@ -38,7 +37,7 @@ pub(super) fn configure_resource_limits(
         ("processes", limits.processes),
         ("fileBytes", limits.file_bytes),
     ];
-    if let Some((name, _zero)) = named.iter().find(|(_, value)| NonZeroU64::new(*value).is_none()) {
+    if let Some((name, _zero)) = named.iter().find(|(_, value)| *value == 0) {
         return Err(format!(
             "process resource limit {name} is 0, which would let the command run nothing"
         ));
@@ -85,11 +84,13 @@ fn inherited_fds() -> Result<Vec<libc::c_int>, String> {
 /// them; a listing or an entry that cannot be read is refused naming it.
 #[cfg(target_os = "macos")]
 fn inherited_fds() -> Result<Vec<libc::c_int>, String> {
-    let entries = std::fs::read_dir("/dev/fd")
-        .map_err(|error| format!("/dev/fd cannot be listed to close inherited descriptors: {error}"))?;
+    let entries = std::fs::read_dir("/dev/fd").map_err(|error| {
+        format!("/dev/fd cannot be listed to close inherited descriptors: {error}")
+    })?;
     let mut fds = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|error| format!("an entry of /dev/fd cannot be read: {error}"))?;
+        let entry =
+            entry.map_err(|error| format!("an entry of /dev/fd cannot be read: {error}"))?;
         let name = entry.file_name();
         let text = name
             .to_str()
@@ -109,7 +110,12 @@ fn inherited_fds() -> Result<Vec<libc::c_int>, String> {
 fn mark_inherited_fds_close_on_exec(_fds: &[libc::c_int]) -> io::Result<()> {
     let first = libc::c_uint::try_from(STANDARD.len()).map_err(io::Error::other)?;
     let rc = unsafe {
-        libc::syscall(libc::SYS_close_range, first, libc::c_uint::MAX, libc::CLOSE_RANGE_CLOEXEC)
+        libc::syscall(
+            libc::SYS_close_range,
+            first,
+            libc::c_uint::MAX,
+            libc::CLOSE_RANGE_CLOEXEC,
+        )
     };
     if rc.is_negative() {
         return Err(io::Error::last_os_error());

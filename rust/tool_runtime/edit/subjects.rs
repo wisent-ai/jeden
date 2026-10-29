@@ -62,7 +62,8 @@ impl Section {
             }
             (true, false) => self.operations.push(format!("PUT <{first}:")),
         }
-        self.operations.extend(added.iter().map(|line| format!("+{line}")));
+        self.operations
+            .extend(added.iter().map(|line| format!("+{line}")));
         self.added.extend(added.iter().cloned());
         self
     }
@@ -97,9 +98,10 @@ impl Section {
 fn quoted(destination: &str) -> String {
     let plain = !destination.is_empty()
         && !destination.contains(|ch: char| ch.is_whitespace() || matches!(ch, '\'' | '"' | '\\'));
-    match plain {
-        true => destination.to_owned(),
-        false => format!("'{}'", destination.replace('\'', r#"'"'"'"#)),
+    if plain {
+        destination.to_owned()
+    } else {
+        format!("'{}'", destination.replace('\'', r#"'"'"'"#))
     }
 }
 
@@ -120,15 +122,20 @@ fn required<'a>(input: &'a Value, tool: &str, key: &str) -> Result<String, Strin
 /// already names its file and complete content, or changes no file. A call
 /// whose change cannot be planned is the error: its hooks would otherwise be
 /// handed a request they cannot read and judge nothing.
-pub(crate) fn policy_subjects(cwd: &Path, tool: &str, input: &Value) -> Result<Option<Vec<Value>>, String> {
+pub(crate) fn policy_subjects(
+    cwd: &Path,
+    tool: &str,
+    input: &Value,
+) -> Result<Option<Vec<Value>>, String> {
     let sections = match tool {
         "edit" => plan_visual_edit(cwd, &required(input, tool, "patch")?)?
             .into_iter()
             .map(|item| {
                 let section = Section::new(&item.path, item.before.as_bytes());
-                let section = match item.remove {
-                    true => section.removed(),
-                    false => section.changed(&item.before, &item.after),
+                let section = if item.remove {
+                    section.removed()
+                } else {
+                    section.changed(&item.before, &item.after)
                 };
                 match &item.to_path {
                     Some(destination) => section.moved(destination),
@@ -148,7 +155,9 @@ pub(crate) fn policy_subjects(cwd: &Path, tool: &str, input: &Value) -> Result<O
             let path = required(input, tool, "path")?;
             let bytes = read_existing(cwd, &path)?;
             let before = text(&path, &bytes)?;
-            let replacements = input.get("replacements").ok_or("replacements are required")?;
+            let replacements = input
+                .get("replacements")
+                .ok_or("replacements are required")?;
             let after = super::replaced(&before, replacements)?;
             vec![Section::new(&path, &bytes).changed(&before, &after)]
         }

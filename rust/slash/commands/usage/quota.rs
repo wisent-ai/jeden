@@ -38,11 +38,13 @@ fn reset_suffix(now: u64, resets_at_ms: Option<u64>) -> String {
     let Some(ahead) = std::num::NonZeroU64::new(reset.saturating_sub(now)) else {
         return " · resets soon".into();
     };
-    let counted = i64::try_from(ahead.get()).map_err(|error| error.to_string()).and_then(|millis| {
-        jiff::SignedDuration::from_millis(millis)
-            .round(jiff::Unit::Minute)
-            .map_err(|error| error.to_string())
-    });
+    let counted = i64::try_from(ahead.get())
+        .map_err(|error| error.to_string())
+        .and_then(|millis| {
+            jiff::SignedDuration::from_millis(millis)
+                .round(jiff::Unit::Minute)
+                .map_err(|error| error.to_string())
+        });
     match counted {
         Ok(duration) if duration.is_zero() => " · resets soon".into(),
         Ok(duration) => format!(" · resets in {duration:#}"),
@@ -53,7 +55,10 @@ fn reset_suffix(now: u64, resets_at_ms: Option<u64>) -> String {
 /// Badge (percent free) and amount text for one bucket; buckets without a
 /// limit render `unmetered`.
 fn bucket_amount(bucket: &QuotaBucket) -> (Option<String>, String) {
-    match (bucket.remaining, bucket.limit.and_then(std::num::NonZeroU64::new)) {
+    match (
+        bucket.remaining,
+        bucket.limit.and_then(std::num::NonZeroU64::new),
+    ) {
         (Some(remaining), Some(limit)) => (
             Some(format!("{}%", percent_free(remaining, limit.get()))),
             format!("{remaining}/{limit} remaining"),
@@ -125,15 +130,15 @@ pub(super) fn quota_rows() -> Vec<PickerItem> {
     for (provider, mut rows) in groups {
         // Most constrained subscription first; unreported amounts sort last.
         rows.sort_by(|left, right| {
-            (left.remaining.is_none(), left.remaining, &left.label)
-                .cmp(&(right.remaining.is_none(), right.remaining, &right.label))
+            (left.remaining.is_none(), left.remaining, &left.label).cmp(&(
+                right.remaining.is_none(),
+                right.remaining,
+                &right.label,
+            ))
         });
         let exhausted = rows.iter().any(|row| row.exhausted);
         let mut header = display_row(format!("── {provider} ({}) ──", rows.len()));
-        header.badge = Some(match exhausted {
-            true => "✖".into(),
-            false => "✔".into(),
-        });
+        header.badge = Some(if exhausted { "✖" } else { "✔" }.into());
         items.push(header);
         items.extend(rows.into_iter().map(|row| {
             let mut item = display_row(row.label).detail(row.detail);
