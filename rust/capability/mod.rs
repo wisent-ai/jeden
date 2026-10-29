@@ -5,22 +5,16 @@
 //! directory is served from, the questions callers ask of it, and the commands
 //! this build ships with.
 
+/// The capability registry document version this build publishes
+/// (https://github.com/wisent-ai/jeden/blob/main/README.md#capability-registry).
 pub const REGISTRY_VERSION: u32 = 2;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RegistryError {
-    LockPoisoned,
-}
-
-impl std::fmt::Display for RegistryError {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::LockPoisoned => formatter.write_str("capability registry rebuild lock poisoned"),
-        }
-    }
-}
-
-impl std::error::Error for RegistryError {}
+/// The generation of the empty registry published before the first rebuild,
+/// which no published rebuild carries
+/// (https://github.com/wisent-ai/jeden/blob/main/README.md#capability-registry).
+pub(crate) const EMPTY_GENERATION: u64 = 0;
+/// The step each published rebuild adds to the generation
+/// (https://github.com/wisent-ai/jeden/blob/main/README.md#capability-registry).
+pub(crate) const GENERATION_STEP: u64 = 1;
 
 mod builtin;
 mod descriptor;

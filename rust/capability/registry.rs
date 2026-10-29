@@ -10,7 +10,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 
 use super::builtin::{builtin_slash_descriptors, file_slash_descriptors, native_view_descriptors};
 use super::shapes::CapabilityKind;
-use super::{CapabilityDescriptor, RegistryError, REGISTRY_VERSION};
+use super::{CapabilityDescriptor, EMPTY_GENERATION, GENERATION_STEP, REGISTRY_VERSION};
 use crate::capability::shapes::CapabilityHealth;
 use crate::capability::shapes::FunctionTarget;
 use std::collections::BTreeMap;
@@ -38,7 +38,7 @@ impl CapabilitySnapshot {
     pub(super) fn empty() -> Self {
         Self {
             registry_version: REGISTRY_VERSION,
-            generation: 0,
+            generation: EMPTY_GENERATION,
             cwd: PathBuf::new(),
             descriptors: Arc::from([]),
             diagnostics: Arc::from([]),
@@ -71,18 +71,27 @@ static SNAPSHOT: LazyLock<ArcSwapOption<CapabilitySnapshot>> = LazyLock::new(Arc
 static REBUILD: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 static DIRTY: AtomicBool = AtomicBool::new(true);
 
+/// The snapshot last published; before the first rebuild, a registry that
+/// holds nothing.
 pub fn snapshot() -> Arc<CapabilitySnapshot> {
-    SNAPSHOT
-        .load_full()
-        .unwrap_or_else(|| Arc::new(CapabilitySnapshot::empty()))
+    match SNAPSHOT.load_full() {
+        Some(published) => published,
+        None => Arc::new(CapabilitySnapshot::empty()),
+    }
 }
 
 pub fn invalidate() {
     DIRTY.store(true, Ordering::Release);
 }
 
+/// The directory a snapshot is keyed by. A directory that cannot be resolved
+/// is keyed as given: the key only decides whether a published snapshot is
+/// reused for it.
 fn canonical(cwd: &Path) -> PathBuf {
-    cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf())
+    match cwd.canonicalize() {
+        Ok(resolved) => resolved,
+        Err(_unresolved) => cwd.to_path_buf(),
+    }
 }
 
 pub fn for_cwd(cwd: &Path) -> Arc<CapabilitySnapshot> {
@@ -91,15 +100,28 @@ pub fn for_cwd(cwd: &Path) -> Arc<CapabilitySnapshot> {
     if !DIRTY.load(Ordering::Acquire) && current.cwd == cwd {
         return current;
     }
-    refresh(&cwd).unwrap_or(current)
+    refresh(&cwd)
 }
 
-pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
-    let _guard = REBUILD.lock().map_err(|_| RegistryError::LockPoisoned)?;
+/// Rebuild and publish the snapshot for `cwd`. The rebuild lock guards no
+/// data, only that one rebuild runs at a time, and publication is one atomic
+/// swap; a rebuild that panicked left nothing half-written, so its poisoned
+/// guard is taken as it stands rather than refusing every later rebuild and
+/// serving another directory's capabilities.
+pub fn refresh(cwd: &Path) -> Arc<CapabilitySnapshot> {
+    let _guard = match stado_wait::blocking(
+        stado_wait::Kind::Lock,
+        "the capability registry rebuild",
+        "this process",
+        || REBUILD.lock(),
+    ) {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
     let cwd = canonical(cwd);
     let previous = snapshot();
     if !DIRTY.load(Ordering::Acquire) && previous.cwd == cwd {
-        return Ok(previous);
+        return previous;
     }
     let mut candidates = Vec::new();
     candidates.extend(crate::tools::builtin_capability_descriptors());
@@ -148,14 +170,14 @@ pub fn refresh(cwd: &Path) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
         .operation("refresh")
         .operation("status"),
     );
-    build_and_publish(cwd, previous.generation.saturating_add(1), candidates)
+    build_and_publish(cwd, previous.generation.saturating_add(GENERATION_STEP), candidates)
 }
 
 fn build_and_publish(
     cwd: PathBuf,
     generation: u64,
     candidates: Vec<CapabilityDescriptor>,
-) -> Result<Arc<CapabilitySnapshot>, RegistryError> {
+) -> Arc<CapabilitySnapshot> {
     let mut accepted = Vec::with_capacity(candidates.len());
     let mut diagnostics = Vec::new();
     let mut by_id = BTreeMap::new();
@@ -172,7 +194,7 @@ fn build_and_publish(
             });
             continue;
         }
-        if descriptor.health_checked_at == 0 {
+        if descriptor.health_checked_at == EMPTY_GENERATION {
             descriptor.health_checked_at = generation;
             descriptor.health_evidence_id =
                 format!("registry:generation-{generation}:{}:health", descriptor.id);
@@ -216,5 +238,5 @@ fn build_and_publish(
     });
     SNAPSHOT.store(Some(Arc::clone(&built)));
     DIRTY.store(false, Ordering::Release);
-    Ok(built)
+    built
 }
