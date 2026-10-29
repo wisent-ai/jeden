@@ -60,7 +60,10 @@ fn collect_flags(line: &str, flags: &mut Vec<FlagSpec>) {
 /// `list path get set reset`.
 fn extract_actions(line: &str) -> Vec<String> {
     let mut actions = Vec::new();
-    let Some((at, opener)) = line.char_indices().find(|(_at, ch)| matches!(ch, '[' | '<')) else {
+    let Some((at, opener)) = line
+        .char_indices()
+        .find(|(_at, ch)| matches!(ch, '[' | '<'))
+    else {
         return actions;
     };
     let start = at + opener.len_utf8();

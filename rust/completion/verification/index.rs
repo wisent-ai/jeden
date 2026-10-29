@@ -94,9 +94,9 @@ impl EvidenceIndex {
         stamp: &str,
     ) -> Result<bool, String> {
         let (receipt, independent) = self.get(reference)?;
-        let recorded = receipt["timestamp"].as_str().ok_or_else(|| {
-            format!("tool evidence {} records no timestamp", reference.event_id)
-        })?;
+        let recorded = receipt["timestamp"]
+            .as_str()
+            .ok_or_else(|| format!("tool evidence {} records no timestamp", reference.event_id))?;
         let at = recorded.parse::<u64>().map_err(|error| {
             format!(
                 "tool evidence {} timestamp {recorded} is not a unix stamp: {error}",

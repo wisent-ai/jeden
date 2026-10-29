@@ -43,7 +43,13 @@ pub(crate) fn prepare(args: &Args, session_path: &Path) -> Result<RelaunchPlan, 
     let cargo = cargo();
     let mut metadata = Command::new(&cargo);
     metadata
-        .args(["metadata", "--format-version", "1", "--no-deps", "--manifest-path"])
+        .args([
+            "metadata",
+            "--format-version",
+            "1",
+            "--no-deps",
+            "--manifest-path",
+        ])
         .arg(&manifest);
     let metadata = stado_wait::output(&mut metadata)
         .map_err(|error| format!("failed to start cargo metadata: {error}"))?;

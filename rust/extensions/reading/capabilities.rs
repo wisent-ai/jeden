@@ -24,7 +24,10 @@ fn loaded_health(healthy: bool, error: Option<&String>, what: &Path) -> Capabili
     match (healthy, error) {
         (true, _) => CapabilityHealth::healthy(),
         (false, Some(error)) => CapabilityHealth::unavailable(error.clone()),
-        (false, None) => unreachable!("{} is unhealthy, and its loader keeps the cause", what.display()),
+        (false, None) => unreachable!(
+            "{} is unhealthy, and its loader keeps the cause",
+            what.display()
+        ),
     }
 }
 
@@ -189,7 +192,11 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         .iter()
         .filter(|capability| capability.carried)
     {
-        let health = loaded_health(capability.healthy, capability.error.as_ref(), &capability.path);
+        let health = loaded_health(
+            capability.healthy,
+            capability.error.as_ref(),
+            &capability.path,
+        );
         out.push(
             RegistryDescriptor::new(
                 format!(
@@ -221,7 +228,11 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Result<Vec<RegistryDescripto
         .iter()
         .filter(|capability| capability.active || !capability.healthy)
     {
-        let health = loaded_health(capability.healthy, capability.error.as_ref(), &capability.path);
+        let health = loaded_health(
+            capability.healthy,
+            capability.error.as_ref(),
+            &capability.path,
+        );
         out.push(
             RegistryDescriptor::new(
                 format!("{}/{}", capability.kind, capability.id),

@@ -201,8 +201,9 @@ pub(super) fn resolve(base: &str, reference: &str) -> Result<String, String> {
         return Ok(reference.into());
     }
     if base.starts_with("https://") {
-        let url = reqwest::Url::parse(base)
-            .map_err(|error| format!("{base} is not a URL to resolve {reference} against: {error}"))?;
+        let url = reqwest::Url::parse(base).map_err(|error| {
+            format!("{base} is not a URL to resolve {reference} against: {error}")
+        })?;
         return url
             .join(reference)
             .map(|joined| joined.to_string())

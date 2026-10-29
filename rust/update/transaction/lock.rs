@@ -23,7 +23,10 @@ impl UpdateLock {
             .write(true)
             .open(&paths.lock)
             .map_err(|error| {
-                format!("cannot open the update lock {}: {error}", paths.lock.display())
+                format!(
+                    "cannot open the update lock {}: {error}",
+                    paths.lock.display()
+                )
             })?;
         match file.try_lock() {
             Ok(()) => {}

@@ -70,10 +70,9 @@ pub(crate) fn update_source_plugins(
         .iter()
         .enumerate()
         .map(|(at, p)| {
-            let name = p
-                .get("name")
-                .and_then(Value::as_str)
-                .ok_or_else(|| format!("the {name} catalogue lists plugin #{at} without a name: {p}"))?;
+            let name = p.get("name").and_then(Value::as_str).ok_or_else(|| {
+                format!("the {name} catalogue lists plugin #{at} without a name: {p}")
+            })?;
             Ok(json!({
                 "name": name,
                 "description": p.get("description").and_then(Value::as_str),
@@ -133,7 +132,9 @@ pub(crate) fn split_plugin_id(id: &str) -> Result<(String, String), String> {
 /// Parse `install`/`upgrade` flags: `--force`, `--scope <user|project>`, and the
 /// remaining positional targets. `--scope` without a value is refused, never
 /// read as no scope.
-pub(crate) fn parse_marketplace_flags(argv: &[String]) -> Result<(bool, Option<String>, Vec<String>), String> {
+pub(crate) fn parse_marketplace_flags(
+    argv: &[String],
+) -> Result<(bool, Option<String>, Vec<String>), String> {
     let mut force = false;
     let mut scope = None;
     let mut rest = Vec::new();
@@ -172,9 +173,12 @@ pub(crate) fn production_service(scope_dir: &Path) -> MarketplaceService {
 /// is kept in the scope's plugin registry, which is read here too, so a
 /// disabled plugin's commands and hooks are not loaded.
 pub(crate) fn installed_entries_for_scope(dir: &Path) -> Result<Vec<Value>, String> {
-    let active = production_service(dir)
-        .active_packages()
-        .map_err(|cause| format!("the installed plugins of {} cannot be read: {cause}", dir.display()))?;
+    let active = production_service(dir).active_packages().map_err(|cause| {
+        format!(
+            "the installed plugins of {} cannot be read: {cause}",
+            dir.display()
+        )
+    })?;
     let toggles = plugin_registry(dir)?;
     Ok(active
         .into_iter()

@@ -29,7 +29,10 @@ pub(super) fn relative_age(started: &str) -> String {
         .largest(Unit::Day)
         .smallest(Unit::Second)
         .days_are_24_hours();
-    match Timestamp::now().since(at).and_then(|span| span.round(rounding)) {
+    match Timestamp::now()
+        .since(at)
+        .and_then(|span| span.round(rounding))
+    {
         Ok(span) => format!("{span:#}"),
         Err(error) => format!("age unreadable: {error}"),
     }

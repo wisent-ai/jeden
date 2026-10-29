@@ -25,9 +25,12 @@ pub(crate) fn mcp_native_tool(
         return Some(Err(error));
     }
     match crate::tools::native_mcp_tool_target(runtime.cwd, tool) {
-        Ok(Some((server, native_tool))) => {
-            Some(crate::mcp::call_tool(runtime.cwd, &server, &native_tool, input.clone()))
-        }
+        Ok(Some((server, native_tool))) => Some(crate::mcp::call_tool(
+            runtime.cwd,
+            &server,
+            &native_tool,
+            input.clone(),
+        )),
         Ok(None) => None,
         Err(error) => Some(Err(format!("MCP tool {tool} cannot be resolved: {error}"))),
     }

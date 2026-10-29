@@ -125,7 +125,8 @@ impl ChatMemory {
             return Ok(());
         };
         let chat = chat_of(&settings, cwd, session_dir)?;
-        if !crate::tool_runtime::runtime_ops::platform::presence::present(Log::at(&chat.dir).dir())? {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(Log::at(&chat.dir).dir())?
+        {
             return Ok(());
         }
         let _owner = own_chat(&chat)?;

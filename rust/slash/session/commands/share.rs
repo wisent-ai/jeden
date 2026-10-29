@@ -95,7 +95,8 @@ pub(crate) fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<Stri
     }
     let created_at = now_text()?;
     let id = format!("rule-{created_at}");
-    let rule = format!("When this situation recurs, avoid the behavior described here: {complaint}");
+    let rule =
+        format!("When this situation recurs, avoid the behavior described here: {complaint}");
     let record = json!({
         "id": id,
         "kind": "omfg-rule",
@@ -113,7 +114,10 @@ pub(crate) fn handle_omfg(args: &str, context: &SlashContext<'_>) -> Result<Stri
         .open(&file)
         .map_err(|error| format!("{} cannot be opened for appending: {error}", file.display()))?;
     writeln!(out, "{line}").map_err(|error| {
-        format!("rule {id} cannot be appended to {}: {error}", file.display())
+        format!(
+            "rule {id} cannot be appended to {}: {error}",
+            file.display()
+        )
     })?;
     Ok(format!(
         "Forged local rule {}.\nRules file: {}\nRule: {}",

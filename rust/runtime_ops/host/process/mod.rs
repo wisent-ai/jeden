@@ -217,20 +217,20 @@ impl ProcessManager {
                 preserve_descendants,
             )?;
             drop(progress_tx);
-            let stdin_result = stdin_writer
-                .join()
-                .map_err(|payload| crate::panicked::refusal("managed process stdin writer", &*payload))?;
+            let stdin_result = stdin_writer.join().map_err(|payload| {
+                crate::panicked::refusal("managed process stdin writer", &*payload)
+            })?;
             if let Err(error) = stdin_result {
                 if reason == TerminationReason::Completed {
                     return Err(format!("failed writing process stdin: {error}"));
                 }
             }
-            let stdout = stdout_reader
-                .join()
-                .map_err(|payload| crate::panicked::refusal("managed stdout reader", &*payload))??;
-            let stderr = stderr_reader
-                .join()
-                .map_err(|payload| crate::panicked::refusal("managed stderr reader", &*payload))??;
+            let stdout = stdout_reader.join().map_err(|payload| {
+                crate::panicked::refusal("managed stdout reader", &*payload)
+            })??;
+            let stderr = stderr_reader.join().map_err(|payload| {
+                crate::panicked::refusal("managed stderr reader", &*payload)
+            })??;
             drain_progress(context, &progress_rx);
             Ok(ManagedProcessResult {
                 status,

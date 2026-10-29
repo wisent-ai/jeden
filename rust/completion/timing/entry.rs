@@ -20,7 +20,10 @@ pub(super) enum Outcome {
     Open,
     Done(Measured),
     /// Verified complete, but its time cannot be measured; says why.
-    Unmeasured { completed_at: u64, reason: String },
+    Unmeasured {
+        completed_at: u64,
+        reason: String,
+    },
     /// Closed without an accepted review: every task was cancelled.
     Cancelled,
 }
@@ -55,7 +58,10 @@ impl<'a> Entry<'a> {
                 let completed_at = seconds(request, "completedAt", stamp)?;
                 match measure(request, completed_at, estimated_at, seconds_estimated) {
                     Ok(measured) => Outcome::Done(measured),
-                    Err(reason) => Outcome::Unmeasured { completed_at, reason },
+                    Err(reason) => Outcome::Unmeasured {
+                        completed_at,
+                        reason,
+                    },
                 }
             }
             None if request.coverage_verified => Outcome::Cancelled,
@@ -87,7 +93,9 @@ impl<'a> Entry<'a> {
         let (measured, state, reason) = match &self.outcome {
             Outcome::Open => (None, "open", None),
             Outcome::Cancelled => (None, "cancelled", None),
-            Outcome::Done(measured) if measured.elapsed <= self.estimate => (Some(measured), "on_time", None),
+            Outcome::Done(measured) if measured.elapsed <= self.estimate => {
+                (Some(measured), "on_time", None)
+            }
             Outcome::Done(measured) => (Some(measured), "late", None),
             Outcome::Unmeasured { reason, .. } => (None, "unmeasurable", Some(reason)),
         };
@@ -114,7 +122,11 @@ impl<'a> Entry<'a> {
                     self.estimated_at
                 ),
                 Some(spent) => match self.due_at.checked_sub(now) {
-                    Some(left) => format!("{estimate} · {} so far, {} left", duration(spent), duration(left)),
+                    Some(left) => format!(
+                        "{estimate} · {} so far, {} left",
+                        duration(spent),
+                        duration(left)
+                    ),
                     None => format!(
                         "{estimate} · {} so far, {} past the estimate",
                         duration(spent),
@@ -128,7 +140,9 @@ impl<'a> Entry<'a> {
                 duration(measured.elapsed),
                 self.verdict(measured, false)
             ),
-            Outcome::Unmeasured { reason, .. } => format!("{estimate} · verified complete, not measurable: {reason}"),
+            Outcome::Unmeasured { reason, .. } => {
+                format!("{estimate} · verified complete, not measurable: {reason}")
+            }
         }
     }
 
@@ -140,10 +154,14 @@ impl<'a> Entry<'a> {
         match (measured.elapsed.cmp(&self.estimate), polish) {
             (Ordering::Equal, false) => "as estimated".into(),
             (Ordering::Less, false) => format!("{spread} under the estimate"),
-            (Ordering::Greater, false) => format!("{spread} over the estimate ({ratio:.2}× the estimate)"),
+            (Ordering::Greater, false) => {
+                format!("{spread} over the estimate ({ratio:.2}× the estimate)")
+            }
             (Ordering::Equal, true) => "zgodnie z estymacją".into(),
             (Ordering::Less, true) => format!("{spread} poniżej estymacji"),
-            (Ordering::Greater, true) => format!("{spread} ponad estymację ({ratio:.2}× estymacji)"),
+            (Ordering::Greater, true) => {
+                format!("{spread} ponad estymację ({ratio:.2}× estymacji)")
+            }
         }
     }
 
@@ -152,22 +170,38 @@ impl<'a> Entry<'a> {
         let subject = several.then(|| first_line(&self.request.prompt));
         let tail = match (&self.outcome, polish) {
             (Outcome::Done(measured), false) => {
-                format!("done in {}, {}", duration(measured.elapsed), self.verdict(measured, false))
+                format!(
+                    "done in {}, {}",
+                    duration(measured.elapsed),
+                    self.verdict(measured, false)
+                )
             }
             (Outcome::Done(measured), true) => {
-                format!("ukończono w {}, {}", duration(measured.elapsed), self.verdict(measured, true))
+                format!(
+                    "ukończono w {}, {}",
+                    duration(measured.elapsed),
+                    self.verdict(measured, true)
+                )
             }
-            (Outcome::Unmeasured { reason, .. }, false) => format!("verified complete, not measurable: {reason}"),
-            (Outcome::Unmeasured { reason, .. }, true) => format!("ukończono, czasu nie można zmierzyć: {reason}"),
+            (Outcome::Unmeasured { reason, .. }, false) => {
+                format!("verified complete, not measurable: {reason}")
+            }
+            (Outcome::Unmeasured { reason, .. }, true) => {
+                format!("ukończono, czasu nie można zmierzyć: {reason}")
+            }
             (Outcome::Open, false) => "not completed yet".into(),
             (Outcome::Open, true) => "jeszcze nieukończone".into(),
             (Outcome::Cancelled, false) => "cancelled before completion".into(),
             (Outcome::Cancelled, true) => "anulowano przed ukończeniem".into(),
         };
         match (subject, polish) {
-            (Some(subject), true) => format!("Czas ukończenia „{subject}”: estymacja {estimate}, {tail}."),
+            (Some(subject), true) => {
+                format!("Czas ukończenia „{subject}”: estymacja {estimate}, {tail}.")
+            }
             (None, true) => format!("Czas ukończenia: estymacja {estimate}, {tail}."),
-            (Some(subject), false) => format!("Time to completion of “{subject}”: estimated {estimate}, {tail}."),
+            (Some(subject), false) => {
+                format!("Time to completion of “{subject}”: estimated {estimate}, {tail}.")
+            }
             (None, false) => format!("Time to completion: estimated {estimate}, {tail}."),
         }
     }
@@ -176,7 +210,12 @@ impl<'a> Entry<'a> {
 /// The time a request took from its estimate to its verified completion; a
 /// completion stamped before the estimate, which only a clock set back
 /// between the two can produce, is refused with both stamps.
-fn measure(request: &WorkRequest, completed_at: u64, estimated_at: u64, estimate: u64) -> Result<Measured, String> {
+fn measure(
+    request: &WorkRequest,
+    completed_at: u64,
+    estimated_at: u64,
+    estimate: u64,
+) -> Result<Measured, String> {
     let elapsed = completed_at.checked_sub(estimated_at).ok_or_else(|| {
         format!(
             "request {} was verified complete at {completed_at}, before its estimate was recorded at {estimated_at}: the clock was set back between them",
@@ -189,7 +228,11 @@ fn measure(request: &WorkRequest, completed_at: u64, estimated_at: u64, estimate
             request.id
         )
     })?;
-    Ok(Measured { completed_at, elapsed, difference })
+    Ok(Measured {
+        completed_at,
+        elapsed,
+        difference,
+    })
 }
 
 /// A request is named, when one answer reports several, by the first line of

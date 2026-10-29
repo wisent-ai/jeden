@@ -30,7 +30,10 @@ pub(in crate::agent) fn action_to_value(action: &Action) -> Value {
     // Each variant written field by field, in the shape serde's tag gives
     // it, so no encoding step can fail on the way to the transcript.
     match action {
-        Action::Final { text, report: Some(report) } => {
+        Action::Final {
+            text,
+            report: Some(report),
+        } => {
             json!({ "action": "final", "text": text, "report": report })
         }
         Action::Final { text, report: None } => json!({ "action": "final", "text": text }),

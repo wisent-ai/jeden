@@ -115,10 +115,12 @@ pub(crate) fn pty_resize(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
         .get("rows")
         .and_then(Value::as_u64)
         .ok_or("pty_resize requires integer rows")?;
-    let cols = u16::try_from(cols_value)
-        .map_err(|error| format!("pty_resize cols {cols_value} is not a terminal width: {error}"))?;
-    let rows = u16::try_from(rows_value)
-        .map_err(|error| format!("pty_resize rows {rows_value} is not a terminal height: {error}"))?;
+    let cols = u16::try_from(cols_value).map_err(|error| {
+        format!("pty_resize cols {cols_value} is not a terminal width: {error}")
+    })?;
+    let rows = u16::try_from(rows_value).map_err(|error| {
+        format!("pty_resize rows {rows_value} is not a terminal height: {error}")
+    })?;
     let session = pty::resize(&runtime.operation, &session_id, cols, rows)
         .map_err(|error| error.to_string())?;
     Ok(json!({

@@ -74,7 +74,9 @@ struct ExecutionOptions {
 fn emit(value: &impl Serialize, json: bool) -> Result<String, String> {
     let value = serde_json::to_value(value).map_err(|e| e.to_string())?;
     if json {
-        return serde_json::to_string_pretty(&value).map(|v| v + "\n").map_err(|e| e.to_string());
+        return serde_json::to_string_pretty(&value)
+            .map(|v| v + "\n")
+            .map_err(|e| e.to_string());
     }
     let Some(fields) = value.as_object() else {
         return Ok(format!("{value}\n"));
@@ -95,7 +97,9 @@ pub(super) fn command(args: &Args, mode: &Mode) -> Result<String, String> {
         Mode::State(id) => return emit(&Store::existing(id)?.saved()?, args.json),
         Mode::Resume(id) => {
             let store = Store::existing(id)?;
-            let request = store.get::<Request>("request")?.ok_or("stored request payload is missing")?;
+            let request = store
+                .get::<Request>("request")?
+                .ok_or("stored request payload is missing")?;
             (store, request, true)
         }
         Mode::Submit(path) => {

@@ -32,7 +32,9 @@ fn stored_table(table: &Value, key: &str, place: &str) -> Result<Map<String, Val
     match table.get(key) {
         None | Some(Value::Null) => Ok(Map::new()),
         Some(Value::Object(stored)) => Ok(stored.clone()),
-        Some(other) => Err(format!("{place}.{key} is {other}, not an object of settings")),
+        Some(other) => Err(format!(
+            "{place}.{key} is {other}, not an object of settings"
+        )),
     }
 }
 
@@ -45,7 +47,10 @@ fn browser_record_from(config: &Value) -> Result<BrowserRecord, String> {
         .map(str::to_string);
     Ok(BrowserRecord {
         mode,
-        updated_at: browser.get("updatedAt").and_then(Value::as_str).map(str::to_string),
+        updated_at: browser
+            .get("updatedAt")
+            .and_then(Value::as_str)
+            .map(str::to_string),
         launch: stored_table(&browser, "launch", "browser")?,
         profile: stored_table(&browser, "profile", "browser")?,
     })
@@ -81,9 +86,13 @@ pub(super) fn browser_picker(context: &SlashContext<'_>) -> PickerSpec {
         Err(error) => {
             return PickerSpec::new(
                 "Browser runtime",
-                vec![PickerItem::action("Show browser runtime status", "/browser status")
-                    .detail(format!("The stored browser preference cannot be read: {error}"))
-                    .badge("unreadable")],
+                vec![
+                    PickerItem::action("Show browser runtime status", "/browser status")
+                        .detail(format!(
+                            "The stored browser preference cannot be read: {error}"
+                        ))
+                        .badge("unreadable"),
+                ],
             )
         }
     };
@@ -168,7 +177,10 @@ pub(super) fn handle_browser(args: &str, context: &SlashContext<'_>) -> Result<S
     }
     let mut project = project_config_for_edit(context.cwd)?;
     let object = project.as_object_mut().ok_or_else(|| {
-        format!("{} does not hold a JSON object, so the preference is not written", file.display())
+        format!(
+            "{} does not hold a JSON object, so the preference is not written",
+            file.display()
+        )
     })?;
     let mut browser = Map::new();
     browser.insert("mode".into(), json!(verb));

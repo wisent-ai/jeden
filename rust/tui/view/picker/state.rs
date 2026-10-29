@@ -39,7 +39,10 @@ impl PickerState {
             .filter(|(_, item)| {
                 // Tab browsing applies only while not searching; a query
                 // always scans every category. The catch-all tab shows all.
-                if query.is_empty() && self.active_tab != CATCH_ALL_TAB && item.tab != self.active_tab {
+                if query.is_empty()
+                    && self.active_tab != CATCH_ALL_TAB
+                    && item.tab != self.active_tab
+                {
                     return false;
                 }
                 if query.is_empty() {

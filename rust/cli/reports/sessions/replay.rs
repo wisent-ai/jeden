@@ -116,8 +116,14 @@ pub(super) fn replay_entries(entries: Vec<LedgerEntry>) -> Result<Vec<Value>, St
                 // recorded without the summary or its message count cannot be
                 // replayed, and is refused rather than replayed as empty.
                 let invalid = || format!("ledger entry {} has an invalid compaction", entry.id);
-                let before = data.get("before").and_then(Value::as_u64).ok_or_else(invalid)?;
-                let summary = data.get("summary").and_then(Value::as_str).ok_or_else(invalid)?;
+                let before = data
+                    .get("before")
+                    .and_then(Value::as_u64)
+                    .ok_or_else(invalid)?;
+                let summary = data
+                    .get("summary")
+                    .and_then(Value::as_str)
+                    .ok_or_else(invalid)?;
                 messages = vec![
                     json!({ "role": "system", "content": format!("Prior conversation summary (compacted from {} messages):\n{}", before, summary), "_jedenNeedsBaseSystem": true }),
                 ];

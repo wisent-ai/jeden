@@ -178,7 +178,10 @@ fn current_job_mut<'a>(
 ) -> Result<&'a mut JobState, ProtocolError> {
     let job = current_job_mut_allow_cancelling(job, worker_id, attempt, fence)?;
     let Some(lease) = job.lease.as_ref() else {
-        return Err(ProtocolError::LeaseLost(format!("job {} has no active lease", job.job.id)));
+        return Err(ProtocolError::LeaseLost(format!(
+            "job {} has no active lease",
+            job.job.id
+        )));
     };
     if lease.expires_at <= now {
         return Err(ProtocolError::LeaseLost(format!(

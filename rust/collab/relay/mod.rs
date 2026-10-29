@@ -102,7 +102,9 @@ impl RelayStore {
                 .map_err(sql)?;
             // The event takes the place after the room's last one.
             let seq = i64::try_from(count)
-                .map_err(|error| format!("the room holds more events than the database counts: {error}"))?
+                .map_err(|error| {
+                    format!("the room holds more events than the database counts: {error}")
+                })?
                 .checked_add(i64::from(STEP))
                 .ok_or("collaboration event sequence exceeds the database integer range")?;
             let response_seq = usize::try_from(seq).map_err(|error| {
@@ -131,7 +133,11 @@ impl RelayStore {
         let room = room.to_owned();
         let since = match since.map(i64::try_from) {
             Some(Ok(since)) => Some(since),
-            Some(Err(error)) => return Err(format!("the cursor is beyond the database integer range: {error}")),
+            Some(Err(error)) => {
+                return Err(format!(
+                    "the cursor is beyond the database integer range: {error}"
+                ))
+            }
             None => None,
         };
         run_db(move |db| async move {
@@ -158,7 +164,11 @@ impl RelayStore {
                 .flatten();
             let next = match next.map(usize::try_from) {
                 Some(Ok(next)) => Some(next),
-                Some(Err(error)) => return Err(format!("the room's last sequence does not fit this host: {error}")),
+                Some(Err(error)) => {
+                    return Err(format!(
+                        "the room's last sequence does not fit this host: {error}"
+                    ))
+                }
                 None => None,
             };
             Ok((blobs, next))
@@ -196,7 +206,8 @@ impl RelayStore {
                         .update_column(token::Column::TokenHash)
                         .value(
                             token::Column::Generation,
-                            Expr::col((token::Entity, token::Column::Generation)).add(i64::from(STEP)),
+                            Expr::col((token::Entity, token::Column::Generation))
+                                .add(i64::from(STEP)),
                         )
                         .to_owned(),
                 )

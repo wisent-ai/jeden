@@ -18,8 +18,12 @@ impl MarketplaceService {
             .and_then(Path::parent)
             .ok_or("marketplace root must be nested under .jeden/plugins")?;
         let cas = jeden_root.join("cas");
-        LocalCas::open(&cas)
-            .map_err(|error| format!("the content store {} cannot be opened: {error}", cas.display()))
+        LocalCas::open(&cas).map_err(|error| {
+            format!(
+                "the content store {} cannot be opened: {error}",
+                cas.display()
+            )
+        })
     }
     pub(super) fn packages(&self) -> PathBuf {
         self.root.join("packages")
@@ -69,9 +73,9 @@ impl MarketplaceService {
                 bytes.len()
             ));
         }
-        let expected = expected_digest
-            .parse::<Digest>()
-            .map_err(|error| format!("artifact digest {expected_digest} is not a digest: {error}"))?;
+        let expected = expected_digest.parse::<Digest>().map_err(|error| {
+            format!("artifact digest {expected_digest} is not a digest: {error}")
+        })?;
         self.cas()?
             .put_verified(expected, bytes)
             .map_err(|error| format!("artifact {expected_digest} cannot be stored: {error}"))?;
@@ -80,22 +84,27 @@ impl MarketplaceService {
 
     pub(super) fn unpack_verified(&self, digest: Digest, destination: &Path) -> Result<(), String> {
         fs::create_dir_all(destination).map_err(|error| {
-            format!("the plugin directory {} cannot be created: {error}", destination.display())
+            format!(
+                "the plugin directory {} cannot be created: {error}",
+                destination.display()
+            )
         })?;
-        let stored = self
-            .cas()?
-            .get(digest)
-            .map_err(|error| format!("artifact {digest} cannot be read from the content store: {error}"))?;
+        let stored = self.cas()?.get(digest).map_err(|error| {
+            format!("artifact {digest} cannot be read from the content store: {error}")
+        })?;
         let mut archive = tar::Archive::new(Cursor::new(stored));
         for item in archive
             .entries()
             .map_err(|error| format!("artifact {digest} is not a tar archive: {error}"))?
         {
-            let mut item =
-                item.map_err(|error| format!("an entry of artifact {digest} cannot be read: {error}"))?;
+            let mut item = item.map_err(|error| {
+                format!("an entry of artifact {digest} cannot be read: {error}")
+            })?;
             let relative = item
                 .path()
-                .map_err(|error| format!("an entry path of artifact {digest} cannot be read: {error}"))?
+                .map_err(|error| {
+                    format!("an entry path of artifact {digest} cannot be read: {error}")
+                })?
                 .into_owned();
             if relative.is_absolute()
                 || relative

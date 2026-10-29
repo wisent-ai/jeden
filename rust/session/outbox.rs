@@ -43,7 +43,11 @@ impl TryFrom<String> for OutboxConsumer {
 
     /// The consumer `name` names; an unknown name is refused naming it.
     fn try_from(name: String) -> Result<Self, Self::Error> {
-        match OutboxConsumer::ALL.iter().copied().find(|consumer| consumer.name() == name) {
+        match OutboxConsumer::ALL
+            .iter()
+            .copied()
+            .find(|consumer| consumer.name() == name)
+        {
             Some(consumer) => Ok(consumer),
             None => Err(format!("{name} is not an outbox consumer")),
         }

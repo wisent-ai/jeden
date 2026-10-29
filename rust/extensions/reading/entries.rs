@@ -19,8 +19,12 @@ pub(crate) fn agent_dirs(cwd: &Path) -> Result<Vec<PathBuf>, String> {
 /// `pick`ed from each in precedence order. A registry that cannot be read is
 /// refused with its cause: read as no extensions, the models and providers
 /// they declare would vanish from the catalog with nothing said.
-fn declared<T: Clone>(cwd: &Path, pick: impl Fn(&super::super::HostExtension) -> &[T]) -> Result<Vec<T>, String> {
-    let registry = current(cwd).map_err(|cause| format!("the extension registry cannot be read: {cause}"))?;
+fn declared<T: Clone>(
+    cwd: &Path,
+    pick: impl Fn(&super::super::HostExtension) -> &[T],
+) -> Result<Vec<T>, String> {
+    let registry =
+        current(cwd).map_err(|cause| format!("the extension registry cannot be read: {cause}"))?;
     let mut extensions = registry
         .extensions
         .iter()
@@ -31,10 +35,15 @@ fn declared<T: Clone>(cwd: &Path, pick: impl Fn(&super::super::HostExtension) ->
             .cmp(&right.precedence)
             .then_with(|| left.source.cmp(&right.source))
     });
-    Ok(extensions.into_iter().flat_map(|extension| pick(extension).iter().cloned()).collect())
+    Ok(extensions
+        .into_iter()
+        .flat_map(|extension| pick(extension).iter().cloned())
+        .collect())
 }
 
-pub(crate) fn model_entries(cwd: &Path) -> Result<Vec<crate::control_plane::brama::ModelEntry>, String> {
+pub(crate) fn model_entries(
+    cwd: &Path,
+) -> Result<Vec<crate::control_plane::brama::ModelEntry>, String> {
     declared(cwd, |extension| &extension.models)
 }
 

@@ -79,7 +79,9 @@ pub(crate) fn handle_goal(args: &str, state: &mut ModeState) -> Result<String, S
                 return Ok("Goal budget disabled.".into());
             }
             let parsed = budget.parse::<f64>().map_err(|error| {
-                format!("Usage: /goal budget <positive-number|off> ({budget:?} is no number: {error})")
+                format!(
+                    "Usage: /goal budget <positive-number|off> ({budget:?} is no number: {error})"
+                )
             })?;
             // A normal, positive number: zero, negatives, infinities, NaN
             // and subnormal fractions are no budget.

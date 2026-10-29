@@ -6,12 +6,12 @@
 
 use super::super::super::platform::{native, threaded_pipe, PipeReader, ProcessSignal};
 use super::super::super::{BoundedOutput, OperationContext, OperationProgress};
+use super::control::{self, PtyControl, SharedControl};
 use super::{PtySessionMetadata, PtySessionState, DEFAULT_PTY_COLS, DEFAULT_PTY_ROWS};
 use crate::tool_runtime::runtime_ops::host::pty::PtyResult;
 use std::io;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
-use super::control::{self, PtyControl, SharedControl};
 
 /// How many bytes one read of the terminal takes: the size POSIX guarantees
 /// a pipe writes whole. <https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/limits.h.html>
@@ -43,13 +43,13 @@ impl PtyProcess {
                 state: PtySessionState::Live,
             },
         }));
-        Ok(Self {
-            control,
-            output,
-        })
+        Ok(Self { control, output })
     }
 
-    pub(super) fn initialize(&mut self, context: Option<&OperationContext<'_>>) -> Result<(), String> {
+    pub(super) fn initialize(
+        &mut self,
+        context: Option<&OperationContext<'_>>,
+    ) -> Result<(), String> {
         let (startup, ready_marker) = native().startup_handshake();
         {
             let mut control = control::lock(&self.control)?;
@@ -57,7 +57,10 @@ impl PtyProcess {
             if context.is_some_and(|context| context.cancellation().is_cancelled()) {
                 return Err("PTY startup cancelled before shell readiness".into());
             }
-            control.session.write_all(startup).map_err(|error| error.to_string())?;
+            control
+                .session
+                .write_all(startup)
+                .map_err(|error| error.to_string())?;
         }
         wait_for_bytes(self.output.as_mut(), ready_marker, &self.control, context)?;
         drain(self.output.as_mut())
@@ -81,10 +84,16 @@ impl PtyProcess {
             let mut control = control::lock(&self.control)?;
             control.require_live().map_err(|error| error.to_string())?;
             if context.cancellation().is_cancelled() {
-                return Err(format!("PTY session '{}' execution cancelled before command was written", control.metadata.session_id));
+                return Err(format!(
+                    "PTY session '{}' execution cancelled before command was written",
+                    control.metadata.session_id
+                ));
             }
             let frame = native().command_frame(input, control.session.process_id(), sequence);
-            control.session.write_all(&frame.bytes).map_err(|error| error.to_string())?;
+            control
+                .session
+                .write_all(&frame.bytes)
+                .map_err(|error| error.to_string())?;
             frame
         };
         let marker = frame.marker;
@@ -102,7 +111,9 @@ impl PtyProcess {
                 session.state = PtySessionState::Cancelled;
                 // These bytes were already read but held back in case they
                 // completed the frame marker. Cancellation must not lose them.
-                output.write_chunk(&pending).map_err(|error| error.to_string())?;
+                output
+                    .write_chunk(&pending)
+                    .map_err(|error| error.to_string())?;
                 let mut capture = output.finish().map_err(|e| e.to_string())?;
                 let interrupt = {
                     let mut control = control::lock(&self.control)?;
@@ -113,7 +124,9 @@ impl PtyProcess {
                     }
                 };
                 if let Err(error) = interrupt {
-                    capture.text.push_str(&format!("\njeden: the shell could not be interrupted: {error}"));
+                    capture.text.push_str(&format!(
+                        "\njeden: the shell could not be interrupted: {error}"
+                    ));
                 }
                 return Ok((
                     PtyResult {
@@ -132,7 +145,9 @@ impl PtyProcess {
                 Ok(count) => {
                     let read = &chunk[..count];
                     if read.is_empty() {
-                        if control::lock(&self.control)?.metadata.state == PtySessionState::Cancelled {
+                        if control::lock(&self.control)?.metadata.state
+                            == PtySessionState::Cancelled
+                        {
                             continue;
                         }
                         return Err("PTY shell exited before command completed".into());
@@ -194,7 +209,9 @@ impl PtyProcess {
 
     pub(super) fn terminate(&mut self) {
         match self.control.lock() {
-            Ok(mut control) => { control.terminate(PtySessionState::Ended); }
+            Ok(mut control) => {
+                control.terminate(PtySessionState::Ended);
+            }
             Err(poisoned) => {
                 eprintln!("jeden: PTY control lock poisoned during probe cleanup: {poisoned}; recovering its owned process to terminate it");
                 poisoned.into_inner().terminate(PtySessionState::Ended);
@@ -205,11 +222,14 @@ impl PtyProcess {
 
 impl crate::tool_runtime::runtime_ops::session::PersistentProcess for PtyProcess {
     fn retire(&mut self, cancelled: bool) {
-        super::registry::finish(&self.control, if cancelled {
-            PtySessionState::Cancelled
-        } else {
-            PtySessionState::Ended
-        });
+        super::registry::finish(
+            &self.control,
+            if cancelled {
+                PtySessionState::Cancelled
+            } else {
+                PtySessionState::Ended
+            },
+        );
     }
 }
 
@@ -224,7 +244,9 @@ fn wait_for_bytes(
 ) -> Result<(), String> {
     let mut pending = Vec::new();
     loop {
-        control::lock(shared)?.require_live().map_err(|error| error.to_string())?;
+        control::lock(shared)?
+            .require_live()
+            .map_err(|error| error.to_string())?;
         if context.is_some_and(|context| context.cancellation().is_cancelled()) {
             return Err("PTY startup cancelled before shell readiness".into());
         }
@@ -233,7 +255,9 @@ fn wait_for_bytes(
             Ok(count) => {
                 let read = &buffer[..count];
                 if read.is_empty() {
-                    control::lock(shared)?.require_live().map_err(|error| error.to_string())?;
+                    control::lock(shared)?
+                        .require_live()
+                        .map_err(|error| error.to_string())?;
                     return Err("PTY shell exited before it was ready".into());
                 }
                 pending.extend_from_slice(read);
@@ -264,8 +288,9 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 fn parse_marker_code(line: &[u8]) -> Result<i32, String> {
     let text = String::from_utf8_lossy(line);
     let code = text.trim_start_matches(':').trim();
-    code.parse()
-        .map_err(|error| format!("the PTY shell's completion marker states {code:?}, not an exit code: {error}"))
+    code.parse().map_err(|error| {
+        format!("the PTY shell's completion marker states {code:?}, not an exit code: {error}")
+    })
 }
 
 /// Read away what the shell printed while starting, up to what has arrived;
@@ -278,7 +303,11 @@ fn drain(output: &mut dyn PipeReader) -> Result<(), String> {
             Ok(_) => {}
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(()),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
-            Err(error) => return Err(format!("the PTY shell's startup output could not be read: {error}")),
+            Err(error) => {
+                return Err(format!(
+                    "the PTY shell's startup output could not be read: {error}"
+                ))
+            }
         }
     }
 }

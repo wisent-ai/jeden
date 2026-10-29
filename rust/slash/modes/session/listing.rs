@@ -42,7 +42,10 @@ fn first_task_in(reader: impl BufRead, transcript: &Path) -> Result<Option<Strin
         // A line that is not JSON is a damaged transcript, shown as such in the
         // picker with the line itself, never passed over on the way to the first task.
         let value = serde_json::from_str::<serde_json::Value>(&line).map_err(|error| {
-            format!("{}: a line is not a transcript event ({error}): {line}", transcript.display())
+            format!(
+                "{}: a line is not a transcript event ({error}): {line}",
+                transcript.display()
+            )
         })?;
         // A V2 line carries its event under payload; a legacy line is the
         // event itself.
@@ -72,7 +75,10 @@ fn user_text(payload: &serde_json::Value, transcript: &Path) -> Result<Option<St
         return Ok(None);
     };
     let said = UserEventData::deserialize(data).map_err(|error| {
-        format!("{}: a user event's data is not a user event: {error}", transcript.display())
+        format!(
+            "{}: a user event's data is not a user event: {error}",
+            transcript.display()
+        )
     })?;
     let found = [&said.task, &said.content, &said.text]
         .into_iter()
@@ -180,15 +186,28 @@ pub(super) fn session_items(session_root: &Path) -> Vec<PickerItem> {
 /// naming the root and the cause, so `/resume` does not answer success with
 /// a refusal in its text.
 pub(super) fn list_sessions(session_root: &Path) -> Result<String, String> {
-    let refused = |error: std::io::Error| format!("Sessions cannot be listed: {}: {error}", session_root.display());
+    let refused = |error: std::io::Error| {
+        format!(
+            "Sessions cannot be listed: {}: {error}",
+            session_root.display()
+        )
+    };
     let entries = match fs::read_dir(session_root) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok("No sessions found.".into()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok("No sessions found.".into())
+        }
         Err(error) => return Err(refused(error)),
     };
     let mut rows = Vec::new();
     for entry in entries {
-        rows.push(entry.map_err(&refused)?.file_name().to_string_lossy().to_string());
+        rows.push(
+            entry
+                .map_err(&refused)?
+                .file_name()
+                .to_string_lossy()
+                .to_string(),
+        );
     }
     if rows.is_empty() {
         return Ok("No sessions found.".into());

@@ -36,8 +36,8 @@ use session::{
     save_artifact, todo_tool,
 };
 
-pub use observed::execute;
 pub(crate) use edit::policy_subjects;
+pub use observed::execute;
 
 #[derive(Clone, Debug)]
 pub struct DynamicToolDescriptor {

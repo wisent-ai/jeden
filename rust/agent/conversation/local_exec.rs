@@ -96,7 +96,9 @@ fn format_local_result(result: &Value) -> String {
     let ok = match result.get("ok").and_then(Value::as_bool) {
         Some(ok) => ok,
         None => {
-            lines.push(format!("(the tool answered without saying whether it succeeded: {result})"));
+            lines.push(format!(
+                "(the tool answered without saying whether it succeeded: {result})"
+            ));
             return lines.join("\n");
         }
     };

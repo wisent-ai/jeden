@@ -23,9 +23,12 @@ pub(crate) fn fetch_url(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
     }
     // The server answers or the connection ends; a cancelled turn still stops
     // this read at the next chunk.
-    let client = crate::net::blocking_builder()
-        .build()
-        .map_err(|error| format!("fetch_url: the HTTP client cannot be built: {}", crate::control_plane::transport::describe_reqwest(error)))?;
+    let client = crate::net::blocking_builder().build().map_err(|error| {
+        format!(
+            "fetch_url: the HTTP client cannot be built: {}",
+            crate::control_plane::transport::describe_reqwest(error)
+        )
+    })?;
     let response = stado_wait::request_blocking(client.get(&url))
         .map_err(|error| format!("fetch_url {url}: {error}"))?;
     let status = response.status();

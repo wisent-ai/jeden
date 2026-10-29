@@ -124,7 +124,12 @@ pub(crate) fn discover_context(
     // Explicit sticky rules are load-bearing policy. Reserve their budget first,
     // while assigning their final precedence after discovered project files.
     let mut configured_entries = Vec::new();
-    append_configured_rules(&root, &mut budget, &mut configured_entries, &rules.always_apply)?;
+    append_configured_rules(
+        &root,
+        &mut budget,
+        &mut configured_entries,
+        &rules.always_apply,
+    )?;
     // An entry's precedence is its position: later entries apply over earlier.
     let mut entries = Vec::new();
     for directory in ancestor_chain(&root, &canonical_cwd) {

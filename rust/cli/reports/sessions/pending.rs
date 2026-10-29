@@ -6,8 +6,8 @@
 use super::ledger::append_ledger_entry_unlocked;
 use super::{parse_transcript, LedgerEntry, LEDGER_APPEND_LOCK};
 // The append lock guards `()`; see ledger.rs.
-use crate::panicked::held;
 use crate::cli::reports::sessions::ledger::append_ledger_entry;
+use crate::panicked::held;
 use serde_json::json;
 use serde_json::Value;
 use std::fs;

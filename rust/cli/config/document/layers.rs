@@ -160,7 +160,9 @@ pub(crate) fn config_texts<'a>(value: &'a Value, key: &str) -> Result<Vec<&'a st
                     .ok_or_else(|| format!("config {key} holds an entry that is not text: {entry}"))
             })
             .collect(),
-        other => Err(format!("config {key} must be a list of text; it holds {other}")),
+        other => Err(format!(
+            "config {key} must be a list of text; it holds {other}"
+        )),
     }
 }
 
@@ -176,9 +178,9 @@ pub(crate) fn config_set_value(value: &mut Value, key: &str, next: Value) -> Res
     let Some((last, prefix)) = parts.split_last() else {
         return Err("config key is required".into());
     };
-    let mut current = value
-        .as_object_mut()
-        .ok_or_else(|| format!("the configuration document is not an object, so {key} is not set"))?;
+    let mut current = value.as_object_mut().ok_or_else(|| {
+        format!("the configuration document is not an object, so {key} is not set")
+    })?;
     for (depth, part) in prefix.iter().enumerate() {
         let table = current
             .entry((*part).to_string())

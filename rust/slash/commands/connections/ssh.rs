@@ -38,7 +38,10 @@ fn ssh_host_value(target: &str, options: &[String]) -> Option<Value> {
 /// What a configured host entry connects to: the entry itself when it is a
 /// target, or its `host` field; an entry with neither says so.
 fn host_target(value: &Value) -> String {
-    match value.as_str().or_else(|| value.get("host").and_then(Value::as_str)) {
+    match value
+        .as_str()
+        .or_else(|| value.get("host").and_then(Value::as_str))
+    {
         Some(target) => target.to_string(),
         None => format!("no target recorded in {value}"),
     }
@@ -71,7 +74,9 @@ pub(crate) fn ssh_picker(context: &SlashContext<'_>) -> PickerSpec {
                     Ok(quoted) => quoted,
                     Err(error) => {
                         let mut unquotable = PickerItem::action(format!("Remove {name}"), "")
-                            .detail(format!("its name cannot be quoted for the command: {error}"))
+                            .detail(format!(
+                                "its name cannot be quoted for the command: {error}"
+                            ))
                             .disabled(true);
                         unquotable.command = None;
                         items.push(unquotable);

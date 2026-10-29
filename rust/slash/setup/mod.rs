@@ -45,10 +45,11 @@ struct SetupState {
 
 fn setup_state(context: &SlashContext<'_>) -> SetupState {
     let config = load_config(context.cwd);
-    let (model, model_error) = match crate::agent::selected_model(context.model, config.model.as_deref()) {
-        Ok(model) => (model, None),
-        Err(cause) => (None, Some(cause)),
-    };
+    let (model, model_error) =
+        match crate::agent::selected_model(context.model, config.model.as_deref()) {
+            Ok(model) => (model, None),
+            Err(cause) => (None, Some(cause)),
+        };
     let theme = config.ui.theme.clone();
     let (workspace, workspace_error) = match crate::cli::workspace::status(context.cwd) {
         Ok(Some(report)) => (Some(report.workspace), None),

@@ -50,7 +50,16 @@ fn private_v4() -> Ipv4Addr {
 fn nat64_address_carrying_a_private_ipv4_is_refused() {
     let [a, b, c, d] = private_v4().octets();
     // https://www.rfc-editor.org/rfc/rfc6052#section-2.1 : the well-known prefix, then the IPv4 address in the last 32 bits.
-    let nat64 = Ipv6Addr::new(0x64, 0xff9b, 0, 0, 0, 0, u16::from_be_bytes([a, b]), u16::from_be_bytes([c, d]));
+    let nat64 = Ipv6Addr::new(
+        0x64,
+        0xff9b,
+        0,
+        0,
+        0,
+        0,
+        u16::from_be_bytes([a, b]),
+        u16::from_be_bytes([c, d]),
+    );
     refused(IpAddr::V6(nat64));
 }
 
@@ -63,7 +72,16 @@ fn ipv4_mapped_private_address_is_refused() {
 fn six_to_four_address_is_refused() {
     let [a, b, c, d] = private_v4().octets();
     // https://www.rfc-editor.org/rfc/rfc3056#section-2 : the 6to4 prefix followed by the IPv4 address of the site.
-    let six_to_four = Ipv6Addr::new(0x2002, u16::from_be_bytes([a, b]), u16::from_be_bytes([c, d]), 0, 0, 0, 0, 1);
+    let six_to_four = Ipv6Addr::new(
+        0x2002,
+        u16::from_be_bytes([a, b]),
+        u16::from_be_bytes([c, d]),
+        0,
+        0,
+        0,
+        0,
+        1,
+    );
     refused(IpAddr::V6(six_to_four));
 }
 

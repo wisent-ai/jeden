@@ -17,8 +17,12 @@ pub fn recover(paths: &InstallPaths) -> Result<Option<String>, String> {
     };
     // A journal in another shape (another release's format included) is
     // refused naming the field serde could not read, never acted on.
-    let entry: Journal = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("invalid update journal {}: {error}", paths.journal.display()))?;
+    let entry: Journal = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "invalid update journal {}: {error}",
+            paths.journal.display()
+        )
+    })?;
     match entry.phase {
         Phase::Prepared | Phase::Staged => remove_present(&paths.stage, "interrupted stage")?,
         Phase::BackingUp | Phase::BackedUp => {

@@ -14,7 +14,11 @@ pub(super) struct GatewayProcess {
 
 impl GatewayProcess {
     pub(super) fn serving(lease: File, child: Child, gateway: Gateway) -> Self {
-        Self { _lease: lease, child, route: Ok(gateway) }
+        Self {
+            _lease: lease,
+            child,
+            route: Ok(gateway),
+        }
     }
 
     fn context(&self) -> &str {
@@ -37,7 +41,9 @@ pub(super) fn held() -> MutexGuard<'static, Option<GatewayProcess>> {
 /// Reap an observed exit before releasing its lease; an inspection refusal
 /// retains ownership and never publishes an unverified endpoint.
 pub(super) fn live(running: &mut Option<GatewayProcess>) -> Result<Option<Gateway>, String> {
-    let Some(owned) = running.as_mut() else { return Ok(None); };
+    let Some(owned) = running.as_mut() else {
+        return Ok(None);
+    };
     match owned.child.try_wait() {
         Ok(Some(status)) => {
             let process = owned.child.id();
@@ -77,36 +83,48 @@ pub(super) fn refusal() -> Option<String> {
 /// refused system operation is named separately, including its observed error.
 pub(super) fn end(child: &mut Child) -> Result<ExitStatus, String> {
     let process = child.id();
-    if let Some(status) = child.try_wait().map_err(|error| format!(
-        "try_wait for Jeden's own gateway process {process} before termination failed: {error}"
-    ))? {
+    if let Some(status) = child.try_wait().map_err(|error| {
+        format!(
+            "try_wait for Jeden's own gateway process {process} before termination failed: {error}"
+        )
+    })? {
         return Ok(status);
     }
-    child.kill().map_err(|error| format!(
-        "kill of Jeden's own gateway process {process} failed: {error}"
-    ))?;
+    child.kill().map_err(|error| {
+        format!("kill of Jeden's own gateway process {process} failed: {error}")
+    })?;
     stado_wait::blocking(
         stado_wait::Kind::Process,
         format!("Jeden's own gateway process {process} to end"),
         PROGRAM,
         || child.wait(),
-    ).map_err(|error| format!(
-        "wait to reap Jeden's own gateway process {process} failed: {error}"
-    ))
+    )
+    .map_err(|error| format!("wait to reap Jeden's own gateway process {process} failed: {error}"))
 }
 
 /// A failed cleanup stores the real child and lease without inventing a route.
 pub(super) fn ended(
-    mut child: Child, lease: File, cause: String, said: &[String],
+    mut child: Child,
+    lease: File,
+    cause: String,
+    said: &[String],
     running: &mut Option<GatewayProcess>,
 ) -> String {
     match end(&mut child) {
-        Ok(status) => format!("{cause}; it was stopped ({status}); it said: {}", said.join(" | ")),
+        Ok(status) => format!(
+            "{cause}; it was stopped ({status}); it said: {}",
+            said.join(" | ")
+        ),
         Err(error) => {
             let cause = format!(
-                "{cause}; it could not be stopped: {error}; it said: {}", said.join(" | ")
+                "{cause}; it could not be stopped: {error}; it said: {}",
+                said.join(" | ")
             );
-            *running = Some(GatewayProcess { _lease: lease, child, route: Err(cause.clone()) });
+            *running = Some(GatewayProcess {
+                _lease: lease,
+                child,
+                route: Err(cause.clone()),
+            });
             cause
         }
     }
@@ -116,7 +134,9 @@ pub(super) fn ended(
 /// observed termination; a refusal retains the initiating and cleanup causes.
 pub(crate) fn stop() -> Result<(), String> {
     let mut running = held();
-    let Some(owned) = running.as_mut() else { return Ok(()); };
+    let Some(owned) = running.as_mut() else {
+        return Ok(());
+    };
     end(&mut owned.child).map_err(|error| format!(
         "Jeden's own gateway process {} could not be stopped: {error}; recorded state: {}; its child and ownership lease remain held",
         owned.child.id(), owned.context()

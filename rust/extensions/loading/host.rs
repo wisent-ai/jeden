@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::mpsc;
 
-use super::host_stream::{drained, node_supports_typescript, read_stderr, read_stdout, HostEvent};
 use super::super::HOST;
+use super::host_stream::{drained, node_supports_typescript, read_stderr, read_stdout, HostEvent};
 use std::env;
 use std::path::PathBuf;
 

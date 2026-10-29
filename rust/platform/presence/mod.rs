@@ -25,6 +25,9 @@ pub fn remove_present(path: &Path, what: &str) -> Result<(), String> {
     match std::fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!("{what} {} cannot be removed: {error}", path.display())),
+        Err(error) => Err(format!(
+            "{what} {} cannot be removed: {error}",
+            path.display()
+        )),
     }
 }

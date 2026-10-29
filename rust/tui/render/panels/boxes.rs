@@ -64,8 +64,11 @@ pub(crate) fn input_prefix_width(width: usize) -> usize {
 /// the text, a gutter and a border. `None` when `width` leaves the text no
 /// column, and so is drawn unframed.
 pub(crate) fn frame_inner(width: usize) -> Option<usize> {
-    let chrome = visible_len(VERTICAL) + visible_len(GUTTER) + visible_len(GUTTER) + visible_len(VERTICAL);
-    width.checked_sub(chrome).filter(|inner| *inner > crate::tally::ORIGIN)
+    let chrome =
+        visible_len(VERTICAL) + visible_len(GUTTER) + visible_len(GUTTER) + visible_len(VERTICAL);
+    width
+        .checked_sub(chrome)
+        .filter(|inner| *inner > crate::tally::ORIGIN)
 }
 
 /// What a framed prompt draws before its first input row: the frame's
@@ -104,7 +107,11 @@ pub(crate) fn boxed(title: &str, rows: &[String], width: usize, color: bool) -> 
     out.push(format!(
         "{}{}{}",
         paint(BOTTOM_LEFT, BORDER, color),
-        paint(&HORIZONTAL.repeat(between_corners(width, BOTTOM_LEFT, BOTTOM_RIGHT)), BORDER, color),
+        paint(
+            &HORIZONTAL.repeat(between_corners(width, BOTTOM_LEFT, BOTTOM_RIGHT)),
+            BORDER,
+            color
+        ),
         paint(BOTTOM_RIGHT, BORDER, color),
     ));
     out
@@ -143,7 +150,11 @@ pub(crate) fn boxed_split(
     let label_width = if title_left { pane } else { right_width };
     let label = clamp_visible(&framed, label_width);
     let head_pad = label_width.saturating_sub(visible_len(&label));
-    let titled = format!("{}{}", paint(&label, "bold", color), HORIZONTAL.repeat(head_pad));
+    let titled = format!(
+        "{}{}",
+        paint(&label, "bold", color),
+        HORIZONTAL.repeat(head_pad)
+    );
     let (left_head, right_head) = if title_left {
         (titled, HORIZONTAL.repeat(right_width))
     } else {

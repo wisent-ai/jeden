@@ -98,10 +98,14 @@ fn collect(result: &mut Value, images: &mut Vec<Value>) -> Result<(), String> {
                 // fields, before the base64 content is taken out of them.
                 let prefix = format!("data:{mime};base64,");
                 let Some(Value::String(encoded)) = fields.remove("base64") else {
-                    return Err(format!("image tool result {named} base64 content is not a string"));
+                    return Err(format!(
+                        "image tool result {named} base64 content is not a string"
+                    ));
                 };
                 if encoded.is_empty() {
-                    return Err(format!("image tool result {named} has empty base64 content"));
+                    return Err(format!(
+                        "image tool result {named} has empty base64 content"
+                    ));
                 }
                 let url = format!("{prefix}{encoded}");
                 images.push(json!({"type": "image_url", "image_url": {"url": url}}));

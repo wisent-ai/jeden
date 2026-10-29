@@ -12,12 +12,12 @@ mod prompt;
 pub mod qr;
 
 use crate::tui::render::panels::boxes::{input_prefix_width, INPUT_PREFIX};
-use std::num::NonZeroUsize;
 use crate::tui::text::clamp_visible;
 use crate::tui::text::visible_len;
 pub(crate) use panels::{boxed, boxed_split, welcome_panel};
 pub(super) use panels::{complete_slash_input, slash_hint_panel, slash_matches};
 pub(crate) use prompt::compact_prompt;
+use std::num::NonZeroUsize;
 
 fn role_color(role: Role) -> &'static str {
     match role {
@@ -41,10 +41,15 @@ pub(super) fn format_message(message: &Message, width: usize, color: bool) -> Ve
     });
     let safe = sanitize_terminal_text(&message.text);
     let rows = safe.split('\n').map(str::to_string).collect::<Vec<_>>();
-    boxed(&title, &rows, width.max(usize::from(crate::tally::STEP)), color)
-        .into_iter()
-        .map(|line| paint(&line, role_color(message.role), color))
-        .collect()
+    boxed(
+        &title,
+        &rows,
+        width.max(usize::from(crate::tally::STEP)),
+        color,
+    )
+    .into_iter()
+    .map(|line| paint(&line, role_color(message.role), color))
+    .collect()
 }
 
 pub(super) fn place_editor_cursor(

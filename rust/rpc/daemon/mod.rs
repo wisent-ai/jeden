@@ -65,8 +65,9 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
         service: Arc<SessionService<B>>,
         config: HeadlessConfig,
     ) -> Result<Self, String> {
-        let reconnect = ReconnectTokens::new(config.reconnect_key.clone())
-            .map_err(|error| format!("the reconnect key cannot sign reconnect tokens: {error:?}"))?;
+        let reconnect = ReconnectTokens::new(config.reconnect_key.clone()).map_err(|error| {
+            format!("the reconnect key cannot sign reconnect tokens: {error:?}")
+        })?;
         Ok(Self {
             tls,
             directory,

@@ -31,13 +31,19 @@ fn browser_option_value(key: &str, value: &str) -> Value {
 /// object on the way. A parent that an earlier option already set to a
 /// value, or a whole option already given, is refused naming it: replacing
 /// it silently dropped what the operator typed first.
-fn insert_nested_object(target: &mut serde_json::Map<String, Value>, path: &[&str], value: Value) -> Result<(), String> {
+fn insert_nested_object(
+    target: &mut serde_json::Map<String, Value>,
+    path: &[&str],
+    value: Value,
+) -> Result<(), String> {
     let Some((key, parents)) = path.split_last() else {
         return Err("a browser option names no key".to_string());
     };
     let mut cursor = target;
     for part in parents {
-        let next = cursor.entry((*part).to_string()).or_insert_with(|| json!({}));
+        let next = cursor
+            .entry((*part).to_string())
+            .or_insert_with(|| json!({}));
         // Read before the mutable borrow below, which lives on as `cursor`.
         if !next.is_object() {
             return Err(format!(
@@ -46,12 +52,18 @@ fn insert_nested_object(target: &mut serde_json::Map<String, Value>, path: &[&st
             ));
         }
         let Some(object) = next.as_object_mut() else {
-            return Err(format!("browser option {} cannot open {part}", path.join(".")));
+            return Err(format!(
+                "browser option {} cannot open {part}",
+                path.join(".")
+            ));
         };
         cursor = object;
     }
     if let Some(earlier) = cursor.get(*key) {
-        return Err(format!("browser option {} is given twice (first as {earlier})", path.join(".")));
+        return Err(format!(
+            "browser option {} is given twice (first as {earlier})",
+            path.join(".")
+        ));
     }
     cursor.insert((*key).to_string(), value);
     Ok(())

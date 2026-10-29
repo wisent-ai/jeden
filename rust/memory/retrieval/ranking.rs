@@ -240,10 +240,10 @@ fn rank(
         rows.iter()
             .filter_map(|(id, (lexical, _, _))| lexical.map(|score| (id.clone(), score))),
     ));
-    let semantic = positions(descending(
-        rows.keys()
-            .filter_map(|id| semantic.get(id).map(|score| (id.clone(), *score))),
-    ));
+    let semantic =
+        positions(descending(rows.keys().filter_map(|id| {
+            semantic.get(id).map(|score| (id.clone(), *score))
+        })));
     let confidence = positions(descending(
         rows.iter()
             .map(|(id, (_, confidence, _))| (id.clone(), *confidence)),

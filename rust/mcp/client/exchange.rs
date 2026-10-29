@@ -96,15 +96,16 @@ impl McpClient {
                 }
                 match content_type.as_deref() {
                     Some(declared) if declared.starts_with("text/event-stream") => {
-                        let text = std::str::from_utf8(&body).map_err(|error| {
-                            format!("invalid MCP event stream UTF-8: {error}")
-                        })?;
+                        let text = std::str::from_utf8(&body)
+                            .map_err(|error| format!("invalid MCP event stream UTF-8: {error}"))?;
                         let mut messages = Vec::new();
                         for line in text.lines() {
                             if let Some(data) = line.strip_prefix("data:") {
-                                messages.push(serde_json::from_str(data.trim()).map_err(
-                                    |error| format!("invalid MCP event data: {error}"),
-                                )?);
+                                messages.push(
+                                    serde_json::from_str(data.trim()).map_err(|error| {
+                                        format!("invalid MCP event data: {error}")
+                                    })?,
+                                );
                             }
                         }
                         Ok(messages)
@@ -112,9 +113,8 @@ impl McpClient {
                     Some(declared) if !declared.starts_with("application/json") => {
                         Err(format!("unsupported MCP HTTP content type: {declared}"))
                     }
-                    Some(_) | None => Ok(vec![serde_json::from_slice(&body).map_err(|error| {
-                        format!("invalid MCP HTTP JSON: {error}")
-                    })?]),
+                    Some(_) | None => Ok(vec![serde_json::from_slice(&body)
+                        .map_err(|error| format!("invalid MCP HTTP JSON: {error}"))?]),
                 }
             }
         }

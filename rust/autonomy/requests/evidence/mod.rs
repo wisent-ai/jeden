@@ -42,7 +42,9 @@ pub(super) fn repository(cwd: &Path) -> Result<String, String> {
     .ok_or_else(|| format!("origin {url} names no repository path"))?;
     let identity = path.trim_end_matches(".git");
     if owner_name(identity).is_none() {
-        return Err(format!("origin {url} names no owner/name repository identity"));
+        return Err(format!(
+            "origin {url} names no owner/name repository identity"
+        ));
     }
     Ok(identity.to_owned())
 }
@@ -67,8 +69,8 @@ pub(super) fn snapshot(
     }
     let mut revisions = BTreeMap::new();
     for identity in repositories {
-        let (_, name) = owner_name(&identity)
-            .ok_or("request repository must be an owner/name identity")?;
+        let (_, name) =
+            owner_name(&identity).ok_or("request repository must be an owner/name identity")?;
         let cwd = root
             .join(name)
             .canonicalize()
@@ -85,7 +87,9 @@ pub(super) fn snapshot(
             .filter(|line| line.starts_with("worktree "))
             .collect();
         if !matches!(checkouts.as_slice(), [_]) {
-            return Err(format!("{identity} has multiple checkouts; none was changed"));
+            return Err(format!(
+                "{identity} has multiple checkouts; none was changed"
+            ));
         }
         if require_clean && !git(&cwd, &["status", "--porcelain"])?.is_empty() {
             return Err(format!(

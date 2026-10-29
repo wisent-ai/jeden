@@ -52,7 +52,11 @@ impl TaskScheduler {
         loop {
             let before = targets.len();
             for job in &jobs {
-                if job.parent_job.as_ref().is_some_and(|parent| targets.contains(parent)) {
+                if job
+                    .parent_job
+                    .as_ref()
+                    .is_some_and(|parent| targets.contains(parent))
+                {
                     targets.insert(job.id.clone());
                 }
             }
@@ -168,7 +172,12 @@ impl TaskScheduler {
                 Err(_unread) => None,
             }),
             running: Counted(match &jobs {
-                Ok(listed) => Some(listed.iter().filter(|j| j.status == JobStatus::Running).count()),
+                Ok(listed) => Some(
+                    listed
+                        .iter()
+                        .filter(|j| j.status == JobStatus::Running)
+                        .count(),
+                ),
                 Err(_unread) => None,
             }),
             limits: self.limits.clone(),

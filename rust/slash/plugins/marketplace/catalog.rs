@@ -26,7 +26,9 @@ pub(super) fn handle_catalog(
     if verb == "installed" {
         let mut installed = merged_installed_values(context.cwd)?;
         installed.sort_by(|a, b| {
-            a.get("id").and_then(Value::as_str).cmp(&b.get("id").and_then(Value::as_str))
+            a.get("id")
+                .and_then(Value::as_str)
+                .cmp(&b.get("id").and_then(Value::as_str))
         });
         return Ok(if installed.is_empty() {
             "No plugins installed.".into()
@@ -86,7 +88,8 @@ pub(super) fn handle_catalog(
             let cache = marketplace_cache_dir(&name);
             // A cache that cannot be examined is reported for this source,
             // never fetched over as if it were absent.
-            let cached = match crate::tool_runtime::runtime_ops::platform::presence::present(&cache) {
+            let cached = match crate::tool_runtime::runtime_ops::platform::presence::present(&cache)
+            {
                 Ok(cached) => cached,
                 Err(error) => {
                     errors.push(format!("- {name}: {error}"));
@@ -108,7 +111,9 @@ pub(super) fn handle_catalog(
                 }
             };
             plugins.sort_by(|a, b| {
-                a.get("name").and_then(Value::as_str).cmp(&b.get("name").and_then(Value::as_str))
+                a.get("name")
+                    .and_then(Value::as_str)
+                    .cmp(&b.get("name").and_then(Value::as_str))
             });
             for plugin in plugins {
                 let desc = match plugin.get("description").and_then(Value::as_str) {

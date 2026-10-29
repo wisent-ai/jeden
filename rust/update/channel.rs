@@ -30,7 +30,10 @@ impl Channel {
 
     /// The channel `name` spells, read back through [`Channel::name`].
     pub fn named(name: &str) -> Option<Channel> {
-        Self::ALL.iter().copied().find(|channel| channel.name() == name)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|channel| channel.name() == name)
     }
 
     /// Every channel's name, for a refusal.
@@ -42,8 +45,14 @@ impl Channel {
     /// its Ed25519 public key in base64.
     fn release_key(self) -> (&'static str, &'static str) {
         match self {
-            Channel::Canary => ("jeden-canary-2026-07-13", "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk="),
-            Channel::Stable => ("jeden-stable-2026-07-13", "78wFp2XYBVMWv/MfkvTlQ3TqWjyHMgJWKA9KK4e9wsA="),
+            Channel::Canary => (
+                "jeden-canary-2026-07-13",
+                "8hCBoR81Kax1U4oPKyg0C9IvYifV+o+6qc4L6JYbCFk=",
+            ),
+            Channel::Stable => (
+                "jeden-stable-2026-07-13",
+                "78wFp2XYBVMWv/MfkvTlQ3TqWjyHMgJWKA9KK4e9wsA=",
+            ),
         }
     }
 }

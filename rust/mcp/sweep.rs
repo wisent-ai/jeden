@@ -149,7 +149,13 @@ pub fn refresh_all(cwd: &Path) -> Result<Value, String> {
         .servers
         .retain(|name, _| configured_names.contains(name));
     for (name, connection, result) in results {
-        status.insert(name.clone(), match result { Ok(()) => json!({"state": "ready", "tools": listed(&connection.tools, "tools")}), Err(error) => json!({"state": connection.state.as_str(), "error": error}) });
+        status.insert(
+            name.clone(),
+            match result {
+                Ok(()) => json!({"state": "ready", "tools": listed(&connection.tools, "tools")}),
+                Err(error) => json!({"state": connection.state.as_str(), "error": error}),
+            },
+        );
         manager.servers.insert(name, connection);
     }
     crate::capability::invalidate();

@@ -31,7 +31,15 @@ pub fn pretool_block(
     let subjects = match crate::tool_runtime::policy_subjects(cwd, tool, input) {
         Ok(Some(subjects)) => subjects,
         Ok(None) => {
-            return pretool_subject(cwd, tool, tool, input, input, allow_project, transcript_path)
+            return pretool_subject(
+                cwd,
+                tool,
+                tool,
+                input,
+                input,
+                allow_project,
+                transcript_path,
+            )
         }
         Err(cause) => {
             return Some(format!(
@@ -40,7 +48,15 @@ pub fn pretool_block(
         }
     };
     subjects.iter().find_map(|subject| {
-        pretool_subject(cwd, tool, SECTION_TOOL, input, subject, allow_project, transcript_path)
+        pretool_subject(
+            cwd,
+            tool,
+            SECTION_TOOL,
+            input,
+            subject,
+            allow_project,
+            transcript_path,
+        )
     })
 }
 

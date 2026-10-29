@@ -36,7 +36,12 @@ pub(super) fn presentation_text(
         .get(key)
         .and_then(Value::as_str)
         .map(str::to_string)
-        .ok_or_else(|| format!("onboarding screen {} presents no {key} text", screen.screen_id))
+        .ok_or_else(|| {
+            format!(
+                "onboarding screen {} presents no {key} text",
+                screen.screen_id
+            )
+        })
 }
 
 pub(super) fn picker_for(

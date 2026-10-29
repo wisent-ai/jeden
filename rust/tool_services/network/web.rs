@@ -37,7 +37,14 @@ impl Kind {
             Kind::Brave => "https://api.search.brave.com/res/v1/web/search",
         }
     }
-    fn request(self, client: &Client, url: Url, token: &str, query: &str, count: usize) -> RequestBuilder {
+    fn request(
+        self,
+        client: &Client,
+        url: Url,
+        token: &str,
+        query: &str,
+        count: usize,
+    ) -> RequestBuilder {
         match self {
             Kind::Tavily => client
                 .post(url)
@@ -51,8 +58,14 @@ impl Kind {
     /// The results list of an answer, and the field each result's snippet is under.
     fn results(self, answer: &Value) -> Option<(&Vec<Value>, &'static str)> {
         match self {
-            Kind::Tavily => answer.get("results").and_then(Value::as_array).map(|list| (list, "content")),
-            Kind::Brave => answer.pointer("/web/results").and_then(Value::as_array).map(|list| (list, "description")),
+            Kind::Tavily => answer
+                .get("results")
+                .and_then(Value::as_array)
+                .map(|list| (list, "content")),
+            Kind::Brave => answer
+                .pointer("/web/results")
+                .and_then(Value::as_array)
+                .map(|list| (list, "description")),
         }
     }
 }
@@ -72,21 +85,47 @@ impl WebService {
         let mut providers = Vec::new();
         let mut secrets = crate::tool_runtime::runtime_ops::secrets::SecretBroker::default();
         let configured: &[(Kind, &str, &str, &str, &str, &'static str)] = &[
-            (Kind::Tavily, "tavilyApiKey", "TAVILY_API_KEY", "tavilyEndpoint", "JEDEN_TAVILY_URL", "web.tavily"),
-            (Kind::Brave, "braveApiKey", "BRAVE_SEARCH_API_KEY", "braveEndpoint", "JEDEN_BRAVE_SEARCH_URL", "web.brave"),
+            (
+                Kind::Tavily,
+                "tavilyApiKey",
+                "TAVILY_API_KEY",
+                "tavilyEndpoint",
+                "JEDEN_TAVILY_URL",
+                "web.tavily",
+            ),
+            (
+                Kind::Brave,
+                "braveApiKey",
+                "BRAVE_SEARCH_API_KEY",
+                "braveEndpoint",
+                "JEDEN_BRAVE_SEARCH_URL",
+                "web.brave",
+            ),
         ];
-        for &(kind, key_field, key_variable, endpoint_field, endpoint_variable, secret_ref) in configured {
-            let Some(token) = config::string(value, &["toolServices", "web", key_field], key_variable) else {
+        for &(kind, key_field, key_variable, endpoint_field, endpoint_variable, secret_ref) in
+            configured
+        {
+            let Some(token) =
+                config::string(value, &["toolServices", "web", key_field], key_variable)
+            else {
                 continue;
             };
             secrets.insert(secret_ref, token.into_bytes());
             // A provider configured without an endpoint override is reached at
             // the endpoint its vendor publishes.
-            let endpoint = match config::string(value, &["toolServices", "web", endpoint_field], endpoint_variable) {
+            let endpoint = match config::string(
+                value,
+                &["toolServices", "web", endpoint_field],
+                endpoint_variable,
+            ) {
                 Some(endpoint) => endpoint,
                 None => kind.published_endpoint().to_owned(),
             };
-            providers.push(Provider { kind, endpoint, secret_ref });
+            providers.push(Provider {
+                kind,
+                endpoint,
+                secret_ref,
+            });
         }
         Self { providers, secrets }
     }
@@ -147,7 +186,10 @@ impl WebService {
                 Ok((_, unusable)) => failures.push(format!(
                     "{} returned no usable results{}",
                     provider.kind.name(),
-                    unusable.iter().map(|cause| format!("; {cause}")).collect::<String>()
+                    unusable
+                        .iter()
+                        .map(|cause| format!("; {cause}"))
+                        .collect::<String>()
                 )),
                 Err(error) => failures.push(format!("{}: {}", provider.kind.name(), error)),
             }
@@ -170,20 +212,39 @@ fn search_provider(
 ) -> ServiceResult<(Vec<Value>, Vec<String>)> {
     let endpoint = Url::parse(&provider.endpoint)
         .map_err(|e| ServiceError::InvalidInput(format!("invalid provider endpoint: {e}")))?;
-    let answer: Value = send_provider(provider, secrets, query, count, context, endpoint, Vec::new())?
-        .json()
-        .map_err(|e| ServiceError::Protocol {
-            service: "web",
-            detail: e.to_string(),
-        })?;
-    let (raw, snippet_field) = provider.kind.results(&answer).ok_or_else(|| ServiceError::Protocol {
+    let answer: Value = send_provider(
+        provider,
+        secrets,
+        query,
+        count,
+        context,
+        endpoint,
+        Vec::new(),
+    )?
+    .json()
+    .map_err(|e| ServiceError::Protocol {
         service: "web",
-        detail: format!("{} answered no results list: {answer}", provider.kind.name()),
+        detail: e.to_string(),
     })?;
+    let (raw, snippet_field) =
+        provider
+            .kind
+            .results(&answer)
+            .ok_or_else(|| ServiceError::Protocol {
+                service: "web",
+                detail: format!(
+                    "{} answered no results list: {answer}",
+                    provider.kind.name()
+                ),
+            })?;
     let mut results = Vec::new();
     let mut unusable = Vec::new();
     for entry in raw.iter().take(count) {
-        let url = match entry.get("url").and_then(Value::as_str).map(|url| (url, Url::parse(url))) {
+        let url = match entry
+            .get("url")
+            .and_then(Value::as_str)
+            .map(|url| (url, Url::parse(url)))
+        {
             Some((url, Ok(parsed))) if parsed.has_host() => url,
             Some((url, Ok(_hostless))) => {
                 unusable.push(format!("{url} names no host"));
@@ -198,7 +259,9 @@ fn search_provider(
                 continue;
             }
         };
-        results.push(json!({"title": entry.get("title"), "url": url, "snippet": entry.get(snippet_field)}));
+        results.push(
+            json!({"title": entry.get("title"), "url": url, "snippet": entry.get(snippet_field)}),
+        );
     }
     Ok((results, unusable))
 }
@@ -239,11 +302,17 @@ fn send_provider(
             let token = std::str::from_utf8(token).map_err(|error| {
                 ServiceError::PermissionDenied(format!("provider credential is not UTF-8: {error}"))
             })?;
-            stado_wait::request_blocking(provider.kind.request(&client, target.url.clone(), token, query, count))
-                .map_err(|e| ServiceError::Backend {
-                    service: "web",
-                    detail: e.to_string(),
-                })
+            stado_wait::request_blocking(provider.kind.request(
+                &client,
+                target.url.clone(),
+                token,
+                query,
+                count,
+            ))
+            .map_err(|e| ServiceError::Backend {
+                service: "web",
+                detail: e.to_string(),
+            })
         })
         .map_err(|e| ServiceError::PermissionDenied(e.to_string()))??;
     if response.status().is_redirection() {

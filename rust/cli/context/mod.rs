@@ -41,11 +41,9 @@ fn options(rest: &[String]) -> Result<Options, String> {
                 let value = iter
                     .next()
                     .ok_or_else(|| usage("--limit requires a number"))?;
-                options.limit = Some(
-                    value
-                        .parse()
-                        .map_err(|error| usage(format!("--limit must be a number, not {value}: {error}")))?,
-                );
+                options.limit = Some(value.parse().map_err(|error| {
+                    usage(format!("--limit must be a number, not {value}: {error}"))
+                })?);
             }
             "--source" | "--sources" => {
                 options.sources = Some(

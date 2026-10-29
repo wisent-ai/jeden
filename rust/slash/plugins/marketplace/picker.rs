@@ -25,7 +25,9 @@ fn name_of(entry: &Value) -> Option<&str> {
 /// A disabled row for an entry that cannot be offered, saying why.
 fn unnamed_row(what: &str, entry: &Value) -> PickerItem {
     let mut row = PickerItem::action(format!("Unnamed {what}"), "")
-        .detail(format!("this {what} entry has no name, so it cannot be addressed: {entry}"))
+        .detail(format!(
+            "this {what} entry has no name, so it cannot be addressed: {entry}"
+        ))
         .disabled(true);
     row.command = None;
     row
@@ -53,7 +55,10 @@ pub(crate) fn marketplace_picker(context: &SlashContext<'_>) -> PickerSpec {
         sources.sort_by(|a, b| name_of(a).cmp(&name_of(b)));
         for source in sources {
             let Some(name) = name_of(&source) else {
-                items.push(unnamed_row(&format!("{source_scope} marketplace source"), &source));
+                items.push(unnamed_row(
+                    &format!("{source_scope} marketplace source"),
+                    &source,
+                ));
                 continue;
             };
             let location = stated(&source, "source");

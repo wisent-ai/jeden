@@ -93,7 +93,9 @@ fn read_frame(reader: &mut impl BufRead) -> Result<Value, String> {
     let mut content_length = None;
     loop {
         let mut header = String::new();
-        reader.read_line(&mut header).map_err(|error| error.to_string())?;
+        reader
+            .read_line(&mut header)
+            .map_err(|error| error.to_string())?;
         if header.is_empty() {
             return Err("LSP server closed stdout".into());
         }
@@ -102,12 +104,16 @@ fn read_frame(reader: &mut impl BufRead) -> Result<Value, String> {
         }
         if let Some(value) = header.trim().strip_prefix("Content-Length:") {
             let length = value.trim().parse::<u64>().map_err(|error| {
-                format!("the LSP server's Content-Length {:?} is not a byte count: {error}", value.trim())
+                format!(
+                    "the LSP server's Content-Length {:?} is not a byte count: {error}",
+                    value.trim()
+                )
             })?;
             content_length = Some(length);
         }
     }
-    let length = content_length.ok_or("the LSP server sent a frame header without Content-Length")?;
+    let length =
+        content_length.ok_or("the LSP server sent a frame header without Content-Length")?;
     let mut bytes = Vec::new();
     reader
         .take(length)
@@ -161,10 +167,9 @@ pub(super) fn await_response(
                 if let Some(error) = message.get("error") {
                     return Err(format!("LSP error: {error}"));
                 }
-                return message
-                    .get("result")
-                    .cloned()
-                    .ok_or_else(|| format!("the LSP server answered request {id} with neither result nor error"));
+                return message.get("result").cloned().ok_or_else(|| {
+                    format!("the LSP server answered request {id} with neither result nor error")
+                });
             }
             Ok(Ok(_notification_or_wake)) => {}
             Ok(Err(error)) => return Err(client.stopped(&error)),

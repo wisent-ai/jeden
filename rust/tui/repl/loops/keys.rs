@@ -128,7 +128,9 @@ where
         KeyCode::Down => {
             let count = slash_matches(editor.text()).len();
             // Below the last match the selection wraps to the first.
-            if let Some(next) = (*slash_selection + usize::from(crate::tally::STEP)).checked_rem(count) {
+            if let Some(next) =
+                (*slash_selection + usize::from(crate::tally::STEP)).checked_rem(count)
+            {
                 *slash_selection = next;
             } else if editor.text()[editor.cursor()..].contains('\n') {
                 editor.apply(EditorAction::MoveDown);

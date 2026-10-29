@@ -32,7 +32,9 @@ impl Drop for ActiveRequestPermit {
         // a permit that is never given back holds the tenant's slot forever.
         let mut usage = held(&self.usage);
         let entry = usage.entry(self.tenant.clone()).or_default();
-        entry.active_requests = entry.active_requests.saturating_sub(NonZeroUsize::MIN.get());
+        entry.active_requests = entry
+            .active_requests
+            .saturating_sub(NonZeroUsize::MIN.get());
     }
 }
 

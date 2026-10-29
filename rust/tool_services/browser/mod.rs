@@ -121,7 +121,11 @@ impl BrowserService {
         }
     }
     fn session(&self, input: &Value) -> String {
-        let key = match input.get("session").and_then(Value::as_str).filter(|v| !v.is_empty()) {
+        let key = match input
+            .get("session")
+            .and_then(Value::as_str)
+            .filter(|v| !v.is_empty())
+        {
             Some(key) => key,
             None => UNNAMED_SESSION,
         };
@@ -206,7 +210,9 @@ impl BrowserService {
                 // could never end: refused rather than left untracked.
                 let pid = i32::try_from(pid).map_err(|error| ServiceError::Protocol {
                     service: "browser",
-                    detail: format!("the bridge named browser process {pid}, which is no process id: {error}"),
+                    detail: format!(
+                        "the bridge named browser process {pid}, which is no process id: {error}"
+                    ),
                 })?;
                 self.browser_pids.lock().insert(pid);
             }

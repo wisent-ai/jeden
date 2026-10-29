@@ -35,19 +35,32 @@ struct HostLimits {
 }
 
 fn host_limits(path: &str) -> Result<HostLimits, String> {
-    let bytes = fs::read(path).map_err(|error| format!("the host limits {path} cannot be read: {error}"))?;
+    let bytes = fs::read(path)
+        .map_err(|error| format!("the host limits {path} cannot be read: {error}"))?;
     serde_json::from_slice(&bytes)
         .map_err(|error| format!("the host limits {path} are not a limits declaration: {error}"))
 }
 
 pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<(), String> {
     let (address, certificate, key, client_ca, identity_map, limits, revoked) = match positionals {
-        [address, certificate, key, client_ca, identity_map, limits] => {
-            (address, certificate, key, client_ca, identity_map, limits, None)
-        }
-        [address, certificate, key, client_ca, identity_map, limits, revoked] => {
-            (address, certificate, key, client_ca, identity_map, limits, Some(revoked))
-        }
+        [address, certificate, key, client_ca, identity_map, limits] => (
+            address,
+            certificate,
+            key,
+            client_ca,
+            identity_map,
+            limits,
+            None,
+        ),
+        [address, certificate, key, client_ca, identity_map, limits, revoked] => (
+            address,
+            certificate,
+            key,
+            client_ca,
+            identity_map,
+            limits,
+            Some(revoked),
+        ),
         _ => return Err(USAGE.into()),
     };
     let limits = host_limits(limits)?;
@@ -133,7 +146,9 @@ pub fn serve_headless_cli(positionals: &[String], data_root: &Path) -> Result<()
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|error| format!("the secure headless listener's async runtime cannot be started: {error}"))?;
+        .map_err(|error| {
+            format!("the secure headless listener's async runtime cannot be started: {error}")
+        })?;
     runtime.block_on(async move {
         let listener = tokio::net::TcpListener::bind(address)
             .await
@@ -162,7 +177,12 @@ fn load_or_create_reconnect_key(path: &Path) -> Result<Vec<u8>, String> {
     match fs::read(path) {
         Ok(key) => return Ok(key),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(format!("failed to read reconnect key {}: {error}", path.display())),
+        Err(error) => {
+            return Err(format!(
+                "failed to read reconnect key {}: {error}",
+                path.display()
+            ))
+        }
     }
     let key: Vec<u8> = std::iter::repeat_with(|| rand::rngs::OsRng.gen::<u8>())
         .take(RECONNECT_KEY_BYTES)

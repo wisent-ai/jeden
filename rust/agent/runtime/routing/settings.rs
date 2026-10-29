@@ -68,8 +68,9 @@ pub(super) fn retry_policy(routing: &Value) -> Result<RetryPolicy, String> {
             let value = raw
                 .as_u64()
                 .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?;
-            let value = usize::try_from(value)
-                .map_err(|_too_large| "modelRouting.retry.maxAttempts exceeds the supported size")?;
+            let value = usize::try_from(value).map_err(|_too_large| {
+                "modelRouting.retry.maxAttempts exceeds the supported size"
+            })?;
             std::num::NonZeroUsize::new(value)
                 .ok_or("modelRouting.retry.maxAttempts must be a positive integer")?
                 .get()

@@ -1,6 +1,6 @@
 use crate::clock::unix_millis;
-use crate::task_runtime::types::{MailMessage, TaskError};
 use crate::task_runtime::atomic_json;
+use crate::task_runtime::types::{MailMessage, TaskError};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -67,7 +67,9 @@ impl Mailbox {
         let mut messages = Vec::new();
         // An inbox that cannot be examined is refused with its cause: read as
         // absent, an agent's waiting mail was answered as no mail.
-        if !crate::tool_runtime::runtime_ops::platform::presence::present(&dir).map_err(TaskError::Io)? {
+        if !crate::tool_runtime::runtime_ops::platform::presence::present(&dir)
+            .map_err(TaskError::Io)?
+        {
             return Ok(messages);
         }
         let mut paths = Vec::new();
@@ -98,10 +100,16 @@ impl Mailbox {
         }
         for path in paths {
             let bytes = fs::read(&path).map_err(|error| {
-                TaskError::Io(format!("mail message {} cannot be read: {error}", path.display()))
+                TaskError::Io(format!(
+                    "mail message {} cannot be read: {error}",
+                    path.display()
+                ))
             })?;
             let mut message: MailMessage = serde_json::from_slice(&bytes).map_err(|error| {
-                TaskError::Invalid(format!("mail message {} is not a message: {error}", path.display()))
+                TaskError::Invalid(format!(
+                    "mail message {} is not a message: {error}",
+                    path.display()
+                ))
             })?;
             if deliver {
                 if message.delivered_at.is_none() {
@@ -158,7 +166,9 @@ impl Mailbox {
     /// Whether a wake is waiting for `agent`; a wake file that cannot be
     /// examined is refused, never read as no wake.
     pub fn wake_pending(&self, agent: &str) -> Result<bool, TaskError> {
-        crate::tool_runtime::runtime_ops::platform::presence::present(&self.root.join(format!("{agent}.wake.json")))
-            .map_err(TaskError::Io)
+        crate::tool_runtime::runtime_ops::platform::presence::present(
+            &self.root.join(format!("{agent}.wake.json")),
+        )
+        .map_err(TaskError::Io)
     }
 }

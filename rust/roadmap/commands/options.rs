@@ -26,15 +26,19 @@ impl ParsedOptions {
             let (name, value) = match flag.split_once('=') {
                 Some((name, value)) => (name.to_string(), value.to_string()),
                 None => {
-                    let value = tokens.next().cloned().ok_or_else(|| {
-                        RoadmapError::Usage(format!("--{flag} requires a value"))
-                    })?;
+                    let value = tokens
+                        .next()
+                        .cloned()
+                        .ok_or_else(|| RoadmapError::Usage(format!("--{flag} requires a value")))?;
                     (flag.to_string(), value)
                 }
             };
             values.entry(name).or_default().push(value);
         }
-        Ok(Self { values, positionals })
+        Ok(Self {
+            values,
+            positionals,
+        })
     }
 
     pub(super) fn one(&self, name: &str) -> Option<&str> {
@@ -58,9 +62,9 @@ pub(super) fn expected_revision(
     options: &ParsedOptions,
 ) -> Result<u64, RoadmapError> {
     match options.one("revision") {
-        Some(value) => value
-            .parse::<u64>()
-            .map_err(|error| RoadmapError::Usage(format!("invalid --revision value {value}: {error}"))),
+        Some(value) => value.parse::<u64>().map_err(|error| {
+            RoadmapError::Usage(format!("invalid --revision value {value}: {error}"))
+        }),
         None => Ok(store.load()?.revision),
     }
 }

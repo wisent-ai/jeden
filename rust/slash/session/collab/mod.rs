@@ -191,14 +191,7 @@ pub(crate) fn handle_join(args: &str, context: &SlashContext<'_>) -> Result<Stri
             );
         }
         if let Some(token) = parsed.write_token.as_deref() {
-            post_collab_http(
-                &parsed.base,
-                &room,
-                &key,
-                token,
-                "guest-join",
-                context.cwd,
-            )?;
+            post_collab_http(&parsed.base, &room, &key, token, "guest-join", context.cwd)?;
         }
         let role = parsed.role.name();
         state["guest"] = json!({ "backend": "http", "relayBase": parsed.base, "room": room, "key": crate::collab::encode_key(&key), "writeToken": parsed.write_token, "role": role, "cursor": cursor, "joinedAt": joined, "cwd": context.cwd });

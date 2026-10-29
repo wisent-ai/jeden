@@ -45,8 +45,12 @@ pub(crate) fn save_artifact(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     if name.contains('/') || name.contains("..") {
         return Err(format!("invalid artifact name: {name}"));
     }
-    fs::create_dir_all(dir)
-        .map_err(|error| format!("cannot create artifact directory {}: {error}", dir.display()))?;
+    fs::create_dir_all(dir).map_err(|error| {
+        format!(
+            "cannot create artifact directory {}: {error}",
+            dir.display()
+        )
+    })?;
     let path = dir.join(&name);
     fs::write(&path, content.as_bytes())
         .map_err(|error| format!("cannot write artifact {}: {error}", path.display()))?;
@@ -79,9 +83,9 @@ pub(crate) fn list_artifacts(runtime: &ToolRuntime<'_>) -> Result<Value, String>
     for entry in entries.into_iter().flatten() {
         let entry = entry
             .map_err(|error| format!("cannot list artifacts in {}: {error}", dir.display()))?;
-        let meta = entry.metadata().map_err(|error| {
-            format!("cannot read artifact {}: {error}", entry.path().display())
-        })?;
+        let meta = entry
+            .metadata()
+            .map_err(|error| format!("cannot read artifact {}: {error}", entry.path().display()))?;
         if meta.is_file() {
             artifacts
                 .push(json!({"name": entry.file_name().to_string_lossy(), "bytes": meta.len()}));

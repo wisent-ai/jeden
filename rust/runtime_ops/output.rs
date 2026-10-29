@@ -55,7 +55,10 @@ impl ArtifactSink {
             Ok(canonical) => canonical,
             Err(error) if error.kind() == io::ErrorKind::NotFound => {
                 let parent = self.root.parent().ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::PermissionDenied, "artifact root has no parent")
+                    io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        "artifact root has no parent",
+                    )
                 })?;
                 let name = self.root.file_name().ok_or_else(|| {
                     io::Error::new(io::ErrorKind::PermissionDenied, "artifact root has no name")
@@ -97,7 +100,10 @@ impl ArtifactSink {
         fs::create_dir_all(&self.root)?;
         let name = format!("operation-{}-{stream}.log", uuid::Uuid::new_v4());
         let path = self.root.join(name);
-        let file = OpenOptions::new().write(true).create_new(true).open(&path)?;
+        let file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)?;
         Ok((path, file))
     }
 }
@@ -163,7 +169,11 @@ impl BoundedOutput {
             return Ok(());
         }
         let grown = self.total_bytes.saturating_add(bytes.len() as u64);
-        if self.artifacts.maximum_bytes().is_some_and(|maximum| grown > maximum) {
+        if self
+            .artifacts
+            .maximum_bytes()
+            .is_some_and(|maximum| grown > maximum)
+        {
             return Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "artifact output exceeds execution grant file limit",

@@ -45,14 +45,20 @@ pub(super) fn storage_probe(cwd: &Path) -> HealthProbe {
         return HealthProbe::unavailable(
             "storage",
             started,
-            format!("storage probe directory {} cannot be created: {error}", dir.display()),
+            format!(
+                "storage probe directory {} cannot be created: {error}",
+                dir.display()
+            ),
         );
     }
     let path = dir.join(format!(".doctor-{}", std::process::id()));
     let step = |action: &'static str| {
         let path = path.clone();
         move |error: std::io::Error| {
-            format!("storage probe {} cannot be {action}: {error}", path.display())
+            format!(
+                "storage probe {} cannot be {action}: {error}",
+                path.display()
+            )
         }
     };
     let result = (|| -> Result<(), String> {
@@ -61,7 +67,8 @@ pub(super) fn storage_probe(cwd: &Path) -> HealthProbe {
             .write(true)
             .open(&path)
             .map_err(step("created"))?;
-        file.write_all(b"jeden-health-v1").map_err(step("written"))?;
+        file.write_all(b"jeden-health-v1")
+            .map_err(step("written"))?;
         file.sync_all().map_err(step("synced"))?;
         let bytes = fs::read(&path).map_err(step("read back"))?;
         if bytes != b"jeden-health-v1" {

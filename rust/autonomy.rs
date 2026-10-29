@@ -1,8 +1,8 @@
 use crate::agent::{Conversation, RunHooks};
 use crate::Args;
 use pursuit::{
-    collect_preference_evidence, pursue, ProtocolError, PursuitConfig, RunOutcome, Stage, StageResponse,
-    StageRunner,
+    collect_preference_evidence, pursue, ProtocolError, PursuitConfig, RunOutcome, Stage,
+    StageResponse, StageRunner,
 };
 use serde_json::json;
 use std::borrow::BorrowMut;
@@ -129,7 +129,8 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
     if objective.trim().is_empty() {
         return Err("pursue requires a rough objective".into());
     }
-    let outcome = pursue_objective(args, objective, &mut RunHooks::inert()).map_err(|error| error.to_string())?;
+    let outcome = pursue_objective(args, objective, &mut RunHooks::inert())
+        .map_err(|error| error.to_string())?;
 
     if args.json {
         return serde_json::to_string_pretty(&json!({
@@ -157,10 +158,19 @@ pub(crate) fn command(args: &Args) -> Result<String, String> {
 /// Pursue `objective` in `args.cwd` with `args`' grants: the contract, the
 /// execution and the independent acceptance Pursuit runs, through Jeden's
 /// conversations. `hillclimb` runs one of these per round.
-pub(crate) fn pursue_objective(args: &Args, objective: String, hooks: &mut RunHooks<'static>) -> Result<RunOutcome, ProtocolError> {
-    let unstarted = |message: String| ProtocolError { message, receipt_path: None };
+pub(crate) fn pursue_objective(
+    args: &Args,
+    objective: String,
+    hooks: &mut RunHooks<'static>,
+) -> Result<RunOutcome, ProtocolError> {
+    let unstarted = |message: String| ProtocolError {
+        message,
+        receipt_path: None,
+    };
     if hooks.cancelled() {
-        return Err(unstarted("pursuit cancelled before reading preference evidence".into()));
+        return Err(unstarted(
+            "pursuit cancelled before reading preference evidence".into(),
+        ));
     }
     // Unset means the program on PATH; set to something that is not text is
     // the operator's override unread, refused rather than silently replaced.
@@ -168,7 +178,11 @@ pub(crate) fn pursue_objective(args: &Args, objective: String, hooks: &mut RunHo
         Some(match env::var("TRANSCRIPT_LAKE_BIN") {
             Ok(path) => PathBuf::from(path),
             Err(env::VarError::NotPresent) => PathBuf::from("transcript-lake"),
-            Err(error) => return Err(unstarted(format!("TRANSCRIPT_LAKE_BIN cannot be read: {error}"))),
+            Err(error) => {
+                return Err(unstarted(format!(
+                    "TRANSCRIPT_LAKE_BIN cannot be read: {error}"
+                )))
+            }
         })
     } else {
         None
@@ -176,7 +190,9 @@ pub(crate) fn pursue_objective(args: &Args, objective: String, hooks: &mut RunHo
     let preference_evidence =
         collect_preference_evidence(&args.cwd, &objective, transcript_lake.as_deref());
     if hooks.cancelled() {
-        return Err(unstarted("pursuit cancelled after reading preference evidence".into()));
+        return Err(unstarted(
+            "pursuit cancelled after reading preference evidence".into(),
+        ));
     }
     let config = PursuitConfig::new(&args.cwd, objective, preference_evidence);
     let mut runner = JedenStageRunner::controlled(args, hooks).map_err(unstarted)?;

@@ -9,7 +9,8 @@ use std::time::Instant;
 /// routing uses, without the `--model` flag no diagnostic has.
 fn configured_model(cwd: &Path) -> Result<Option<String>, String> {
     let declared = crate::cli::config::load_config(cwd).model;
-    Ok(crate::agent::selected_model(None, declared.as_deref())?.map(|model| model.trim().to_string()))
+    Ok(crate::agent::selected_model(None, declared.as_deref())?
+        .map(|model| model.trim().to_string()))
 }
 
 /// Probe the selected model route rather than treating a responding service as

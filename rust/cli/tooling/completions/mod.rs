@@ -54,6 +54,8 @@ pub(crate) fn completions_command(args: &Args) -> Result<String, String> {
         "bash" => Ok(model.render_bash()),
         "zsh" => Ok(model.render_zsh()),
         "fish" => Ok(model.render_fish()),
-        other => Err(format!("unknown shell '{other}': usage: jeden completions <bash|zsh|fish>")),
+        other => Err(format!(
+            "unknown shell '{other}': usage: jeden completions <bash|zsh|fish>"
+        )),
     }
 }

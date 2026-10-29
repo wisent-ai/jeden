@@ -24,13 +24,18 @@ pub(crate) fn native_mcp_tool_name(server_name: &str, tool_name: &str) -> String
 /// a name that is no MCP tool's, and for an MCP name the live servers do
 /// not offer; the live servers that cannot be read are refused, never read
 /// as offering nothing.
-pub fn native_mcp_tool_target(cwd: &Path, native_name: &str) -> Result<Option<(String, String)>, String> {
+pub fn native_mcp_tool_target(
+    cwd: &Path,
+    native_name: &str,
+) -> Result<Option<(String, String)>, String> {
     if !native_name.starts_with(NATIVE_PREFIX) {
         return Ok(None);
     }
-    Ok(crate::mcp::live_tools(cwd)?.into_iter().find_map(|(server_name, tool)| {
-        let raw_name = tool.get("name").and_then(Value::as_str)?;
-        (native_mcp_tool_name(&server_name, raw_name) == native_name)
-            .then(|| (server_name, raw_name.to_string()))
-    }))
+    Ok(crate::mcp::live_tools(cwd)?
+        .into_iter()
+        .find_map(|(server_name, tool)| {
+            let raw_name = tool.get("name").and_then(Value::as_str)?;
+            (native_mcp_tool_name(&server_name, raw_name) == native_name)
+                .then(|| (server_name, raw_name.to_string()))
+        }))
 }

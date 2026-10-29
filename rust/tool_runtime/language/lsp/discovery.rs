@@ -34,10 +34,17 @@ fn probe_server(name: &str) -> bool {
             return false;
         }
     };
-    match stado_wait::blocking(stado_wait::Kind::Process, format!("{name} --version"), name, || child.wait()) {
+    match stado_wait::blocking(
+        stado_wait::Kind::Process,
+        format!("{name} --version"),
+        name,
+        || child.wait(),
+    ) {
         Ok(status) => status.success(),
         Err(error) => {
-            eprintln!("jeden: the probe of language server {name} could not be waited for: {error}");
+            eprintln!(
+                "jeden: the probe of language server {name} could not be waited for: {error}"
+            );
             false
         }
     }

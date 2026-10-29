@@ -20,7 +20,9 @@ pub(super) fn drain_kernel_stderr(
 ) -> Result<(), String> {
     let mut buffer = [Default::default(); PIPE_READ_BYTES];
     loop {
-        if cancelled()? { return Ok(()); }
+        if cancelled()? {
+            return Ok(());
+        }
         match reader.read_available(&mut buffer) {
             Ok(count) => {
                 let read = &buffer[..count];

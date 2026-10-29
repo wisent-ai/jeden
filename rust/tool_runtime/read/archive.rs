@@ -47,7 +47,8 @@ fn format_of(path: &Path) -> Result<Format, String> {
 
 fn archive_entries(path: &Path, wanted: Option<&str>) -> Result<Vec<ArchiveEntry>, String> {
     let file = File::open(path).map_err(|error| format!("{}: {error}", path.display()))?;
-    let unreadable = |error: String| format!("{} cannot be read as an archive: {error}", path.display());
+    let unreadable =
+        |error: String| format!("{} cannot be read as an archive: {error}", path.display());
     match format_of(path)? {
         Format::Zip => zip_entries(file, wanted).map_err(unreadable),
         Format::Tar => tar_entries(file, wanted).map_err(unreadable),

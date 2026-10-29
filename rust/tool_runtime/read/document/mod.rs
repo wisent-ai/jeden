@@ -112,9 +112,12 @@ pub(crate) fn fetch_readable_url(
         return Err("fetch_readable_url requires http(s) URL".into());
     }
     let max_bytes = count_input(input, "maxBytes", "fetch_readable_url")? as usize;
-    let client = crate::net::blocking_builder()
-        .build()
-        .map_err(|error| format!("fetch_readable_url: the HTTP client cannot be built: {}", crate::control_plane::transport::describe_reqwest(error)))?;
+    let client = crate::net::blocking_builder().build().map_err(|error| {
+        format!(
+            "fetch_readable_url: the HTTP client cannot be built: {}",
+            crate::control_plane::transport::describe_reqwest(error)
+        )
+    })?;
     let response = stado_wait::request_blocking(client.get(&url))
         .map_err(|error| format!("fetch_readable_url {url}: {error}"))?;
     let status = response.status();
@@ -123,9 +126,9 @@ pub(crate) fn fetch_readable_url(
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
-    let bytes = response
-        .bytes()
-        .map_err(|error| format!("fetch_readable_url {url}: the body could not be read: {error}"))?;
+    let bytes = response.bytes().map_err(|error| {
+        format!("fetch_readable_url {url}: the body could not be read: {error}")
+    })?;
     let readable = readable_text_for_document(&bytes)?;
     let window = selected_lines(&readable, string_input(input, "range"))?;
     let (text, truncated) = answered_text(&readable, window.as_ref(), max_bytes);

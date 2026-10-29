@@ -35,14 +35,21 @@ fn installed_helper() -> Result<Option<PathBuf>, String> {
     if let Some(configured) = env::var_os("JEDEN_TASK_SANDBOX_HELPER") {
         candidates.push(PathBuf::from(configured));
     }
-    let executable = env::current_exe().map_err(|error| format!("the Jeden executable cannot be located: {error}"))?;
+    let executable = env::current_exe()
+        .map_err(|error| format!("the Jeden executable cannot be located: {error}"))?;
     if let Some(directory) = executable.parent() {
-        for relative in ["jeden-sandbox-helper", "../jeden-sandbox-helper", "../libexec/jeden-sandbox-helper"] {
+        for relative in [
+            "jeden-sandbox-helper",
+            "../jeden-sandbox-helper",
+            "../libexec/jeden-sandbox-helper",
+        ] {
             candidates.push(directory.join(relative));
         }
     }
     for candidate in candidates {
-        if crate::tool_runtime::runtime_ops::platform::presence::present(&candidate)? && candidate.is_file() {
+        if crate::tool_runtime::runtime_ops::platform::presence::present(&candidate)?
+            && candidate.is_file()
+        {
             return Ok(Some(candidate));
         }
     }
@@ -72,11 +79,21 @@ fn health_output(command: &mut Command) -> Result<std::process::Output, String> 
         program.display(),
         || child.wait(),
     )
-    .map_err(|error| format!("cannot wait for health check {}: {error}", program.display()))?;
+    .map_err(|error| {
+        format!(
+            "cannot wait for health check {}: {error}",
+            program.display()
+        )
+    })?;
     let stderr = reader
         .join()
         .map_err(|panic| crate::panicked::refusal("the health check stderr reader", &*panic))?
-        .map_err(|error| format!("the health check stderr of {} cannot be read: {error}", program.display()))?;
+        .map_err(|error| {
+            format!(
+                "the health check stderr of {} cannot be read: {error}",
+                program.display()
+            )
+        })?;
     Ok(std::process::Output {
         status,
         stdout: Vec::new(),
@@ -216,7 +233,10 @@ fn add_existing(roots: &mut Vec<PathBuf>, path: impl Into<PathBuf>) -> Result<()
         Ok(real) => roots.push(real),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(error) => {
-            return Err(format!("sandbox root {} cannot be resolved: {error}", path.display()));
+            return Err(format!(
+                "sandbox root {} cannot be resolved: {error}",
+                path.display()
+            ));
         }
     }
     Ok(())

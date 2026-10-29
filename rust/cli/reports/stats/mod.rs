@@ -127,7 +127,9 @@ fn sessions_json() -> Value {
         match std::fs::metadata(&path) {
             Ok(metadata) if metadata.is_dir() => {}
             Ok(_not_session) => continue,
-            Err(error) => return json!({"error": format!("cannot examine {}: {error}", path.display())}),
+            Err(error) => {
+                return json!({"error": format!("cannot examine {}: {error}", path.display())})
+            }
         }
         let modified = match entry.metadata().and_then(|meta| meta.modified()) {
             Ok(modified) => modified,
@@ -163,7 +165,11 @@ pub(crate) fn stats_json(cwd: &Path) -> Value {
 
 fn stats_text(cwd: &Path) -> String {
     let stats = stats_json(cwd);
-    let mut lines = vec![format!("jeden {} · {}", crate::JEDEN_VERSION, cwd.display())];
+    let mut lines = vec![format!(
+        "jeden {} · {}",
+        crate::JEDEN_VERSION,
+        cwd.display()
+    )];
     for (scope, usage) in stats["usage"].as_object().into_iter().flatten() {
         if let Some(error) = usage.get("error").and_then(Value::as_str) {
             lines.push(format!("usage ({scope}) unreadable: {error}"));
@@ -181,7 +187,9 @@ fn stats_text(cwd: &Path) -> String {
             for entry in provider["entries"].as_array().into_iter().flatten() {
                 // An entry the quota report left unnamed is said as that,
                 // rather than printed as a line with blank names.
-                let (Some(name), Some(label)) = (provider["provider"].as_str(), entry["label"].as_str()) else {
+                let (Some(name), Some(label)) =
+                    (provider["provider"].as_str(), entry["label"].as_str())
+                else {
                     lines.push(format!("quota entry unreadable: the quota report names no provider or no label for {entry}"));
                     continue;
                 };
@@ -218,10 +226,17 @@ pub(crate) fn stats_command(args: &Args) -> Result<String, String> {
         // The word after `--port` is the port; `--port` as the last word
         // names none and is refused.
         let mut words = args.positionals.iter();
-        let named = words.by_ref().find(|part| *part == "--port").map(|_flag| words.next());
+        let named = words
+            .by_ref()
+            .find(|part| *part == "--port")
+            .map(|_flag| words.next());
         let port = match named {
             None => None,
-            Some(None) => return Err("jeden stats --serve --port takes a port number, and none followed it".into()),
+            Some(None) => {
+                return Err(
+                    "jeden stats --serve --port takes a port number, and none followed it".into(),
+                )
+            }
             Some(Some(value)) => Some(value.parse::<u16>().map_err(|error| {
                 format!("jeden stats --serve --port takes a port number, not {value}: {error}")
             })?),

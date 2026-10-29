@@ -65,7 +65,9 @@ fn roots(cwd: &Path) -> Result<Vec<PathBuf>, TaskError> {
 /// none; one that cannot be examined, or a directory that cannot be listed,
 /// is refused naming it.
 fn collect(root: &Path, out: &mut Vec<PathBuf>) -> Result<(), TaskError> {
-    if !crate::tool_runtime::runtime_ops::platform::presence::present(root).map_err(TaskError::Io)? {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(root)
+        .map_err(TaskError::Io)?
+    {
         return Ok(());
     }
     if root.is_file() {

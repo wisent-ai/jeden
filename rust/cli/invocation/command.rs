@@ -62,7 +62,12 @@ impl Command {
     pub(crate) fn workspace_bound(self) -> bool {
         matches!(
             self,
-            Command::Interactive | Command::Run | Command::Pursue | Command::Hillclimb | Command::Rpc | Command::Acp
+            Command::Interactive
+                | Command::Run
+                | Command::Pursue
+                | Command::Hillclimb
+                | Command::Rpc
+                | Command::Acp
         )
     }
 

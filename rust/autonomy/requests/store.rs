@@ -81,7 +81,12 @@ fn root() -> Result<PathBuf, String> {
         Some(stated) => PathBuf::from(stated),
         None => match crate::user_config_path().parent() {
             Some(directory) => directory.join("pursuit"),
-            None => return Err("the user configuration path has no directory to keep pursuit state beside".into()),
+            None => {
+                return Err(
+                    "the user configuration path has no directory to keep pursuit state beside"
+                        .into(),
+                )
+            }
         },
     };
     if !root.is_absolute() {
@@ -251,7 +256,10 @@ impl Store {
         &self.id
     }
     fn unreadable(&self, key: &str, error: serde_json::Error) -> String {
-        format!("request {} holds {key} that cannot be read: {error}", self.id)
+        format!(
+            "request {} holds {key} that cannot be read: {error}",
+            self.id
+        )
     }
     /// Every value stored for this request, by key, as `pursue --state` shows.
     pub fn saved(&self) -> Result<std::collections::BTreeMap<String, serde_json::Value>, String> {

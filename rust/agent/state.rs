@@ -13,7 +13,9 @@ pub(super) fn read_mode_state(cwd: &Path) -> Result<Value, String> {
 
 /// The mode state's fields to change. `read_mode_state` refuses a state that
 /// is not an object, so this refusal names a state replaced in between.
-pub(super) fn mode_state_fields(state: &mut Value) -> Result<&mut serde_json::Map<String, Value>, String> {
+pub(super) fn mode_state_fields(
+    state: &mut Value,
+) -> Result<&mut serde_json::Map<String, Value>, String> {
     state
         .as_object_mut()
         .ok_or_else(|| "the mode state is not a JSON object; nothing was changed".to_string())
@@ -56,7 +58,9 @@ pub(super) fn command_session(args: &Args) -> Result<PathBuf, String> {
         .and_then(Value::as_str)
         .map(PathBuf::from)
     else {
-        return Err("No prior session found. Run a task first, or name one with --resume-session.".into());
+        return Err(
+            "No prior session found. Run a task first, or name one with --resume-session.".into(),
+        );
     };
     // A recorded last session that is gone, or cannot be examined, is said
     // as that: both read as "no prior session" and hid where it had been.

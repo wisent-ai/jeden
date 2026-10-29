@@ -213,7 +213,9 @@ impl Corpus {
         for (number, line) in (NonZeroUsize::MIN.get()..).zip(text.lines()) {
             let opens = !line.is_empty()
                 && !line.starts_with(char::is_whitespace)
-                && window.last().is_some_and(|previous| previous.trim().is_empty());
+                && window
+                    .last()
+                    .is_some_and(|previous| previous.trim().is_empty());
             if opens {
                 self.push_window(path, title, &window, start);
                 window.clear();

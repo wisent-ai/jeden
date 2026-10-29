@@ -143,9 +143,12 @@ pub(super) fn matches(matchers: &[String], prompt: &str) -> bool {
 
 pub(super) fn safe_assets(skill_file: &Path, raw: Option<&Value>) -> Result<Vec<PathBuf>, String> {
     let relative = string_list(raw)?;
-    let root = skill_file
-        .parent()
-        .ok_or_else(|| format!("skill file {} has no directory to hold its assets", skill_file.display()))?;
+    let root = skill_file.parent().ok_or_else(|| {
+        format!(
+            "skill file {} has no directory to hold its assets",
+            skill_file.display()
+        )
+    })?;
     let canonical_root = fs::canonicalize(root).map_err(|error| error.to_string())?;
     let mut assets = Vec::new();
     for asset in relative {

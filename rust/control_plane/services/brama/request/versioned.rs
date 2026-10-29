@@ -38,7 +38,8 @@ impl BramaClient {
             Some(bytes) => bytes,
             None => &[],
         };
-        insert_caller_auth_headers(&mut headers, signature_body).map_err(BramaError::Configuration)?;
+        insert_caller_auth_headers(&mut headers, signature_body)
+            .map_err(BramaError::Configuration)?;
         let response = self
             .transport
             .execute(TransportRequest {

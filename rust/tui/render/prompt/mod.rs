@@ -51,7 +51,12 @@ pub(crate) fn compact_prompt(
     // Live segments: mode badges slot in after the route segment; the cost
     // and quota segments follow the context segment.
     let extras = status_extras(Path::new(&status.cwd));
-    let badges: Vec<String> = extras.as_ref().map(mode_badges).into_iter().flatten().collect();
+    let badges: Vec<String> = extras
+        .as_ref()
+        .map(mode_badges)
+        .into_iter()
+        .flatten()
+        .collect();
     let cost_text = extras
         .as_ref()
         .and_then(|extras| cost_segment(status, extras));
@@ -61,7 +66,11 @@ pub(crate) fn compact_prompt(
         mid.push(format!(
             "{}{}",
             sanitize_terminal_text(branch),
-            if status.dirty_count != crate::tally::ORIGIN { " dirty" } else { "" }
+            if status.dirty_count != crate::tally::ORIGIN {
+                " dirty"
+            } else {
+                ""
+            }
         ));
     }
     match (status.context_percent, status.context_limit.as_deref()) {

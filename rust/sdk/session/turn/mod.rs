@@ -111,7 +111,8 @@ impl AgentSession {
                         {
                             // A path is replaced whole, so a writer that panicked
                             // left a path; the new one is still recorded.
-                            *crate::panicked::written(&trace_inner.session_path) = PathBuf::from(path);
+                            *crate::panicked::written(&trace_inner.session_path) =
+                                PathBuf::from(path);
                         }
                         SessionEventKind::Completion {
                             state: state.clone(),

@@ -26,7 +26,10 @@ pub(crate) fn run_command(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let mut managed = ManagedCommand::new("sh", runtime.cwd);
     managed.args = vec![OsString::from("-c"), OsString::from(&command)];
     let result = ProcessManager.run(&runtime.operation, managed)?;
-    Ok(process_result_json(result, Map::from_iter([("command".to_owned(), json!(command))])))
+    Ok(process_result_json(
+        result,
+        Map::from_iter([("command".to_owned(), json!(command))]),
+    ))
 }
 
 pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
@@ -47,7 +50,11 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 None => Err(format!("run_process args[{at}] is {value}, not a string")),
             })
             .collect::<Result<Vec<_>, String>>()?,
-        Some(other) => return Err(format!("run_process args is {other}, not an array of strings")),
+        Some(other) => {
+            return Err(format!(
+                "run_process args is {other}, not an array of strings"
+            ))
+        }
     };
 
     let mut managed = ManagedCommand::new(&command, runtime.cwd);
@@ -56,7 +63,11 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let env = match input.get("env") {
         None | Some(Value::Null) => None,
         Some(Value::Object(env)) => Some(env),
-        Some(other) => return Err(format!("run_process env is {other}, not an object of strings")),
+        Some(other) => {
+            return Err(format!(
+                "run_process env is {other}, not an object of strings"
+            ))
+        }
     };
     if let Some(env) = env {
         managed.env.reserve(env.len());
@@ -64,7 +75,11 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             let value = match value {
                 Value::Null => None,
                 Value::String(text) => Some(OsString::from(text)),
-                other => return Err(format!("run_process env.{key} is {other}, not a string or null")),
+                other => {
+                    return Err(format!(
+                        "run_process env.{key} is {other}, not a string or null"
+                    ))
+                }
             };
             managed.env.push((OsString::from(key), value));
         }
@@ -72,13 +87,19 @@ pub(crate) fn run_process(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     let result = ProcessManager.run(&runtime.operation, managed)?;
     Ok(process_result_json(
         result,
-        Map::from_iter([("command".to_owned(), json!(command)), ("args".to_owned(), json!(args))]),
+        Map::from_iter([
+            ("command".to_owned(), json!(command)),
+            ("args".to_owned(), json!(args)),
+        ]),
     ))
 }
 
 /// `object` (what was run) with the process's outcome beside it. It is a JSON
 /// object by type, so no caller can hand one the outcome cannot join.
-pub(super) fn process_result_json(result: ManagedProcessResult, mut object: Map<String, Value>) -> Value {
+pub(super) fn process_result_json(
+    result: ManagedProcessResult,
+    mut object: Map<String, Value>,
+) -> Value {
     let cancelled = result.reason == TerminationReason::Cancelled;
     let completed = result.reason == TerminationReason::Completed;
     object.insert("ok".into(), json!(completed && result.status.success()));
@@ -92,7 +113,10 @@ pub(super) fn process_result_json(result: ManagedProcessResult, mut object: Map<
     object.insert("stdoutTruncated".into(), json!(result.stdout.truncated));
     object.insert(
         "stdoutArtifact".into(),
-        json!(result.stdout.artifact.map(|path| path.display().to_string())),
+        json!(result
+            .stdout
+            .artifact
+            .map(|path| path.display().to_string())),
     );
     object.insert("stdoutSha256".into(), json!(result.stdout.sha256));
     object.insert("stderrHead".into(), json!(result.stderr.head));
@@ -101,7 +125,10 @@ pub(super) fn process_result_json(result: ManagedProcessResult, mut object: Map<
     object.insert("stderrTruncated".into(), json!(result.stderr.truncated));
     object.insert(
         "stderrArtifact".into(),
-        json!(result.stderr.artifact.map(|path| path.display().to_string())),
+        json!(result
+            .stderr
+            .artifact
+            .map(|path| path.display().to_string())),
     );
     object.insert("stderrSha256".into(), json!(result.stderr.sha256));
     Value::Object(object)
@@ -109,14 +136,18 @@ pub(super) fn process_result_json(result: ManagedProcessResult, mut object: Map<
 
 pub(crate) fn list_package_scripts(runtime: &ToolRuntime<'_>) -> Result<Value, String> {
     let file = runtime.cwd.join("package.json");
-    let raw = fs::read_to_string(&file).map_err(|e| format!("{} cannot be read: {e}", file.display()))?;
+    let raw =
+        fs::read_to_string(&file).map_err(|e| format!("{} cannot be read: {e}", file.display()))?;
     let parsed: Value =
         serde_json::from_str(&raw).map_err(|e| format!("{} is not JSON: {e}", file.display()))?;
     let mut scripts = serde_json::Map::new();
     if let Some(raw_scripts) = parsed.get("scripts").and_then(Value::as_object) {
         for (name, value) in raw_scripts {
             let Some(script) = value.as_str() else {
-                return Err(format!("{} declares script {name} as {value}, not a command string", file.display()));
+                return Err(format!(
+                    "{} declares script {name} as {value}, not a command string",
+                    file.display()
+                ));
             };
             scripts.insert(name.clone(), json!(script));
         }

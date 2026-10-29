@@ -189,7 +189,8 @@ impl Conversation {
             )?;
             if can_continue {
                 hooks.note("the report lists open follow-on tasks; continuing with them");
-                self.messages.push(json!({ "role": "user", "content": instruction }));
+                self.messages
+                    .push(json!({ "role": "user", "content": instruction }));
                 return Ok(None);
             }
             let error = format!(

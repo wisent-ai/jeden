@@ -35,7 +35,10 @@ pub(super) fn collab_role_status(role: &str, entry: &Value, view: bool) -> Strin
         Ok(events) => events,
         Err(cause) => return [head, format!("Events: unavailable ({cause})")].join("\n"),
     };
-    let latest = match events.last().map(|event| event.get("type").and_then(Value::as_str)) {
+    let latest = match events
+        .last()
+        .map(|event| event.get("type").and_then(Value::as_str))
+    {
         Some(Some(kind)) => kind.to_owned(),
         Some(None) => "an event without a type".to_owned(),
         None => "none".to_owned(),

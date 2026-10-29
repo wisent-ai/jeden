@@ -58,7 +58,10 @@ fn contract_settings_json(
 ) -> Result<Value, String> {
     let language = super::ui_language(&crate::load_config(Path::new(".")));
     let stated = communication.as_str().ok_or_else(|| {
-        format!("{COMMUNICATION_CONTRACT_KEY} in {} is not text: {communication}", path.display())
+        format!(
+            "{COMMUNICATION_CONTRACT_KEY} in {} is not text: {communication}",
+            path.display()
+        )
     })?;
     let (source, _) = crate::agent::communication_contract::resolve(stated, &language);
     Ok(json!({
@@ -111,7 +114,10 @@ fn communication_settings_json(config: &Value, path: &Path) -> Result<Value, Str
                 "the communication setting {key} names no section, so its field cannot be answered"
             ));
         };
-        out.insert(field.to_string(), effective_setting_value(config, declared(key)?));
+        out.insert(
+            field.to_string(),
+            effective_setting_value(config, declared(key)?),
+        );
     }
     // The policy in force where this process runs, project layer included.
     let here = std::env::current_dir().map_err(|error| {

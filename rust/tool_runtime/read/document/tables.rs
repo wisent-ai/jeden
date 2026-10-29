@@ -41,7 +41,8 @@ pub(super) fn readable_text_from_delimited(raw: &str, delimiter: char) -> Result
         return Ok(String::new());
     };
     // Shorter rows are padded with empty cells to the widest one.
-    rows.iter_mut().for_each(|row| row.resize(columns, String::new()));
+    rows.iter_mut()
+        .for_each(|row| row.resize(columns, String::new()));
     let mut lines = Vec::new();
     if let Some((header, body)) = rows.split_first() {
         lines.push(markdown_row(header));

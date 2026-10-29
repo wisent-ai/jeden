@@ -38,8 +38,8 @@ pub(super) fn readable_text_from_html(raw: &str) -> String {
 }
 
 pub(super) fn readable_text_from_json(raw: &str) -> Result<String, String> {
-    let value: Value = serde_json::from_str(raw)
-        .map_err(|error| format!("the document is not JSON: {error}"))?;
+    let value: Value =
+        serde_json::from_str(raw).map_err(|error| format!("the document is not JSON: {error}"))?;
     serde_json::to_string_pretty(&value)
         .map_err(|error| format!("the JSON document cannot be laid out: {error}"))
 }
@@ -129,8 +129,8 @@ pub(super) fn readable_text_from_pdf(bytes: &[u8]) -> String {
 /// first. A cell without its type or source, or with a source line that is not
 /// text, is refused naming the cell: the notebook format requires both.
 pub(super) fn readable_text_from_notebook(raw: &str) -> Result<String, String> {
-    let notebook: Value = serde_json::from_str(raw)
-        .map_err(|error| format!("the notebook is not JSON: {error}"))?;
+    let notebook: Value =
+        serde_json::from_str(raw).map_err(|error| format!("the notebook is not JSON: {error}"))?;
     let cells = notebook
         .get("cells")
         .and_then(Value::as_array)
@@ -145,13 +145,18 @@ pub(super) fn readable_text_from_notebook(raw: &str) -> Result<String, String> {
             Some(Value::Array(parts)) => parts
                 .iter()
                 .map(|part| {
-                    part.as_str()
-                        .ok_or_else(|| format!("notebook cell {number} has a source line that is not text: {part}"))
+                    part.as_str().ok_or_else(|| {
+                        format!("notebook cell {number} has a source line that is not text: {part}")
+                    })
                 })
                 .collect::<Result<Vec<_>, _>>()?
                 .join(""),
             Some(Value::String(text)) => text.clone(),
-            Some(other) => return Err(format!("notebook cell {number} has a source that is not text: {other}")),
+            Some(other) => {
+                return Err(format!(
+                    "notebook cell {number} has a source that is not text: {other}"
+                ))
+            }
             None => return Err(format!("notebook cell {number} has no source")),
         };
         out.push(

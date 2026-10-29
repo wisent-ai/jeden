@@ -146,10 +146,12 @@ impl WelesClient {
         {
             headers.insert("authorization".into(), format!("Bearer {token}"));
         }
-        let body = body
-            .map(serde_json::to_vec)
-            .transpose()
-            .map_err(|error| WelesError::RequestRefused { what: "request encoding failed", cause: error.to_string() })?;
+        let body = body.map(serde_json::to_vec).transpose().map_err(|error| {
+            WelesError::RequestRefused {
+                what: "request encoding failed",
+                cause: error.to_string(),
+            }
+        })?;
         let response = self
             .transport
             .execute(TransportRequest {

@@ -195,7 +195,9 @@ fn structured_status(value: &Value) -> Option<SessionUpdate> {
             if let Some(input) = value.get("input") {
                 call = call.raw_input(input.clone());
             }
-            Some(SessionUpdate::ToolCall(call.status(tool_status(value.get("status")))))
+            Some(SessionUpdate::ToolCall(
+                call.status(tool_status(value.get("status"))),
+            ))
         }
         Some("toolUpdate") | Some("toolResult") => {
             let id = text(value, "toolCallId")?;
@@ -203,7 +205,9 @@ fn structured_status(value: &Value) -> Option<SessionUpdate> {
             if let Some(output) = value.get("output") {
                 fields = fields.raw_output(output.clone());
             }
-            Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(id, fields)))
+            Some(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                id, fields,
+            )))
         }
         Some("plan") => {
             let entries = value

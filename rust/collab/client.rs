@@ -4,15 +4,19 @@ use serde_json::Value;
 /// connection ends; `reqwest`'s own thirty-second default is turned off,
 /// because a library's guess is still a guess.
 fn client() -> Result<reqwest::blocking::Client, String> {
-    crate::net::blocking_builder()
-        .build()
-        .map_err(|error| format!("the relay's HTTP client cannot be built: {}", crate::control_plane::transport::describe_reqwest(error)))
+    crate::net::blocking_builder().build().map_err(|error| {
+        format!(
+            "the relay's HTTP client cannot be built: {}",
+            crate::control_plane::transport::describe_reqwest(error)
+        )
+    })
 }
 
 /// One request to the relay, waited for through Stado's wait reporting; the
 /// relay's answer text when it succeeded, its status and text when it did not.
 fn answered(what: &str, request: reqwest::blocking::RequestBuilder) -> Result<Value, String> {
-    let response = stado_wait::request_blocking(request).map_err(|e| format!("relay {what}: {e}"))?;
+    let response =
+        stado_wait::request_blocking(request).map_err(|e| format!("relay {what}: {e}"))?;
     let status = response.status();
     let text = response
         .text()
@@ -65,11 +69,9 @@ pub fn relay_get(base: &str, room: &str) -> Result<(Vec<String>, Option<usize>),
         .collect::<Result<Vec<_>, _>>()?;
     let next = match value.get("next") {
         Some(serde_json::Value::Null) => None,
-        Some(next) => Some(
-            next.as_u64()
-                .ok_or_else(|| format!("relay GET answered a next cursor that is not a sequence: {next}"))?
-                as usize,
-        ),
+        Some(next) => Some(next.as_u64().ok_or_else(|| {
+            format!("relay GET answered a next cursor that is not a sequence: {next}")
+        })? as usize),
         None => return Err(format!("relay GET answered no next cursor: {value}")),
     };
     Ok((events, next))

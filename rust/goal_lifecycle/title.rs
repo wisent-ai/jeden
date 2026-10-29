@@ -41,10 +41,12 @@ fn transcript_lake_title(executable: &Path, prompt: &str) -> Result<String, Stri
     // The prompt is written from its own thread while the answer is read:
     // written first, a child that answers before it reads all of a long
     // prompt filled its output pipe and both waited on each other.
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| failed("cannot write the prompt", "the child has no stdin pipe".to_string()))?;
+    let mut stdin = child.stdin.take().ok_or_else(|| {
+        failed(
+            "cannot write the prompt",
+            "the child has no stdin pipe".to_string(),
+        )
+    })?;
     let input = prompt.as_bytes().to_vec();
     let writer = std::thread::spawn(move || stdin.write_all(&input));
     let output = stado_wait::child_output(child, &command_line)
@@ -52,7 +54,12 @@ fn transcript_lake_title(executable: &Path, prompt: &str) -> Result<String, Stri
     match writer.join() {
         Ok(Ok(())) => {}
         Ok(Err(error)) => return Err(failed("cannot write the prompt", error.to_string())),
-        Err(panic) => return Err(failed("cannot write the prompt", crate::panicked::refusal("the prompt writer", &*panic))),
+        Err(panic) => {
+            return Err(failed(
+                "cannot write the prompt",
+                crate::panicked::refusal("the prompt writer", &*panic),
+            ))
+        }
     }
     if !output.status.success() {
         return Err(failed(

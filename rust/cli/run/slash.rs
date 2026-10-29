@@ -15,11 +15,19 @@ fn format_slash_help(cwd: &Path) -> String {
     let rows: Vec<(String, String)> = crate::capability::slash_descriptors(cwd)
         .into_iter()
         .filter_map(|descriptor| {
-            let command = descriptor.ui.action.as_deref()?.trim_start_matches('/').to_string();
+            let command = descriptor
+                .ui
+                .action
+                .as_deref()?
+                .trim_start_matches('/')
+                .to_string();
             Some((command, descriptor.ui.description))
         })
         .collect();
-    let width = rows.iter().map(|(command, _)| command.chars().count()).max();
+    let width = rows
+        .iter()
+        .map(|(command, _)| command.chars().count())
+        .max();
     let mut out = String::from("Jeden slash commands:\n");
     for (command, description) in rows {
         match width {
@@ -38,7 +46,9 @@ pub(crate) fn is_builtin_slash(command: &str) -> bool {
 
 pub(crate) fn update_command() -> Result<String, String> {
     let manifest_location = env::var("JEDEN_UPDATE_MANIFEST").map_err(|error| {
-        format!("JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest: {error}")
+        format!(
+            "JEDEN_UPDATE_MANIFEST must point to an HTTPS or local DSSE release manifest: {error}"
+        )
     })?;
     // The documented default channel applies only when none is declared; a
     // declaration that is not text is refused, not read as the default.

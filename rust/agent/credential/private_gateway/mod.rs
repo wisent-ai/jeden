@@ -21,8 +21,8 @@ use std::process::{Command, Stdio};
 
 mod ownership;
 use ownership::{lease, private_directory};
-mod sign_in;
 mod process;
+mod sign_in;
 use process::{ended, held, live, GatewayProcess};
 
 pub(super) use process::running;
@@ -39,7 +39,6 @@ const CLIENT: &str = "jeden";
 
 /// The program the private gateway is.
 const PROGRAM: &str = "brama";
-
 
 /// Where the private gateway keeps its grants, state and overlay.
 fn directory() -> PathBuf {
@@ -103,7 +102,6 @@ pub(crate) struct Gateway {
     pub(crate) endpoint: String,
     pub(crate) bearer: String,
 }
-
 
 /// The gateway this process runs, started now if it runs none: `brama
 /// serve` in standalone mode on Jeden's grants, answered once its listener is
@@ -203,4 +201,3 @@ pub(crate) fn start() -> Result<Gateway, String> {
     *running = Some(GatewayProcess::serving(leased, child, gateway.clone()));
     Ok(gateway)
 }
-

@@ -103,5 +103,7 @@ fn check_command(payload: &str, json: bool) -> Result<String, String> {
         Some(first) => format!("{} bytes beginning {:?}", found.len(), first.trim()),
         None => format!("{} bytes and no line", found.len()),
     };
-    Err(format!("the clipboard no longer holds the payload: {reader} reads {holds_now}. Copy it again."))
+    Err(format!(
+        "the clipboard no longer holds the payload: {reader} reads {holds_now}. Copy it again."
+    ))
 }

@@ -67,7 +67,9 @@ pub(super) fn execute_task(scheduler: &TaskScheduler, input: &Value) -> Result<V
         None => false,
         Some(Value::Bool(wait)) => *wait,
         Some(other) => {
-            return Err(TaskError::Invalid(format!("task wait is true or false; got {other}")));
+            return Err(TaskError::Invalid(format!(
+                "task wait is true or false; got {other}"
+            )));
         }
     };
     let job = scheduler.spawn(request)?;

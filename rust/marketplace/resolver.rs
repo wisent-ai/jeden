@@ -30,9 +30,14 @@ fn candidates<'a>(
     let mut matches = Vec::new();
     for release in releases.iter().filter(|release| release.id == id) {
         let version = Version::parse(&release.version).map_err(|error| {
-            format!("release {id} {} is not a semantic version: {error}", release.version)
+            format!(
+                "release {id} {} is not a semantic version: {error}",
+                release.version
+            )
         })?;
-        if requirements.iter().all(|requirement| requirement.matches(&version))
+        if requirements
+            .iter()
+            .all(|requirement| requirement.matches(&version))
             && features.is_subset(&release.features)
             && (release.platforms.is_empty() || release.platforms.contains(platform))
         {

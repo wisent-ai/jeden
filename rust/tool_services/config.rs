@@ -28,7 +28,10 @@ pub(crate) fn fingerprint(cwd: &Path) -> u64 {
         match fs::metadata(&path) {
             Ok(metadata) => {
                 metadata.len().hash(&mut hash);
-                metadata.modified().map_err(|error| error.kind()).hash(&mut hash);
+                metadata
+                    .modified()
+                    .map_err(|error| error.kind())
+                    .hash(&mut hash);
             }
             Err(error) => error.kind().hash(&mut hash),
         }
@@ -48,7 +51,10 @@ pub(crate) fn string(config: &Value, path: &[&str], env: &str) -> Option<String>
         Ok(value) if !value.trim().is_empty() => return Some(value),
         Ok(_) | Err(std::env::VarError::NotPresent) => {}
         Err(std::env::VarError::NotUnicode(_)) => {
-            eprintln!("jeden: {env} is not Unicode; reading {} from the config", path.join("."));
+            eprintln!(
+                "jeden: {env} is not Unicode; reading {} from the config",
+                path.join(".")
+            );
         }
     }
     let mut value = config;

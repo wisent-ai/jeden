@@ -175,14 +175,25 @@ pub fn manager_status(cwd: &Path) -> Result<Value, String> {
     let mut managers = managers()?;
     let manager = managers.entry(key).or_default();
     manager.sync_config(cwd)?;
-    Ok(Value::Object(manager.servers.iter().map(|(name, connection)| (name.clone(), json!({
-        "state": connection.state.as_str(),
-        "failures": connection.failures.len(),
-        "lastError": connection.failures.last(),
-        "tools": connection::listed(&connection.tools, "tools"),
-        "resources": connection::listed(&connection.resources, "resources"),
-        "prompts": connection::listed(&connection.prompts, "prompts"),
-    }))).collect()))
+    Ok(Value::Object(
+        manager
+            .servers
+            .iter()
+            .map(|(name, connection)| {
+                (
+                    name.clone(),
+                    json!({
+                        "state": connection.state.as_str(),
+                        "failures": connection.failures.len(),
+                        "lastError": connection.failures.last(),
+                        "tools": connection::listed(&connection.tools, "tools"),
+                        "resources": connection::listed(&connection.resources, "resources"),
+                        "prompts": connection::listed(&connection.prompts, "prompts"),
+                    }),
+                )
+            })
+            .collect(),
+    ))
 }
 
 pub fn shutdown(cwd: &Path) -> Result<(), String> {

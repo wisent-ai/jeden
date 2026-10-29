@@ -37,7 +37,10 @@ fn language(name: Option<String>, path: &Path) -> Result<Language, String> {
             .and_then(|value| value.to_str())
             .map(str::to_owned)
             .ok_or_else(|| {
-                format!("{} has no extension that names its language; state language", path.display())
+                format!(
+                    "{} has no extension that names its language; state language",
+                    path.display()
+                )
             })?,
     };
     let grammar = serde_json::from_value::<Grammar>(Value::String(named.clone()))
@@ -179,8 +182,12 @@ fn resolve_pending(runtime: &ToolRuntime<'_>, input: &Value, apply: bool) -> Res
         ));
     }
     let path = jail_write_path(runtime.cwd, &claim.target)?;
-    let current = fs::read(&path)
-        .map_err(|error| format!("AST rewrite target {} cannot be read: {error}", claim.target))?;
+    let current = fs::read(&path).map_err(|error| {
+        format!(
+            "AST rewrite target {} cannot be read: {error}",
+            claim.target
+        )
+    })?;
     let current_sha = sha256_hex(&current);
     if current_sha != claim.expected_sha256 {
         return Err(format!(
@@ -220,7 +227,10 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
     // file rewritten would leave the rest unchanged without a word.
     let (mut selected, _) = ranges(&bytes, &tree, &query, capture, None)?;
     selected.sort_by_key(|(start, end, _)| (*start, *end));
-    for (earlier, later) in selected.iter().zip(selected.iter().skip(usize::from(crate::tally::STEP))) {
+    for (earlier, later) in selected
+        .iter()
+        .zip(selected.iter().skip(usize::from(crate::tally::STEP)))
+    {
         if earlier.1 > later.0 {
             return Err("AST rewrite captures overlap".into());
         }
@@ -231,7 +241,8 @@ pub(crate) fn ast_rewrite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
         let text = replacement.replace("$TEXT", &original);
         rewritten.splice(*start..*end, text.bytes());
     }
-    let before = std::str::from_utf8(&bytes).map_err(|error| format!("AST input is not UTF-8: {error}"))?;
+    let before =
+        std::str::from_utf8(&bytes).map_err(|error| format!("AST input is not UTF-8: {error}"))?;
     let after = std::str::from_utf8(&rewritten)
         .map_err(|error| format!("AST replacement produced invalid UTF-8: {error}"))?;
     let diff = simple_diff(&label, before, after);

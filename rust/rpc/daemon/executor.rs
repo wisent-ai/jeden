@@ -99,7 +99,9 @@ impl BoundedExecutor {
         if self.readiness() != Readiness::Ready {
             return Err(SubmitError::NotReady);
         }
-        let sender = lock(&self.inner.sender).clone().ok_or(SubmitError::NotReady)?;
+        let sender = lock(&self.inner.sender)
+            .clone()
+            .ok_or(SubmitError::NotReady)?;
         let mut pending = lock(&self.inner.pending);
         pending.push(());
         match sender.try_send(Box::new(job)) {

@@ -62,12 +62,26 @@ impl CollabRole {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum FrameKind {
-    Transcript { entry: serde_json::Value },
-    State { value: serde_json::Value },
-    Tool { tool_call_id: String, value: serde_json::Value },
-    Agent { agent_id: String, value: serde_json::Value },
-    Prompt { text: String },
-    Abort { operation_id: String },
+    Transcript {
+        entry: serde_json::Value,
+    },
+    State {
+        value: serde_json::Value,
+    },
+    Tool {
+        tool_call_id: String,
+        value: serde_json::Value,
+    },
+    Agent {
+        agent_id: String,
+        value: serde_json::Value,
+    },
+    Prompt {
+        text: String,
+    },
+    Abort {
+        operation_id: String,
+    },
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -175,9 +189,8 @@ pub fn decode_key(text: &str) -> Result<RoomKey, String> {
         .decode(text.trim())
         .map_err(|error| format!("the relay key is not base64url: {error}"))?;
     let length = bytes.len();
-    RoomKey::from_exact_iter(bytes).ok_or_else(|| {
-        format!("relay key is {length} bytes, not the length of an AES-256-GCM key")
-    })
+    RoomKey::from_exact_iter(bytes)
+        .ok_or_else(|| format!("relay key is {length} bytes, not the length of an AES-256-GCM key"))
 }
 
 /// A freshly generated random room key.
@@ -207,7 +220,8 @@ pub struct RelayUrl {
 /// Parse an HTTP relay URL of the form `http://host[:port][/room/<id>][#key=<k>&write=<t>&role=<r>]`.
 /// A URL without a fragment, or without `role=`, is read for viewing.
 pub fn parse_relay_url(text: &str) -> Result<RelayUrl, String> {
-    let url = url::Url::parse(text.trim()).map_err(|error| format!("malformed relay URL: {error}"))?;
+    let url =
+        url::Url::parse(text.trim()).map_err(|error| format!("malformed relay URL: {error}"))?;
     if !url.has_host() || url.cannot_be_a_base() {
         return Err("relay URL is missing a host".into());
     }

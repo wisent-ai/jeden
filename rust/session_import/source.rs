@@ -53,7 +53,8 @@ pub(crate) fn detect(path: &Path) -> Result<Option<Format>, String> {
         if value["type"] == TITLE_RECORD {
             continue;
         }
-        let header = value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string();
+        let header =
+            value["type"] == "session" && value["id"].is_string() && value["cwd"].is_string();
         return Ok(header.then_some(Format::Omp));
     }
     Ok(None)
@@ -103,8 +104,12 @@ fn read_omp(path: &Path) -> Result<Source, String> {
         if line.trim().is_empty() {
             continue;
         }
-        let value: Value = serde_json::from_str(&line)
-            .map_err(|e| format!("{}: invalid source record at byte {offset}: {e}", path.display()))?;
+        let value: Value = serde_json::from_str(&line).map_err(|e| {
+            format!(
+                "{}: invalid source record at byte {offset}: {e}",
+                path.display()
+            )
+        })?;
         match value["type"].as_str() {
             Some("session") => header = Some(value.clone()),
             Some(TITLE_RECORD) | Some("title_change") => {
@@ -159,8 +164,12 @@ fn read_omp(path: &Path) -> Result<Source, String> {
         reader.seek(SeekFrom::Start(offset)).map_err(at)?;
         line.clear();
         reader.read_line(&mut line).map_err(at)?;
-        let value: Value = serde_json::from_str(&line)
-            .map_err(|e| format!("{}: invalid source record at byte {offset}: {e}", path.display()))?;
+        let value: Value = serde_json::from_str(&line).map_err(|e| {
+            format!(
+                "{}: invalid source record at byte {offset}: {e}",
+                path.display()
+            )
+        })?;
         if let Some(id) = value["id"].as_str() {
             message_offsets.insert(id.to_owned(), source.messages.len());
         }

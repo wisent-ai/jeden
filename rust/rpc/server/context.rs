@@ -22,8 +22,14 @@ const INVALID: &str = "invalid_params";
 pub(super) fn cwd(params: &Value) -> Result<PathBuf, (&'static str, String)> {
     match params.get("cwd") {
         Some(Value::String(path)) if !path.is_empty() => Ok(PathBuf::from(path)),
-        Some(other) => Err((INVALID, format!("cwd must be a non-empty path string; got {other}"))),
-        None => Err((INVALID, "the request names no cwd, the workspace it reads from".to_string())),
+        Some(other) => Err((
+            INVALID,
+            format!("cwd must be a non-empty path string; got {other}"),
+        )),
+        None => Err((
+            INVALID,
+            "the request names no cwd, the workspace it reads from".to_string(),
+        )),
     }
 }
 

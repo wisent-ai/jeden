@@ -14,10 +14,9 @@ mod process;
 mod control;
 mod launch;
 mod registry;
+use super::session::PersistentProcess;
 use crate::tool_runtime::runtime_ops::security::ExecutionGrant;
 use process::KernelProcess;
-use super::session::PersistentProcess;
-
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum KernelLanguage {
@@ -108,17 +107,23 @@ pub fn evaluate(
     let mut owned = slot.acquire(context)?;
     registry::check_current(&slot)?;
     if reset {
-        if let Some(mut old) = owned.take() { old.retire(true); }
+        if let Some(mut old) = owned.take() {
+            old.retire(true);
+        }
     }
     if let Some(existing) = owned.as_mut() {
         match existing.alive() {
             Ok(true) => {}
             Ok(false) => {
-                let mut old = owned.take().expect("checked kernel disappeared while its lease was held");
+                let mut old = owned
+                    .take()
+                    .expect("checked kernel disappeared while its lease was held");
                 old.retire(false);
             }
             Err(cause) => {
-                let mut old = owned.take().expect("unreadable kernel disappeared while its lease was held");
+                let mut old = owned
+                    .take()
+                    .expect("unreadable kernel disappeared while its lease was held");
                 old.retire(false);
                 return Err(cause);
             }
@@ -130,16 +135,22 @@ pub fn evaluate(
         registry::register(&slot, &kernel.control)?;
         *owned = Some(kernel);
     }
-    let kernel = owned.as_mut().expect("initialized kernel disappeared while its lease was held");
+    let kernel = owned
+        .as_mut()
+        .expect("initialized kernel disappeared while its lease was held");
     match kernel.evaluate(context, code, reset) {
         Ok((result, true)) => Ok(result),
         Ok((result, false)) => {
-            let mut kernel = owned.take().expect("executed kernel disappeared while its lease was held");
+            let mut kernel = owned
+                .take()
+                .expect("executed kernel disappeared while its lease was held");
             kernel.retire(result.cancelled);
             Ok(result)
         }
         Err(cause) => {
-            let mut kernel = owned.take().expect("failed kernel disappeared while its lease was held");
+            let mut kernel = owned
+                .take()
+                .expect("failed kernel disappeared while its lease was held");
             kernel.retire(context.cancellation().is_cancelled());
             Err(cause)
         }

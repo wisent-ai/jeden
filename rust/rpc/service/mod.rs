@@ -225,7 +225,9 @@ fn session_cwd(dir: &Path) -> Result<PathBuf, String> {
 }
 
 fn unreadable_session(session_id: &str, cause: &str) -> ServiceError {
-    ServiceError::Runtime(format!("session {session_id} ledger is unreadable: {cause}"))
+    ServiceError::Runtime(format!(
+        "session {session_id} ledger is unreadable: {cause}"
+    ))
 }
 
 fn map_event(event: SessionEventKind) -> (String, Value, bool) {

@@ -204,7 +204,8 @@ fn post(
                 Err(refusal)
             };
         }
-        let text = text.map_err(|error| route.failure(config, "read model response body", error))?;
+        let text =
+            text.map_err(|error| route.failure(config, "read model response body", error))?;
         let safe: std::borrow::Cow<'_, str> = if bearer.is_empty() || !text.contains(bearer) {
             std::borrow::Cow::Borrowed(text.as_str())
         } else {

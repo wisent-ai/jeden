@@ -104,7 +104,12 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
             let mut image_error = None;
             if image.available {
                 match clipboard_image() {
-                    Ok(bytes) => return Ok(Some(ClipboardContent::from(("clipboard.png".into(), bytes)))),
+                    Ok(bytes) => {
+                        return Ok(Some(ClipboardContent::from((
+                            "clipboard.png".into(),
+                            bytes,
+                        ))))
+                    }
                     Err(error) => image_error = Some(error),
                 }
             }
@@ -127,7 +132,10 @@ impl UiRuntimeAdapter for RegistryUiRuntime {
                     .map_err(|error| format!("Clipboard text is not UTF-8: {error}"));
             }
             // Neither read could be made: every cause there is, in order.
-            let causes: Vec<String> = [image_error, image.reason, text.reason].into_iter().flatten().collect();
+            let causes: Vec<String> = [image_error, image.reason, text.reason]
+                .into_iter()
+                .flatten()
+                .collect();
             match causes.as_slice() {
                 [] => Err("neither the clipboard image nor its text can be read, and no capability says why".into()),
                 _ => Err(causes.join("; ")),
@@ -205,12 +213,17 @@ fn clipboard_image() -> Result<Vec<u8>, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    let answered = String::from_utf8(output.stdout)
-        .map_err(|error| format!("osascript answered the clipboard image in text that is not UTF-8: {error}"))?;
+    let answered = String::from_utf8(output.stdout).map_err(|error| {
+        format!("osascript answered the clipboard image in text that is not UTF-8: {error}")
+    })?;
     let hex = answered
         .trim()
         .strip_prefix("«data PNGf")
         .and_then(|rest| rest.strip_suffix('»'))
-        .ok_or_else(|| "osascript answered the clipboard image in a form other than «data PNGf…»".to_string())?;
-    hex::decode(hex).map_err(|error| format!("the clipboard image osascript answered is not hexadecimal: {error}"))
+        .ok_or_else(|| {
+            "osascript answered the clipboard image in a form other than «data PNGf…»".to_string()
+        })?;
+    hex::decode(hex).map_err(|error| {
+        format!("the clipboard image osascript answered is not hexadecimal: {error}")
+    })
 }

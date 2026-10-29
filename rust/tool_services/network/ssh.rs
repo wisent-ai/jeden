@@ -55,11 +55,16 @@ fn configured_host(value: &Value) -> Result<Host, String> {
             let number = port
                 .as_u64()
                 .ok_or_else(|| format!("port {port} is not a whole number"))?;
-            Some(u16::try_from(number).map_err(|error| format!("port {number} is not a TCP port: {error}"))?)
+            Some(
+                u16::try_from(number)
+                    .map_err(|error| format!("port {number} is not a TCP port: {error}"))?,
+            )
         }
     };
     let identity = match (value.get("identity"), value.get("key")) {
-        (Some(_), Some(_)) => return Err("the entry names its identity twice, as identity and as key".into()),
+        (Some(_), Some(_)) => {
+            return Err("the entry names its identity twice, as identity and as key".into())
+        }
         (Some(stated), None) | (None, Some(stated)) => Some(
             stated
                 .as_str()
@@ -72,7 +77,11 @@ fn configured_host(value: &Value) -> Result<Host, String> {
         Some(user) => format!("{user}@{target}"),
         None => target.into(),
     };
-    Ok(Host { target, port, identity })
+    Ok(Host {
+        target,
+        port,
+        identity,
+    })
 }
 
 pub(crate) struct SshService {
@@ -194,7 +203,11 @@ impl SshService {
     /// The host name and port ssh itself would connect to for `host`, as
     /// `ssh -G` resolves them from the stated port and the user's ssh
     /// configuration.
-    fn endpoint(&self, host: &Host, context: &OperationContext<'_>) -> ServiceResult<(String, u16)> {
+    fn endpoint(
+        &self,
+        host: &Host,
+        context: &OperationContext<'_>,
+    ) -> ServiceResult<(String, u16)> {
         let mut args = vec!["-G".to_owned()];
         if let Some(port) = host.port {
             args.extend(["-p".to_owned(), port.to_string()]);
@@ -218,7 +231,10 @@ impl SshService {
             .parse::<u16>()
             .map_err(|error| ServiceError::Protocol {
                 service: "ssh",
-                detail: format!("ssh -G {} named a port that is not one: {error}", host.target),
+                detail: format!(
+                    "ssh -G {} named a port that is not one: {error}",
+                    host.target
+                ),
             })?;
         Ok((hostname, port))
     }

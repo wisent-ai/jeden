@@ -63,10 +63,9 @@ impl IdempotencyStore {
         request_id: &str,
     ) -> Result<IdempotencyDecision, IdempotencyError> {
         validate(key, request_digest, request_id)?;
-        let _guard = self
-            .lock
-            .lock()
-            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
+        let _guard = self.lock.lock().map_err(|poisoned| {
+            IdempotencyError::Storage(format!("idempotency lock: {poisoned}"))
+        })?;
         let path = self.record_path(tenant, key);
         if let Some(record) = read_existing_record(&path)? {
             if record.tenant != tenant.as_str() || record.request_digest != request_digest {
@@ -98,10 +97,9 @@ impl IdempotencyStore {
         request_digest: &str,
         result: Value,
     ) -> Result<(), IdempotencyError> {
-        let _guard = self
-            .lock
-            .lock()
-            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
+        let _guard = self.lock.lock().map_err(|poisoned| {
+            IdempotencyError::Storage(format!("idempotency lock: {poisoned}"))
+        })?;
         let path = self.record_path(tenant, key);
         let mut record = read_record(&path)?;
         if record.tenant != tenant.as_str() || record.request_digest != request_digest {
@@ -122,10 +120,9 @@ impl IdempotencyStore {
         request_digest: &str,
         request_id: &str,
     ) -> Result<(), IdempotencyError> {
-        let _guard = self
-            .lock
-            .lock()
-            .map_err(|poisoned| IdempotencyError::Storage(format!("idempotency lock: {poisoned}")))?;
+        let _guard = self.lock.lock().map_err(|poisoned| {
+            IdempotencyError::Storage(format!("idempotency lock: {poisoned}"))
+        })?;
         let path = self.record_path(tenant, key);
         let record = read_record(&path)?;
         let matches = record.tenant == tenant.as_str()

@@ -124,16 +124,25 @@ impl TaskScheduler {
         let mut jobs = Vec::new();
         let directory = self.store.join("jobs");
         let unlistable = |error: std::io::Error| {
-            TaskError::Io(format!("job records in {} cannot be listed: {error}", directory.display()))
+            TaskError::Io(format!(
+                "job records in {} cannot be listed: {error}",
+                directory.display()
+            ))
         };
         for entry in fs::read_dir(&directory).map_err(&unlistable)? {
             let path = entry.map_err(&unlistable)?.path();
             if path.extension().and_then(|v| v.to_str()) == Some("json") {
                 let bytes = fs::read(&path).map_err(|error| {
-                    TaskError::Io(format!("job record {} cannot be read: {error}", path.display()))
+                    TaskError::Io(format!(
+                        "job record {} cannot be read: {error}",
+                        path.display()
+                    ))
                 })?;
                 let job = serde_json::from_slice::<JobRecord>(&bytes).map_err(|error| {
-                    TaskError::Invalid(format!("job record {} is not a job: {error}", path.display()))
+                    TaskError::Invalid(format!(
+                        "job record {} is not a job: {error}",
+                        path.display()
+                    ))
                 })?;
                 jobs.push(job);
             }

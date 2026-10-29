@@ -221,12 +221,19 @@ impl McpClient {
             }
             Transport::Http(transport) => {
                 if let Some(session_id) = transport.session_id.take() {
-                    let request = transport.client.delete(&transport.url).header(MCP_SESSION_ID, &session_id);
+                    let request = transport
+                        .client
+                        .delete(&transport.url)
+                        .header(MCP_SESSION_ID, &session_id);
                     let ended = stado_wait::blocking(
                         stado_wait::Kind::Network,
                         format!("DELETE MCP session {session_id}"),
                         &transport.url,
-                        || request.send().and_then(|response| response.error_for_status()),
+                        || {
+                            request
+                                .send()
+                                .and_then(|response| response.error_for_status())
+                        },
                     );
                     if let Err(error) = ended {
                         eprintln!(

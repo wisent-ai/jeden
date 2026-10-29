@@ -45,33 +45,62 @@ impl Requests {
             Entry::Vacant(entry) => {
                 let flag = Arc::new(AtomicBool::new(false));
                 let cancellation = CancellationToken::from_flag(Arc::clone(&flag));
-                entry.insert(Active { id: id.clone(), cwd: cwd.to_path_buf(), scope, cancellation: cancellation.clone() });
-                Ok(Lease { active: Arc::clone(&self.active), key, flag, cancellation })
+                entry.insert(Active {
+                    id: id.clone(),
+                    cwd: cwd.to_path_buf(),
+                    scope,
+                    cancellation: cancellation.clone(),
+                });
+                Ok(Lease {
+                    active: Arc::clone(&self.active),
+                    key,
+                    flag,
+                    cancellation,
+                })
             }
         }
     }
 
     pub(super) fn cancel(&self, id: &Value) -> Result<Value, Failure> {
         // A wake can end a lease; never announce cancellation while holding it.
-        let cancellation = self.active.lock().get(&key(id)?).map(|active| active.cancellation.clone())
-            .ok_or_else(|| ("request_not_running", format!("hillclimb request {id} is not running on this connection")))?;
+        let cancellation = self
+            .active
+            .lock()
+            .get(&key(id)?)
+            .map(|active| active.cancellation.clone())
+            .ok_or_else(|| {
+                (
+                    "request_not_running",
+                    format!("hillclimb request {id} is not running on this connection"),
+                )
+            })?;
         cancellation.cancel();
         Ok(json!({ "requestId": id, "cancellationRequested": true }))
     }
 
     pub(super) fn status(&self) -> Value {
         let active = self.active.lock();
-        let requests: Vec<_> = active.values().map(|request| json!({
-            "requestId": request.id,
-            "cwd": request.cwd,
-            "scope": request.scope,
-            "cancellationRequested": request.cancellation.is_cancelled(),
-        })).collect();
+        let requests: Vec<_> = active
+            .values()
+            .map(|request| {
+                json!({
+                    "requestId": request.id,
+                    "cwd": request.cwd,
+                    "scope": request.scope,
+                    "cancellationRequested": request.cancellation.is_cancelled(),
+                })
+            })
+            .collect();
         json!({ "requests": requests })
     }
 
     pub(in crate::rpc::server) fn cancel_all(&self) {
-        let tokens: Vec<_> = self.active.lock().values().map(|active| active.cancellation.clone()).collect();
+        let tokens: Vec<_> = self
+            .active
+            .lock()
+            .values()
+            .map(|active| active.cancellation.clone())
+            .collect();
         for token in tokens {
             token.cancel();
         }

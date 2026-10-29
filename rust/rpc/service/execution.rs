@@ -106,7 +106,10 @@ impl<B: SessionBackend> SessionService<B> {
                 // answered with the result this daemon kept, not reattached
                 // to a stream that already ended.
                 let kept = crate::panicked::held(&self.unrecorded)
-                    .get(&(caller.tenant.as_str().to_owned(), idempotency_key.to_owned()))
+                    .get(&(
+                        caller.tenant.as_str().to_owned(),
+                        idempotency_key.to_owned(),
+                    ))
                     .cloned();
                 return Ok(match kept {
                     Some((request_id, result)) => SubmitOutcome::Completed { request_id, result },

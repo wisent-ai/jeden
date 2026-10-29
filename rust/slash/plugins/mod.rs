@@ -134,7 +134,9 @@ pub(crate) fn plugins_picker(context: &SlashContext<'_>) -> PickerSpec {
         Ok(items) => items,
         // The registry that could not be read is one disabled error row, as
         // the other plugin views show it, never "No plugins installed".
-        Err(cause) => vec![PickerItem::action(&cause, "").detail("error").disabled(true)],
+        Err(cause) => vec![PickerItem::action(&cause, "")
+            .detail("error")
+            .disabled(true)],
     };
     PickerSpec::new("Manage plugins", items)
 }
@@ -149,7 +151,9 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
     if verb == "list" {
         let mut installed = merged_installed_values(context.cwd)?;
         installed.sort_by(|a, b| {
-            a.get("id").and_then(Value::as_str).cmp(&b.get("id").and_then(Value::as_str))
+            a.get("id")
+                .and_then(Value::as_str)
+                .cmp(&b.get("id").and_then(Value::as_str))
         });
         return Ok(if installed.is_empty() {
             "No plugins installed. Use /marketplace discover and /marketplace install <name@marketplace>.".into()
@@ -164,7 +168,11 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
     if let Ok(toggle) = serde_json::from_value::<Toggle>(Value::from(verb)) {
         let (_force, scope, targets) = parse_marketplace_flags(rest)?;
         let scope = normalize_scope(scope)?;
-        let Some(target) = targets.first().map(String::as_str).filter(|target| !target.is_empty()) else {
+        let Some(target) = targets
+            .first()
+            .map(String::as_str)
+            .filter(|target| !target.is_empty())
+        else {
             return Err(format!(
                 "Usage: /plugins {verb} [--scope user|project] <name@marketplace>"
             ));
@@ -182,7 +190,9 @@ pub(crate) fn handle_plugins(args: &str, context: &SlashContext<'_>) -> Result<S
         // is first enabled or disabled; one installed nowhere is refused.
         if !installed.contains_key(target) {
             if !active_here {
-                return Err(format!("Installed plugin not found in {scope} scope: {target}"));
+                return Err(format!(
+                    "Installed plugin not found in {scope} scope: {target}"
+                ));
             }
             installed.insert(target.to_string(), json!({ "id": target }));
         }

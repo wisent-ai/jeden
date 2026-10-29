@@ -32,9 +32,8 @@ impl ChatConfig {
         if self.via_brama {
             return Err("resolve private-gateway model request: configuration also selects shared Brama account leases".to_owned());
         }
-        let gateway = crate::agent::credential::private_gateway::start().map_err(|cause| {
-            format!("resolve private-gateway model request: {cause}")
-        })?;
+        let gateway = crate::agent::credential::private_gateway::start()
+            .map_err(|cause| format!("resolve private-gateway model request: {cause}"))?;
         Ok(RequestRoute {
             endpoint: Cow::Owned(gateway.endpoint),
             bearer: Cow::Owned(gateway.bearer),

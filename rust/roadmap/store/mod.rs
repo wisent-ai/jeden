@@ -89,7 +89,9 @@ impl RoadmapStore {
             });
         }
         change(&mut roadmap)?;
-        roadmap.revision = roadmap.revision.saturating_add(u64::from(crate::tally::STEP));
+        roadmap.revision = roadmap
+            .revision
+            .saturating_add(u64::from(crate::tally::STEP));
         normalize(&mut roadmap);
         let errors = self.validation_errors(&roadmap, true);
         if !errors.is_empty() {
@@ -264,6 +266,9 @@ fn atomic_write_yaml(path: &Path, roadmap: &RoadmapFile) -> Result<(), RoadmapEr
 
 fn relative_path(cwd: &Path, path: &Path) -> String {
     // A path outside the workspace is named whole.
-    let shown = match path.strip_prefix(cwd) { Ok(inside) => inside, Err(_outside) => path };
+    let shown = match path.strip_prefix(cwd) {
+        Ok(inside) => inside,
+        Err(_outside) => path,
+    };
     shown.to_string_lossy().into_owned()
 }

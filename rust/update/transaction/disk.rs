@@ -17,8 +17,8 @@ pub(super) fn sync_dir(path: &Path) -> Result<(), String> {
 /// `value` as JSON over `path` through the shared durable replace. The
 /// staging file was one fixed <name>.tmp, so two updaters wrote into one.
 pub(super) fn durable_json<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
-    let mut bytes = serde_json::to_vec(value)
-        .map_err(|error| format!("encode {}: {error}", path.display()))?;
+    let mut bytes =
+        serde_json::to_vec(value).map_err(|error| format!("encode {}: {error}", path.display()))?;
     bytes.push(b'\n');
     crate::tool_runtime::runtime_ops::durable::replace(path, &bytes)
 }

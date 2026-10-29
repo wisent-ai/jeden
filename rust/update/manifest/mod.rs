@@ -92,7 +92,9 @@ pub fn verify_envelope(
         .map_err(|error| format!("DSSE signature must be 64 bytes: {error}"))?;
     root.key
         .verify(&pae(envelope.payload_type.as_bytes(), &payload), &signature)
-        .map_err(|error| format!("release manifest Ed25519 signature verification failed: {error}"))?;
+        .map_err(|error| {
+            format!("release manifest Ed25519 signature verification failed: {error}")
+        })?;
     Ok(manifest)
 }
 

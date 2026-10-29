@@ -18,7 +18,10 @@ pub(super) fn control_plane_probe(
                 return HealthProbe::unavailable(
                     subsystem,
                     started,
-                    format!("{}; its health cannot be encoded as evidence: {error}", health.detail),
+                    format!(
+                        "{}; its health cannot be encoded as evidence: {error}",
+                        health.detail
+                    ),
                 );
             }
         };

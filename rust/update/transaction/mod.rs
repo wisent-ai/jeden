@@ -80,10 +80,10 @@ mod disk;
 mod lock;
 mod recover;
 
+use crate::tool_runtime::runtime_ops::platform::presence::present;
 use disk::{durable_json, make_executable, sync_dir};
 use lock::UpdateLock;
 pub use recover::recover;
-use crate::tool_runtime::runtime_ops::platform::presence::present;
 use recover::rollback;
 
 fn journal(
@@ -148,12 +148,18 @@ where
     let reject_staged = |error: String| -> Result<(), String> {
         if present(&paths.stage)? {
             fs::remove_file(&paths.stage).map_err(|cleanup| {
-                format!("{error}; remove rejected stage {}: {cleanup}", paths.stage.display())
+                format!(
+                    "{error}; remove rejected stage {}: {cleanup}",
+                    paths.stage.display()
+                )
             })?;
         }
         if present(&paths.journal)? {
             fs::remove_file(&paths.journal).map_err(|cleanup| {
-                format!("{error}; remove rejected journal {}: {cleanup}", paths.journal.display())
+                format!(
+                    "{error}; remove rejected journal {}: {cleanup}",
+                    paths.journal.display()
+                )
             })?;
         }
         sync_dir(paths.parent())?;
@@ -273,11 +279,17 @@ where
     )?;
     if present(&paths.backup)? {
         fs::remove_file(&paths.backup).map_err(|error| {
-            format!("remove last-known-good {} after commit: {error}", paths.backup.display())
+            format!(
+                "remove last-known-good {} after commit: {error}",
+                paths.backup.display()
+            )
         })?;
     }
     fs::remove_file(&paths.journal).map_err(|error| {
-        format!("remove committed journal {}: {error}", paths.journal.display())
+        format!(
+            "remove committed journal {}: {error}",
+            paths.journal.display()
+        )
     })?;
     sync_dir(paths.parent())?;
     Ok(())

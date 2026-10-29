@@ -262,7 +262,10 @@ impl EvalRunner {
             artifacts,
         };
         let encoded = serde_json::to_vec(&outcome).map_err(|error| {
-            format!("the outcome of case {} cannot be encoded as JSON: {error}", outcome_path.display())
+            format!(
+                "the outcome of case {} cannot be encoded as JSON: {error}",
+                outcome_path.display()
+            )
         })?;
         crate::tool_runtime::runtime_ops::durable::replace(&outcome_path, &encoded)?;
         Ok(outcome)

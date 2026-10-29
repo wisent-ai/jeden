@@ -145,8 +145,10 @@ fn handle_queue(store: &MemoryStore, args: &[String]) -> Result<String, String> 
     let Some((action, inputs)) = args.split_first() else {
         return serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string());
     };
-    let verb: QueueVerb = serde_json::from_value(Value::String(action.clone()))
-        .map_err(|error| format!("unknown memory queue action {action:?} ({error}); {QUEUE_USAGE}"))?;
+    let verb: QueueVerb =
+        serde_json::from_value(Value::String(action.clone())).map_err(|error| {
+            format!("unknown memory queue action {action:?} ({error}); {QUEUE_USAGE}")
+        })?;
     match (verb, inputs) {
         (QueueVerb::Status, []) => {
             serde_json::to_string_pretty(&store.queue_status()?).map_err(|e| e.to_string())

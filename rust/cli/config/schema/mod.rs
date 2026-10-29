@@ -69,7 +69,9 @@ fn unknown_key(key: &str) -> String {
 fn printed(verb: &str, value: &impl serde::Serialize) -> Result<String, String> {
     serde_json::to_string_pretty(value)
         .map(|text| text + "\n")
-        .map_err(|error| format!("the answer of `jeden config {verb}` cannot be written as JSON: {error}"))
+        .map_err(|error| {
+            format!("the answer of `jeden config {verb}` cannot be written as JSON: {error}")
+        })
 }
 
 pub(crate) fn config_command(args: &Args) -> Result<String, String> {

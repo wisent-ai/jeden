@@ -29,8 +29,9 @@ impl SecretPolicy {
             add_secret(&mut sources, value);
         }
         for name in &config.environment {
-            let value = env::var(name)
-                .map_err(|error| format!("configured secret environment variable {name} cannot be read: {error}"))?;
+            let value = env::var(name).map_err(|error| {
+                format!("configured secret environment variable {name} cannot be read: {error}")
+            })?;
             add_secret(&mut sources, &value);
         }
         if config.discover_environment {

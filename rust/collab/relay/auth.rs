@@ -61,20 +61,27 @@ pub(super) fn relay_response_authorized(
         "GET" => match parse_since(query) {
             Err(error) => refused(StatusCode::BAD_REQUEST, error),
             Ok(since) => match store.get(target, since) {
-                Ok((events, next)) => {
-                    answered(StatusCode::OK, json!({"ok": true, "events": events, "next": next}))
-                }
+                Ok((events, next)) => answered(
+                    StatusCode::OK,
+                    json!({"ok": true, "events": events, "next": next}),
+                ),
                 Err(error) => refused(StatusCode::INTERNAL_SERVER_ERROR, error),
             },
         },
-        _ => refused(StatusCode::METHOD_NOT_ALLOWED, format!("{method} is not a relay method")),
+        _ => refused(
+            StatusCode::METHOD_NOT_ALLOWED,
+            format!("{method} is not a relay method"),
+        ),
     }
 }
 
 /// The `since=` cursor of a read: none when the query states none, so the
 /// read starts at the room's first event; refused when it is not a number.
 pub(super) fn parse_since(query: &str) -> Result<Option<usize>, String> {
-    match query.split('&').find_map(|pair| pair.strip_prefix("since=")) {
+    match query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("since="))
+    {
         None => Ok(None),
         Some(since) => since
             .parse()

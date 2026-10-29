@@ -83,7 +83,10 @@ pub(super) fn write_disk_cache(key: &str, catalog: &ModelCatalog, etag: Option<&
             });
             // The shared durable replace stages each write in a file of its
             // own, so concurrent jeden processes never rename a mix of two.
-            crate::tool_runtime::runtime_ops::durable::replace(&path, payload.to_string().as_bytes())
+            crate::tool_runtime::runtime_ops::durable::replace(
+                &path,
+                payload.to_string().as_bytes(),
+            )
         });
     if let Err(error) = written {
         eprintln!(
@@ -106,5 +109,7 @@ pub(super) fn catalog_cache_key(endpoint: &str, bearer: Option<&str>) -> Result<
         Some((agent_id, _)) => agent_id,
         None => "unsigned".to_string(),
     };
-    Ok(format!("{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}"))
+    Ok(format!(
+        "{endpoint}\u{0}bearer={bearer_scope}\u{0}agent={agent_scope}"
+    ))
 }

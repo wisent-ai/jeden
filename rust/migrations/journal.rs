@@ -78,7 +78,12 @@ pub fn sync_parent(path: &Path) -> Result<(), String> {
     let parent = match path.parent() {
         Some(parent) if parent.as_os_str().is_empty() => Path::new("."),
         Some(parent) => parent,
-        None => return Err(format!("{} has no directory whose entry could be synced", path.display())),
+        None => {
+            return Err(format!(
+                "{} has no directory whose entry could be synced",
+                path.display()
+            ))
+        }
     };
     let directory = fs::File::open(parent)
         .map_err(|error| format!("open directory {}: {error}", parent.display()))?;

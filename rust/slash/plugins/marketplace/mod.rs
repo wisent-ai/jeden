@@ -172,19 +172,30 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
             Some(first) => first.clone(),
             None => json!(now),
         };
-        let listed = match existing.as_ref().and_then(|earlier| earlier.get("plugins")).filter(|value| value.is_array()) {
+        let listed = match existing
+            .as_ref()
+            .and_then(|earlier| earlier.get("plugins"))
+            .filter(|value| value.is_array())
+        {
             Some(plugins) => plugins.clone(),
             None => json!([]),
         };
-        registry.get_mut("sources").and_then(Value::as_object_mut).ok_or("invalid plugin registry")?.insert(name.clone(), json!({
-        "name": name,
-        "source": source.clone(),
-        "type": marketplace_source_type(&source),
-        "enabled": true,
-        "addedAt": added_at,
-        "updatedAt": now,
-        "plugins": listed,
-    }));
+        registry
+            .get_mut("sources")
+            .and_then(Value::as_object_mut)
+            .ok_or("invalid plugin registry")?
+            .insert(
+                name.clone(),
+                json!({
+                    "name": name,
+                    "source": source.clone(),
+                    "type": marketplace_source_type(&source),
+                    "enabled": true,
+                    "addedAt": added_at,
+                    "updatedAt": now,
+                    "plugins": listed,
+                }),
+            );
         let file = save_plugin_registry(context.cwd, &registry)?;
         return Ok(format!(
             "Added marketplace source {} ({}) in {}.",
@@ -210,7 +221,9 @@ pub(crate) fn handle_marketplace(args: &str, context: &SlashContext<'_>) -> Resu
     if verb == "list" {
         let mut sources = sorted_object_values(&registry["sources"])?;
         sources.sort_by(|a, b| {
-            a.get("name").and_then(Value::as_str).cmp(&b.get("name").and_then(Value::as_str))
+            a.get("name")
+                .and_then(Value::as_str)
+                .cmp(&b.get("name").and_then(Value::as_str))
         });
         return Ok(if sources.is_empty() {
             "No marketplace sources configured. Add one with /marketplace add <source>.".into()

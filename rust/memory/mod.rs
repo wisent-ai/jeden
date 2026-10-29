@@ -167,7 +167,9 @@ pub fn scope_from_value(value: Option<&Value>, cwd: &Path) -> Result<MemoryScope
     };
     match value {
         None | Some(Value::Null) => Ok(repository(cwd.display().to_string())),
-        Some(Value::String(kind)) if kind == REPO_SCOPE => Ok(repository(cwd.display().to_string())),
+        Some(Value::String(kind)) if kind == REPO_SCOPE => {
+            Ok(repository(cwd.display().to_string()))
+        }
         Some(Value::String(kind)) => Ok(MemoryScope {
             kind: kind.clone(),
             id: kind.clone(),
@@ -232,7 +234,11 @@ pub(crate) fn redacted(value: &str) -> String {
         // credential it recognises was kept in memory unredacted.
         match regex::Regex::new(pattern) {
             Ok(re) => text = re.replace_all(&text, "[REDACTED]").into_owned(),
-            Err(error) => return format!("[REDACTED: the credential pattern {pattern} does not compile: {error}]"),
+            Err(error) => {
+                return format!(
+                    "[REDACTED: the credential pattern {pattern} does not compile: {error}]"
+                )
+            }
         }
     }
     text.split_whitespace().collect::<Vec<_>>().join(" ")

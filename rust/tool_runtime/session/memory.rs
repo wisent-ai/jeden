@@ -6,9 +6,8 @@ use crate::tool_runtime::ToolRuntime;
 
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
     let store = MemoryStore::open()?;
-    let op = string_input(input, "op").ok_or(
-        "memory requires op, one of remember, list, recall, context, forget or stats",
-    )?;
+    let op = string_input(input, "op")
+        .ok_or("memory requires op, one of remember, list, recall, context, forget or stats")?;
     let scope = scope_from_value(input.get("scope"), runtime.cwd)?;
     match op.as_str() {
         "remember" => {
@@ -16,13 +15,15 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 return Err("memory remember requires --allow-write".into());
             }
             let text = string_input(input, "text").ok_or("memory remember requires text")?;
-            let kind = string_input(input, "kind")
-                .ok_or("memory remember requires kind, what the note is (such as note or decision)")?;
+            let kind = string_input(input, "kind").ok_or(
+                "memory remember requires kind, what the note is (such as note or decision)",
+            )?;
             // How sure the note is, between 0 and 1 as the store keeps it: the
             // caller states it; no certainty is assumed for it.
-            let confidence = input.get("confidence").and_then(Value::as_f64).ok_or(
-                "memory remember requires confidence, how sure the note is, from 0 to 1",
-            )?;
+            let confidence = input
+                .get("confidence")
+                .and_then(Value::as_f64)
+                .ok_or("memory remember requires confidence, how sure the note is, from 0 to 1")?;
             // No tags is a note without tags; a tag that is not text is refused.
             let tags: Vec<String> = match input.get("tags") {
                 None | Some(Value::Null) => Vec::new(),
@@ -34,7 +35,9 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                             .ok_or_else(|| format!("memory remember tags must be text, not {item}"))
                     })
                     .collect::<Result<_, String>>()?,
-                Some(other) => return Err(format!("memory remember tags must be a list, not {other}")),
+                Some(other) => {
+                    return Err(format!("memory remember tags must be a list, not {other}"))
+                }
             };
             // A note the caller does not attribute is recorded as written by
             // this tool; a source that is not one is refused with its cause.
@@ -44,8 +47,9 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                     session_id: None,
                     entry_id: None,
                 },
-                Some(value) => serde_json::from_value(value.clone())
-                    .map_err(|error| format!("memory remember source is not a memory source: {error}"))?,
+                Some(value) => serde_json::from_value(value.clone()).map_err(|error| {
+                    format!("memory remember source is not a memory source: {error}")
+                })?,
             };
             let entry = store.remember(&kind, &scope, &text, &tags, &source, confidence)?;
             Ok(json!({"entry":entry,"backend":"fleet-postgres"}))

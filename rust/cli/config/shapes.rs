@@ -205,7 +205,9 @@ pub(crate) struct UiLanguage {
 
 impl Default for UiLanguage {
     fn default() -> Self {
-        Self { code: schema::UI_LANGUAGE_AUTO.into() }
+        Self {
+            code: schema::UI_LANGUAGE_AUTO.into(),
+        }
     }
 }
 
@@ -249,7 +251,11 @@ pub(crate) fn ui_theme() -> String {
             crate::cli::config::user_config_value()
         }
     };
-    match config.get("ui").and_then(|ui| ui.get("theme")).and_then(serde_json::Value::as_str) {
+    match config
+        .get("ui")
+        .and_then(|ui| ui.get("theme"))
+        .and_then(serde_json::Value::as_str)
+    {
         Some(theme) => theme.to_string(),
         None => default_ui_theme(),
     }

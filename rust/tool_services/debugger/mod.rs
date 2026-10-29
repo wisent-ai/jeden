@@ -110,7 +110,9 @@ impl DebuggerService {
         }
     }
     pub(crate) fn health(&self) -> HealthDescriptor {
-        if let Err(unread) = &self.args { return HealthDescriptor::unavailable("debugger", unread.clone()) }
+        if let Err(unread) = &self.args {
+            return HealthDescriptor::unavailable("debugger", unread.clone());
+        }
         match self.command.as_deref() {
             Some(command) if command_exists(command) => {
                 HealthDescriptor::healthy("debugger", command)
@@ -126,7 +128,10 @@ impl DebuggerService {
         }
     }
     fn spawn(&self) -> ServiceResult<DapSession> {
-        let unavailable = || ServiceError::Unavailable { service: "debugger", detail: self.health().detail };
+        let unavailable = || ServiceError::Unavailable {
+            service: "debugger",
+            detail: self.health().detail,
+        };
         let command = self.command.as_deref().ok_or_else(unavailable)?;
         let args = self.args.as_ref().map_err(|_unread| unavailable())?;
         let stderr_log = self.cwd.join(".jeden/dap").join(format!(

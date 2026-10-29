@@ -34,7 +34,9 @@ pub(super) fn load(inputs: &[Input]) -> Loaded {
         let accepts: fn(Notation) -> bool = match declared {
             DeclarativeKind::Skills => Notation::markdown,
             DeclarativeKind::Agents => Notation::structured,
-            DeclarativeKind::Rules => |notation: Notation| notation.markdown() || notation.structured(),
+            DeclarativeKind::Rules => {
+                |notation: Notation| notation.markdown() || notation.structured()
+            }
             DeclarativeKind::Commands | DeclarativeKind::Hooks => continue,
         };
         let mut files = Vec::new();
@@ -58,7 +60,9 @@ pub(super) fn load(inputs: &[Input]) -> Loaded {
             CapabilityKind::Skill => loaded.skills.get(&capability.id).map(|value| &value.source),
             CapabilityKind::Rule => loaded.rules.get(&capability.id).map(|value| &value.source),
             CapabilityKind::Agent => loaded.agents.get(&capability.id).map(|value| &value.source),
-            other => unreachable!("the declarative runtime lists skills, rules and agents, not {other}"),
+            other => {
+                unreachable!("the declarative runtime lists skills, rules and agents, not {other}")
+            }
         };
         capability.active = capability.healthy && winning_source == Some(&capability.path);
         if let Some(source) = winning_source.filter(|source| **source != capability.path) {
@@ -101,7 +105,11 @@ fn skill(loaded: &mut Loaded, path: &Path, precedence: usize) {
         metadata,
     ));
     if let Ok(skill) = result {
-        if loaded.skills.get(&id).is_none_or(|prior| prior.precedence <= skill.precedence) {
+        if loaded
+            .skills
+            .get(&id)
+            .is_none_or(|prior| prior.precedence <= skill.precedence)
+        {
             loaded.skills.insert(id, skill);
         }
     }
@@ -127,7 +135,11 @@ fn rule(loaded: &mut Loaded, path: &Path, precedence: usize) {
         metadata,
     ));
     if let Ok(rule) = result {
-        if loaded.rules.get(&id).is_none_or(|prior| prior.precedence <= rule.precedence) {
+        if loaded
+            .rules
+            .get(&id)
+            .is_none_or(|prior| prior.precedence <= rule.precedence)
+        {
             loaded.rules.insert(id, rule);
         }
     }
@@ -157,7 +169,11 @@ fn agent(loaded: &mut Loaded, path: &Path, precedence: usize) {
         metadata,
     ));
     if let Ok(agent) = result {
-        if loaded.agents.get(&id).is_none_or(|prior| prior.precedence <= agent.precedence) {
+        if loaded
+            .agents
+            .get(&id)
+            .is_none_or(|prior| prior.precedence <= agent.precedence)
+        {
             loaded.agents.insert(id, agent);
         }
     }

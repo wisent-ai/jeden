@@ -134,9 +134,9 @@ pub(crate) fn amount_input(input: &Value, key: &str, tool: &str) -> Result<Amoun
     let whole = value
         .as_u64()
         .ok_or_else(|| format!("{tool} {key} must be a whole number, not {value}"))?;
-    usize::try_from(whole)
-        .map(Amount)
-        .map_err(|error| format!("{tool} {key} {whole} is more than this machine can count: {error}"))
+    usize::try_from(whole).map(Amount).map_err(|error| {
+        format!("{tool} {key} {whole} is more than this machine can count: {error}")
+    })
 }
 
 /// An amount a tool works to — how many entries it answers, how many bytes

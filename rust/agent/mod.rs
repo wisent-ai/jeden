@@ -77,9 +77,9 @@ fn catalog_left_unread(router: &ChatConfig) -> Option<&str> {
     router.config_error.as_deref()
 }
 
-pub(crate) use runtime::{now_stamp, selected_model, selected_service_tier};
 pub(crate) use runtime::specs::system_prompt_checked;
 pub(crate) use runtime::task_contract;
+pub(crate) use runtime::{now_stamp, selected_model, selected_service_tier};
 pub(crate) use state::{
     loop_next_prompt, record_branch, resumed_session, update_last_session_path, update_task_outcome,
 };

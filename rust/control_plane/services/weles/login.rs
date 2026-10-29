@@ -17,7 +17,10 @@ fn listed(value: Value, key: &str, path: &str) -> Result<Value, WelesError> {
     match value {
         Value::Array(_) => Ok(value),
         Value::Object(mut object) => object.remove(key).ok_or_else(|| {
-            WelesError::InvalidResponse(format!("the answer to {path} carries no {key} list: {}", Value::Object(object)))
+            WelesError::InvalidResponse(format!(
+                "the answer to {path} carries no {key} list: {}",
+                Value::Object(object)
+            ))
         }),
         other => Err(WelesError::InvalidResponse(format!(
             "the answer to {path} is neither a list nor an object holding {key}: {other}"
@@ -28,8 +31,9 @@ fn listed(value: Value, key: &str, path: &str) -> Result<Value, WelesError> {
 impl WelesClient {
     pub fn providers(&self) -> Result<Vec<Provider>, WelesError> {
         let value = self.request(reqwest::Method::GET, "/providers", None)?;
-        let providers: Vec<Provider> = serde_json::from_value(listed(value, "providers", "/providers")?)
-            .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
+        let providers: Vec<Provider> =
+            serde_json::from_value(listed(value, "providers", "/providers")?)
+                .map_err(|e| WelesError::InvalidResponse(e.to_string()))?;
         Ok(providers)
     }
 
@@ -74,7 +78,10 @@ impl WelesClient {
                 Some(reason) => reason.clone(),
                 None => "Weles marks it unavailable and names no reason".to_string(),
             };
-            return Err(WelesError::UnavailableProvider { provider: provider.id.clone(), reason });
+            return Err(WelesError::UnavailableProvider {
+                provider: provider.id.clone(),
+                reason,
+            });
         }
         self.run_operation(
             "/auth/login",

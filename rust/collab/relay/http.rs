@@ -4,12 +4,12 @@
 //!
 //! Split out of `collab/relay.rs`, which had grown past the module line cap.
 
-use std::num::NonZeroUsize;
 use super::{relay_response_authorized, RelayStore};
 use crate::collab::relay::auth::token_role;
 use reqwest::StatusCode;
 use serde_json::json;
 use std::io::Read;
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tiny_http::{Header, Request, Response, Server};
 
@@ -71,7 +71,11 @@ fn handle(mut request: Request, store: &RelayStore, max_blob_bytes: usize) -> st
         }
         Some(length) => length,
         None => {
-            return answer(request, StatusCode::LENGTH_REQUIRED, json!({"ok": false, "error": "the request declares no content-length"}).to_string());
+            return answer(
+                request,
+                StatusCode::LENGTH_REQUIRED,
+                json!({"ok": false, "error": "the request declares no content-length"}).to_string(),
+            );
         }
     };
     let mut body = String::with_capacity(length);
@@ -90,7 +94,8 @@ fn handle(mut request: Request, store: &RelayStore, max_blob_bytes: usize) -> st
         {
             (
                 StatusCode::FORBIDDEN.as_u16(),
-                json!({"ok":false,"error":"write token is not valid for requested role"}).to_string(),
+                json!({"ok":false,"error":"write token is not valid for requested role"})
+                    .to_string(),
             )
         }
         _ => relay_response_authorized(store, &method, &path, &query, &body, token.as_deref()),

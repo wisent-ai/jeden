@@ -83,9 +83,12 @@ pub(crate) fn write_json_value(path: &Path, value: &Value) -> Result<(), String>
         fs::create_dir_all(parent)
             .map_err(|error| format!("{} cannot be created: {error}", parent.display()))?;
     }
-    let text = serde_json::to_string_pretty(value)
-        .map_err(|error| format!("the value for {} cannot be encoded: {error}", path.display()))?
-        + "\n";
+    let text = serde_json::to_string_pretty(value).map_err(|error| {
+        format!(
+            "the value for {} cannot be encoded: {error}",
+            path.display()
+        )
+    })? + "\n";
     fs::write(path, text).map_err(|error| format!("{} cannot be written: {error}", path.display()))
 }
 
@@ -112,7 +115,10 @@ pub(crate) fn is_plain_object(value: &Value) -> bool {
 pub(crate) fn file_url(path: &Path) -> String {
     match Url::from_file_path(path) {
         Ok(url) => url.to_string(),
-        Err(()) => panic!("{} is not an absolute path, so it has no file URL", path.display()),
+        Err(()) => panic!(
+            "{} is not an absolute path, so it has no file URL",
+            path.display()
+        ),
     }
 }
 

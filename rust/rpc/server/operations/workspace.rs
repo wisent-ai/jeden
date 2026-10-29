@@ -35,8 +35,8 @@ pub(crate) fn workspace_adopt(params: &Value) -> Result<Value, (&'static str, St
     let path = string_param(params, "path")
         .map(PathBuf::from)
         .map_err(|error| ("invalid_request", error))?;
-    let report = crate::cli::workspace::adopt(&path, &cwd)
-        .map_err(|error| ("invalid_workspace", error))?;
+    let report =
+        crate::cli::workspace::adopt(&path, &cwd).map_err(|error| ("invalid_workspace", error))?;
     report.value().map_err(|error| ("storage", error))
 }
 

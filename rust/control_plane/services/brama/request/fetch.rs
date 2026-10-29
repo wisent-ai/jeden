@@ -24,15 +24,14 @@ impl BramaClient {
         // request made with another token or no token.
         let authorization = SecretRef::resolve_optional(self.authorization.as_ref())
             .map_err(BramaError::Configuration)?;
-        let key = catalog_cache_key(&endpoint, authorization.as_deref()).map_err(BramaError::Configuration)?;
+        let key = catalog_cache_key(&endpoint, authorization.as_deref())
+            .map_err(BramaError::Configuration)?;
         let prior = if direct {
             None
         } else {
             // Catalog entries are inserted whole: a holder that panicked left a
             // cache, not a reason to call Brama's model catalog unusable.
-            crate::panicked::held(&CACHE)
-                .get(&key)
-                .cloned()
+            crate::panicked::held(&CACHE).get(&key).cloned()
         };
         if !force && !direct {
             if let Some(cached) = &prior {
@@ -59,15 +58,14 @@ impl BramaClient {
                     }
                 };
                 if fresh {
-                    crate::panicked::held(&CACHE)
-                        .insert(
-                            key.clone(),
-                            CachedCatalog {
-                                catalog: catalog.clone(),
-                                etag,
-                                fetched: Instant::now(),
-                            },
-                        );
+                    crate::panicked::held(&CACHE).insert(
+                        key.clone(),
+                        CachedCatalog {
+                            catalog: catalog.clone(),
+                            etag,
+                            fetched: Instant::now(),
+                        },
+                    );
                     return Ok(catalog);
                 }
             }
@@ -149,8 +147,7 @@ impl BramaClient {
             cached.fetched = Instant::now();
             let catalog = cached.catalog.clone();
             write_disk_cache(&key, &cached.catalog, cached.etag.as_deref());
-            crate::panicked::held(&CACHE)
-                .insert(key, cached);
+            crate::panicked::held(&CACHE).insert(key, cached);
             return Ok(catalog);
         }
         let status = response.status;

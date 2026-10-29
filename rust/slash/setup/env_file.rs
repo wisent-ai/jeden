@@ -60,7 +60,12 @@ pub(super) fn example_prefill(cwd: &Path, key: &str) -> Result<Option<String>, S
             Ok(metadata) if metadata.is_file() => return env_file_value(&candidate, key),
             Ok(_not_file) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(format!("{} cannot be examined: {error}", candidate.display())),
+            Err(error) => {
+                return Err(format!(
+                    "{} cannot be examined: {error}",
+                    candidate.display()
+                ))
+            }
         }
     }
     Ok(None)

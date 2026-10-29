@@ -47,7 +47,10 @@ fn rewrite_zip(
     let mut archive =
         zip::ZipArchive::new(source).map_err(failed("the archive cannot be read as a zip"))?;
     let output = File::create(target).map_err(|error| {
-        format!("the rewritten archive {} cannot be created: {error}", target.display())
+        format!(
+            "the rewritten archive {} cannot be created: {error}",
+            target.display()
+        )
     })?;
     let mut writer = zip::ZipWriter::new(output);
     let options = SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -100,7 +103,10 @@ fn rewrite_tar(
         Box::new(source)
     };
     let output = File::create(target).map_err(|error| {
-        format!("the rewritten archive {} cannot be created: {error}", target.display())
+        format!(
+            "the rewritten archive {} cannot be created: {error}",
+            target.display()
+        )
     })?;
     let sink: Box<dyn Write> = if gzip {
         Box::new(GzEncoder::new(output, Compression::default()))
@@ -132,7 +138,9 @@ fn rewrite_tar(
         let mut header = tar::Header::new_gnu();
         header.set_size(bytes.len() as u64);
         // A written entry is a regular file its owner may change and anyone may read.
-        header.set_mode(u32::from(libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH));
+        header.set_mode(u32::from(
+            libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH,
+        ));
         header.set_cksum();
         builder
             .append_data(&mut header, entry_name, Cursor::new(bytes))
@@ -158,8 +166,11 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     let expected =
         string_input(input, "expectedSha256").ok_or("write_archive requires expectedSha256")?;
     let path = jail_write_path(runtime.cwd, &label)?;
-    let mut source = File::open(&path).map_err(|error| format!("{label} cannot be opened: {error}"))?;
-    let mut hashing = Hashing { digest: Sha256::new() };
+    let mut source =
+        File::open(&path).map_err(|error| format!("{label} cannot be opened: {error}"))?;
+    let mut hashing = Hashing {
+        digest: Sha256::new(),
+    };
     std::io::copy(&mut source, &mut hashing)
         .map_err(|error| format!("{label} cannot be read to check its digest: {error}"))?;
     let actual = hex::encode(hashing.digest.finalize());
@@ -194,7 +205,10 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
         Err("write_archive supports .zip, .tar, .tar.gz, and .tgz".into())
     };
     if let Err(error) = result {
-        return Err(failed_leaving(format!("{label} cannot be rewritten: {error}"), &temp));
+        return Err(failed_leaving(
+            format!("{label} cannot be rewritten: {error}"),
+            &temp,
+        ));
     }
     fs::rename(&temp, &path).map_err(|error| {
         failed_leaving(

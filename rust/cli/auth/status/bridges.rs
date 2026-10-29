@@ -16,13 +16,13 @@ impl InteractionBridge for ConsoleBridge {
             eprint!(" [{}]", options.join("/"));
         }
         eprint!(": ");
-        io::stderr()
-            .flush()
-            .map_err(|error| format!("the authentication prompt cannot be shown on stderr: {error}"))?;
+        io::stderr().flush().map_err(|error| {
+            format!("the authentication prompt cannot be shown on stderr: {error}")
+        })?;
         let mut answer = String::new();
-        io::stdin()
-            .read_line(&mut answer)
-            .map_err(|error| format!("the authentication answer cannot be read from stdin: {error}"))?;
+        io::stdin().read_line(&mut answer).map_err(|error| {
+            format!("the authentication answer cannot be read from stdin: {error}")
+        })?;
         let answer = answer.trim().to_string();
         if answer.is_empty() {
             Err("authentication input cannot be empty".into())
@@ -41,7 +41,9 @@ impl InteractionBridge for ConsoleBridge {
                 eprintln!("Open {verification_uri} and enter code {user_code}");
                 match crate::qr::render(verification_uri) {
                     Ok(qr) => eprintln!("{qr}"),
-                    Err(cause) => eprintln!("(No QR code for this link: {cause}; open it as text.)"),
+                    Err(cause) => {
+                        eprintln!("(No QR code for this link: {cause}; open it as text.)")
+                    }
                 }
             }
             _ => {}
@@ -78,7 +80,9 @@ impl InteractionBridge for TurnBridge<'_> {
                 (self.progress)(&format!("enter code {user_code} at {verification_uri}"));
                 let qr = match crate::qr::render(verification_uri) {
                     Ok(qr) => format!("\n{qr}"),
-                    Err(cause) => format!("\n(No QR code for this link: {cause}; open it as text.)"),
+                    Err(cause) => {
+                        format!("\n(No QR code for this link: {cause}; open it as text.)")
+                    }
                 };
                 (self.stream)(&format!(
                     "Open {verification_uri} and enter code {user_code}.{qr}\n"

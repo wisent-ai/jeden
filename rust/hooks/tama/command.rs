@@ -61,10 +61,12 @@ pub(super) fn entry_command(
     if path.is_absolute() {
         return Some(match std::fs::metadata(path) {
             Ok(metadata) if metadata.is_file() => EntryCommand::Runnable(written.to_string()),
-            Err(error) if error.kind() != std::io::ErrorKind::NotFound => EntryCommand::Unexamined {
-                written: written.to_string(),
-                reason: format!("{} cannot be examined: {error}", path.display()),
-            },
+            Err(error) if error.kind() != std::io::ErrorKind::NotFound => {
+                EntryCommand::Unexamined {
+                    written: written.to_string(),
+                    reason: format!("{} cannot be examined: {error}", path.display()),
+                }
+            }
             _absent_or_not_file => EntryCommand::Missing {
                 written: written.to_string(),
                 tried: vec![path.to_path_buf()],
@@ -127,7 +129,10 @@ fn replace_program(written: &str, program: &Path) -> String {
     match shell_words::split(written) {
         Ok(tokens) => match tokens.split_first() {
             Some((_program, rest)) if !rest.is_empty() => {
-                format!("{quoted} {}", shell_words::join(rest.iter().map(String::as_str)))
+                format!(
+                    "{quoted} {}",
+                    shell_words::join(rest.iter().map(String::as_str))
+                )
             }
             _no_arguments => quoted,
         },

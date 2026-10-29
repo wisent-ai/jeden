@@ -41,8 +41,8 @@ impl AcpState {
         // This agent speaks one protocol version and answers it whatever the
         // client asked for; the client decides whether it can speak it too.
         Ok(InitializeResponse::new(ProtocolVersion::V1)
-        .agent_capabilities(agent_capabilities())
-        .agent_info(Implementation::new("jeden", crate::JEDEN_VERSION)))
+            .agent_capabilities(agent_capabilities())
+            .agent_info(Implementation::new("jeden", crate::JEDEN_VERSION)))
     }
 
     pub(super) fn require_initialized(&self) -> agent_client_protocol::Result<()> {

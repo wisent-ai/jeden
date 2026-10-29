@@ -46,7 +46,9 @@ impl Coordinator {
             worker.last_heartbeat = now;
             let job = current_job_mut(state.jobs.get_mut(job_id), worker_id, attempt, fence, now)?;
             let Some(lease) = job.lease.as_mut() else {
-                return Err(ProtocolError::LeaseLost(format!("job {job_id} has no active lease")));
+                return Err(ProtocolError::LeaseLost(format!(
+                    "job {job_id} has no active lease"
+                )));
             };
             lease.heartbeat_at = now;
             lease.expires_at = now.saturating_add(self.lease_ms);

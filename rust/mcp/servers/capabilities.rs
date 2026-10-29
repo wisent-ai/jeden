@@ -90,9 +90,10 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
         let health = match (ready, connection.failures.last().cloned()) {
             (true, _) => CapabilityHealth::healthy(),
             (false, Some(error)) => CapabilityHealth::unavailable(error),
-            (false, None) => {
-                CapabilityHealth::unavailable(format!("MCP server is {}", connection.state.as_str()))
-            }
+            (false, None) => CapabilityHealth::unavailable(format!(
+                "MCP server is {}",
+                connection.state.as_str()
+            )),
         };
         out.push(
             CapabilityDescriptor::new(
@@ -138,11 +139,26 @@ pub(crate) fn capability_descriptors(cwd: &Path) -> Vec<CapabilityDescriptor> {
                     )),
                 ),
             };
-            out.push(CapabilityDescriptor::new(
-                format!("tool/{native_name}"), CapabilityKind::Tool, format!("mcp:{server}"), native_name.clone(), description,
-                FunctionTarget::McpTool { native_name: native_name.clone(), server: server.clone(), remote_name: remote_name.into() },
-            ).operation("execute").dependency(format!("mcp/{server}")).policy(CapabilityPolicy::Sandboxed)
-             .health(tool_health).executable(native_name).metadata(json!({"input": input})));
+            out.push(
+                CapabilityDescriptor::new(
+                    format!("tool/{native_name}"),
+                    CapabilityKind::Tool,
+                    format!("mcp:{server}"),
+                    native_name.clone(),
+                    description,
+                    FunctionTarget::McpTool {
+                        native_name: native_name.clone(),
+                        server: server.clone(),
+                        remote_name: remote_name.into(),
+                    },
+                )
+                .operation("execute")
+                .dependency(format!("mcp/{server}"))
+                .policy(CapabilityPolicy::Sandboxed)
+                .health(tool_health)
+                .executable(native_name)
+                .metadata(json!({"input": input})),
+            );
         }
     }
     out

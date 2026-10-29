@@ -36,7 +36,13 @@ fn needle_of(query: &str, case: bool) -> String {
 }
 
 /// The matches the caller's window covers, as the answer lists them.
-fn window(runtime: &ToolRuntime<'_>, files: &[PathBuf], found: Vec<Found>, skip: usize, limit: usize) -> Vec<Value> {
+fn window(
+    runtime: &ToolRuntime<'_>,
+    files: &[PathBuf],
+    found: Vec<Found>,
+    skip: usize,
+    limit: usize,
+) -> Vec<Value> {
     found
         .into_iter()
         .skip(skip)
@@ -74,14 +80,19 @@ pub(crate) fn search_files(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     let limit = count_input(input, "limit", "search_files")? as usize;
     let files = text_files(runtime, input)?;
     let needle = needle_of(&query, case);
-    let (found, unreadable) =
-        parallel_scan(runtime, &files, "search_files", skip.saturating_add(limit), |content| {
+    let (found, unreadable) = parallel_scan(
+        runtime,
+        &files,
+        "search_files",
+        skip.saturating_add(limit),
+        |content| {
             (FIRST..)
                 .zip(content.lines())
                 .filter(|(_, line)| holds(line, &needle, case))
                 .map(|(number, line)| (number, line.to_owned()))
                 .collect()
-        })?;
+        },
+    )?;
     let matches = window(runtime, &files, found, skip, limit);
     Ok(
         json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches,"unreadable":unreadable}),
@@ -113,7 +124,9 @@ pub(crate) fn glob_paths(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let skip = amount_input(input, "skip", "glob_paths")?.0;
     let patterns = glob_patterns(input)?
         .iter()
-        .map(|value| Pattern::new(value).map_err(|error| format!("glob_paths pattern {value:?}: {error}")))
+        .map(|value| {
+            Pattern::new(value).map_err(|error| format!("glob_paths pattern {value:?}: {error}"))
+        })
         .collect::<Result<Vec<_>, _>>()?;
     let matches = discover(runtime, input, true)?
         .into_iter()
@@ -144,8 +157,12 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
     let files = text_files(runtime, input)?;
     let skip = amount_input(input, "skip", "grep_regex")?.0;
     let limit = count_input(input, "limit", "grep_regex")? as usize;
-    let (found, unreadable) =
-        parallel_scan(runtime, &files, "grep_regex", skip.saturating_add(limit), |content| {
+    let (found, unreadable) = parallel_scan(
+        runtime,
+        &files,
+        "grep_regex",
+        skip.saturating_add(limit),
+        |content| {
             if multiline {
                 matcher
                     .find_iter(content)
@@ -154,7 +171,11 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                             .bytes()
                             .filter(|byte| *byte == b'\n')
                             .count() as u64;
-                        let text = found.as_str().split_whitespace().collect::<Vec<_>>().join(" ");
+                        let text = found
+                            .as_str()
+                            .split_whitespace()
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         (FIRST + breaks_before, text)
                     })
                     .collect()
@@ -165,7 +186,8 @@ pub(crate) fn grep_regex(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Val
                     .map(|(number, line)| (number, line.to_owned()))
                     .collect()
             }
-        })?;
+        },
+    )?;
     let matches = window(runtime, &files, found, skip, limit);
     Ok(
         json!({"searchedFiles":files.len(),"skip":skip,"limit":limit,"matches":matches,"unreadable":unreadable}),

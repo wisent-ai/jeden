@@ -14,9 +14,9 @@ use agent_client_protocol::Responder;
 use futures::channel::oneshot;
 use futures::executor::block_on;
 use futures::future::{self, Either};
-use uuid::Uuid;
 use std::sync::Arc;
 use std::thread;
+use uuid::Uuid;
 
 impl AcpState {
     pub(super) fn start_prompt(
@@ -101,10 +101,9 @@ impl AcpState {
                     if let Some(update) = mapped.update {
                         // A client that hung up misses an update; the prompt's own
                         // answer still reaches it or fails on its own.
-                        let _undelivered = forward_client.send_notification(SessionNotification::new(
-                            forward_session_id.clone(),
-                            update,
-                        ));
+                        let _undelivered = forward_client.send_notification(
+                            SessionNotification::new(forward_session_id.clone(), update),
+                        );
                     }
                     if mapped.terminal {
                         break;
@@ -141,17 +140,15 @@ impl AcpState {
             // The same entering rule as the active map above: each change is one
             // insert or remove, so a poisoned lock holds a consistent set.
             let aborted = crate::panicked::held(&state.aborted).remove(&request_id);
-            let delivered = if cancellation.is_cancelled()
-                || operation_expired(&operation_token)
-                || aborted
-            {
-                responder.respond(PromptResponse::new(StopReason::Cancelled))
-            } else {
-                match result {
-                    Ok(_) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
-                    Err(error) => responder.respond_with_error(super::internal(error)),
-                }
-            };
+            let delivered =
+                if cancellation.is_cancelled() || operation_expired(&operation_token) || aborted {
+                    responder.respond(PromptResponse::new(StopReason::Cancelled))
+                } else {
+                    match result {
+                        Ok(_) => responder.respond(PromptResponse::new(StopReason::EndTurn)),
+                        Err(error) => responder.respond_with_error(super::internal(error)),
+                    }
+                };
             if let Err(error) = delivered {
                 eprintln!("jeden acp: the answer to {request_id} could not be delivered: {error}");
             }
@@ -165,15 +162,10 @@ impl AcpState {
     ) -> agent_client_protocol::Result<()> {
         self.require_initialized()?;
         let id = session_id.0.to_string();
-        let session = crate::panicked::held(&self.sessions)
-            .get(&id)
-            .cloned();
-        let request_id = crate::panicked::held(&self.active)
-            .get(&id)
-            .cloned();
+        let session = crate::panicked::held(&self.sessions).get(&id).cloned();
+        let request_id = crate::panicked::held(&self.active).get(&id).cloned();
         if let (Some(session), Some(request_id)) = (session, request_id) {
-            crate::panicked::held(&self.aborted)
-                .insert(request_id.clone());
+            crate::panicked::held(&self.aborted).insert(request_id.clone());
             // Whether a request was still running to abort; the aborted set
             // above already tells the prompt thread to answer Cancelled.
             let _was_running = session.abort(&request_id).map_err(super::internal)?;
@@ -191,8 +183,7 @@ impl AcpState {
         let session = crate::panicked::held(&self.sessions)
             .remove(&id)
             .ok_or_else(|| agent_client_protocol::Error::resource_not_found(Some(id.clone())))?;
-        crate::panicked::held(&self.active)
-            .remove(&id);
+        crate::panicked::held(&self.active).remove(&id);
         session
             .set_interaction_handler(None)
             .map_err(super::internal)?;

@@ -65,7 +65,11 @@ fn hard_constraints(
     if let Some(os) = required.os.as_ref().filter(|os| **os != available.os) {
         reasons.push(format!("os requires {os}, has {}", available.os));
     }
-    if let Some(arch) = required.arch.as_ref().filter(|arch| **arch != available.arch) {
+    if let Some(arch) = required
+        .arch
+        .as_ref()
+        .filter(|arch| **arch != available.arch)
+    {
         reasons.push(format!("arch requires {arch}, has {}", available.arch));
     }
     for capability in required.capabilities.difference(&available.capabilities) {

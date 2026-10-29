@@ -275,8 +275,10 @@ fn summary(state: &CompletionState) -> Value {
             None => grouped.push((task.phase.as_str(), vec![task])),
         }
     }
-    let phases: Vec<Value> =
-        grouped.into_iter().map(|(phase, items)| json!({"phase": phase, "items": items})).collect();
+    let phases: Vec<Value> = grouped
+        .into_iter()
+        .map(|(phase, items)| json!({"phase": phase, "items": items}))
+        .collect();
     let mut output = snapshot_value(state);
     output["phases"] = json!(phases);
     output["items"] = json!(state.tasks);

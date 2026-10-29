@@ -59,7 +59,10 @@ pub fn status_text(cwd: &Path) -> String {
     )];
     for (kind, descriptors) in by_kind {
         let total = descriptors.len();
-        let available = descriptors.iter().filter(|descriptor| descriptor.health.is_executable()).count();
+        let available = descriptors
+            .iter()
+            .filter(|descriptor| descriptor.health.is_executable())
+            .count();
         lines.push(format!("- {:?}: {available}/{total} available", kind));
     }
     for diagnostic in snapshot.diagnostics.iter() {

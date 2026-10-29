@@ -51,7 +51,10 @@ impl CommunicationMode {
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         let wanted = value.trim().to_ascii_lowercase();
-        Self::ALL.iter().copied().find(|mode| mode.as_str() == wanted)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|mode| mode.as_str() == wanted)
     }
 }
 
@@ -95,7 +98,10 @@ impl Visibility {
 
     pub(crate) fn parse(value: &str) -> Option<Self> {
         let wanted = value.trim().to_ascii_lowercase();
-        Self::ALL.iter().copied().find(|item| item.as_str() == wanted)
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|item| item.as_str() == wanted)
     }
     fn resolve(self, mode_default: bool) -> bool {
         match self {

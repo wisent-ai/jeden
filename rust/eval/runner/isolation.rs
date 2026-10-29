@@ -107,8 +107,9 @@ pub(super) fn materialize_fixture(fixture: &FixtureV1, workspace: &Path) -> Resu
     for (relative, content) in &fixture.files {
         let target = workspace.join(safe_relative(relative)?);
         if crate::tool_runtime::runtime_ops::platform::presence::present(&target)? {
-            let existing = fs::read(&target)
-                .map_err(|error| format!("fixture file {} cannot be read: {error}", target.display()))?;
+            let existing = fs::read(&target).map_err(|error| {
+                format!("fixture file {} cannot be read: {error}", target.display())
+            })?;
             if existing != content.as_bytes() {
                 return Err(format!(
                     "partially materialized fixture differs at {relative}"

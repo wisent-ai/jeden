@@ -13,7 +13,9 @@ pub(super) struct PtyControl {
 }
 
 pub(super) fn lock(control: &SharedControl) -> Result<MutexGuard<'_, PtyControl>, String> {
-    control.lock().map_err(|_| "PTY control lock poisoned".into())
+    control
+        .lock()
+        .map_err(|_| "PTY control lock poisoned".into())
 }
 
 impl PtyControl {
@@ -34,7 +36,10 @@ impl PtyControl {
             return Ok(false);
         }
         self.session.alive().map_err(|error| {
-            format!("PTY session '{}' status could not be read: {error}", self.metadata.session_id)
+            format!(
+                "PTY session '{}' status could not be read: {error}",
+                self.metadata.session_id
+            )
         })
     }
 

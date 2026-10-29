@@ -44,7 +44,7 @@ pub(super) fn read_messages(stdout: impl Read + Send + 'static) -> Receiver<Resu
             if line.last() != Some(&b'\n') {
                 if !line.trim_ascii().is_empty() {
                     let _unreceived = tx.send(Err(
-                        "MCP stdio closed with an unterminated JSON message".into()
+                        "MCP stdio closed with an unterminated JSON message".into(),
                     ));
                 }
                 return;
@@ -75,7 +75,9 @@ pub(super) fn drain_stderr(mut stderr: impl Read + Send + 'static) -> Receiver<S
         let ended = stderr.read_to_end(&mut buffer);
         let mut text = String::from_utf8_lossy(&buffer).into_owned();
         if let Err(error) = ended {
-            text.push_str(&format!("\n[the server's stderr could not be read further: {error}]"));
+            text.push_str(&format!(
+                "\n[the server's stderr could not be read further: {error}]"
+            ));
         }
         let _unreceived = tx.send(text);
     });

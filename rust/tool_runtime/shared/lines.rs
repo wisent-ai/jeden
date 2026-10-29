@@ -15,7 +15,10 @@ pub(crate) struct LineWindow {
 
 /// The window `range` selects from `text`, or `None` when the caller asked
 /// for no range and the whole text is answered.
-pub(crate) fn selected_lines(text: &str, range: Option<String>) -> Result<Option<LineWindow>, String> {
+pub(crate) fn selected_lines(
+    text: &str,
+    range: Option<String>,
+) -> Result<Option<LineWindow>, String> {
     match range {
         Some(range) => line_window(text, &range).map(Some),
         None => Ok(None),
@@ -39,9 +42,7 @@ fn parse_line_range_token(
     let (start, end) = if let Some((first, count)) = trimmed.split_once('+') {
         let start = line_number(first, full_range)?;
         let count = line_number(count, full_range)?;
-        let end = start
-            .get()
-            .saturating_add(count.get() - usize::from(STEP));
+        let end = start.get().saturating_add(count.get() - usize::from(STEP));
         (start, end)
     } else if let Some((first, last)) = trimmed.split_once('-') {
         let start = line_number(first, full_range)?;
@@ -96,7 +97,10 @@ pub(crate) fn split_edit_lines(content: &str) -> (Vec<String>, bool) {
         Some(body) => (body, true),
         None => (content, false),
     };
-    (body.lines().map(ToString::to_string).collect(), has_trailing)
+    (
+        body.lines().map(ToString::to_string).collect(),
+        has_trailing,
+    )
 }
 
 /// The whole change as one unified-diff hunk from the first line: every old

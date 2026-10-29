@@ -110,7 +110,9 @@ pub(crate) fn plan_request(
             .requests
             .iter_mut()
             .find(|request| request.id == request_id)
-            .ok_or_else(|| format!("request {request_id} is no longer in this session's completion state"))?;
+            .ok_or_else(|| {
+                format!("request {request_id} is no longer in this session's completion state")
+            })?;
         request.planned = true;
         request.estimate = Some(CompletionEstimate {
             minutes,

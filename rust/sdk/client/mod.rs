@@ -15,8 +15,8 @@ mod errors;
 mod inner;
 mod stream;
 
-pub use errors::{ClientError, SessionTransport, TransportError};
 use crate::panicked::held;
+pub use errors::{ClientError, SessionTransport, TransportError};
 use inner::{reader_loop, ClientInner, EventSubscriber};
 pub use stream::EventStream;
 use tokio_stream::wrappers::UnboundedReceiverStream;

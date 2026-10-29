@@ -19,7 +19,6 @@ pub(super) const DEFAULT_PTY_COLS: u16 = 80;
 // VT100 standard screen geometry. Source: https://vt100.net/docs/vt100-ug/chapter1.html
 pub(super) const DEFAULT_PTY_ROWS: u16 = 24;
 
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PtySessionState {
     Live,
@@ -104,7 +103,9 @@ pub fn execute(
     }
     if let Some(existing) = owned.as_mut() {
         if !existing.alive()? {
-            let old = owned.take().expect("checked PTY process disappeared while scope was locked");
+            let old = owned
+                .take()
+                .expect("checked PTY process disappeared while scope was locked");
             registry::finish(&old.control, PtySessionState::Ended);
         }
     }
@@ -112,30 +113,42 @@ pub fn execute(
         let mut session = PtyProcess::spawn(&canonical_cwd)?;
         registry::register(&slot, &session.control)?;
         if let Err(error) = session.initialize(Some(context)) {
-            registry::finish(&session.control, if context.cancellation().is_cancelled() {
-                PtySessionState::Cancelled
-            } else {
-                PtySessionState::Ended
-            });
+            registry::finish(
+                &session.control,
+                if context.cancellation().is_cancelled() {
+                    PtySessionState::Cancelled
+                } else {
+                    PtySessionState::Ended
+                },
+            );
             return Err(error);
         }
         *owned = Some(session);
     }
-    let session = owned.as_mut().expect("initialized PTY process disappeared while scope was locked");
+    let session = owned
+        .as_mut()
+        .expect("initialized PTY process disappeared while scope was locked");
     let result = session.execute(context, input, reset);
     match result {
         Ok((result, true)) => Ok(result),
         Ok((result, false)) => {
-            let session = owned.take().expect("executed PTY process disappeared while scope was locked");
-            registry::finish(&session.control, if result.cancelled {
-                PtySessionState::Cancelled
-            } else {
-                PtySessionState::Ended
-            });
+            let session = owned
+                .take()
+                .expect("executed PTY process disappeared while scope was locked");
+            registry::finish(
+                &session.control,
+                if result.cancelled {
+                    PtySessionState::Cancelled
+                } else {
+                    PtySessionState::Ended
+                },
+            );
             Ok(result)
         }
         Err(error) => {
-            let session = owned.take().expect("failed PTY process disappeared while scope was locked");
+            let session = owned
+                .take()
+                .expect("failed PTY process disappeared while scope was locked");
             registry::finish(&session.control, PtySessionState::Ended);
             Err(error)
         }
@@ -157,7 +170,9 @@ pub fn resize(
         if context.cancellation().is_cancelled() {
             return Err(PtyError::OperationCancelled);
         }
-        control.resize(cols, rows).map(|()| control.metadata.clone())
+        control
+            .resize(cols, rows)
+            .map(|()| control.metadata.clone())
     };
     if matches!(&result, Err(PtyError::SessionEnded { .. })) {
         registry::finish(&shared, PtySessionState::Ended);

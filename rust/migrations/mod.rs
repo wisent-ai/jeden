@@ -36,9 +36,9 @@ fn version(value: &Value) -> Result<u32, String> {
     match value.get(SCHEMA_VERSION_KEY) {
         None => Ok(Envelope::Unversioned.number()),
         Some(found) => {
-            let number = found
-                .as_u64()
-                .ok_or_else(|| format!("schemaVersion must be a non-negative integer, not {found}"))?;
+            let number = found.as_u64().ok_or_else(|| {
+                format!("schemaVersion must be a non-negative integer, not {found}")
+            })?;
             u32::try_from(number)
                 .map_err(|error| format!("schemaVersion {number} is not a 32-bit integer: {error}"))
         }
@@ -111,7 +111,8 @@ pub(crate) fn recover_json(
     fs::remove_file(&journal_file)
         .map_err(|error| format!("remove journal {}: {error}", journal_file.display()))?;
     sync_parent(path)?;
-    let recovered = fs::read(path).map_err(|error| format!("read recovered {}: {error}", path.display()))?;
+    let recovered =
+        fs::read(path).map_err(|error| format!("read recovered {}: {error}", path.display()))?;
     let value: Value = serde_json::from_slice(&recovered)
         .map_err(|error| format!("invalid recovered {}: {error}", path.display()))?;
     Ok(Some(MigrationOutcome::Recovered {
@@ -128,16 +129,15 @@ pub(crate) fn migrate_json(path: &Path, plan: &MigrationPlan) -> Result<Migratio
     // A store that is neither JSON nor YAML is refused with both causes: the
     // JSON one was dropped, and a JSON store with one stray byte was said to
     // be bad YAML.
-    let mut value: Value = serde_json::from_slice(&original)
-        .or_else(|json_error| {
-            serde_yaml::from_slice(&original).map_err(|yaml_error| {
-                format!(
-                    "corrupt {} store {}: as JSON, {json_error}; as YAML, {yaml_error}",
-                    plan.store,
-                    path.display()
-                )
-            })
-        })?;
+    let mut value: Value = serde_json::from_slice(&original).or_else(|json_error| {
+        serde_yaml::from_slice(&original).map_err(|yaml_error| {
+            format!(
+                "corrupt {} store {}: as JSON, {json_error}; as YAML, {yaml_error}",
+                plan.store,
+                path.display()
+            )
+        })
+    })?;
     (plan.preflight)(&value)?;
     let from = version(&value)?;
     refuse_unsupported(plan, from)?;
@@ -214,7 +214,8 @@ pub(crate) fn migrate_json(path: &Path, plan: &MigrationPlan) -> Result<Migratio
 pub(crate) fn write_json_atomic(path: &Path, value: &Value) -> Result<(), String> {
     write_bytes_atomic(
         path,
-        &serde_json::to_vec_pretty(value).map_err(|error| format!("encode {}: {error}", path.display()))?,
+        &serde_json::to_vec_pretty(value)
+            .map_err(|error| format!("encode {}: {error}", path.display()))?,
     )
 }
 

@@ -19,7 +19,13 @@ pub(super) fn ensure_safe_destination(path: &Path) -> Result<(), CasError> {
     let existing = match fs::symlink_metadata(path) {
         Ok(metadata) => Some(metadata),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-        Err(error) => return Err(CasError::io("inspect materialization destination", path, error)),
+        Err(error) => {
+            return Err(CasError::io(
+                "inspect materialization destination",
+                path,
+                error,
+            ))
+        }
     };
     if let Some(metadata) = existing {
         if !metadata.file_type().is_dir() {

@@ -22,9 +22,7 @@ impl Signer {
         match std::env::var("JEDEN_CODESIGN_IDENTITY") {
             Ok(identity) if !identity.trim().is_empty() => return Ok(Self::Own(identity)),
             Ok(_) | Err(std::env::VarError::NotPresent) => {}
-            Err(error) => {
-                return Err(format!("JEDEN_CODESIGN_IDENTITY cannot be read: {error}"))
-            }
+            Err(error) => return Err(format!("JEDEN_CODESIGN_IDENTITY cannot be read: {error}")),
         }
         let previous = std::env::current_exe()
             .map_err(|error| format!("cannot identify the running Jeden executable: {error}"))?;
@@ -65,7 +63,10 @@ impl Signer {
         match self {
             Self::Own(identity) => {
                 let mut codesign = Command::new("/usr/bin/codesign");
-                codesign.args(["--force", "--sign"]).arg(identity).arg(executable);
+                codesign
+                    .args(["--force", "--sign"])
+                    .arg(identity)
+                    .arg(executable);
                 let output = stado_wait::output(&mut codesign)
                     .map_err(|error| format!("cannot start codesign: {error}"))?;
                 if !output.status.success() {

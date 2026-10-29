@@ -79,7 +79,10 @@ pub(crate) fn read_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                     if let Some(name) = table.get("name").and_then(Value::as_str) {
                         let rows: i64 = conn
                             .query_row(
-                                &format!("SELECT count(*) AS count FROM {}", sqlite_identifier(name)?),
+                                &format!(
+                                    "SELECT count(*) AS count FROM {}",
+                                    sqlite_identifier(name)?
+                                ),
                                 [],
                                 |row| row.get("count"),
                             )

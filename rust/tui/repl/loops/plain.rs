@@ -129,7 +129,9 @@ pub(super) fn attachment_command(
                 digits
                     .parse::<u64>()
                     .map(crate::tui::AttachmentId)
-                    .map_err(|error| format!("Usage: /detach [id|all] ({rest:?} is no attachment id: {error})"))
+                    .map_err(|error| {
+                        format!("Usage: /detach [id|all] ({rest:?} is no attachment id: {error})")
+                    })
             };
             id.and_then(|id| {
                 tray.remove(id)

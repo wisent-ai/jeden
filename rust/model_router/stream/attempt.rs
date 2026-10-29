@@ -172,7 +172,13 @@ pub(crate) fn streaming_attempt_inner(
         .into_iter()
         .flat_map(lease::SessionLease::headers)
         .collect();
-    spawn_openai_stream_adapter(config, request_route, body_text, lease_headers, sender.clone())?;
+    spawn_openai_stream_adapter(
+        config,
+        request_route,
+        body_text,
+        lease_headers,
+        sender.clone(),
+    )?;
     // An announced cancellation wakes the blocked receive below; the wake
     // removes itself once this attempt's receiver is gone.
     crate::tool_runtime::runtime_ops::wake_on_cancellation(move || {

@@ -143,7 +143,12 @@ where
                 let mut pending_question: Option<PendingQuestion> = None;
                 let mut blocks = Vec::new();
                 // An empty channel has nothing now; `read_or_message` reports a closed one.
-                let next = |rx: &mut futures::channel::mpsc::UnboundedReceiver<TurnMsg>| match rx.try_recv() { Ok(m) => Some(m), Err(_empty) => None };
+                let next = |rx: &mut futures::channel::mpsc::UnboundedReceiver<TurnMsg>| match rx
+                    .try_recv()
+                {
+                    Ok(m) => Some(m),
+                    Err(_empty) => None,
+                };
                 while let Some(message) = pending.take().or_else(|| next(&mut rx)) {
                     match message {
                         TurnMsg::Note(m) => {

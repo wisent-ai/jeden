@@ -89,8 +89,8 @@ pub(super) fn collab_path(cwd: &Path, target: &str) -> Result<PathBuf, String> {
         return Err("Rust collab currently supports durable file relays only; HTTP relay support remains JS-only.".into());
     }
     if text.starts_with("file://") {
-        let url = Url::parse(text)
-            .map_err(|error| format!("the relay {text} is not a URL: {error}"))?;
+        let url =
+            Url::parse(text).map_err(|error| format!("the relay {text} is not a URL: {error}"))?;
         // `to_file_path` answers `()` on refusal: a file URL with a host other
         // than localhost, or one this platform cannot express as a path.
         return url.to_file_path().map_err(|()| {
@@ -111,7 +111,10 @@ pub(super) fn collab_path(cwd: &Path, target: &str) -> Result<PathBuf, String> {
 pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
-            format!("the relay directory {} cannot be created: {error}", parent.display())
+            format!(
+                "the relay directory {} cannot be created: {error}",
+                parent.display()
+            )
         })?;
     }
     let line = serde_json::to_string(&json!({ "ts": now_text()?, "type": event_type, "cwd": cwd }))
@@ -121,10 +124,16 @@ pub(super) fn append_collab_event(path: &Path, event_type: &str, cwd: &Path) -> 
         .append(true)
         .open(path)
         .map_err(|error| {
-            format!("the relay {} cannot be opened for appending: {error}", path.display())
+            format!(
+                "the relay {} cannot be opened for appending: {error}",
+                path.display()
+            )
         })?;
     writeln!(file, "{}", line).map_err(|error| {
-        format!("the {event_type} event cannot be appended to {}: {error}", path.display())
+        format!(
+            "the {event_type} event cannot be appended to {}: {error}",
+            path.display()
+        )
     })
 }
 

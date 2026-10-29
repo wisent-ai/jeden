@@ -37,14 +37,13 @@ impl<B: SessionBackend> SessionService<B> {
             }
         };
         // Whole-step inserts and clones: a panicking holder leaves a state.
-        crate::panicked::held(&self.sessions)
-            .insert(
-                id.clone(),
-                SessionEntry {
-                    tenant: caller.tenant.clone(),
-                    path,
-                },
-            );
+        crate::panicked::held(&self.sessions).insert(
+            id.clone(),
+            SessionEntry {
+                tenant: caller.tenant.clone(),
+                path,
+            },
+        );
         Ok(id)
     }
 
@@ -169,14 +168,13 @@ impl<B: SessionBackend> SessionService<B> {
         // the ledger the terminal wrote: the backend session behind this id was
         // resumed in place by `AgentSession::resume_in_place` and keeps
         // appending to `path`.
-        crate::panicked::held(&self.sessions)
-            .insert(
-                session_id.to_owned(),
-                SessionEntry {
-                    tenant: caller.tenant.clone(),
-                    path,
-                },
-            );
+        crate::panicked::held(&self.sessions).insert(
+            session_id.to_owned(),
+            SessionEntry {
+                tenant: caller.tenant.clone(),
+                path,
+            },
+        );
         Ok(summary)
     }
 
@@ -213,7 +211,12 @@ impl<B: SessionBackend> SessionService<B> {
     }
 
     /// The listing row of one session, or why its ledger could not be read.
-    fn summarize(&self, session_id: &str, dir: &Path, open: bool) -> Result<SessionSummary, String> {
+    fn summarize(
+        &self,
+        session_id: &str,
+        dir: &Path,
+        open: bool,
+    ) -> Result<SessionSummary, String> {
         let state = session_state(dir)?;
         let turns = self.backend.turns(dir)?;
         Ok(SessionSummary {

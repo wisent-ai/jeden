@@ -25,10 +25,10 @@ impl Write for ProgressSink {
     fn write(&mut self, chunk: &[u8]) -> std::io::Result<usize> {
         self.bytes.extend_from_slice(chunk);
         // A wait that has already ended (a cancelled turn) reads no progress.
-        if let Err(mpsc::SendError(_)) = self
-            .events
-            .send(HostEvent::Progress(chunk.len() as u64, self.bytes.len() as u64))
-        {
+        if let Err(mpsc::SendError(_)) = self.events.send(HostEvent::Progress(
+            chunk.len() as u64,
+            self.bytes.len() as u64,
+        )) {
             return Ok(chunk.len());
         }
         Ok(chunk.len())
@@ -80,7 +80,10 @@ pub(super) fn drained(
         .map_err(|payload| {
             format!(
                 "{}, so what it read is lost",
-                crate::panicked::refusal(&format!("the extension host's {stream} reader"), &*payload)
+                crate::panicked::refusal(
+                    &format!("the extension host's {stream} reader"),
+                    &*payload
+                )
             )
         })?
         .map_err(|error| format!("the extension host's {stream} could not be read: {error}"))
@@ -91,5 +94,7 @@ pub(super) fn drained(
 pub(super) fn node_supports_typescript(node: &str) -> Result<bool, String> {
     stado_wait::output(Command::new(node).args(["--experimental-strip-types", "--eval", ""]))
         .map(|output| output.status.success())
-        .map_err(|error| format!("{node} cannot be run to ask whether it strips TypeScript types: {error}"))
+        .map_err(|error| {
+            format!("{node} cannot be run to ask whether it strips TypeScript types: {error}")
+        })
 }

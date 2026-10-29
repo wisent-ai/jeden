@@ -34,8 +34,8 @@ pub(crate) fn handle_doctor(context: &SlashContext<'_>) -> Result<String, String
             "error": error,
         }),
     };
-    let ok = context.cwd.is_dir()
-        && memory_health.get("healthy").and_then(Value::as_bool) == Some(true);
+    let ok =
+        context.cwd.is_dir() && memory_health.get("healthy").and_then(Value::as_bool) == Some(true);
     let report = json!({
         "ok": ok,
         "cwd": context.cwd,

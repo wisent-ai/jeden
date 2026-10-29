@@ -95,7 +95,10 @@ impl CoordinatorStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, ProtocolError> {
         let root = root.as_ref();
         fs::create_dir_all(root).map_err(|error| {
-            ProtocolError::Storage(format!("create coordinator directory {}: {error}", root.display()))
+            ProtocolError::Storage(format!(
+                "create coordinator directory {}: {error}",
+                root.display()
+            ))
         })?;
         let path = root.join("coordinator-v1.json");
         // Only a state that does not exist starts fresh: one that could not
@@ -159,20 +162,18 @@ impl CoordinatorStore {
         &self,
         f: impl FnOnce(&CoordinatorState) -> Result<T, ProtocolError>,
     ) -> Result<T, ProtocolError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
+        let state = self.state.lock().map_err(|poisoned| {
+            ProtocolError::Storage(format!("coordinator store lock: {poisoned}"))
+        })?;
         f(&state)
     }
     pub(crate) fn transact<T>(
         &self,
         f: impl FnOnce(&mut CoordinatorState) -> Result<T, ProtocolError>,
     ) -> Result<T, ProtocolError> {
-        let mut state = self
-            .state
-            .lock()
-            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
+        let mut state = self.state.lock().map_err(|poisoned| {
+            ProtocolError::Storage(format!("coordinator store lock: {poisoned}"))
+        })?;
         let mut next = state.clone();
         let output = f(&mut next)?;
         write_atomic(&self.path, &next)?;
@@ -180,10 +181,9 @@ impl CoordinatorStore {
         Ok(output)
     }
     fn persist(&self) -> Result<(), ProtocolError> {
-        let state = self
-            .state
-            .lock()
-            .map_err(|poisoned| ProtocolError::Storage(format!("coordinator store lock: {poisoned}")))?;
+        let state = self.state.lock().map_err(|poisoned| {
+            ProtocolError::Storage(format!("coordinator store lock: {poisoned}"))
+        })?;
         write_atomic(&self.path, &state)
     }
 }
@@ -193,7 +193,10 @@ impl CoordinatorStore {
 /// process wrote into one staging file.
 fn write_atomic(path: &Path, value: &CoordinatorState) -> Result<(), ProtocolError> {
     let mut bytes = serde_json::to_vec_pretty(value).map_err(|error| {
-        ProtocolError::Storage(format!("encode coordinator state {}: {error}", path.display()))
+        ProtocolError::Storage(format!(
+            "encode coordinator state {}: {error}",
+            path.display()
+        ))
     })?;
     bytes.push(b'\n');
     crate::tool_runtime::runtime_ops::durable::replace(path, &bytes).map_err(ProtocolError::Storage)

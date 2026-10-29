@@ -39,7 +39,10 @@ fn format_loop_status(loop_state: &LoopState) -> String {
 /// so: a made-up `default` named a model nothing would run, and the unrelated
 /// `MODEL` variable named one routing never reads.
 pub(crate) fn current_model_route(context: &SlashContext<'_>) -> String {
-    match crate::agent::selected_model(context.model, crate::load_config(context.cwd).model.as_deref()) {
+    match crate::agent::selected_model(
+        context.model,
+        crate::load_config(context.cwd).model.as_deref(),
+    ) {
         Ok(Some(model)) => model,
         Ok(None) => "no model selected (choose one with /model)".into(),
         Err(cause) => format!("unreadable: {cause}"),
@@ -228,7 +231,9 @@ pub(crate) fn forceable(cwd: &std::path::Path, tool: &str) -> Result<(), String>
     } else {
         names.join(", ")
     };
-    Err(format!("Unknown or unavailable tool: {tool}. Visible tools: {visible}"))
+    Err(format!(
+        "Unknown or unavailable tool: {tool}. Visible tools: {visible}"
+    ))
 }
 
 pub(crate) fn handle_branching(

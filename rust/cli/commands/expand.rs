@@ -55,10 +55,11 @@ fn whole_number(raw: &str, placeholder: &str) -> Result<Option<usize>, String> {
     if digits.is_empty() || !digits.chars().all(|ch| ch.is_ascii_digit()) {
         return Ok(None);
     }
-    digits
-        .parse::<usize>()
-        .map(Some)
-        .map_err(|error| format!("the command template's placeholder {placeholder} names no argument position: {error}"))
+    digits.parse::<usize>().map(Some).map_err(|error| {
+        format!(
+            "the command template's placeholder {placeholder} names no argument position: {error}"
+        )
+    })
 }
 
 /// The positional argument at zero-based `index`; a placeholder for an
@@ -105,10 +106,13 @@ fn replace_arg_slices(template: &str, positionals: &[String]) -> Result<(String,
                 whole_number(raw_start, &placeholder)?,
                 whole_number(raw_length, &placeholder)?,
             ) {
-                (Some(start), Some(length)) => Some(argument_slice(positionals, start, Some(length))),
+                (Some(start), Some(length)) => {
+                    Some(argument_slice(positionals, start, Some(length)))
+                }
                 _ => None,
             },
-            None => whole_number(spec, &placeholder)?.map(|start| argument_slice(positionals, start, None)),
+            None => whole_number(spec, &placeholder)?
+                .map(|start| argument_slice(positionals, start, None)),
         };
         match replacement {
             Some(value) => {
@@ -146,7 +150,11 @@ fn render_prompt_variables(
             "ARGUMENTS" => Some(raw_args.to_string()),
             "args" => Some(positionals.join(" ")),
             _ => {
-                let index = match (expr.strip_prefix("args."), expr.strip_prefix("args[").and_then(|raw| raw.strip_suffix(']'))) {
+                let index = match (
+                    expr.strip_prefix("args."),
+                    expr.strip_prefix("args[")
+                        .and_then(|raw| raw.strip_suffix(']')),
+                ) {
                     (Some(raw), _) | (None, Some(raw)) => whole_number(raw, &placeholder)?,
                     (None, None) => None,
                 };

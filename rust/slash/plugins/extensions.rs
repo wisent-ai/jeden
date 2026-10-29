@@ -49,7 +49,11 @@ pub(crate) fn extensions_picker(context: &SlashContext<'_>) -> PickerSpec {
     let mut items = match plugin_management_items(context.cwd) {
         Ok(items) => items,
         Err(cause) => {
-            return refusal_picker("Extensions and plugins", "Plugin management cannot be listed", cause)
+            return refusal_picker(
+                "Extensions and plugins",
+                "Plugin management cannot be listed",
+                cause,
+            )
         }
     };
     for (scope, dir) in [

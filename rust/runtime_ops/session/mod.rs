@@ -29,13 +29,20 @@ pub(crate) struct SessionLease<K: Debug + Send + Sync + 'static, T: PersistentPr
 impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> SessionSlot<K, T> {
     pub(crate) fn new(key: K, label: &'static str) -> Arc<Self> {
         let slot = Arc::new(Self {
-            key, label,
-            state: Mutex::new(State { busy: false, retired: false, process: None }),
+            key,
+            label,
+            state: Mutex::new(State {
+                busy: false,
+                retired: false,
+                process: None,
+            }),
             ready: Condvar::new(),
         });
         let weak = Arc::downgrade(&slot);
         super::wake_on_cancellation(move || {
-            let Some(slot) = weak.upgrade() else { return false; };
+            let Some(slot) = weak.upgrade() else {
+                return false;
+            };
             // Synchronize with the condition check before wait releases the lock.
             let state = slot.cleanup_state();
             slot.ready.notify_all();
@@ -45,23 +52,41 @@ impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> SessionSlot<K, T> {
         slot
     }
 
-    pub(crate) fn acquire(self: &Arc<Self>, context: &OperationContext<'_>) -> Result<SessionLease<K, T>, String> {
+    pub(crate) fn acquire(
+        self: &Arc<Self>,
+        context: &OperationContext<'_>,
+    ) -> Result<SessionLease<K, T>, String> {
         let mut state = self.state.lock().map_err(|error| {
-            format!("{} {:?} command lock poisoned: {error}", self.label, self.key)
+            format!(
+                "{} {:?} command lock poisoned: {error}",
+                self.label, self.key
+            )
         })?;
         loop {
             if context.cancellation().is_cancelled() {
-                return Err(format!("{} {:?} execution cancelled before command was written", self.label, self.key));
+                return Err(format!(
+                    "{} {:?} execution cancelled before command was written",
+                    self.label, self.key
+                ));
             }
             if state.retired {
-                return Err(format!("{} {:?} was torn down before execution", self.label, self.key));
+                return Err(format!(
+                    "{} {:?} was torn down before execution",
+                    self.label, self.key
+                ));
             }
             if !state.busy {
                 state.busy = true;
-                return Ok(SessionLease { slot: Arc::clone(self), process: state.process.take() });
+                return Ok(SessionLease {
+                    slot: Arc::clone(self),
+                    process: state.process.take(),
+                });
             }
             state = self.ready.wait(state).map_err(|error| {
-                format!("{} {:?} command wait poisoned: {error}", self.label, self.key)
+                format!(
+                    "{} {:?} command wait poisoned: {error}",
+                    self.label, self.key
+                )
             })?;
         }
     }
@@ -86,10 +111,14 @@ impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> SessionSlot<K, T> {
 
 impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> Deref for SessionLease<K, T> {
     type Target = Option<T>;
-    fn deref(&self) -> &Self::Target { &self.process }
+    fn deref(&self) -> &Self::Target {
+        &self.process
+    }
 }
 impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> DerefMut for SessionLease<K, T> {
-    fn deref_mut(&mut self) -> &mut Self::Target { &mut self.process }
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.process
+    }
 }
 impl<K: Debug + Send + Sync + 'static, T: PersistentProcess> Drop for SessionLease<K, T> {
     fn drop(&mut self) {

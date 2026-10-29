@@ -16,12 +16,14 @@ use listing::{list_sessions, session_items, session_path};
 pub(crate) fn roles_picker(state: &ModeState, context: &SlashContext<'_>) -> PickerSpec {
     let lang = crate::cli::i18n::lang_code(context.cwd);
     // An unreadable route is said, not shown as no route.
-    let model_detail =
-        match crate::agent::selected_model(context.model, crate::load_config(context.cwd).model.as_deref()) {
-            Ok(Some(route)) => format!("Current route: {route} · /model to change"),
-            Ok(None) => "No model route selected · /model to choose".to_string(),
-            Err(cause) => format!("The model route cannot be read: {cause} · /model to choose"),
-        };
+    let model_detail = match crate::agent::selected_model(
+        context.model,
+        crate::load_config(context.cwd).model.as_deref(),
+    ) {
+        Ok(Some(route)) => format!("Current route: {route} · /model to change"),
+        Ok(None) => "No model route selected · /model to choose".to_string(),
+        Err(cause) => format!("The model route cannot be read: {cause} · /model to choose"),
+    };
     let tier = if state.fast.service_tier.trim().is_empty() {
         "priority"
     } else {

@@ -10,8 +10,8 @@ use super::{LedgerEntry, LEDGER_APPEND_LOCK, SESSION_LEDGER_VERSION};
 use crate::cli::reports::sessions::pending::unresolved_pending_claim;
 // The append lock guards `()`: a holder that panicked left nothing broken in
 // it, so later appends take it back instead of being refused for good.
-use crate::panicked::held;
 use crate::cli::reports::sessions::replay::parse_transcript;
+use crate::panicked::held;
 use serde_json::{json, Value};
 use std::path::Path;
 

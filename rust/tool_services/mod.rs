@@ -112,7 +112,10 @@ static HUBS: LazyLock<HubCache> = LazyLock::new(|| Mutex::new(BTreeMap::new()));
 /// for the same directory.
 fn hub(cwd: &Path) -> Result<Arc<ServiceHub>, String> {
     let cwd = cwd.canonicalize().map_err(|error| {
-        format!("the working directory {} cannot be resolved: {error}", cwd.display())
+        format!(
+            "the working directory {} cannot be resolved: {error}",
+            cwd.display()
+        )
     })?;
     let fingerprint = config::fingerprint(&cwd);
     let mut hubs = HUBS.lock();

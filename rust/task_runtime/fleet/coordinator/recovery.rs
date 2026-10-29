@@ -143,10 +143,9 @@ impl Coordinator {
                 attempt,
                 fence,
             )?;
-            let lease = job
-                .lease
-                .as_mut()
-                .ok_or_else(|| ProtocolError::LeaseLost(format!("{job_id} holds no lease to adopt")))?;
+            let lease = job.lease.as_mut().ok_or_else(|| {
+                ProtocolError::LeaseLost(format!("{job_id} holds no lease to adopt"))
+            })?;
             if lease.expires_at <= now {
                 return Err(ProtocolError::LeaseLost(format!(
                     "lease for {job_id} expired"

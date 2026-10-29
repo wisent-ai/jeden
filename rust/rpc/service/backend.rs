@@ -74,12 +74,14 @@ impl SessionBackend for AgentSessionFacade {
         if let Err(error) = &result {
             emit("error".into(), json!({"message": error}), true);
         }
-        forwarder
-            .join()
-            .map_err(|payload| crate::panicked::refusal("the session event forwarder", &*payload))?;
+        forwarder.join().map_err(|payload| {
+            crate::panicked::refusal("the session event forwarder", &*payload)
+        })?;
         let result = result?;
         serde_json::to_value(result).map_err(|error| {
-            format!("request {request_id} finished, but its result cannot be written as JSON: {error}")
+            format!(
+                "request {request_id} finished, but its result cannot be written as JSON: {error}"
+            )
         })
     }
 

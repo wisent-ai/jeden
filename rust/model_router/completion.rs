@@ -73,7 +73,9 @@ pub(crate) fn tool_calls_to_action(tool_calls: &[Value]) -> Result<String, Strin
         actions.push(json!({"tool": name, "input": input}));
     }
     match actions.as_slice() {
-        [only] => Ok(json!({"action": "tool", "tool": only["tool"], "input": only["input"]}).to_string()),
+        [only] => {
+            Ok(json!({"action": "tool", "tool": only["tool"], "input": only["input"]}).to_string())
+        }
         _ => Ok(json!({"action": "tools", "tools": &actions}).to_string()),
     }
 }

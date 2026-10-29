@@ -64,7 +64,8 @@ pub(super) fn serve(cwd: &Path, port: Option<u16>) -> Result<String, String> {
         Some(port) => format!("{}:{port}", Ipv4Addr::LOCALHOST),
         None => format!("{}:0", Ipv4Addr::LOCALHOST),
     };
-    let server = Server::http(&address).map_err(|error| format!("cannot bind {address}: {error}"))?;
+    let server =
+        Server::http(&address).map_err(|error| format!("cannot bind {address}: {error}"))?;
     println!(
         "jeden stats dashboard: http://{}  (Ctrl-C to stop)",
         server.server_addr()

@@ -92,10 +92,11 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     modules.sort();
     modules.dedup();
     let disabled_extensions = config_value(cwd, "disabledExtensions")?;
-    let disabled: BTreeSet<String> = crate::cli::config::config_texts(&disabled_extensions, "disabledExtensions")?
-        .into_iter()
-        .map(str::to_string)
-        .collect();
+    let disabled: BTreeSet<String> =
+        crate::cli::config::config_texts(&disabled_extensions, "disabledExtensions")?
+            .into_iter()
+            .map(str::to_string)
+            .collect();
     modules.retain(|path| {
         let text = path.to_string_lossy();
         !disabled
@@ -118,11 +119,18 @@ pub(in crate::hooks::extensions) fn source_set(cwd: &Path) -> Result<SourceSet, 
     let mut hasher = DefaultHasher::new();
     for path in &modules {
         path.hash(&mut hasher);
-        let metadata = fs::metadata(path)
-            .map_err(|error| format!("extension module {} cannot be examined: {error}", path.display()))?;
+        let metadata = fs::metadata(path).map_err(|error| {
+            format!(
+                "extension module {} cannot be examined: {error}",
+                path.display()
+            )
+        })?;
         metadata.len().hash(&mut hasher);
         let modified = metadata.modified().map_err(|error| {
-            format!("extension module {} has no readable modification time: {error}", path.display())
+            format!(
+                "extension module {} has no readable modification time: {error}",
+                path.display()
+            )
         })?;
         modified.hash(&mut hasher);
     }

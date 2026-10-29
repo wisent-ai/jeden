@@ -37,7 +37,11 @@ fn event_label(event: &Value) -> Result<String, String> {
 
 pub(crate) fn slash_session_text(session: &Value) -> Result<String, String> {
     let (id, path, events) = session_parts(session)?;
-    let mut out = vec![format!("Session: {id}"), format!("Path: {path}"), String::new()];
+    let mut out = vec![
+        format!("Session: {id}"),
+        format!("Path: {path}"),
+        String::new(),
+    ];
     for event in events {
         out.push(format!("## {}", event_label(event)?));
         out.push(format!("{:#}", event["data"]));

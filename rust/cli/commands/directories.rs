@@ -53,7 +53,10 @@ fn md_files(dir: &Path, recursive: bool) -> Vec<PathBuf> {
         }
         paths.sort();
         for path in paths {
-            if path.file_name().is_some_and(|name| name.as_encoded_bytes().starts_with(b".")) {
+            if path
+                .file_name()
+                .is_some_and(|name| name.as_encoded_bytes().starts_with(b"."))
+            {
                 continue;
             }
             if recursive {
@@ -67,7 +70,10 @@ fn md_files(dir: &Path, recursive: bool) -> Vec<PathBuf> {
                     }
                     Ok(_file) => {}
                     Err(error) => {
-                        eprintln!("jeden: slash commands under {} were not loaded: {error}", path.display());
+                        eprintln!(
+                            "jeden: slash commands under {} were not loaded: {error}",
+                            path.display()
+                        );
                         continue;
                     }
                 }
@@ -132,7 +138,10 @@ pub(super) fn add_frontmatter_name_dir(
         let text = match fs::read_to_string(&path) {
             Ok(text) => text,
             Err(error) => {
-                eprintln!("jeden: slash command {} was not loaded: {error}", path.display());
+                eprintln!(
+                    "jeden: slash command {} was not loaded: {error}",
+                    path.display()
+                );
                 continue;
             }
         };

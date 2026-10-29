@@ -7,9 +7,9 @@ use crate::cli::config::communication::{CodeFilter, DisplayPolicy};
 use crate::{agent, session_conversation_turns};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::num::{NonZeroU64, NonZeroUsize};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc, Arc, Mutex, RwLock, Weak};
 
@@ -177,7 +177,10 @@ impl AgentSession {
         if self.inner.disposed.load(Ordering::Acquire) {
             return Err("session disposed".into());
         }
-        let id = self.inner.next_subscriber.fetch_add(NonZeroU64::MIN.get(), Ordering::Relaxed);
+        let id = self
+            .inner
+            .next_subscriber
+            .fetch_add(NonZeroU64::MIN.get(), Ordering::Relaxed);
         let (sender, receiver) = mpsc::channel();
         subscribers.insert(id, sender);
         Ok(EventSubscription {

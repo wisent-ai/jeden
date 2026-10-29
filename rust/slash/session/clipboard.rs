@@ -76,9 +76,12 @@ fn none_answered(what: &str, attempts: &[String]) -> String {
 pub(crate) fn read_clipboard() -> Result<(String, String), String> {
     let mut attempts = Vec::new();
     for (command, args) in clipboard_readers() {
-        let read = stado_wait::blocking(stado_wait::Kind::Process, "the clipboard reader", command, || {
-            Command::new(command).args(&args).output()
-        });
+        let read = stado_wait::blocking(
+            stado_wait::Kind::Process,
+            "the clipboard reader",
+            command,
+            || Command::new(command).args(&args).output(),
+        );
         match read {
             Ok(output) if output.status.success() => {
                 return Ok((
@@ -122,9 +125,12 @@ pub(crate) fn write_clipboard(payload: &str) -> Result<String, String> {
                         continue;
                     }
                 }
-                match stado_wait::blocking(stado_wait::Kind::Process, "the clipboard writer", command, || {
-                    child.wait_with_output()
-                }) {
+                match stado_wait::blocking(
+                    stado_wait::Kind::Process,
+                    "the clipboard writer",
+                    command,
+                    || child.wait_with_output(),
+                ) {
                     Ok(output) if output.status.success() => {
                         return verified(command, payload).map(|_reader| command.to_string())
                     }
@@ -156,10 +162,19 @@ fn verified(command: &str, payload: &str) -> Result<String, String> {
         return Ok(reader);
     }
     let holds = match found.lines().next() {
-        Some(first) => format!("{} bytes that are not the payload: it begins {:?}", found.len(), first.trim()),
-        None => format!("{} bytes and no line, which is not the payload", found.len()),
+        Some(first) => format!(
+            "{} bytes that are not the payload: it begins {:?}",
+            found.len(),
+            first.trim()
+        ),
+        None => format!(
+            "{} bytes and no line, which is not the payload",
+            found.len()
+        ),
     };
-    Err(format!("{command} exited zero but {reader} reads {holds}. Nothing was handed over."))
+    Err(format!(
+        "{command} exited zero but {reader} reads {holds}. Nothing was handed over."
+    ))
 }
 
 pub(super) fn build_copy_picker() -> PickerSpec {

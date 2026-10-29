@@ -51,7 +51,10 @@ fn seconds(request: &WorkRequest, field: &str, stamp: &str) -> Result<u64, Strin
 /// seconds than can be counted.
 pub(crate) fn estimate_seconds(estimate: &CompletionEstimate) -> Result<u64, String> {
     estimate.minutes.get().checked_mul(MINUTE).ok_or_else(|| {
-        format!("an estimate of {} minutes is more seconds than Jeden can count", estimate.minutes)
+        format!(
+            "an estimate of {} minutes is more seconds than Jeden can count",
+            estimate.minutes
+        )
     })
 }
 
@@ -101,7 +104,9 @@ pub(crate) fn values(state: &CompletionState) -> Value {
             .filter_map(|request| {
                 Entry::of(request).map(|entry| match entry {
                     Ok(entry) => entry.value(),
-                    Err(reason) => json!({"requestId": request.id, "state": "unreadable", "reason": reason}),
+                    Err(reason) => {
+                        json!({"requestId": request.id, "state": "unreadable", "reason": reason})
+                    }
                 })
             })
             .collect(),
@@ -114,7 +119,8 @@ pub(crate) fn line(request: &WorkRequest, now: u64) -> String {
         Some(Ok(entry)) => entry.line(now),
         Some(Err(reason)) => format!("Time to completion: cannot be read: {reason}"),
         None if !request.planned && !request.coverage_verified => {
-            "Time to completion: not estimated yet; Jeden records the estimate before execution".into()
+            "Time to completion: not estimated yet; Jeden records the estimate before execution"
+                .into()
         }
         None => "Time to completion: no estimate was recorded".into(),
     }
@@ -124,7 +130,9 @@ pub(crate) fn line(request: &WorkRequest, now: u64) -> String {
 pub(crate) fn context(request: &WorkRequest, now: u64) -> Option<Value> {
     Some(match Entry::of(request)? {
         Ok(entry) => match now.checked_sub(entry.estimated_at) {
-            Some(spent) => json!({"estimateMinutes": entry.minutes, "minutesSinceEstimate": spent / MINUTE}),
+            Some(spent) => {
+                json!({"estimateMinutes": entry.minutes, "minutesSinceEstimate": spent / MINUTE})
+            }
             None => json!({
                 "estimateMinutes": entry.minutes,
                 "unmeasurable": format!(
