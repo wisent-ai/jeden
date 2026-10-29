@@ -1968,6 +1968,7 @@ dependencies = [
  "url",
  "uuid",
  "wisent-onboarding-client",
+ "wisent-public-destination",
  "x509-parser",
  "zip",
 ]
@@ -4933,6 +4934,11 @@ dependencies = [
  "time",
  "uuid",
 ]
+
+[[package]]
+name = "wisent-public-destination"
+version = "0.1.0"
+source = "git+https://github.com/wisent-ai/wisent-integrations?rev=46f2686a8a119601f7671719c31ccf77bd205d8d#46f2686a8a119601f7671719c31ccf77bd205d8d"
 
 [[package]]
 name = "wit-bindgen"

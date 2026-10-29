@@ -73,6 +73,8 @@ sea-orm = { version = "1.1", default-features = false, features = ["sqlx-postgre
 sea-orm-migration = { version = "1.1", default-features = false, features = ["sqlx-postgres", "runtime-tokio-rustls"] }
 stado-database = { git = "https://github.com/wisent-ai/stado", package = "stado-database" }
 stado-wait = { git = "https://github.com/wisent-ai/stado", package = "stado-wait" }
+# The one public-destination rule Wisent's egress guards share.
+wisent-public-destination = { git = "https://github.com/wisent-ai/wisent-integrations", rev = "46f2686a8a119601f7671719c31ccf77bd205d8d", package = "wisent-public-destination" }
 rusqlite = { version = "0.32", features = ["bundled"] }
 rust_decimal = { version = "1", features = ["serde"] }
 serde = { version = "1", features = ["derive"] }
