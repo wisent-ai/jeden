@@ -6,10 +6,12 @@ export const managementCommands = [
     purpose: "Read and transactionally mutate the repository-owned Jeden roadmap.",
     inputs: [
       "Required for non-default use: one listed action; no action defaults to <code>list</code>.",
-      "Mutation leaves accept <code>--revision n</code> for optimistic concurrency; without it they load the current revision.",
+      "Mutation leaves accept <code>--revision n</code> for optimistic concurrency; without it they use the snapshot that invocation read, and still fail if another writer commits first. Pass <code>--revision</code> in automation.",
+      "Statuses are <code>backlog</code>, <code>planned</code>, <code>in_progress</code>, <code>implemented</code>, <code>not_run</code>, <code>failed</code>, <code>external_blocked</code>, <code>passed</code> and <code>dropped</code>. <code>passed</code> requires evidence and <code>external_blocked</code> an external prerequisite; dependencies must resolve and stay acyclic, and capability IDs must exist in the capability registry.",
+      "The same operations are <code>/roadmap …</code> in a session. Bare <code>/roadmap</code> opens the searchable picker; its <strong>Add roadmap item</strong> row prefills an editable command holding the required title, area, priority, summary and acceptance fields. Dependencies and external prerequisites are repeated <code>--depends-on</code> and <code>--external-prerequisite</code> flags.",
       "Use the linked leaf pages for action-specific identifiers, values, filters, reasons, evidence, and output.",
     ],
-    effect: "Reads or atomically updates <code>roadmap/roadmap.yaml</code>, validates the complete graph and status invariants, increments the revision for mutations, and appends roadmap event evidence.",
+    effect: "Reads or atomically updates <code>roadmap/roadmap.yaml</code>, the canonical versioned roadmap, against its machine contract <code>roadmap/schema/roadmap-v1.schema.json</code>. Every mutation is serialized through a stable sibling lock, validates the expected revision and the complete graph and status invariants, writes a same-directory temporary file, flushes and fsyncs it, renames it over the YAML and fsyncs the parent directory, increments the revision, and appends roadmap event evidence. <code>roadmap work</code> also pins the session's later artifacts and branches to <code>activeRoadmapItem</code>.",
     refusals: [
       "Unknown actions are refused with the complete expected command set.",
       "A stale <code>--revision</code> is refused as a revision conflict; invalid YAML, schema, IDs, dependencies, priorities, statuses, evidence, or atomic writes never commit a partial mutation.",

@@ -11,6 +11,7 @@ import { overviewPages } from "./content/overview.mjs";
 import { contextPages } from "./content/context.mjs";
 import { sessionPages } from "./content/sessions.mjs";
 import { toolPages } from "./content/tools.mjs";
+import { desktopPages } from "./content/desktop.mjs";
 import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,6 +32,7 @@ export const nav = [
   { label: "Sessions", href: "/docs/sessions" },
   { label: "Context", href: "/docs/context" },
   { label: "Tools", href: "/docs/tools" },
+  { label: "Desktop", href: "/docs/desktop" },
   { label: "CLI", href: "/docs/cli" },
 ];
 
@@ -39,6 +41,7 @@ export const pages = [
   ...sessionPages,
   ...contextPages,
   ...toolPages,
+  ...desktopPages,
   ...cliPages,
 ];
 

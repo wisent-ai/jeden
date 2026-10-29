@@ -151,6 +151,21 @@ export const toolPages = [
         ],
       },
       {
+        title: "Native extensions, and a tool that reloads them",
+        paragraphs: [
+          "A native extension module exports its extension as <code>default</code>, <code>extension</code>, <code>activate</code>, <code>tool</code> or <code>tools</code> (looked for in that order). What it declares is refused, and the extension marked unhealthy with the cause, rather than completed: a tool states its input at most once (<code>parameters</code>, <code>input</code> or <code>schema</code>; none means it takes no input), a command its prompt at most once (<code>prompt</code>, <code>template</code> or <code>body</code>), a capability its <code>kind</code> and <code>version</code> as strings, a provider its <code>loginMethods</code> as a list of <code>device_code</code>, <code>paste</code> or <code>api_key</code>. <code>exec(command, args, options)</code> takes <code>args</code> as a list of strings (<code>[]</code> for none) and answers the command's whole stdout and stderr. The host reads every setting from the variables Jeden starts it with and refuses to run without them.",
+          "<code>jeden rpc</code> publishes executable file-based commands as <code>quickReplies</code> in both the <code>ready</code> frame and the <code>capabilities</code> response. Each entry carries its capability ID, label, slash prompt and discovery source; native clients use that projection instead of reproducing command-directory precedence.",
+          "A native extension is discovered and activated when a session starts, so its tools, hooks and commands come from the material on disk at that moment. A tool whose job is to install extension material asks for them to be loaded again: its execution context carries <code>requestReload()</code>. The host runs in a short-lived process and cannot touch the registry the session holds in memory, so the call records the request as <code>.jeden/runtime/extensions/reload-request.json</code>, and the session consumes it immediately after the tool answers: it rebuilds the registry with a new generation, re-activating every extension source and re-materializing tools, hooks and commands.",
+          "When a reload was requested, the tool's answer is wrapped as <code>{\"result\": &lt;the tool's own answer&gt;, \"extensionReload\": {\"reloaded\": true, \"generation\": &lt;n&gt;, \"activeExtensions\": &lt;n&gt;, \"tools\": &lt;n&gt;, \"hooks\": &lt;n&gt;}}</code>. A failed reload, or a reload request that cannot be read, reports <code>{\"reloaded\": false, \"error\": \"…\"}</code> beside the same answer, so a tool that asked for one never looks successful while the reload did not happen. A tool that never calls <code>requestReload()</code> gets its answer unchanged and no reload runs. The request is consumed per call: one tool call reloads at most once, and a later call can ask again.",
+        ],
+        commands: [
+          {
+            label: "A tool that installs extension material and loads it",
+            code: "api.registerTool({\n  name: 'install_policy',\n  description: 'install a policy release and load it here',\n  parameters: api.zod.object({}),\n  execute: async (_id, input, _update, context) => {\n    const installed = await install(input);\n    await context.requestReload();\n    return installed;\n  },\n});",
+          },
+        ],
+      },
+      {
         title: "Interfaces",
         bullets: [
           "<strong>CLI</strong> (<code>jeden</code>, <code>jeden run</code>, <code>jeden pursue</code>, management subcommands) — canonical for human interactive, direct one-shot, and contract-driven autonomous use.",

@@ -28,7 +28,7 @@ private token list at `~/.jeden/model-tokens.sqlite3`. `jeden token status`,
 the secret from standard input, not a command argument. The selected key
 advances per endpoint and a pre-output authentication, payment or rate-limit
 refusal tries another untried key. Status and diagnostics reveal no secret.
-[Jeden Desktop Settings](https://github.com/wisent-ai/jeden-desktop/blob/main/docs/model-credentials.md)
+[Jeden Desktop Settings](https://jeden.wisent.com/docs/desktop)
 uses the same RPC operations on its selected host. See the
 [token command](https://jeden.wisent.com/docs/cli/token) for refusal details.
 
@@ -137,10 +137,11 @@ commands, exit statuses and saved state. The direct-token qualification is
 [token command](https://jeden.wisent.com/docs/cli/token). A failed or blocked
 model journey is not a pass. Probierz is optional.
 
-- [Configuration and context](docs/configuration.md)
-- [Release automation](docs/release.md)
-- [Roadmap registry](docs/roadmap.md)
-- [Extension reload](docs/extension-reload.md)
+- [Configuration and context](https://jeden.wisent.com/docs/sessions)
+- [Compaction, tool-result pruning and the status line](https://jeden.wisent.com/docs/context)
+- [Release automation](https://jeden.wisent.com/docs)
+- [Roadmap registry](https://jeden.wisent.com/docs/cli/roadmap)
+- [Native extensions and extension reload](https://jeden.wisent.com/docs/tools)
 - [Tools and action protocol](https://jeden.wisent.com/docs/tools)
 - [Sessions and memory](https://jeden.wisent.com/docs/sessions)
 

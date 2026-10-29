@@ -123,6 +123,15 @@ export const contextPages = [
           },
         ],
       },
+      {
+        title: "Compaction, tool-result pruning and the status line",
+        paragraphs: [
+          "A conversation compacts on its own only at a token count the operator states. <code>JEDEN_COMPACTION_THRESHOLD</code> names that count directly; otherwise <code>JEDEN_CONTEXT_LIMIT</code> less <code>JEDEN_COMPACTION_RESERVE</code> does. With neither, compaction is <code>/compact</code> alone. A context limit stated without its reserve is refused by name (<code>JEDEN_CONTEXT_LIMIT is &lt;n&gt; but JEDEN_COMPACTION_RESERVE is not set</code>), and so is a reserve that leaves nothing of the limit: Jeden does not pick a share of the window for you. The interactive session refuses to start, and <code>/context</code> refuses to answer, while <code>JEDEN_CONTEXT_LIMIT</code> holds anything but a whole number above zero, naming the value it holds.",
+          "Before compacting, Jeden can replace old tool results with a one-line marker. That step runs only when all three of its bounds are stated: <code>JEDEN_TOOL_PRUNE_PROTECT_TOKENS</code> (the newest tool results kept whole), <code>JEDEN_TOOL_PRUNE_MIN_SAVINGS_TOKENS</code> (the least a prune must free) and <code>JEDEN_TOOL_PRUNE_MIN_TOOL_TOKENS</code> (the smallest result worth replacing). With none stated the step is skipped; with only some, the turn is refused with the names of the missing ones.",
+          "The status line's route segment is the service tier a model call would carry, chosen in the same order (<code>JEDEN_SERVICE_TIER</code>, then <code>MODEL_SERVICE_TIER</code>, then the fast mode tier); with none stated it shows no route. Its branch and <code>dirty</code> mark come from one <code>git status --porcelain --branch</code>, run when the working directory or the conversation changes rather than on every keypress, so a change made outside Jeden shows after the next turn. A git that cannot run, or fails inside a work tree, puts its cause where the branch would be.",
+          "A chat kept by <code>chatMemory</code> never compacts; its view, tree and log are described on <a href=\"/docs/cli/chat-memory\">jeden chat-memory</a>. Besides the kinds listed there, a <code>work</code> line holds the report of a task given to <code>delegate_task</code> (<code>[&lt;agent&gt; &lt;job id&gt;]</code> and the subagent's final output, clipped like a tool's); a delegation that failed before a subagent ran stays the tool's <code>echo</code>, and a delegated task keeps its own chat in its session directory. Named chats live beside the session root in <code>chats/&lt;name&gt;/</code> (<code>~/.jeden/chats/</code> by default). Between turns a background thread builds the line of every message the view does not cover yet and the parent of every sibling pair in the view. <code>jeden import</code> refuses a transcript it cannot read, or whose message lacks a role or carries content that is neither text nor a list of parts, naming the file, the record's byte offset and what is missing.",
+        ],
+      },
     ],
   },
 ];
