@@ -45,7 +45,7 @@ fn options(rest: &[String]) -> Result<Options, String> {
                     usage(format!("--limit must be a number, not {value}: {error}"))
                 })?);
             }
-            "--source" | "--sources" => {
+            "--source" => {
                 options.sources = Some(
                     iter.next()
                         .ok_or_else(|| usage("--source requires a list"))?
