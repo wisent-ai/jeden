@@ -5,13 +5,19 @@ use sea_orm::{
     ActiveValue::Set, ColumnTrait, EntityTrait, QueryFilter, QuerySelect, TransactionTrait,
 };
 use std::{
+    num::NonZeroU64,
     str::FromStr,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard},
 };
 
 // One machine request owns the process. Keep its accounting active until process exit,
 // including model workers that finish after their original caller has returned.
 static ACTIVE: Mutex<Option<Arc<Budget>>> = Mutex::new(None);
+
+/// The tokens one catalogue price is the cost of, as the catalogue's own
+/// model declares it.
+const TOKENS_PER_PRICE: u32 = crate::control_plane::brama::ModelPrice::TOKENS_PER_PRICE;
+
 /// The request whose calls this process accounts, in the fleet database's
 /// `pursuit_calls`; reservations of one request serialize on its ledger lock.
 struct Budget {
@@ -41,23 +47,42 @@ mod call {
     pub enum Relation {}
     impl ActiveModelBehavior for ActiveModel {}
 }
+
+/// A route's stated price per million tokens, every side of it.
+#[derive(Clone, Copy)]
+struct Rates {
+    input: Decimal,
+    output: Decimal,
+    cache_read: Decimal,
+    cache_write: Decimal,
+}
+
 pub(crate) struct Reservation {
     budget: Arc<Budget>,
     id: String,
-    rates: [Decimal; 4],
+    rates: Rates,
     upper: Decimal,
 }
 
 fn decimal(value: f64) -> Result<Decimal, String> {
-    if !value.is_finite() || value < 0.0 {
-        return Err("model accounting received a negative or nonfinite amount".into());
+    let nothing: f64 = Default::default();
+    if !value.is_finite() || value < nothing {
+        return Err(format!(
+            "model accounting received {value}, a negative or nonfinite amount"
+        ));
     }
     Decimal::from_str(&value.to_string()).map_err(|e| e.to_string())
 }
+
+/// `lock`, waited for in the open: a lock another thread holds is said on
+/// stderr while this one waits, and a poisoned one is refused naming it.
+fn held<'a, T>(lock: &'a Mutex<T>, what: &str) -> Result<MutexGuard<'a, T>, String> {
+    stado_wait::blocking(stado_wait::Kind::Lock, what, "this process", || lock.lock())
+        .map_err(|poisoned| format!("{what} lock is poisoned: {poisoned}"))
+}
+
 pub(super) fn activate(request: &str, limit: &str) -> Result<(), String> {
-    let mut active = ACTIVE
-        .lock()
-        .map_err(|_| "request budget owner lock failed")?;
+    let mut active = held(&ACTIVE, "the request budget owner")?;
     if active.is_some() {
         return Err("this process already owns a durable request budget".into());
     }
@@ -73,17 +98,35 @@ pub(super) fn activate(request: &str, limit: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Every side of `price` the bound needs, or the refusal naming the side
+/// the catalogue states no price for: an unstated side cannot be bounded.
+fn stated_rates(
+    model: &str,
+    price: &crate::control_plane::brama::ModelPrice,
+) -> Result<Rates, String> {
+    let side = |name: &str, rate: Option<f64>| -> Result<Decimal, String> {
+        match rate {
+            Some(rate) => decimal(rate),
+            None => Err(format!(
+                "budget admission cannot bound {model}: the catalogue states no {name} price for it"
+            )),
+        }
+    };
+    Ok(Rates {
+        input: side("input", price.input)?,
+        output: side("output", price.output)?,
+        cache_read: side("cacheRead", price.cache_read)?,
+        cache_write: side("cacheWrite", price.cache_write)?,
+    })
+}
+
 /// Admission is at each real HTTP attempt, including routing retries and compaction.
 pub(crate) fn reserve(
     config: &ChatConfig,
     model: &str,
     max_tokens: Option<usize>,
 ) -> Result<Option<Reservation>, String> {
-    let Some(budget) = ACTIVE
-        .lock()
-        .map_err(|_| "request budget owner lock failed")?
-        .clone()
-    else {
+    let Some(budget) = held(&ACTIVE, "the request budget owner")?.clone() else {
         return Ok(None);
     };
     let client = crate::control_plane::brama::BramaClient::configured(
@@ -99,40 +142,32 @@ pub(crate) fn reserve(
     let Some(price) = entry.price.as_ref() else {
         return Err(format!("budget admission requires a priced concrete route with declared token ceilings; the catalogue states no price for {model}"));
     };
-    let rates = [
-        decimal(price.input)?,
-        decimal(price.output)?,
-        decimal(price.cache_read)?,
-        decimal(price.cache_write)?,
-    ];
+    let rates = stated_rates(model, price)?;
     let (Some(context_window), Some(ceiling)) = (
-        entry.context_window.filter(|tokens| *tokens > 0),
-        entry.max_output_tokens.filter(|tokens| *tokens > 0),
+        entry.context_window.and_then(NonZeroU64::new),
+        entry.max_output_tokens.and_then(NonZeroU64::new),
     ) else {
         return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} declares no context window or output ceiling"));
     };
-    if rates[0] <= Decimal::ZERO || rates[1] <= Decimal::ZERO {
-        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} has incomplete pricing"));
+    if rates.input <= Decimal::ZERO || rates.output <= Decimal::ZERO {
+        return Err(format!("budget admission requires a priced concrete route with declared token ceilings; {model} states a free input or output side"));
     }
     // The caller's own cap when it set one; the route's declared ceiling is
     // what an uncapped request may spend.
     let output = match max_tokens {
         Some(requested) => requested as u64,
-        None => ceiling,
+        None => ceiling.get(),
     };
-    if output > ceiling {
+    if output > ceiling.get() {
         return Err(format!(
             "requested output exceeds {model}'s advertised token ceiling"
         ));
     }
-    let input_rate = rates[0] + rates[2] + rates[3];
-    let million = Decimal::from(1_000_000u64);
-    let upper =
-        (Decimal::from(context_window) * input_rate + Decimal::from(output) * rates[1]) / million;
-    let _ledger = budget
-        .ledger
-        .lock()
-        .map_err(|_| "request budget ledger lock failed")?;
+    let input_rate = rates.input + rates.cache_read + rates.cache_write;
+    let upper = (Decimal::from(context_window.get()) * input_rate
+        + Decimal::from(output) * rates.output)
+        / Decimal::from(TOKENS_PER_PRICE);
+    let ledger = held(&budget.ledger, "the request budget ledger")?;
     let request = budget.request.clone();
     let limit = budget.limit;
     let id = uuid::Uuid::new_v4().to_string();
@@ -146,16 +181,28 @@ pub(crate) fn reserve(
     };
     run_db(move |db| async move {
         let tx = db.begin().await.map_err(sql)?;
+        let place = format!("request {request}");
+        let calls = stado_wait::until(
+            stado_wait::Kind::Lock,
+            "the request's pursuit_calls rows",
+            place,
+            call::Entity::find()
+                .filter(call::Column::Request.eq(request))
+                .lock_exclusive()
+                .all(&tx),
+        )
+        .await
+        .map_err(sql)?;
         let mut allocated = Decimal::ZERO;
-        for call in call::Entity::find()
-            .filter(call::Column::Request.eq(request))
-            .lock_exclusive()
-            .all(&tx)
-            .await
-            .map_err(sql)?
-        {
-            allocated += Decimal::from_str(call.actual.as_deref().unwrap_or(&call.reserved))
-                .map_err(|e| e.to_string())?;
+        for call in calls {
+            // A settled call counts what it cost; an unsettled one what it reserved.
+            let counted = match call.actual.as_deref() {
+                Some(actual) => actual,
+                None => call.reserved.as_str(),
+            };
+            allocated += Decimal::from_str(counted).map_err(|e| {
+                format!("pursuit call {} records {counted:?}, not an amount: {e}", call.id)
+            })?;
         }
         if allocated + upper > limit {
             return Err(format!("budget_exhausted: limit {limit}, spent or still reserved {allocated}, next model attempt requires {upper}"));
@@ -166,7 +213,7 @@ pub(crate) fn reserve(
             .map_err(sql)?;
         tx.commit().await.map_err(sql)
     })?;
-    drop(_ledger);
+    drop(ledger);
     Ok(Some(Reservation {
         budget,
         id,
@@ -183,18 +230,12 @@ pub(crate) fn settle(
         return Ok(());
     };
     let usage = usage.ok_or("model response omitted usage; its maximum cost remains reserved")?;
-    let tokens = [
-        decimal(usage.input_tokens)?,
-        decimal(usage.output_tokens)?,
-        decimal(usage.cache_read_tokens)?,
-        decimal(usage.cache_write_tokens)?,
-    ];
-    let actual = tokens
-        .iter()
-        .zip(reservation.rates)
-        .map(|(count, rate)| *count * rate)
-        .sum::<Decimal>()
-        / Decimal::from(1_000_000u64);
+    let rates = reservation.rates;
+    let actual = (decimal(usage.input_tokens)? * rates.input
+        + decimal(usage.output_tokens)? * rates.output
+        + decimal(usage.cache_read_tokens)? * rates.cache_read
+        + decimal(usage.cache_write_tokens)? * rates.cache_write)
+        / Decimal::from(TOKENS_PER_PRICE);
     let (request, id) = (reservation.budget.request.clone(), reservation.id.clone());
     let settled = actual.to_string();
     run_db(move |db| async move {

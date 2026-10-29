@@ -9,10 +9,6 @@ fn usage_path(cwd: &Path) -> PathBuf {
     cwd.join(".jeden/usage.json")
 }
 
-/// Brama passes on models.dev's prices, each the cost of a million tokens
-/// in USD: https://github.com/anomalyco/models.dev/blob/dev/README.md
-const TOKENS_PER_PRICE: f64 = 1_000_000.0;
-
 pub(in crate::agent) fn usage_cost(
     cwd: &Path,
     _config: &Config,
@@ -36,17 +32,31 @@ pub(in crate::agent) fn usage_cost(
         }
     };
     let cost = catalog.price(model)?;
-    let input = usage.input_tokens * cost.input / TOKENS_PER_PRICE;
-    let output = usage.output_tokens * cost.output / TOKENS_PER_PRICE;
-    let cache_read = usage.cache_read_tokens * cost.cache_read / TOKENS_PER_PRICE;
-    let cache_write = usage.cache_write_tokens * cost.cache_write / TOKENS_PER_PRICE;
-    Some(json!({
-        "input": input,
-        "output": output,
-        "cacheRead": cache_read,
-        "cacheWrite": cache_write,
-        "total": input + output + cache_read + cache_write,
-    }))
+    let counts = [
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.cache_read_tokens,
+        usage.cache_write_tokens,
+    ];
+    let nothing: f64 = Default::default();
+    let per_price = f64::from(crate::control_plane::brama::ModelPrice::TOKENS_PER_PRICE);
+    let mut priced = serde_json::Map::new();
+    let mut total = nothing;
+    for ((side, rate), tokens) in cost.sides().into_iter().zip(counts) {
+        let spent = match rate {
+            Some(rate) => tokens * rate / per_price,
+            // A side the call used no tokens of costs nothing at any rate.
+            None if tokens <= nothing => nothing,
+            None => {
+                eprintln!("jeden: the catalogue states no {side} price for {model}, so the call's {tokens} {side} tokens cannot be priced; it is recorded without a cost");
+                return None;
+            }
+        };
+        priced.insert(side.to_string(), json!(spent));
+        total += spent;
+    }
+    priced.insert("total".into(), json!(total));
+    Some(Value::Object(priced))
 }
 
 pub(in crate::agent) fn append_usage_event(

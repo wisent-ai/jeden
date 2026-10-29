@@ -18,27 +18,42 @@ pub struct BramaReadiness {
     pub reason: String,
     pub providers_without_credential: Vec<String>,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+/// A route's price per million tokens, side by side, as Brama's catalogue
+/// states it: each side a number, or `null`/absent when the registry's
+/// source states none. An unstated side is unknown, never free.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPrice {
-    #[serde(default)]
-    pub input: f64,
-    #[serde(default)]
-    pub output: f64,
-    #[serde(default)]
-    pub cache_read: f64,
-    #[serde(default)]
-    pub cache_write: f64,
+    pub input: Option<f64>,
+    pub output: Option<f64>,
+    pub cache_read: Option<f64>,
+    pub cache_write: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+impl ModelPrice {
+    /// The tokens one price is the cost of: Brama passes on models.dev's
+    /// prices, each in USD per million tokens
+    /// (https://github.com/anomalyco/models.dev/blob/dev/README.md).
+    pub const TOKENS_PER_PRICE: u32 = 1_000_000;
+
+    /// Every side with its wire name, for a reader that must name the one
+    /// it found unstated.
+    pub fn sides(&self) -> Vec<(&'static str, Option<f64>)> {
+        vec![
+            ("input", self.input),
+            ("output", self.output),
+            ("cacheRead", self.cache_read),
+            ("cacheWrite", self.cache_write),
+        ]
+    }
+}
+
+/// Brama's measured performance of a route; it always sends every field.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelPerf {
-    #[serde(default)]
     pub count: u64,
-    #[serde(default)]
     pub latency_ms: f64,
-    #[serde(default)]
     pub tps: f64,
 }
 
@@ -171,19 +186,17 @@ pub(super) fn validate_catalog(catalog: &ModelCatalog, via_brama: bool) -> Resul
                 model.id
             )));
         }
-        // Only a stated price is checked; an unpriced route is not invalid,
-        // it is unpriced, and every reader of its price says so.
+        // Only a stated side is checked; an unstated one is not invalid, it
+        // is unpriced, and every reader of it says so.
         if let Some(price) = &model.price {
-            // Comparing with magnitude preserves signed zero as nonnegative.
-            if !price.input.is_finite()
-                || !price.output.is_finite()
-                || price.input < price.input.abs()
-                || price.output < price.output.abs()
-            {
-                return Err(BramaError::InvalidCatalog(format!(
-                    "invalid price for `{}`",
-                    model.id
-                )));
+            for (side, rate) in price.sides() {
+                // Comparing with magnitude preserves signed zero as nonnegative.
+                if let Some(rate) = rate.filter(|rate| !rate.is_finite() || *rate < rate.abs()) {
+                    return Err(BramaError::InvalidCatalog(format!(
+                        "invalid {side} price {rate} for `{}`",
+                        model.id
+                    )));
+                }
             }
         }
     }
