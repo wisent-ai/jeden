@@ -88,14 +88,18 @@ try {
   writeFileSync(envFile, 'JEDEN_MODEL_ENDPOINT=https://example.invalid/recovered\n');
   const recovered = invoke(['run', '/setup status', '--json', '--cwd', project]);
   assert.ok(recovered.status !== null && !recovered.status, recovered.stderr);
-  assert.ok(JSON.parse(recovered.stdout).text.includes('Endpoint: https://example.invalid/recovered\n'),
+  // The setup screen names where the endpoint comes from, never the endpoint itself;
+  // the declaration's value is read back through token status.
+  assert.ok(JSON.parse(recovered.stdout).text.includes('Endpoint: configured by JEDEN_MODEL_ENDPOINT\n'),
     `the CLI did not read the repaired declaration: ${recovered.stdout}`);
+  assert.equal(JSON.parse(invoke(['token', 'status', '--json']).stdout).endpoint,
+    'https://example.invalid/recovered', 'the repaired declaration was not read as the endpoint');
   writeFileSync(envFile,
     'JEDEN_MODEL_ENDPOINT=https://example.invalid/recovered\nJEDEN_MODEL_KEY= # outside comment\n');
   const empty = invoke(['run', '/setup status', '--json', '--cwd', project]);
   assert.ok(empty.status !== null && !empty.status, empty.stderr);
   const emptyText = JSON.parse(empty.stdout).text;
-  assert.ok(emptyText.includes('Endpoint: https://example.invalid/recovered\n'), emptyText);
+  assert.ok(emptyText.includes('Endpoint: configured by JEDEN_MODEL_ENDPOINT\n'), emptyText);
   const emptySource = invoke(['token', 'status', '--json']);
   assert.ok(emptySource.status !== null && !emptySource.status, emptySource.stderr);
   assert.equal(JSON.parse(emptySource.stdout).keySource, 'none',
