@@ -15,21 +15,33 @@ pub(super) fn process_probe(subsystem: &'static str, program: &str, args: &[&str
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     // The probe's own process is waited for through the shared wait
-    // mechanism, so a probe that hangs says on stderr what it waits for.
-    match stado_wait::status(&mut command) {
-        Ok(status) if status.success() => HealthProbe::healthy(
+    // mechanism, so a probe that hangs says on stderr what it waits for; a
+    // probe that fails is reported with what it printed on stderr.
+    match stado_wait::output(&mut command) {
+        Ok(output) if output.status.success() => HealthProbe::healthy(
             subsystem,
             started,
             format!("{program} probe exited successfully"),
             None,
         ),
-        Ok(status) => HealthProbe::unavailable(
-            subsystem,
-            started,
-            format!("{program} probe exited with {status}"),
-        ),
+        Ok(output) => {
+            let said = String::from_utf8_lossy(&output.stderr);
+            let said = said.trim();
+            HealthProbe::unavailable(
+                subsystem,
+                started,
+                if said.is_empty() {
+                    format!(
+                        "{program} probe exited with {} and printed nothing on stderr",
+                        output.status
+                    )
+                } else {
+                    format!("{program} probe exited with {}: {said}", output.status)
+                },
+            )
+        }
         Err(error) => HealthProbe::unavailable(
             subsystem,
             started,
