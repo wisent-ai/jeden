@@ -156,7 +156,7 @@ export const sessionCommands = [
     invocation: "jeden relay serve <addr>",
     purpose: "Run the encrypted collaboration-room relay used by interactive collaboration commands.",
     inputs: [
-      "Required: the address to listen on, <code>host:port</code>. No address or port is assumed; <code>jeden relay serve</code> without one is refused with <code>relay serve takes the address to listen on: jeden relay serve &lt;host:port&gt;</code>. It replaces <code>jeden collab-relay [addr]</code>, which listened on a built-in address when none was given.",
+      "Required: the address to listen on, <code>host:port</code>. No address or port is assumed; <code>jeden relay serve</code> without one is refused with <code>relay serve takes the address to listen on: jeden relay serve &lt;host:port&gt;</code>.",
       "Required: <code>JEDEN_RELAY_MAX_BLOB_BYTES</code>, the largest request body the relay accepts, a positive whole number of bytes. Unset or malformed, startup is refused naming the variable and the value it held.",
       "Room payloads are opaque, client-encrypted blobs; mutation requests carry the room write token and role. A read names <code>since=&lt;seq&gt;</code> to start after an event, or nothing to start at the room's first; <code>next</code> is the room's last sequence, <code>null</code> for a room without events.",
     ],
