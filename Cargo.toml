@@ -113,7 +113,11 @@ stado-wait = { git = "https://github.com/wisent-ai/stado", package = "stado-wait
 
 # Shapes a defect was once filed against, refused where they would come back.
 # `match` on a bool hid an `if` from a gate that read `== 0` as a number; the
-# disallowed methods are listed with their reasons in clippy.toml.
+# disallowed methods are listed with their reasons in clippy.toml. `let _ =`
+# over a Result dropped failed kills, removals, syncs and writes without a
+# word, so a discarded must-use value is refused where it is written: the
+# caller says the failure or states, in code, why none is owed.
 [lints.clippy]
 match_bool = "deny"
 disallowed_methods = "deny"
+let_underscore_must_use = "deny"

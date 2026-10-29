@@ -110,8 +110,15 @@ impl PtySession for WindowsPty {
     }
 }
 impl Drop for WindowsPty {
+    /// End the shell's job. A drop has no caller to refuse to, so a kill
+    /// that fails is said on stderr instead of being dropped.
     fn drop(&mut self) {
-        let _ = self.signal(ProcessSignal::Kill);
+        if let Err(error) = self.signal(ProcessSignal::Kill) {
+            eprintln!(
+                "jeden: the PTY shell {} could not be killed: {error}",
+                self.pid
+            );
+        }
         close_handle(self.input);
         close_handle(self.output);
         unsafe { ClosePseudoConsole(self.pseudo) };

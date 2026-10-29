@@ -102,7 +102,9 @@ pub(super) fn threaded_pipe(mut pipe: Box<dyn std::io::Read + Send>) -> Box<dyn 
                     }
                 }
                 Err(error) => {
-                    let _ = sender.send(Err(error));
+                    // The pipe is done either way; a receiver already gone
+                    // stopped listening, so the error has nobody to reach.
+                    sender.send(Err(error)).ok();
                     break;
                 }
             }

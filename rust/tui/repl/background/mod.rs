@@ -74,11 +74,17 @@ where
         let approve_tx = tx.clone();
         let ask_tx = tx.clone();
         let worker = scope.spawn(move || {
+            // The screen loop owns the receiver; once it is gone the turn's
+            // notes, deltas and traces have no screen left to reach.
             let progress = move |message: &str| {
-                let _ = note_tx.unbounded_send(TurnMsg::Note(message.to_string()));
+                note_tx
+                    .unbounded_send(TurnMsg::Note(message.to_string()))
+                    .ok();
             };
             let stream = move |piece: &str| {
-                let _ = delta_tx.unbounded_send(TurnMsg::Delta(piece.to_string()));
+                delta_tx
+                    .unbounded_send(TurnMsg::Delta(piece.to_string()))
+                    .ok();
             };
             let trace = move |event: &TraceEvent<'_>| {
                 let message = match *event {
@@ -88,7 +94,7 @@ where
                         None => return,
                     },
                 };
-                let _ = trace_tx.unbounded_send(message);
+                trace_tx.unbounded_send(message).ok();
             };
             let approve = move |tool: &str, detail: &str| -> bool {
                 let (reply, answer) = mpsc::channel::<bool>();
@@ -205,14 +211,16 @@ where
                     let decision = prompt_tool_approval(
                         renderer, &streamed, &tool, &detail, columns, color, input,
                     )?;
-                    let _ = reply.send(decision);
+                    // A worker that stopped waiting has ended its turn; the
+                    // decision has nobody left to reach.
+                    reply.send(decision).ok();
                     continue;
                 }
                 if let Some((question, options, reply)) = pending_question {
                     let answer = prompt_user_question(
                         renderer, &streamed, &question, &options, columns, color, input,
                     )?;
-                    let _ = reply.send(answer);
+                    reply.send(answer).ok();
                     continue;
                 }
                 let cancelling = cancel.load(Ordering::Relaxed);

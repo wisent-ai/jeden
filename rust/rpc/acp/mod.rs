@@ -20,7 +20,9 @@ pub fn serve_stdio() -> Result<(), String> {
                     }
                 }
                 Some(Err(error)) => {
-                    let _ = incoming_tx.unbounded_send(Err(error));
+                    // The reader ends either way; a receiver already gone
+                    // has closed the session the error would have ended.
+                    incoming_tx.unbounded_send(Err(error)).ok();
                     return;
                 }
                 None => return,

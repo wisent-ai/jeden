@@ -23,7 +23,11 @@ use x509_parser::parse_x509_certificate;
 /// exists; an `Err` means another component installed one first, which is the
 /// same outcome this wants.
 static CRYPTO_PROVIDER: LazyLock<()> = LazyLock::new(|| {
-    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    // `Err` hands back the provider when one is already installed: the
+    // outcome this wants, so nothing is owed.
+    rustls::crypto::aws_lc_rs::default_provider()
+        .install_default()
+        .ok();
 });
 
 pub(super) fn load_server_config(

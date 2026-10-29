@@ -30,11 +30,15 @@ pub(super) fn capture_stream(
             .write_chunk(&buffer[..count])
             .map_err(|error| format!("failed capturing {stream}: {error}"))?;
         total = total.saturating_add(count as u64);
-        let _ = events.send(ProcessEvent::Progress(OperationProgress {
-            stream,
-            bytes: count as u64,
-            total_bytes: total,
-        }));
+        // Progress is advisory: an observer that stopped listening is not a
+        // capture failure, and the output itself is still written.
+        events
+            .send(ProcessEvent::Progress(OperationProgress {
+                stream,
+                bytes: count as u64,
+                total_bytes: total,
+            }))
+            .ok();
     }
     output.finish().map_err(|error| error.to_string())
 }
