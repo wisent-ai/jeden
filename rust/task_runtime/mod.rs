@@ -116,21 +116,17 @@ fn dynamic_descriptors() -> Vec<crate::tool_runtime::DynamicToolDescriptor> {
             })
             .collect();
     }
-    let health_store =
-        std::env::temp_dir().join(format!("jeden-task-health-{}", std::process::id()));
+    // The probe answers for the store delegation actually opens (the same
+    // one the conformance probe reads), so nothing is written to the
+    // system's temporary directory and no scratch store is left to remove.
     let health = std::env::current_dir()
         .map_err(|error| error.to_string())
         .and_then(|cwd| {
             limits_from_config(&cwd)
-                .and_then(|limits| TaskScheduler::open(&cwd, &health_store, limits))
+                .and_then(|limits| TaskScheduler::open(&cwd, &default_store(&cwd, None), limits))
                 .map_err(|error| error.to_string())
         })
         .map(|scheduler| scheduler.health());
-    if let Err(left) = fs::remove_dir_all(&health_store) {
-        if left.kind() != std::io::ErrorKind::NotFound {
-            eprintln!("jeden: {} is left behind: {left}", health_store.display());
-        }
-    }
     let (healthy, detail) = match health {
         Ok(health) if health.healthy => (
             true,
@@ -227,25 +223,15 @@ pub fn execute_registered_tool(
     }
 }
 
-/// Write `value` to `path` whole: into a file of its own beside it, synced,
-/// then renamed over it. The scratch name carries a fresh UUID, so writers
-/// in this or another process never share one.
+/// Write `value` to `path` whole through the shared durable replace: staged
+/// in a file of its own beside it, then renamed over it. A step that fails
+/// removes the staged file, and one that cannot be removed is named in the
+/// error, so no orphan staging file is left beside the record.
 pub(crate) fn atomic_json(path: &Path, value: &impl Serialize) -> Result<(), TaskError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let temporary = path.with_extension(format!("tmp-{}", uuid::Uuid::new_v4()));
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(&temporary)?;
-    use std::io::Write;
-    file.write_all(&serde_json::to_vec_pretty(value)?)?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    fs::rename(temporary, path)?;
-    if let Some(parent) = path.parent() {
-        fs::File::open(parent)?.sync_all()?;
-    }
-    Ok(())
+    let mut bytes = serde_json::to_vec_pretty(value)?;
+    bytes.push(b'\n');
+    crate::tool_runtime::runtime_ops::durable::replace(path, &bytes).map_err(TaskError::Io)
 }
