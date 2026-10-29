@@ -49,6 +49,26 @@ pub(crate) fn bearer_token() -> Result<Option<String>, String> {
     route_variable(BEARER)
 }
 
+/// The variable naming the agent Jeden's signed requests speak for.
+pub(crate) const AGENT_ID: &str = "WISENT_APP_AGENT_ID";
+
+/// The agent Jeden signs Brama and Weles requests as, the one order every
+/// reader shares: `WISENT_APP_AGENT_ID`, then the configuration's `agentId`
+/// (`configuration`). Neither stated is refused naming both: an agent filled
+/// in by Jeden signed every request as an agent whose grant this secret may
+/// not hold, and Brama answered each one as forbidden.
+pub(crate) fn agent_id(configuration: Option<&str>) -> Result<String, String> {
+    if let Some(stated) = route_variable(AGENT_ID)? {
+        return Ok(stated);
+    }
+    match configuration.map(str::trim).filter(|stated| !stated.is_empty()) {
+        Some(configured) => Ok(configured.to_owned()),
+        None => Err(format!(
+            "no agent is stated for signed requests: set {AGENT_ID} or the configuration's agentId to the agent Brama grants {SECRET} to (jeden run \"/setup agent-id <id>\")"
+        )),
+    }
+}
+
 /// Why this process refuses an explicit direct provider route whose
 /// endpoint or key cannot be read, or whose endpoint is invalid.
 static DIRECT_REFUSED: OnceLock<String> = OnceLock::new();

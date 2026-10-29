@@ -106,7 +106,7 @@ export const overviewPages = [
           },
           {
             label: "Brama route without Stado",
-            code: "WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>\nBRAMA_URL=<brama-model-router-url>\nBRAMA_TOKEN=<brama-bearer>\nWISENT_APP_AGENT_ID=wisent-app",
+            code: "WISENT_APP_AGENT_AUTH_SECRET=<signing-credential>\nBRAMA_URL=<brama-model-router-url>\nBRAMA_TOKEN=<brama-bearer>\nWISENT_APP_AGENT_ID=<agent-the-secret-signs-for>",
           },
           {
             label: "Verify",

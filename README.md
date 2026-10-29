@@ -47,6 +47,9 @@ stado credentials run \
 
 Stado reads both fields into Jeden's environment only and then becomes Jeden;
 a missing role or field is refused naming the variable before Jeden starts.
+The agent the secret signs for is `WISENT_APP_AGENT_ID`, or the
+configuration's `agentId`; with neither, a signed request is refused naming
+both, never sent as an agent Jeden picked.
 Brama retains its own account leases and routing; a direct provider requires
 neither a Brama signature nor a gateway lease. `/setup` and `jeden doctor`
 report the active route and observed catalog refusal.

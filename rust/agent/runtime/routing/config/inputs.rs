@@ -34,17 +34,13 @@ pub(crate) fn selected_model(
     Ok(chosen(configuration))
 }
 
+/// The agent a Brama route signs as (none on a direct provider route), read
+/// through the one order [`crate::agent::credential::agent_id`] declares.
 pub(super) fn agent_id(configuration: Option<&str>, direct: bool) -> Result<String, String> {
     if direct {
         return Ok(String::new());
     }
-    match optional_env("WISENT_APP_AGENT_ID")? {
-        Some(value) => Ok(value),
-        None => match configuration {
-            Some(value) => Ok(value.to_owned()),
-            None => Ok(crate::slash::setup::DEFAULT_AGENT_ID.to_owned()),
-        },
-    }
+    crate::agent::credential::agent_id(configuration)
 }
 
 /// The service tier a model call carries, the one order every reader shares:

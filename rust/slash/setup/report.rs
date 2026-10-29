@@ -5,7 +5,6 @@
 
 use super::super::SlashContext;
 use super::setup_state;
-use crate::slash::setup::DEFAULT_AGENT_ID;
 
 pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     let state = setup_state(context);
@@ -87,7 +86,7 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
             "3. WISENT_APP_AGENT_ID [unknown] — resolve the environment file read error before configuring this value".to_string()
         } else {
             format!(
-                "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\" (default: {DEFAULT_AGENT_ID})",
+                "3. WISENT_APP_AGENT_ID {} — set: jeden run \"/setup agent-id <id>\", the agent Brama grants the signing secret to",
                 mark(state.agent_id.is_some())
             )
         },

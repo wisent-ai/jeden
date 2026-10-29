@@ -1,4 +1,3 @@
-use std::env;
 use std::path::Path;
 
 use crate::control_plane::billing::{QuotaBucket, QuotaState};
@@ -33,21 +32,11 @@ fn item_slug(value: &str) -> String {
         .to_string()
 }
 
-/// The agent Weles logs in for: WISENT_APP_AGENT_ID, then the configured
-/// agent id, then the declared default, the order routing reads it in. A
-/// variable that is not Unicode is refused, never read as unset.
+/// The agent Weles logs in for, in the order routing reads it
+/// ([`crate::agent::credential::agent_id`]): refused naming both sources when
+/// neither states one.
 pub(crate) fn agent_identity(cwd: &Path) -> Result<String, String> {
-    match env::var("WISENT_APP_AGENT_ID") {
-        Ok(value) if !value.trim().is_empty() => return Ok(value),
-        Ok(_) | Err(env::VarError::NotPresent) => {}
-        Err(env::VarError::NotUnicode(_)) => {
-            return Err("WISENT_APP_AGENT_ID cannot be read: value is not Unicode".into())
-        }
-    }
-    Ok(match load_config(cwd).agent_id {
-        Some(configured) => configured,
-        None => crate::slash::setup::DEFAULT_AGENT_ID.to_string(),
-    })
+    crate::agent::credential::agent_id(load_config(cwd).agent_id.as_deref())
 }
 
 pub(crate) fn format_auth_status(cwd: &Path) -> String {

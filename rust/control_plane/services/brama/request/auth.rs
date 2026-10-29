@@ -9,12 +9,10 @@ use std::env::VarError;
 
 use crate::agent::credential::SECRET;
 
-/// The variable naming the agent a signed request speaks for.
-const AGENT_ID: &str = "WISENT_APP_AGENT_ID";
-
 /// The agent id and shared secret requests are signed with; none when no secret
-/// is configured, so the caller is unsigned. The agent id is the configured one,
-/// else the agent `/setup` declares. A variable that is set but not Unicode is
+/// is configured, so the caller is unsigned. With a secret, the agent is the
+/// one `WISENT_APP_AGENT_ID` states, refused naming it when it states none,
+/// never an agent Jeden fills in. A variable that is set but not Unicode is
 /// refused naming it.
 pub(crate) fn caller_credentials() -> Result<Option<(String, String)>, String> {
     let secret = match std::env::var(SECRET) {
@@ -24,13 +22,7 @@ pub(crate) fn caller_credentials() -> Result<Option<(String, String)>, String> {
             return Err(format!("{SECRET} cannot be read: value is not Unicode"))
         }
     };
-    let agent_id = match std::env::var(AGENT_ID) {
-        Ok(value) if !value.trim().is_empty() => value,
-        Ok(_) | Err(VarError::NotPresent) => crate::slash::setup::DEFAULT_AGENT_ID.to_owned(),
-        Err(VarError::NotUnicode(_)) => {
-            return Err(format!("{AGENT_ID} cannot be read: value is not Unicode"))
-        }
-    };
+    let agent_id = crate::agent::credential::agent_id(None)?;
     Ok(Some((agent_id, secret)))
 }
 

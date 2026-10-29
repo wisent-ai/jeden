@@ -23,10 +23,6 @@ pub(crate) use steps::{handle_text, run_interactive};
 const BRAMA_URL_KEY: &str = "BRAMA_URL";
 const AGENT_ID_KEY: &str = "WISENT_APP_AGENT_ID";
 const AGENT_SECRET_KEY: &str = "WISENT_APP_AGENT_AUTH_SECRET";
-/// The agent Brama routes for and Weles logs in for when neither
-/// WISENT_APP_AGENT_ID nor the configuration names one, as /setup offers it
-/// and Jeden's overview documents it. Routing, /setup and /login read it here.
-pub(crate) const DEFAULT_AGENT_ID: &str = "wisent-app";
 
 struct SetupState {
     brama_url: Option<String>,
@@ -171,17 +167,25 @@ pub(crate) fn setup_picker(context: &SlashContext<'_>) -> Result<PickerSpec, Str
             "3. WISENT_APP_AGENT_ID state is unknown",
             "Resolve the environment file read error before configuring this value.",
         )),
-        None => items.push(
-            PickerItem::action(
-                "3. Set WISENT_APP_AGENT_ID",
-                format!("/setup agent-id {DEFAULT_AGENT_ID}"),
-            )
-            .detail(format!(
-                "default: {DEFAULT_AGENT_ID} · stored in ~/.jeden/.env"
-            ))
-            .badge("INPUT")
-            .prefill(),
-        ),
+        None => {
+            let prefill = match example_prefill(context.cwd, AGENT_ID_KEY) {
+                Ok(Some(id)) => format!(" {id}"),
+                Ok(None) => " ".to_string(),
+                Err(error) => {
+                    items.push(error_row(".env.example is unreadable", error));
+                    " ".to_string()
+                }
+            };
+            items.push(
+                PickerItem::action(
+                    "3. Set WISENT_APP_AGENT_ID",
+                    format!("/setup agent-id{prefill}"),
+                )
+                .detail("the agent Brama grants the signing secret to · stored in ~/.jeden/.env")
+                .badge("INPUT")
+                .prefill(),
+            );
+        }
     }
     if state.secret_configured {
         items.push(configured_row(
