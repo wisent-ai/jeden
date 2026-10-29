@@ -11,7 +11,7 @@ mod memory;
 mod todo;
 
 pub(crate) use context::context_tool;
-pub(crate) use memory::memory_tool;
+pub(crate) use memory::{memory_tool, MemoryOp};
 pub(crate) use todo::todo_tool;
 
 /// The `field` a JSON state file declares as a string. No file declares

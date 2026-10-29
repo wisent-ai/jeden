@@ -4,13 +4,55 @@ use crate::memory::{scope_from_value, FtsBackend, MemorySource, MemoryStore};
 use crate::tool_runtime::shared::{count_input, string_input};
 use crate::tool_runtime::ToolRuntime;
 
+/// What one call of the memory tool does, spelled by its serde name in the
+/// tool's `op` field; the tool schema lists the same names.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum MemoryOp {
+    Remember,
+    List,
+    Recall,
+    Context,
+    Forget,
+    Stats,
+}
+
+impl MemoryOp {
+    const ALL: &'static [MemoryOp] = &[
+        MemoryOp::Remember,
+        MemoryOp::List,
+        MemoryOp::Recall,
+        MemoryOp::Context,
+        MemoryOp::Forget,
+        MemoryOp::Stats,
+    ];
+
+    /// Every op's name, for the tool schema and refusals.
+    pub(crate) fn names() -> Vec<String> {
+        Self::ALL
+            .iter()
+            .map(|op| crate::vocabulary::spelling(*op))
+            .collect()
+    }
+
+    fn of(input: &Value) -> Result<Self, String> {
+        let named = string_input(input, "op")
+            .ok_or_else(|| format!("memory requires op, one of {}", Self::names().join(", ")))?;
+        crate::vocabulary::named(&named).map_err(|cause| {
+            format!(
+                "unknown memory op {named:?} ({cause}); the ops are {}",
+                Self::names().join(", ")
+            )
+        })
+    }
+}
+
 pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Value, String> {
+    let op = MemoryOp::of(input)?;
     let store = MemoryStore::open()?;
-    let op = string_input(input, "op")
-        .ok_or("memory requires op, one of remember, list, recall, context, forget or stats")?;
     let scope = scope_from_value(input.get("scope"), runtime.cwd)?;
-    match op.as_str() {
-        "remember" => {
+    match op {
+        MemoryOp::Remember => {
             if !runtime.allow_write {
                 return Err("memory remember requires --allow-write".into());
             }
@@ -54,10 +96,10 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
             let entry = store.remember(&kind, &scope, &text, &tags, &source, confidence)?;
             Ok(json!({"entry":entry,"backend":"fleet-postgres"}))
         }
-        "list" => {
+        MemoryOp::List => {
             Ok(json!({"entries":store.list(count_input(input, "limit", "memory list")? as usize)?}))
         }
-        "recall" => {
+        MemoryOp::Recall => {
             let query = string_input(input, "query")
                 .ok_or("memory recall requires query, the text the notes are recalled for")?;
             let hits = store.recall(
@@ -70,19 +112,18 @@ pub(crate) fn memory_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Va
                 json!({"entries":hits.iter().map(|h|&h.record).collect::<Vec<_>>(),"hits":hits,"query":query,"backend":"postgres-fts"}),
             )
         }
-        "context" => {
+        MemoryOp::Context => {
             let query = string_input(input, "query")
                 .ok_or("memory context requires query, the text the context is gathered for")?;
             let max_chars = count_input(input, "maxChars", "memory context")? as usize;
             Ok(json!({"context":store.pre_compaction_context(&scope,&query,Some(max_chars))?}))
         }
-        "forget" => {
+        MemoryOp::Forget => {
             if !runtime.allow_write {
                 return Err("memory forget requires --allow-write".into());
             }
             Ok(json!({"removed":store.forget_scope(&scope)?}))
         }
-        "stats" => store.health(),
-        other => Err(format!("unknown memory op: {other}")),
+        MemoryOp::Stats => store.health(),
     }
 }

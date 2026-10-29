@@ -38,6 +38,7 @@ use session::{
 
 pub(crate) use edit::{policy_subjects, LineEditKind};
 pub use observed::execute;
+pub(crate) use session::MemoryOp;
 
 #[derive(Clone, Debug)]
 pub struct DynamicToolDescriptor {
