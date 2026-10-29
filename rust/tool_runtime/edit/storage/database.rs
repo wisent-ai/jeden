@@ -50,13 +50,16 @@ pub(crate) fn write_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     }
     let table = string_input(input, "table").ok_or("write_sqlite requires table")?;
     let table_sql = identifier(&table)?;
-    let action = string_input(input, "action").ok_or("write_sqlite requires action")?;
+    let named = string_input(input, "action")
+        .ok_or("write_sqlite requires action: insert, update or delete")?;
+    let action: SqliteAction = crate::vocabulary::named(&named)
+        .map_err(|cause| format!("unsupported SQLite action: {named} ({cause})"))?;
     let mut connection = Connection::open(&path).map_err(|error| error.to_string())?;
     let tx = connection
         .transaction_with_behavior(TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
-    let affected = match action.as_str() {
-        "insert" => {
+    let affected = match action {
+        SqliteAction::Insert => {
             let row = input
                 .get("row")
                 .and_then(Value::as_object)
@@ -79,7 +82,7 @@ pub(crate) fn write_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
             )
             .map_err(|error| error.to_string())?
         }
-        "update" => {
+        SqliteAction::Update => {
             let row = input
                 .get("row")
                 .and_then(Value::as_object)
@@ -106,7 +109,7 @@ pub(crate) fn write_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
             )
             .map_err(|error| error.to_string())?
         }
-        "delete" => {
+        SqliteAction::Delete => {
             let key_column =
                 string_input(input, "keyColumn").ok_or("SQLite delete requires keyColumn")?;
             let key = input.get("key").ok_or("SQLite delete requires key")?;
@@ -119,7 +122,6 @@ pub(crate) fn write_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
             )
             .map_err(|error| error.to_string())?
         }
-        other => return Err(format!("unsupported SQLite action: {other}")),
     };
     tx.commit().map_err(|error| error.to_string())?;
     drop(connection);
@@ -127,4 +129,13 @@ pub(crate) fn write_sqlite(runtime: &ToolRuntime<'_>, input: &Value) -> Result<V
     Ok(
         json!({"ok":true,"path":label,"table":table,"action":action,"affected":affected,"sha256":sha256}),
     )
+}
+
+/// What `write_sqlite` does to one table, spelled by its serde name.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum SqliteAction {
+    Insert,
+    Update,
+    Delete,
 }

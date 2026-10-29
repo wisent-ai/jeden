@@ -182,16 +182,17 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     source
         .rewind()
         .map_err(|error| format!("{label} cannot be read again after its digest: {error}"))?;
-    let action =
+    let named =
         string_input(input, "action").ok_or("write_archive requires action: upsert or delete")?;
-    let content = match action.as_str() {
-        "upsert" => Some(
+    let action: ArchiveAction = crate::vocabulary::named(&named)
+        .map_err(|cause| format!("unsupported archive action: {named} ({cause})"))?;
+    let content = match action {
+        ArchiveAction::Upsert => Some(
             string_input(input, "content")
                 .ok_or("archive upsert requires content")?
                 .into_bytes(),
         ),
-        "delete" => None,
-        other => return Err(format!("unsupported archive action: {other}")),
+        ArchiveAction::Delete => None,
     };
     let temp = path.with_extension(format!("jeden-{}.tmp", std::process::id()));
     let lower = label.to_ascii_lowercase();
@@ -218,6 +219,14 @@ pub(crate) fn write_archive(runtime: &ToolRuntime<'_>, input: &Value) -> Result<
     })?;
     let (sha256, bytes) = file_sha(&path)?;
     Ok(json!({"ok":true,"path":label,"entry":entry,"action":action,"sha256":sha256,"bytes":bytes}))
+}
+
+/// What `write_archive` does to its entry, spelled by its serde name.
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum ArchiveAction {
+    Upsert,
+    Delete,
 }
 
 /// `error`, followed by the sentence of the temporary archive a failed

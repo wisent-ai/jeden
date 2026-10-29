@@ -36,7 +36,7 @@ use session::{
     save_artifact, todo_tool,
 };
 
-pub(crate) use edit::policy_subjects;
+pub(crate) use edit::{policy_subjects, LineEditKind};
 pub use observed::execute;
 
 #[derive(Clone, Debug)]

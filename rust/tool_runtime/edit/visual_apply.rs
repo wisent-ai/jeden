@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
-use super::lines::apply_line_edit_ops;
+use super::lines::{apply_line_edits, LineEdit, LineEditKind};
 use super::visual_parse::parse_visual_edit_patch;
 use super::VisualPatchOp;
 use crate::tally::{ORIGIN, STEP};
@@ -75,38 +75,53 @@ fn visual_block_range(content: &str, start_line: usize) -> Result<(usize, usize)
     Err(format!("unsupported block anchor at line {start_line}"))
 }
 
-fn anchored_line(op: &VisualPatchOp, name: &str) -> Result<usize, String> {
-    op.line.ok_or_else(|| format!("{name} requires line"))
-}
-
-fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<Value>, String> {
+/// Every hunk of a section resolved to line edits in the file's original
+/// coordinates: a block hunk to the lines its block spans.
+fn visual_ops_for_content(content: &str, ops: &[VisualPatchOp]) -> Result<Vec<LineEdit>, String> {
     let (lines, _) = split_edit_lines(content);
     let mut out = Vec::new();
     for op in ops {
-        match op.op.as_str() {
-            "insert_head" => out.push(json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content})),
-            "insert_tail" => out.push(if lines.is_empty() {
-                json!({"op": "insert_before", "line": FIRST_LINE, "content": op.content})
-            } else {
-                json!({"op": "insert_after", "line": lines.len(), "content": op.content})
-            }),
-            "replace_block" => {
-                let (start, end) = visual_block_range(content, anchored_line(op, "replace_block")?)?;
-                out.push(json!({"op": "replace", "startLine": start, "endLine": end, "content": op.content}));
+        out.push(match op {
+            VisualPatchOp::InsertHead(body) => {
+                LineEdit::insert(LineEditKind::InsertBefore, FIRST_LINE, body.clone())
             }
-            "delete_block" => {
-                let (start, end) = visual_block_range(content, anchored_line(op, "delete_block")?)?;
-                out.push(json!({"op": "delete", "startLine": start, "endLine": end}));
+            VisualPatchOp::InsertTail(body) => {
+                if lines.is_empty() {
+                    LineEdit::insert(LineEditKind::InsertBefore, FIRST_LINE, body.clone())
+                } else {
+                    LineEdit::insert(LineEditKind::InsertAfter, lines.len(), body.clone())
+                }
             }
-            "insert_block_after" => {
-                let (_, end) = visual_block_range(content, anchored_line(op, "insert_block_after")?)?;
-                out.push(json!({"op": "insert_after", "line": end, "content": op.content}));
+            VisualPatchOp::ReplaceBlock {
+                line,
+                content: body,
+            } => {
+                let (start, end) = visual_block_range(content, *line)?;
+                LineEdit {
+                    kind: LineEditKind::Replace,
+                    start,
+                    end,
+                    content: body.clone(),
+                }
             }
-            "replace" => out.push(json!({"op": "replace", "startLine": op.start_line, "endLine": op.end_line, "content": op.content})),
-            "delete" => out.push(json!({"op": "delete", "startLine": op.start_line, "endLine": op.end_line})),
-            "insert_before" | "insert_after" => out.push(json!({"op": op.op, "line": op.line, "content": op.content})),
-            _ => return Err(format!("unknown visual op: {}", op.op)),
-        }
+            VisualPatchOp::DeleteBlock { line } => {
+                let (start, end) = visual_block_range(content, *line)?;
+                LineEdit {
+                    kind: LineEditKind::Delete,
+                    start,
+                    end,
+                    content: Vec::new(),
+                }
+            }
+            VisualPatchOp::InsertBlockAfter {
+                line,
+                content: body,
+            } => {
+                let (_, end) = visual_block_range(content, *line)?;
+                LineEdit::insert(LineEditKind::InsertAfter, end, body.clone())
+            }
+            VisualPatchOp::Lines(edit) => edit.clone(),
+        });
     }
     Ok(out)
 }
@@ -119,7 +134,7 @@ pub(super) struct PreparedVisualEdit {
     pub(super) to_path: Option<String>,
     pub(super) before: String,
     pub(super) after: String,
-    pub(super) ops: Vec<Value>,
+    pub(super) ops: Vec<LineEdit>,
     pub(super) remove: bool,
 }
 
@@ -203,7 +218,7 @@ pub(super) fn plan_visual_edit(cwd: &Path, patch: &str) -> Result<Vec<PreparedVi
         let after = match (section.remove, ops.is_empty()) {
             (true, _) => String::new(),
             (false, true) => before.clone(),
-            (false, false) => apply_line_edit_ops(&before, &Value::Array(ops.clone()))?,
+            (false, false) => apply_line_edits(&before, &ops)?,
         };
         prepared.push(PreparedVisualEdit {
             file,

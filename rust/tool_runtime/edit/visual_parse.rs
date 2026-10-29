@@ -1,3 +1,4 @@
+use super::lines::{LineEdit, LineEditKind};
 use super::{VisualPatchOp, VisualPatchSection};
 
 fn parse_visual_body(lines: &[&str], mut index: usize) -> Result<(Vec<String>, usize), String> {
@@ -78,11 +79,8 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
                     "SWAP.BLK hunk requires at least one + body line; use DEL.BLK to delete".into(),
                 );
             }
-            current.ops.push(VisualPatchOp {
-                op: "replace_block".into(),
-                start_line: None,
-                end_line: None,
-                line: Some(line_no),
+            current.ops.push(VisualPatchOp::ReplaceBlock {
+                line: line_no,
                 content,
             });
             index = next;
@@ -92,13 +90,9 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
             let line_no = rest
                 .parse::<usize>()
                 .map_err(|_| format!("unsupported patch line: {line}"))?;
-            current.ops.push(VisualPatchOp {
-                op: "delete_block".into(),
-                start_line: None,
-                end_line: None,
-                line: Some(line_no),
-                content: Vec::new(),
-            });
+            current
+                .ops
+                .push(VisualPatchOp::DeleteBlock { line: line_no });
             index += 1;
             continue;
         }
@@ -112,11 +106,8 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
             if content.is_empty() {
                 return Err("INS.BLK.POST hunk requires at least one + body line".into());
             }
-            current.ops.push(VisualPatchOp {
-                op: "insert_block_after".into(),
-                start_line: None,
-                end_line: None,
-                line: Some(line_no),
+            current.ops.push(VisualPatchOp::InsertBlockAfter {
+                line: line_no,
                 content,
             });
             index = next;
@@ -151,13 +142,12 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
                     "SWAP hunk requires at least one + body line; use DEL to delete".into(),
                 );
             }
-            current.ops.push(VisualPatchOp {
-                op: "replace".into(),
-                start_line: Some(start),
-                end_line: Some(end),
-                line: None,
+            current.ops.push(VisualPatchOp::Lines(LineEdit {
+                kind: LineEditKind::Replace,
+                start,
+                end,
                 content,
-            });
+            }));
             index = next;
             continue;
         }
@@ -176,13 +166,12 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
                     .map_err(|_| format!("unsupported patch line: {line}"))?;
                 (start, start)
             };
-            current.ops.push(VisualPatchOp {
-                op: "delete".into(),
-                start_line: Some(start),
-                end_line: Some(end),
-                line: None,
+            current.ops.push(VisualPatchOp::Lines(LineEdit {
+                kind: LineEditKind::Delete,
+                start,
+                end,
                 content: Vec::new(),
-            });
+            }));
             index += 1;
             continue;
         }
@@ -196,13 +185,11 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
             if content.is_empty() {
                 return Err("INS hunk requires at least one + body line".into());
             }
-            current.ops.push(VisualPatchOp {
-                op: "insert_before".into(),
-                start_line: None,
-                end_line: None,
-                line: Some(line_no),
+            current.ops.push(VisualPatchOp::Lines(LineEdit::insert(
+                LineEditKind::InsertBefore,
+                line_no,
                 content,
-            });
+            )));
             index = next;
             continue;
         }
@@ -216,13 +203,11 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
             if content.is_empty() {
                 return Err("INS hunk requires at least one + body line".into());
             }
-            current.ops.push(VisualPatchOp {
-                op: "insert_after".into(),
-                start_line: None,
-                end_line: None,
-                line: Some(line_no),
+            current.ops.push(VisualPatchOp::Lines(LineEdit::insert(
+                LineEditKind::InsertAfter,
+                line_no,
                 content,
-            });
+            )));
             index = next;
             continue;
         }
@@ -231,16 +216,10 @@ pub(super) fn parse_visual_edit_patch(patch: &str) -> Result<Vec<VisualPatchSect
             if content.is_empty() {
                 return Err("INS hunk requires at least one + body line".into());
             }
-            current.ops.push(VisualPatchOp {
-                op: if line == "INS.HEAD:" {
-                    "insert_head".into()
-                } else {
-                    "insert_tail".into()
-                },
-                start_line: None,
-                end_line: None,
-                line: None,
-                content,
+            current.ops.push(if line == "INS.HEAD:" {
+                VisualPatchOp::InsertHead(content)
+            } else {
+                VisualPatchOp::InsertTail(content)
             });
             index = next;
             continue;

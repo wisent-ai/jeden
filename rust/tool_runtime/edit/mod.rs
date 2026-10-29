@@ -14,6 +14,7 @@ mod subjects;
 mod visual_apply;
 mod visual_parse;
 
+pub(crate) use lines::LineEditKind;
 pub(crate) use storage::{write_archive, write_sqlite};
 pub(crate) use subjects::policy_subjects;
 pub(crate) use visual_apply::visual_edit;
@@ -38,13 +39,24 @@ fn not_text(path: &std::path::Path) -> impl FnOnce(std::string::FromUtf8Error) -
     }
 }
 
+/// One hunk of a visual patch, read once from its `SWAP`/`DEL`/`INS` line.
+/// Each resolves to the line edits of [`lines::LineEdit`]; none is spelled as
+/// a word again.
 #[derive(Clone)]
-struct VisualPatchOp {
-    op: String,
-    start_line: Option<usize>,
-    end_line: Option<usize>,
-    line: Option<usize>,
-    content: Vec<String>,
+enum VisualPatchOp {
+    /// `INS.HEAD:`: lines before the first.
+    InsertHead(Vec<String>),
+    /// `INS.TAIL:`: lines after the last.
+    InsertTail(Vec<String>),
+    /// `SWAP.BLK N:`: the block anchored at `line`, replaced.
+    ReplaceBlock { line: usize, content: Vec<String> },
+    /// `DEL.BLK N`: the block anchored at `line`, deleted.
+    DeleteBlock { line: usize },
+    /// `INS.BLK.POST N:`: lines after the block anchored at `line`.
+    InsertBlockAfter { line: usize, content: Vec<String> },
+    /// `SWAP N.=M:` and `DEL N[.=M]`, and `INS.PRE N:` / `INS.POST N:`:
+    /// one line edit as stated.
+    Lines(lines::LineEdit),
 }
 
 struct VisualPatchSection {
