@@ -7,10 +7,9 @@ name: Version check
 # breaks whoever scripted it yesterday.
 #
 # The rule is the fleet's shared one, https://github.com/lbartoszcze/AutoVersion,
-# whose SPEC keeps one small implementation per consumer language, held identical
-# by its conformance fixtures. Jeden's is the Rust port in tools/src/versioning,
-# run as `jeden-tools versioning decide`; tests/versioning/ reproduces every
-# fixture of AutoVersion v0.1.0 against it. This workflow supplies only the three
+# taken as its crate rather than copied: `jeden-tools versioning decide` answers
+# with the AutoVersion crate tools/Cargo.toml pins, whose own docs/FIXTURES.md
+# that crate's conformance test reproduces. This workflow supplies only the three
 # things this repository alone knows: its surface, the version it declares, and
 # the published artifact its baseline was recovered from.
 #
