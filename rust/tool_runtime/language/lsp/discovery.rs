@@ -120,14 +120,27 @@ pub(crate) fn healthy_servers() -> Vec<String> {
         .collect()
 }
 
-fn inferred_server(path: &Path) -> Option<(String, Vec<String>)> {
-    let (program, args) = Language::of(path)?.server();
-    executable_exists(program).then(|| {
-        (
-            program.to_owned(),
-            args.iter().map(|arg| (*arg).to_owned()).collect(),
+/// The server Jeden starts for `path`'s language, or why it starts none: the
+/// extension names no language it serves, or that language's server is not
+/// installed.
+fn inferred_server(path: &Path) -> Result<(String, Vec<String>), String> {
+    let language = Language::of(path).ok_or_else(|| {
+        format!(
+            "{} names no language Jeden starts a language server for; pass server (and serverArgs) to choose one",
+            path.display()
         )
-    })
+    })?;
+    let (program, args) = language.server();
+    if !executable_exists(program) {
+        return Err(format!(
+            "{} needs the language server {program}, which is not on PATH; install it or pass server",
+            path.display()
+        ));
+    }
+    Ok((
+        program.to_owned(),
+        args.iter().map(|arg| (*arg).to_owned()).collect(),
+    ))
 }
 
 pub(super) fn command_for(input: &Value, path: &Path) -> Result<(String, Vec<String>), String> {
@@ -149,7 +162,6 @@ pub(super) fn command_for(input: &Value, path: &Path) -> Result<(String, Vec<Str
         return Ok((program, args));
     }
     inferred_server(path)
-        .ok_or_else(|| format!("no healthy LSP server discovered for {}", path.display()))
 }
 
 /// The LSP languageId of `path`, or why there is none: its extension names
