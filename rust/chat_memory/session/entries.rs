@@ -82,7 +82,7 @@ fn delegated_result(text: &str) -> Delegated {
         }
         // A JSON answer without the job's fields, or a text that is not JSON,
         // is the tool's own error; the caller echoes that text as it stands.
-        Ok(_unshaped) | Err(_not_json) => Delegated::Failed,
+        Ok(_) | Err(_) => Delegated::Failed,
     }
 }
 

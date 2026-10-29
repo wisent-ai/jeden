@@ -21,10 +21,10 @@ pub(crate) use visual_apply::visual_edit;
 /// The refusal for one filesystem step of an edit, naming what was being done
 /// to which path: the tool's caller sees which write failed, not a bare
 /// operating-system message.
-fn io_failed(
+fn io_failed<'a>(
     action: &'static str,
-    path: &std::path::Path,
-) -> impl FnOnce(std::io::Error) -> String + '_ {
+    path: &'a std::path::Path,
+) -> impl FnOnce(std::io::Error) -> String + 'a {
     move |error| format!("cannot {action} {}: {error}", path.display())
 }
 
@@ -69,7 +69,10 @@ pub(crate) fn write_any(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
         return write_archive(runtime, &routed);
     }
     let lower = path.to_ascii_lowercase();
-    if DATABASE_SUFFIXES.iter().any(|suffix| lower.ends_with(suffix)) && input.get("table").is_some()
+    if DATABASE_SUFFIXES
+        .iter()
+        .any(|suffix| lower.ends_with(suffix))
+        && input.get("table").is_some()
     {
         return write_sqlite(runtime, input);
     }
@@ -117,7 +120,9 @@ pub(crate) fn apply_patch_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
     let file = jail_write_path(runtime.cwd, &path)?;
     let current_bytes = verify_expected_sha(&path, &file, &expected)?;
     let current = String::from_utf8(current_bytes).map_err(not_text(&file))?;
-    let replacements = input.get("replacements").ok_or("replacements are required")?;
+    let replacements = input
+        .get("replacements")
+        .ok_or("replacements are required")?;
     let next = replaced(&current, replacements)?;
     fs::write(&file, next.as_bytes()).map_err(io_failed("write", &file))?;
     Ok(
@@ -128,9 +133,7 @@ pub(crate) fn apply_patch_tool(runtime: &ToolRuntime<'_>, input: &Value) -> Resu
 /// `current` with each exact, single-occurrence replacement applied in order;
 /// the tool and its policy hooks read the same result.
 fn replaced(current: &str, replacements: &Value) -> Result<String, String> {
-    let replacements = replacements
-        .as_array()
-        .ok_or("replacements are required")?;
+    let replacements = replacements.as_array().ok_or("replacements are required")?;
     if replacements.is_empty() {
         return Err("replacements are required".into());
     }
@@ -214,7 +217,11 @@ pub(crate) fn move_file(runtime: &ToolRuntime<'_>, input: &Value) -> Result<Valu
         fs::create_dir_all(parent).map_err(io_failed("create directory", parent))?;
     }
     fs::rename(&from_file, &to_file).map_err(|error| {
-        format!("cannot move {} to {}: {error}", from_file.display(), to_file.display())
+        format!(
+            "cannot move {} to {}: {error}",
+            from_file.display(),
+            to_file.display()
+        )
     })?;
     Ok(
         json!({"ok": true, "from": from, "to": to, "sha256": sha256_hex(&bytes), "bytes": bytes.len()}),

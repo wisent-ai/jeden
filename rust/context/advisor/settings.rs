@@ -75,9 +75,12 @@ fn resolve_ground_truth(advisor: &AdvisorConfig) -> (String, String) {
     for name in ["WISENT_GROUND_TRUTH_API", "GROUND_TRUTH_API"] {
         match std::env::var(name) {
             Ok(value) if !value.trim().is_empty() => {
-                return (value.trim().trim_end_matches('/').to_string(), name.to_string());
+                return (
+                    value.trim().trim_end_matches('/').to_string(),
+                    name.to_string(),
+                );
             }
-            Ok(_blank) | Err(std::env::VarError::NotPresent) => {}
+            Ok(_) | Err(std::env::VarError::NotPresent) => {}
             // A value that is not text is said as the source, never passed
             // over for the next variable or read as unset.
             Err(error) => return (String::new(), format!("{name} cannot be read: {error}")),
@@ -200,7 +203,10 @@ fn parse_roots(raw: &str, cwd: &Path) -> Vec<DocRoot> {
             Ok(real) => real,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => path,
             Err(error) => {
-                eprintln!("jeden: context root {} cannot be resolved: {error}", path.display());
+                eprintln!(
+                    "jeden: context root {} cannot be resolved: {error}",
+                    path.display()
+                );
                 path
             }
         };
