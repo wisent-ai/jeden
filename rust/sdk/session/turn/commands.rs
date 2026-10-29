@@ -31,7 +31,7 @@ pub(super) fn run(
         "/checkpoint" if rest.trim() == "list" => conversation.list_checkpoints(),
         "/checkpoint" => conversation.checkpoint(rest),
         "/rewind" => conversation.rewind(rest),
-        "/new" | "/fresh" => {
+        "/new" => {
             conversation.reset(&args.cwd)?;
             Ok("Started a fresh conversation; prior turns cleared.".into())
         }

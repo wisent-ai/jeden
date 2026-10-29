@@ -260,7 +260,7 @@ pub(crate) fn handle_lifecycle(
     context: &SlashContext<'_>,
 ) -> Option<Result<String, String>> {
     match command {
-        "/new" | "/fresh" => Some(Ok("Started a fresh logical turn context. Provider stream state is reset for the next prompt in this Jeden process.".into())),
+        "/new" => Some(Ok("Started a fresh logical turn context. Provider stream state is reset for the next prompt in this Jeden process.".into())),
         "/drop" => Some(Err("Refusing to delete the active session from inside itself. Use /new for a fresh context or exit and remove the session directory explicitly.".into())),
         "/shake" => {
             state.shake = if args.trim().is_empty() { "elide".into() } else { args.trim().into() };

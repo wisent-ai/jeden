@@ -137,7 +137,7 @@ pub(super) fn run_turn(
             return Ok(outcome);
         }
         match command {
-            "/new" | "/fresh" => {
+            "/new" => {
                 handler_conv.lock().reset(&run_args.cwd)?;
                 Ok("Started a fresh conversation; prior turns cleared.".into())
             }

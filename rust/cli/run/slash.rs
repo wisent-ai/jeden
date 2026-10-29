@@ -38,7 +38,7 @@ fn format_slash_help(cwd: &Path) -> String {
     out
 }
 
-/// True for every slash command Jeden handles itself (canonical list + aliases).
+/// True for every slash command Jeden handles itself: one catalogue name each.
 /// Unknown slash input forwards to the model as a prompt instead of hard-erroring.
 pub(crate) fn is_builtin_slash(command: &str) -> bool {
     crate::capability::is_builtin_slash(command)

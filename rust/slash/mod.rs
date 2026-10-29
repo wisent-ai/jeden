@@ -98,7 +98,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/btw" => Some(Err("/btw must be executed through the agent runner so it can run the side question.".into())),
         "/memory" => Some(commands::memory::handle_memory(args, context)),
         "/branch" | "/fork" | "/tree" => Some(modes::handle_branching(command.as_str(), args, &state)),
-        "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
+        "/new" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             changed = command == "/shake";
             modes::session::handle_lifecycle(command.as_str(), args, &mut state, context)
         },
@@ -252,7 +252,7 @@ pub(crate) fn interactive_picker(
         "/session" => Ok(modes::session::session_picker(context)),
         "/roles" => Ok(modes::session::roles_picker(&state, context)),
         "/tree" | "/branch" | "/fork" => Ok(modes::session::tree_picker(&state, &lang)),
-        "/new" | "/fresh" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
+        "/new" | "/drop" | "/shake" | "/resume" | "/rename" | "/move" => {
             Ok(modes::session::lifecycle_picker(&state, context))
         }
         "/mcp" => Ok(commands::mcp::mcp_picker(context)),

@@ -48,7 +48,6 @@
   { "name": "tree", "description": "Navigate tree", "view": true },
   { "name": "ssh", "description": "Manage SSH hosts", "view": true },
   { "name": "new", "description": "Start new session", "view": true },
-  { "name": "fresh", "description": "Reset provider stream state", "view": true },
   { "name": "drop", "description": "Drop current session", "view": true },
   { "name": "compact", "description": "Compact session", "view": false },
   { "name": "shake", "description": "Shake session context", "view": true },
