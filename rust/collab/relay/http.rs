@@ -8,7 +8,6 @@ use super::{relay_response_authorized, RelayStore};
 use crate::collab::relay::auth::token_role;
 use reqwest::StatusCode;
 use serde_json::json;
-use std::io::Read;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use tiny_http::{Header, Request, Response, Server};

@@ -10,7 +10,7 @@ use crate::cli::config::load_config;
 use crate::cli::run::slash::is_builtin_slash;
 use crate::cli::run::slash_ui::model_picker;
 use crate::cli::sessions::session_conversation_turns;
-use crate::{agent, hooks, tui, Args};
+use crate::{agent, tui, Args};
 
 mod commands;
 pub(crate) mod status;
@@ -175,7 +175,7 @@ pub(crate) fn interactive(args: &Args) -> Result<String, String> {
     };
 
     let classify = |input: &str| {
-        let command = input.trim().split_whitespace().next();
+        let command = input.split_whitespace().next();
         if matches!(command, Some("/compact" | "/handoff")) {
             return tui::TurnKind::Background;
         }

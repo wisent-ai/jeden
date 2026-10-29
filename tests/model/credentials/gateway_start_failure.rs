@@ -157,14 +157,14 @@ fn exercise(root: &Path, area: &Path, report: &mut Value) -> Result<(), String> 
         .ok_or("the isolated grants path has no parent")?;
     std::fs::DirBuilder::new()
         .recursive(true)
-        .mode(u32::from(libc::S_IRWXU))
+        .mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_ALL)
         .create(directory)
         .map_err(|error| error.to_string())?;
     use std::io::Write;
     let mut file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
-        .mode(u32::from(libc::S_IRUSR | libc::S_IWUSR))
+        .mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_READ_WRITE)
         .open(&grants)
         .map_err(|error| error.to_string())?;
     file.write_all(b"[]")

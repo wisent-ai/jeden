@@ -164,19 +164,6 @@ impl DeclarativeKind {
         Self::EVERY.iter().copied().find(|kind| kind.name() == name)
     }
 
-    /// The capability each definition of this kind is listed as, for the
-    /// kinds the declarative runtime loads; none for those the registry
-    /// carries itself.
-    pub(crate) fn capability(self) -> Option<crate::capability::CapabilityKind> {
-        use crate::capability::CapabilityKind;
-        match self {
-            DeclarativeKind::Skills => Some(CapabilityKind::Skill),
-            DeclarativeKind::Agents => Some(CapabilityKind::Agent),
-            DeclarativeKind::Rules => Some(CapabilityKind::Rule),
-            DeclarativeKind::Commands | DeclarativeKind::Hooks => None,
-        }
-    }
-
     /// Whether the registry itself carries this kind's capability — the
     /// commands it expands and the hooks it runs — rather than handing it to
     /// the declarative runtime.

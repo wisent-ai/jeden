@@ -7,10 +7,10 @@
 //! whoever scripted it yesterday. Two families, namespaced because a CLI
 //! subcommand and a slash command of the same word are different promises:
 //!
-//!   cli:<name>      a command the binary dispatches, read from the
-//!                   dispatcher in rust/main.rs (its match arms, the
-//!                   `command == "..."` checks ahead of it, and the
-//!                   `matches!(command.as_str(), ...)` pre-dispatch);
+//!   cli:<name>      a command the binary answers to: a variant of the
+//!                   `Command` enum in rust/cli/invocation/command.rs, which
+//!                   the parser and the dispatcher both read, spelled as its
+//!                   `#[serde(rename_all = "kebab-case")]` spells it;
 //!   slash:/<name>   a builtin slash command or alias, read from the catalogue
 //!                   the binary compiles in.
 //!
@@ -21,17 +21,18 @@
 //! has moved, is refused; it never degrades to a smaller surface, which would
 //! read as a clean removal and mislabel the release.
 
-mod arms;
 mod source;
 
-use arms::match_arm_patterns;
 use serde_json::{json, Value};
 use source::Source;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-const DISPATCH_FILE: &str = "rust/main.rs";
+/// The one declaration of every top-level command.
+const COMMAND_FILE: &str = "rust/cli/invocation/command.rs";
+/// The serde spelling the reader applies to the enum's variants.
+const COMMAND_SPELLING: &str = "kebab-case";
 /// The builtin slash commands are a declaration the binary compiles in with
 /// `include_str!` (rust/capability/builtin/mod.rs), not Rust source.
 const REGISTRY_FILE: &str = "rust/capability/builtin/builtin-slash-commands.json";
@@ -62,38 +63,51 @@ pub(crate) fn surface(root: &Path) -> Result<Vec<String>, String> {
     Ok(names.into_iter().collect())
 }
 
-/// Every command name the binary dispatches, from rust/main.rs.
+/// Every command name the binary answers to: each variant of the `Command`
+/// enum, spelled as serde's `kebab-case` spells it on the command line.
 fn cli_commands(root: &Path) -> Result<BTreeSet<String>, String> {
-    let source = Source::read(&root.join(DISPATCH_FILE), DISPATCH_FILE)?;
-    let anchor = source.sole_anchor(
-        r"match\s+args\.command\.as_str\(\)\s*\{",
-        "command dispatcher",
+    let source = Source::read(&root.join(COMMAND_FILE), COMMAND_FILE)?;
+    let declaration = source.sole_anchor(r"\benum\s+Command\s*\{", "Command enum")?;
+    let rename = source.sole_anchor(
+        r#"#\s*\[\s*serde\s*\(\s*rename_all\s*=\s*""#,
+        "serde rename_all",
     )?;
-    let block = anchor.end() - 1;
-    let end = source.balanced_end(block, b'{', b'}')?;
-    let mut names = match_arm_patterns(&source, block + 1, end)?;
-    for equality in source.anchors(r#"\bcommand\s*==\s*""#)? {
-        names.push(source.literal_at(equality.end() - 1)?);
-    }
-    for guard in source.anchors(r"matches!\s*\(\s*(?:args\.)?command\.as_str\(\)\s*,\s*")? {
-        let opener = guard.start()
-            + guard
-                .as_str()
-                .find('(')
-                .ok_or("a matches! guard has no parenthesis")?;
-        let close = source.balanced_end(opener, b'(', b')')?;
-        names.extend(source.literals_within(guard.end(), close));
-    }
-    let kept = names
-        .into_iter()
-        .filter(|name| !name.is_empty() && !name.starts_with('-'))
-        .collect::<BTreeSet<_>>();
-    if kept.is_empty() {
+    if rename.start() > declaration.start() {
         return Err(format!(
-            "{DISPATCH_FILE}: dispatcher yielded no command names"
+            "{COMMAND_FILE}: the serde rename_all attribute follows the Command enum instead of declaring its spelling"
         ));
     }
-    Ok(kept)
+    let spelling = source.literal_at(rename.end() - 1)?;
+    if spelling != COMMAND_SPELLING {
+        return Err(format!(
+            "{COMMAND_FILE}: the Command enum is spelled {spelling:?}; the surface reader spells {COMMAND_SPELLING:?} only"
+        ));
+    }
+    let block = declaration.end() - 1;
+    let end = source.balanced_end(block, b'{', b'}')?;
+    let mut names = BTreeSet::new();
+    for variant in source.variants(block + 1, end - 1)? {
+        names.insert(kebab_case(&variant));
+    }
+    if names.is_empty() {
+        return Err(format!(
+            "{COMMAND_FILE}: the Command enum declares no variant"
+        ));
+    }
+    Ok(names)
+}
+
+/// `variant` as serde's `kebab-case` spells it: a hyphen before every
+/// uppercase letter but the first, and every letter lowercase.
+fn kebab_case(variant: &str) -> String {
+    let mut spelled = String::with_capacity(variant.len() + variant.len() / 2);
+    for (index, letter) in variant.char_indices() {
+        if index > 0 && letter.is_uppercase() {
+            spelled.push('-');
+        }
+        spelled.extend(letter.to_lowercase());
+    }
+    spelled
 }
 
 /// Every builtin slash command and alias, from the catalogue the binary

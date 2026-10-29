@@ -114,7 +114,7 @@ fn text(path: &str, bytes: &[u8]) -> Result<String, String> {
     String::from_utf8(bytes.to_vec()).map_err(|cause| format!("{path} is not UTF-8 text: {cause}"))
 }
 
-fn required<'a>(input: &'a Value, tool: &str, key: &str) -> Result<String, String> {
+fn required(input: &Value, tool: &str, key: &str) -> Result<String, String> {
     string_input(input, key).ok_or_else(|| format!("{tool} requires {key}"))
 }
 

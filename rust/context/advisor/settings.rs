@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
-use super::{sources::files, DEFAULT_FILE_EXTENSIONS, DEFAULT_SOURCES, SOURCES};
+use super::{DEFAULT_FILE_EXTENSIONS, DEFAULT_SOURCES, SOURCES};
 use crate::cli::config::{AdvisorConfig, Config};
 
 #[derive(Debug, Clone, Serialize)]

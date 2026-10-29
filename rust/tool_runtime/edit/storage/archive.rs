@@ -137,10 +137,9 @@ fn rewrite_tar(
     if let Some(bytes) = content {
         let mut header = tar::Header::new_gnu();
         header.set_size(bytes.len() as u64);
-        // A written entry is a regular file its owner may change and anyone may read.
-        header.set_mode(u32::from(
-            libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH,
-        ));
+        // A written entry is a regular file its owner may change and anyone
+        // may read: rw-r--r--, as the tar format states a mode.
+        header.set_mode(0o644);
         header.set_cksum();
         builder
             .append_data(&mut header, entry_name, Cursor::new(bytes))

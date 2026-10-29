@@ -130,7 +130,7 @@ fn walk_dir(
             Err(_outside) => path.as_path(),
         };
         // Only a file has a size; any other entry answers none.
-        let size = metadata.is_file().then(|| metadata.len());
+        let size = metadata.is_file().then_some(metadata.len());
         entries.push(json!({"name": entry.file_name().to_string_lossy(), "path": shown.to_string_lossy().replace('\\', "/"), "type": kind, "size": size}));
         if metadata.is_dir() {
             if let Some(deeper) = depth.checked_sub(usize::from(STEP)) {

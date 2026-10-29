@@ -11,7 +11,6 @@ use super::super::declarative;
 use super::super::{CommandDescriptor, HostExtension, Registry, SourceSet};
 use super::host::run_host;
 use crate::hooks::extensions::ABI_VERSION;
-use serde_json::json;
 use std::collections::BTreeSet;
 
 pub(super) fn materialize_commands(

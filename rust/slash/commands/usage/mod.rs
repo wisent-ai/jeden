@@ -27,7 +27,7 @@ pub(crate) fn usage_picker(context: &SlashContext<'_>) -> PickerSpec {
         Ok(ledger) => ledger,
         Err(cause) => {
             return refusal_picker(
-                &crate::cli::i18n::tr(&lang, "view.usage.title"),
+                crate::cli::i18n::tr(&lang, "view.usage.title"),
                 "Usage accounting cannot be read",
                 cause,
             )

@@ -203,7 +203,7 @@ pub(super) fn list_sessions(session_root: &Path) -> Result<String, String> {
     for entry in entries {
         rows.push(
             entry
-                .map_err(&refused)?
+                .map_err(refused)?
                 .file_name()
                 .to_string_lossy()
                 .to_string(),

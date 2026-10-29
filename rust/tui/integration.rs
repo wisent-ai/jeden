@@ -4,6 +4,9 @@ use crate::capability::{self, CapabilityKind, HealthState};
 
 use super::attachments::ClipboardContent;
 
+// Only the macOS build reads the clipboard, so elsewhere nothing asks for the
+// two clipboard features.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiFeature {
     ClipboardRead,

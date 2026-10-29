@@ -129,9 +129,7 @@ impl TaskScheduler {
                 staging.display()
             ))
         })?;
-        let mut places = std::iter::repeat(())
-            .take(self.limits.max_parallel)
-            .enumerate();
+        let mut places = std::iter::repeat_n((), self.limits.max_parallel).enumerate();
         let reserved = places.find_map(|(place, ())| {
             let path = self.store.join("slots").join(place.to_string());
             match fs::hard_link(&staging, &path) {

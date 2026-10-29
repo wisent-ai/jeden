@@ -129,8 +129,8 @@ impl TaskScheduler {
                 directory.display()
             ))
         };
-        for entry in fs::read_dir(&directory).map_err(&unlistable)? {
-            let path = entry.map_err(&unlistable)?.path();
+        for entry in fs::read_dir(&directory).map_err(unlistable)? {
+            let path = entry.map_err(unlistable)?.path();
             if path.extension().and_then(|v| v.to_str()) == Some("json") {
                 let bytes = fs::read(&path).map_err(|error| {
                     TaskError::Io(format!(

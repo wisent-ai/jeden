@@ -25,7 +25,7 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
             "session/create" => {
                 // Read before the session exists, so a clock that cannot be
                 // read creates nothing.
-                let now = now_unix()?;
+                let now = now_unix().map_err(|cause| protocol_error("internal", &cause))?;
                 let session_id = self
                     .service
                     .create_session(&connection.identity)
@@ -43,7 +43,11 @@ impl<B: SessionBackend> HeadlessDaemon<B> {
                 let token = string_field(&request.params, "reconnectToken")?;
                 let session_id = self
                     .reconnect
-                    .verify(connection, token, now_unix()?)
+                    .verify(
+                        connection,
+                        token,
+                        now_unix().map_err(|cause| protocol_error("internal", &cause))?,
+                    )
                     .map_err(|_| {
                         protocol_error("access_denied", "invalid or expired reconnect token")
                     })?;
@@ -292,9 +296,9 @@ fn service_error(error: ServiceError) -> ErrorV1 {
     }
 }
 
-/// Seconds since the epoch for reconnect tokens, or the refusal of a clock
-/// that has none: read as zero, every token issued would be expired and every
-/// expired token would verify.
-fn now_unix() -> Result<u64, ErrorV1> {
-    crate::clock::unix_seconds().map_err(|error| protocol_error("internal", &error.to_string()))
+/// Seconds since the epoch for reconnect tokens, or why the clock has none:
+/// read as zero, every token issued would be expired and every expired token
+/// would verify. The caller answers the cause as an internal protocol error.
+fn now_unix() -> Result<u64, String> {
+    crate::clock::unix_seconds().map_err(|error| error.to_string())
 }

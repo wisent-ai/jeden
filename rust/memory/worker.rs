@@ -236,12 +236,10 @@ impl MemoryStore {
         if !self.heartbeat(&job.id, worker, lease_ms)? {
             return Err("memory job lease was lost before processing".into());
         }
-        let outcome = (|| -> Result<(), String> {
-            match job.kind.as_str() {
-                kind if kind == super::REINDEX_JOB => self.rebuild_fts().map(|_| ()),
-                other => Err(format!("unsupported memory job kind: {other}")),
-            }
-        })();
+        let outcome = match job.kind.as_str() {
+            kind if kind == super::REINDEX_JOB => self.rebuild_fts().map(|_| ()),
+            other => Err(format!("unsupported memory job kind: {other}")),
+        };
         match outcome {
             Ok(()) => {
                 if !self.complete(&job.id, worker)? {

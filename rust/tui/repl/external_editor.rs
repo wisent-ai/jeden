@@ -158,7 +158,7 @@ impl TemporaryEditorFile {
         #[cfg(unix)]
         {
             use std::os::unix::fs::OpenOptionsExt;
-            options.mode(u32::from(libc::S_IRUSR | libc::S_IWUSR));
+            options.mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_READ_WRITE);
         }
         let file = options
             .open(&path)
@@ -208,7 +208,7 @@ impl Drop for TemporaryEditorFile {
 #[cfg(unix)]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
+    let executable = crate::tool_runtime::runtime_ops::platform::mode::ANY_EXECUTE;
     match path.metadata() {
         Ok(metadata) => metadata.is_file() && metadata.permissions().mode() & executable != 0,
         Err(_unreadable) => false,

@@ -38,7 +38,23 @@ impl McpClient {
                     let response = match transport.responses.recv() {
                         Ok(Ok(response)) => response,
                         Ok(Err(error)) => return Err(error),
-                        Err(mpsc::RecvError) => return Err("MCP stdio transport closed".into()),
+                        Err(mpsc::RecvError) => {
+                            // What the server wrote to stderr is why it went
+                            // away, when it has finished writing it.
+                            let stderr = match transport.stderr.try_recv() {
+                                Ok(text) if text.trim().is_empty() => {
+                                    "the server wrote nothing to stderr".to_string()
+                                }
+                                Ok(text) => format!("the server's stderr: {}", text.trim()),
+                                Err(mpsc::TryRecvError::Empty) => {
+                                    "the server's stderr is still open".to_string()
+                                }
+                                Err(mpsc::TryRecvError::Disconnected) => {
+                                    "the server's stderr was already read".to_string()
+                                }
+                            };
+                            return Err(format!("MCP stdio transport closed; {stderr}"));
+                        }
                     };
                     let complete = response.get("id").and_then(Value::as_u64) == Some(expected_id);
                     messages.push(response);

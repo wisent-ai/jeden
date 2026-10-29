@@ -245,11 +245,12 @@ fn complete_streamed(
                                 error.visible_output,
                             ));
                         }
-                        // A transient failure moves to the next route at
-                        // once; the last one's error is what the turn
+                        // A transient failure is tried again on this route
+                        // while the declared attempts last, then the next
+                        // route is tried; the last error is what the turn
                         // reports when none is left.
                         last_error = Some(error);
-                        break;
+                        continue;
                     }
                 }
             }

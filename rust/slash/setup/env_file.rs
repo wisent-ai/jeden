@@ -132,7 +132,9 @@ fn write_env_keys(updates: &[(String, String)]) -> Result<PathBuf, String> {
         use std::os::unix::fs::PermissionsExt;
         fs::set_permissions(
             &path,
-            fs::Permissions::from_mode((libc::S_IRUSR | libc::S_IWUSR) as u32),
+            fs::Permissions::from_mode(
+                crate::tool_runtime::runtime_ops::platform::mode::OWNER_READ_WRITE,
+            ),
         )
         .map_err(|error| format!("cannot make {} private: {error}", path.display()))?;
     }

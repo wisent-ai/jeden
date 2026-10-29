@@ -110,7 +110,7 @@ impl Store {
         #[cfg(unix)]
         {
             use std::os::unix::fs::DirBuilderExt;
-            builder.mode(u32::from(libc::S_IRWXU));
+            builder.mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_ALL);
         }
         builder
             .create(&directory)

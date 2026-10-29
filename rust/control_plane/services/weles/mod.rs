@@ -1,7 +1,6 @@
 use super::transport::{ControlPlaneTransport, ReqwestTransport, SecretRef};
 use super::ServiceHealth;
 use std::sync::Arc;
-use std::time::Duration;
 
 pub(super) const API_VERSION: &str = "v1";
 const PLATFORM_BILLING_URL_ENV: &str = "WISENT_PLATFORM_BILLING_URL";

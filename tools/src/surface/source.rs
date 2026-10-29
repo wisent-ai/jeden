@@ -198,12 +198,56 @@ impl Source {
             .ok_or_else(|| self.error(&format!("expected a string literal at offset {offset}")))
     }
 
-    pub(crate) fn literals_within(&self, start: usize, stop: usize) -> Vec<String> {
-        self.literals
-            .iter()
-            .filter(|(begin, _, _)| (start..stop).contains(begin))
-            .map(|(_, _, value)| value.clone())
-            .collect()
+    /// The unit variants of the enum body `start..stop`, in order. An
+    /// attribute on a variant is skipped, except a serde one, which could
+    /// respell the variant and is refused; a variant carrying fields or a
+    /// discriminant is refused, since only a unit variant is a command word.
+    pub(crate) fn variants(&self, start: usize, stop: usize) -> Result<Vec<String>, String> {
+        let mask = self.mask.as_bytes();
+        let mut variants = Vec::new();
+        let mut index = start;
+        while index < stop {
+            let byte = mask[index];
+            if byte.is_ascii_whitespace() || byte == b',' {
+                index += 1;
+            } else if byte == b'#' {
+                let mut open = index + 1;
+                while open < stop && mask[open].is_ascii_whitespace() {
+                    open += 1;
+                }
+                let close = self.balanced_end(open, b'[', b']')?;
+                let attribute = self.mask[open + 1..close - 1].trim_start();
+                if attribute.starts_with("serde") {
+                    return Err(self.error(&format!(
+                        "a Command variant carries its own attribute #[{attribute}]; variants are spelled by the enum's rename_all alone"
+                    )));
+                }
+                index = close;
+            } else if ident(byte) {
+                let mut end = index;
+                while end < stop && ident(mask[end]) {
+                    end += 1;
+                }
+                let name = &self.mask[index..end];
+                let mut next = end;
+                while next < stop && mask[next].is_ascii_whitespace() {
+                    next += 1;
+                }
+                if next < stop && mask[next] != b',' {
+                    return Err(self.error(&format!(
+                        "the Command variant {name} carries fields or a discriminant; a command word is a unit variant"
+                    )));
+                }
+                variants.push(name.to_string());
+                index = next;
+            } else {
+                return Err(self.error(&format!(
+                    "unexpected {:?} at offset {index} inside the Command enum",
+                    byte as char
+                )));
+            }
+        }
+        Ok(variants)
     }
 
     pub(crate) fn anchors(&self, pattern: &str) -> Result<Vec<Match<'_>>, String> {

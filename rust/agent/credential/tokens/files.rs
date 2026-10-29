@@ -53,17 +53,7 @@ pub(super) fn store_path() -> PathBuf {
 /// group's or others' permission bits is set in it.
 #[cfg(unix)]
 fn shared(mode: u32) -> bool {
-    [
-        libc::S_IRGRP,
-        libc::S_IWGRP,
-        libc::S_IXGRP,
-        libc::S_IROTH,
-        libc::S_IWOTH,
-        libc::S_IXOTH,
-    ]
-    .into_iter()
-    .map(u32::from)
-    .any(|bit| mode & bit == bit)
+    mode & crate::tool_runtime::runtime_ops::platform::mode::GROUP_AND_OTHER != 0
 }
 
 #[cfg(unix)]
@@ -79,8 +69,11 @@ pub(super) fn check_directory(dir: &Path, protect: bool) -> Result<(), String> {
         ));
     }
     if protect {
-        fs::set_permissions(dir, fs::Permissions::from_mode(u32::from(libc::S_IRWXU)))
-            .map_err(|error| format!("protect token directory {}: {error}", dir.display()))?;
+        fs::set_permissions(
+            dir,
+            fs::Permissions::from_mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_ALL),
+        )
+        .map_err(|error| format!("protect token directory {}: {error}", dir.display()))?;
     } else if shared(meta.permissions().mode()) {
         return Err(format!("token directory {} is not private", dir.display()));
     }
@@ -96,7 +89,7 @@ pub(super) fn check_file(path: &Path, create: bool) -> Result<(), String> {
             match OpenOptions::new()
                 .write(true)
                 .create_new(true)
-                .mode(u32::from(libc::S_IRUSR | libc::S_IWUSR))
+                .mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_READ_WRITE)
                 .open(path)
             {
                 Ok(_) => {}

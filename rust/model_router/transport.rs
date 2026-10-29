@@ -40,14 +40,6 @@ impl ChatConfig {
         })
     }
 
-    pub(crate) fn endpoint_failure(
-        &self,
-        operation: &str,
-        cause: impl std::fmt::Display,
-    ) -> String {
-        self.endpoint_failure_on(&self.url, &self.bearer_token, operation, cause)
-    }
-
     fn endpoint_failure_on(
         &self,
         endpoint: &str,

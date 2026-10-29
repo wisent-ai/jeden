@@ -105,10 +105,6 @@ pub(crate) fn project_config_for_edit(cwd: &Path) -> Result<Value, String> {
     }
 }
 
-pub(crate) fn is_plain_object(value: &Value) -> bool {
-    matches!(value, Value::Object(_))
-}
-
 /// The `file://` URL of `path`. Every caller passes a path joined onto the absolute
 /// working directory, and an absolute path always forms a file URL; a relative one is
 /// a caller's defect, stopped naming it rather than written as a URL that is not one.

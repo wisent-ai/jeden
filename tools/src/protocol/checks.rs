@@ -23,7 +23,12 @@ fn names(value: &Value) -> Vec<String> {
 }
 
 /// The text `key` of the contract part `part`, or an error naming both.
-fn named<'a>(part: &'a Value, key: &str, where_: &str, errors: &mut Vec<String>) -> Option<&'a str> {
+fn named<'a>(
+    part: &'a Value,
+    key: &str,
+    where_: &str,
+    errors: &mut Vec<String>,
+) -> Option<&'a str> {
     let text = part[key].as_str();
     if text.is_none() {
         errors.push(format!("contract: {where_} names no {key}"));

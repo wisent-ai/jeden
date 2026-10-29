@@ -194,7 +194,7 @@ fn load_or_create_reconnect_key(path: &Path) -> Result<Vec<u8>, String> {
         options
             .write(true)
             .create_new(true)
-            .mode(u32::from(libc::S_IRUSR | libc::S_IWUSR));
+            .mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_READ_WRITE);
         let mut file = options
             .open(path)
             .map_err(|error| format!("failed to create reconnect key: {error}"))?;

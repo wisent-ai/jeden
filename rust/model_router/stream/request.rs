@@ -23,10 +23,12 @@ pub(crate) fn spawn_openai_stream_adapter(
         .name("model-stream-adapter".into())
         .spawn(move || {
             if let Err(error) = send_request(
-                &url,
-                &endpoint,
-                &bearer,
-                use_store,
+                Destination {
+                    url: &url,
+                    endpoint: &endpoint,
+                    bearer: &bearer,
+                    use_store,
+                },
                 &body_text,
                 &signed,
                 &lease_headers,
@@ -41,16 +43,29 @@ pub(crate) fn spawn_openai_stream_adapter(
     Ok(())
 }
 
-fn send_request(
-    url: &str,
-    endpoint: &str,
-    bearer: &str,
+/// Where one streamed call goes and how it is authorized: the completions
+/// URL, the endpoint it hangs off, the bearer, and whether the bearer is read
+/// from the token store instead.
+struct Destination<'a> {
+    url: &'a str,
+    endpoint: &'a str,
+    bearer: &'a str,
     use_store: bool,
+}
+
+fn send_request(
+    destination: Destination<'_>,
     body: &str,
     signed: &[(&'static str, String)],
     lease_headers: &[(&'static str, String)],
     sender: &Sender<WireMessage>,
 ) -> Result<(), String> {
+    let Destination {
+        url,
+        endpoint,
+        bearer,
+        use_store,
+    } = destination;
     let client = crate::net::blocking_builder()
         .build()
         .map_err(crate::control_plane::transport::describe_reqwest)?;

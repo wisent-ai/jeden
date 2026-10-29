@@ -1,5 +1,4 @@
 use serde_json::{json, Value};
-use std::collections::BTreeSet;
 use std::env;
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};

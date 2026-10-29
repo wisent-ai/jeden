@@ -95,13 +95,17 @@ fn selected_capture(query: &Query, input: &Value) -> Result<u32, String> {
         .ok_or_else(|| format!("query has no @{name} capture"))
 }
 
+/// Each captured node's start and end byte with the JSON that reports it
+/// (kind, position, text), and whether the list stopped at the caller's limit.
+type Ranges = (Vec<(usize, usize, Value)>, bool);
+
 fn ranges(
     source: &[u8],
     tree: &tree_sitter::Tree,
     query: &Query,
     capture: u32,
     limit: Option<usize>,
-) -> Result<(Vec<(usize, usize, Value)>, bool), String> {
+) -> Result<Ranges, String> {
     let mut cursor = QueryCursor::new();
     let mut stream = cursor.matches(query, tree.root_node(), source);
     let mut out = Vec::new();

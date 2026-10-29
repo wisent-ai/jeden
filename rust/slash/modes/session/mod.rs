@@ -2,7 +2,7 @@
 //! and what starting, resuming or ending one does.
 
 use crate::slash::common::split_head;
-use crate::slash::state::{read_mode_state, ModeState};
+use crate::slash::state::ModeState;
 use crate::slash::SlashContext;
 use crate::tui::{PickerItem, PickerSpec};
 

@@ -30,9 +30,7 @@ pub(super) fn make_executable(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("read the permissions of {}: {error}", path.display()))?
         .permissions();
     // Owner reads, writes and runs it; group and others read and run it.
-    permissions.set_mode(u32::from(
-        libc::S_IRWXU | libc::S_IRGRP | libc::S_IXGRP | libc::S_IROTH | libc::S_IXOTH,
-    ));
+    permissions.set_mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_WRITE_ANYONE_RUN);
     fs::set_permissions(path, permissions)
         .map_err(|error| format!("mark {} executable: {error}", path.display()))
 }

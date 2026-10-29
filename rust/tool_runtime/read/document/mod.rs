@@ -22,8 +22,8 @@ mod formats;
 mod tables;
 
 use formats::{
-    readable_text_from_feed, readable_text_from_html, readable_text_from_json,
-    readable_text_from_notebook, readable_text_from_pdf,
+    readable_text_from_feed, readable_text_from_json, readable_text_from_notebook,
+    readable_text_from_pdf,
 };
 use tables::readable_text_from_delimited;
 

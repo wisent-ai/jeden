@@ -123,3 +123,12 @@ stado-wait = { git = "https://github.com/wisent-ai/stado", package = "stado-wait
 match_bool = "deny"
 disallowed_methods = "deny"
 let_underscore_must_use = "deny"
+# Jeden's code says, in a `match`, what it reports when a value is absent and
+# why an error is passed over: the absence is a named answer at the place it
+# is read, and the workspace's write gates refuse `unwrap_or`,
+# `unwrap_or_default` and `.ok()` for that reason. Clippy's suggestions to
+# fold those matches back into the refused methods are turned off so the lint
+# gate and the write gates ask for the same code, as Stado's manifest does.
+manual_unwrap_or = "allow"
+manual_unwrap_or_default = "allow"
+manual_ok_err = "allow"

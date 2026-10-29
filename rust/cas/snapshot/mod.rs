@@ -226,8 +226,8 @@ pub(crate) fn load_tree(cas: &LocalCas, digest: Digest) -> Result<MerkleTree, Ca
 #[cfg(unix)]
 fn is_executable(metadata: &fs::Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
-    let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
-    metadata.permissions().mode() & executable != 0
+    metadata.permissions().mode() & crate::tool_runtime::runtime_ops::platform::mode::ANY_EXECUTE
+        != 0
 }
 #[cfg(not(unix))]
 fn is_executable(_: &fs::Metadata) -> bool {
@@ -238,14 +238,14 @@ fn is_executable(_: &fs::Metadata) -> bool {
 /// an executable one is also executable by everyone.
 #[cfg(unix)]
 fn set_executable(file: &std::fs::File, executable: bool, path: &Path) -> Result<(), CasError> {
+    use crate::tool_runtime::runtime_ops::platform::mode;
     use std::os::unix::fs::PermissionsExt;
-    let readable = libc::S_IRUSR | libc::S_IWUSR | libc::S_IRGRP | libc::S_IROTH;
     let mode = if executable {
-        readable | libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH
+        mode::OWNER_WRITE_ANYONE_RUN
     } else {
-        readable
+        mode::OWNER_WRITE_ANYONE_READ
     };
-    file.set_permissions(fs::Permissions::from_mode(u32::from(mode)))
+    file.set_permissions(fs::Permissions::from_mode(mode))
         .map_err(|error| CasError::io("set materialized permissions", path, error))
 }
 #[cfg(not(unix))]

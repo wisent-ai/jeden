@@ -160,11 +160,8 @@ impl AttachmentTray {
             return Err(AttachmentError::Empty);
         }
         let kind = sniff_kind(&bytes)?;
-        match &kind {
-            AttachmentKind::Binary { mime } => {
-                return Err(AttachmentError::UnsupportedBinary { mime: mime.clone() });
-            }
-            _ => {}
+        if let AttachmentKind::Binary { mime } = &kind {
+            return Err(AttachmentError::UnsupportedBinary { mime: mime.clone() });
         }
         let id = AttachmentId(self.next_id);
         self.next_id = self.next_id.wrapping_add(1);

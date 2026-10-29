@@ -43,7 +43,7 @@ pub(super) fn private_directory(dir: &std::path::Path) -> Result<(), String> {
     use std::os::unix::fs::DirBuilderExt;
     std::fs::DirBuilder::new()
         .recursive(true)
-        .mode(u32::from(libc::S_IRWXU))
+        .mode(crate::tool_runtime::runtime_ops::platform::mode::OWNER_ALL)
         .create(dir)
         .map_err(|error| {
             format!(

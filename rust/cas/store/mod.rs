@@ -7,7 +7,7 @@ use sha2::{Digest as ShaDigest, Sha256};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::AtomicU64;
 
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(crate::tally::FIRST);
 /// The byte offset of an upload not begun: no bytes before it.

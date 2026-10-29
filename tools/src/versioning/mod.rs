@@ -23,7 +23,9 @@ pub(crate) fn run(arguments: &[String]) -> Result<u8, String> {
     match (action.as_str(), rest) {
         ("decide", options) => decide(options),
         ("baseline", []) => baseline::regenerate(false).map(|()| SUCCEEDED),
-        ("baseline", [flag]) if flag == "--stdout" => baseline::regenerate(true).map(|()| SUCCEEDED),
+        ("baseline", [flag]) if flag == "--stdout" => {
+            baseline::regenerate(true).map(|()| SUCCEEDED)
+        }
         ("baseline", [flag]) if flag == "--marker" => {
             println!("{}", baseline::marker()?);
             Ok(SUCCEEDED)
