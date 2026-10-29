@@ -237,14 +237,13 @@ fn write_immutable(path: &Path, bytes: &[u8]) -> Result<(), String> {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    if path.exists() {
-        let existing = fs::read(path)
-            .map_err(|error| format!("cannot read existing {}: {error}", path.display()))?;
-        return if existing == bytes {
-            Ok(())
-        } else {
-            Err(format!("immutable report mismatch at {}", path.display()))
-        };
+    // Only a report that is not there is written; one that cannot be read is
+    // refused, never taken as absent and replaced.
+    match fs::read(path) {
+        Ok(existing) if existing == bytes => return Ok(()),
+        Ok(_) => return Err(format!("immutable report mismatch at {}", path.display())),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("cannot read existing {}: {error}", path.display())),
     }
     let temporary = path.with_extension("tmp");
     let mut file = OpenOptions::new()

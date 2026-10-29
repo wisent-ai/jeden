@@ -22,7 +22,7 @@ impl WorkspacePlatform for NativePlatform {
         workspace: &Path,
         max: u64,
     ) -> Result<Vec<u8>, PlatformError> {
-        if !workspace.join(".git").exists() {
+        if !workspace.join(".git").try_exists()? {
             return Err(PlatformError::unsupported(
                 "non-git workspace snapshot",
                 UnsupportedReason::FilesystemCapability,

@@ -1,0 +1,9 @@
+# `Path::exists` answers false for a path it cannot examine (a permission or
+# I/O fault), so a caller reads that path as absent: a record is started
+# empty, a backup is skipped, a file is written over. The shared Rust gates run
+# clippy with warnings denied, so a new call is refused where it is written.
+# platform::presence::present and Path::try_exists tell "not there" from
+# "cannot be examined".
+disallowed-methods = [
+  { path = "std::path::Path::exists", reason = "answers false for a path it cannot examine; use platform::presence::present or Path::try_exists" },
+]

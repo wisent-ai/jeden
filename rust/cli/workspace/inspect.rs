@@ -29,11 +29,19 @@ fn resolve_input(path: &Path, base: &Path) -> PathBuf {
     }
 }
 
-fn repository_root(workspace: &Path) -> Option<PathBuf> {
-    workspace
-        .ancestors()
-        .find(|candidate| candidate.join(".git").exists())
-        .map(Path::to_path_buf)
+/// The nearest ancestor holding `.git`. A `.git` that cannot be examined is
+/// refused naming it, never read as absent and the workspace reported as a
+/// plain directory.
+fn repository_root(workspace: &Path) -> Result<Option<PathBuf>, String> {
+    for candidate in workspace.ancestors() {
+        let marker = candidate.join(".git");
+        match marker.try_exists() {
+            Ok(true) => return Ok(Some(candidate.to_path_buf())),
+            Ok(false) => {}
+            Err(error) => return Err(format!("{} cannot be examined: {error}", marker.display())),
+        }
+    }
+    Ok(None)
 }
 
 fn validate_project_config(workspace: &Path) -> Result<String, String> {
@@ -119,7 +127,10 @@ fn session_counts(workspace: &Path) -> Result<WorkspaceSessions, String> {
         let cwd = match Path::new(cwd).canonicalize() {
             Ok(cwd) => cwd,
             Err(error) => {
-                rejections.push(format!("{} records cwd {cwd}, which cannot be resolved: {error}", state_path.display()));
+                rejections.push(format!(
+                    "{} records cwd {cwd}, which cannot be resolved: {error}",
+                    state_path.display()
+                ));
                 continue;
             }
         };
@@ -160,7 +171,7 @@ pub(crate) fn inspect(path: &Path, base: &Path, status: &str) -> Result<Workspac
         )
     })?;
     let configuration = validate_project_config(&workspace)?;
-    let repository_root = repository_root(&workspace);
+    let repository_root = repository_root(&workspace)?;
     // What the check above establishes is that an ancestor holds `.git`. It
     // does not establish how that checkout came to exist, so the report names
     // the fact and leaves the mechanism unclaimed.

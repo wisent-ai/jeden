@@ -40,14 +40,17 @@ impl WorkspacePlatform for UnixPlatform {
             None => return Ok("reflink-copy"),
             Some(cause) => refused.push(format!("cp --reflink=auto refused: {cause}")),
         }
-        copy_tree(parent, target).map_err(|error| match refused.is_empty() {
-            true => error,
-            false => PlatformError::Process(format!(
-                "copying {} into {} failed: {error}; the clone before it: {}",
-                parent.display(),
-                target.display(),
-                refused.join("; ")
-            )),
+        copy_tree(parent, target).map_err(|error| {
+            if refused.is_empty() {
+                error
+            } else {
+                PlatformError::Process(format!(
+                    "copying {} into {} failed: {error}; the clone before it: {}",
+                    parent.display(),
+                    target.display(),
+                    refused.join("; ")
+                ))
+            }
         })?;
         Ok("native-copy")
     }
@@ -57,7 +60,9 @@ impl WorkspacePlatform for UnixPlatform {
         workspace: &Path,
         max: u64,
     ) -> Result<Vec<u8>, PlatformError> {
-        if workspace.join(".git").exists() {
+        // A `.git` that cannot be examined is refused, never snapshotted as a
+        // plain directory.
+        if workspace.join(".git").try_exists()? {
             checked(
                 Command::new("git")
                     .args(["add", "-N", "--all"])
@@ -129,8 +134,11 @@ fn cloned(command: &mut Command, target: &Path) -> Result<Option<String>, Platfo
         output.status,
         String::from_utf8_lossy(&output.stderr).trim()
     );
-    if target.exists() {
-        fs::remove_dir_all(target)?;
+    // Only a partial tree that is not there needs no removal.
+    match fs::remove_dir_all(target) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
     }
     Ok(Some(cause))
 }

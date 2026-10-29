@@ -72,7 +72,11 @@ fn expand_local_path(cwd: &Path, source: &str) -> PathBuf {
 pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     let copy_file = |from: &Path, to: &Path| {
         fs::copy(from, to).map(drop).map_err(|error| {
-            format!("{} cannot be copied to {}: {error}", from.display(), to.display())
+            format!(
+                "{} cannot be copied to {}: {error}",
+                from.display(),
+                to.display()
+            )
         })
     };
     fs::create_dir_all(dst)
@@ -80,8 +84,8 @@ pub(crate) fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     let entries = fs::read_dir(src)
         .map_err(|error| format!("{} cannot be listed: {error}", src.display()))?;
     for entry in entries {
-        let entry =
-            entry.map_err(|error| format!("an entry of {} cannot be read: {error}", src.display()))?;
+        let entry = entry
+            .map_err(|error| format!("an entry of {} cannot be read: {error}", src.display()))?;
         let name = entry.file_name();
         if name == ".git" {
             continue;
@@ -183,10 +187,16 @@ fn http_get_text(url: &str) -> Result<String, String> {
 
 /// Clear a marketplace's cache directory before it is fetched again.
 fn clear_cache(dest: &Path) -> Result<(), String> {
-    if dest.exists() {
-        fs::remove_dir_all(dest).map_err(|error| {
-            format!("the marketplace cache {} cannot be cleared: {error}", dest.display())
-        })?;
+    match fs::remove_dir_all(dest) {
+        Ok(()) => {}
+        // Only a cache that is not there needs no clearing.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "the marketplace cache {} cannot be cleared: {error}",
+                dest.display()
+            ))
+        }
     }
     Ok(())
 }

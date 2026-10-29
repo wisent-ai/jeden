@@ -46,10 +46,12 @@ impl GitWatch {
 }
 
 /// One `git status --porcelain --branch` of `cwd`. A directory with no `.git`
-/// above it starts no process; a git that cannot run or refuses inside a work
-/// tree puts its cause where the branch would be.
+/// above it starts no process; a `.git` that cannot be examined is not read
+/// as absent, so git runs and says why. A git that cannot run or refuses
+/// inside a work tree puts its cause where the branch would be.
 pub(crate) fn git_prompt(cwd: &Path) -> GitPrompt {
-    if !cwd.ancestors().any(|dir| dir.join(".git").exists()) {
+    let absent = |dir: &Path| matches!(dir.join(".git").try_exists(), Ok(false));
+    if cwd.ancestors().all(absent) {
         return GitPrompt::default();
     }
     let mut command = Command::new("git");

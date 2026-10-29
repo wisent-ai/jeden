@@ -31,7 +31,10 @@ pub(super) enum Palette {
 }
 
 const PRESET_JSON: &[(&str, &str)] = &[
-    ("graphite-dark", include_str!("../themes/graphite-dark.json")),
+    (
+        "graphite-dark",
+        include_str!("../themes/graphite-dark.json"),
+    ),
     ("paper-light", include_str!("../themes/paper-light.json")),
     ("titanium", include_str!("../themes/titanium.json")),
     ("nord", include_str!("../themes/nord.json")),
@@ -103,10 +106,12 @@ fn role_color(
         return Ok(None);
     };
     match vars.get(var) {
-        Some(value) => match color_of(value).map_err(|error| format!("{name} (var {var}): {error}"))? {
-            Some(color) => Ok(Some(color)),
-            None => Err(format!("{name}: var {var} holds no color: {value}")),
-        },
+        Some(value) => {
+            match color_of(value).map_err(|error| format!("{name} (var {var}): {error}"))? {
+                Some(color) => Ok(Some(color)),
+                None => Err(format!("{name}: var {var} holds no color: {value}")),
+            }
+        }
         None if stated.is_some() => Err(format!("{name}: {var} is neither a color nor a var")),
         None => Ok(None),
     }
@@ -128,6 +133,7 @@ pub(super) fn parse_theme_json(text: &str) -> Result<Palette, String> {
 }
 
 pub(super) fn read_theme_json(path: &Path) -> Result<Palette, String> {
-    let text = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    let text = std::fs::read_to_string(path)
+        .map_err(|error| format!("theme file {} cannot be read: {error}", path.display()))?;
     parse_theme_json(&text)
 }

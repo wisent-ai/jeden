@@ -93,7 +93,7 @@ fn legacy_requests(dir: &Path) -> Result<CompletionState, String> {
     let mut state = CompletionState::default();
     let transcript = dir.join("transcript.jsonl");
     regular_file_or_absent(&transcript)?;
-    if !transcript.exists() {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&transcript)? {
         return Ok(state);
     }
     let cwd = crate::completion::cli::workspace(dir)?;

@@ -92,8 +92,8 @@ pub(crate) fn update<T>(
     state.validate()?;
     write_atomic(&dir.join(STATE_FILE), &state)?;
     let legacy = dir.join("artifacts/todo.json");
-    if legacy.exists() {
-        regular_file_or_absent(&legacy)?;
+    regular_file_or_absent(&legacy)?;
+    if crate::tool_runtime::runtime_ops::platform::presence::present(&legacy)? {
         fs::remove_file(&legacy).map_err(|error| {
             format!("completion state saved but legacy todo retirement failed: {error}")
         })?;

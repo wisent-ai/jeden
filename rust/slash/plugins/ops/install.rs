@@ -62,7 +62,7 @@ pub(crate) fn install_one(
         format!("Marketplace source not found: {mkt_name}. Add a signed source first.")
     })?;
     let cache = marketplace_cache_dir(mkt_name);
-    if !cache.exists() {
+    if !crate::tool_runtime::runtime_ops::platform::presence::present(&cache)? {
         fetch_marketplace(cwd, mkt_name, &source)?;
     }
     let envelope: MarketplaceEnvelopeV1 = serde_json::from_value(read_marketplace_catalog(&cache)?).map_err(|error| format!("marketplace catalog is not a signed MarketplaceEnvelopeV1: {error}; use explicit dev-link for local development"))?;

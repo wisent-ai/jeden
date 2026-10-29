@@ -47,9 +47,13 @@ impl AtomicFsPlatform for UnixPlatform {
         backup: Option<&Path>,
     ) -> Result<(), PlatformError> {
         if let Some(backup) = backup {
-            if destination.exists() {
-                if backup.exists() {
-                    fs::remove_file(backup)?;
+            // A destination that cannot be examined is the caller's error, never
+            // taken as absent and replaced without its backup.
+            if destination.try_exists()? {
+                match fs::remove_file(backup) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
                 }
                 fs::hard_link(destination, backup)
                     .or_else(|_| fs::copy(destination, backup).map(|_| ()))?;

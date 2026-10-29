@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use crossterm::style::{Attribute, ContentStyle, Stylize};
-use palette::{preset_palette, read_theme_json, Palette};
 pub(crate) use palette::preset_names;
+use palette::{preset_palette, read_theme_json, Palette};
 
 static PROJECT_CWD: OnceLock<PathBuf> = OnceLock::new();
 
@@ -102,13 +102,17 @@ impl Theme {
         {
             // A theme file that cannot be examined is said like one that
             // cannot be read, never passed over as absent.
-            let present = match crate::tool_runtime::runtime_ops::platform::presence::present(&candidate) {
-                Ok(present) => present,
-                Err(error) => {
-                    eprintln!("jeden: ignoring theme file {}: {error}", candidate.display());
-                    false
-                }
-            };
+            let present =
+                match crate::tool_runtime::runtime_ops::platform::presence::present(&candidate) {
+                    Ok(present) => present,
+                    Err(error) => {
+                        eprintln!(
+                            "jeden: ignoring theme file {}: {error}",
+                            candidate.display()
+                        );
+                        false
+                    }
+                };
             if present {
                 match read_theme_json(&candidate) {
                     Ok(palette) => {
@@ -143,7 +147,9 @@ impl Theme {
             return Ok(Some(Self::preset(DEFAULT_PRESET, color)));
         }
         let path = Path::new(value);
-        if value.ends_with(".json") && path.exists() {
+        // A value naming a `.json` file is that file: one missing or unreadable
+        // is refused naming it, never passed over to the preset names.
+        if value.ends_with(".json") {
             let palette = read_theme_json(path)?;
             return Ok(Some(Self {
                 palette,

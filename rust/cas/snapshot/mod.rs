@@ -64,7 +64,10 @@ impl<'a> SnapshotBuilder<'a> {
             let child = child
                 .map_err(|error| CasError::io("read snapshot directory entry", directory, error))?;
             let name = child.file_name().into_string().map_err(|raw| {
-                CasError::InvalidPath(format!("{} contains a non-UTF-8 name {raw:?}", directory.display()))
+                CasError::InvalidPath(format!(
+                    "{} contains a non-UTF-8 name {raw:?}",
+                    directory.display()
+                ))
             })?;
             validate_component(&name)?;
             let path = child.path();
@@ -133,10 +136,18 @@ fn materialize_tree(
     let result = (|| {
         let tree = load_tree(cas, digest)?;
         validate_tree(destination, &tree)?;
-        if !destination.exists() {
-            fs::create_dir(destination).map_err(|error| {
-                CasError::io("create materialized directory", destination, error)
-            })?;
+        // A directory already there is kept; any other failure to create it,
+        // an unexaminable parent included, is the materialization's error.
+        match fs::create_dir(destination) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(CasError::io(
+                    "create materialized directory",
+                    destination,
+                    error,
+                ))
+            }
         }
         for entry in tree.entries {
             let path = destination.join(&entry.name);
@@ -216,7 +227,7 @@ pub(crate) fn load_tree(cas: &LocalCas, digest: Digest) -> Result<MerkleTree, Ca
 fn is_executable(metadata: &fs::Metadata) -> bool {
     use std::os::unix::fs::PermissionsExt;
     let executable = u32::from(libc::S_IXUSR | libc::S_IXGRP | libc::S_IXOTH);
-    std::num::NonZeroU32::new(metadata.permissions().mode() & executable).is_some()
+    metadata.permissions().mode() & executable != 0
 }
 #[cfg(not(unix))]
 fn is_executable(_: &fs::Metadata) -> bool {

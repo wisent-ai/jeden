@@ -50,7 +50,9 @@ impl AtomicFsPlatform for NativePlatform {
     ) -> Result<(), PlatformError> {
         let source = wide(staged.as_os_str());
         let dest = wide(destination.as_os_str());
-        if destination.exists() {
+        // A destination that cannot be examined is refused, never moved over as
+        // if absent and left without its backup.
+        if destination.try_exists()? {
             let backup_w = backup.map(|p| wide(p.as_os_str()));
             if unsafe {
                 ReplaceFileW(
