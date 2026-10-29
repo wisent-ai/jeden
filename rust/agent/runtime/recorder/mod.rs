@@ -130,8 +130,7 @@ impl SessionRecorder {
     }
 
     pub(in crate::agent) fn record(&mut self, event_type: &str, data: Value) -> Result<(), String> {
-        self.record_entry(event_type, data)
-            .map(|_recorded_entry| ())
+        self.record_entry(event_type, data).map(|_recorded_entry| ())
     }
 
     pub(in crate::agent) fn record_entry(
@@ -210,7 +209,10 @@ impl SessionRecorder {
     }
 
     pub(in crate::agent) fn active_leaf(&self) -> Result<Option<String>, String> {
-        if !self.ready && !self.dir.join("state.json").exists() {
+        // A session state that cannot be examined is the error: read as
+        // absent, the in-memory leaf would stand in for a recorded one.
+        let state = self.dir.join("state.json");
+        if !self.ready && !crate::tool_runtime::runtime_ops::platform::presence::present(&state)? {
             return Ok(self.active_leaf.clone());
         }
         crate::cli::sessions::session_active_leaf(&self.dir)

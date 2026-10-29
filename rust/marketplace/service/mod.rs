@@ -92,7 +92,7 @@ impl MarketplaceService {
         let mut backups = Vec::<(PathBuf, PathBuf)>::new();
         let result = (|| {
             let current = self.registry()?;
-            let next_generation = current.generation.saturating_add(1);
+            let next_generation = advanced(current.generation)?;
             let mut next = current.clone();
             next.generation = next_generation;
             next.catalog_sequence = envelope.catalog.sequence;
@@ -115,11 +115,12 @@ impl MarketplaceService {
                         release.id
                     ));
                 }
+                // The whole verified digest names the package directory: a
+                // prefix of it was a length nobody stated, and a digest shorter
+                // than that prefix panicked the install.
                 let final_path = self.packages().join(format!(
                     "{}-{}-{}",
-                    release.id,
-                    release.version,
-                    &release.artifact_digest[..16]
+                    release.id, release.version, release.artifact_digest
                 ));
                 next.packages.insert(
                     release.id.clone(),
@@ -146,7 +147,9 @@ impl MarketplaceService {
                 .filter(|record| record.generation == next_generation)
             {
                 let staged = transaction.join("staged").join(&record.id);
-                if record.path.exists() {
+                // A package path that cannot be examined is the error: read
+                // as absent, its files would be promoted over without a backup.
+                if crate::tool_runtime::runtime_ops::platform::presence::present(&record.path)? {
                     let backup = transaction.join("backups").join(&record.id);
                     if let Some(parent) = backup.parent() {
                         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -215,7 +218,7 @@ impl MarketplaceService {
             return Err("dev-link requires an existing local directory and entrypoint".into());
         }
         let mut registry = self.registry()?;
-        registry.generation = registry.generation.saturating_add(1);
+        registry.generation = advanced(registry.generation)?;
         let record = PackageRecord {
             id: id.into(),
             version: "dev-link".into(),
@@ -243,7 +246,7 @@ impl MarketplaceService {
             }
         }
         if !quarantined.is_empty() {
-            registry.generation = registry.generation.saturating_add(1);
+            registry.generation = advanced(registry.generation)?;
             self.atomic_json(&self.registry_path(), &registry)?;
             crate::capability::invalidate();
         }
@@ -261,4 +264,13 @@ impl MarketplaceService {
         active.sort_by(|a, b| a.id.cmp(&b.id));
         Ok(active)
     }
+}
+
+/// The registry generation after `current`; one past the largest a u64
+/// holds is refused, never pinned at the maximum where two installs would
+/// share a generation.
+fn advanced(current: u64) -> Result<u64, String> {
+    current
+        .checked_add(u64::from(crate::tally::STEP))
+        .ok_or_else(|| format!("the marketplace registry generation {current} cannot advance"))
 }
