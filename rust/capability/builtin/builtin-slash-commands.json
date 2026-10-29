@@ -19,6 +19,7 @@
   { "name": "goal", "description": "Toggle goal mode", "view": true },
   { "name": "guided-goal", "description": "Draft a goal from a rough objective on the next turn", "view": true },
   { "name": "loop", "description": "Toggle loop mode", "view": true },
+  { "name": "hillclimb", "description": "Read recorded hillclimb history with --ledger, --last, --ending, --round, --repository, --without-repository and --json; never start a model or writer", "view": false },
   { "name": "fast", "description": "Toggle priority service tier", "view": true },
   { "name": "advisor", "description": "Toggle advisor reviewer", "view": true },
   { "name": "export", "description": "Export session", "view": true },
