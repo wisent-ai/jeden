@@ -141,10 +141,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const approve = async (argument?: PendingAction): Promise<void> => {
     const action = await selectPending(argument); if (!action) return;
     if (action.kind === "approval") { interaction.allow(action.id); return; }
-    if (action.kind !== "diff" || !action.uri) return;
+    if (action.kind === "input") throw new Error(`Pending action ${action.title} asks for input; answer it in its own prompt`);
+    // A diff the model kept is whole (uri, before and after); one without them is refused, never applied as an empty document.
+    if (action.uri === undefined || action.before === undefined || action.after === undefined) throw new Error(`Pending diff ${action.title} carries no ${action.uri === undefined ? "uri" : action.before === undefined ? "before text" : "after text"}, so it cannot be applied`);
     const uri = vscode.Uri.parse(action.uri); const document = await vscode.workspace.openTextDocument(uri); const current = document.getText();
-    if (current !== action.before) throw new Error("Pending diff is stale; the document changed after it was proposed");
-    const last = document.lineAt(document.lineCount - 1).range.end; const edit = new vscode.WorkspaceEdit(); edit.replace(uri, new vscode.Range(new vscode.Position(0, 0), last), action.after ?? "");
+    if (current !== action.before) throw new Error(`Pending diff ${action.title} is stale: ${action.uri} changed after it was proposed; reject it and ask the agent to propose it again`);
+    const last = document.lineAt(document.lineCount - 1).range.end; const edit = new vscode.WorkspaceEdit(); edit.replace(uri, new vscode.Range(new vscode.Position(0, 0), last), action.after);
     if (!await vscode.workspace.applyEdit(edit)) throw new Error("VS Code rejected the pending diff");
     model.pending.delete(action.id); model.emit("change");
   };

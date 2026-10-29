@@ -27,7 +27,9 @@ export class ExtensionModel extends EventEmitter {
   serviceStatus = "Disconnected";
 
   apply(event: SessionEventEnvelope): void {
-    const payload = object(event.payload) ?? {};
+    const payload = object(event.payload);
+    // An event whose payload is not an object is said in the transcript with what it carried, never read as an empty payload.
+    if (payload === undefined) { this.transcript.push({ role: "status", text: `${event.kind} ${event.eventId} arrived with a payload that is not an object and was not shown: ${JSON.stringify(event.payload)}` }); this.emit("change", event); return; }
     const kind = event.kind;
     switch (kind) {
       case "agent_message_content":

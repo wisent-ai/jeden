@@ -61,6 +61,27 @@ jobs:
       - name: Check native library and binaries
         run: cargo check --locked --lib --bins
 
+  # The VS Code client refuses a field an agent's message lacks instead of
+  # filling it in; its lint refuses a new stand-in where it is written.
+  vscode:
+    name: VS Code client
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/vscode-jeden
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      # The current Node.js long-term-support release, as setup-node resolves `lts/*`.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+
   # jeden-tools is its own Cargo workspace (it has to build before the
   # private Git sources are configured), so rust-gates does not see it.
   tools:
@@ -85,7 +106,7 @@ jobs:
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rust-gates, native-platform, tools]
+    needs: [rust-gates, native-platform, tools, vscode]
     permissions:
       contents: write
     uses: wisent-ai/quality-control/.github/workflows/tag-on-manifest-bump.yml@897485548846d7dfe38832b6b9a38212cdd1685a

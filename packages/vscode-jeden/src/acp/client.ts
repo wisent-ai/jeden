@@ -67,11 +67,15 @@ export class JedenAcpClient extends EventEmitter {
     });
     if (!isObject(result) || typeof result.protocolVersion !== "number" || !isObject(result.agentCapabilities)) throw new Error("ACP initialize returned invalid capabilities");
     const raw = result.agentCapabilities;
-    const prompt = isObject(raw.promptCapabilities) ? raw.promptCapabilities : {};
+    // ACP states an absent promptCapabilities or sessionCapabilities as no capability beyond the baseline; one present in another shape is refused.
+    const prompt = raw.promptCapabilities;
+    if (prompt !== undefined && !isObject(prompt)) throw new Error("ACP initialize returned promptCapabilities that is not an object");
+    const session = raw.sessionCapabilities;
+    if (session !== undefined && !isObject(session)) throw new Error("ACP initialize returned sessionCapabilities that is not an object");
     this.capabilities = {
       loadSession: raw.loadSession === true,
-      promptCapabilities: { image: prompt.image === true, audio: prompt.audio === true, embeddedContext: prompt.embeddedContext === true },
-      sessionCapabilities: isObject(raw.sessionCapabilities) ? asJsonValue(raw.sessionCapabilities) as JsonObject : {},
+      promptCapabilities: { image: prompt?.image === true, audio: prompt?.audio === true, embeddedContext: prompt?.embeddedContext === true },
+      sessionCapabilities: session === undefined ? {} : asJsonValue(session) as JsonObject,
     };
     const initialized: InitializeResult = { protocolVersion: result.protocolVersion, agentCapabilities: this.capabilities, ...(isObject(result.agentInfo) && isText(result.agentInfo.name) && isText(result.agentInfo.version) ? { agentInfo: { name: result.agentInfo.name, version: result.agentInfo.version } } : {}) };
     this.initialized = initialized;
@@ -138,7 +142,11 @@ export class JedenAcpClient extends EventEmitter {
   private async receive(message: JsonRpcMessage): Promise<void> {
     if (isRequest(message)) { await this.receiveRequest(message); return; }
     if (isNotification(message)) {
-      if (message.method === "session/update" && isObject(message.params) && typeof message.params.sessionId === "string" && isObject(message.params.update)) this.emitSessionUpdate(message.params.sessionId, message.params.update);
+      if (message.method === "session/update") {
+        // An update this client cannot place is logged with its cause, never dropped unsaid.
+        if (!isObject(message.params) || !isText(message.params.sessionId) || !isObject(message.params.update)) { this.options.logger.error("acp.session_update.incomplete", new Error("session/update carries no sessionId or no update object")); return; }
+        this.emitSessionUpdate(message.params.sessionId, message.params.update);
+      }
       return;
     }
     if (message.id === null) return;
@@ -150,7 +158,10 @@ export class JedenAcpClient extends EventEmitter {
 
   private async receiveRequest(message: Extract<JsonRpcMessage, { readonly method: string; readonly id: number }>): Promise<void> {
     try {
-      if ((message.method === "session/request_permission" || message.method === "session/requestPermission") && isObject(message.params)) {
+      const permission = message.method === "session/request_permission" || message.method === "session/requestPermission";
+      const supported = permission || message.method === "elicitation/create" || message.method === "session/request_input" || message.method === "session/requestInput";
+      if (supported && !isObject(message.params)) throw new Error(`${message.method} carries no params object`);
+      if (permission && isObject(message.params)) {
         const params = message.params;
         if (!Array.isArray(params.options)) throw new Error(`${message.method} carries no options to choose from`);
         const options = params.options.map((candidate, index) => {
@@ -158,7 +169,8 @@ export class JedenAcpClient extends EventEmitter {
           if (!isObject(candidate)) throw new Error(`${where} is not an object`);
           return { optionId: required(candidate, "optionId", where), name: required(candidate, "name", where), kind: required(candidate, "kind", where) };
         });
-        const selected = await this.options.interaction.requestPermission({ sessionId: required(params, "sessionId", message.method), toolCall: isObject(params.toolCall) ? asJsonValue(params.toolCall) as JsonObject : {}, options });
+        if (!isObject(params.toolCall)) throw new Error(`${message.method} carries no toolCall`);
+        const selected = await this.options.interaction.requestPermission({ sessionId: required(params, "sessionId", message.method), toolCall: asJsonValue(params.toolCall) as JsonObject, options });
         await this.respond(message.id, selected ? { outcome: { outcome: "selected", optionId: selected } } : { outcome: { outcome: "cancelled" } }); return;
       }
       if (message.method === "elicitation/create" && isObject(message.params)) {
@@ -167,8 +179,10 @@ export class JedenAcpClient extends EventEmitter {
           await this.respondError(message.id, -32602, "Only ACP form elicitation is supported");
           return;
         }
-        const schema = isObject(params.requestedSchema) ? params.requestedSchema : {};
-        const [field, ...others] = Object.keys(isObject(schema.properties) ? schema.properties : {});
+        if (!isObject(params.requestedSchema)) throw new Error("elicitation/create carries no requestedSchema");
+        const schema = params.requestedSchema;
+        if (!isObject(schema.properties)) throw new Error("elicitation/create carries a requestedSchema without properties");
+        const [field, ...others] = Object.keys(schema.properties);
         if (field === undefined || others.length) throw new Error(`elicitation/create asks for ${others.length ? "several fields" : "no field"}; this client answers a form of one field`);
         const value = await this.options.interaction.requestInput({
           sessionId: required(params, "sessionId", message.method),
@@ -191,8 +205,10 @@ export class JedenAcpClient extends EventEmitter {
   private emitSessionUpdate(sessionId: string, update: Record<string, unknown>): void {
     const canonical = isObject(update.event) && update.event.type === "event" ? update.event : undefined;
     let event: SessionEventEnvelope;
-    if (canonical && isText(canonical.sessionId) && isText(canonical.streamId) && isCount(canonical.sequence) && isText(canonical.cursor) && isText(canonical.eventId) && isText(canonical.kind)) {
-      event = { type: "event", sessionId: canonical.sessionId, streamId: canonical.streamId, sequence: canonical.sequence, cursor: canonical.cursor, eventId: canonical.eventId, ...(typeof canonical.requestId === "string" ? { requestId: canonical.requestId } : {}), kind: canonical.kind, payload: asJsonValue(canonical.payload ?? {}) };
+    if (canonical) {
+      // Jeden's own event envelope is whole or it is logged with what it lacks, never completed with a stand-in payload.
+      if (!(isText(canonical.sessionId) && isText(canonical.streamId) && isCount(canonical.sequence) && isText(canonical.cursor) && isText(canonical.eventId) && isText(canonical.kind) && canonical.payload !== undefined)) { this.options.logger.error("acp.session_update.incomplete_event", new Error(`session/update for session ${sessionId} carries an event envelope without sessionId, streamId, sequence, cursor, eventId, kind or payload`)); return; }
+      event = { type: "event", sessionId: canonical.sessionId, streamId: canonical.streamId, sequence: canonical.sequence, cursor: canonical.cursor, eventId: canonical.eventId, ...(isText(canonical.requestId) ? { requestId: canonical.requestId } : {}), kind: canonical.kind, payload: asJsonValue(canonical.payload) };
     } else {
       // ACP names an update's kind in `sessionUpdate`; one without it is logged with its cause, not given a kind.
       if (!isText(update.sessionUpdate)) { this.options.logger.error("acp.session_update.unnamed", new Error(`session/update for session ${sessionId} carries no sessionUpdate kind`)); return; }

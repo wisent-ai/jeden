@@ -5,8 +5,9 @@ export type JsonPrimitive = null | boolean | number | string;
 export type JsonValue = JsonPrimitive | JsonValue[] | { readonly [key: string]: JsonValue };
 export type JsonObject = { readonly [key: string]: JsonValue };
 
-export interface JsonRpcRequest { readonly jsonrpc: "2.0"; readonly id: number; readonly method: string; readonly params: JsonValue; }
-export interface JsonRpcNotification { readonly jsonrpc: "2.0"; readonly method: string; readonly params: JsonValue; }
+// JSON-RPC 2.0 lets a request or notification omit params; an absent one stays absent, never read as `{}`.
+export interface JsonRpcRequest { readonly jsonrpc: "2.0"; readonly id: number; readonly method: string; readonly params?: JsonValue; }
+export interface JsonRpcNotification { readonly jsonrpc: "2.0"; readonly method: string; readonly params?: JsonValue; }
 export interface JsonRpcSuccess { readonly jsonrpc: "2.0"; readonly id: number; readonly result: JsonValue; }
 export interface JsonRpcFailure { readonly jsonrpc: "2.0"; readonly id: number | null; readonly error: { readonly code: number; readonly message: string; readonly data?: JsonValue }; }
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcSuccess | JsonRpcFailure;
@@ -51,9 +52,9 @@ export function asJsonValue(value: unknown): JsonValue { if (value === null || i
 export function parseMessage(value: unknown): JsonRpcMessage {
   if (!isObject(value) || value.jsonrpc !== "2.0") throw new Error("Invalid ACP JSON-RPC envelope");
   if (typeof value.method === "string") {
-    const params = asJsonValue(value.params ?? {});
-    if (typeof value.id === "number" && Number.isInteger(value.id)) { const id = value.id; const method = value.method; return { jsonrpc: "2.0", id, method, params }; }
-    if (value.id === undefined) { const method = value.method; return { jsonrpc: "2.0", method, params }; }
+    const params = value.params === undefined ? {} : { params: asJsonValue(value.params) };
+    if (typeof value.id === "number" && Number.isInteger(value.id)) { const id = value.id; const method = value.method; return { jsonrpc: "2.0", id, method, ...params }; }
+    if (value.id === undefined) { const method = value.method; return { jsonrpc: "2.0", method, ...params }; }
   }
   if ((typeof value.id === "number" && Number.isInteger(value.id)) || value.id === null) {
     if ("error" in value && isObject(value.error) && isCount(value.error.code) && isText(value.error.message)) {
