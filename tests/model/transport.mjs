@@ -61,13 +61,15 @@ function transcripts(directory) {
 try {
   assert.equal(succeeds(invoke('git', ['rev-parse', 'HEAD'])).trim(), revision);
   succeeds(invoke('git', ['diff', '--exit-code', 'HEAD']));
-  const route = JSON.parse(succeeds(invoke(stado, [
-    'service', 'directory', 'connect', 'brama', '--consumer', 'jeden', '--no-verify', '--json',
+  const resolved = JSON.parse(succeeds(invoke(stado, [
+    'capabilities', 'resolve', 'inference', '--consumer', 'jeden', '--json',
   ])));
-  assert.equal(route.service, 'brama');
-  assert.equal(route.consumer, 'jeden');
-  assert.ok(route.url, 'the real directory must name the observed adapter');
-  report.route = route;
+  assert.equal(resolved.family, 'inference');
+  assert.equal(resolved.consumer, 'jeden');
+  assert.equal(resolved.provider, 'brama', 'this journey needs Stado to hand out Brama, the failing route observed');
+  const route = { url: resolved.route, proven_at: resolved.proven_at };
+  assert.ok(route.url, 'the real resolution must name the observed adapter');
+  report.route = resolved;
   const superseded = `${route.url.replace(/\/$/, '')}/superseded-${randomUUID()}`;
   writeFileSync(join(workspace, '.env'), `BRAMA_URL=${superseded}\n`);
   const bind = new URL(route.url).host;
@@ -103,10 +105,8 @@ try {
   });
   const failure = events.find((event) => event.type === 'run_error' && event.data?.message?.includes(cause));
   assert.ok(failure, 'the actual refusal must remain in the durable session');
-  assert.ok(failure.data.message.includes(`placed_on ${route.placed_on}`),
-    'the retained failure must identify the host selected by the real directory');
-  assert.ok(failure.data.message.includes(`from ${route.from}`),
-    'the retained failure must identify the actual directory vantage');
+  assert.ok(failure.data.message.includes('Stado proved brama at '),
+    'the retained failure must identify the proof Stado handed Brama out on');
   assert.ok(!failure.data.message.includes(superseded),
     'the exported session must not disclose the superseded environment-file address');
   if (channelRefusal) {
@@ -143,8 +143,7 @@ try {
       assert.ok(text.includes(cause), 'the graphical-client refusal lost the observed transport cause');
       assert.ok(text.includes(`${route.url.replace(/\/$/, '')}/v1/chat/completions`),
         'the graphical-client refusal lost the failed model endpoint');
-      assert.ok(text.includes(`placed_on ${route.placed_on}`), 'the selected host was lost');
-      assert.ok(text.includes(`from ${route.from}`), 'the directory vantage was lost');
+      assert.ok(text.includes('Stado proved brama at '), 'the proof Stado handed Brama out on was lost');
       assert.ok(!text.includes(superseded),
         'the RPC refusal must not disclose the superseded environment-file address');
       if (channelRefusal) {

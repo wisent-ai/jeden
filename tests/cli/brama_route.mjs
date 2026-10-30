@@ -1,5 +1,6 @@
-// Real test that Jeden takes Brama's address from Stado's service directory
-// at every start, not from a port written into an environment file: the
+// Real test that Jeden takes Brama's address from Stado's capability
+// resolution (`stado capabilities resolve inference --consumer jeden`) at
+// every start, not from a port written into an environment file: the
 // adapter port the resolver binds for the consumer `jeden` is handed out by
 // the host and changes, so a written copy goes stale.
 //
@@ -70,15 +71,17 @@ try {
   report.test_sha256 = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url))).digest('hex');
   report.binary_sha256 = createHash('sha256').update(readFileSync(binary)).digest('hex');
 
-  const connect = record('stado', ['service', 'directory', 'connect', 'brama', '--consumer', 'jeden', '--no-verify', '--json'], hostEnv(), workspace);
-  assert.ok(!connect.status && !connect.error, `this host's Stado does not route brama for the consumer jeden: ${connect.stderr || connect.error}`);
-  const routed = JSON.parse(connect.stdout).url;
-  assert.ok(routed, `stado answered without a url: ${connect.stdout}`);
+  const resolved = record('stado', ['capabilities', 'resolve', 'inference', '--consumer', 'jeden', '--json'], hostEnv(), workspace);
+  assert.ok(!resolved.status && !resolved.error, `this host's Stado resolves no inference alternative for the consumer jeden: ${resolved.stderr || resolved.error}`);
+  const answer = JSON.parse(resolved.stdout);
+  assert.equal(answer.provider, 'brama', `this journey needs Stado to hand out Brama: ${resolved.stdout}`);
+  const routed = answer.route;
+  assert.ok(routed, `stado answered without a route: ${resolved.stdout}`);
 
   // 1. Stado's route replaces the address an environment file holds.
   writeFileSync(join(workspace, '.env'), `BRAMA_URL=${staleCopy}\n`);
   const fromStado = bramaProbe(hostEnv());
-  assert.ok(fromStado.includes("address from Stado's service directory (consumer jeden)"), fromStado);
+  assert.ok(fromStado.includes("address from Stado's capability resolution (inference, consumer jeden)"), fromStado);
   assert.ok(fromStado.includes(`still holds ${staleCopy}`), fromStado);
   assert.ok(!fromStado.includes(`${staleCopy}/v1`), `doctor called the stale copy: ${fromStado}`);
 

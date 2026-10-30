@@ -51,10 +51,10 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
                     value["route"] = json!("direct");
                     value["endpoint"] = json!(endpoint);
                     value["keySource"] = json!(if key.is_some() {
-                        if credential::standing_in().is_some() {
-                            "own-gateway"
-                        } else {
-                            "environment"
+                        match credential::standing_in() {
+                            Some("stado-resolved") => "stado-resolved",
+                            Some(_) => "own-gateway",
+                            None => "environment",
                         }
                     } else if stored {
                         "local-token-list"

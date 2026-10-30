@@ -48,11 +48,16 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         ),
         Err(cause) => (None, Some(cause)),
     };
-    let (selected_model, model_error) =
-        match inputs::selected_model(args.model.as_deref(), config.model.as_deref()) {
+    // The endpoint Stado resolves in Brama's place is asked for the model it
+    // declares, not for a Brama route alias it does not know.
+    let resolved_model = crate::agent::credential::stand_in::resolved_model();
+    let (selected_model, model_error) = match resolved_model {
+        Some(model) => (Some(model.to_owned()), None),
+        None => match inputs::selected_model(args.model.as_deref(), config.model.as_deref()) {
             Ok(model) => (model, None),
             Err(cause) => (None, Some(cause)),
-        };
+        },
+    };
     let client = crate::control_plane::brama::BramaClient::configured(
         endpoint.clone(),
         bearer_token.clone(),
@@ -133,8 +138,11 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             other => {
                 let base =
                     "BRAMA_URL is required; declare Jeden's route with `stado service directory \
-                    consumer add brama jeden --capability model-routing --target <this host>`, \
-                    export BRAMA_URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider";
+                    consumer add brama jeden --capability model-routing --target <this host>` or \
+                    an endpoint Stado hands out in Brama's place (`stado config set \
+                    capabilities.inference.endpoint.url <url>` and \
+                    `capabilities.inference.endpoint.model <model>`), export BRAMA_URL, or set \
+                    JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider";
                 Some(match other.refusal() {
                     Some(cause) => format!("{base} (Stado did not route it: {cause})"),
                     None => base.to_owned(),
@@ -251,6 +259,10 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             ),
         endpoint_origin: if own_gateway {
             "Jeden's own gateway on its subscription grants".to_owned()
+        } else if resolved_model.is_some() {
+            "the OpenAI-compatible endpoint Stado's capability resolution (inference, consumer \
+             jeden) hands out in Brama's place"
+                .to_owned()
         } else if direct.is_some() {
             format!(
                 "OpenAI-compatible provider selected by {}",

@@ -49,6 +49,9 @@ fn status(json_output: bool) -> Result<String, String> {
     let stored = active_endpoint
         .is_some_and(|endpoint| tokens.iter().any(|token| token.endpoint == endpoint));
     let key_source = match &direct {
+        Some((_, Some(_))) if credential::standing_in() == Some("stado-resolved") => {
+            "stado-resolved"
+        }
         Some((_, Some(_))) if credential::standing_in().is_some() => "own-gateway",
         Some((_, Some(_))) => "environment",
         Some(_) if stored => "local-token-list",

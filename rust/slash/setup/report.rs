@@ -30,10 +30,10 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     };
     if let Some((endpoint, key)) = crate::agent::credential::direct_provider() {
         let credential = if key.is_some() {
-            if crate::agent::credential::standing_in().is_some() {
-                "Provider key: the bearer of Jeden's own gateway (signed in with jeden token sign-in)".to_string()
-            } else {
-                "Provider key: JEDEN_MODEL_KEY from the process environment".to_string()
+            match crate::agent::credential::standing_in() {
+                Some("stado-resolved") => "Provider key: the key of the role Stado's capability resolution names for the endpoint answering in Brama's place".to_string(),
+                Some(_) => "Provider key: the bearer of Jeden's own gateway (signed in with jeden token sign-in)".to_string(),
+                None => "Provider key: JEDEN_MODEL_KEY from the process environment".to_string(),
             }
         } else {
             match crate::agent::credential::tokens::Store::open_existing() {
@@ -77,7 +77,7 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
             "2. BRAMA_URL [unknown] — resolve the environment file read error before configuring this value".to_string()
         } else {
             format!(
-                "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado service directory connect brama --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
+                "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado capabilities resolve inference --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
                 mark(state.brama_url.is_some()),
                 crate::agent::credential::route_origin()
             )

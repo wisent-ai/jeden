@@ -1,10 +1,11 @@
-//! Jeden's model endpoint and process-owned credentials. Stado may locate
-//! Brama's address; model credentials are never acquired from Skarbiec.
+//! Jeden's model endpoint and process-owned credentials. Stado's capability
+//! resolution may hand out Brama's address or the endpoint answering in its
+//! place; model credentials are never acquired from Skarbiec.
 use std::env;
 use std::sync::{LazyLock, OnceLock};
 
-mod directory;
 pub(crate) mod private_gateway;
+mod resolution;
 pub(crate) mod stand_in;
 pub(crate) mod tokens;
 
@@ -13,7 +14,8 @@ pub(crate) const BEARER: &str = "BRAMA_TOKEN";
 pub(crate) const DIRECT_URL: &str = "JEDEN_MODEL_ENDPOINT";
 pub(crate) const DIRECT_KEY: &str = "JEDEN_MODEL_KEY";
 pub(crate) const ADDRESS: &str = "BRAMA_URL";
-const DIRECTORY_ROUTE: (&str, &str) = ("brama", "jeden");
+/// The consumer Jeden asks Stado's capability resolution as.
+const CONSUMER: &str = "jeden";
 
 /// A route variable as the process holds it: unset or blank is no value; a
 /// value that is not Unicode is a refusal naming the variable, never no value.
@@ -84,14 +86,16 @@ pub(crate) fn direct_provider() -> Option<(String, Option<String>)> {
 }
 
 /// What serves this process in Brama's place, once a stand-in was engaged:
+/// the endpoint Stado's capability resolution hands out (`stado-resolved`),
 /// Jeden's own gateway (on subscription grants signed in by hand) or a
 /// stored provider. The surfaces that report the route read this, so a
-/// bearer Jeden minted for its own gateway is never reported as the
-/// process environment's key.
+/// bearer Jeden minted for its own gateway, or the key of the role Stado
+/// names, is never reported as the process environment's key.
 pub(crate) fn standing_in() -> Option<&'static str> {
-    stand_in::engaged().map(|standing| match standing.stored {
-        Some(_) => "stored-provider",
-        None => "own-gateway",
+    stand_in::engaged().map(|standing| match (&standing.resolved, &standing.stored) {
+        (Some(_), _) => "stado-resolved",
+        (None, Some(_)) => "stored-provider",
+        (None, None) => "own-gateway",
     })
 }
 
@@ -166,51 +170,49 @@ pub(crate) struct Route {
     pub(crate) url: Option<String>,
     pub(crate) source: Source,
     pub(crate) replaced_written_address: bool,
-    directory: Option<directory::Provenance>,
+    provenance: Option<resolution::Provenance>,
+    /// The endpoint Stado's resolution handed out because Brama does not
+    /// answer Jeden; `stand_in::engage` serves the turn with it.
+    pub(crate) in_place: Option<resolution::Alternative>,
 }
 
-/// An exported address wins; otherwise Stado's current directory route wins
-/// over a written file copy. A direct provider needs no Brama route.
+impl Route {
+    fn refused(source: Source) -> Self {
+        Self {
+            url: None,
+            source,
+            replaced_written_address: false,
+            provenance: None,
+            in_place: None,
+        }
+    }
+}
+
+/// An exported address wins; otherwise Stado's capability resolution wins
+/// over a written file copy: Brama's route when Brama answers Jeden, else the
+/// endpoint it hands out in Brama's place, kept for the stand-in. A direct
+/// provider needs no Brama route.
 pub(crate) fn brama_route() -> &'static Route {
     static ROUTE: LazyLock<Route> = LazyLock::new(|| {
         let direct = direct_provider();
         if let Some(said) = DIRECT_REFUSED.get() {
-            return Route {
-                url: None,
-                source: Source::DirectRefused(said.clone()),
-                replaced_written_address: false,
-                directory: None,
-            };
+            return Route::refused(Source::DirectRefused(said.clone()));
         }
         if direct.is_some() {
-            return Route {
-                url: None,
-                source: Source::NotNeeded,
-                replaced_written_address: false,
-                directory: None,
-            };
+            return Route::refused(Source::NotNeeded);
         }
         let current = match route_variable(ADDRESS) {
             Ok(value) => value,
-            Err(said) => {
-                return Route {
-                    url: None,
-                    source: Source::EnvironmentRefused(said),
-                    replaced_written_address: false,
-                    directory: None,
-                };
-            }
+            Err(said) => return Route::refused(Source::EnvironmentRefused(said)),
         };
         if current.is_some() && !file_supplied(ADDRESS) {
             return Route {
                 url: current,
-                source: Source::Environment,
-                replaced_written_address: false,
-                directory: None,
+                ..Route::refused(Source::Environment)
             };
         }
-        match directory::resolve() {
-            Ok((url, provenance)) => {
+        match resolution::resolve(false) {
+            Ok(resolution::Resolved::Brama(url, provenance)) => {
                 unsafe { env::set_var(ADDRESS, &url) };
                 Route {
                     replaced_written_address: current
@@ -218,14 +220,22 @@ pub(crate) fn brama_route() -> &'static Route {
                         .is_some_and(|written| *written != url),
                     url: Some(url),
                     source: Source::Stado,
-                    directory: Some(provenance),
+                    provenance: Some(provenance),
+                    in_place: None,
                 }
             }
+            Ok(resolution::Resolved::InPlace(alternative)) => Route {
+                // A written copy of Brama's address is not used: Stado proved
+                // Brama does not answer Jeden.
+                in_place: Some(alternative.clone()),
+                ..Route::refused(Source::Refused(format!(
+                    "Brama does not answer Jeden ({}); Stado hands out {} at {} in its place",
+                    alternative.passed_over, alternative.provider, alternative.endpoint
+                )))
+            },
             Err(said) => Route {
                 url: current,
-                source: Source::Refused(said),
-                replaced_written_address: false,
-                directory: None,
+                ..Route::refused(Source::Refused(said))
             },
         }
     });
@@ -235,5 +245,5 @@ pub(crate) fn brama_url() -> Option<String> {
     brama_route().url.clone()
 }
 pub(crate) fn route_origin() -> String {
-    directory::origin(brama_route())
+    resolution::origin(brama_route())
 }

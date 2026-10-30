@@ -15,16 +15,19 @@ pub(super) fn items(state: &SetupState) -> Result<Option<Vec<PickerItem>>, Strin
         "selected by JEDEN_MODEL_ENDPOINT",
     )];
     if key.is_some() {
-        if crate::agent::credential::standing_in().is_some() {
-            items.push(configured_row(
+        match crate::agent::credential::standing_in() {
+            Some("stado-resolved") => items.push(configured_row(
+                "3. Key of the endpoint Stado resolves in Brama's place",
+                "read as the role stado capabilities resolve inference --consumer jeden names",
+            )),
+            Some(_) => items.push(configured_row(
                 "3. Jeden's own gateway",
                 "subscription grants signed in with jeden token sign-in serve this route",
-            ));
-        } else {
-            items.push(configured_row(
+            )),
+            None => items.push(configured_row(
                 "3. Provider key in process environment",
                 "JEDEN_MODEL_KEY takes precedence over locally stored tokens",
-            ));
+            )),
         }
     } else {
         let count = match crate::agent::credential::tokens::Store::open_existing()? {
