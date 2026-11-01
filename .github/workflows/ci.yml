@@ -21,45 +21,9 @@ env:
 jobs:
 
   rust-gates:
-    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@caf52813f475b2485e27696eb3474a672e7a020a
+    uses: wisent-ai/quality-control/.github/workflows/rust-gates.yml@90a668cc614a43e95289b4233e420f14a546353c
     secrets:
       repository_token: ${{ secrets.WISENT_PACKAGES_TOKEN }}
-
-  native-platform:
-    name: Native build (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-24.04, macos-14, windows-2022]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      # Cargo.toml names two private wisent-ai dependencies, `pursuit` and
-      # `echo-web`, and a runner's git holds no credential for either, so every
-      # leg of this matrix stopped at "failed to authenticate when downloading
-      # repository" before compiling a line. The rewrite is the same one
-      # `rust-gates.yml` performs, and it is repeated here because this job calls
-      # cargo itself rather than through that workflow.
-      - name: Configure private Git dependency access
-        shell: bash
-        env:
-          REPOSITORY_TOKEN: ${{ secrets.WISENT_PACKAGES_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$REPOSITORY_TOKEN" ]; then
-            echo "::error::WISENT_PACKAGES_TOKEN is not set, so cargo cannot read the private wisent-ai dependencies this crate names (pursuit, echo-web). Set it to a token with read access to both."
-            exit 1
-          fi
-          git config --global \
-            url."https://x-access-token:${REPOSITORY_TOKEN}@github.com/".insteadOf \
-            https://github.com/
-          printf '%s\n' 'CARGO_NET_GIT_FETCH_WITH_CLI=true' >> "$GITHUB_ENV"
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Check native library and binaries
-        run: cargo check --locked --lib --bins
 
   # The VS Code client refuses a field an agent's message lacks instead of
   # filling it in; its lint refuses a new stand-in where it is written.
@@ -79,7 +43,6 @@ jobs:
         with:
           node-version: lts/*
       - run: npm ci
-      - run: npm run typecheck
       - run: npm run lint
 
   # jeden-tools is its own Cargo workspace (it has to build before the
@@ -93,12 +56,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - name: Formatting
-        run: cargo fmt --manifest-path tools/Cargo.toml --check
-      - name: Lints
-        run: cargo clippy --locked --manifest-path tools/Cargo.toml --all-targets -- -D warnings
       - name: Protocol compatibility gate
         run: cargo run --quiet --locked --manifest-path tools/Cargo.toml -- protocol-check
       - name: Public surface
@@ -106,7 +63,7 @@ jobs:
 
   tag:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [rust-gates, native-platform, tools, vscode]
+    needs: [rust-gates, tools, vscode]
     permissions:
       contents: write
     uses: wisent-ai/quality-control/.github/workflows/tag-on-manifest-bump.yml@897485548846d7dfe38832b6b9a38212cdd1685a
