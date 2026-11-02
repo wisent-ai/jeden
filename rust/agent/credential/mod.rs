@@ -1,11 +1,14 @@
-//! Jeden's model endpoint and process-owned credentials. Stado's capability
-//! resolution may hand out Brama's address or the endpoint answering in its
-//! place; model credentials are never acquired from Skarbiec.
+//! Jeden's model endpoint and process-owned credentials. A Brama address the
+//! caller exports is used as given; otherwise, where Stado is installed, each
+//! model request is handed to `stado capabilities call inference --consumer
+//! jeden` (`stado_call`), which asks the first alternative in Stado's
+//! selected order that answers it, so Jeden names no alternative and reads no
+//! credential for it. Model credentials are never acquired from Skarbiec.
 use std::env;
 use std::sync::{LazyLock, OnceLock};
 
 pub(crate) mod private_gateway;
-mod resolution;
+pub(crate) mod stado_call;
 pub(crate) mod stand_in;
 pub(crate) mod tokens;
 
@@ -14,8 +17,6 @@ pub(crate) const BEARER: &str = "BRAMA_TOKEN";
 pub(crate) const DIRECT_URL: &str = "JEDEN_MODEL_ENDPOINT";
 pub(crate) const DIRECT_KEY: &str = "JEDEN_MODEL_KEY";
 pub(crate) const ADDRESS: &str = "BRAMA_URL";
-/// The consumer Jeden asks Stado's capability resolution as.
-const CONSUMER: &str = "jeden";
 
 /// A route variable as the process holds it: unset or blank is no value; a
 /// value that is not Unicode is a refusal naming the variable, never no value.
@@ -86,16 +87,14 @@ pub(crate) fn direct_provider() -> Option<(String, Option<String>)> {
 }
 
 /// What serves this process in Brama's place, once a stand-in was engaged:
-/// the endpoint Stado's capability resolution hands out (`stado-resolved`),
 /// Jeden's own gateway (on subscription grants signed in by hand) or a
 /// stored provider. The surfaces that report the route read this, so a
-/// bearer Jeden minted for its own gateway, or the key of the role Stado
-/// names, is never reported as the process environment's key.
+/// bearer Jeden minted for its own gateway is never reported as the process
+/// environment's key.
 pub(crate) fn standing_in() -> Option<&'static str> {
-    stand_in::engaged().map(|standing| match (&standing.resolved, &standing.stored) {
-        (Some(_), _) => "stado-resolved",
-        (None, Some(_)) => "stored-provider",
-        (None, None) => "own-gateway",
+    stand_in::engaged().map(|standing| match &standing.stored {
+        Some(_) => "stored-provider",
+        None => "own-gateway",
     })
 }
 
@@ -107,6 +106,8 @@ pub(crate) fn direct_refusal() -> Option<&'static str> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Source {
     Environment,
+    /// No address is exported and Stado is installed: each request is handed
+    /// to Stado's inference alternatives.
     Stado,
     DirectRefused(String),
     EnvironmentRefused(String),
@@ -135,9 +136,10 @@ impl Source {
 /// Brama credentials come only from the caller's environment. Its signing
 /// secret and gateway bearer are distinct; the runtime names either missing
 /// value before dispatch and reports any HTTP refusal from Brama itself.
+/// Neither is needed for a direct provider or through Stado's alternatives.
 pub(crate) fn ensure() -> &'static (Source, Source) {
     static RESOLVED: LazyLock<(Source, Source)> = LazyLock::new(|| {
-        if direct_provider().is_some() {
+        if direct_provider().is_some() || via_stado() {
             return (Source::NotNeeded, Source::NotNeeded);
         }
         let source = |name: &str| match env::var(name) {
@@ -169,29 +171,18 @@ fn file_supplied(name: &str) -> bool {
 pub(crate) struct Route {
     pub(crate) url: Option<String>,
     pub(crate) source: Source,
-    pub(crate) replaced_written_address: bool,
-    provenance: Option<resolution::Provenance>,
-    /// The endpoint Stado's resolution handed out because Brama does not
-    /// answer Jeden; `stand_in::engage` serves the turn with it.
-    pub(crate) in_place: Option<resolution::Alternative>,
 }
 
 impl Route {
     fn refused(source: Source) -> Self {
-        Self {
-            url: None,
-            source,
-            replaced_written_address: false,
-            provenance: None,
-            in_place: None,
-        }
+        Self { url: None, source }
     }
 }
 
-/// An exported address wins; otherwise Stado's capability resolution wins
-/// over a written file copy: Brama's route when Brama answers Jeden, else the
-/// endpoint it hands out in Brama's place, kept for the stand-in. A direct
-/// provider needs no Brama route.
+/// An exported address wins; otherwise, where Stado is installed, requests go
+/// to Stado's inference alternatives, so an address a file kept from an
+/// earlier day is not used; without Stado that file's address is, the cause
+/// named. A direct provider needs no Brama route.
 pub(crate) fn brama_route() -> &'static Route {
     static ROUTE: LazyLock<Route> = LazyLock::new(|| {
         let direct = direct_provider();
@@ -208,31 +199,11 @@ pub(crate) fn brama_route() -> &'static Route {
         if current.is_some() && !file_supplied(ADDRESS) {
             return Route {
                 url: current,
-                ..Route::refused(Source::Environment)
+                source: Source::Environment,
             };
         }
-        match resolution::resolve(false) {
-            Ok(resolution::Resolved::Brama(url, provenance)) => {
-                unsafe { env::set_var(ADDRESS, &url) };
-                Route {
-                    replaced_written_address: current
-                        .as_ref()
-                        .is_some_and(|written| *written != url),
-                    url: Some(url),
-                    source: Source::Stado,
-                    provenance: Some(provenance),
-                    in_place: None,
-                }
-            }
-            Ok(resolution::Resolved::InPlace(alternative)) => Route {
-                // A written copy of Brama's address is not used: Stado proved
-                // Brama does not answer Jeden.
-                in_place: Some(alternative.clone()),
-                ..Route::refused(Source::Refused(format!(
-                    "Brama does not answer Jeden ({}); Stado hands out {} at {} in its place",
-                    alternative.passed_over, alternative.provider, alternative.endpoint
-                )))
-            },
+        match stado_call::installed() {
+            Ok(()) => Route::refused(Source::Stado),
             Err(said) => Route {
                 url: current,
                 ..Route::refused(Source::Refused(said))
@@ -244,6 +215,29 @@ pub(crate) fn brama_route() -> &'static Route {
 pub(crate) fn brama_url() -> Option<String> {
     brama_route().url.clone()
 }
+/// Whether this process's model requests go to Stado's inference
+/// alternatives.
+pub(crate) fn via_stado() -> bool {
+    brama_route().source == Source::Stado
+}
 pub(crate) fn route_origin() -> String {
-    resolution::origin(brama_route())
+    let route = brama_route();
+    match (&route.source, &route.url) {
+        (Source::Environment, _) => "address from BRAMA_URL in the process environment".to_string(),
+        (Source::Stado, _) => format!(
+            "Stado's inference alternatives, each request handed to `{}`",
+            stado_call::operation()
+        ),
+        (Source::DirectRefused(said), _) => format!("direct provider route refused: {said}"),
+        (Source::EnvironmentRefused(said), _) => {
+            format!("BRAMA_URL in the process environment refused: {said}")
+        }
+        (Source::Refused(said), Some(_)) => {
+            format!("address from an environment file, because {said}")
+        }
+        (Source::Refused(said), None) => format!("no Brama route: {said}"),
+        (Source::NotNeeded, _) => {
+            "JEDEN_MODEL_ENDPOINT names a provider called without Brama".to_string()
+        }
+    }
 }

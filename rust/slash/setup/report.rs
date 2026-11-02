@@ -31,7 +31,6 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     if let Some((endpoint, key)) = crate::agent::credential::direct_provider() {
         let credential = if key.is_some() {
             match crate::agent::credential::standing_in() {
-                Some("stado-resolved") => "Provider key: the key of the role Stado's capability resolution names for the endpoint answering in Brama's place".to_string(),
                 Some(_) => "Provider key: the bearer of Jeden's own gateway (signed in with jeden token sign-in)".to_string(),
                 None => "Provider key: JEDEN_MODEL_KEY from the process environment".to_string(),
             }
@@ -73,11 +72,16 @@ pub(super) fn checklist_text(context: &SlashContext<'_>) -> String {
     let mut lines = vec![
         "Setup checklist (guided wizard: run /setup in the interactive TUI):".to_string(),
         workspace_line,
-        if state.brama_url.is_none() && state.env_file_error.is_some() {
+        if crate::agent::credential::via_stado() {
+            format!(
+                "2. Model route [OK] — {}; Stado's selected order decides which alternative answers each request (stado capabilities inference); export BRAMA_URL to name a Brama instead",
+                crate::agent::credential::route_origin()
+            )
+        } else if state.brama_url.is_none() && state.env_file_error.is_some() {
             "2. BRAMA_URL [unknown] — resolve the environment file read error before configuring this value".to_string()
         } else {
             format!(
-                "2. BRAMA_URL {} — {}; on a Stado host the route comes from `stado capabilities resolve inference --consumer jeden`, elsewhere set: jeden run \"/setup brama-url <https-url>\"",
+                "2. BRAMA_URL {} — {}; install Stado to hand each request to its inference alternatives, or set: jeden run \"/setup brama-url <https-url>\"",
                 mark(state.brama_url.is_some()),
                 crate::agent::credential::route_origin()
             )

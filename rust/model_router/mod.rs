@@ -123,7 +123,10 @@ pub struct ChatConfig {
     pub url: String,
     /// Provenance of the selected endpoint, retained with this configuration.
     pub endpoint_origin: String,
-    pub endpoint_via_stado: bool,
+    /// No route is named and Stado is installed: each request is handed to
+    /// `stado capabilities call inference --consumer jeden`, and `url`,
+    /// `bearer_token` and `secret` are empty.
+    pub via_stado: bool,
     pub bearer_token: String,
     /// This route belongs to the private gateway this process owns. Resolve
     /// its current endpoint and bearer for each request, not from this snapshot.
@@ -137,8 +140,8 @@ pub struct ChatConfig {
     pub context_promotions: Vec<RouteDescriptor>,
     /// Models advertised by Brama as accepting image input.
     pub image_capable_models: BTreeSet<String>,
-    /// Whether calls go to Brama, which leases accounts; false for a
-    /// provider named by `JEDEN_MODEL_ENDPOINT`.
+    /// Whether calls go to a named Brama, which leases accounts; false for a
+    /// provider named by `JEDEN_MODEL_ENDPOINT` and for Stado's alternatives.
     pub via_brama: bool,
     /// The Jeden session the calls belong to; a leased route takes its
     /// account for this session.

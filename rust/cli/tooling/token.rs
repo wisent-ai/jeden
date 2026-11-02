@@ -49,9 +49,6 @@ fn status(json_output: bool) -> Result<String, String> {
     let stored = active_endpoint
         .is_some_and(|endpoint| tokens.iter().any(|token| token.endpoint == endpoint));
     let key_source = match &direct {
-        Some((_, Some(_))) if credential::standing_in() == Some("stado-resolved") => {
-            "stado-resolved"
-        }
         Some((_, Some(_))) if credential::standing_in().is_some() => "own-gateway",
         Some((_, Some(_))) => "environment",
         Some(_) if stored => "local-token-list",
@@ -72,6 +69,12 @@ fn status(json_output: bool) -> Result<String, String> {
                 "route": "direct", "endpoint": endpoint,
                 "keySource": key_source,
                 "selected": selected,
+                "tokens": tokens,
+            }),
+            None if credential::via_stado() => json!({
+                "route": "stado", "endpoint": null,
+                "origin": credential::route_origin(),
+                "keySource": "not-needed", "selected": selected,
                 "tokens": tokens,
             }),
             None => {
@@ -97,6 +100,10 @@ fn status(json_output: bool) -> Result<String, String> {
     }
     let mut text = match &direct {
         Some((endpoint, _)) => format!("Direct provider: {endpoint}\nKey source: {key_source}\n"),
+        None if credential::via_stado() => format!(
+            "Model requests: {}\nKey source: not-needed\n",
+            credential::route_origin()
+        ),
         None => {
             let route = credential::brama_route();
             let endpoint = match (route.url.as_deref(), &route.source) {

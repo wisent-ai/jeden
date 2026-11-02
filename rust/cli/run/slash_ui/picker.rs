@@ -20,6 +20,12 @@ pub(crate) fn model_picker(
     let config = load_config(cwd);
     let lang = ui_language(&config).code().to_string();
     let active = crate::agent::selected_model(current_model, config.model.as_deref())?;
+    if crate::agent::credential::via_stado() {
+        return Err(format!(
+            "no model list to pick from: model requests go to {}, which keeps no catalog; set the model with /model <route>, or export BRAMA_URL to pick from a Brama's catalog",
+            crate::agent::credential::route_origin()
+        ));
+    }
     let client = crate::control_plane::model_client()?;
     if !client.health().available {
         return Err(client.health().detail);

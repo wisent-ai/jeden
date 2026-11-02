@@ -104,6 +104,11 @@ pub(crate) fn resolve_model_route(cwd: &Path, model: &str) -> Result<String, Str
         }
         return Ok(model.to_string());
     }
+    // Through Stado's alternatives no catalog is read: the route is kept as
+    // given and the request's own answer says whether the model is known.
+    if crate::agent::credential::via_stado() {
+        return Ok(model.to_string());
+    }
     let client = crate::control_plane::model_client()?;
     let catalog = crate::control_plane::model_catalog(cwd, &client, false)
         .map_err(|error| error.to_string())?;

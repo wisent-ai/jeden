@@ -111,6 +111,44 @@ fn complete_streamed(
         },
         service_tier: nonempty(&config.service_tier),
     };
+    // Through Stado the request is handed whole to its inference
+    // alternatives, which try each in the selected order themselves; the
+    // answer arrives whole, as a completion an endpoint that ignores
+    // `stream` gives.
+    if config.via_stado {
+        if cancelled() {
+            return Err(stream_failure(
+                StreamErrorClass::Cancelled,
+                "Turn cancelled.".into(),
+                Vec::new(),
+                false,
+            ));
+        }
+        let mut body = json!({ "model": primary.model, "messages": messages });
+        if let Some(max_tokens) = max_tokens {
+            body["max_tokens"] = json!(max_tokens);
+        }
+        if let Some(tier) = &primary.service_tier {
+            body["service_tier"] = Value::String(tier.clone());
+        }
+        if !tools.is_empty() {
+            body["tools"] = Value::Array(tools.to_vec());
+            body["tool_choice"] = Value::String("auto".into());
+        }
+        let body_text = serde_json::to_string(&body).map_err(|error| {
+            stream_failure(StreamErrorClass::Permanent, error.to_string(), Vec::new(), false)
+        })?;
+        let completion = super::buffered::through_stado(config, &body_text, max_tokens)
+            .map_err(|message| {
+                stream_failure(StreamErrorClass::Permanent, message, Vec::new(), false)
+            })?;
+        return Ok(StreamingCompletion {
+            completion,
+            route: primary,
+            route_results: Vec::new(),
+            lease: None,
+        });
+    }
     let mut routes = vec![primary];
     for route in &config.fallbacks {
         if !routes.contains(route) {

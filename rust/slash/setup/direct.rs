@@ -16,10 +16,6 @@ pub(super) fn items(state: &SetupState) -> Result<Option<Vec<PickerItem>>, Strin
     )];
     if key.is_some() {
         match crate::agent::credential::standing_in() {
-            Some("stado-resolved") => items.push(configured_row(
-                "3. Key of the endpoint Stado resolves in Brama's place",
-                "read as the role stado capabilities resolve inference --consumer jeden names",
-            )),
             Some(_) => items.push(configured_row(
                 "3. Jeden's own gateway",
                 "subscription grants signed in with jeden token sign-in serve this route",

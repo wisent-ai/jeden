@@ -126,6 +126,15 @@ fn cut_off(refusal: &str) -> bool {
 fn output_ceiling(args: &Args) -> Result<Option<u32>, String> {
     let config = load_config(&args.cwd);
     let router = model_router_config(&config, args);
+    // Through Stado's alternatives no catalog is read, so no ceiling is
+    // declared: the alternative that answers applies its own limit.
+    if router.via_stado {
+        eprintln!(
+            "jeden: {} is asked through Stado's inference alternatives, which declare no output ceiling; the inspection is asked without one",
+            router.model
+        );
+        return Ok(None);
+    }
     let client = crate::control_plane::brama::BramaClient::configured(
         Some(router.url.clone()),
         Some(router.bearer_token.clone()),

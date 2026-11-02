@@ -41,13 +41,17 @@ fn complete_buffered(
     if let Some(message) = &config.config_error {
         return Err(message.clone());
     }
-    if !config.via_brama && is_virtual_model_route(&config.model) {
+    if !config.via_brama && !config.via_stado && is_virtual_model_route(&config.model) {
         return Err(format!(
             "{} is a Brama virtual route; choose a concrete direct-provider model with /model",
             config.model
         ));
     }
-    ensure_image_capability(config, &config.model, &messages)?;
+    // Through Stado no catalog is read here, so which models take images is
+    // the answering alternative's to say.
+    if !config.via_stado {
+        ensure_image_capability(config, &config.model, &messages)?;
+    }
     let mut body = json!({
         "model": config.model,
         "messages": messages,
@@ -63,6 +67,9 @@ fn complete_buffered(
         body["tool_choice"] = Value::String("auto".into());
     }
     let body_text = serde_json::to_string(&body).map_err(|e| e.to_string())?;
+    if config.via_stado {
+        return through_stado(config, &body_text, max_tokens);
+    }
     let mut leased = lease::for_route(config, &config.model)?;
     let mut accounts_tried = BTreeSet::new();
     loop {
@@ -83,6 +90,33 @@ fn complete_buffered(
             Ok(_) => return Err(failure),
             Err(refused) => return Err(format!("{failure}; {refused}")),
         }
+    }
+}
+
+/// One request handed to Stado's inference alternatives: the completion the
+/// one that answered gave, Brama's own refusal of the request, or Stado's
+/// sentence naming every alternative and the command that answers a kept
+/// request.
+pub(super) fn through_stado(
+    config: &ChatConfig,
+    body_text: &str,
+    max_tokens: Option<usize>,
+) -> Result<Completion, String> {
+    use crate::agent::credential::stado_call::{call, Called};
+    let reservation =
+        crate::autonomy::requests::budget::reserve(config, &config.model, max_tokens)?;
+    match call(body_text)? {
+        Called::Answered(text) => {
+            let completion = parse_completion_response(&text)?;
+            crate::autonomy::requests::budget::settle(reservation, completion.usage.as_ref())?;
+            Ok(completion)
+        }
+        Called::RefusedByBrama { status, body } => Err(format!(
+            "POST model request through `{}` ({}) failed: HTTP {status}: {body}",
+            crate::agent::credential::stado_call::operation(),
+            config.endpoint_origin
+        )),
+        Called::Unanswered(sentence) => Err(sentence),
     }
 }
 

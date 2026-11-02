@@ -16,7 +16,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
 
     // An explicit valid provider endpoint turns Brama off; a malformed one
     // refuses rather than falling through to the gateway. A Brama this
-    // process cannot ask at all is stood in for before any request.
+    // process cannot ask at all is stood in for before any request. Through
+    // Stado's inference alternatives nothing is stood in for: Stado chooses
+    // per request which alternative answers.
     let explicit_refusal = crate::agent::credential::direct_refusal().is_some();
     if crate::agent::credential::direct_provider().is_none() && !explicit_refusal {
         if let Some(cause) = crate::agent::credential::stand_in::brama_unconfigured() {
@@ -26,6 +28,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         }
     }
     let direct = crate::agent::credential::stand_in::selected_provider();
+    let via_stado = direct.is_none() && crate::agent::credential::via_stado();
     let own_gateway = direct.as_ref().is_some_and(|provider| provider.own_gateway);
     let (endpoint, bearer_read, secret_read) = match &direct {
         Some(provider) => (
@@ -41,31 +44,28 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     };
     let (bearer_token, bearer_error) = match bearer_read {
         Ok(Some(token)) => (Some(token), None),
-        Ok(None) if direct.is_some() => (None, None),
+        Ok(None) if direct.is_some() || via_stado => (None, None),
         Ok(None) => (
             None,
             Some("BRAMA_TOKEN is required for Brama requests".to_owned()),
         ),
         Err(cause) => (None, Some(cause)),
     };
-    // The endpoint Stado resolves in Brama's place is asked for the model it
-    // declares, not for a Brama route alias it does not know.
-    let resolved_model = crate::agent::credential::stand_in::resolved_model();
-    let (selected_model, model_error) = match resolved_model {
-        Some(model) => (Some(model.to_owned()), None),
-        None => match inputs::selected_model(args.model.as_deref(), config.model.as_deref()) {
+    let (selected_model, model_error) =
+        match inputs::selected_model(args.model.as_deref(), config.model.as_deref()) {
             Ok(model) => (model, None),
             Err(cause) => (None, Some(cause)),
-        },
-    };
+        };
     let client = crate::control_plane::brama::BramaClient::configured(
         endpoint.clone(),
         bearer_token.clone(),
     );
+    // Through Stado no catalog is read here: the alternative that answers is
+    // chosen per request, and the request itself answers about its model.
     let catalog = crate::control_plane::model_catalog(&args.cwd, &client, false);
     // A Brama that refuses, fails or does not answer the catalog read does not
     // serve this process: the provider standing in for it serves the turn.
-    if direct.is_none() && !explicit_refusal {
+    if direct.is_none() && !explicit_refusal && !via_stado {
         if let Err(error) = &catalog {
             if crate::agent::credential::stand_in::brama_not_serving(error) {
                 match crate::agent::credential::stand_in::engage(&format!(
@@ -97,11 +97,13 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
     };
     let catalog_error = bare_model_error.or(match (&selected_model, &catalog) {
         (None, _) => Some("no model selected; choose a model from /model".to_owned()),
+        // Through Stado there is no catalog to read: the request answers.
+        (_, Err(_)) if via_stado => None,
         (_, Err(error)) => Some(error.to_string()),
         (Some(model), Ok(_)) if crate::model_router::is_virtual_model_route(model) => None,
         (Some(model), Ok(catalog)) => catalog.resolve(model).err().map(|error| error.to_string()),
     });
-    if let Err(error) = &catalog {
+    if let (Err(error), false) = (&catalog, via_stado) {
         eprintln!("jeden: model catalog could not supply image modalities: {error}");
     }
     let image_capable_models: std::collections::BTreeSet<String> = catalog
@@ -131,20 +133,17 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             }
         })
     };
-    let endpoint_error = if endpoint.is_none() {
+    let endpoint_error = if endpoint.is_none() && !via_stado {
         let route = crate::agent::credential::brama_route();
         match &route.source {
             crate::agent::credential::Source::DirectRefused(cause) => Some(cause.clone()),
             other => {
                 let base =
-                    "BRAMA_URL is required; declare Jeden's route with `stado service directory \
-                    consumer add brama jeden --capability model-routing --target <this host>` or \
-                    an endpoint Stado hands out in Brama's place (`stado config set \
-                    capabilities.inference.endpoint.url <url>` and \
-                    `capabilities.inference.endpoint.model <model>`), export BRAMA_URL, or set \
-                    JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider";
+                    "BRAMA_URL is required; install Stado so each request goes to its inference \
+                    alternatives (`stado capabilities call inference --consumer jeden`), export \
+                    BRAMA_URL, or set JEDEN_MODEL_ENDPOINT to an OpenAI-compatible provider";
                 Some(match other.refusal() {
-                    Some(cause) => format!("{base} (Stado did not route it: {cause})"),
+                    Some(cause) => format!("{base} ({cause})"),
                     None => base.to_owned(),
                 })
             }
@@ -153,6 +152,9 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         None
     };
     let (secret, secret_error) = match secret_read {
+        // Through Stado nothing is signed here: the alternative Stado asks
+        // presents what it needs.
+        _ if via_stado => (String::new(), None),
         Ok(secret) if !secret.is_empty() || direct.is_some() => (secret, None),
         Ok(_) | Err(env::VarError::NotPresent) => (
             String::new(),
@@ -165,13 +167,13 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             )),
         ),
     };
-    let inherited_lease = if direct.is_some() {
+    let inherited_lease = if direct.is_some() || via_stado {
         Ok(None)
     } else {
         crate::model_router::lease::inherited()
     };
     let (agent_id, agent_error) =
-        match inputs::agent_id(config.agent_id.as_deref(), direct.is_some()) {
+        match inputs::agent_id(config.agent_id.as_deref(), direct.is_some() || via_stado) {
             Ok(value) => (value, None),
             Err(cause) => (String::new(), Some(cause)),
         };
@@ -195,6 +197,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         .or_else(|| configured_fallbacks.as_ref().err().cloned())
         .or_else(|| configured_promotions.as_ref().err().cloned());
     let catalog_unanswered = precondition_error.is_none()
+        && !via_stado
         && matches!((&selected_model, &catalog), (Some(_), Err(error)) if error.left_unanswered());
     let config_error = precondition_error
         .or(catalog_error)
@@ -252,22 +255,16 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
             Some(url) => url,
             None => String::new(),
         },
-        endpoint_via_stado: direct.is_none()
-            && matches!(
-                crate::agent::credential::brama_route().source,
-                crate::agent::credential::Source::Stado
-            ),
+        via_stado,
         endpoint_origin: if own_gateway {
             "Jeden's own gateway on its subscription grants".to_owned()
-        } else if resolved_model.is_some() {
-            "the OpenAI-compatible endpoint Stado's capability resolution (inference, consumer \
-             jeden) hands out in Brama's place"
-                .to_owned()
         } else if direct.is_some() {
             format!(
                 "OpenAI-compatible provider selected by {}",
                 crate::agent::credential::DIRECT_URL
             )
+        } else if via_stado {
+            crate::agent::credential::route_origin()
         } else {
             format!("Brama; {}", crate::agent::credential::route_origin())
         },
@@ -293,7 +290,7 @@ pub(crate) fn model_router_config(config: &Config, args: &Args) -> ChatConfig {
         fallbacks: resolved_fallbacks,
         context_promotions: resolved_promotions,
         image_capable_models,
-        via_brama: direct.is_none(),
+        via_brama: direct.is_none() && !via_stado,
         session_id: None,
         inherited_lease: match inherited_lease {
             Ok(lease) => lease,

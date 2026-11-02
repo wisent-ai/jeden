@@ -51,10 +51,10 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
                     value["route"] = json!("direct");
                     value["endpoint"] = json!(endpoint);
                     value["keySource"] = json!(if key.is_some() {
-                        match credential::standing_in() {
-                            Some("stado-resolved") => "stado-resolved",
-                            Some(_) => "own-gateway",
-                            None => "environment",
+                        if credential::standing_in().is_some() {
+                            "own-gateway"
+                        } else {
+                            "environment"
                         }
                     } else if stored {
                         "local-token-list"
@@ -70,6 +70,12 @@ pub(crate) fn request(method: &str, params: &Value) -> Answer {
                         value["keySource"] = json!("refused");
                         value["selected"] = Value::Null;
                         value["routeRefusal"] = json!(cause);
+                    } else if credential::via_stado() {
+                        value["route"] = json!("stado");
+                        value["endpoint"] = Value::Null;
+                        value["origin"] = json!(credential::route_origin());
+                        value["keySource"] = json!("not-needed");
+                        value["selected"] = Value::Null;
                     } else {
                         value["route"] = json!("brama");
                         value["endpoint"] = json!(credential::brama_route().url);

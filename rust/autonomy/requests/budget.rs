@@ -129,6 +129,13 @@ pub(crate) fn reserve(
     let Some(budget) = held(&ACTIVE, "the request budget owner")?.clone() else {
         return Ok(None);
     };
+    if config.via_stado {
+        return Err(format!(
+            "budget admission cannot bound {model}: request {} has a spending limit, and model requests go to {}, which states no price; export BRAMA_URL to run a budgeted request on a priced Brama route",
+            budget.request,
+            crate::agent::credential::route_origin()
+        ));
+    }
     let client = crate::control_plane::brama::BramaClient::configured(
         Some(config.url.clone()),
         Some(config.bearer_token.clone()),

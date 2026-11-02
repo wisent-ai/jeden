@@ -31,6 +31,23 @@ pub(super) fn brama_probe(
             );
         }
     }
+    // Through Stado nothing is dialled here: the probe reports the order
+    // Stado asks its alternatives in, read from Stado itself. Whether one
+    // answers is known only per request, so this is not a readiness claim.
+    if direct.is_none() && crate::agent::credential::via_stado() {
+        let origin = crate::agent::credential::route_origin();
+        return match crate::agent::credential::stado_call::alternatives() {
+            Ok(order) => HealthProbe::degraded(
+                "brama",
+                started,
+                format!(
+                    "{origin}; Stado asks them in the order {order}, and whether one answers is known per request"
+                ),
+                Some(json!({ "provider": "stado", "calledThrough": crate::agent::credential::stado_call::operation(), "order": order })),
+            ),
+            Err(cause) => HealthProbe::unavailable("brama", started, format!("{origin}; {cause}")),
+        };
+    }
     let is_direct = direct.is_some();
     let subsystem = if is_direct { "model" } else { "brama" };
     let active = match direct {

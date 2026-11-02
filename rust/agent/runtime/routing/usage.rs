@@ -15,6 +15,23 @@ pub(in crate::agent) fn usage_cost(
     model: &str,
     usage: &CompletionUsage,
 ) -> Option<Value> {
+    // Through Stado's alternatives no catalog states a price. An answer that
+    // used no tokens (an attested one) costs nothing at any price; any other
+    // is recorded without a cost, the reason said.
+    if crate::agent::credential::via_stado() {
+        let counts = [
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
+        ];
+        let nothing: f64 = Default::default();
+        if counts.iter().all(|tokens| *tokens <= nothing) {
+            return Some(json!({ "input": nothing, "output": nothing, "cacheRead": nothing, "cacheWrite": nothing, "total": nothing }));
+        }
+        eprintln!("jeden: {model} answered through Stado's inference alternatives, which state no price; the call is recorded without a cost");
+        return None;
+    }
     let client = match crate::control_plane::model_client() {
         Ok(client) => client,
         Err(error) => {
