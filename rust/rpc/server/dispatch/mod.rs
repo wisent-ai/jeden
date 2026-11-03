@@ -59,6 +59,7 @@ pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> 
             Ok(json!({"shuttingDown": true}))
         }
         method if method.starts_with("token/") => token::request(method, &request.params),
+        method if method.starts_with("star/") => star_request(method, &request.params),
         method if method.starts_with("chat-memory/") => {
             chat_memory::request(method, &request.params)
         }
@@ -76,4 +77,29 @@ pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> 
             .map_err(|error| error_response(Value::Null, "write_error", &error)),
         Err((code, message)) => Err(error_response(id, code, &message)),
     }
+}
+
+/// `star/status`, `star/dismiss` and `star/reset`: the same verbs and answer
+/// as `jeden star … --json`, so Jeden Desktop reads and changes the one
+/// record the terminal keeps.
+fn star_request(method: &str, params: &Value) -> Result<Value, (&'static str, String)> {
+    if params.as_object().is_some_and(|fields| !fields.is_empty()) {
+        return Err((
+            "invalid_params",
+            format!("{method} takes no parameters; it was sent {params}"),
+        ));
+    }
+    let status = match method {
+        "star/status" => crate::star::status(),
+        "star/dismiss" => crate::star::dismiss(),
+        "star/reset" => crate::star::reset(),
+        other => {
+            return Err((
+                "method_not_found",
+                format!("unknown method: {other}; star answers star/status, star/dismiss and star/reset"),
+            ))
+        }
+    }
+    .map_err(|cause| ("star_record", cause))?;
+    serde_json::to_value(status).map_err(|error| ("internal_error", error.to_string()))
 }

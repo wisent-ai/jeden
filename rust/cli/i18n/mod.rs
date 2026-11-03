@@ -114,6 +114,16 @@ static STRINGS: &[(&str, &str, &str)] = &[
     ),
     ("en", "picker.tab.all", "All"),
     ("pl", "picker.tab.all", "Wszystkie"),
+    (
+        "en",
+        "star.request",
+        "★ You have sent {prompts} prompts with Jeden. If it helps you, a star on GitHub helps other people find it: {repository}\n`/star dismiss` stops this message.",
+    ),
+    (
+        "pl",
+        "star.request",
+        "★ Wysłałeś już {prompts} promptów w Jedenie. Jeśli Ci pomaga, gwiazdka na GitHubie pomoże innym go znaleźć: {repository}\n`/star dismiss` wyłącza tę wiadomość.",
+    ),
 ];
 
 /// Look up `key` for `lang`: hand-written rows first, then the generated

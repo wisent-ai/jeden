@@ -9,6 +9,12 @@ use crate::tui::view::picker::spec::PickerItem;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandOutcome {
     Text(String),
+    /// A model answer followed by a notice the terminal shows as its own
+    /// system block under the answer (the GitHub star request).
+    Noticed {
+        answer: String,
+        notice: String,
+    },
     Exit(String),
     Picker(PickerSpec),
 }
@@ -21,6 +27,7 @@ impl CommandOutcome {
     pub fn into_text(self) -> String {
         match self {
             Self::Text(text) => text,
+            Self::Noticed { answer, notice } => format!("{}\n\n{}", answer.trim_end(), notice),
             Self::Exit(text) => text,
             Self::Picker(spec) => {
                 let mut lines = vec![spec.title, spec.prompt];

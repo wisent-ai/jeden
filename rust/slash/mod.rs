@@ -52,6 +52,7 @@ pub fn handle_local(context: &SlashContext<'_>, input: &str) -> Option<Result<St
         "/stats" => Some(commands::handle_doctor(context)),
         "/setup" => Some(setup::handle_text(args, context)),
         "/onboarding" => Some(crate::onboarding::text(args, context.cwd)),
+        "/star" => Some(crate::star::command::slash(args)),
         "/usage" => Some(commands::usage::handle_usage(args, context)),
 
         "/session" => Some(modes::session::handle_session(args, context)),

@@ -9,5 +9,5 @@ pub use client::{ClientError, EventStream, SessionClient, SessionTransport, Tran
 pub use session::{AgentSession, EventSubscription};
 pub use types::{
     ApprovalRequest, Capabilities, ElicitationRequest, InteractionHandler, PromptRequest,
-    PromptResult, RpcErrorData, SessionEvent, SessionEventKind, SessionOptions,
+    PromptResult, RpcErrorData, SessionEvent, SessionEventKind, SessionOptions, StarRequest,
 };

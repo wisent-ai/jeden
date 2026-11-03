@@ -92,6 +92,20 @@ pub struct PromptResult {
     pub text: String,
     pub session_path: PathBuf,
     pub completion: Value,
+    /// The GitHub star request when this prompt made it due, worded in the
+    /// workspace's language with the repository it links to; absent on every
+    /// other prompt. A client shows it once beside the answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub star_request: Option<StarRequest>,
+}
+
+/// The GitHub star request a prompt made due.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct StarRequest {
+    pub text: String,
+    pub repository: String,
+    pub prompts: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

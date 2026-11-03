@@ -13,6 +13,7 @@
   { "name": "settings", "description": "Open settings menu", "view": true },
   { "name": "setup", "description": "Guided environment configuration", "view": true },
   { "name": "onboarding", "description": "Explain Jeden and reach the first successful task", "view": true },
+  { "name": "star", "description": "Show, dismiss or reset the GitHub star request made after five prompts", "view": false },
   { "name": "providers", "description": "Open provider setup", "view": false },
   { "name": "plan", "description": "Toggle plan mode", "view": true },
   { "name": "plan-review", "description": "Review latest plan", "view": false },

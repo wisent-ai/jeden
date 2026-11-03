@@ -256,6 +256,23 @@ export const managementCommands = [
       "Dropped or passed items are refused as not workable, and any dependency not passed refuses activation as <code>&lt;id&gt; is blocked by unresolved dependencies: ...</code>.",
     ],
   },
+  {
+    path: "star",
+    group: "GitHub star request",
+    invocation: "jeden star [status|dismiss|reset] [--json]",
+    purpose: "Read, dismiss or restart the request for a GitHub star that Jeden makes once, after the fifth successful prompt.",
+    inputs: [
+      "Optional action: <code>status</code> (the default) reads the request; <code>dismiss</code> stops it from being shown; <code>reset</code> sets the count back to zero so the request is made again after five prompts. <code>--json</code> prints the same status as one JSON object.",
+      "The same verbs are <code>/star …</code> in a session and the RPC methods <code>star/status</code>, <code>star/dismiss</code> and <code>star/reset</code>, which take no parameters.",
+    ],
+    effect: "Every successful agent prompt counts, whichever surface sent it: the terminal, <code>jeden run</code>, and <code>session/prompt</code> over RPC, which Jeden Desktop uses. A slash command, <code>--model-only</code> and a continuation of retained work do not count. The prompt that brings the count to five shows the request once: the terminal prints it as a system message under the answer, <code>jeden run</code> prints it on standard error so standard output and <code>--json</code> keep only the answer, and <code>session/prompt</code> returns it as <code>starRequest</code> (<code>text</code>, <code>repository</code>, <code>prompts</code>). The count and the moments the request was shown and dismissed (Unix seconds) are kept per user in <code>~/.jeden/star.json</code>, replaced whole under the lock <code>~/.jeden/star.lock</code>, so two Jeden processes finishing at once both count. The status names <code>stage</code> (<code>counting</code>, <code>due</code>, <code>shown</code> or <code>dismissed</code>), <code>prompts</code>, <code>threshold</code>, <code>repository</code>, <code>file</code>, <code>shownAt</code> and <code>dismissedAt</code>. The real journey is <code>JEDEN_BIN=… JEDEN_TEST_SOURCE_REVISION=… JEDEN_TEST_PROVIDER_ENDPOINT=… JEDEN_TEST_MODEL=… node tests/star/journey.mjs</code>.",
+    refusals: [
+      "An unknown action is refused as <code>star: unknown action \"&lt;verb&gt;\"; usage: jeden star [status|dismiss|reset] [--json]</code>; a second argument as <code>star: unexpected argument \"&lt;argument&gt;\"; …</code>.",
+      "A record that is not a star record is refused as <code>&lt;file&gt; is not a star record (&lt;cause&gt;); `jeden star reset` writes a new one</code>; an unreadable one names the file and the operating system's cause.",
+      "A prompt whose count cannot be kept still returns its answer; standard error says <code>jeden: this prompt is not counted toward the GitHub star request: &lt;cause&gt;</code>.",
+      "Over RPC a parameter is refused as <code>invalid_params</code>, an unknown <code>star/…</code> method as <code>method_not_found</code> naming the three methods, and a record failure as <code>star_record</code> with the same cause.",
+    ],
+  },
 ];
 
 /** The page of `jeden completions <shell>` for one supported shell. */

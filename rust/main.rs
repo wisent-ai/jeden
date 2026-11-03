@@ -40,6 +40,7 @@ pub mod rpc;
 pub mod sdk;
 mod session_import;
 pub mod slash;
+pub(crate) mod star;
 pub(crate) mod tally;
 pub mod task_runtime;
 pub mod tool_runtime;
@@ -258,6 +259,7 @@ pub fn main() -> ExitCode {
         Command::ChatMemory => cli::chat_memory::command(&args),
         Command::Stats => stats_command(&args),
         Command::Gallery => gallery_command(&args),
+        Command::Star => star::command::command(&args),
     };
     // The standalone gateway a stand-in started lives as long as the command
     // that needed it; a gateway that cannot be stopped is said, not hidden.

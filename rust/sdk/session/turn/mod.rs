@@ -240,11 +240,28 @@ impl AgentSession {
                 completion: completion.clone(),
             },
         })?;
+        // An agent prompt counts toward the GitHub star request; a session
+        // control (`/new`, `/todo …`), a continuation or a model-only call
+        // does not.
+        let agent_prompt =
+            !continuing && !args.model_only && !request.prompt.trim_start().starts_with('/');
+        let star_request = match agent_prompt {
+            true => crate::star::observe_prompt_reporting().map(|status| {
+                let lang = crate::cli::i18n::lang_code(&args.cwd);
+                crate::sdk::StarRequest {
+                    text: crate::star::request_text(&lang, &status),
+                    repository: status.repository.to_string(),
+                    prompts: status.prompts,
+                }
+            }),
+            false => None,
+        };
         Ok(PromptResult {
             request_id,
             text,
             session_path,
             completion,
+            star_request,
         })
     }
 }

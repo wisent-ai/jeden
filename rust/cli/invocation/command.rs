@@ -43,6 +43,7 @@ pub(crate) enum Command {
     Lease,
     ChatMemory,
     Stats,
+    Star,
     Gallery,
 }
 
@@ -94,6 +95,7 @@ impl Command {
                 | Command::Asks
                 | Command::Copy
                 | Command::Hillclimb
+                | Command::Star
         )
     }
 }

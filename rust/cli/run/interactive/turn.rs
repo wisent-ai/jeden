@@ -271,6 +271,13 @@ pub(super) fn run_turn(
     };
     if !input.trim_start().starts_with('/') && result.is_ok() {
         crate::onboarding::observe_successful_turn();
+        if let Some(request) = crate::star::observe_prompt_reporting() {
+            let lang = crate::cli::i18n::lang_code(&run_args.cwd);
+            return result.map(|answer| tui::CommandOutcome::Noticed {
+                answer,
+                notice: crate::star::request_text(&lang, &request),
+            });
+        }
     }
     result.map(tui::CommandOutcome::text)
 }

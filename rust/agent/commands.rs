@@ -73,8 +73,19 @@ pub(crate) fn btw_command_with(
     run_command_with(&side_args, hooks)
 }
 
+/// `jeden run`: a successful agent prompt counts toward the GitHub star
+/// request, which is said on standard error so stdout and `--json` keep only
+/// the answer. A slash command and `--model-only` are not agent prompts.
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
-    run_command_with(args, &mut RunHooks::inert())
+    let answer = run_command_with(args, &mut RunHooks::inert())?;
+    let prompt = args.positionals.join(" ");
+    if !args.model_only && !prompt.trim_start().starts_with('/') {
+        if let Some(request) = crate::star::observe_prompt_reporting() {
+            let lang = crate::cli::i18n::lang_code(&args.cwd);
+            eprintln!("{}", crate::star::request_text(&lang, &request));
+        }
+    }
+    Ok(answer)
 }
 
 /// Run a session-scoped slash in the one-shot CLI by opening the last durable

@@ -184,6 +184,11 @@ pub(super) fn apply_turn_result(
             }
             false
         }
+        Ok(CommandOutcome::Noticed { answer, notice }) => {
+            messages.push(Message::new(Role::Assistant, answer.trim().to_string()));
+            messages.push(Message::new(Role::System, notice.trim().to_string()));
+            false
+        }
         Ok(CommandOutcome::Exit(text)) => {
             messages.push(Message::new(Role::System, text.trim().to_string()));
             true

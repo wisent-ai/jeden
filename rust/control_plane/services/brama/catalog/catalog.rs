@@ -96,18 +96,51 @@ fn default_true() -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", try_from = "WireCatalog")]
 pub struct ModelCatalog {
-    #[serde(default, alias = "revision")]
     pub catalog_revision: String,
-    #[serde(default)]
     pub version: String,
-    /// Brama answers `models`; an OpenAI-compatible provider named by
-    /// `JEDEN_MODEL_ENDPOINT` answers `data`, whose entries carry the same `id`.
-    #[serde(default, alias = "data")]
     pub models: Vec<ModelEntry>,
-    #[serde(default)]
     pub degraded: bool,
+}
+
+/// A catalogue as it arrives. Brama answers `models`; an OpenAI-compatible
+/// provider named by `JEDEN_MODEL_ENDPOINT` answers `data`, whose entries
+/// carry the same `id`. Some providers (llama.cpp's server, Ollama) answer
+/// both, their `models` in a shape of their own: `data` is then the list,
+/// and `models` is read only when `data` is absent.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireCatalog {
+    #[serde(default, alias = "revision")]
+    catalog_revision: String,
+    #[serde(default)]
+    version: String,
+    #[serde(default)]
+    models: Option<serde_json::Value>,
+    #[serde(default)]
+    data: Option<Vec<ModelEntry>>,
+    #[serde(default)]
+    degraded: bool,
+}
+
+impl TryFrom<WireCatalog> for ModelCatalog {
+    type Error = String;
+
+    fn try_from(wire: WireCatalog) -> Result<Self, Self::Error> {
+        let models = match (wire.data, wire.models) {
+            (Some(data), _) => data,
+            (None, Some(models)) => serde_json::from_value(models)
+                .map_err(|error| format!("catalog `models` is not a list of routes: {error}"))?,
+            (None, None) => Vec::new(),
+        };
+        Ok(Self {
+            catalog_revision: wire.catalog_revision,
+            version: wire.version,
+            models,
+            degraded: wire.degraded,
+        })
+    }
 }
 
 impl ModelCatalog {
