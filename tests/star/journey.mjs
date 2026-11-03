@@ -114,7 +114,13 @@ try {
   for (const name of ['BRAMA_URL', 'BRAMA_TOKEN', 'WISENT_APP_AGENT_AUTH_SECRET', 'JEDEN_MODEL_KEY',
     'JEDEN_DATABASE_URL', 'JEDEN_LEASE']) delete env[name];
   if (token) env.JEDEN_MODEL_KEY = token;
-  const prompt = (text) => invoke(binary, ['run', text, '--model', model, '--cwd', workspace], env);
+  // A person's run: `jeden run` under script(1), whose pty is the run's
+  // standard error, so it counts and the request is said there. A run with
+  // piped standard error (`piped`) has nobody to read the request and must
+  // not count.
+  const prompt = (text) => invoke('/usr/bin/script',
+    ['-q', '/dev/null', binary, 'run', text, '--model', model, '--cwd', workspace], env);
+  const piped = (text) => invoke(binary, ['run', text, '--model', model, '--cwd', workspace], env);
   const star = (...words) => JSON.parse(succeeds(invoke(binary, ['star', ...words, '--json'], env)));
 
   // 1. Nothing recorded yet: counting from zero, nothing written by a read.
@@ -137,33 +143,36 @@ try {
   refuses(extra, 'star: unexpected argument "now"; usage: jeden star [status|dismiss|reset] [--json]');
   report.cases.push({ name: 'unknown action and extra argument are usage refusals' });
 
-  // 3. A model-only call and a slash command are not agent prompts.
+  // 3. A model-only call, a slash command and a run with piped standard
+  //    error are not counted: the first two are not agent prompts, and the
+  //    third has nobody to read the request it would make.
   succeeds(invoke(binary, ['run', 'Respond exactly: OK', '--model', model, '--model-only', '--cwd', workspace], env));
   succeeds(invoke(binary, ['run', '/star', '--cwd', workspace], env));
-  assert.ok(!existsSync(record), '--model-only and a slash command must not count');
-  report.cases.push({ name: '--model-only and /star do not count' });
+  const unread = piped('Respond with the single word: unread');
+  succeeds(unread);
+  assert.ok(!unread.stderr.includes(REQUEST), 'a piped run must not show the request');
+  assert.ok(!existsSync(record), '--model-only, a slash command and a piped run must not count');
+  report.cases.push({ name: '--model-only, /star and a piped run do not count' });
 
-  // 4. Four real prompts count without the request; the fifth shows it once.
+  // 4. Four real prompts on a terminal count without the request; the fifth
+  //    shows it once. script(1) carries the run's stdout and stderr on one
+  //    terminal, so the request is read from that stream.
   for (let sent = 1; sent <= 4; sent += 1) {
-    const answer = prompt(`Respond with the single word: ${['one', 'two', 'three', 'four'][sent - 1]}`);
-    succeeds(answer);
-    assert.ok(!answer.stderr.includes(REQUEST), `prompt ${sent} must not show the request`);
+    const answer = succeeds(prompt(`Respond with the single word: ${['one', 'two', 'three', 'four'][sent - 1]}`));
+    assert.ok(!answer.includes(REQUEST), `prompt ${sent} must not show the request`);
     assert.deepEqual(kept(), { status: 'in_progress', screen: 'counting', actions: sent, events: 0 });
   }
-  const fifth = prompt('Respond with the single word: five');
-  const fifthAnswer = succeeds(fifth);
-  assert.ok(fifth.stderr.includes(REQUEST), `the fifth prompt must show the request: ${fifth.stderr}`);
-  assert.ok(fifth.stderr.includes('https://github.com/wisent-ai/jeden'));
-  assert.ok(!fifthAnswer.includes(REQUEST), 'the request must stay off standard output');
+  const fifth = succeeds(prompt('Respond with the single word: five'));
+  assert.ok(fifth.includes(REQUEST), `the fifth prompt must show the request: ${fifth}`);
+  assert.ok(fifth.includes('https://github.com/wisent-ai/jeden'));
   const shown = kept();
   assert.deepEqual(shown, { status: 'in_progress', screen: 'request', actions: 5, events: 0 });
   assert.equal(star().stage, 'shown');
-  report.cases.push({ name: 'fifth real prompt shows the request on stderr, once', record: shown });
+  report.cases.push({ name: 'fifth real prompt on a terminal shows the request, once', record: shown });
 
   // 5. A sixth prompt counts and shows nothing.
-  const sixth = prompt('Respond with the single word: six');
-  succeeds(sixth);
-  assert.ok(!sixth.stderr.includes(REQUEST), 'the request is shown once');
+  const sixth = succeeds(prompt('Respond with the single word: six'));
+  assert.ok(!sixth.includes(REQUEST), 'the request is shown once');
   assert.deepEqual(kept(), { status: 'in_progress', screen: 'request', actions: 6, events: 0 });
   report.cases.push({ name: 'sixth prompt counts without a second request' });
 
@@ -180,10 +189,7 @@ try {
   assert.equal(status.stage, 'counting');
   assert.equal(status.actions, 0);
   assert.equal(kept().actions, 0);
-  succeeds(invoke(binary, ['run', 'Respond with the single word: a', '--model', model, '--cwd', workspace], env));
-  succeeds(invoke(binary, ['run', 'Respond with the single word: b', '--model', model, '--cwd', workspace], env));
-  succeeds(invoke(binary, ['run', 'Respond with the single word: c', '--model', model, '--cwd', workspace], env));
-  succeeds(invoke(binary, ['run', 'Respond with the single word: d', '--model', model, '--cwd', workspace], env));
+  for (const word of ['a', 'b', 'c', 'd']) succeeds(prompt(`Respond with the single word: ${word}`));
   assert.equal(kept().actions, 4);
   const [opened, slashed, prompted, again, refusedParams, refusedMethod, statusAnswer] = await rpc(binary, env, [
     { id: 'open', method: 'session/new', params: { cwd: workspace, model } },
@@ -219,9 +225,8 @@ try {
   const [dismissed] = await rpc(binary, env, [{ id: 'star-dismiss', method: 'star/dismiss', params: {} }]);
   assert.equal(dismissed.result.stage, 'dismissed');
   assert.equal(kept().status, 'skipped');
-  const afterDismiss = prompt('Respond with the single word: seven');
-  succeeds(afterDismiss);
-  assert.ok(!afterDismiss.stderr.includes(REQUEST));
+  const afterDismiss = succeeds(prompt('Respond with the single word: seven'));
+  assert.ok(!afterDismiss.includes(REQUEST));
   assert.equal(star().stage, 'dismissed');
   report.cases.push({ name: 'star/dismiss stops the request', record: kept() });
 
@@ -233,10 +238,8 @@ try {
   assert.equal(broken.status, 1);
   refuses(broken, `${record} is not a journey state`);
   refuses(broken, '`jeden star reset` sets it aside and counts from zero');
-  const uncounted = prompt('Respond with the single word: eight');
-  succeeds(uncounted);
-  assert.ok(uncounted.stderr.includes('jeden: this prompt is not counted toward the GitHub star request:'),
-    uncounted.stderr);
+  const uncounted = succeeds(prompt('Respond with the single word: eight'));
+  assert.ok(uncounted.includes('jeden: this prompt is not counted toward the GitHub star request:'), uncounted);
   assert.equal(readFileSync(record, 'utf8'), '{"prompts":"many"}\n', 'a broken file is not overwritten by a prompt');
   const recovered = invoke(binary, ['star', 'reset', '--json'], env);
   status = JSON.parse(succeeds(recovered));

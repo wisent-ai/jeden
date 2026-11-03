@@ -74,12 +74,16 @@ pub(crate) fn btw_command_with(
 }
 
 /// `jeden run`: a successful agent prompt counts toward the GitHub star
-/// request, which is said on standard error so stdout and `--json` keep only
-/// the answer. A slash command and `--model-only` are not agent prompts.
+/// request when a person reads this terminal, and the request is said on
+/// standard error so stdout and `--json` keep only the answer. A slash
+/// command and `--model-only` are not agent prompts, and a run whose
+/// standard error is no terminal (a script, a pipe, an agent) does not count:
+/// nobody would read the request it made.
 pub(crate) fn run_command(args: &Args) -> Result<String, String> {
+    use std::io::IsTerminal;
     let answer = run_command_with(args, &mut RunHooks::inert())?;
     let prompt = args.positionals.join(" ");
-    if !args.model_only && !prompt.trim_start().starts_with('/') {
+    if !args.model_only && !prompt.trim_start().starts_with('/') && std::io::stderr().is_terminal() {
         if let Some(request) = crate::star::observe_prompt_reporting() {
             let lang = crate::cli::i18n::lang_code(&args.cwd);
             eprintln!("{}", crate::star::request_text(&lang, &request));
