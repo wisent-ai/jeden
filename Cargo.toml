@@ -41,7 +41,7 @@ path = "tests/network/egress.rs"
 # By git rev, not by sibling path: a path dependency outside this repository
 # resolves only on a machine that happens to hold both checkouts, and nowhere in
 # CI. `image-video-router` consumes the same crate this way.
-wisent-onboarding-client = { git = "https://github.com/wisent-ai/echo-web", rev = "e14fe9eb99a1ae7792bafdfe570e21e43810519c", package = "wisent-onboarding-client" }
+wisent-onboarding-client = { git = "https://github.com/wisent-ai/echo-web", rev = "6d20fe6c1bc2403c4cbce0a8217b65747e4ab0b3", package = "wisent-onboarding-client" }
 pursuit = { git = "https://github.com/wisent-ai/pursuit", rev = "8955ef3db3a91a22cefa73bbd4f9fb36ec6f3e44" }
 agent-client-protocol = { version = "=1.2.0", features = ["unstable_elicitation"] }
 base64 = "0.22"
