@@ -1,6 +1,10 @@
 //! Build version identity is `<base>+dev.<commits>.<short-sha>[.dirty]`.
-//! A non-empty `JEDEN_BUILD_VERSION` takes precedence over the generated identity;
-//! without one, a tree git cannot describe fails the build naming git's answer.
+//! A non-empty `JEDEN_BUILD_VERSION` takes precedence over the generated identity.
+//! A tree exported without `.git` (Stado's release worker and install builds)
+//! is identified by the commit Stado states in `WISENT_SOURCE_COMMIT`:
+//! `<base>+commit.<short-sha>`, since the export holds no history to count.
+//! Without either, a tree git cannot describe fails the build naming git's
+//! answer and both variables.
 //! The build also stamps the target triple it compiles for, which self-update
 //! fetches the release of.
 
@@ -48,9 +52,26 @@ fn main() {
             panic!("JEDEN_BUILD_VERSION is not Unicode: {value:?}")
         }
     };
-    let version = match stated {
-        Some(version) => version,
-        None => {
+    println!("cargo:rerun-if-env-changed=WISENT_SOURCE_COMMIT");
+    let exported = match env::var("WISENT_SOURCE_COMMIT") {
+        Ok(commit) if commit.len() >= 7 && commit.bytes().all(|byte| byte.is_ascii_hexdigit()) => {
+            Some(format!("{base}+commit.{}", &commit[..7]))
+        }
+        Ok(commit) if commit.is_empty() => None,
+        Ok(commit) => panic!(
+            "WISENT_SOURCE_COMMIT {commit:?} is not a commit id (at least seven hex digits)"
+        ),
+        Err(env::VarError::NotPresent) => None,
+        Err(env::VarError::NotUnicode(value)) => {
+            panic!("WISENT_SOURCE_COMMIT is not Unicode: {value:?}")
+        }
+    };
+    let version = match (stated, exported) {
+        (Some(version), _) => version,
+        (None, Some(version)) => version,
+        (None, None) => {
+            const WAY_OUT: &str =
+                "set JEDEN_BUILD_VERSION, or WISENT_SOURCE_COMMIT for an exported tree, to build without git";
             // The branch HEAD names is watched too, so a commit on it rebuilds;
             // a detached HEAD names no branch, and `.git/HEAD` itself changes.
             match git(&["rev-parse", "--symbolic-full-name", "HEAD"]) {
@@ -58,11 +79,11 @@ fn main() {
                     println!("cargo:rerun-if-changed=.git/{reference}");
                 }
                 Ok(_detached) => {}
-                Err(cause) => panic!("{cause}; set JEDEN_BUILD_VERSION to build without git"),
+                Err(cause) => panic!("{cause}; {WAY_OUT}"),
             }
             match described(&base) {
                 Ok(version) => version,
-                Err(cause) => panic!("{cause}; set JEDEN_BUILD_VERSION to build without git"),
+                Err(cause) => panic!("{cause}; {WAY_OUT}"),
             }
         }
     };

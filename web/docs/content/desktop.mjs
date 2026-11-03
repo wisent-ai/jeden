@@ -87,6 +87,12 @@ export const desktopPages = [
         ],
       },
       {
+        title: "GitHub star request",
+        paragraphs: [
+          "Jeden counts every successful agent prompt, whichever surface sent it, and asks once for a GitHub star when the count reaches five (<a href=\"/docs/cli/star\">jeden star</a>). When the app's prompt is that fifth one, Jeden's <code>session/prompt</code> answer carries <code>starRequest</code> (<code>text</code>, <code>repository</code>, <code>prompts</code>) and <strong>Conversation</strong> shows it above the composer. <strong>Star on GitHub</strong> opens the repository Jeden named; <strong>Not now</strong> hides it, and it does not return because Jeden already recorded it as shown; <strong>Don't ask again</strong> sends <code>star/dismiss</code> and closes it once Jeden answers with the <code>dismissed</code> stage. A refused dismissal stays on screen with Jeden's message and code; a <code>starRequest</code> without text, an https repository or a whole prompt count is shown as <strong>Star request</strong> naming the field. <code>JEDEN_DESKTOP_TEST_STAR_REPORT=&lt;jeden&gt;/.build/star/&lt;run&gt;/report.json swift test --filter JedenStarTests</code> reads the RPC answers a real Jeden star journey recorded.",
+        ],
+      },
+      {
         title: "Retained tasks and asks of you",
         paragraphs: [
           "The Conversation screen's Tasks panel shows original requests, acceptance criteria, states, exact blocker details and verified session and event references; the full contract is on <a href=\"/docs/sessions\">sessions</a> and <a href=\"/docs/cli/todo\">task commands</a>. Pause, resume and cancel require an operator reason and the latest state revision. Add without running uses the native <code>/todo add</code> session command; Continue retained work uses <code>session/completion/continue</code>, so it creates no synthetic user request. Under each request the panel prints its time to completion in the words <code>jeden todo list</code> prints, from the snapshot's <code>timing</code>. An interim <code>assistantMessage</code> does not end the turn, and only a native verified completion snapshot marks work complete.",
