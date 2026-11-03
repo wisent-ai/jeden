@@ -1952,7 +1952,7 @@ dependencies = [
  "sha2",
  "shell-words",
  "stado-database",
- "stado-wait",
+ "stado-wait 0.1.0 (git+https://github.com/wisent-ai/stado)",
  "tar",
  "tiny_http",
  "tokio",
@@ -3881,8 +3881,18 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "stado-wait",
+ "stado-wait 0.1.0 (git+https://github.com/wisent-ai/stado)",
  "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "stado-wait"
+version = "0.1.0"
+source = "git+https://github.com/wisent-ai/stado?rev=692c0438d24117735c61373c0c178f1c1e21b080#692c0438d24117735c61373c0c178f1c1e21b080"
+dependencies = [
+ "chrono",
+ "reqwest",
  "tokio",
 ]
 
@@ -4684,7 +4694,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.48.0",
 ]
 
 [[package]]
@@ -4923,15 +4933,17 @@ dependencies = [
 [[package]]
 name = "wisent-onboarding-client"
 version = "0.1.0"
-source = "git+https://github.com/wisent-ai/echo-web?rev=17f8a8a52add00b41f515d98682e5f33f86f71b1#17f8a8a52add00b41f515d98682e5f33f86f71b1"
+source = "git+https://github.com/wisent-ai/echo-web?rev=e14fe9eb99a1ae7792bafdfe570e21e43810519c#e14fe9eb99a1ae7792bafdfe570e21e43810519c"
 dependencies = [
  "async-trait",
  "reqwest",
  "serde",
  "serde_json",
  "sha2",
+ "stado-wait 0.1.0 (git+https://github.com/wisent-ai/stado?rev=692c0438d24117735c61373c0c178f1c1e21b080)",
  "thiserror",
  "time",
+ "url",
  "uuid",
 ]
 

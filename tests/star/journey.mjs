@@ -1,8 +1,9 @@
 // Real journey: the GitHub star request Jeden makes once, after the fifth
 // successful agent prompt, against a real OpenAI-compatible model provider.
-// It counts `jeden run` prompts and an RPC `session/prompt`, reads the record
-// Jeden keeps (~/.jeden/star.json in an isolated home) after every step,
-// checks that the request is shown on the fifth prompt and on no other, that
+// It counts `jeden run` prompts and an RPC `session/prompt`, reads the
+// star-request journey Jeden keeps through the shared onboarding runtime
+// (~/.jeden/star-request.json in an isolated home) after every step, checks
+// that the request is shown on the fifth prompt and on no other, that
 // --model-only and slash commands do not count, and exercises every verb and
 // refusal of `jeden star`, `/star` and the `star/*` RPC methods.
 // Inputs: JEDEN_BIN, JEDEN_TEST_SOURCE_REVISION, JEDEN_TEST_PROVIDER_ENDPOINT,
@@ -10,7 +11,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { commands } from '../model/credentials/commands.mjs';
@@ -32,8 +33,18 @@ const required = (name) => {
   return value;
 };
 const { invoke, succeeds, refuses } = commands({ root, area, report, redacted });
-const record = join(home, '.jeden/star.json');
-const kept = () => JSON.parse(readFileSync(record, 'utf8'));
+const record = join(home, '.jeden/star-request.json');
+// The one progress record of the star-request journey in the runtime's file:
+// its status, screen and counted actions.
+const kept = () => {
+  const stored = JSON.parse(readFileSync(record, 'utf8'));
+  const progress = Object.values(stored.progress);
+  assert.equal(progress.length, 1, JSON.stringify(stored.progress));
+  const [only] = progress;
+  const counted = only.answers.find((answer) => answer.question_id === 'successful_actions');
+  return { status: only.status, screen: only.current_screen_id, actions: counted?.answer_value ?? 0,
+    events: Object.keys(stored.events).length };
+};
 const REQUEST = 'a star on GitHub helps other people find it';
 
 // One RPC conversation with `jeden rpc`: requests are written in order and
@@ -108,8 +119,9 @@ try {
 
   // 1. Nothing recorded yet: counting from zero, nothing written by a read.
   let status = star();
+  assert.equal(status.product, 'jeden');
   assert.equal(status.stage, 'counting');
-  assert.equal(status.prompts, 0);
+  assert.equal(status.actions, 0);
   assert.equal(status.threshold, 5);
   assert.equal(status.repository, 'https://github.com/wisent-ai/jeden');
   assert.equal(status.file, record);
@@ -136,7 +148,7 @@ try {
     const answer = prompt(`Respond with the single word: ${['one', 'two', 'three', 'four'][sent - 1]}`);
     succeeds(answer);
     assert.ok(!answer.stderr.includes(REQUEST), `prompt ${sent} must not show the request`);
-    assert.deepEqual(kept(), { prompts: sent });
+    assert.deepEqual(kept(), { status: 'in_progress', screen: 'counting', actions: sent, events: 0 });
   }
   const fifth = prompt('Respond with the single word: five');
   const fifthAnswer = succeeds(fifth);
@@ -144,9 +156,7 @@ try {
   assert.ok(fifth.stderr.includes('https://github.com/wisent-ai/jeden'));
   assert.ok(!fifthAnswer.includes(REQUEST), 'the request must stay off standard output');
   const shown = kept();
-  const slash = JSON.parse(succeeds(invoke(binary, ['run', '/star status --json', '--cwd', workspace], env)));
-  assert.equal(slash.prompts, 6);
-  assert.equal(slash.stage, 'shown');
+  assert.deepEqual(shown, { status: 'in_progress', screen: 'request', actions: 5, events: 0 });
   assert.equal(star().stage, 'shown');
   report.cases.push({ name: 'fifth real prompt shows the request on stderr, once', record: shown });
 
@@ -154,25 +164,27 @@ try {
   const sixth = prompt('Respond with the single word: six');
   succeeds(sixth);
   assert.ok(!sixth.stderr.includes(REQUEST), 'the request is shown once');
-  assert.equal(kept().prompts, 6);
-  assert.equal(kept().shownAt, shown.shownAt);
+  assert.deepEqual(kept(), { status: 'in_progress', screen: 'request', actions: 6, events: 0 });
   report.cases.push({ name: 'sixth prompt counts without a second request' });
 
-  // 6. /star inside a session reads the same record.
-  const slash = JSON.parse(succeeds(invoke(binary, ['run', '/star status --json', '--cwd', workspace], env)));
-  assert.equal(JSON.parse(slash.text ?? slash).prompts ?? JSON.parse(slash.text).prompts, 6);
-  report.cases.push({ name: '/star reads the same record' });
+  // 6. /star inside a session reads the same journey.
+  const slashAnswer = succeeds(invoke(binary, ['run', '/star status --json', '--cwd', workspace], env));
+  const slash = JSON.parse(slashAnswer.trim().startsWith('{"text"') ? JSON.parse(slashAnswer).text : slashAnswer);
+  assert.equal(slash.actions, 6);
+  assert.equal(slash.stage, 'shown');
+  report.cases.push({ name: '/star reads the same journey' });
 
   // 7. Reset restarts the count; RPC prompts count and the fifth carries
   //    starRequest, which is what Jeden Desktop shows.
   status = star('reset');
   assert.equal(status.stage, 'counting');
-  assert.deepEqual(kept(), { prompts: 0 });
+  assert.equal(status.actions, 0);
+  assert.equal(kept().actions, 0);
   succeeds(invoke(binary, ['run', 'Respond with the single word: a', '--model', model, '--cwd', workspace], env));
   succeeds(invoke(binary, ['run', 'Respond with the single word: b', '--model', model, '--cwd', workspace], env));
   succeeds(invoke(binary, ['run', 'Respond with the single word: c', '--model', model, '--cwd', workspace], env));
   succeeds(invoke(binary, ['run', 'Respond with the single word: d', '--model', model, '--cwd', workspace], env));
-  assert.equal(kept().prompts, 4);
+  assert.equal(kept().actions, 4);
   const [opened, slashed, prompted, again, refusedParams, refusedMethod, statusAnswer] = await rpc(binary, env, [
     { id: 'open', method: 'session/new', params: { cwd: workspace, model } },
     { id: 'slash', method: 'session/prompt', params: (seen) => ({ sessionId: seen[0].answer.result.sessionId,
@@ -199,36 +211,42 @@ try {
   assert.match(JSON.stringify(refusedMethod.error), /method_not_found/);
   assert.match(JSON.stringify(refusedMethod.error), /star answers star\/status, star\/dismiss and star\/reset/);
   assert.equal(statusAnswer.result.stage, 'shown');
-  assert.equal(statusAnswer.result.prompts, 6);
+  assert.equal(statusAnswer.result.actions, 6);
   report.cases.push({ name: 'RPC prompt carries starRequest on the fifth prompt only; star/* refusals',
     starRequest: prompted.result.starRequest });
 
-  // 8. Dismiss through RPC, as Jeden Desktop does; it holds after a reset only
-  //    until the count reaches five again.
+  // 8. Dismiss through RPC, as Jeden Desktop does; it holds until a reset.
   const [dismissed] = await rpc(binary, env, [{ id: 'star-dismiss', method: 'star/dismiss', params: {} }]);
   assert.equal(dismissed.result.stage, 'dismissed');
-  assert.equal(typeof kept().dismissedAt, 'number');
+  assert.equal(kept().status, 'skipped');
   const afterDismiss = prompt('Respond with the single word: seven');
   succeeds(afterDismiss);
   assert.ok(!afterDismiss.stderr.includes(REQUEST));
   assert.equal(star().stage, 'dismissed');
   report.cases.push({ name: 'star/dismiss stops the request', record: kept() });
 
-  // 9. A record that is not a star record is refused naming the file and the
-  //    way out; a prompt still answers and says why it was not counted.
+  // 9. A file that holds no journey state is refused naming the file and the
+  //    way out; a prompt still answers and says why it was not counted; a
+  //    reset sets the file aside and counts from zero.
   writeFileSync(record, '{"prompts":"many"}\n');
   const broken = invoke(binary, ['star', '--json'], env);
   assert.equal(broken.status, 1);
-  refuses(broken, `${record} is not a star record`);
-  refuses(broken, '`jeden star reset` writes a new one');
+  refuses(broken, `${record} is not a journey state`);
+  refuses(broken, '`jeden star reset` sets it aside and counts from zero');
   const uncounted = prompt('Respond with the single word: eight');
   succeeds(uncounted);
   assert.ok(uncounted.stderr.includes('jeden: this prompt is not counted toward the GitHub star request:'),
     uncounted.stderr);
-  assert.equal(readFileSync(record, 'utf8'), '{"prompts":"many"}\n', 'a broken record is not overwritten by a prompt');
-  status = star('reset');
-  assert.deepEqual(kept(), { prompts: 0 });
-  report.cases.push({ name: 'broken record refused; prompt still answers; reset recovers' });
+  assert.equal(readFileSync(record, 'utf8'), '{"prompts":"many"}\n', 'a broken file is not overwritten by a prompt');
+  const recovered = invoke(binary, ['star', 'reset', '--json'], env);
+  status = JSON.parse(succeeds(recovered));
+  assert.equal(status.actions, 0);
+  assert.ok(recovered.stderr.includes('held no journey state; it was set aside as'), recovered.stderr);
+  const aside = readdirSync(join(home, '.jeden')).filter((name) => name.startsWith('star-request.json.unreadable-'));
+  assert.equal(aside.length, 1, aside.join(', '));
+  assert.equal(readFileSync(join(home, '.jeden', aside[0]), 'utf8'), '{"prompts":"many"}\n');
+  assert.equal(kept().actions, 0);
+  report.cases.push({ name: 'broken file refused; prompt still answers; reset sets it aside' });
 
   report.verdict = 'passed';
 } catch (error) {

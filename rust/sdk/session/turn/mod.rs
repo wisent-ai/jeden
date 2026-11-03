@@ -246,12 +246,12 @@ impl AgentSession {
         let agent_prompt =
             !continuing && !args.model_only && !request.prompt.trim_start().starts_with('/');
         let star_request = match agent_prompt {
-            true => crate::star::observe_prompt_reporting().map(|status| {
+            true => crate::star::observe_prompt_reporting().map(|made| {
                 let lang = crate::cli::i18n::lang_code(&args.cwd);
                 crate::sdk::StarRequest {
-                    text: crate::star::request_text(&lang, &status),
-                    repository: status.repository.to_string(),
-                    prompts: status.prompts,
+                    text: crate::star::request_text(&lang, &made),
+                    repository: made.repository.clone(),
+                    prompts: made.actions,
                 }
             }),
             false => None,

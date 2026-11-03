@@ -135,9 +135,11 @@ executable on macOS; see the [signing contract](https://stado.wisent.com/docs/si
   terminal cleanup does not wait after a failed kill.
 - After the fifth successful agent prompt, counted across the terminal,
   `jeden run` and RPC, Jeden asks once for a star on its GitHub repository.
-  `jeden star [status|dismiss|reset] [--json]`, `/star` and the RPC methods
-  `star/status|dismiss|reset` read and change the one record in
-  `~/.jeden/star.json`; see the [star command](https://jeden.wisent.com/docs/cli/star).
+  The request is the `star-request` journey every Wisent product walks, run by
+  the shared onboarding runtime. `jeden star [status|dismiss|reset] [--json]`,
+  `/star` and the RPC methods `star/status|dismiss|reset` read and change the
+  one journey in `~/.jeden/star-request.json`; see the
+  [star command](https://jeden.wisent.com/docs/cli/star).
 
 Sessions and artifacts live under `~/.jeden/sessions/` unless
 `JEDEN_SESSION_ROOT` is set. A task's completion state retains original

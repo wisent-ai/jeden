@@ -1,6 +1,0 @@
-{
-  "prompts_before_request": {
-    "value": 5,
-    "user_said": "I added a minimal notification in-app that recommends giving us a star after you've sent 5 prompts. ... do we have this? can you add it?"
-  }
-}

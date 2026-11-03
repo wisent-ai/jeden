@@ -1,39 +1,16 @@
 //! `jeden star` and `/star`: read, dismiss and reset the GitHub star request.
+//! The verbs, their text and JSON, and their refusals are the shared
+//! runtime's `ProductStarRequest::command`; an unknown verb or stray word is
+//! a usage refusal here.
 
-use super::{dismiss, reset, status, status_text, Status};
-
-const USAGE: &str = "usage: jeden star [status|dismiss|reset] [--json]";
-
-fn render(status: &Status, json: bool) -> Result<String, String> {
-    if json {
-        serde_json::to_string(status)
-            .map(|text| text + "\n")
-            .map_err(|error| format!("the star status cannot be written as JSON: {error}"))
-    } else {
-        Ok(status_text(status))
-    }
-}
-
-/// One verb of the command; an unknown verb or a stray argument is a usage
-/// refusal naming every verb.
+/// One verb of the command, as the runtime answers it.
 pub(crate) fn execute(words: &[String], json: bool) -> Result<String, String> {
-    let status = match words {
-        [] => status(),
-        [verb] if verb == "status" => status(),
-        [verb] if verb == "dismiss" => dismiss(),
-        [verb] if verb == "reset" => reset(),
-        [verb] => {
-            return Err(crate::cli::invocation::refusal::usage(format!(
-                "star: unknown action {verb:?}; {USAGE}"
-            )))
+    match super::request()?.command(words, json) {
+        Err(refusal) if refusal.starts_with("star: ") => {
+            Err(crate::cli::invocation::refusal::usage(refusal))
         }
-        [_, unexpected, ..] => {
-            return Err(crate::cli::invocation::refusal::usage(format!(
-                "star: unexpected argument {unexpected:?}; {USAGE}"
-            )))
-        }
-    }?;
-    render(&status, json)
+        answered => answered,
+    }
 }
 
 /// `jeden star …`
