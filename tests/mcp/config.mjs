@@ -5,6 +5,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { constants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -29,7 +30,7 @@ const valid = JSON.stringify({ mcpServers: { [name]: declaration }, disabledServ
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 const report = { revision, binary, binarySha256: hash(binary),
   testSha256: hash(fileURLToPath(import.meta.url)), commands: [], cases: [], verdict: 'failed' };
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 function command(program, args, cwd = project) {
   const result = spawnSync(program, args, { cwd, env, encoding: 'utf8' });
   report.commands.push({ program, args, cwd, home, status: result.status, signal: result.signal,

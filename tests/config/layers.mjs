@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, statSync } from 'node:fs';
 import { constants } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -27,7 +28,7 @@ const local = join(project, '.jeden/config.json');
 const hash = (path) => createHash('sha256').update(readFileSync(path)).digest('hex');
 const report = { revision, binary, binarySha256: hash(binary),
   testSha256: hash(fileURLToPath(import.meta.url)), commands: [], states: [], verdict: 'failed' };
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 const key = 'communication.mode';
 
 function command(program, args, cwd) {

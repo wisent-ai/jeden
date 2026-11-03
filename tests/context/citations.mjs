@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -28,7 +29,7 @@ const report = { startedAt: new Date().toISOString(), revision, binary, endpoint
   binarySha256: hash(binary), testSha256: hash(fileURLToPath(import.meta.url)),
   commands: [], http: [], cases: [], verdict: 'failed' };
 const persist = () => writeFileSync(join(output, 'report.json'), JSON.stringify(report, null, '  '));
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 function command(program, args, cwd = workspace) {
   const result = spawnSync(program, args, { cwd, env, encoding: 'utf8' });
   report.commands.push({ program, args, cwd, status: result.status, signal: result.signal,

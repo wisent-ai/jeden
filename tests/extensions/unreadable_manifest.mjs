@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -37,7 +38,7 @@ const extensionPackage = join(project, '.jeden', 'extensions', 'example');
 const manifest = join(extensionPackage, 'package.json');
 mkdirSync(home, { recursive: true });
 mkdirSync(extensionPackage, { recursive: true });
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 
 function extensions() {
   const args = ['run', '/extensions', '--json', '--cwd', project];

@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -39,7 +40,7 @@ const userMcp = join(home, '.jeden', 'mcp.json');
 const projectMcp = join(project, '.jeden', 'mcp.json');
 mkdirSync(dirname(userMcp), { recursive: true });
 mkdirSync(dirname(projectMcp), { recursive: true });
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 
 function mcpProbe() {
   const result = spawnSync(binary, ['doctor', '--cwd', project], { cwd: project, env, encoding: 'utf8' });

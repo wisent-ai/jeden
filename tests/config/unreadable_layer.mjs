@@ -15,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -38,7 +39,7 @@ const projectLayer = join(project, '.jeden', 'config.json');
 const userLayer = join(home, '.jeden', 'config.yml');
 mkdirSync(dirname(projectLayer), { recursive: true });
 mkdirSync(dirname(userLayer), { recursive: true });
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 delete env.JEDEN_MODEL;
 delete env.JEDEN_LANGUAGE;
 

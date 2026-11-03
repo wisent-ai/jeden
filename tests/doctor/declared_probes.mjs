@@ -16,6 +16,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -40,7 +41,7 @@ const command = 'collab-browser-lsp-notes';
 mkdirSync(home, { recursive: true });
 mkdirSync(join(project, '.jeden', 'commands'), { recursive: true });
 writeFileSync(join(project, '.jeden', 'commands', `${command}.md`), 'Notes for this run.\n');
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 
 try {
   const args = ['doctor', '--cwd', project];

@@ -11,6 +11,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { pinnedGit } from '../support/home.mjs';
 import { fileURLToPath } from 'node:url';
 
 function required(name) {
@@ -32,7 +33,7 @@ const home = join(output, 'home');
 const project = join(output, 'project');
 mkdirSync(home, { recursive: true });
 mkdirSync(project, { recursive: true });
-const env = { ...process.env, HOME: home };
+const env = { ...process.env, ...pinnedGit, HOME: home };
 
 function invoke(args) {
   const result = spawnSync(binary, args, { cwd: project, env, encoding: 'utf8' });
