@@ -174,7 +174,7 @@ export class SessionClient {
           case "error": {
             if (envelope.id === undefined) throw new ProtocolError(envelope);
             const pending = this.#pending.get(envelope.id);
-            if (pending === undefined) throw new EnvelopeValidationError(`Unexpected error id: ${envelope.id}`);
+            if (pending === undefined) throw new EnvelopeValidationError(`The server answered request ${envelope.id} with an error, but this client sent no request with that id or has already settled it: ${envelope.error.code}: ${envelope.error.message}`);
             this.#pending.delete(envelope.id);
             pending.reject(new ProtocolError(envelope));
             break;

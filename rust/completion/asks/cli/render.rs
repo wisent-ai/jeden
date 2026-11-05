@@ -47,7 +47,7 @@ fn summary(ask: &Value) -> Result<String, String> {
     );
     if let Some(follows) = ask["follows"].as_str() {
         line.push_str(&format!(
-            "\n  Asked again after ask {follows} because an operation failed after its answer"
+            "\n  Asked again after ask {follows} because a step of the task failed after its answer"
         ));
     }
     match ask["answer"].as_object() {

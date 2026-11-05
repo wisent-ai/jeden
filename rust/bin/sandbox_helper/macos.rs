@@ -117,7 +117,8 @@ fn probe() -> Result<(), String> {
     match fs::write(&marker, b"sandbox must deny this write") {
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => Ok(()),
         Err(error) => Err(format!(
-            "sandbox probe failed with unexpected error: {error}"
+            "the sandbox probe's write to {} was refused for a reason other than the sandbox profile, so whether the profile denies writes is unknown: {error}; make the temporary directory writable for this user and probe again",
+            marker.display()
         )),
         Ok(()) => Err("sandbox profile was accepted but did not deny filesystem writes".into()),
     }

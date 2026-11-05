@@ -85,7 +85,7 @@ impl Linker {
             Some(ask) => match &ask.answer {
                 Some(answer) if !failed_after(&answer.answered_at)? => {
                     return Err(format!(
-                        "task {task_id} asks the operator again for what ask {} already holds an answer to: {} The operator answered at {}: {} No operation failed since, so the work continues with that answer",
+                        "task {task_id} asks the operator again for what ask {} already holds an answer to: {} The operator answered at {}: {} No step of the task has failed since, so the work continues with that answer",
                         ask.id, ask.ask, answer.answered_at, answer.text
                     ));
                 }

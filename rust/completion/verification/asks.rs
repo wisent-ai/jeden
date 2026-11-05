@@ -44,7 +44,7 @@ pub(super) fn check(
         .and_then(|request| request.answer.as_ref())
     {
         Some(answer) if !failed_since_answer => Err(format!(
-            "task {} is blocked after the operator answered its ask with: {}; no operation failed since, so the work continues with that answer",
+            "task {} is blocked after the operator answered its ask with: {}; no step of the task has failed since, so the work continues with that answer",
             task.id, answer.text
         )),
         _ => Ok(()),

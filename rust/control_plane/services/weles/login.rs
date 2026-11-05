@@ -226,7 +226,7 @@ impl WelesClient {
                 OperationState::Failed => {
                     return Err(WelesError::Operation {
                         code: page.state.to_string(),
-                        message: "operation failed without an error event".into(),
+                        message: "Weles set the operation's state to failed without the event that says why; read the operation's log in Weles for its cause".into(),
                     })
                 }
                 OperationState::Cancelled => return Err(WelesError::Cancelled),

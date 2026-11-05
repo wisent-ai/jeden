@@ -208,7 +208,7 @@ impl std::fmt::Display for WelesError {
                 "Weles answered a holding operation read before the operation moved; the deployment has no holding read, and Jeden does not poll on a timer",
             ),
             Self::Operation { code, message } => {
-                write!(f, "Weles operation failed ({code}): {message}")
+                write!(f, "Weles ended the account operation (sign-in, refresh or sign-out) as {code}, so the account is as it was before it: {message}")
             }
             Self::Interaction(e) => write!(f, "Weles interaction failed: {e}"),
             Self::Clock(e) => write!(f, "the expiry of a Weles operation cannot be judged: {e}"),

@@ -234,7 +234,8 @@ fn probe() -> Result<(), String> {
             Ok(())
         }
         Err(error) => Err(format!(
-            "sandbox probe failed with unexpected error: {error}"
+            "the sandbox probe's write to {} outside every declared root was refused for a reason other than the Landlock ruleset, so whether the ruleset denies writes is unknown: {error}; make the temporary directory writable for this user and probe again",
+            marker.display()
         )),
         Ok(()) => Err("the Landlock ruleset was accepted but did not deny writes".into()),
     }
