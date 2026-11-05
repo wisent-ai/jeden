@@ -251,7 +251,7 @@ pub(crate) static SETTINGS_SCHEMA: std::sync::LazyLock<Vec<SettingSpec>> = std::
     SettingSpec {
         key: "ui.language",
         typ: "enum",
-        description: "Conversation language: auto follows the user's messages; an ISO 639 code pins the answer language (65 languages as in wisent-app).",
+        description: "Conversation language: auto follows the user's messages; a code of the fleet list (wisent-texts) pins the answer and screen language.",
         default_json: "\"auto\"",
         enum_values: ui_language_choices(),
     },

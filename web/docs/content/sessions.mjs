@@ -262,6 +262,19 @@ printf '%s\n' '{"id":"read-contracts","method":"config/contracts/get","params":{
           },
         ],
       },
+      {
+        title: "Screen language",
+        paragraphs: [
+          "The <code>ui.language</code> setting chooses the language of Jeden's screens and the one it answers in. <code>auto</code> follows your messages; a language code pins it. The languages offered are the fleet's list every Wisent product offers (wisent-texts <code>languages.json</code>), with each language's own name; every screen text reads in each of them, and a test fails the build when one lacks a text.",
+          "Jeden Desktop edits the same value on <strong>Settings → Language</strong> through RPC <code>config/language/get</code>, which answers <code>language</code>, <code>auto</code> and <code>languages</code> (<code>code</code>, <code>english</code>, <code>native</code>), and <code>config/language/set</code> with <code>{\"language\": CODE}</code>. A code outside the list is refused as <code>config_write_failed</code> (<code>\"xx\" is not a language Jeden offers: ui.language must be one of: …</code>), a missing <code>language</code> as <code>invalid_params</code>. A user configuration that cannot be read stops <code>jeden rpc</code> before it answers, as every command does (<code>configuration &lt;path&gt; is not valid: &lt;cause&gt;</code>), and is never overwritten. The real journey is <code>node tests/config/language.mjs</code> with <code>JEDEN_BIN</code> and <code>JEDEN_TEST_SOURCE_REVISION</code>.",
+        ],
+        commands: [
+          {
+            label: "Pin the language, then follow your messages again",
+            code: "jeden config set ui.language de\njeden config get ui.language\njeden config reset ui.language",
+          },
+        ],
+      },
     ],
   },
 ];

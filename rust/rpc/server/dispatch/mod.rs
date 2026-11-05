@@ -20,6 +20,21 @@ pub(super) fn handle_request(state: &Arc<ServerState>, request: WireRequest) -> 
         "config/contracts/set" => set_contract_settings(&request.params),
         "config/communication/get" => Ok(crate::cli::config::schema::communication_settings()),
         "config/communication/set" => set_communication_settings(&request.params),
+        "config/language/get" => Ok(crate::cli::config::schema::language_settings()),
+        "config/language/set" => request
+            .params
+            .get("language")
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                (
+                    "invalid_params",
+                    "config/language/set requires language: auto or a code config/language/get lists".to_string(),
+                )
+            })
+            .and_then(|language| {
+                crate::cli::config::schema::set_language_settings(language)
+                    .map_err(|error| ("config_write_failed", error))
+            }),
         "config/task-limits/get" => Ok(crate::task_runtime::limits_settings()),
         "config/task-limits/set" => request
             .params

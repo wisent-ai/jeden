@@ -11,6 +11,7 @@ use crate::user_config_path;
 use crate::Args;
 
 mod contracts;
+mod language;
 mod table;
 mod values;
 mod views;
@@ -23,6 +24,7 @@ use crate::cli::config::ui_language;
 pub(crate) use contracts::{
     communication_settings, contract_settings, set_communication_settings, set_contract_settings,
 };
+pub(crate) use language::{language_settings, set_language_settings};
 use values::{effective_setting_value, parse_setting_value, setting_spec};
 pub(crate) use views::settings_picker;
 use views::{config_list_json, config_list_text};
