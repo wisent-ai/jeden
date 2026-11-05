@@ -1969,6 +1969,7 @@ dependencies = [
  "uuid",
  "wisent-onboarding-client",
  "wisent-public-destination",
+ "wisent-texts",
  "x509-parser",
  "zip",
 ]
@@ -4941,6 +4942,15 @@ dependencies = [
 name = "wisent-public-destination"
 version = "0.1.0"
 source = "git+https://github.com/wisent-ai/wisent-integrations?rev=46f2686a8a119601f7671719c31ccf77bd205d8d#46f2686a8a119601f7671719c31ccf77bd205d8d"
+
+[[package]]
+name = "wisent-texts"
+version = "1.0.0"
+source = "git+https://github.com/wisent-ai/wisent-texts?rev=f53a8c6a0ddfdb065cef74a12483ec9589ac8a09#f53a8c6a0ddfdb065cef74a12483ec9589ac8a09"
+dependencies = [
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "wit-bindgen"

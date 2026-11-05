@@ -1,7 +1,9 @@
-//! First i18n layer for UI chrome: a static string table keyed by
-//! (language code, key) with English as the ultimate fallback. Contract-critical
-//! agent syntax (Rules block, action protocol, tool registry) never goes
-//! through this table and stays English always.
+//! The i18n layer for UI chrome: a static string table keyed by (language
+//! code, key) with English as the ultimate fallback. Every key reads in every
+//! language a person can pin (the fleet list from wisent-texts, see
+//! `config::ui_language_codes`), which the `every_language` test holds.
+//! Contract-critical agent syntax (Rules block, action protocol, tool
+//! registry) never goes through this table and stays English always.
 
 mod translations;
 
@@ -155,4 +157,46 @@ pub(crate) fn tr(lang: &str, key: &'static str) -> &'static str {
 /// `auto` (and any code without table rows) resolves to English inside `tr`.
 pub(crate) fn lang_code(cwd: &Path) -> String {
     ui_language(&load_config(cwd)).code().to_string()
+}
+
+#[cfg(test)]
+mod every_language {
+    use super::{translations::GENERATED_TRANSLATIONS, STRINGS};
+
+    /// The placeholders a text carries: `{}` and `{name}`, in order.
+    fn placed(text: &str) -> Vec<&str> {
+        let mut found = Vec::new();
+        let mut rest = text;
+        while let Some(start) = rest.find('{') {
+            let Some(end) = rest[start..].find('}') else { break };
+            found.push(&rest[start..start + end + 1]);
+            rest = &rest[start + end + 1..];
+        }
+        found.sort_unstable();
+        found
+    }
+
+    /// Every English key reads in every language a person can pin (the fleet
+    /// list), and keeps the values its English text places; a `.few` plural
+    /// form only some languages use is not demanded of the others.
+    #[test]
+    fn every_key_reads_in_every_fleet_language_with_its_placeholders() {
+        let rows = STRINGS.iter().chain(GENERATED_TRANSLATIONS.iter());
+        let mut missing = Vec::new();
+        let mut misplaced = Vec::new();
+        let english: Vec<_> = STRINGS.iter().filter(|(lang, _, _)| *lang == "en").collect();
+        for language in crate::cli::config::ui_language_codes() {
+            for (_, key, source) in &english {
+                match rows.clone().find(|(lang, row_key, _)| lang == language && row_key == key) {
+                    None => missing.push(format!("{language}/{key}")),
+                    Some((_, _, text)) if placed(text) != placed(source) => {
+                        misplaced.push(format!("{language}/{key}: {text}"))
+                    }
+                    Some(_) => {}
+                }
+            }
+        }
+        assert!(missing.is_empty(), "keys without a row in their language: {missing:?}");
+        assert!(misplaced.is_empty(), "rows that drop or add a placeholder: {misplaced:?}");
+    }
 }

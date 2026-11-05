@@ -180,18 +180,14 @@ fn default_true() -> bool {
     true
 }
 
-/// Languages offered by wisent-app (src/locales) — the same set is pinnable
-/// here. Declared in `ui-languages.json` beside this module, so the parser
-/// and the settings schema read one list and neither can drift from it.
+/// The languages a conversation can be pinned to: the fleet's list
+/// (wisent-texts `languages.json`), the one every Wisent product offers, so
+/// the parser, the settings schema and the chrome translations read one list.
 pub(crate) fn ui_language_codes() -> &'static [String] {
     static DECLARED: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
-        let document: serde_json::Value = serde_json::from_str(include_str!("ui-languages.json"))
-            .expect("ui-languages.json beside this module is valid JSON");
-        document["words"]
-            .as_array()
-            .expect("ui-languages.json declares a words array")
+        wisent_texts::languages()
             .iter()
-            .filter_map(|code| code.as_str().map(str::to_owned))
+            .map(|language| language.code.clone())
             .collect()
     });
     &DECLARED
