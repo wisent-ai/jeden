@@ -10,7 +10,9 @@ pub use criterion::CriterionReview;
 pub use status::TaskStatus;
 
 pub use operator::{OperatorAnswer, OperatorRequest};
-pub(crate) use review::{unreadable, CompletionReview, IntakePlan, ReviewStatus, TaskReview};
+pub(crate) use review::{
+    unreadable, CompletionReview, IntakePlan, QuotedTask, ReviewStatus, TaskReview,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

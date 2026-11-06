@@ -23,7 +23,17 @@ use super::{CriterionReview, EvidenceReference, TaskKind};
 pub(crate) struct IntakePlan {
     pub tasks: Vec<PlannedTask>,
     #[serde(default)]
-    pub cancellations: Vec<UserCancellation>,
+    pub cancellations: Vec<QuotedTask>,
+    /// Open tasks the current request holds back without withdrawing them:
+    /// an order to stop working, or not to code for now. Each stays paused
+    /// until the operator resumes it, here or with `jeden todo resume`, so no
+    /// stop forces another turn on it.
+    #[serde(default)]
+    pub pauses: Vec<QuotedTask>,
+    /// Tasks an earlier request paused that the current request lets run
+    /// again, by its own words.
+    #[serde(default)]
+    pub resumes: Vec<QuotedTask>,
     /// Whole minutes the intake expects the request to take until it is
     /// independently verified complete. Unlike `kind`, a missing estimate has
     /// no strict reading to fall back on, so the controller refuses the plan
@@ -53,9 +63,11 @@ fn work_task() -> TaskKind {
     TaskKind::Work
 }
 
+/// An open task the current request names, with the request's own words
+/// that decide it: a cancellation's withdrawal, or a pause's order to stop.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct UserCancellation {
+pub(crate) struct QuotedTask {
     #[serde(alias = "id", alias = "task", alias = "task_id")]
     pub task_id: String,
     pub quote: String,

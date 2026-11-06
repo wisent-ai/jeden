@@ -10,6 +10,11 @@ use super::{model::*, store};
 use serde_json::{json, Value};
 use std::path::Path;
 
+/// How a task the intake changed on a user's quoted order names that order
+/// in its reason; a pause written so is one a later order may lift, unlike
+/// the operator's own (`Operator pause: …`), which only he lifts.
+const ORDERED: &str = "User request ";
+
 pub(crate) fn plan_request(
     session: &Path,
     revision: u64,
@@ -37,24 +42,18 @@ pub(crate) fn plan_request(
             .estimate_minutes
             .and_then(std::num::NonZeroU64::new)
             .ok_or("completion intake must estimate the time to completion before execution: estimateMinutes is a whole number of minutes above zero")?;
-        for cancellation in &plan.cancellations {
-            if cancellation.quote.trim().is_empty() || !request.prompt.contains(&cancellation.quote)
-            {
-                return Err(
-                    "task cancellation must cite the current user's exact instruction".into(),
-                );
-            }
-            if !state
-                .tasks
-                .iter()
-                .any(|task| task.id == cancellation.task_id && !task.status.terminal())
-            {
-                return Err(format!(
-                    "cancellation references no open task: {}",
-                    cancellation.task_id
-                ));
-            }
-        }
+        let open = |task: &WorkTask| !task.status.terminal();
+        let prompt = request.prompt.as_str();
+        quoted(state, prompt, &plan.cancellations, ("cancellation", "open task"), open)?;
+        quoted(state, prompt, &plan.pauses, ("pause", "open task"), open)?;
+        // Only a pause an earlier order wrote is lifted by an order; the
+        // operator's own pause is lifted only by him.
+        let resumable = |task: &WorkTask| {
+            task.status == TaskStatus::Paused
+                && task.reason.as_deref().is_some_and(|reason| reason.starts_with(ORDERED))
+        };
+        let held = "task an earlier request of the user paused";
+        quoted(state, prompt, &plan.resumes, ("resume", held), resumable)?;
         for item in &plan.tasks {
             if (item.kind == TaskKind::Defect) != item.defect_of.is_some()
                 || item.kind == TaskKind::Defect
@@ -74,14 +73,17 @@ pub(crate) fn plan_request(
                 return Err("every task needs a title and concrete acceptance requirements before execution".into());
             }
         }
-        for cancellation in plan.cancellations {
-            if let Some(task) = state
-                .tasks
-                .iter_mut()
-                .find(|task| task.id == cancellation.task_id)
-            {
-                task.status = TaskStatus::Cancelled;
-                task.reason = Some(format!("User request {request_id}: {}", cancellation.quote));
+        for (entries, status) in [
+            (plan.cancellations, TaskStatus::Cancelled),
+            (plan.pauses, TaskStatus::Paused),
+            (plan.resumes, TaskStatus::Pending),
+        ] {
+            for entry in entries {
+                if let Some(task) = state.tasks.iter_mut().find(|task| task.id == entry.task_id) {
+                    task.status = status;
+                    task.reason = Some(format!("{ORDERED}{request_id}: {}", entry.quote));
+                    task.verification = None;
+                }
             }
         }
         for item in plan.tasks {
@@ -122,6 +124,29 @@ pub(crate) fn plan_request(
         Ok(())
     })?;
     Ok(state)
+}
+
+/// Refuse `entries` (the intake's cancellations, pauses or resumes, named
+/// `what`) unless each quotes `prompt`, the current request, word for word
+/// and names a task of `state` that `eligible` admits (described as
+/// `admitted`): an order the operator did not give, or one aimed at work it
+/// cannot apply to, decides nothing.
+fn quoted(
+    state: &CompletionState,
+    prompt: &str,
+    entries: &[QuotedTask],
+    (what, admitted): (&str, &str),
+    eligible: impl Fn(&WorkTask) -> bool,
+) -> Result<(), String> {
+    for entry in entries {
+        if entry.quote.trim().is_empty() || !prompt.contains(&entry.quote) {
+            return Err(format!("task {what} must cite the current user's exact instruction"));
+        }
+        if !state.tasks.iter().any(|task| task.id == entry.task_id && eligible(task)) {
+            return Err(format!("{what} references no {admitted}: {}", entry.task_id));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) fn observed_blocker(

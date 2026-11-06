@@ -36,8 +36,8 @@ export const completionCommands = [
     refusals: ["Missing text returns the todo usage. Storage failures are reported without claiming the request was completed."],
   },
   ...[
-    ["pause", "Pause retained work without losing it.", "Marks the selected unfinished work paused. It remains incomplete and the execution agent cannot resume it itself."],
-    ["resume", "Make paused retained work eligible to run again.", "Returns the selected work to pending; it does not execute it. Use todo continue or Continue retained work in the graphical session to run it with the current grants."],
+    ["pause", "Pause retained work without losing it.", "Marks the selected unfinished work paused. It remains incomplete and the execution agent cannot resume it itself. Telling the session to stop, or not to code for now, does the same: the intake pauses every open task the order covers, keeps your words as the task's reason, and the turn ends with <code>Work remains paused</code> instead of starting another one. A pause you give here is lifted only here or in the graphical Tasks panel."],
+    ["resume", "Make paused retained work eligible to run again.", "Returns the selected work to pending; it does not execute it. Use todo continue or Continue retained work in the graphical session to run it with the current grants. A later request telling the session to go on resumes the tasks an order paused, quoting your words; a request the intake names as paused or resumed without quoting you is refused as <code>task pause must cite the current user's exact instruction</code> (or <code>task resume …</code>), and a resume aimed at work you paused here as <code>resume references no task an earlier request of the user paused: &lt;id&gt;</code>."],
     ["cancel", "Withdraw exactly the work the operator selected.", "Records the operator's reason and cancellation without deleting the original request, completed evidence or other work. A cancelled request is not reported as verified implementation."],
   ].map(([action, purpose, effect]) => ({
     path: `todo/${action}`,
